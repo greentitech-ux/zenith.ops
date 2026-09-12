@@ -457,6 +457,7 @@
     <div class="sub" id="ficha-sub"></div>
     <div id="ficha-corpo" style="margin:12px 0;max-height:64vh;overflow-y:auto;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button type="button" class="preset-btn hidden" id="ficha-editar" style="color:var(--accent);" onclick="editarDaFicha()">✏️ Editar</button>
       <button type="button" class="preset-btn" onclick="fecharFichaFechamento()">Fechar</button>
     </div>
   </div>
@@ -2594,6 +2595,21 @@ const FICHA_SEM_CIFRAO = ['tc','cancelados'];
 function fichaValorFmt(it){
   if(FICHA_SEM_CIFRAO.includes(it.campo) || it.tipo==='quantidade') return String(num(it.valor));
   if(it.tipo==='texto' || it.tipo==='arquivo') return String(it.valor||'—');
+  // KPI tem TIPO (ver TIPOS_KPI_VALIDOS em grupos.js) e a ficha ignorava todos
+  // menos quantidade/texto: Run Time, Leg Time, ADT e OTD - que são TEMPO, em
+  // SEGUNDOS (ver kpi-tempo.js) - saíam como "R$ 1.201,00". Número certo,
+  // unidade errada, e o painel parecia não ter nada a ver com a realidade.
+  // Mesmos sufixos do lançamento (kg / % / R$), pra ler igual nas duas telas.
+  // "20:01" sozinho se confunde com hora do relógio numa lista que tem R$ do
+  // lado. Aqui a unidade vai escrita: minutos e segundos, como o Master pediu.
+  // O campo de EDIÇÃO segue em min:seg (é um input, e tem o rótulo explicando).
+  if(it.tipo==='tempo'){
+    const seg = Math.max(0, Math.round(num(it.valor)));
+    if(!seg) return '—';
+    return `${Math.floor(seg/60)} min ${String(seg%60).padStart(2,'0')} s`;
+  }
+  if(it.tipo==='kg') return num(it.valor).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3})+' kg';
+  if(it.tipo==='percentual') return num(it.valor).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' %';
   return fmtMoney(num(it.valor));
 }
 function abrirFichaFechamento(id){
@@ -2616,10 +2632,21 @@ function abrirFichaFechamento(id){
     d.criadoEm ? 'lançado em '+new Date(d.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR}) : '',
     d.criadoPorEmail || '',
   ].filter(Boolean).join(' · ');
+  const btnEd = document.getElementById('ficha-editar');
+  btnEd.dataset.id = String(d.id||'');
+  btnEd.classList.toggle('hidden', !(IS_MASTER && d.criadoPorId));
   document.getElementById('ficha-corpo').innerHTML = corpo + (obs?`<div class="ficha-secao"><div class="ficha-secao-titulo">📝 Observação</div><div class="ficha-obs">${escapeHtml(obs)}</div></div>`:'');
   document.getElementById('ficha-overlay').classList.remove('hidden');
 }
 function fecharFichaFechamento(){ document.getElementById('ficha-overlay').classList.add('hidden'); }
+// editar direto da ficha: quem abriu pra conferir e viu o erro corrige ali
+// mesmo, sem ter que caçar a linha na tabela e achar o lápis
+function editarDaFicha(){
+  const id = document.getElementById('ficha-editar').dataset.id;
+  if(!id) return;
+  fecharFichaFechamento();
+  abrirEdicaoFechamento(id);
+}
 
 function tabelaFechamentosHtml(rows){
   const grupo = grupoKpiDaUnidade((rows[0]||{}).unidade);
