@@ -15665,7 +15665,10 @@ setTimeout(async () => {
       'listarMinhas esconde CANCELADA de quem não é Master (na fonte)': /tarefa\.status !== 'CANCELADA' \|\| acesso\.isMaster/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
       'a tela tem botão Cancelar e Excluir/Pedir exclusão': /id="BTNCANCEL"[^>]*onclick="cancelarTarefa\(\)"/.test(html) && /id="BTNDEL"[^>]*onclick="excluirTarefa\(\)"/.test(html) && /CTX\.isMaster\?'🗑 Excluir':'🗑 Pedir exclusão'/.test(html),
       'a coluna Cancelados existe e só aparece pro Master': /id="COLX"[^>]*hidden><h2>Cancelados/.test(html) && /\$\('COLX'\)\.hidden=!CTX\.isMaster/.test(html) && /if\(t\.status==='CANCELADA'\)return'X'/.test(html),
-      'o X de fechar fica fixo no topo do modal (sticky, não some no scroll)': /\.dialog>\.row:first-child\{position:sticky;top:0/.test(html),
+      // (atualizado) o fechar agora e' o ✕ redondo flutuante da quina, FORA da caixa
+      // que rola - por construcao nunca some no scroll; o titulo continua sticky
+      'o X de fechar fica fixo no topo do modal (sticky, não some no scroll)':
+        /\.dialog>\.row:first-child\{position:sticky;top:-8px/.test(html) && /x\.className='sheet-fechar-flutuante'/.test(html) && /w\.appendChild\(x\);/.test(html),
       'fechar zera O e TODA reabertura checa O (o popup não volta ao atualizar o card)':
         /function fechar\(\)\{\$\('M'\)\.classList\.remove\('show'\);O=null\}/.test(html)
         && (html.match(/openT\(O\.id\)/g) || []).length > 0
@@ -15737,7 +15740,10 @@ setTimeout(async () => {
       'o X do modal é um botão redondo no canto (como nas outras telas)':
         /\.close\{[^}]*border-radius:50%/.test(htmlT),
       'o topo sticky ficou leve (sem a barra pesada que sobrepunha o conteúdo)':
-        /\.dialog>\.row:first-child\{position:sticky;top:0;z-index:5;background:var\(--panel\);padding-bottom:10px\}/.test(htmlT)
+        // (atualizado) mais leve ainda: a linha nao tem fundo nenhum - so a
+        // pastilha do titulo tem. A faixa colada 18px abaixo do topo era o
+        // "erro de style" que o Master apontou.
+        /\.dialog>\.row:first-child\{position:sticky;top:-8px;z-index:5;background:none;/.test(htmlT)
         && !/\.dialog>\.row:first-child\{[^}]*border-bottom:1px solid var\(--line\)\}/.test(htmlT),
       // fechar o aviso no X persiste local: não volta ao atualizar a página
       'aviso da Central: fechar no X dispensa e não reabre no refresh':
@@ -18794,6 +18800,76 @@ setTimeout(async () => {
   } catch (e) { okAnexoEnviado = false; console.log('  erro: ' + e.message); }
   if (!okAnexoEnviado) ruins += 1;
   console.log(`${okAnexoEnviado ? '✓' : '✗'} Anexo enviado não fica pendurado (o print ia junto de novo na mensagem seguinte)`);
+
+  // ---- texto digitado não some quando a ficha se redesenha ----
+  //
+  // Relato do Master, no Meu Dia: "fiz Ctrl+V pra colar uma imagem e já
+  // tinha digitado um texto na caixa de comentários; o texto sumiu quando o
+  // anexo foi adicionado. Já tínhamos corrigido isso antes, por que voltou?"
+  //
+  // A correção anterior (b2358d6) só cuidou do ENVIO do comentário. O que
+  // apagava o texto era outro caminho: openT() é chamado 24x como REFRESH da
+  // mesma tarefa (anexar, mover, concluir...) e zerava a caixa toda vez. O
+  // guarda-rascunho do tema.js não tem como salvar disso: ele restaura campo
+  // RECRIADO, não campo que a própria tela zerou com `.value = ''`.
+  //
+  // E havia um segundo furo, no próprio tema.js: o × do chip de anexo
+  // ("Remover anexo") é um botão de um glifo só, e a regra "clicou em
+  // fechar/×, descarta os rascunhos do modal" apagava TODOS os rascunhos.
+  //
+  // A regra que fica: um abrir() só zera as caixas quando o REGISTRO muda;
+  // e só botão rotulado como fechar/cancelar descarta rascunho.
+  let okTextoFica = false;
+  try {
+    const ler = (f) => require('fs').readFileSync(require('path').join(__dirname, 'public', f), 'utf8');
+    const tar = ler('tarefas.html'), tec = ler('tecnico.html'), ch = ler('central-historico.html'), tema = ler('tema.js');
+    const regra = (tema.match(/document\.addEventListener\('click', function \(e\) \{[\s\S]*?limparNo\(caixa\);[\s\S]*?\}, true\);/) || [''])[0];
+    const conf = {
+      // o caso relatado
+      'Meu Dia: reabrir a MESMA tarefa não zera o comentário':
+        /if\(TXT_DE!==id\)\{\$\('TXT'\)\.value='';TXT_DE=id\}/.test(tar) && !/\$\('TXT'\)\.value='';(?!TXT_DE)/.test(tar.replace(/if\(TXT_DE!==id\)\{\$\('TXT'\)\.value='';TXT_DE=id\}/, '')),
+      'mas enviar o comentário continua limpando a caixa':
+        /limparCampoEnviado\(campo\);campo\.value='';/.test(tar),
+      // as outras telas que reaproveitam abrirDetalhe() como refresh
+      'Técnico: as 3 caixas só zeram quando muda de chamado':
+        /const trocouRegistro = DETALHE_ZERADO_PARA !== id; DETALHE_ZERADO_PARA = id;/.test(tec)
+        && /if\(podeConcluirRemoto && trocouRegistro\) document\.getElementById\('r-observacao'\)\.value = '';/.test(tec)
+        && /if\(trocouRegistro\) document\.getElementById\('esc-motivo'\)\.value = '';/.test(tec)
+        && /if\(trocouRegistro\) document\.getElementById\('c-observacao'\)\.value = '';/.test(tec),
+      'Central-Histórico: o motivo da decisão só zera quando muda de card':
+        /if\(DETALHE_ZERADO_PARA !== tipo\+':'\+id\) document\.getElementById\('d-motivo-decisao'\)\.value = '';/.test(ch),
+      // o segundo furo, no tema.js
+      'um × de um glifo só não descarta rascunho, a não ser que seja rotulado como fechar':
+        /var glifo = \/\^\[×x✕\]\$\/\.test\(texto\);/.test(regra)
+        && /var ehFechar = \/\^\(fechar\|cancelar\)\/\.test\(rotulo\) \|\| \(!glifo && \/\^\(fechar\|cancelar\)\/\.test\(texto\)\);/.test(regra)
+        && !/\/\^\(fechar\|cancelar\|×\|x\|✕\)\//.test(regra),
+      // ---- a ficha da tarefa: sem a faixa no topo ----
+      // Pedido do Master: "deixar o número do ticket e o botão de fechar
+      // travados, sem a faixa; o número como um fundo discreto de bordas
+      // arredondadas no canto esquerdo e o fechar no ✕ redondo flutuante da
+      // quina". A faixa era a linha do título com sticky top:0 + fundo na
+      // largura toda, colada 18px abaixo do topo (o padding da caixa) - o
+      // conteúdo rolava por cima dela.
+      'a linha do título não é mais uma faixa (sem fundo, só a pastilha)':
+        /\.dialog>\.row:first-child\{position:sticky;top:-8px;z-index:5;background:none;/.test(tar)
+        && /#MH\{display:inline-block;[^}]*border-radius:999px;/.test(tar),
+      'o fechar é o ✕ redondo flutuante da quina, fora da caixa que rola':
+        /x\.className='sheet-fechar-flutuante'/.test(tar) && /w\.className='dialog-wrap'/.test(tar)
+        && /\.dialog-wrap\{position:relative;/.test(tar)
+        && /const antigo=d\.querySelector\('\.row>\.close'\);if\(antigo\)antigo\.remove\(\);/.test(tar),
+      // o ✕ e' filho do ENVOLTORIO, nao da caixa que rola: dentro dela o
+      // overflow:auto cortaria a parte que passa da borda
+      'o ✕ é pendurado no envoltório, não na caixa que rola': /w\.appendChild\(x\);\}\)\(\);/.test(tar) && !/d\.appendChild\(x\)/.test(tar),
+      'e continua fechando pela mesma função (Esc e fundo inclusive)': /x\.onclick=fechar;/.test(tar),
+      'o rótulo vem do aria-label ou do title (é assim que o × de fechar de verdade se apresenta)':
+        /botao\.getAttribute\('aria-label'\) \|\| botao\.getAttribute\('title'\)/.test(regra),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTextoFica = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTextoFica = false; console.log('  erro: ' + e.message); }
+  if (!okTextoFica) ruins += 1;
+  console.log(`${okTextoFica ? '✓' : '✗'} Texto digitado não some quando a ficha se redesenha - e a ficha da tarefa perdeu a faixa do topo (pastilha + ✕ flutuante)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

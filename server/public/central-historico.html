@@ -1360,6 +1360,12 @@ async function mudarPrioridade(tipo, id, prioridade){
 function fmtDSub(c, atribuidosTxt){
   return `<span class="nome-unidade">${escapeHtml(c.unidadeNome||c.unidade||'—')}</span> · ${escapeHtml(c.criadoPorEmail||'')} · ${escapeHtml(fmtDataHora(c.criadoEm))}` + (atribuidosTxt ? ` · atribuído a ${escapeHtml(atribuidosTxt)}` : '');
 }
+// DETALHE_ZERADO_PARA: de qual registro sao os textos que estao nas caixas.
+// abrirDetalhe() tambem e' chamado como REFRESH do mesmo registro (depois de
+// evoluir nivel, mudar prioridade, anexar...) e zerava as caixas toda vez -
+// quem ja tinha escrito perdia o texto. So zera quando o registro aberto e'
+// OUTRO.
+let DETALHE_ZERADO_PARA = null;
 function abrirDetalhe(tipo, id){
   const c = CARDS.find(x=>x.tipo===tipo && x.id===id);
   if(!c) return;
@@ -1440,7 +1446,8 @@ function abrirDetalhe(tipo, id){
   }
   document.getElementById('d-bloqueio-wrap').classList.toggle('hidden', !(podeDecidir && ehBloqueioLogin(c)));
   if(podeDecidir && ehBloqueioLogin(c)) document.getElementById('d-bloqueio-pedir-troca').checked = false;
-  document.getElementById('d-motivo-decisao').value = '';
+  if(DETALHE_ZERADO_PARA !== tipo+':'+id) document.getElementById('d-motivo-decisao').value = '';
+  DETALHE_ZERADO_PARA = tipo+':'+id;
   document.getElementById('msg-detalhe').classList.add('hidden');
 
   document.getElementById('d-editar').classList.add('hidden');
