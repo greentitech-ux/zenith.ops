@@ -17019,6 +17019,61 @@ setTimeout(async () => {
   if (!okSumicoArcfood) ruins += 1;
   console.log(`${okSumicoArcfood ? '✓' : '✗'} Monitor: por que a ARCFOOD some (área) e o perfil que não apaga mais as áreas`);
 
+  // Preenchimento automático: o navegador despejava a senha salva (e o
+  // histórico de formulário) em campo que ninguém clicou. A causa era o
+  // autocomplete="current-password" em campo que NÃO é login - isso é um
+  // convite explícito pro gerenciador preencher sozinho.
+  //
+  // "Confirme sua senha pra autorizar ESTA ação" pede new-password: desliga o
+  // preenchimento e mantém a SUGESTÃO (o cadeado continua lá pra quem clicar).
+  let okAutofill = false;
+  try {
+    const fs = require('fs');
+    const dir = __dirname + '/public';
+    const arquivos = fs.readdirSync(dir).filter((f) => f.endsWith('.html') || f.endsWith('.js'));
+    const campos = [];
+    arquivos.forEach((f) => {
+      const txt = fs.readFileSync(dir + '/' + f, 'utf8');
+      (txt.match(/<input[^>]*type="password"[^>]*>/g) || []).forEach((tag) => {
+        const id = (tag.match(/id="([^"]*)"/) || [])[1] || '(sem id)';
+        const ac = (tag.match(/autocomplete="([^"]*)"/) || [])[1] || null;
+        campos.push({ arquivo: f, id, ac });
+      });
+    });
+    const semAutocomplete = campos.filter((c) => !c.ac);
+    // só o login de verdade pode pedir a senha salva
+    const pedemSenhaSalva = campos.filter((c) => c.ac === 'current-password');
+    const soOLogin = pedemSenhaSalva.length === 1
+      && pedemSenhaSalva[0].arquivo === 'index.html' && pedemSenhaSalva[0].id === 'auth-password';
+
+    const conf = {
+      'todo campo de senha declara o que o navegador pode fazer':
+        semAutocomplete.length === 0 || `sem autocomplete: ${semAutocomplete.map((c) => c.arquivo + '#' + c.id).join(', ')}`,
+      // ESTA é a regressão: um "confirme sua senha" marcado como login
+      'só o login pede a senha salva; confirmação de ação, nunca':
+        soOLogin || `pedem senha salva: ${pedemSenhaSalva.map((c) => c.arquivo + '#' + c.id).join(', ') || 'nenhum'}`,
+      'os campos de confirmar ação estão todos desligados do preenchimento':
+        ['central.html', 'grupos.html', 'lancamento.html', 'loja-status.html', 'monitor.html', 'tarefas.html']
+          .every((f) => campos.some((c) => c.arquivo === f && (c.ac === 'new-password' || c.ac === 'off'))),
+      'e mais de um campo existe de fato (o teste não passa por lista vazia)':
+        campos.length >= 15,
+      // o histórico de formulário do Chrome enchia campo de texto pelo rótulo
+      // (foi assim que "solutions" caiu na Observação da sangria)
+      'os campos de texto da sangria não são mais preenchidos sozinhos':
+        (() => {
+          const l = fs.readFileSync(dir + '/lancamento.html', 'utf8');
+          return /id="s-descricao" autocomplete="off"/.test(l)
+            && /id="s-nome-depositante" autocomplete="off"/.test(l)
+            && /id="s-motivo" autocomplete="off"/.test(l);
+        })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
+    okAutofill = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAutofill = false; console.log('  erro: ' + e.message); }
+  if (!okAutofill) ruins += 1;
+  console.log(`${okAutofill ? '✓' : '✗'} Senha: o navegador não preenche mais sozinho - só o login pede a senha salva`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
