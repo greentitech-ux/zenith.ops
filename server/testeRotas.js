@@ -137,6 +137,9 @@ process.env.DASHBOARD_USER = 'x';
 process.env.DASHBOARD_PASS = 'x';
 process.env.MASTER_EMAIL = 'master@teste.local';
 process.env.MASTER_PASSWORD = 'SenhaDeTeste!2026';
+// token de API do Master (pedido 12/09/2026: ele chama a API de um chat no
+// Cowork). 64 hex = acima do minimo de 32 exigido pelo auth.js
+process.env.MASTER_API_TOKEN = 'a'.repeat(64);
 // A varredura tem 2min de carência depois do boot do processo (ver
 // CARENCIA_POS_BOOT_MS em lojaStatus.js): logo após subir, ela não anuncia
 // queda de máquina cuja última batida é anterior ao boot, pra não inventar
@@ -11540,6 +11543,64 @@ setTimeout(async () => {
   } catch (e) { okPolitica = false; console.log('  erro: ' + e.message); }
   if (!okPolitica) ruins += 1;
   console.log(`${okPolitica ? '✓' : '✗'} Política da máquina: papel de parede, pendrive, instalação com Administrador e alerta de programa novo`);
+
+  // ------------------------------------------------------------------
+  // TOKEN DE API DO MASTER (pedido 12/09/2026: "só quem usará sou eu esse
+  // Token Global, em um chat no Cowork"). O desenho NAO e o da especificacao
+  // (um BOT_ACAO_TOKEN com regras proprias por rota): o token resolve pro
+  // usuario Master DE VERDADE e segue pelo mesmo caminho da sessao. Assim
+  // existe UM sistema de permissao, nao dois que divergem - e tudo que ele faz
+  // ja sai auditado no nome do Master.
+  let okApiToken = false;
+  try {
+    const authSrc = require('fs').readFileSync(__dirname + '/auth.js', 'utf8');
+    const TOK = process.env.MASTER_API_TOKEN;
+    const cabTok = { Authorization: 'Bearer ' + TOK };
+    // 1) o token age como o Master numa rota que EXIGE Master
+    const eu = await pedir('/api/me', cabTok);
+    const euJson = eu.status === 200 ? JSON.parse(eu.corpo) : {};
+    const soMaster = await pedir('/api/qa-aprovacoes', cabTok);
+    // 2) e escreve: mesma rota de Master que o navegador usa
+    DOCS.set('lojaStatus/TOK__PC1', { codigo: 'TOK', posto: 'PC1', nome: 'Tok', tipo: 'interno', agentToken: 'tk', ultimoHeartbeatEm: Date.now(), eventos: [] });
+    const escreveu = await enviarJson('PUT', '/api/loja-status/TOK/computadores/PC1/politica', { bloquearUsbStorage: true }, cabTok);
+    // 3) token errado nao entra
+    const errado = await pedir('/api/me', { Authorization: 'Bearer ' + 'b'.repeat(64) });
+    const vazio = await pedir('/api/me', { Authorization: 'Bearer ' });
+    const conf = {
+      'o token entra como o Master de verdade (mesma identidade da sessão)':
+        eu.status === 200 && euJson.role === 'master' && euJson.email === process.env.MASTER_EMAIL,
+      'e vale nas rotas que exigem Master (nenhuma checagem de rota precisou mudar)':
+        soMaster.status === 200 && escreveu.status === 200,
+      'token errado é recusado': errado.status === 401 && vazio.status === 401,
+      // o coracao: UM caminho de permissao, nao dois
+      'sessão e token preenchem o req pela MESMA função (não há dois sistemas de permissão)':
+        /async function aplicarUsuarioNoReq\(req, user, sid\)/.test(authSrc)
+        && (authSrc.match(/await aplicarUsuarioNoReq\(req, user, /g) || []).length === 2,
+      'a comparação do token é em tempo constante (não vaza por timing)':
+        /crypto\.timingSafeEqual\(a, b\)/.test(authSrc) && !/token === esperado|esperado === token/.test(authSrc),
+      // COMPORTAMENTAL: liga um token curto de verdade e confere que a porta
+      // fecha - regex provaria só que a linha existe, não que ela funciona
+      'token fraco (curto) desliga a porta em vez de fingir que protege': (() => {
+        const guardado = process.env.MASTER_API_TOKEN;
+        try {
+          process.env.MASTER_API_TOKEN = '123';
+          const fracoRecusado = auth.tokenDeApiConfigurado() === null && auth.ehTokenDeApiDoMaster('123') === false;
+          process.env.MASTER_API_TOKEN = 'c'.repeat(64);
+          const forteAceito = auth.tokenDeApiConfigurado() !== null && auth.ehTokenDeApiDoMaster('c'.repeat(64)) === true;
+          return fracoRecusado && forteAceito;
+        } finally { process.env.MASTER_API_TOKEN = guardado; }
+      })(),
+      'o token não vira sessão de navegador (sid nulo)': /await aplicarUsuarioNoReq\(req, user, null\);/.test(authSrc),
+      'o valor do token NUNCA vai pro log (só o método e a rota)':
+        /console\.log\(`\[api-token\] \$\{req\.method\} \$\{req\.originalUrl \|\| req\.url\}`\)/.test(authSrc)
+        && !/console\.log\([^)]*MASTER_API_TOKEN/.test(authSrc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okApiToken = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (me=${eu.status} qa=${soMaster.status} put=${escreveu.status} errado=${errado.status})`);
+  } catch (e) { okApiToken = false; console.log('  erro: ' + e.message); }
+  if (!okApiToken) ruins += 1;
+  console.log(`${okApiToken ? '✓' : '✗'} Token de API do Master: entra como ele mesmo, pelo MESMO caminho de permissão da sessão`);
 
   // ------------------------------------------------------------------
   // O APP "NoPulso" NAS LOJAS (pedido do Master, 12/09/2026): "no Chrome tem a

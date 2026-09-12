@@ -98,6 +98,42 @@ usuário pra ele, marcado **QA Master** — 100% do acesso, mas exclusões e
 configuração global ficam presas na mesma fila pra você aprovar) e tirar o
 print da tela após a aprovação. Nunca use a sua senha nele.
 
+## 6.1 Token de API do Master (o chat "Beni" no Cowork)
+
+Decidido em 12/09/2026: *"só quem usará sou eu esse Token Global, em um chat no
+Cowork"*. Existe um token pessoal pro Master chamar a API de fora do navegador.
+
+**Como ligar (uma vez):**
+
+1. Gere: `openssl rand -hex 32`
+2. No Render → Environment: `MASTER_API_TOKEN=<o valor gerado>` → Manual Deploy
+3. No chat do Cowork, use em toda chamada: `Authorization: Bearer <token>`
+
+**O que ele é — e o que ele não é.** Ele **não** é um escopo de permissão
+separado (era isso que a especificação pedia, com `BOT_ACAO_TOKEN` e regras
+próprias por rota). Ele resolve pro **usuário Master de verdade** e segue pelo
+**mesmo** `aplicarUsuarioNoReq` da sessão do navegador. Consequências:
+
+- toda rota que já existe funciona, sem exceção e sem regra nova;
+- tudo que ele fizer já sai auditado **no nome do Master** (`req.user.email`),
+  porque é literalmente o Master agindo;
+- não há dois sistemas de permissão pra manter em sincronia — e é aí que
+  nascem as brechas.
+
+**As travas que ele tem:**
+
+| Trava | O que faz |
+|---|---|
+| Mínimo de 32 caracteres | Token curto **desliga** a porta e avisa no boot |
+| `crypto.timingSafeEqual` | Comparação em tempo constante (não vaza por timing) |
+| Sem sessão (`sid` nulo) | Não vira sessão de navegador nem aparece em "sessões ativas" |
+| Log de toda chamada | `[api-token] MÉTODO /rota` — o valor do token **nunca** vai pro log |
+
+**O risco, dito com todas as letras:** quem tiver esse valor **é** o Master —
+pode aprovar, editar e excluir tudo. Trate como a sua senha. Não cole em
+mensagem, print ou issue. Se desconfiar de vazamento, troque a variável no
+Render e faça o deploy: a revogação é imediata.
+
 ## 7. Opção "por baixo", sem chat (API, para um agente externo)
 
 Tudo que o Beniboy faz sai de rotas que já existem, autenticadas pelo login
