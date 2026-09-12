@@ -928,7 +928,7 @@ function toggleNocUnidade(codigo){
       const posto = c.posto.replace(/'/g,"\\'");
       const tipo = (c.tipo||'atendimento').replace(/'/g,"\\'");
       const anydesk = c.anydeskId
-        ? `<a class="pnoc-btn" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️ Abrir</a>`
+        ? `<a class="pnoc-btn" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk" onclick="window.zenithAnydesk && window.zenithAnydesk('${String(c.anydeskId).replace(/'/g,"\\'")}')">🖥️ Abrir</a>`
         : '<span class="pnoc-ip">—</span>';
       const ip = c.ipLocal
         ? `<span class="pnoc-ip" style="cursor:pointer;" title="Clique pra copiar" onclick="painelCopiarIpLocal('${c.ipLocal.replace(/'/g,"\\'")}')">${escapeHtml(c.ipLocal)}</span>`

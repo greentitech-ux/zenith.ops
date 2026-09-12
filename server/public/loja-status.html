@@ -1201,35 +1201,13 @@ async function salvarDispositivo(){
   }catch(e){ statusEl.textContent = e.message; statusEl.className = 'msg err'; }
 }
 
-// ---- AnyDesk no celular ----
-// O atalho 🖥️ e' um link "anydesk:" - no Windows o AnyDesk atende esse
-// esquema e abre a sessao. No celular NAO existe quem atenda: o toque cai no
-// vazio e, como o atalho ainda barrava o clique de subir pro card, a maquina
-// parecia travada ("clico na maquina e nao acontece nada", relato do Master
-// pelo celular).
-//
-// Em tela de TOQUE o atalho deixa de tentar o "anydesk:":
-//   - no card, o clique sobe pro card e abre o detalhe da maquina, que e o
-//     que a pessoa queria ver;
-//   - no detalhe, copia o ID pra colar no app do AnyDesk do celular, que e o
-//     unico caminho que existe ali.
-// No desktop nada muda: abre o AnyDesk, e no card continua sem abrir o
-// detalhe junto (era pra isso que o stopPropagation estava ali).
-function ehTelaDeToque(){
-  try{ return window.matchMedia && window.matchMedia('(hover:none)').matches; }
-  catch(e){ return false; }
-}
-function cliqueAnydeskTile(ev){
-  if(!ehTelaDeToque()){ ev.stopPropagation(); return; }
-  // sem stopPropagation de proposito: o clique sobe e o card abre o detalhe
-  ev.preventDefault();
-}
-function cliqueAnydeskDetalhe(ev, id){
-  if(!ehTelaDeToque()) return;
-  ev.preventDefault();
-  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(id).catch(()=>{});
-  alert(`O AnyDesk não abre pelo celular. ID copiado: ${id} — cole no app do AnyDesk.`);
-}
+// ---- AnyDesk ----
+// A regra ("tenta abrir o esquema e so avisa se ninguem atender") mora no
+// tema.js, em window.zenithAnydesk - o Painel usa a mesma. Aqui ficam so os
+// dois handlers, porque o do CARD tem de barrar o clique de abrir a ficha
+// junto e o do detalhe nao.
+function cliqueAnydeskTile(ev, id){ ev.stopPropagation(); if(window.zenithAnydesk) window.zenithAnydesk(id); }
+function cliqueAnydeskDetalhe(ev, id){ if(window.zenithAnydesk) window.zenithAnydesk(id); }
 
 // ---- reinício automático: leitura do plano semanal ----
 // O painel só LÊ; quem valida e grava é o servidor (ver lojaStatus.js).
@@ -1318,7 +1296,7 @@ function equipTileHtml(codigo, c){
   const status = statusDe(c);
   const statusTexto = textoDeEstado(c, status);
   const btnAnydesk = c.anydeskId
-    ? `<a class="btn-anydesk" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk" onclick="cliqueAnydeskTile(event)">🖥️</a>`
+    ? `<a class="btn-anydesk" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk" onclick="cliqueAnydeskTile(event,'${escapeJs(c.anydeskId)}')">🖥️</a>`
     : `<span class="btn-anydesk btn-anydesk-off" title="Sem AnyDesk cadastrado">🖥️</span>`;
   const marcadorGcom = c.temGcom ? '<span class="btn-anydesk" title="Possui GCOM">G</span>' : '';
   const marcadorServidor = c.ehServidor ? '<span class="btn-anydesk" title="Servidor">🗄️</span>' : '';

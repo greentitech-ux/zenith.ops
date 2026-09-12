@@ -18285,59 +18285,66 @@ setTimeout(async () => {
   if (!okPaginaInicial) ruins += 1;
   console.log(`${okPaginaInicial ? '✓' : '✗'} Entrada do app: todo mundo começa no Meu Dia (só o tablet de abastecimento fica na tela dele)`);
 
-  // ---- NOC: no celular, tocar na maquina abre a maquina ----
+  // ---- AnyDesk: tentar sempre, e só avisar se não abrir ----
   //
-  // Relato do Master, do celular: "ao clicar nao funciona quando clico na
-  // maquina". O 🖥️ do card e' um link "anydesk:" - no Windows o AnyDesk
-  // atende; no celular NINGUEM atende, e o atalho ainda barrava o clique de
-  // subir pro card (stopPropagation). Resultado: um pedaco do card era um
-  // beco sem saida, e a maquina parecia travada.
+  // Relato do Master (12/09), no computador dele: "não consigo abrir o
+  // AnyDesk clicando no botão da TV" — e a tela mostrava "O AnyDesk não abre
+  // pelo celular. ID copiado: 475863190".
   //
-  // A trava aqui e' o par: em tela de toque o atalho NAO pode barrar o
-  // clique (senao o card nao abre) e NAO pode tentar o "anydesk:" (senao
-  // o toque cai no vazio de novo).
-  let okAnydeskToque = false;
+  // A causa era uma regra minha, de uma entrega anterior: o atalho decidia
+  // por (hover:none) que "tela de toque não tem AnyDesk". COMPUTADOR COM
+  // TELA SENSÍVEL AO TOQUE casa nessa regra — e o Master ficou sem conseguir
+  // abrir sessão nenhuma pelo botão, no próprio computador.
+  //
+  // A regra que fica: NÃO adivinhar o aparelho. O link tenta o esquema de
+  // verdade (ninguém chama preventDefault); se o app abrir, a janela perde o
+  // foco e nada mais acontece; se depois da espera a página continuar
+  // visível e com foco, ninguém atendeu — aí copia o ID e explica.
+  let okAnydeskTenta = false;
   try {
-    const htmlAd = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
-    const corpoTile = (htmlAd.match(/function cliqueAnydeskTile\(ev\)\{[\s\S]*?\n\}/) || [''])[0];
-    const corpoDet = (htmlAd.match(/function cliqueAnydeskDetalhe\(ev, id\)\{[\s\S]*?\n\}/) || [''])[0];
+    const tema7 = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    const noc7 = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const painel7 = require('fs').readFileSync(require('path').join(__dirname, 'public', 'painel.html'), 'utf8');
+    const corpo = (tema7.match(/window\.zenithAnydesk = function \(id\) \{[\s\S]*?\n  \};/) || [''])[0];
+
     const conf = {
-      'o atalho do card chama o desvio de toque (não é mais só stopPropagation)':
-        /class="btn-anydesk" href="anydesk:\$\{escapeHtml\(c\.anydeskId\)\}"[^`]*onclick="cliqueAnydeskTile\(event\)"/.test(htmlAd)
-        && !/class="btn-anydesk"[^`]*onclick="event\.stopPropagation\(\)"/.test(htmlAd),
-      'quem decide é a tela de toque, não o tamanho da janela':
-        /window\.matchMedia\('\(hover:none\)'\)\.matches/.test(htmlAd)
-        && !/function ehTelaDeToque\(\)\{[\s\S]*?innerWidth/.test(htmlAd),
-      // ESTA é a correção do relato: no toque o clique tem de SUBIR pro card
-      // o que sobra DEPOIS do desvio do desktop e' o caminho do toque: ali
-      // nao pode haver stopPropagation, senao o card nao abre
-      'no toque o atalho não barra o clique (o card abre o detalhe)':
-        /if\(!ehTelaDeToque\(\)\)\{ ev\.stopPropagation\(\); return; \}/.test(corpoTile)
-        && !/ev\.stopPropagation\(/.test(corpoTile.split('return; }').slice(1).join('return; }')),
-      'e não tenta mais o "anydesk:" que ninguém atende no celular':
-        /ev\.preventDefault\(\);/.test(corpoTile),
-      // no desktop nada muda: abre o AnyDesk e NAO abre o detalhe junto
-      'no desktop o atalho continua abrindo o AnyDesk sem abrir o detalhe':
-        /if\(!ehTelaDeToque\(\)\)\{ ev\.stopPropagation\(\); return; \}/.test(corpoTile),
-      // no detalhe o beco sem saida e o mesmo, mas ali a saida e outra
-      'no detalhe, o celular copia o ID em vez de cair no vazio':
-        /onclick="cliqueAnydeskDetalhe\(event,'\$\{escapeJs\(c\.anydeskId\)\}'\)"/.test(htmlAd)
-        && /if\(!ehTelaDeToque\(\)\) return;/.test(corpoDet)
-        && /navigator\.clipboard\.writeText\(id\)/.test(corpoDet)
-        && /ID copiado/.test(corpoDet),
-      // tom da casa: diz o fato e o numero, nao "algo deu errado"
-      'e diz por quê, com o ID na frente': /O AnyDesk não abre pelo celular/.test(corpoDet),
-      // tempoRelativo ja vem com o "há" - o card do fantasma dizia "há há"
-      'o card não identificado não repete o "há"':
-        /aberto \$\{tempoRelativo\(c\.abertoDesde\)\}/.test(htmlAd)
-        && !/aberto há \$\{tempoRelativo/.test(htmlAd),
+      // ESTA é a correção: nenhuma decisão pelo tipo de tela
+      'nada de decidir pelo aparelho — (hover:none) não manda mais no AnyDesk':
+        !/ehTelaDeToque/.test(noc7)
+        && !/hover:none/.test(corpo),
+      'o link tenta o esquema de verdade (ninguém barra o padrão)':
+        !/preventDefault/.test(corpo)
+        && !/cliqueAnydesk[^{]*\{[^}]*preventDefault/.test(noc7),
+      // como se sabe que abriu: o app vem pra frente e a janela perde o foco
+      'só avisa se a página continuar visível e com foco depois da espera':
+        /window\.addEventListener\('blur', marcar, \{ once: true \}\)/.test(corpo)
+        && /document\.addEventListener\('visibilitychange', marcar, \{ once: true \}\)/.test(corpo)
+        && /if \(saiuDaPagina \|\| document\.hidden \|\| !document\.hasFocus\(\)\) return;/.test(corpo),
+      'e o aviso leva o ID, copiado':
+        /navigator\.clipboard\.writeText\(idLimpo\)/.test(corpo)
+        && /ID copiado: ' \+ idLimpo/.test(corpo),
+      // no card o 🖥️ é "quero o AnyDesk", não "abra a ficha"
+      'no card, o 🖥️ não abre a ficha da máquina junto':
+        /function cliqueAnydeskTile\(ev, id\)\{ ev\.stopPropagation\(\); if\(window\.zenithAnydesk\) window\.zenithAnydesk\(id\); \}/.test(noc7),
+      'no detalhe, o 🖥️ só pede o AnyDesk':
+        /function cliqueAnydeskDetalhe\(ev, id\)\{ if\(window\.zenithAnydesk\) window\.zenithAnydesk\(id\); \}/.test(noc7),
+      // uma regra só: NOC e Painel usam a mesma função do tema.js
+      'NOC e Painel usam a mesma regra, do tema.js':
+        /onclick="cliqueAnydeskTile\(event,'\$\{escapeJs\(c\.anydeskId\)\}'\)"/.test(noc7)
+        && /onclick="cliqueAnydeskDetalhe\(event,'\$\{escapeJs\(c\.anydeskId\)\}'\)"/.test(noc7)
+        && /window\.zenithAnydesk && window\.zenithAnydesk\(/.test(painel7)
+        && /window\.zenithAnydesk = function/.test(tema7),
+      // o comentário do tema.js guarda o porquê: sem ele, alguém "simplifica"
+      // de volta pro (hover:none) daqui a três meses
+      'o porquê fica escrito onde a regra mora':
+        /TELA[\s\S]{0,20}SENSIVEL AO TOQUE tambem casa nessa regra/.test(tema7),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
-    okAnydeskToque = !falhas.length;
+    okAnydeskTenta = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
-  } catch (e) { okAnydeskToque = false; console.log('  erro: ' + e.message); }
-  if (!okAnydeskToque) ruins += 1;
-  console.log(`${okAnydeskToque ? '✓' : '✗'} NOC no celular: tocar no 🖥️ do card abre a máquina (o "anydesk:" não tem quem atenda ali)`);
+  } catch (e) { okAnydeskTenta = false; console.log('  erro: ' + e.message); }
+  if (!okAnydeskTenta) ruins += 1;
+  console.log(`${okAnydeskTenta ? '✓' : '✗'} AnyDesk: tenta abrir em qualquer aparelho e só avisa se ninguém atender (era o (hover:none) barrando o computador do Master)`);
 
   // ---- NOC: reinício automático programado ----
   //
