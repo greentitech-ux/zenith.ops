@@ -17605,6 +17605,57 @@ setTimeout(async () => {
   if (!okBlocoTitulo) ruins += 1;
   console.log(`${okBlocoTitulo ? '✓' : '✗'} Leitura por foto: campo que é TÍTULO de bloco (DINHEIRO → RECEBIMENTOS) para de voltar vazio`);
 
+  // Porta de entrada do app: todo mundo cai no Meu Dia (pedido do Master).
+  //
+  // Ele serve como padrão porque é a ÚNICA tela que não depende de seção
+  // nenhuma - /api/tarefas pede só login e o item do menu não tem trava.
+  // Qualquer outra como padrão corre o risco de receber quem não tem a seção
+  // e abrir direto num "sem acesso".
+  let okPaginaInicial = false;
+  try {
+    const fs = require('fs');
+    const html = fs.readFileSync(__dirname + '/public/index.html', 'utf8');
+    const idx = fs.readFileSync(__dirname + '/index.js', 'utf8');
+    const nav = fs.readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
+    const fn = new Function(`${(html.match(/function paginaInicial\(me\)\{[\s\S]*?\n\}/) || [''])[0]}; return paginaInicial;`)();
+
+    const conf = {
+      'Master cai no Meu Dia': fn({ role: 'master', permissions: { sections: [] } }) === '/tarefas.html',
+      'quem tem cargo também (loja, técnico, suporte, manutenção)':
+        ['loja', 'tecnico', 'suporte', 'manutencao']
+          .every((cargo) => fn({ role: 'user', cargo, permissions: { sections: [] } }) === '/tarefas.html'),
+      'e quem não tem cargo nenhum': fn({ role: 'user', permissions: { sections: [] } }) === '/tarefas.html'
+        && fn({}) === '/tarefas.html' && fn(null) === '/tarefas.html',
+      // o tablet é aparelho DEDICADO, fica o dia todo numa tela só e é ele que
+      // bate o heartbeat da loja pelo navegador - mandar pro Meu Dia tira a
+      // loja do ar
+      'o tablet de abastecimento continua indo pra tela dele':
+        fn({ role: 'user', permissions: { sections: ['abastecimento-carrinho'] } }) === '/abastecimento.html'
+        && fn({ role: 'user', permissions: { sections: ['abastecimento-loja'] } }) === '/abastecimento.html',
+      'mas Master/Admin com essa seção NÃO ficam presos no tablet':
+        fn({ role: 'master', permissions: { sections: ['abastecimento-carrinho'] } }) === '/tarefas.html'
+        && fn({ role: 'user', isAdmin: true, permissions: { sections: ['abastecimento-loja'] } }) === '/tarefas.html',
+      'se nem der pra ler quem é a pessoa, o destino é o mesmo':
+        /\}catch\(e\)\{ location\.href = '\/tarefas\.html'; \}/.test(html),
+      // ESTA é a invariante que sustenta tudo: se um dia o Meu Dia passar a
+      // exigir seção, a porta de entrada quebra pra quem não tiver
+      'o Meu Dia continua sem exigir seção (senão a porta de entrada quebra)':
+        /app\.get\('\/api\/tarefas\/minhas', auth\.requireAuth/.test(idx)
+        && /app\.get\('\/api\/tarefas\/contexto', auth\.requireAuth/.test(idx)
+        && /\{ id: 'nav-tarefas', href: '\/tarefas\.html', icone: '✅', rotulo: 'Meu Dia' \}/.test(nav),
+      // o PC interno da loja abre a raiz SEM login: boot() sai cedo e a página
+      // fica, que é o que mantém o heartbeat de pé
+      'sem login ninguém é redirecionado (é assim que a loja segue batendo)':
+        /async function boot\(\)\{\s*if\(!AUTH_TOKEN\) return;/.test(html)
+        && /iniciarHeartbeatLoja\(\);/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPaginaInicial = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPaginaInicial = false; console.log('  erro: ' + e.message); }
+  if (!okPaginaInicial) ruins += 1;
+  console.log(`${okPaginaInicial ? '✓' : '✗'} Entrada do app: todo mundo começa no Meu Dia (só o tablet de abastecimento fica na tela dele)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
