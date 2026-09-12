@@ -2791,7 +2791,9 @@ async function enviarPapelDeParede(){
     const r = await fetch('/api/loja-status/papel-de-parede', { method:'PUT', body: fd });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui enviar.');
-    input.value = '';
+    // enviado: zera o input E o rascunho do tema.js (senao o File voltava
+    // ao input num redesenho e ia junto de novo)
+    window.zenithRascunhos?.limparAnexoEnviado(input);
     msg.textContent = 'Imagem enviada. Quem está com o papel de parede ligado troca na próxima consulta.';
     msg.className = 'msg'; msg.classList.remove('hidden');
   }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }

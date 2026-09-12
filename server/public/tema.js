@@ -1440,11 +1440,27 @@
     // Use depois de uma gravacao confirmada. A atualizacao normal continua
     // preservando o texto, mas uma mensagem/comentario que ja foi enviado nao
     // pode reaparecer como se ainda fosse um rascunho.
+    // O ANEXO que acabou de ser enviado tem de morrer aqui também, e isso
+    // vinha sendo esquecido tela a tela. Esta camada guarda o File e devolve
+    // ele ao input recriado (ver aplicarCampo) - então, depois de enviar, o
+    // print voltava sozinho: ficava pendurado na prévia e ia junto na
+    // PRÓXIMA mensagem. Relato do Master na Central do Beniboy: "colei um
+    // print e apertei ENTER, ele enviou a imagem mas o arquivo permaneceu no
+    // anexo" - e um segundo ENTER mandava o mesmo print de novo.
+    //
+    // Zera o input, apaga o rascunho E dispara 'change': é o 'change' que faz
+    // a prévia sumir e o 📎 voltar, sem cada tela ter de saber disso.
+    function limparAnexoEnviado(campo) {
+      if (!campo) return;
+      try { campo.value = ''; } catch (e) { /* input pode estar desabilitado */ }
+      limparNo(campo);
+      campo.dispatchEvent(new Event('change', { bubbles: true }));
+    }
     function limparCampoEnviado(campo) {
       limparNo(campo);
       if (campo && 'value' in campo) campo.value = '';
     }
-    window.zenithRascunhos = { limpar: limparNo, limparCampoEnviado: limparCampoEnviado, restaurar: agendarRestauracao };
+    window.zenithRascunhos = { limpar: limparNo, limparCampoEnviado: limparCampoEnviado, limparAnexoEnviado: limparAnexoEnviado, restaurar: agendarRestauracao };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', agendarRestauracao);
     else agendarRestauracao();
   })();

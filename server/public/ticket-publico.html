@@ -311,6 +311,8 @@ async function enviarDecisao(){
     const resp = await fetch(`/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/decidir-publico`, { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Não foi possível registrar a decisão.');
+    // enviado: zera o input E o rascunho do tema.js (senao o File voltava)
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('comprovante'));
     document.getElementById('painel-decidir').classList.add('hidden');
     document.getElementById('sucesso-icone').textContent = acao==='aprovar' ? '✅' : '🚫';
     document.getElementById('sucesso-titulo').textContent = acao==='aprovar' ? 'Aprovado!' : 'Recusado!';
@@ -371,6 +373,8 @@ async function enviarComprada(){
     const resp = await fetch(`/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/comprada-publico`, { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Não foi possível marcar como comprada.');
+    // enviado: zera o input E o rascunho do tema.js (senao o File voltava)
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('comprada-comprovante'));
     document.getElementById('painel-comprada').classList.add('hidden');
     document.getElementById('sucesso-icone').textContent = '🛒';
     document.getElementById('sucesso-titulo').textContent = 'Compra registrada!';
@@ -429,7 +433,7 @@ async function enviarChat(){
     const campoTexto = document.getElementById('chat-texto');
     window.zenithRascunhos?.limparCampoEnviado(campoTexto);
     campoTexto.value = '';
-    if(campoAnexo){ campoAnexo.value = ''; campoAnexo.dispatchEvent(new Event('change', { bubbles: true })); }
+    window.zenithRascunhos?.limparAnexoEnviado(campoAnexo);
     await carregarChat();
   }catch(err){
     alert(err.message);

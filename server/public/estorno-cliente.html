@@ -318,6 +318,9 @@ document.getElementById('form-estorno').addEventListener('submit', async (e)=>{
     const resp = await fetch('/api/refund-requests/publico', { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar o pedido.');
+    // enviado: zera o input E o rascunho do tema.js (senao o File voltava
+    // ao input num redesenho e ia junto de novo)
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('comprovantes'));
     document.getElementById('form-estorno').classList.add('hidden');
     document.getElementById('sucesso').classList.remove('hidden');
     window.scrollTo({ top: 0, behavior: 'smooth' });

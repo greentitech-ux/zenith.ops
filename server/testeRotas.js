@@ -18788,6 +18788,82 @@ setTimeout(async () => {
   if (!okLinhaUnidade) ruins += 1;
   console.log(`${okLinhaUnidade ? '✓' : '✗'} Comparativo por unidade: a linha abre e diz contra quanto - e o formulário de fechamento só recolhe a sangria`);
 
+  // ---- anexo enviado não pode continuar pendurado ----
+  //
+  // Relato do Master, na Central do Beniboy: "colei um print e apertei ENTER,
+  // ele enviou a imagem no chat mas o arquivo permaneceu no anexo". Testando,
+  // era pior: um segundo ENTER mandava o MESMO print de novo pro cliente.
+  //
+  // A causa não era do chat: é o guarda-rascunho do tema.js. Ele guarda o
+  // File e devolve ele ao input recriado (aplicarCampo/DataTransfer) pra uma
+  // tela com polling não perder o anexo que a pessoa acabou de escolher. Só
+  // que, depois do envio, o mesmo mecanismo trazia de volta o que já tinha
+  // ido - e cada tela "limpava" do seu jeito (só `.value=''`, que não apaga
+  // o rascunho).
+  //
+  // Por isso a limpeza virou UMA função (limparAnexoEnviado) e este teste
+  // cobre o app inteiro: toda tela que consome arquivo tem de chamá-la. Sem
+  // essa regra, a próxima tela com anexo nasce com o mesmo defeito.
+  let okAnexoEnviado = false;
+  try {
+    const fs7 = require('fs');
+    const path7 = require('path');
+    const dir7 = path7.join(__dirname, 'public');
+    const tema7 = fs7.readFileSync(path7.join(dir7, 'tema.js'), 'utf8');
+    const corpoLimpar = (tema7.match(/function limparAnexoEnviado\(campo\) \{[\s\S]*?\n    \}/) || [''])[0];
+    // toda tela que CONSOME arquivo escolhido/colado
+    const consomem = fs7.readdirSync(dir7)
+      .filter((f) => /\.(html|js)$/.test(f) && f !== 'tema.js')
+      .filter((f) => {
+        const src = fs7.readFileSync(path7.join(dir7, f), 'utf8');
+        return /\.files\s*\[\s*0\s*\]|for\s*\(\s*const\s+\w+\s+of\s+\w*[Ii]nput\.files|\.files\)/.test(src);
+      });
+    // CHAMADA de verdade, não a palavra: uma tela cujo comentário cita
+    // limparAnexoEnviado mas não chama passaria batido (aconteceu com o
+    // monitor.html na verificação por sabotagem)
+    const semComentario = (src) => src.split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    const chama = (f) => /limparAnexoEnviado\s*\(/.test(semComentario(fs7.readFileSync(path7.join(dir7, f), 'utf8')));
+    const semLimpeza = consomem.filter((f) => !chama(f));
+
+    const conf = {
+      'a limpeza do anexo mora em um arquivo só (tema.js)':
+        /limparAnexoEnviado: limparAnexoEnviado/.test(tema7) && corpoLimpar.length > 60,
+      // as TRÊS coisas: sem uma delas o print volta
+      'zera o input, apaga o rascunho E avisa a tela':
+        /campo\.value = '';/.test(corpoLimpar)
+        && /limparNo\(campo\);/.test(corpoLimpar)
+        && /campo\.dispatchEvent\(new Event\('change', \{ bubbles: true \}\)\);/.test(corpoLimpar),
+      // ESTA é a regra que vale pro app inteiro
+      'toda tela que consome arquivo limpa o anexo depois':
+        semLimpeza.length === 0 || (console.log(`  telas sem limpar o anexo: ${semLimpeza.join(' · ')}`), false),
+      // é uma regra de verdade: se ninguém consumisse arquivo, o teste acima
+      // passaria vazio e não provaria nada
+      'e há telas de verdade sendo cobertas': consomem.length >= 15,
+      // o caso relatado, nominalmente
+      'na Central do Beniboy, a resposta limpa o print que acabou de ir':
+        /window\.zenithRascunhos\?\.limparAnexoEnviado\(document\.getElementById\(`d-anexo-\$\{id\}`\)\)/
+          .test(semComentario(fs7.readFileSync(path7.join(dir7, 'beniboy.html'), 'utf8'))),
+      // o widget é o que roda em TODAS as telas e do lado do visitante
+      'o widget do Beniboy também limpa (no envio e ao tirar o anexo)':
+        /limparAnexoEnviado\(inputEl\)/.test(semComentario(fs7.readFileSync(path7.join(dir7, 'suporte-chat.js'), 'utf8'))),
+      // ponto e check-in por foto: ali o rascunho restaurado dispara o
+      // onchange sozinho, e isso REGISTRA um ponto que ninguém bateu
+      'o ponto por foto limpa ANTES de registrar':
+        ['rh-checkin.html', 'rh-colaborador.html'].every((f) => {
+          const src = fs7.readFileSync(path7.join(dir7, f), 'utf8');
+          const i = src.indexOf('limparAnexoEnviado(input)');
+          const j = src.search(/(enviarRegistro|enviarPonto)\(foto\)/);
+          return i > 0 && j > i;
+        }),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAnexoEnviado = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAnexoEnviado = false; console.log('  erro: ' + e.message); }
+  if (!okAnexoEnviado) ruins += 1;
+  console.log(`${okAnexoEnviado ? '✓' : '✗'} Anexo enviado não fica pendurado (o print ia junto de novo na mensagem seguinte)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

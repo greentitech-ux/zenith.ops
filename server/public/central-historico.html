@@ -2243,7 +2243,9 @@ function removerFotoChat(){
   document.getElementById('d-chat-preview').classList.add('hidden');
   document.getElementById('d-chat-foto-btn').classList.remove('tem-foto');
   const input = document.querySelector('#d-chat-foto-btn input[type=file]');
-  if(input) input.value = '';
+  // limparAnexoEnviado tambem apaga o rascunho do tema.js: so zerar o .value
+  // deixava o File guardado, e ele voltava no proximo redesenho
+  if(input) window.zenithRascunhos?.limparAnexoEnviado(input);
 }
 async function enviarChat(){
   const input = document.getElementById('d-chat-texto');

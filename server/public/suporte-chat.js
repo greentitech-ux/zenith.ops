@@ -226,6 +226,9 @@
     });
   }
   function limparAnexo(inputEl, iconeEl) {
+    // limparAnexoEnviado zera o input E apaga o rascunho do tema.js - sem
+    // isso o File voltava sozinho no proximo redesenho do painel
+    if (window.zenithRascunhos) window.zenithRascunhos.limparAnexoEnviado(inputEl);
     inputEl.value = '';
     iconeEl.textContent = '📎';
     iconeEl.parentElement.classList.remove('szc-anexo-tem');
@@ -439,6 +442,9 @@
       if (!r.ok) throw new Error(data.error || 'Não foi possível iniciar a conversa.');
       localStorage.setItem(LS_ID, data.id);
       localStorage.setItem(LS_TOKEN, data.token);
+      // o formulario inicial some daqui pra frente, mas o rascunho do arquivo
+      // sobrevive na memoria - numa segunda conversa o print antigo voltaria
+      if (window.zenithRascunhos) window.zenithRascunhos.limparAnexoEnviado(arquivoInicial);
       await carregarConversa();
     } catch (err) {
       erroEl.textContent = err.message;

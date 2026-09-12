@@ -175,6 +175,9 @@ async function enviar(){
       : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token: TOKEN, nome, imagem }) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || 'Não foi possível registrar a assinatura.');
+    // enviado: zera o input E o rascunho do tema.js (senao o File voltava
+    // ao input num redesenho e ia junto de novo)
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('comprovante'));
     document.getElementById('painel-assinar').classList.add('hidden');
     document.getElementById('sucesso-texto').textContent = d.completo
       ? 'Todas as assinaturas foram coletadas - o formulário está completo.'
