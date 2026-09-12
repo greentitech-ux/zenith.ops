@@ -11736,6 +11736,31 @@ setTimeout(async () => {
         naoDocumentadas.length === 0 || `falta avisar: ${naoDocumentadas.join(' · ')}`,
       'e o documento não inventa trava que o código não tem':
         inventadas.length === 0 || `não pedem senha: ${inventadas.join(' · ')}`,
+      // O Beni PEDIU o token no chat do Cowork (print do Master, 12/09/2026) -
+      // e pediu porque o documento dizia de onde o valor sai (Render) mas
+      // nunca dizia como ele chega até ELE. Sem isso, pedir na conversa é o
+      // caminho natural. A regra agora tem seção própria, e ela não pode
+      // sumir num "enxugar o documento": token colado em chat fica gravado,
+      // vira print, e quem tem o valor É o Master.
+      'o documento manda ler o token do ambiente e proíbe pedir no chat': (() => {
+        const s11 = doc.slice(doc.indexOf('### 1.1'), doc.indexOf('## 2.'));
+        return /\$MASTER_API_TOKEN/.test(s11)
+          && /Nunca peça o token no chat/.test(s11)
+          && /Nunca aceite se oferecerem/.test(s11)
+          // e diz o que fazer quando não achar, em vez de deixar ele inventar
+          && /Não encontrei `MASTER_API_TOKEN` no meu ambiente/.test(s11)
+          && /queimado/.test(s11);
+      })(),
+      // o curl do print saiu com adyen-monitor.onrender.com; o endereço é o
+      // nopulso.com.br, e o documento tem que deixar isso sem margem
+      'o endereço das chamadas é o nopulso.com.br, dito sem ambiguidade': (() => {
+        const s1 = doc.slice(doc.indexOf('## 1.'), doc.indexOf('### 1.1'));
+        return /\*\*O endereço é `https:\/\/www\.nopulso\.com\.br`\.\*\*/.test(s1)
+          && /ele não é pra você/.test(s1)
+          // nenhum bloco de código pode mandar chamar o endereço antigo - o
+          // comando quebra em duas linhas, então olhar uma linha só não pega
+          && [...doc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].every((m) => !/onrender/.test(m[1]));
+      })(),
       'o mínimo de 32 caracteres do token bate com o código':
         /MASTER_API_TOKEN_MIN = 32/.test(fs.readFileSync(__dirname + '/auth.js', 'utf8'))
         && /Mínimo de 32\b/.test(doc),

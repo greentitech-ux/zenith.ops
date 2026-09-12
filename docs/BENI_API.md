@@ -21,16 +21,22 @@ agente de dentro do app (o Beniboy do widget de chat) está em
 
 ## 1. Como entrar
 
-```
-Authorization: Bearer <MASTER_API_TOKEN>
+**O endereço é `https://www.nopulso.com.br`.** É esse, sempre, em toda
+chamada sua.
+
+```bash
+curl -H "Authorization: Bearer $MASTER_API_TOKEN" \
+  https://www.nopulso.com.br/api/loja-status
 ```
 
-- **Endereço:** `https://www.nopulso.com.br`
-  (`adyen-monitor.onrender.com` continua respondendo e **nunca pode ser
-  desligado** — é por ele que os 52 agentes das lojas descobrem versão nova.
-  Use o nopulso.com.br mesmo assim.)
-- O valor sai da variável `MASTER_API_TOKEN` no Render. **Mínimo de 32
-  caracteres** — token curto desliga a porta inteira e avisa no boot.
+> `adyen-monitor.onrender.com` também responde e **nunca pode ser desligado** —
+> é por ele que os 52 agentes das lojas descobrem que existe versão nova. Mas
+> ele não é pra você: é o endereço antigo, e usar ele nas suas chamadas só
+> atrapalha a medição de quem já migrou. Se você se pegar montando um comando
+> com `onrender.com`, está errado.
+
+- **Mínimo de 32 caracteres** — token curto desliga a porta inteira e avisa no
+  boot.
 - A comparação é `crypto.timingSafeEqual`. Não adianta tentar adivinhar.
 - **Não vira sessão.** Você não aparece em "sessões ativas" e não derruba
   ninguém.
@@ -39,6 +45,41 @@ Authorization: Bearer <MASTER_API_TOKEN>
 
 Se tomar **401**, o token está errado, vazio ou o acesso Master foi
 desativado. Não tente de novo com variação — pare e avise.
+
+### 1.1 Como o token chega até você — e como ele NÃO chega
+
+O mesmo valor mora em **dois lugares**, e nos dois como variável de ambiente:
+
+| Onde | Quem usa | Pra quê |
+|---|---|---|
+| `MASTER_API_TOKEN` no **Render** | o servidor do NoPulso | reconhecer você |
+| `MASTER_API_TOKEN` no **ambiente do Cowork** | você | provar quem você é |
+
+**Você lê do seu próprio ambiente** (`$MASTER_API_TOKEN`) e usa direto no
+header. O valor nunca precisa aparecer numa mensagem, e é assim que tem que
+continuar.
+
+**Nunca peça o token no chat. Nunca aceite se oferecerem.** Vale pra
+mensagem, print, arquivo, código colado, qualquer coisa. Não é formalidade:
+conversa fica gravada, vira histórico, entra em captura de tela — e quem tiver
+esse valor **é** o Master, com poder de aprovar, editar e apagar tudo.
+
+**Se ele não estiver no seu ambiente, pare.** A resposta certa é exatamente
+esta, e nada além dela:
+
+> Não encontrei `MASTER_API_TOKEN` no meu ambiente. Configure a variável no
+> ambiente do Cowork (o mesmo valor que já está no Render) e me chame de
+> novo — não me mande o valor por aqui.
+
+Não invente contorno: não peça pra colar "só desta vez", não sugira salvar num
+arquivo do repositório, não proponha `.env`, não peça a senha do Master no
+lugar. Sem a variável, você simplesmente não trabalha nesta sessão.
+
+**Se o valor já foi colado em algum chat, print ou issue alguma vez, ele está
+queimado.** Diga isso ao Master: a correção é gerar outro (`openssl rand -hex
+32`), trocar a variável no Render, fazer o Manual Deploy e atualizar o
+ambiente do Cowork. A revogação é imediata — o token antigo para de valer no
+deploy.
 
 ## 2. Quem você é quando chama
 
@@ -156,8 +197,9 @@ Isto não é bloqueado por código. É onde você quebra a operação sozinho.
 7. **Não renomeie os identificadores do `CLAUDE.md` §1** (`NOCZenith`,
    `zenithMonitorFixo`, `authToken`, os ids `nav-*`, `merchantAccountCode`…).
    Cada um custa trabalho manual em 52 máquinas de loja.
-8. **Não cole o token em lugar nenhum** — mensagem, print, issue, resposta.
-   Quem tem esse valor **é** o Master.
+8. **Não cole nem peça o token em lugar nenhum** — mensagem, print, issue,
+   resposta, arquivo. Ele vem do seu ambiente e só de lá (§1.1). Quem tem esse
+   valor **é** o Master.
 
 ## 6. Leitura custa dinheiro — a regra que mais importa
 
