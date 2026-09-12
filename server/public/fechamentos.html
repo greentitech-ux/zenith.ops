@@ -300,19 +300,6 @@
   </div>
 </div>
 
-<!-- Correção histórica pontual. Só o Master enxerga; a prévia é somente
-     leitura e a gravação exige confirmação escrita. -->
-<div class="panel hidden" id="migracao-calabresa-panel">
-  <h2><div class="title-group"><span>🛠️ Corrigir KPI “Calabress”</span></div></h2>
-  <div style="padding:12px 16px;">
-    <div class="sub">Une o KPI digitado como <b>Calabress</b> no histórico ao KPI correto <b>Calabresa</b>. Primeiro confira a prévia; nada é alterado até a confirmação. Se ambos existirem no mesmo fechamento, os valores são somados e a alteração fica no histórico.</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-      <button type="button" class="back" id="btn-previa-calabresa" onclick="carregarPreviaCalabresa()" style="cursor:pointer;">1 · Conferir prévia</button>
-      <button type="button" class="back" id="btn-migrar-calabresa" onclick="migrarCalabresa()" style="cursor:pointer;color:var(--bad);border-color:var(--bad);" disabled>2 · Corrigir histórico</button>
-    </div>
-    <div id="migracao-calabresa-resultado" style="margin-top:12px;"></div>
-  </div>
-</div>
 
 <div class="panel hidden" id="edicoes-panel">
   <h2><div class="title-group"><span>Pedidos de correção de fechamento</span><span class="n" id="edicoes-count"></span></div></h2>
@@ -799,57 +786,6 @@ async function carregarStatusSincronizacao(){
   }
 }
 
-let PREVIA_CALABRESA = null;
-function fmtNumeroInteiro(v){ return Number(v || 0).toLocaleString('pt-BR', {maximumFractionDigits:0}); }
-function renderPreviaCalabresa(dados){
-  const alvo = document.getElementById('migracao-calabresa-resultado');
-  const n = Number(dados.fechamentos || 0);
-  if(!n){
-    alvo.innerHTML = '<div style="color:var(--ok);font-size:12.5px;">✅ Nenhum fechamento restante com o KPI “Calabress”.</div>';
-    return;
-  }
-  const exemplos = (dados.exemplos || []).map(x =>
-    `<tr><td>${escapeHtml(fmtData(x.data))}</td><td>${escapeHtml(x.unidade)}</td><td style="text-align:right;">${fmtNumeroInteiro(x.origem)}</td><td style="text-align:right;">${fmtNumeroInteiro(x.destino)}</td></tr>`
-  ).join('');
-  alvo.innerHTML = `<div style="color:var(--warn);font-size:12.5px;margin-bottom:8px;"><b>${fmtNumeroInteiro(n)} fechamento(s)</b> serão corrigidos. Calabress: <b>${fmtNumeroInteiro(dados.valorOrigem)} un.</b> · Calabresa já existente: <b>${fmtNumeroInteiro(dados.valorDestinoJaExistente)} un.</b> · resultado: <b>${fmtNumeroInteiro(dados.valorDestinoAposMigracao)} un.</b>${dados.comOsDoisCampos ? ` · ${fmtNumeroInteiro(dados.comOsDoisCampos)} dia(s) já tinham os dois campos e serão somados.` : ''}</div>`+
-    `<table style="width:100%;font-size:11px;"><tr><th style="text-align:left;">Data</th><th style="text-align:left;">Loja</th><th>Calabress</th><th>Calabresa atual</th></tr>${exemplos}</table>`;
-}
-async function carregarPreviaCalabresa(){
-  const btn = document.getElementById('btn-previa-calabresa');
-  const executar = document.getElementById('btn-migrar-calabresa');
-  btn.disabled = true; btn.textContent = 'Conferindo...';
-  try{
-    const r = await fetch('/api/fechamentos/kpis/calabresa/migracao');
-    const dados = await r.json();
-    if(!r.ok) throw new Error(dados.error || 'Não foi possível conferir a migração.');
-    PREVIA_CALABRESA = dados;
-    renderPreviaCalabresa(dados);
-    executar.disabled = !dados.fechamentos;
-  }catch(e){
-    document.getElementById('migracao-calabresa-resultado').innerHTML = `<div style="color:var(--bad);font-size:12.5px;">❌ ${escapeHtml(e.message)}</div>`;
-  }finally{
-    btn.disabled = false; btn.textContent = '1 · Conferir prévia';
-  }
-}
-async function migrarCalabresa(){
-  if(!PREVIA_CALABRESA || !PREVIA_CALABRESA.fechamentos) return;
-  const frase = prompt(`Esta ação vai corrigir ${PREVIA_CALABRESA.fechamentos} fechamento(s), somando “Calabress” a “Calabresa”.\n\nDigite MIGRAR CALABRESS para confirmar:`);
-  if(frase == null) return;
-  const btn = document.getElementById('btn-migrar-calabresa');
-  btn.disabled = true; btn.textContent = 'Corrigindo...';
-  try{
-    const r = await fetch('/api/fechamentos/kpis/calabresa/migracao', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({confirmacao:frase}) });
-    const dados = await r.json();
-    if(!r.ok) throw new Error(dados.error || 'Não foi possível corrigir o histórico.');
-    PREVIA_CALABRESA = null;
-    document.getElementById('migracao-calabresa-resultado').innerHTML = `<div style="color:var(--ok);font-size:12.5px;">✅ ${fmtNumeroInteiro(dados.migrados)} fechamento(s) corrigido(s). ${dados.erros?.length ? `<span style="color:var(--bad);">${dados.erros.length} erro(s): ${escapeHtml(dados.erros.map(x=>x.erro).join(' · '))}</span>` : 'Cada alteração foi registrada no histórico.'}</div>`;
-    await carregar();
-  }catch(e){
-    document.getElementById('migracao-calabresa-resultado').innerHTML = `<div style="color:var(--bad);font-size:12.5px;">❌ ${escapeHtml(e.message)}</div>`;
-  }finally{
-    btn.textContent = '2 · Corrigir histórico';
-  }
-}
 
 // leitura INCREMENTAL (padrao): o servidor le so as linhas novas da
 // planilha desde a ultima leitura (o comeco ja e conhecido) - nao percebe
@@ -3454,7 +3390,6 @@ async function boot(){
   document.getElementById('btn-sincronizar-planilhas').classList.toggle('hidden', !isMaster);
   document.getElementById('btn-sincronizar-completa').classList.toggle('hidden', !isMaster);
   document.getElementById('import-bravo-panel').classList.toggle('hidden', !isMaster);
-  document.getElementById('migracao-calabresa-panel').classList.toggle('hidden', !isMaster);
 
   if(!secoes.includes('fechamentos')){
     document.getElementById('sem-acesso').classList.remove('hidden');
