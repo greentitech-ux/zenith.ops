@@ -104,6 +104,21 @@ function sanitizarDisco(disco) {
 // Traduz o bloco cru em "precisa fazer alguma coisa?". Devolve motivos em
 // texto porque é isso que vai no push e no card - "crítico" sozinho não
 // diz a ninguém o que trocar.
+// RAM instalada/livre em GB, como o vigia manda (Medir-Ram). So numeros
+// plausiveis: uma maquina de loja tem entre 1 e 512 GB.
+function sanitizarRam(ram) {
+  if (!ram || typeof ram !== 'object') return null;
+  // num() ENCOSTA no limite (99999 viraria 512 GB); aqui fora da faixa e
+  // descartado - RAM de mentira no card e pior que card sem RAM
+  const plausivel = (v, min, max) => { const n = Number(v); return Number.isFinite(n) && n >= min && n <= max ? Math.round(n * 10) / 10 : null; };
+  const totalGb = plausivel(ram.totalGb, 0.5, 512);
+  if (totalGb == null) return null;
+  const out = { totalGb };
+  const livreGb = plausivel(ram.livreGb, 0, 512);
+  if (livreGb != null) out.livreGb = Math.min(livreGb, totalGb);
+  return out;
+}
+
 function avaliarDisco(disco) {
   if (!disco) return { nivel: 'ok', motivos: [] };
   let nivel = 'ok';
@@ -323,6 +338,7 @@ function discosComProblema(docs) {
 }
 
 module.exports = {
+  sanitizarRam,
   LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
   UPTIME_REINICIAR_DIAS,
   sanitizarDisco, avaliarDisco, sanitizarDispositivos, mesclarDispositivos, macAleatorio,

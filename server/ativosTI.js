@@ -14,6 +14,11 @@ const db = require('./firestore');
 const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('ativosTI');
+// pedidos de correcao do inventario (mesmo desenho da fila de correcao de
+// fechamento, ver fechamentosLive.solicitarEdicao): o tecnico que esteve na
+// loja PEDE, o Master decide. Status do proprio vocabulario ja usado no app:
+// PENDENTE / APROVADO / REJEITADO.
+const EDICOES = db.collection('ativosTIEdicoes');
 
 function num(v) {
   const n = Number(v);
@@ -53,6 +58,131 @@ async function criar({ unidade, unidadeNome, areas, observacao, criadoPorEmail, 
   await doc.set(registro);
   cache.invalidar();
   return registro;
+}
+
+// achata as areas em "Area · Ativo" -> quantidade, pra comparar duas versoes
+// do inventario item a item (e o que vira o "de -> para" do pedido e a linha
+// do historico da vistoria)
+function achatar(areas) {
+  const mapa = new Map();
+  (areas || []).forEach((a) => (a.itens || []).forEach((i) => {
+    mapa.set(`${a.nome} · ${i.descricao}`, i.quantidade);
+  }));
+  return mapa;
+}
+
+// o que mudou entre o inventario atual e o proposto: item somado, item
+// tirado, quantidade diferente. Sem isso o Master aprovaria um pedido sem
+// saber o que exatamente muda.
+function diferencas(areasAntes, areasDepois) {
+  const antes = achatar(areasAntes);
+  const depois = achatar(areasDepois);
+  const linhas = [];
+  for (const [chave, qtd] of depois) {
+    if (!antes.has(chave)) linhas.push({ item: chave, de: null, para: qtd, tipo: 'adicionado' });
+    else if (antes.get(chave) !== qtd) linhas.push({ item: chave, de: antes.get(chave), para: qtd, tipo: 'quantidade' });
+  }
+  for (const [chave, qtd] of antes) {
+    if (!depois.has(chave)) linhas.push({ item: chave, de: qtd, para: null, tipo: 'removido' });
+  }
+  return linhas;
+}
+
+function totalDe(areas) {
+  return areas.reduce((t, a) => t + a.itens.reduce((sm, i) => sm + i.quantidade, 0), 0);
+}
+
+// EDITA a vistoria no lugar (nao cria outra): e assim que se soma ou tira um
+// ativo do inventario ATUAL sem inventar uma visita que nao aconteceu. Cada
+// edicao deixa linha no historico do proprio documento - quem mexeu, quando,
+// por que e o que mudou.
+async function editar(id, { areas, observacao, motivo, editadoPorEmail, editadoPorNome }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Vistoria não encontrada.');
+  const atual = snap.data();
+  const areasLimpas = sanitizarAreas(areas);
+  if (!areasLimpas.length) throw new Error('Registre ao menos um ativo.');
+  const mudancas = diferencas(atual.areas, areasLimpas);
+  const agora = new Date().toISOString();
+  const patch = {
+    areas: areasLimpas,
+    totalAtivos: totalDe(areasLimpas),
+    observacao: observacao === undefined ? (atual.observacao || '') : String(observacao || '').trim().slice(0, 500),
+    historico: [...(atual.historico || []), {
+      em: agora,
+      porEmail: editadoPorEmail || null,
+      porNome: editadoPorNome || null,
+      motivo: String(motivo || '').trim().slice(0, 300) || null,
+      mudancas,
+    }].slice(-30),
+    atualizadoEm: agora,
+  };
+  await ref.update(patch);
+  cache.invalidar();
+  return { ...atual, ...patch };
+}
+
+// ---- pedidos de correcao (tecnico pede, Master decide) ----
+async function solicitarEdicao({ vistoriaId, areas, observacao, motivo, solicitadoPorId, solicitadoPorEmail, solicitadoPorNome }) {
+  const snap = await COLLECTION.doc(vistoriaId).get();
+  if (!snap.exists) throw new Error('Vistoria não encontrada.');
+  if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
+  const atual = snap.data();
+  const areasLimpas = sanitizarAreas(areas);
+  if (!areasLimpas.length) throw new Error('Registre ao menos um ativo.');
+  const mudancas = diferencas(atual.areas, areasLimpas);
+  if (!mudancas.length) throw new Error('Nada mudou em relação ao inventário atual.');
+  const pendentes = (await listarEdicoes()).filter((e) => e.vistoriaId === vistoriaId && e.status === 'PENDENTE');
+  if (pendentes.length) throw new Error('Já existe um pedido de correção pendente para essa vistoria - espere a decisão do Master.');
+  const doc = EDICOES.doc();
+  const registro = {
+    id: doc.id,
+    vistoriaId,
+    unidade: atual.unidade,
+    unidadeNome: atual.unidadeNome || atual.unidade,
+    areas: areasLimpas,
+    observacao: String(observacao || '').trim().slice(0, 500),
+    mudancas,
+    motivo: String(motivo).trim().slice(0, 300),
+    status: 'PENDENTE',
+    solicitadoPorId: solicitadoPorId || null,
+    solicitadoPorEmail: solicitadoPorEmail || null,
+    solicitadoPorNome: solicitadoPorNome || null,
+    criadoEm: new Date().toISOString(),
+  };
+  await doc.set(registro);
+  cacheEdicoes.invalidar();
+  return registro;
+}
+
+async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao } = {}) {
+  if (!['APROVADO', 'REJEITADO'].includes(status)) throw new Error('Status inválido.');
+  const ref = EDICOES.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Pedido não encontrado.');
+  const pedido = snap.data();
+  if (pedido.status !== 'PENDENTE') throw new Error('Esse pedido já foi decidido.');
+  const patch = {
+    status,
+    motivoDecisao: String(motivoDecisao || '').trim().slice(0, 300) || null,
+    decididoPorEmail: decididoPorEmail || null,
+    decididoEm: new Date().toISOString(),
+  };
+  // aprovar APLICA a correcao na vistoria - a fila nunca guarda dado que a
+  // tela ja mostra como valendo
+  if (status === 'APROVADO') {
+    await editar(pedido.vistoriaId, {
+      areas: pedido.areas,
+      observacao: pedido.observacao,
+      motivo: `Correção aprovada (pedido de ${pedido.solicitadoPorNome || pedido.solicitadoPorEmail || '—'}): ${pedido.motivo}`,
+      editadoPorEmail: decididoPorEmail,
+      editadoPorNome: pedido.solicitadoPorNome || null,
+    });
+  }
+  await ref.update(patch);
+  cacheEdicoes.invalidar();
+  return { ...pedido, ...patch };
 }
 
 async function remover(id) {
@@ -155,4 +285,11 @@ async function listAllUncached() {
 const cache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = cache.cached;
 
-module.exports = { criar, remover, listAll };
+async function listarEdicoesUncached() {
+  const snap = await EDICOES.orderBy('criadoEm', 'desc').get();
+  return snap.docs.map((d) => d.data());
+}
+const cacheEdicoes = createCache(listarEdicoesUncached, 60 * 1000);
+const listarEdicoes = cacheEdicoes.cached;
+
+module.exports = { criar, editar, remover, listAll, diferencas, solicitarEdicao, listarEdicoes, decidirEdicao };

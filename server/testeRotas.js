@@ -464,10 +464,19 @@ setTimeout(async () => {
     disco: { discos: { modelo: 'ST500LM012', tipo: 'HDD', tamanhoGb: 465, saude: 'saudavel' }, volumes: { letra: 'C:', totalGb: 465, livreGb: 9 } },
     dispositivos: [{ ip: '192.168.18.1', mac: 'A4-2B-B0-11-22-33' }],
     uptimeHoras: 9 * 24,
+    // RAM (pedido 12/09): vai junto da telemetria; valor absurdo e descartado
+    ram: { totalGb: 8, livreGb: 2.1 },
   });
-  const okTele = tele.status === 200 && /"disco":"critico"/.test(tele.corpo) && /"uptimeHoras":216/.test(tele.corpo);
+  const docTele = DOCS.get('lojaStatus/AERO__ATM01') || {};
+  const teleAbsurda = await postarJson('/api/loja-status/AERO/computadores/ATM01/telemetria', { ram: { totalGb: 99999 }, uptimeHoras: 1 });
+  const okTele = tele.status === 200 && /"disco":"critico"/.test(tele.corpo) && /"uptimeHoras":216/.test(tele.corpo)
+    && docTele.ram && docTele.ram.totalGb === 8 && docTele.ram.livreGb === 2.1 && !!docTele.ramMedidaEm
+    && teleAbsurda.status === 200 && (DOCS.get('lojaStatus/AERO__ATM01') || {}).ram.totalGb === 8
+    && /function Medir-Ram \{/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8'))
+    && /🧠 \$\{c\.ram\.totalGb\} GB/.test(require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8'));
   if (!okTele) ruins += 1;
-  console.log(`${okTele ? '✓' : '✗'} telemetria de HD/rede do NOCZenith: HTTP ${tele.status} ${tele.corpo.slice(0, 90)}`);
+  if (!okTele) console.log(`  ram=${JSON.stringify(docTele.ram)} medida=${docTele.ramMedidaEm} absurda=${teleAbsurda.status} depois=${JSON.stringify((DOCS.get('lojaStatus/AERO__ATM01') || {}).ram)} medir=${/function Medir-Ram \{/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8'))} card=${/🧠 \$\{c\.ram\.totalGb\} GB/.test(require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8'))}`);
+  console.log(`${okTele ? '✓' : '✗'} telemetria de HD/rede/RAM do NOCZenith (RAM no card do NOC; valor absurdo descartado): HTTP ${tele.status} ${tele.corpo.slice(0, 90)}`);
 
   // apelido de aparelho da rede: MAC invalido tem que ser recusado, MAC bom
   // tem que gravar (o nome vale pra unidade inteira, ver definirApelidoDispositivo)
@@ -11238,6 +11247,208 @@ setTimeout(async () => {
   console.log(`${okBracos ? '✓' : '✗'} Agente "braços do Master": 9 ações de sistema executam em nome do Master que pediu, e recusam quem não é`);
 
   // ------------------------------------------------------------------
+  // ENCERRADO VAI PRA CONCLUIDOS (pedido do Master, 12/09/2026). Caso real:
+  // ticket automatico "Login bloqueado" (#10191) aprovado - a conta destrava na
+  // hora, mas o ticket ficava com execucao PENDENTE e a tarefa do Meu Dia em
+  // "A fazer" pra sempre, oferecendo "Concluir" que o servidor recusava. Agora:
+  // aprovar = destravar = FINALIZADO -> tarefa CONCLUIDA; e os dois caminhos
+  // que fechavam ticket sem avisar a tarefa (decisao pelo link do e-mail e
+  // prestacao de contas) passam a sincronizar. O backfill (tickets-v4) refaz o
+  // historico uma vez.
+  let okEncerrados = false;
+  try {
+    const tfE = require('/home/user/adyen-monitor/server/tarefas.js');
+    const authE = require('/home/user/adyen-monitor/server/auth.js');
+    const hashE = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-bloq-alvo', { passwordHash: hashE, role: 'user', active: true, locked: true, failedAttempts: 3, email: 'bloq-alvo@teste.local', username: 'bloqalvo', permissions: { sections: ['suporte'], unidades: ['AERO'], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: new Date().toISOString() });
+    const agoraE = new Date().toISOString();
+    DOCS.set('solicitacoes/sol-bloq-1', {
+      id: 'sol-bloq-1', numeroTicket: 10191, tipo: 'suporte-ti', status: 'PENDENTE', titulo: 'Login bloqueado: bloqalvo', descricao: 'Acesso bloqueado automaticamente após 3 tentativas.',
+      unidade: 'AERO', unidadeNome: 'Loja AERO', criadoPorId: 'u-bloq-alvo', criadoPorEmail: authE.ROBO_BLOQUEIO_EMAIL, criadoPorNome: 'bloqalvo', criadoEm: agoraE, prioridade: 'alta',
+    });
+    const masterE = (await auth.login(process.env.MASTER_EMAIL, process.env.MASTER_PASSWORD)).user;
+    const acessoE = { usuario: { id: masterE.id, email: process.env.MASTER_EMAIL }, isMaster: true, isAdmin: false, unidades: [] };
+    // nasce a tarefa (pendente) pelo mesmo sync que a Central usa
+    await tfE.sincronizarTicket(DOCS.get('solicitacoes/sol-bloq-1'), await require('/home/user/adyen-monitor/server/users.js').list(), 'solicitacao');
+    const antes = (await tfE.listarMinhas(acessoE)).find((t) => t.vinculo && t.vinculo.id === 'sol-bloq-1') || null;
+    const aprov = await enviarJson('PATCH', '/api/solicitacoes/sol-bloq-1/status', { status: 'APROVADO', motivoDecisao: 'ok' }, { Authorization: 'Bearer ' + token });
+    const ticketDepois = DOCS.get('solicitacoes/sol-bloq-1') || {};
+    const depois = (await tfE.listarMinhas(acessoE)).find((t) => t.vinculo && t.vinculo.id === 'sol-bloq-1') || null;
+    const srcIdxE = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const srcTfE = require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8');
+    const conf = {
+      'a tarefa do ticket nasce em aberto (PENDENTE)': !!antes && antes.status === 'PENDENTE',
+      'aprovar o Login bloqueado destrava a conta e FECHA o ticket (execucao FINALIZADO)':
+        aprov.status === 200 && ticketDepois.status === 'APROVADO' && ticketDepois.execucaoStatus === 'FINALIZADO' && (DOCS.get('users/u-bloq-alvo') || {}).locked === false,
+      'e a tarefa vai pra CONCLUIDA (nao fica em "A fazer" com o ticket encerrado)': !!depois && depois.status === 'CONCLUIDA' && !!depois.concluidaEm,
+      'a regra vale tambem no re-sync do historico (aprovado + bloqueio = concluida, mesmo sem FINALIZADO)':
+        /function ehTicketDeBloqueio\(ticket\)/.test(srcTfE) && /\(ticket\.execucaoStatus === 'FINALIZADO' \|\| ehTicketDeBloqueio\(ticket\)\) \? 'CONCLUIDA' : 'A_FAZER'/.test(srcTfE)
+        && /const versao = 'tickets-v4';/.test(srcTfE),
+      'decidir pelo link do e-mail sincroniza a tarefa': /await sincronizarTarefasDoTicket\(atualizado\);\n    res\.json\(\{ ok: true, numeroTicket: atualizado\.numeroTicket/.test(srcIdxE),
+      'prestacao de contas (adiantamento FINALIZADO) sincroniza a tarefa': /await sincronizarTarefasDoTicket\(registro\); \/\/ prestacao de contas encerra/.test(srcIdxE),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okEncerrados = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (aprov=${aprov.status} ${String(aprov.corpo).slice(0, 120)} antes=${antes && antes.status} depois=${depois && depois.status} exec=${ticketDepois.execucaoStatus})`);
+  } catch (e) { okEncerrados = false; console.log('  erro: ' + e.message); }
+  if (!okEncerrados) ruins += 1;
+  console.log(`${okEncerrados ? '✓' : '✗'} Meu Dia: ticket encerrado leva a tarefa pra Concluidos (Login bloqueado aprovado, decisao por e-mail, prestacao de contas)`);
+
+  // ------------------------------------------------------------------
+  // ATIVOS DE TI: EDITAR o inventario (somar/tirar ativo) e a FILA de correcao
+  // (pedido do Master, 12/09/2026: "precisamos editar para adicionar/remover
+  // itens ativos, tec pode solicitar edicao"). Antes so dava pra criar uma
+  // vistoria NOVA - trocar um pin pad queimado obrigava a redigitar os 41
+  // ativos da loja. Agora: Master/Admin edita a vistoria atual no lugar (com
+  // linha no historico dizendo o que mudou); o tecnico da secao 'ativos-ti'
+  // PEDE a correcao e nada muda ate o Master decidir. Status do vocabulario
+  // que ja existe: PENDENTE / APROVADO / REJEITADO.
+  let okAtivosTI = false;
+  try {
+    const cabA = { Authorization: 'Bearer ' + token };
+    const hashA = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-tec-ativos', {
+      passwordHash: hashA, role: 'user', active: true, email: 'tec-ativos@teste.local', username: 'tecativos',
+      permissions: { sections: ['ativos-ti'], unidades: ['AERO'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabTec = { Authorization: 'Bearer ' + (await auth.login('tec-ativos@teste.local', 'SenhaDeTeste!2026')).token };
+    const criada = JSON.parse((await postarJson('/api/ativos-ti', {
+      unidade: 'ATV1', unidadeNome: 'Loja Ativos', observacao: 'primeira',
+      areas: [{ nome: 'Loja', itens: [{ descricao: 'Monitor', quantidade: 6 }, { descricao: 'Pin pad', quantidade: 5 }] }],
+    }, cabA)).corpo);
+    // Master edita: tira 1 pin pad (queimado) e soma 1 impressora
+    const editado = await enviarJson('PATCH', `/api/ativos-ti/${criada.id}`, {
+      areas: [{ nome: 'Loja', itens: [{ descricao: 'Monitor', quantidade: 6 }, { descricao: 'Pin pad', quantidade: 4 }, { descricao: 'Impressora térmica', quantidade: 1 }] }],
+      motivo: 'pin pad queimado trocado',
+    }, cabA);
+    const dep = editado.status === 200 ? JSON.parse(editado.corpo) : {};
+    const hist = (dep.historico || [])[0] || {};
+    // 2a edicao: o historico tem que SOMAR (guardar a linha anterior), nao trocar
+    const editado2 = await enviarJson('PATCH', `/api/ativos-ti/${criada.id}`, {
+      areas: [{ nome: 'Loja', itens: [{ descricao: 'Monitor', quantidade: 7 }, { descricao: 'Pin pad', quantidade: 4 }, { descricao: 'Impressora térmica', quantidade: 1 }] }],
+      motivo: 'chegou 1 monitor novo',
+    }, cabA);
+    const dep2 = editado2.status === 200 ? JSON.parse(editado2.corpo) : {};
+    const hist2 = dep2.historico || [];
+    const tiposMud = (hist.mudancas || []).map((m) => `${m.tipo}:${m.item}:${m.de}>${m.para}`).sort();
+    // tecnico NAO edita direto, mas PEDE
+    const tecTentou = await enviarJson('PATCH', `/api/ativos-ti/${criada.id}`, { areas: dep.areas, motivo: 'x' }, cabTec);
+    const semMotivo = await postarJson(`/api/ativos-ti/${criada.id}/solicitar-edicao`, { areas: dep.areas }, cabTec);
+    const areasPedido = [{ nome: 'Loja', itens: [{ descricao: 'Monitor', quantidade: 6 }, { descricao: 'Pin pad', quantidade: 4 }] }];
+    const pedido = await postarJson(`/api/ativos-ti/${criada.id}/solicitar-edicao`, { areas: areasPedido, motivo: 'impressora térmica saiu da loja' }, cabTec);
+    const pedidoJson = pedido.status === 200 ? JSON.parse(pedido.corpo) : {};
+    const duplicado = await postarJson(`/api/ativos-ti/${criada.id}/solicitar-edicao`, { areas: areasPedido, motivo: 'de novo' }, cabTec);
+    const semMudanca = await postarJson(`/api/ativos-ti/${criada.id}/solicitar-edicao`, { areas: dep2.areas, motivo: 'igual' }, cabA);
+    // nada mudou na vistoria enquanto o pedido esta PENDENTE
+    const antesDecisao = (await pedir('/api/ativos-ti', cabA)).corpo;
+    const vistoriaAntes = JSON.parse(antesDecisao).find((v) => v.id === criada.id) || {};
+    // o tecnico so enxerga os proprios pedidos - pra isso a fila tem que ter
+    // pedido de OUTRA pessoa tambem, senao o filtro passaria despercebido
+    const outra = JSON.parse((await postarJson('/api/ativos-ti', {
+      unidade: 'ATV2', unidadeNome: 'Outra Loja', areas: [{ nome: 'Loja', itens: [{ descricao: 'TV', quantidade: 2 }] }],
+    }, cabA)).corpo);
+    const pedidoDoMaster = await postarJson(`/api/ativos-ti/${outra.id}/solicitar-edicao`, {
+      areas: [{ nome: 'Loja', itens: [{ descricao: 'TV', quantidade: 3 }] }], motivo: 'pedido de outra pessoa',
+    }, cabA);
+    const filaTec = JSON.parse((await pedir('/api/ativos-ti/edicoes', cabTec)).corpo);
+    const filaMaster = JSON.parse((await pedir('/api/ativos-ti/edicoes', cabA)).corpo);
+    // Master aprova: aplica de verdade
+    const decidiu = await enviarJson('PATCH', `/api/ativos-ti/edicoes/${pedidoJson.id}`, { status: 'APROVADO' }, cabA);
+    const vistoriaDepois = JSON.parse((await pedir('/api/ativos-ti', cabA)).corpo).find((v) => v.id === criada.id) || {};
+    const redecidir = await enviarJson('PATCH', `/api/ativos-ti/edicoes/${pedidoJson.id}`, { status: 'REJEITADO' }, cabA);
+    const htmlA = require('fs').readFileSync(__dirname + '/public/ativos-ti.html', 'utf8');
+    const conf = {
+      'Master edita a vistoria atual: soma, tira e recalcula o total':
+        editado.status === 200 && dep.totalAtivos === 11
+        && JSON.stringify(tiposMud) === JSON.stringify(['adicionado:Loja · Impressora térmica:null>1', 'quantidade:Loja · Pin pad:5>4']),
+      'a edição deixa quem/quando/por que no histórico da própria vistoria':
+        hist.motivo === 'pin pad queimado trocado' && !!hist.em && hist.porEmail === process.env.MASTER_EMAIL,
+      'o histórico ACUMULA (a edição nova não apaga a anterior)':
+        editado2.status === 200 && hist2.length === 2
+        && hist2[0].motivo === 'pin pad queimado trocado' && hist2[1].motivo === 'chegou 1 monitor novo',
+      'técnico NÃO edita direto (403) mas PODE pedir correção': tecTentou.status === 403 && pedido.status === 200 && pedidoJson.status === 'PENDENTE',
+      'pedido sem motivo é recusado': semMotivo.status === 400 && /motivo/i.test(semMotivo.corpo),
+      'pedido que não muda nada é recusado': semMudanca.status === 400 && /Nada mudou/.test(semMudanca.corpo),
+      'só 1 pedido pendente por vistoria': duplicado.status === 400 && /pendente/i.test(duplicado.corpo),
+      'o pedido mostra o de → para de cada item (o Master decide vendo o que muda)':
+        (pedidoJson.mudancas || []).some((m) => m.tipo === 'removido' && m.item === 'Loja · Impressora térmica' && m.de === 1 && m.para === null),
+      'enquanto PENDENTE nada muda na vistoria': vistoriaAntes.totalAtivos === 12,
+      'o técnico só enxerga os próprios pedidos (o Master vê os dois)':
+        pedidoDoMaster.status === 200
+        && Array.isArray(filaTec) && filaTec.length === 1 && filaTec[0].solicitadoPorId === 'u-tec-ativos'
+        && Array.isArray(filaMaster) && filaMaster.length === 2,
+      'aprovar APLICA a correção na vistoria': decidiu.status === 200 && vistoriaDepois.totalAtivos === 10
+        && !(vistoriaDepois.areas[0].itens || []).some((i) => i.descricao === 'Impressora térmica'),
+      'pedido já decidido não decide de novo': redecidir.status === 400 && /já foi decidido/.test(redecidir.corpo),
+      // tela: o mesmo formulário serve pros dois caminhos, e o rótulo diz qual é
+      'a tela reaproveita o formulário e troca o destino conforme quem está editando':
+        /let EDITANDO_ID = null;/.test(htmlA) && /function abrirEdicaoInventario\(\)/.test(htmlA)
+        && /alvo = `\/api\/ativos-ti\/\$\{EDITANDO_ID\}`; metodo = 'PATCH';/.test(htmlA)
+        && /alvo = `\/api\/ativos-ti\/\$\{EDITANDO_ID\}\/solicitar-edicao`;/.test(htmlA)
+        && /PODE_EDITAR_DIRETO \? '✏️ Editar inventário \(somar\/tirar ativo\)' : '✏️ Pedir correção do inventário'/.test(htmlA),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAtivosTI = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (edit=${editado.status} total=${dep.totalAtivos} mud=${JSON.stringify(tiposMud)} tec=${tecTentou.status} ped=${pedido.status} dup=${duplicado.status} dec=${decidiu.status} depois=${vistoriaDepois.totalAtivos} hist=${hist2.length} filaTec=${filaTec.length} filaMaster=${filaMaster.length})`);
+  } catch (e) { okAtivosTI = false; console.log('  erro: ' + e.message); }
+  if (!okAtivosTI) ruins += 1;
+  console.log(`${okAtivosTI ? '✓' : '✗'} Ativos de TI: Master edita o inventário (soma/tira ativo) e o técnico pede correção pra ele aprovar`);
+
+  // ------------------------------------------------------------------
+  // O APP "NoPulso" NAS LOJAS (pedido do Master, 12/09/2026): "no Chrome tem a
+  // opcao de instalar e fica com esse App - quero do mesmo jeito ao instalar,
+  // e se tiver o app antigo Zenith Ops, remover". O mesmo comando de
+  // instalacao de sempre passa a: (1) desinstalar o PWA "Zenith Ops" pelo
+  // UninstallString que o navegador registrou; (2) gravar a politica
+  // WebAppInstallForceList (Chrome e Edge, HKCU) apontando pro APP_BASE_URL.
+  // Roda na instalacao e uma vez por versao no loop (o auto-update cai direto
+  // no -Loop), NUNCA na instancia de boot (SYSTEM). VERSAO_VIGIA sobe pra 49.
+  let okAppLoja = false;
+  try {
+    delete require.cache[require.resolve('/home/user/adyen-monitor/server/vigiaScript.js')];
+    const vgA = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const base = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
+    const tipos = ['interno', 'atendimento', 'caixa', 'quiosque'];
+    const scripts = tipos.map((tipo) => vgA.montarScriptVigia({ codigo: 'DOM_19706', posto: 'PC1', tipo, agentToken: 'tok' }));
+    const cmd = vgA.montarComandoInstalacao({ codigo: 'DOM_19706', posto: 'PC1', tipo: 'interno', agentToken: 'abc123' });
+    // parse de verdade com o pwsh (se estiver na maquina de teste)
+    let parseOk = null;
+    try {
+      const fs = require('fs'); const { execFileSync } = require('child_process');
+      const pw = '/tmp/claude-0/-home-user-adyen-monitor/a18c6316-378b-5396-aa44-12a815dac3c3/scratchpad/pwsh/pwsh';
+      if (fs.existsSync(pw)) {
+        parseOk = scripts.every((sc, i) => {
+          const f = `/tmp/_vg_${i}.ps1`; fs.writeFileSync(f, sc);
+          const out = execFileSync(pw, ['-NoProfile', '-Command', `$e=$null;[System.Management.Automation.Language.Parser]::ParseFile('${f}',[ref]$null,[ref]$e)|Out-Null; if($e){$e|ForEach-Object{$_.Message};exit 1}`], { encoding: 'utf8' });
+          return !/\S/.test(out);
+        });
+      }
+    } catch (e) { parseOk = false; }
+    const conf = {
+      'VERSAO_VIGIA subiu pra 49 (os 52 agentes baixam e passam a instalar o app)': vgA.VERSAO_VIGIA === 49,
+      'todo tipo de computador ganha a funcao Instalar-AppNoPulso': scripts.every((sc) => /function Instalar-AppNoPulso \{/.test(sc)),
+      'o script continua comecando com "# NOCZenith" (trava do auto-update)': scripts.every((sc) => sc.startsWith('# NOCZenith')),
+      'instala pelo WebAppInstallForceList do Chrome E do Edge, apontando pro APP_BASE_URL':
+        scripts.every((sc) => sc.includes(`$urlApp = "${base}/"`) && /HKCU:\\Software\\Policies\\Google\\Chrome/.test(sc) && /HKCU:\\Software\\Policies\\Microsoft\\Edge/.test(sc)
+          && /New-ItemProperty -Path \$raiz -Name "WebAppInstallForceList" -Value \$politica/.test(sc) && /"create_desktop_shortcut":true,"default_launch_container":"window"/.test(sc)),
+      'remove o "Zenith Ops" antigo pelo UninstallString do navegador (--uninstall-app-id) e apaga os atalhos':
+        scripts.every((sc) => /DisplayName -match "\^Zenith \?Ops\$" -and \$_\.UninstallString -match "--uninstall-app-id="/.test(sc) && /Zenith Ops\.lnk/.test(sc)),
+      'roda na instalacao (antes de iniciar o loop) e uma vez por versao no loop; nunca como SYSTEM':
+        scripts.every((sc) => /try \{ Instalar-AppNoPulso; Write-Host "App NoPulso/.test(sc)
+          && /function Rodar-Loop \{\n  # app NoPulso: uma vez por versao[\s\S]{0,120}?if \(-not \$Servico\) \{\n    \$marcaApp = Join-Path \$env:LOCALAPPDATA \("NOCZenith\\app-nopulso-v" \+ \$VersaoScript \+ "\.ok"\)/.test(sc)
+          && /function Instalar-AppNoPulso \{\n  if \(\$Servico\) \{ return \}/.test(sc)),
+      'o comando de instalacao continua o mesmo de sempre (powershell -EncodedCommand)': /^powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand [A-Za-z0-9+/=]+$/.test(cmd),
+      'o PowerShell dos 4 scripts faz parse (pwsh) - ou o pwsh nao esta nesta maquina': parseOk === null || parseOk === true,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAppLoja = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (parse=${parseOk} versao=${vgA.VERSAO_VIGIA})`);
+  } catch (e) { okAppLoja = false; console.log('  erro: ' + e.message); }
+  if (!okAppLoja) ruins += 1;
+  console.log(`${okAppLoja ? '✓' : '✗'} Lojas: o comando de instalacao tambem instala o app NoPulso e remove o Zenith Ops antigo (VERSAO_VIGIA 49)`);
+
+  // ------------------------------------------------------------------
   // PIX MOSTRA O NOME DO CLIENTE. Pedido do Master (07/09/2026): no Monitor,
   // em "Pedidos que mudaram de status", o Pix saia como "pix · DOM19911: · —".
   // Dois defeitos: o pedido nascia com cliente = shopperReference (conta da
@@ -15153,6 +15364,29 @@ setTimeout(async () => {
       'sync-update guarda o título (estorno sem título não estoura no Firestore)':
         /titulo: ticket\.titulo \|\| atual\.titulo \|\| \('Ticket #' \+ \(ticket\.numeroTicket \|\| ''\)\)/.test(tjSrc)
         && !/update\(\{ titulo: ticket\.titulo, numeroTicket/.test(tjSrc),
+      // ENCERRADA VAI PRA COLUNA CERTA E NAO OFERECE "CONCLUIR" (pedido 12/09):
+      // o botao aparecia numa tarefa ja encerrada e o servidor recusava com
+      // "Essa tarefa ja foi encerrada"; e o modal reabria com o dado velho.
+      'Meu Dia: "Concluir" e mover status só em tarefa ABERTA (mesma lista do servidor)':
+        /const TAREFA_ABERTA=new Set\(\['PENDENTE','A_FAZER','HOJE','EM_ANDAMENTO'\]\);/.test(htmlT)
+        && /\$\('BTNCON'\)\.hidden=!TAREFA_ABERTA\.has\(O\.status\)\|\|acompanha;/.test(htmlT)
+        && /\$\('STATUS'\)\.disabled=acompanha\|\|!TAREFA_ABERTA\.has\(O\.status\)&&O\.status!=='CONCLUIDA';/.test(htmlT),
+      'Meu Dia: ação recusada recarrega do servidor e reabre o card FRESCO (ou fecha se sumiu)':
+        /async function reabrirFresco\(id\)\{await load\(\);const ainda=L\.find\(x=>x\.id===id\);if\(ainda\)openT\(id\);else fechar\(\)\}/.test(htmlT)
+        && (htmlT.match(/catch\(x\)\{alert\(x\.message\);if\(O\)await reabrirFresco\(O\.id\)\}/g) || []).length >= 2,
+      // OS 3 BOTOES DO TOPO NA MESMA LINHA (pedido do Master, 12/09/2026):
+      // no celular o "Criar reuniao" caia pra segunda linha porque o span era
+      // flex-wrap:wrap. Agora nao quebra - encolhe junto nos dois breakpoints.
+      // Medido no Chromium com o CSS real: 360px -> 87+89+102 = 287/360 numa
+      // linha; com o wrap antigo, 334/400 em DUAS linhas.
+      'Meu Dia: Selecionar / Criar tarefa / Criar reunião ficam na MESMA linha':
+        /<span class="top-acoes"><button id="SELMODE"/.test(htmlT)
+        && !/<span style="display:flex;gap:8px;flex-wrap:wrap"><button id="SELMODE"/.test(htmlT)
+        && /\.top-acoes\{display:flex;gap:8px;flex-wrap:nowrap;align-items:center\}/.test(htmlT)
+        && /\.top-acoes \.btn\{white-space:nowrap;flex:0 0 auto\}/.test(htmlT),
+      'Meu Dia: no celular os 3 botões ENCOLHEM em vez de quebrar (dois breakpoints)':
+        /@media\(max-width:700px\)\{\.top-acoes\{gap:6px\}\.top-acoes \.btn\{font-size:12\.5px;padding:8px 10px\}/.test(htmlT)
+        && /@media\(max-width:390px\)\{\.top-acoes\{gap:5px\}\.top-acoes \.btn\{font-size:11\.5px;padding:7px 8px\}/.test(htmlT),
       'o X do modal é um botão redondo no canto (como nas outras telas)':
         /\.close\{[^}]*border-radius:50%/.test(htmlT),
       'o topo sticky ficou leve (sem a barra pesada que sobrepunha o conteúdo)':
@@ -15708,7 +15942,7 @@ setTimeout(async () => {
       'e a correção não mexe na ordem da lista (atualizadoEm continua sendo movimento)': depois.atualizadoEm !== depois.criadaEm,
       'tarefa manual continua nascendo com a data e hora de agora': manual.dataInicio === hojeIso && String(manual.criadaEm).slice(0, 10) === hojeIso,
       'ticket sem data válida cai no agora, não em undefined': !!semDataDoc.criadaEm && /^\d{4}-\d{2}-\d{2}T/.test(semDataDoc.criadaEm),
-      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v3';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
+      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v4';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okDatas = !falhas.length;

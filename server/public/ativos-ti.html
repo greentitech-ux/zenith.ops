@@ -127,6 +127,8 @@
   <div id="inv-meta" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:6px;"></div>
   <div id="inv-areas"></div>
   <div id="inv-obs" class="hidden" style="margin-top:10px;font-size:12px;color:var(--muted);border-left:2px solid var(--line);padding-left:8px;"></div>
+  <button type="button" class="btn-add" id="btn-editar-inv" style="margin-top:10px;" onclick="abrirEdicaoInventario()"></button>
+  <div id="inv-pedidos" style="margin-top:10px;"></div>
   <h2 style="margin-top:16px;">Histórico de vistorias</h2>
   <div id="inv-historico"></div>
 </div>
@@ -138,15 +140,19 @@
   <div class="sheet-wrap">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharVistoria()">✕</span>
     <div class="sheet">
-      <h3>📋 Nova vistoria de ativos</h3>
-      <div class="sub">registre o que encontrou na loja — o inventário atual vira esta vistoria</div>
-      <label>Loja</label>
+      <h3 id="v-titulo">📋 Nova vistoria de ativos</h3>
+      <div class="sub" id="v-sub">registre o que encontrou na loja — o inventário atual vira esta vistoria</div>
+      <label id="v-unidade-rot">Loja</label>
       <select id="v-unidade" onchange="prefillDisponivel()"></select>
       <button type="button" class="btn-add hidden" id="btn-prefill" onclick="copiarUltimaVistoria()">⬇️ Começar da última vistoria dessa loja</button>
       <div id="v-areas"></div>
       <button type="button" class="btn-add" onclick="adicionarArea()">＋ Adicionar área (ex: Rack, Cozinha...)</button>
       <label>Observação geral</label>
       <textarea id="v-obs" placeholder="ex: DVR com HD cheio / faltou conferir câmeras"></textarea>
+      <div id="v-motivo-wrap" class="hidden">
+        <label>Motivo da correção</label>
+        <textarea id="v-motivo" placeholder="ex: trocamos 1 pin pad queimado / a impressora de etiqueta saiu da loja"></textarea>
+      </div>
       <button type="button" class="btn-primary" id="btn-salvar-vistoria" onclick="salvarVistoria()">Salvar vistoria</button>
       <div class="msg hidden" id="msg-vistoria"></div>
     </div>
@@ -198,6 +204,11 @@ let IS_MASTER = false;
 let VISTORIAS = [];
 let UNIDADE_SEL = null;
 let AREAS_FORM = [];
+// null = formulario de vistoria NOVA; id = editando/corrigindo essa vistoria
+let EDITANDO_ID = null;
+let PEDIDOS = [];
+// quem decide edita direto; o resto (o tecnico da secao 'ativos-ti') PEDE
+let PODE_EDITAR_DIRETO = false;
 let SEQ = 0;
 
 const FUSO_BR = 'America/Sao_Paulo';
@@ -259,12 +270,47 @@ function selecionarLoja(unidade){
       <summary><span>${fmtDataHora(v.criadoEm)} · ${escapeHtml(v.criadoPorNome||'—')}</span><span>${v.totalAtivos} ativos</span></summary>
       <div class="corpo">${areasHtml(v)}${IS_MASTER?`<button type="button" class="btn-add" style="color:var(--bad);border-color:rgba(255,92,92,.4);" onclick="excluirVistoria('${v.id}')">🗑 Excluir esta vistoria</button>`:''}</div>
     </details>`).join('') || '<div style="font-size:12px;color:var(--muted);padding:6px 0;">Só existe esta vistoria.</div>';
+  const btnEditar = document.getElementById('btn-editar-inv');
+  btnEditar.textContent = PODE_EDITAR_DIRETO ? '✏️ Editar inventário (somar/tirar ativo)' : '✏️ Pedir correção do inventário';
+  btnEditar.dataset.vistoria = atual.id;
+  renderPedidos(unidade);
   document.getElementById('painel-inventario').classList.remove('hidden');
 }
 
+// pedidos de correcao dessa loja: o Master decide aqui mesmo; o tecnico ve o
+// proprio pedido esperando. So os PENDENTES ficam a vista - decidido vira
+// historico da vistoria (ver ativosTI.editar)
+function renderPedidos(unidade){
+  const meus = PEDIDOS.filter(p=>p.unidade===unidade && p.status==='PENDENTE');
+  document.getElementById('inv-pedidos').innerHTML = meus.map(p=>`
+    <div style="border:1px solid var(--warn);border-radius:8px;padding:10px;margin-top:8px;">
+      <div style="font-size:12px;"><b>Correção pedida</b> por ${escapeHtml(p.solicitadoPorNome||p.solicitadoPorEmail||'—')} · ${fmtDataHora(p.criadoEm)}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0;">${escapeHtml(p.motivo||'')}</div>
+      ${(p.mudancas||[]).map(m=>`<div style="font-family:var(--mono);font-size:11px;">${m.tipo==='adicionado'?'＋':m.tipo==='removido'?'✕':'↻'} ${escapeHtml(m.item)}: ${m.de==null?'—':m.de} → ${m.para==null?'—':m.para}</div>`).join('')}
+      ${PODE_EDITAR_DIRETO?`<div style="display:flex;gap:6px;margin-top:8px;">
+        <button type="button" class="btn-add" onclick="decidirPedido('${p.id}','APROVADO')">✓ Aprovar</button>
+        <button type="button" class="btn-add" style="color:var(--bad);border-color:rgba(255,92,92,.4);" onclick="decidirPedido('${p.id}','REJEITADO')">✕ Rejeitar</button>
+      </div>`:'<div style="font-size:11px;color:var(--muted);margin-top:6px;">Aguardando o Master decidir.</div>'}
+    </div>`).join('');
+}
+
+async function decidirPedido(id, status){
+  const motivoDecisao = status==='REJEITADO' ? (prompt('Por que está rejeitando? (opcional)')||'') : '';
+  const resp = await fetch(`/api/ativos-ti/edicoes/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status, motivoDecisao }) });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error||'Não foi possível decidir.'); return; }
+  await carregar();
+}
+
 async function carregar(){
-  VISTORIAS = await fetch('/api/ativos-ti').then(r=>r.json());
+  const [vs, ps] = await Promise.all([
+    fetch('/api/ativos-ti').then(r=>r.json()),
+    fetch('/api/ativos-ti/edicoes').then(r=>r.ok?r.json():[]).catch(()=>[]),
+  ]);
+  PEDIDOS = Array.isArray(ps) ? ps : [];
+  VISTORIAS = vs;
   VISTORIAS.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
+  VISTORIAS.forEach(v=>{ if(!v.criadoEm) v.criadoEm = ''; });
   renderLojas();
   if(UNIDADE_SEL) selecionarLoja(UNIDADE_SEL);
 }
@@ -305,6 +351,12 @@ function renderAreasForm(){
 }
 
 function abrirVistoria(){
+  EDITANDO_ID = null;
+  document.getElementById('v-titulo').textContent = '📋 Nova vistoria de ativos';
+  document.getElementById('v-sub').textContent = 'registre o que encontrou na loja — o inventário atual vira esta vistoria';
+  document.getElementById('v-unidade').disabled = false;
+  document.getElementById('v-motivo-wrap').classList.add('hidden');
+  document.getElementById('btn-salvar-vistoria').textContent = 'Salvar vistoria';
   AREAS_FORM = [];
   adicionarArea('Loja');
   adicionarArea('Rack');
@@ -317,6 +369,36 @@ function abrirVistoria(){
   document.getElementById('overlay-vistoria').classList.remove('hidden');
 }
 function fecharVistoria(){ document.getElementById('overlay-vistoria').classList.add('hidden'); }
+
+// EDITAR o inventario atual: mesmo formulario, ja preenchido com o que esta
+// valendo - a pessoa soma/tira/ajusta item e salva. Master salva direto; o
+// tecnico manda como pedido de correcao (exige motivo).
+function abrirEdicaoInventario(){
+  const lista = porUnidade().get(UNIDADE_SEL) || [];
+  const atual = lista[0];
+  if(!atual) return;
+  EDITANDO_ID = atual.id;
+  document.getElementById('v-titulo').textContent = PODE_EDITAR_DIRETO ? '✏️ Editar inventário' : '✏️ Pedir correção do inventário';
+  document.getElementById('v-sub').textContent = PODE_EDITAR_DIRETO
+    ? 'some ou tire ativos do inventário atual — fica registrado no histórico desta vistoria'
+    : 'diga o que mudou; o Master aprova antes de valer';
+  document.getElementById('v-unidade').innerHTML = `<option value="${escapeHtml(atual.unidade)}">${escapeHtml(atual.unidadeNome||atual.unidade)}</option>`;
+  document.getElementById('v-unidade').disabled = true;
+  document.getElementById('btn-prefill').classList.add('hidden');
+  document.getElementById('v-obs').value = atual.observacao || '';
+  document.getElementById('v-motivo').value = '';
+  document.getElementById('v-motivo-wrap').classList.toggle('hidden', PODE_EDITAR_DIRETO);
+  document.getElementById('btn-salvar-vistoria').textContent = PODE_EDITAR_DIRETO ? 'Salvar alterações' : 'Enviar pedido de correção';
+  document.getElementById('msg-vistoria').classList.add('hidden');
+  AREAS_FORM = [];
+  for(const a of atual.areas||[]){
+    adicionarArea(a.nome);
+    const alvo = AREAS_FORM[AREAS_FORM.length-1];
+    for(const i of a.itens) adicionarItem(alvo.id, i.descricao, i.quantidade, i.observacao);
+  }
+  renderAreasForm();
+  document.getElementById('overlay-vistoria').classList.remove('hidden');
+}
 
 function prefillDisponivel(){
   const unidade = document.getElementById('v-unidade').value;
@@ -350,7 +432,17 @@ async function salvarVistoria(){
       areas: AREAS_FORM.map(a=>({ nome: a.nome, itens: a.itens.map(i=>({ descricao: i.descricao, quantidade: i.quantidade, observacao: i.observacao })) })),
       observacao: document.getElementById('v-obs').value,
     };
-    const resp = await fetch('/api/ativos-ti', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    let alvo = '/api/ativos-ti';
+    let metodo = 'POST';
+    if(EDITANDO_ID){
+      body.motivo = document.getElementById('v-motivo').value;
+      if(PODE_EDITAR_DIRETO){ alvo = `/api/ativos-ti/${EDITANDO_ID}`; metodo = 'PATCH'; }
+      else {
+        alvo = `/api/ativos-ti/${EDITANDO_ID}/solicitar-edicao`;
+        if(!body.motivo.trim()) throw new Error('Descreva o motivo da correção.');
+      }
+    }
+    const resp = await fetch(alvo, { method:metodo, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar vistoria.');
     fecharVistoria();
@@ -359,7 +451,8 @@ async function salvarVistoria(){
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }finally{
-    btn.disabled = false; btn.textContent = 'Salvar vistoria';
+    btn.disabled = false;
+    btn.textContent = EDITANDO_ID ? (PODE_EDITAR_DIRETO ? 'Salvar alterações' : 'Enviar pedido de correção') : 'Salvar vistoria';
   }
 }
 
@@ -375,6 +468,7 @@ async function boot(){
   ME = await res.json();
   await mesclarUnidadesExtras();
   IS_MASTER = ME.role==='master';
+  PODE_EDITAR_DIRETO = IS_MASTER || !!ME.isAdmin;
   const secoes = ME.permissions?.sections||[];
   if(!IS_MASTER && !ME.isAdmin && !secoes.includes('ativos-ti')){
     document.getElementById('sem-acesso').classList.remove('hidden');

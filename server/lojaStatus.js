@@ -1187,6 +1187,8 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   const patch = { ultimoHeartbeatEm: agora };
   let eventos = atual.eventos || [];
 
+  const ram = nocMaquina.sanitizarRam(dados && dados.ram);
+  if (ram) { patch.ram = ram; patch.ramMedidaEm = agora; }
   const disco = nocMaquina.sanitizarDisco(dados && dados.disco);
   if (disco) {
     const antes = nocMaquina.avaliarDisco(atual.disco);
