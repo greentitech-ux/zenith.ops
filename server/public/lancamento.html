@@ -222,7 +222,7 @@
   <h2>Novo fechamento</h2>
   <form id="form-lancar">
 
-    <div class="secao">
+    <div class="secao" data-recolher="nao">
       <div class="secao-titulo">Identificação</div>
       <label>Unidade</label>
       <select id="f-unidade" required></select>
@@ -239,7 +239,7 @@
       </div>
     </div>
 
-    <div class="secao" id="secao-caixa">
+    <div class="secao" data-recolher="nao" id="secao-caixa">
       <div class="secao-titulo">Caixa</div>
       <div class="grid2">
         <div>
@@ -263,7 +263,7 @@
       </div>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-recolher="nao">
       <div class="secao-titulo">Canais de venda<span class="chip-foto hidden" id="chip-foto-canais"></span></div>
       <!-- so aparece pra loja cujo GRUPO tem lerCanaisPorImagem ligado (o
            Master ativa em /grupos.html) - ver atualizarBotaoLerCanais.
@@ -291,13 +291,13 @@
       <div class="sub hidden" id="canais-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-recolher="nao">
       <div class="secao-titulo">Formas de pagamento<span class="chip-foto hidden" id="chip-foto-formas"></span></div>
       <div class="grid2 hidden" id="formas-extras-container" style="margin-top:6px;"></div>
       <div class="sub hidden" id="formas-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
     </div>
 
-    <div class="secao" id="secao-maquininhas">
+    <div class="secao" data-recolher="nao" id="secao-maquininhas">
       <div class="secao-titulo">Maquininhas (cartão) <span id="maq-total" style="color:var(--text);"></span></div>
       <div id="lista-maquinas"></div>
       <button type="button" class="btn-add" onclick="adicionarMaquina()">+ Adicionar maquininha</button>
@@ -310,7 +310,7 @@
          não nasce mais com uma linha vazia convidando a digitar - só o botão;
          (2) a explicação fica na própria seção, não num título que ninguém lê;
          (3) o aviso vermelho e a pergunta no envio (ver avisosMaquininhaPos). -->
-    <div class="secao hidden" id="secao-maquininhas-pos">
+    <div class="secao hidden" data-recolher="nao" id="secao-maquininhas-pos">
       <div class="secao-titulo">Maquininha POS 01 (vendas após meia-noite) <span id="maq-pos-total" style="color:var(--text);"></span></div>
       <div class="pos-explica">⚠️ <b>Só o que foi vendido DEPOIS da meia-noite.</b> A venda de cartão do dia inteiro vai em <b>Maquininha (cartão)</b>, na seção acima. O valor lançado aqui soma neste fechamento e é <b>descontado automaticamente no fechamento de amanhã</b> — se cair aqui por engano, o dia de amanhã fecha com diferença.</div>
       <div id="lista-maquinas-pos"></div>
@@ -323,13 +323,13 @@
       <div id="sangria-dia-info"><div style="color:var(--muted);font-size:12px;">Selecione unidade e data acima.</div></div>
     </div>
 
-    <div class="secao" id="secao-saidas">
+    <div class="secao" data-recolher="nao" id="secao-saidas">
       <div class="secao-titulo">Outras saídas de caixa <span id="saida-total" style="color:var(--text);"></span></div>
       <div id="lista-saidas"></div>
       <button type="button" class="btn-add" onclick="adicionarSaida()">+ Adicionar saída</button>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-recolher="nao">
        <div class="secao-titulo">KPI's<span class="chip-foto hidden" id="chip-foto-kpis"></span></div>
        <div class="grid2 hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
        <div class="sub hidden" id="kpis-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
@@ -346,7 +346,7 @@
       </div>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-recolher="nao">
       <label id="label-observacao">Observação (opcional)</label>
       <textarea id="f-observacao" placeholder="qualquer detalhe do fechamento do dia"></textarea>
       <div id="aviso-observacao" class="hidden" style="color:var(--warn);font-size:12.5px;margin-top:6px;"></div>
