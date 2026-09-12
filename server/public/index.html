@@ -193,7 +193,7 @@ function paginaInicial(me){
   const secoes = (me && me.permissions && me.permissions.sections) || [];
   const abaixoDeAdmin = me && me.role !== 'master' && !me.isAdmin;
   if(abaixoDeAdmin && (secoes.includes('abastecimento-carrinho') || secoes.includes('abastecimento-loja'))) return '/abastecimento.html';
-  return { loja: '/central-historico.html', tecnico: '/tecnico.html', suporte: '/tecnico.html', manutencao: '/manutencao.html' }[me && me.cargo] || '/painel.html';
+  return '/tarefas.html';
 }
 
 async function boot(){
@@ -270,7 +270,7 @@ document.getElementById('trocar-senha-form').addEventListener('submit', async (e
     try{
       const me = await fetch('/api/me', { headers: { Authorization: 'Bearer '+form.dataset.token } }).then(r=>r.json());
       location.href = paginaInicial(me);
-    }catch(e){ location.href = '/painel.html'; }
+    }catch(e){ location.href = '/tarefas.html'; }
   }catch(err){
     erroEl.textContent = err.message;
     erroEl.classList.remove('hidden');
