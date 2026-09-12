@@ -206,7 +206,11 @@
   /* faixa de saudação - nome + data por extenso à esquerda, relógio + contagem
      de áreas à direita. Um respiro visual antes do mosaico e um jeito rápido de
      a pessoa se situar (quem sou, que dia é hoje, quantas áreas tenho) */
-  .painel-saudacao{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+  /* Pedido do Master: "centralize esse ao vivo, coloque a hora pro canto e
+     remova a parte de Áreas". Tres colunas de grade: a saudacao a esquerda,
+     o "ao vivo" no centro geometrico da faixa (1fr auto 1fr - as laterais
+     dividem a sobra por igual) e o relogio colado na direita. */
+  .painel-saudacao{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;
     background:linear-gradient(135deg,var(--panel) 0%,var(--panel2) 100%);border:1px solid var(--line);
     border-radius:14px;padding:18px 22px;margin-bottom:16px;}
   .painel-saudacao .ps-ola{font-size:20px;font-weight:700;letter-spacing:-.01em;}
@@ -214,11 +218,8 @@
   .painel-saudacao .ps-data{font-size:12.5px;color:var(--muted);margin-top:3px;text-transform:capitalize;}
   /* "ao vivo" com o intervalo REAL (60s, ver o setInterval de renderizarCards).
      O mockup trazia 25s; numero de tela tem que bater com o codigo. */
-  .painel-saudacao .ps-vivo{font-family:var(--mono);font-size:10.5px;color:var(--ok);margin-top:4px;white-space:nowrap;}
-  .painel-saudacao .ps-dir{display:flex;align-items:center;gap:20px;}
-  .painel-saudacao .ps-relogio{font-family:var(--mono);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;}
-  .painel-saudacao .ps-areas{font-size:11px;color:var(--muted);font-family:var(--mono);text-align:right;line-height:1.4;}
-  .painel-saudacao .ps-areas b{color:var(--text);font-size:18px;display:block;}
+  .painel-saudacao .ps-vivo{font-family:var(--mono);font-size:10.5px;color:var(--ok);white-space:nowrap;justify-self:center;}
+  .painel-saudacao .ps-relogio{font-family:var(--mono);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;justify-self:end;}
   /* skeleton de carregamento - cartões fantasma com brilho passando, no lugar
      do "carregando..." solto. Passa a sensação de que o conteúdo já vem vindo */
   .painel-skeleton{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;}
@@ -231,6 +232,9 @@
   @media(max-width:640px){
     .painel-saudacao{padding:14px 16px;}
     .painel-saudacao .ps-ola{font-size:17px;}
+    .painel-saudacao{grid-template-columns:1fr auto;}
+    .painel-saudacao .ps-esq{grid-column:1/-1;}
+    .painel-saudacao .ps-vivo{justify-self:start;}
     .painel-saudacao .ps-relogio{font-size:21px;}
     .painel-skeleton .pskel{height:150px;}
   }
@@ -275,7 +279,7 @@
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
 <nav class="nav-drawer hidden" id="nav-drawer"></nav>
 
-<!-- faixa de saudação: nome + data por extenso + relógio + contagem de áreas.
+<!-- faixa de saudação: nome + data por extenso + "ao vivo" no centro + relógio no canto.
      Preenchida em boot()/atualizarSaudacao() - dá contexto e um respiro visual
      antes do mosaico de cards -->
 <div id="painel-saudacao" class="painel-saudacao hidden">
@@ -283,11 +287,8 @@
     <div class="ps-ola" id="ps-ola">Olá</div>
     <div class="ps-data" id="ps-data"></div>
   </div>
-  <div class="ps-dir">
-    <div class="ps-relogio" id="ps-relogio">--:--</div>
-    <div class="ps-areas" id="ps-areas"></div>
-    <div class="ps-vivo" id="ps-vivo" title="Os cards se atualizam sozinhos a cada 60 segundos, enquanto esta aba estiver visível">● ao vivo · 60s</div>
-  </div>
+  <div class="ps-vivo" id="ps-vivo" title="Os cards se atualizam sozinhos a cada 60 segundos, enquanto esta aba estiver visível">● ao vivo · 60s</div>
+  <div class="ps-relogio" id="ps-relogio">--:--</div>
 </div>
 
 <!-- skeleton de carregamento: cartões fantasma com brilho, no lugar do texto
@@ -1514,7 +1515,7 @@ async function boot(){
 }
 
 // preenche e revela a faixa de saudacao: primeiro nome, data por extenso,
-// relogio ao vivo e quantas areas a pessoa tem liberadas. O relogio segue o
+// relogio ao vivo (a contagem de areas saiu a pedido do Master). O relogio segue o
 // fuso de Recife (mesmo das lojas), independente do relogio do dispositivo
 function montarSaudacao(){
   const nome = (ME_GLOBAL?.username || ME_GLOBAL?.nome || '').trim();
@@ -1523,14 +1524,6 @@ function montarSaudacao(){
   const cumprimento = hora < 12 ? 'Bom dia' : (hora < 18 ? 'Boa tarde' : 'Boa noite');
   document.getElementById('ps-ola').innerHTML = primeiro
     ? `${cumprimento}, <b>${primeiro}</b>` : `${cumprimento}`;
-
-  const qtd = CARDS_POR_SECAO.filter(c=>c.soMaster
-    ? IS_MASTER_GLOBAL
-    : c.soMasterAdmin
-    ? (IS_MASTER_GLOBAL || IS_ADMIN_GLOBAL)
-    : (c.secoes||[c.secao]).some(s=>SECOES_GLOBAL.includes(s))).length;
-  document.getElementById('ps-areas').innerHTML = qtd
-    ? `<b>${qtd}</b>${qtd===1?'área liberada':'áreas liberadas'}` : '';
 
   const opcoesData = { weekday:'long', day:'numeric', month:'long', timeZone:'America/Recife' };
   document.getElementById('ps-data').textContent =
