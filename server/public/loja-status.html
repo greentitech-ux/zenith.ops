@@ -528,6 +528,14 @@
 </div>
 
 <div id="agente-root" class="hidden">
+  <!-- QUEM AINDA FALA COM O ENDERECO ANTIGO. E o que decide se da pra
+       aposentar o dominio velho: enquanto houver pendente, desligar deixa
+       aquela maquina orfa (ver CLAUDE.md §4) -->
+  <div class="agente-titulo"><h2>🌐 Migração de endereço</h2></div>
+  <div class="agente-sub">
+    O agente só descobre que existe versão nova pelo endereço que está assado no próprio script dele. Por isso o endereço antigo <b>não pode ser desligado</b> enquanto alguma máquina ainda falar com ele — ela ficaria órfã pra sempre. Aqui você vê quantas faltam.
+  </div>
+  <div id="migracao-endereco" style="margin-bottom:18px;"></div>
   <!-- papel de parede do parque: UMA imagem pra rede toda; cada computador
        decide se aplica, na política do card dele -->
   <div class="agente-titulo"><h2>🖼️ Papel de parede do parque</h2></div>
@@ -2703,6 +2711,24 @@ async function salvarEdicaoComputador(){
   }
 }
 
+async function carregarMigracaoEndereco(){
+  const el = document.getElementById('migracao-endereco');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/loja-status/migracao-endereco');
+    if(!r.ok) return;
+    const d = await r.json();
+    const cor = d.podeAposentar ? 'var(--ok)' : 'var(--warn)';
+    const lista = (d.pendentes||[]).map(p=>`<div style="font-size:11.5px;color:var(--muted);">• ${escapeHtml(p.nome||'')} — ${p.endereco?escapeHtml(p.endereco):`sem reportar (agente v${p.versao||'?'}, anterior à 51)`}</div>`).join('');
+    el.innerHTML = `<div style="border:1px solid ${cor};border-radius:10px;padding:12px;">
+      <div style="font-size:13px;"><b style="color:${cor};">${d.migradas} de ${d.total}</b> já falam pelo endereço oficial <b>${escapeHtml(d.oficial||'(não configurado)')}</b>.</div>
+      ${d.podeAposentar
+        ? '<div style="font-size:12.5px;color:var(--ok);margin-top:6px;">✅ Nenhuma máquina pendente — dá pra aposentar o endereço antigo com segurança.</div>'
+        : `<div style="font-size:12.5px;color:var(--warn);margin-top:6px;">⚠️ ${(d.pendentes||[]).length} máquina(s) ainda não confirmaram. <b>Não desligue o endereço antigo agora.</b></div>${lista}`}
+    </div>`;
+  }catch(e){ /* o painel some em vez de quebrar a tela */ }
+}
+
 async function enviarPapelDeParede(){
   const input = document.getElementById('pp-arquivo');
   const msg = document.getElementById('msg-pp');
@@ -3442,6 +3468,7 @@ async function boot(){
     document.getElementById('btn-manutencao').classList.remove('hidden');
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
+    carregarMigracaoEndereco();
     await carregarAgente();
   }
   conectarStream();

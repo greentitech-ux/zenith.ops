@@ -1079,7 +1079,30 @@ async function pedirCaptura(codigo, posto) {
 // versao do script que roda de fato e o estado do NoPulsoPrint. O agente so
 // manda quando muda, entao isto escreve pouco - mas escreve pelo caminho do
 // espelho, como o ip-local, pra nao derrubar o cache dos 52 documentos.
-async function reportarEstadoAgente(codigo, posto, { versao, noPulsoPrint }, token) {
+// `endereco` (v51+): por QUAL endereco base aquele agente fala. E o unico jeito
+// de saber quando o dominio antigo pode ser aposentado - enquanto uma maquina
+// ainda reportar o endereco velho (ou nao reportar nada, por estar numa versao
+// anterior a 51), desligar o velho deixa ELA orfa pra sempre: o agente so
+// descobre versao nova pelo endereco assado no proprio script (ver CLAUDE.md §4).
+// Quantas maquinas ja falam pelo endereco oficial e quantas ainda nao. Uma
+// maquina so conta como MIGRADA quando ela mesma reportou o endereco oficial -
+// versao antiga (que nem sabe reportar) conta como pendente, que e o lado
+// seguro do erro.
+function resumoEnderecoAgentes(docs, oficial) {
+  const alvo = String(oficial || '').replace(/\/+$/, '').toLowerCase();
+  const migradas = [];
+  const pendentes = [];
+  (docs || []).forEach((d) => {
+    if (!d || !d.agentToken) return;   // computador sem agente nao entra na conta
+    const dela = String(d.agenteEndereco || '').replace(/\/+$/, '').toLowerCase();
+    const nome = d.nome || `${d.codigo}/${d.posto}`;
+    const item = { codigo: d.codigo, posto: d.posto, nome, endereco: d.agenteEndereco || null, versao: d.agenteVersao || null, ultimoEstadoEm: d.agenteEstadoEm || null };
+    if (alvo && dela === alvo) migradas.push(item); else pendentes.push(item);
+  });
+  return { oficial: alvo, total: migradas.length + pendentes.length, migradas: migradas.length, pendentes, podeAposentar: !!alvo && pendentes.length === 0 };
+}
+
+async function reportarEstadoAgente(codigo, posto, { versao, noPulsoPrint, endereco }, token) {
   const id = docIdFor(codigo, posto);
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Computador não encontrado.');
@@ -1091,6 +1114,8 @@ async function reportarEstadoAgente(codigo, posto, { versao, noPulsoPrint }, tok
     agenteNoPulsoPrint: String(noPulsoPrint || '').trim().slice(0, 200) || null,
     agenteEstadoEm: Date.now(),
   };
+  const end = String(endereco || '').trim().slice(0, 200);
+  if (end) patch.agenteEndereco = end;
   await COLLECTION.doc(id).set(patch, { merge: true });
   espelharEscrita(id, patch);
   return { codigo, posto, ...patch };
@@ -2957,6 +2982,7 @@ module.exports = {
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   sanitizarPolitica, definirPolitica, programasNovos, registrarProgramas,
+  resumoEnderecoAgentes,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, reportarEstadoAgente, pedirCaptura,
 };

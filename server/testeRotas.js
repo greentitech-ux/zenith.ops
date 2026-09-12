@@ -11603,6 +11603,65 @@ setTimeout(async () => {
   console.log(`${okApiToken ? '✓' : '✗'} Token de API do Master: entra como ele mesmo, pelo MESMO caminho de permissão da sessão`);
 
   // ------------------------------------------------------------------
+  // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
+  // adyen-monitor, aposentar de vez"). O CLAUDE.md §4 diz que o dominio velho
+  // NUNCA pode ser desligado - e o motivo e concreto: o agente so descobre que
+  // existe versao nova pelo endereco assado no PROPRIO script. Desligar com uma
+  // maquina ainda apontando pra la deixa ELA orfa pra sempre.
+  // Isso nao e um "nunca" eterno, e um "nunca ENQUANTO houver pendente" - mas
+  // ate agora nao dava pra saber quantas eram. Agora da: o agente (v51+) diz
+  // por qual endereco fala, e o servidor conta. podeAposentar so fica true com
+  // ZERO pendentes; versao antiga (que nem sabe reportar) conta como PENDENTE,
+  // que e o lado seguro do erro.
+  let okMigracao = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const OFICIAL = 'https://www.nopulso.com.br';
+    const docs = [
+      { codigo: 'A', posto: 'P1', nome: 'Migrada', agentToken: 't', agenteEndereco: OFICIAL, agenteVersao: 51 },
+      { codigo: 'B', posto: 'P1', nome: 'Barra no fim', agentToken: 't', agenteEndereco: OFICIAL + '/', agenteVersao: 51 },
+      { codigo: 'C', posto: 'P1', nome: 'Ainda no velho', agentToken: 't', agenteEndereco: 'https://adyen-monitor.onrender.com', agenteVersao: 51 },
+      { codigo: 'D', posto: 'P1', nome: 'Versao antiga', agentToken: 't', agenteVersao: 48 },
+      { codigo: 'E', posto: 'P1', nome: 'Sem agente', agenteVersao: null },
+    ];
+    const r = ls.resumoEnderecoAgentes(docs, OFICIAL);
+    const soMigradas = ls.resumoEnderecoAgentes(docs.filter((d) => ['A', 'B'].includes(d.codigo)), OFICIAL);
+    const semOficial = ls.resumoEnderecoAgentes(docs, '');
+    // o caso que de fato distingue: NADA pendente e NENHUM endereço oficial.
+    // Só "pendentes === 0" diria "pode aposentar" aqui - e desligar o domínio
+    // velho sem ter pra onde apontar é o pior desfecho possível.
+    const vazioSemOficial = ls.resumoEnderecoAgentes([], '');
+    const vazioComOficial = ls.resumoEnderecoAgentes([], OFICIAL);
+    // rota: só o Master
+    const rotaComum = await pedir('/api/loja-status/migracao-endereco', { Authorization: 'Bearer ' + (await auth.login('pol-comum@teste.local', 'SenhaDeTeste!2026')).token });
+    const rotaMaster = await pedir('/api/loja-status/migracao-endereco', { Authorization: 'Bearer ' + token });
+    const psMig = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'X', posto: 'P', tipo: 'interno', agentToken: 't' });
+    const conf = {
+      'computador SEM agente não entra na conta (não há o que migrar nele)': r.total === 4,
+      'máquina no endereço oficial conta como migrada, com ou sem barra no fim': r.migradas === 2,
+      'quem ainda fala com o endereço antigo aparece na lista de pendentes':
+        r.pendentes.some((p) => p.codigo === 'C' && /adyen-monitor/.test(p.endereco || '')),
+      'versão antiga (que nem sabe reportar) conta como PENDENTE - o lado seguro do erro':
+        r.pendentes.some((p) => p.codigo === 'D' && !p.endereco),
+      'podeAposentar só fica true com ZERO pendentes':
+        r.podeAposentar === false && soMigradas.podeAposentar === true && soMigradas.pendentes.length === 0,
+      'sem endereço oficial configurado, NUNCA libera aposentar (nem com o parque vazio)':
+        semOficial.podeAposentar === false && vazioSemOficial.podeAposentar === false
+        && vazioComOficial.podeAposentar === true,
+      'o agente v51+ diz por qual endereço fala (e a dedup considera isso)':
+        /\$EnderecoBase = "/.test(psMig)
+        && /endereco = \$EnderecoBase/.test(psMig)
+        && /\$chave = "\$VersaoScript\|\$estadoPrint\|\$EnderecoBase"/.test(psMig),
+      'a rota do resumo é só do Master': rotaComum.status === 403 && rotaMaster.status === 200,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMigracao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (${JSON.stringify(r)})`);
+  } catch (e) { okMigracao = false; console.log('  erro: ' + e.message); }
+  if (!okMigracao) ruins += 1;
+  console.log(`${okMigracao ? '✓' : '✗'} Aposentar o endereço antigo: o agente diz por onde fala, e só libera com ZERO máquinas pendentes`);
+
+  // ------------------------------------------------------------------
   // O APP "NoPulso" NAS LOJAS (pedido do Master, 12/09/2026): "no Chrome tem a
   // opcao de instalar e fica com esse App - quero do mesmo jeito ao instalar,
   // e se tiver o app antigo Zenith Ops, remover". O mesmo comando de

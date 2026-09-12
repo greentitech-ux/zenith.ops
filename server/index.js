@@ -1456,7 +1456,7 @@ app.get('/api/loja-status/vigia-versao', (req, res) => {
 app.post('/api/loja-status/:codigo/computadores/:posto/estado-agente', async (req, res) => {
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    res.json(await lojaStatus.reportarEstadoAgente(req.params.codigo, req.params.posto, { versao: req.body.versao, noPulsoPrint: req.body.noPulsoPrint }, token));
+    res.json(await lojaStatus.reportarEstadoAgente(req.params.codigo, req.params.posto, { versao: req.body.versao, noPulsoPrint: req.body.noPulsoPrint, endereco: req.body.endereco }, token));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -4962,6 +4962,14 @@ app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo
     res.status(400).json({ error: err.message });
   }
 });
+// QUEM AINDA FALA COM O ENDERECO ANTIGO. Responde a pergunta que decide se da
+// pra aposentar o dominio velho: enquanto houver pendente, desligar deixa
+// aquela maquina orfa (ver CLAUDE.md §4 e resumoEnderecoAgentes).
+app.get('/api/loja-status/migracao-endereco', auth.requireMaster, async (req, res) => {
+  const docs = await lojaStatus.listar();
+  res.json(lojaStatus.resumoEnderecoAgentes(docs, APP_BASE_URL));
+});
+
 app.put('/api/loja-status/config', auth.requireMaster, async (req, res) => {
   try {
     const patch = {};
