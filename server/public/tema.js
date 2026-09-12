@@ -766,26 +766,38 @@
   var dicas = document.createElement('style');
   dicas.id = 'zenith-dicas';
   dicas.textContent = [
-    '[data-dica]{position:relative;}',
-    '[data-dica]::after{content:attr(data-dica);position:absolute;top:calc(100% + 7px);left:50%;',
-    '  transform:translateX(-50%) translateY(-3px);background:var(--panel2,#181d24);color:var(--text,#e7ecf1);',
+    // O BALAO NAO E MAIS ::after DO PROPRIO BOTAO.
+    //
+    // Era, e o Master viu o resultado: na Central do Beniboy a dica aparecia
+    // cortada pela metade ("...mir atendimento" em vez de "Assumir
+    // atendimento"), e em alguns pontos nao aparecia nada. O motivo e' de
+    // CSS, nao de logica: um ::after e' position:absolute e nunca escapa de
+    // um ancestral com rolagem. A fileira de icones mora dentro da
+    // .paineis-wrap (overflow-x:auto) e dentro do .sheet (overflow-y:auto) -
+    // os dois cortam. Mudar de lugar dentro do botao nao resolve nenhum dos
+    // dois casos; so sair do fluxo resolve.
+    //
+    // Agora e UM elemento position:fixed, pendurado no <html> (e nao no
+    // <body>: varias telas usam overflow:clip no body). Fixed ancorado no
+    // <html> nao e' cortado por ninguem, e o mesmo elemento serve as 59 telas.
+    '#zenith-dica{position:fixed;left:0;top:0;z-index:2147483000;',
+    '  background:var(--panel2,#181d24);color:var(--text,#e7ecf1);',
     '  border:1px solid var(--line,#27313b);border-radius:7px;padding:4px 9px;',
-    '  font:11px/1.3 var(--sans,Arial,sans-serif);font-weight:600;white-space:nowrap;letter-spacing:normal;text-transform:none;',
-    '  pointer-events:none;opacity:0;visibility:hidden;z-index:60;',
-    '  box-shadow:0 4px 14px rgba(0,0,0,.45);transition:opacity .12s ease,transform .12s ease;}',
-    // a setinha que liga o balão ao ícone
-    '[data-dica]::before{content:"";position:absolute;top:calc(100% + 2px);left:50%;transform:translateX(-50%);',
-    '  border:5px solid transparent;border-bottom-color:var(--line,#27313b);',
-    '  pointer-events:none;opacity:0;visibility:hidden;z-index:61;transition:opacity .12s ease;}',
-    '[data-dica]:hover::after,[data-dica]:focus-visible::after{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0);}',
-    '[data-dica]:hover::before,[data-dica]:focus-visible::before{opacity:1;visibility:visible;}',
-    // balão que nasceria fora da tela pela direita ancora pela borda
-    '[data-dica][data-dica-fim]::after{left:auto;right:0;transform:translateX(0) translateY(-3px);}',
-    '[data-dica][data-dica-fim]:hover::after,[data-dica][data-dica-fim]:focus-visible::after{transform:translateX(0) translateY(0);}',
-    '@media (prefers-reduced-motion:reduce){[data-dica]::after,[data-dica]::before{transition:none;}}',
-    // o balão depende de hover: em tela de toque não existe, e um balão preso
-    // depois do toque atrapalharia mais do que ajuda
-    '@media (hover:none){[data-dica]::after,[data-dica]::before{display:none;}}',
+    '  font:11px/1.3 var(--sans,Arial,sans-serif);font-weight:600;',
+    // quebra linha em vez de virar uma faixa que atravessa a tela: rotulo
+    // que explica ("Copiar comando de instalacao") nao cabe numa linha so
+    '  white-space:normal;max-width:min(260px,calc(100vw - 24px));',
+    '  letter-spacing:normal;text-transform:none;text-align:left;',
+    '  pointer-events:none;opacity:0;visibility:hidden;',
+    '  box-shadow:0 4px 14px rgba(0,0,0,.45);transition:opacity .12s ease,transform .12s ease;',
+    '  transform:translateY(-3px);}',
+    '#zenith-dica.mostra{opacity:1;visibility:visible;transform:translateY(0);}',
+    // a setinha acompanha o ICONE, nao o balao: quando o balao encosta na
+    // borda da tela ele desliza, e uma seta presa no meio apontaria pro nada
+    '#zenith-dica::before{content:"";position:absolute;bottom:100%;left:var(--seta-x,50%);',
+    '  transform:translateX(-50%);border:5px solid transparent;',
+    '  border-bottom-color:var(--line,#27313b);}',
+    '@media (prefers-reduced-motion:reduce){#zenith-dica{transition:none;}}',
     // botão só-ícone: mesma família do ✕ de fechar, quadrado e sem relevo
     '.btn-icone{width:34px;height:34px;flex:none;padding:0;border-radius:8px;',
     '  background:var(--panel2,#181d24);border:1px solid var(--line,#27313b);color:var(--text,#e7ecf1);',
@@ -796,6 +808,90 @@
     '.btn-icone.perigo:hover{border-color:var(--bad,#ff6b6b);}',
   ].join('\n');
   document.head.appendChild(dicas);
+
+  // ---- o balão de dica, em um elemento só pro app inteiro ----
+  //
+  // Aparece no hover e no foco por teclado (quem navega no Tab tambem precisa
+  // saber o que o icone faz, senao botao so-icone vira adivinhacao).
+  //
+  // Em tela de TOQUE nao aparece: hover nao existe ali, e um balao preso
+  // depois do toque atrapalha mais do que ajuda. Quem le por leitor de tela
+  // continua servido pelo aria-label, que sai do MESMO rotulo.
+  (function balaoDeDica() {
+    var balao = null;
+    var alvoAtual = null;
+
+    function ehToque() {
+      try { return window.matchMedia && window.matchMedia('(hover:none)').matches; }
+      catch (_) { return false; }
+    }
+    function garantirBalao() {
+      if (balao && balao.isConnected) return balao;
+      balao = document.createElement('div');
+      balao.id = 'zenith-dica';
+      balao.setAttribute('role', 'presentation');
+      // no <html>, nao no <body>: telas com overflow:clip no body cortariam
+      document.documentElement.appendChild(balao);
+      return balao;
+    }
+    function esconder() {
+      alvoAtual = null;
+      if (balao) balao.classList.remove('mostra');
+    }
+    function mostrar(alvo) {
+      var texto = alvo.getAttribute('data-dica');
+      if (!texto) return;
+      alvoAtual = alvo;
+      var el = garantirBalao();
+      el.textContent = texto;
+      el.classList.add('mostra');
+      posicionar();
+    }
+    function posicionar() {
+      if (!alvoAtual || !balao) return;
+      if (!alvoAtual.isConnected) return esconder();
+      var r = alvoAtual.getBoundingClientRect();
+      var b = balao.getBoundingClientRect();
+      var margem = 6;
+      var centro = r.left + (r.width / 2);
+      // encosta na borda em vez de sair da tela - no celular e em painel
+      // estreito o balao e' mais largo que o icone quase sempre
+      var x = Math.min(Math.max(margem, centro - (b.width / 2)), Math.max(margem, window.innerWidth - b.width - margem));
+      var y = r.bottom + 7;
+      // sem espaco embaixo, vai pra cima (o balao continua visivel; o que
+      // nao pode e' ele ficar fora da tela)
+      if (y + b.height + margem > window.innerHeight) y = Math.max(margem, r.top - b.height - 7);
+      balao.style.left = Math.round(x) + 'px';
+      balao.style.top = Math.round(y) + 'px';
+      balao.style.setProperty('--seta-x', Math.round(centro - x) + 'px');
+    }
+
+    function entrou(e) {
+      if (ehToque()) return;
+      var alvo = e.target && e.target.closest && e.target.closest('[data-dica]');
+      if (!alvo || alvo === alvoAtual) return;
+      mostrar(alvo);
+    }
+    function saiu(e) {
+      var alvo = e.target && e.target.closest && e.target.closest('[data-dica]');
+      if (alvo && alvo === alvoAtual) esconder();
+    }
+    document.addEventListener('mouseover', entrou, true);
+    document.addEventListener('mouseout', saiu, true);
+    // teclado: :focus-visible nao existe como evento, entao mostra no foco e
+    // some quando o foco sai
+    document.addEventListener('focusin', function (e) {
+      var alvo = e.target && e.target.closest && e.target.closest('[data-dica]');
+      if (alvo) mostrar(alvo);
+    }, true);
+    document.addEventListener('focusout', saiu, true);
+    // qualquer coisa que mova a tela ou troque o conteudo tira o balao: um
+    // balao parado sobre um botao que nao esta mais ali e' pior que nenhum
+    document.addEventListener('click', esconder, true);
+    window.addEventListener('scroll', esconder, true);
+    window.addEventListener('resize', esconder);
+    window.zenithDica = { mostrar: mostrar, esconder: esconder };
+  })();
 
   function aplicar() {
     document.documentElement.setAttribute('data-tema', temaAtual());

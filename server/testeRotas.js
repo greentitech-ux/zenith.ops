@@ -17730,21 +17730,23 @@ setTimeout(async () => {
     const conf = {
       'o balão existe e sai de um lugar só': bloco.length > 500
         && /dicas\.id = 'zenith-dicas'/.test(bloco),
+      // O rótulo sai do atributo do próprio botão - não há um segundo texto
+      // em lugar nenhum que possa divergir dele
       'o nome vem do próprio atributo, não de um texto repetido':
-        /\[data-dica\]::after\{content:attr\(data-dica\)/.test(bloco),
-      'aparece ABAIXO do ícone, centralizado': /top:calc\(100% \+ 7px\);left:50%;/.test(bloco),
-      // absolute + pointer-events:none: não empurra nada nem rouba o clique
+        /alvo\.getAttribute\('data-dica'\)/.test(tema) && /el\.textContent = texto;/.test(tema),
+      'aparece ABAIXO do ícone': /var y = r\.bottom \+ 7;/.test(tema),
+      // fixed + pointer-events:none: não empurra nada nem rouba o clique
       'não empurra layout nem atrapalha o clique':
-        /position:absolute/.test(bloco)
-        && /\[data-dica\]::after\{[\s\S]{0,600}?pointer-events:none/.test(bloco)
-        && /\[data-dica\]::before\{[\s\S]{0,300}?pointer-events:none/.test(bloco),
+        /#zenith-dica\{position:fixed/.test(bloco) && /pointer-events:none/.test(bloco),
       'some por completo quando não é hover (não fica ocupando espaço)':
         /opacity:0;visibility:hidden/.test(bloco)
-        && /\[data-dica\]:hover::after,\[data-dica\]:focus-visible::after\{opacity:1;visibility:visible/.test(bloco),
+        && /#zenith-dica\.mostra\{opacity:1;visibility:visible/.test(bloco),
       // quem navega por teclado também precisa saber o que o ícone faz
-      'teclado também vê a dica': /:focus-visible::after/.test(bloco) && /:focus-visible::before/.test(bloco),
+      'teclado também vê a dica':
+        /document\.addEventListener\('focusin'/.test(tema) && /document\.addEventListener\('focusout'/.test(tema),
       // em tela de toque não há hover: balão preso depois do toque atrapalha
-      'em tela de toque o balão não aparece': /@media \(hover:none\)\{\[data-dica\]::after/.test(bloco),
+      'em tela de toque o balão não aparece':
+        /function ehToque\(\)/.test(tema) && /\(hover:none\)/.test(tema) && /if \(ehToque\(\)\) return;/.test(tema),
       'respeita quem pediu menos animação': /@media \(prefers-reduced-motion:reduce\)/.test(bloco),
       'toda cor está dentro de var(--token,…), nenhuma solta':
         !/#[0-9a-f]{6}/i.test(bloco.replace(/var\(--[a-z0-9-]+,\s*#[0-9a-f]{6}\)/gi, ''))
@@ -18289,6 +18291,82 @@ setTimeout(async () => {
   } catch (e) { okLimparFiltros = false; console.log('  erro: ' + e.message); }
   if (!okLimparFiltros) ruins += 1;
   console.log(`${okLimparFiltros ? '✓' : '✗'} Limpar filtros: um botão em toda faixa de período, de um arquivo só (o filtro parava preso no rascunho)`);
+
+  // ---- balão de dica: um elemento flutuante, não ::after do botão ----
+  //
+  // Pedido do Master: a ficha da máquina "do jeito do chat da Central
+  // Beniboy", e "ele não está com hover que pedi aparecendo o nome como um
+  // balão abaixo do ícone".
+  //
+  // Os dois eram o MESMO problema. O balão era ::after do próprio botão, e
+  // ::after é position:absolute: ele nunca escapa de um ancestral com
+  // rolagem. Na Central do Beniboy a fileira de ícones mora dentro da
+  // .paineis-wrap (overflow-x:auto) e do .sheet (overflow-y:auto) - medido no
+  // Chromium, o balão aparecia cortado ("...mir atendimento" em vez de
+  // "Assumir atendimento"). Agora é UM elemento position:fixed pendurado no
+  // <html>, que nenhum overflow corta.
+  let okDica = false;
+  try {
+    const tema = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    const noc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const beni = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
+    // a fileira de ações da ficha da máquina
+    const acoes = (noc.match(/document\.getElementById\('detalhe-comp-acoes'\)\.innerHTML = `[\s\S]*?\n  `;/) || [''])[0];
+    const icones = [...acoes.matchAll(/class="btn-icone[^"]*"([\s\S]*?)>/g)].map((m) => m[1]);
+
+    const conf = {
+      // ESTA é a correção: absolute vira fixed, e no <html> - vários arquivos
+      // usam overflow:clip no body
+      'o balão é um elemento fixo, fora de qualquer caixa com rolagem':
+        /#zenith-dica\{position:fixed/.test(tema)
+        && /document\.documentElement\.appendChild\(balao\)/.test(tema)
+        && !/document\.body\.appendChild\(balao\)/.test(tema),
+      'e não é mais ::after do próprio botão (era isso que cortava)':
+        !/\[data-dica\]::after\{content:attr\(data-dica\)/.test(tema),
+      // balão que sai da tela é tão inútil quanto balão cortado
+      'encosta na borda em vez de sair da tela':
+        /Math\.min\(Math\.max\(margem, centro - \(b\.width \/ 2\)\), Math\.max\(margem, window\.innerWidth - b\.width - margem\)\)/.test(tema),
+      'sem espaço embaixo, vai pra cima': /y = Math\.max\(margem, r\.top - b\.height - 7\)/.test(tema),
+      // a seta tem de apontar pro ÍCONE; presa no meio do balão apontaria pro
+      // nada assim que o balão deslizasse pra caber na tela
+      'a setinha acompanha o ícone, não o meio do balão':
+        /balao\.style\.setProperty\('--seta-x'/.test(tema) && /left:var\(--seta-x,50%\)/.test(tema),
+      // rótulo que explica não cabe numa linha só
+      'o balão quebra linha': /white-space:normal;max-width:min\(260px/.test(tema),
+      // quem navega no Tab também precisa saber o que o ícone faz
+      'aparece no foco por teclado, não só no mouse':
+        /document\.addEventListener\('focusin'/.test(tema) && /document\.addEventListener\('focusout'/.test(tema),
+      // balão parado em cima de um botão que já saiu da tela é pior que nenhum
+      'some ao rolar, ao clicar e ao redimensionar':
+        /window\.addEventListener\('scroll', esconder, true\)/.test(tema)
+        && /document\.addEventListener\('click', esconder, true\)/.test(tema)
+        && /window\.addEventListener\('resize', esconder\)/.test(tema),
+      'em tela de toque não aparece (lá não existe hover)':
+        /function ehToque\(\)/.test(tema) && /if \(ehToque\(\)\) return;/.test(tema),
+      // ---- a ficha da máquina, do jeito do chat da Central ----
+      'a ficha da máquina virou só-ícone, sem sobrar botão com texto':
+        !!acoes && icones.length >= 8 && !/btn-mini/.test(acoes),
+      'todo ícone tem balão E leitor de tela, com o MESMO rótulo':
+        icones.length >= 8 && icones.every((attr) => {
+          const dica = (attr.match(/data-dica="([^"]*)"/) || [])[1];
+          const aria = (attr.match(/aria-label="([^"]*)"/) || [])[1];
+          return dica && aria && dica === aria;
+        }),
+      // title junto do balão daria DOIS rótulos no mesmo ícone
+      'sem title nativo por cima do balão': !/title="/.test(acoes),
+      'remover é o único em vermelho': (acoes.match(/btn-icone perigo/g) || []).length === 1,
+      // o pedido era "igual ao da Central": mesmo mecanismo, não uma cópia
+      'Central e ficha da máquina usam o mesmo mecanismo':
+        /class="btn-icone" data-dica=/.test(beni) && /class="btn-icone" data-dica=/.test(noc),
+      'e nenhuma tela tem CSS de balão próprio':
+        !/\[data-dica\]::after/.test(noc) && !/\[data-dica\]::after/.test(beni),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDica = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDica = false; console.log('  erro: ' + e.message); }
+  if (!okDica) ruins += 1;
+  console.log(`${okDica ? '✓' : '✗'} Balão de dica: flutuante, não cortado por painel com rolagem - e a ficha da máquina virou só-ícone`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
