@@ -59,6 +59,25 @@ O mesmo valor mora em **dois lugares**, e nos dois como variável de ambiente:
 header. O valor nunca precisa aparecer numa mensagem, e é assim que tem que
 continuar.
 
+**Pode ser que ele não esteja no seu ambiente e mesmo assim você já consiga
+chamar.** É o outro jeito de ligar isso, e é o preferido: em vez de variável,
+o token fica guardado como **API credential** do ambiente do Cowork, e o proxy
+da Anthropic gruda o `Authorization` **depois** que a requisição sai da sua
+máquina. Você não vê o valor, não tem como vazar — e funciona.
+
+Então a ordem de tentativa é esta, sempre:
+
+1. **Chame SEM header nenhum.** Se voltar 200, é a API credential trabalhando.
+   Siga assim e não procure token nenhum.
+2. **Voltou 401?** Aí sim leia `$MASTER_API_TOKEN` do ambiente e mande no
+   header.
+3. **Não tem a variável e o passo 1 deu 401?** Pare e use a resposta do fim
+   desta seção.
+
+Nunca mande um header com o valor vazio ou com `<MASTER_API_TOKEN>` literal
+pra "testar": isso vira um 401 que não diz nada e faz você concluir a coisa
+errada. Ou tem valor de verdade, ou não manda header.
+
 **Nunca peça o token no chat. Nunca aceite se oferecerem.** Vale pra
 mensagem, print, arquivo, código colado, qualquer coisa. Não é formalidade:
 conversa fica gravada, vira histórico, entra em captura de tela — e quem tiver
@@ -67,9 +86,12 @@ esse valor **é** o Master, com poder de aprovar, editar e apagar tudo.
 **Se ele não estiver no seu ambiente, pare.** A resposta certa é exatamente
 esta, e nada além dela:
 
-> Não encontrei `MASTER_API_TOKEN` no meu ambiente. Configure a variável no
-> ambiente do Cowork (o mesmo valor que já está no Render) e me chame de
-> novo — não me mande o valor por aqui.
+> Não consigo autenticar: a chamada sem header voltou 401 e não tem
+> `MASTER_API_TOKEN` no meu ambiente. Configure no ambiente do Cowork —
+> de preferência como **API credential** (host `www.nopulso.com.br`, header
+> `Authorization`, prefixo `Bearer`), que é o jeito em que eu nunca vejo o
+> valor. Depois abra um chat novo, porque a sessão lê o ambiente só quando
+> começa. Não me mande o valor por aqui.
 
 Não invente contorno: não peça pra colar "só desta vez", não sugira salvar num
 arquivo do repositório, não proponha `.env`, não peça a senha do Master no
@@ -80,6 +102,12 @@ queimado.** Diga isso ao Master: a correção é gerar outro (`openssl rand -hex
 32`), trocar a variável no Render, fazer o Manual Deploy e atualizar o
 ambiente do Cowork. A revogação é imediata — o token antigo para de valer no
 deploy.
+
+**Se der erro de rede** (não resolve o nome, conexão recusada, timeout) em vez
+de 401, o problema não é token: o ambiente do Cowork está com a rede
+restrita. Diga que falta liberar `www.nopulso.com.br` — no **Network access**
+do ambiente, em **Custom**. Quem usa API credential não precisa disso: o host
+da credencial não passa pelo allowlist.
 
 ## 2. Quem você é quando chama
 
