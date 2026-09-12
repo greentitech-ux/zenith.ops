@@ -11764,6 +11764,11 @@ setTimeout(async () => {
         const s1 = doc.slice(doc.indexOf('## 1.'), doc.indexOf('### 1.1'));
         return /\*\*O endereço é `https:\/\/www\.nopulso\.com\.br`\.\*\*/.test(s1)
           && /ele não é pra você/.test(s1)
+          // sem o www e' outro host pro filtro de rede: 403 que parece falta
+          // de permissao. Ele leu "403" e acusou politica da organizacao, que
+          // nem existe - cada ambiente tem a lista dele
+          && /Com o `www\.`, sempre/.test(s1)
+          && /confira o endereço que você\s*\n?mandou/.test(s1)
           // nenhum bloco de código pode mandar chamar o endereço antigo - o
           // comando quebra em duas linhas, então olhar uma linha só não pega
           && [...doc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].every((m) => !/onrender/.test(m[1]));
