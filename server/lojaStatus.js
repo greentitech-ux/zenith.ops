@@ -1499,10 +1499,58 @@ async function registrarTelemetria(codigo, posto, dados, token) {
 //   'acesso-remoto'  o serviço está conectado à nuvem dele (conexão TCP) -
 //                    continua registrado, porque é assim que se descobre que
 //                    a máquina tem uma porta de acesso remoto aberta 24h
+// ---- a hora do log da ferramenta vem em UTC ----
+//
+// Pergunta do Master, olhando o alarme: "por que a hora que mostra e
+// diferente da hora real?". O alarme trazia "2026-09-12 21:56:32" com o
+// relogio dele marcando 18:56 - 3h, exatamente o fuso de Brasilia.
+//
+// A hora nao e nossa: o agente manda a LINHA CRUA do ad_svc.trace (ver
+// Verificar-SessaoRemota no vigiaScript.js) e o AnyDesk grava esse arquivo
+// em UTC. O nosso carimbo (evento.em) sempre esteve certo; quem mentia era o
+// texto colado ao lado dele - e no alarme, onde so o texto aparece, nao
+// havia como perceber.
+//
+// NAO da pra cravar "e sempre UTC": o formato do trace muda entre versoes do
+// AnyDesk, e o proprio vigiaScript.js ja avisa disso. Entao a escolha se
+// VERIFICA sozinha: das duas leituras possiveis da mesma marca - UTC ou hora
+// de Brasilia - vale a que cair MAIS PERTO do instante em que nos detectamos.
+// Linha que ja venha em hora local fica intacta; linha em UTC vira local.
+// Nao ha como o conserto piorar o que ja estava certo.
+const MARCA_DE_HORA_RE = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/;
+function deslocamentoBrasiliaMs(instante) {
+  const p = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(instante)).reduce((acc, x) => { acc[x.type] = x.value; return acc; }, {});
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - instante;
+}
+function emBrasilia(instante) {
+  const p = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(instante)).reduce((acc, x) => { acc[x.type] = x.value; return acc; }, {});
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+function horaDoLogEmBrasilia(texto, agoraMs) {
+  const m = MARCA_DE_HORA_RE.exec(String(texto || ''));
+  if (!m) return texto;
+  const agora = agoraMs == null ? Date.now() : agoraMs;
+  const comoUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  // o instante que, mostrado em Brasilia, daria esses mesmos digitos
+  const comoLocal = comoUtc - deslocamentoBrasiliaMs(comoUtc);
+  const escolhido = Math.abs(comoUtc - agora) <= Math.abs(comoLocal - agora) ? comoUtc : comoLocal;
+  return String(texto).replace(m[0], emBrasilia(escolhido));
+}
+
 const EVENTO_SESSAO_REMOTA = 'sessao-remota';
 async function registrarAcessoRemoto(codigo, posto, detalhe, token, ehSessao) {
   const id = docIdFor(codigo, posto);
-  const limpo = String(detalhe || '').trim().slice(0, 200);
+  // a marca de hora da ferramenta vem em UTC; vira hora de Brasilia ANTES de
+  // ser guardada, pra o alarme e o historico dizerem a mesma coisa
+  const limpo = horaDoLogEmBrasilia(String(detalhe || '').trim(), Date.now()).slice(0, 200);
   if (!limpo) throw new Error('Detalhe do acesso remoto é obrigatório.');
   const snap = await COLLECTION.doc(id).get();
   const atual = snap.exists ? snap.data() : null;
@@ -3022,7 +3070,7 @@ module.exports = {
   COMANDO_REDE_DESTRAVAR,
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
-  marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
+  marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
   sanitizarPolitica, definirPolitica, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,

@@ -517,6 +517,45 @@
     return true;
   };
 
+  // ---- abrir o AnyDesk: tentar SEMPRE, e so avisar se nao abrir ----
+  //
+  // O atalho 🖥️ do NOC e do Painel e' um link "anydesk:". Quem decide se ele
+  // abre e' o SISTEMA - o AnyDesk registra esse esquema ao instalar -, nao o
+  // tipo de tela.
+  //
+  // A versao anterior decidia por (hover:none): "tela de toque nao tem
+  // AnyDesk". Errado, e o Master pagou por isso: COMPUTADOR COM TELA
+  // SENSIVEL AO TOQUE tambem casa nessa regra, e ele passou a receber "o
+  // AnyDesk nao abre pelo celular" no proprio computador, sem conseguir
+  // abrir sessao nenhuma pelo botao da TV.
+  //
+  // Aqui nao ha adivinhacao de aparelho. O link tenta abrir o esquema de
+  // verdade (ninguem chama preventDefault) e esta funcao so VERIFICA o
+  // resultado: se o app abriu, ele vem pra frente e a janela perde o foco -
+  // nada mais acontece. Se depois da espera a pagina continua visivel e com
+  // foco, ninguem atendeu o esquema: ai copia o ID e explica. Serve igual no
+  // Windows com AnyDesk, no Windows sem AnyDesk e no celular.
+  //
+  // Fica no tema.js porque sao duas telas (NOC e Painel) e copia diverge.
+  var ANYDESK_ESPERA_MS = 1200;
+  window.zenithAnydesk = function (id) {
+    var idLimpo = String(id == null ? '' : id).trim();
+    if (!idLimpo) return;
+    var saiuDaPagina = false;
+    var marcar = function () { saiuDaPagina = true; };
+    window.addEventListener('blur', marcar, { once: true });
+    document.addEventListener('visibilitychange', marcar, { once: true });
+    setTimeout(function () {
+      window.removeEventListener('blur', marcar);
+      document.removeEventListener('visibilitychange', marcar);
+      // hasFocus tambem pega a caixa "Abrir o AnyDesk?" do proprio navegador:
+      // se ela apareceu, o esquema TEM quem atenda e nao ha o que avisar
+      if (saiuDaPagina || document.hidden || !document.hasFocus()) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(idLimpo).catch(function () {});
+      alert('Não consegui abrir o AnyDesk neste aparelho. ID copiado: ' + idLimpo + ' — cole no app do AnyDesk.');
+    }, ANYDESK_ESPERA_MS);
+  };
+
   // ---- aviso de mudanca de endereco ----
   // Quem entra pelo endereco antigo (adyen-monitor.onrender.com) precisa
   // saber que o NoPulso mudou de casa - senao continua usando o velho pra
