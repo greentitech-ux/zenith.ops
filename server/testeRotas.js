@@ -15060,6 +15060,37 @@ setTimeout(async () => {
   if (!okTresBugs) ruins += 1;
   console.log(`${okTresBugs ? '✓' : '✗'} Correções: anexo some após criar o formulário, filtro Mês navega mês a mês, e tag de cargo no participante`);
 
+  // ---- Marca nos PDFs: nenhum relatório pode sair mais com "ZENITH OPS" ----
+  // O cabeçalho dos PDFs passou a marca ZENITH OPS pra NoPulso (o repo ainda se
+  // chama zenith.ops por histórico, mas a marca na tela/PDF é NoPulso). local.js
+  // fica de fora: é o banner do ambiente local, não um relatório do cliente.
+  let okMarcaPDF = false;
+  try {
+    const fs = require('fs');
+    const relatorios = ['reportUtil.js', 'reportExport.js', 'monitorReport.js', 'alertReport.js',
+      'fechamentosReport.js', 'fraudReport.js', 'chamadoRelatorio.js'];
+    const idxSrc = fs.readFileSync(__dirname + '/index.js', 'utf8');
+    const conf = {
+      // cada gerador de PDF perdeu o "ZENITH OPS" e ganhou "NoPulso" no cabeçalho
+      'os geradores de relatório trocaram ZENITH OPS por NoPulso no cabeçalho':
+        relatorios.every((f) => {
+          const s = fs.readFileSync(__dirname + '/' + f, 'utf8');
+          return !/ZENITH\s*OPS/i.test(s) && /NoPulso/.test(s);
+        }),
+      // o PDF de desvios do Carrinho (gerado direto no index.js) também
+      'o PDF de desvios do Carrinho usa NoPulso no cabeçalho':
+        /doc\.fontSize\(8\)\.fillColor\('#5b6470'\)\.text\('SOLUTIONS TI TECH · NoPulso'/.test(idxSrc),
+      // fecha a porta: nenhum outro relatório do index.js ainda diz ZENITH OPS
+      'nenhum cabeçalho de relatório no index.js ainda diz ZENITH OPS':
+        !/ZENITH\s*OPS/i.test(idxSrc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMarcaPDF = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okMarcaPDF = false; console.log('  erro: ' + e.message); }
+  if (!okMarcaPDF) ruins += 1;
+  console.log(`${okMarcaPDF ? '✓' : '✗'} Marca nos PDFs: relatórios saem como NoPulso, não mais ZENITH OPS`);
+
   // ---- Meu Dia: responsável x quem participa (modelo do Asana) ----
   // Participante faz a tarefa ANDAR (comenta, anexa, move o status). O que
   // muda o combinado - prazo e quem participa - e o que destrói fica com o

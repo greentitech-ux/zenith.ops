@@ -335,7 +335,7 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, secoes, nomeArquivo
   const diferencaTotal = linhas.reduce((s, l) => s + l.diferenca, 0);
 
   function cabecalhoPagina() {
-    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · ZENITH OPS · RELATÓRIO DE FECHAMENTOS', tableX, 30, { characterSpacing: 1 });
+    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · NoPulso · RELATÓRIO DE FECHAMENTOS', tableX, 30, { characterSpacing: 1 });
     doc.fontSize(16).fillColor('#111').text(titulo, tableX, 42);
     doc.fontSize(9).fillColor('#666').text(subtitulo, tableX, 64);
   }

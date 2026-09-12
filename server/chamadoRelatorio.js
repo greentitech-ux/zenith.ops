@@ -182,7 +182,7 @@ function gerarPDF(res, chamado, { fotos, geradoPor, nomeArquivo }) {
 
   // ---------- cabecalho ----------
   doc.fontSize(8).fillColor('#5b6470').font('Helvetica-Bold')
-    .text('ZENITH OPS', x, doc.y, { continued: true, characterSpacing: 0.6 });
+    .text('NoPulso', x, doc.y, { continued: true, characterSpacing: 0.6 });
   doc.font('Helvetica').text(`  ·  ${chamado.unidadeNome || chamado.unidade || ''}`, { characterSpacing: 0.6 });
   doc.moveDown(0.4);
   doc.fontSize(18).fillColor('#111').font('Helvetica-Bold').text('Relatório de Atendimento', x, doc.y);

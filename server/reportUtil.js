@@ -121,7 +121,7 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, resumo, larguras, s
   const tableWidth = colunas.reduce((s, c) => s + (larg[c.key] || 60), 0);
 
   function cabecalhoPagina() {
-    doc.fontSize(8).fillColor('#5b6470').text(cabecalho || 'SOLUTIONS TI TECH · ZENITH OPS', tableX, 30, { characterSpacing: 1 });
+    doc.fontSize(8).fillColor('#5b6470').text(cabecalho || 'SOLUTIONS TI TECH · NoPulso', tableX, 30, { characterSpacing: 1 });
     doc.fontSize(16).fillColor('#111').text(titulo, tableX, 42);
     doc.fontSize(9).fillColor('#666').text(subtitulo || '', tableX, 64);
   }

@@ -12349,7 +12349,7 @@ app.get('/api/abastecimento/divergencias/relatorio-escrito.pdf', auth.requireMas
     res.setHeader('Content-Disposition', `attachment; filename="carrinho-relatorio-desvios-${inicio}-a-${fim}.pdf"`);
     doc.pipe(res);
 
-    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · ZENITH OPS', { characterSpacing: 1 });
+    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · NoPulso', { characterSpacing: 1 });
     doc.moveDown(0.3);
     doc.fontSize(16).fillColor('#111').text('Relatório de ajustes e desvios — Relatórios do Carrinho');
     doc.fontSize(9).fillColor('#666').text(`Período ${reportUtil.fmtDataBR(inicio)} a ${reportUtil.fmtDataBR(fim)} · gerado em ${reportUtil.agoraBrasiliaFmt()}`);
