@@ -5377,28 +5377,6 @@ app.post('/api/fechamentos/quebra-caixa/backfill', auth.requireMaster, async (re
   }
 });
 
-// Correção pontual do KPI "Calabress" cadastrado com grafia errada. A prévia
-// não grava; a execução exige frase de confirmação e é exclusiva do Master.
-// O serviço conserva auditoria em cada fechamento e soma os dois campos se um
-// dia chegou a ter Calabress e Calabresa preenchidos juntos.
-app.get('/api/fechamentos/kpis/calabresa/migracao', auth.requireMaster, async (req, res) => {
-  try {
-    res.json(await fechamentosLive.previaMigracaoCalabresa());
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.post('/api/fechamentos/kpis/calabresa/migracao', auth.requireMaster, async (req, res) => {
-  try {
-    if (String(req.body?.confirmacao || '').trim().toUpperCase() !== 'MIGRAR CALABRESS') {
-      return res.status(400).json({ error: 'Digite MIGRAR CALABRESS para confirmar a correção histórica.' });
-    }
-    const resultado = await fechamentosLive.migrarCalabressParaCalabresa(req.user.email);
-    res.json(resultado);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
 
 // data de ontem em Brasilia, formato YYYY-MM-DD (mesmo padrao ja usado em
 // parque.js/hojeBrasiliaISO, so que D-1)
