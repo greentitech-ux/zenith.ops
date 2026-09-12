@@ -14874,7 +14874,6 @@ setTimeout(async () => {
     // O BUG: "Em aberto" escondia toda CONCLUIDA, então concluir fazia a tarefa
     // sumir da tela em vez de cair na coluna "Concluídas" - que ficava sempre
     // vazia. Quem foi concluída HOJE fica à vista; a de ontem, não.
-    const agoraBR = new Function(`${base} return agoraBrasilia;`)()();
     const hojeBR = new Function(`${base} return hoje;`)()();
     // instantes REAIS (Date.now), não agoraBR.toISOString(): agoraBR é o Date
     // "falso" cujos getters locais já são o relógio de Brasília - passar ele
@@ -17338,6 +17337,55 @@ setTimeout(async () => {
   } catch (e) { okMsgUnidade = false; console.log('  erro: ' + e.message); }
   if (!okMsgUnidade) ruins += 1;
   console.log(`${okMsgUnidade ? '✓' : '✗'} Mensagem direta: filtrar por unidade ao lado do nome, sem leitura nova`);
+
+  // Relatório que imprime o nome como TÍTULO e o número numa linha de baixo:
+  // "DINHEIRO" e embaixo VALOR INICIAL / RECEBIMENTOS / SUB-TOTAL. A trava que
+  // exige o rótulo na linha de origem (rotuloBateComOrigem) recusava
+  // "RECEBIMENTOS 306,02" para o campo DINHEIRO - o modelo tinha ACERTADO a
+  // leitura, e o campo voltava vazio mesmo assim.
+  //
+  // A dica do grupo não resolvia: ela entra no prompt e ensina o MODELO; a
+  // recusa acontece DEPOIS, no servidor, onde a dica não chega. A saída é a
+  // origem carregar o título do bloco - aí a trava liga o número ao campo
+  // sozinha, e continua pegando troca de verdade.
+  let okBlocoTitulo = false;
+  try {
+    const ocr = require(__dirname + '/canaisVendaOcr.js');
+    const fonte = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
+    const bate = ocr.rotuloBateComOrigem;
+
+    const conf = {
+      'o prompt manda trazer o título do bloco junto da linha':
+        /BLOCO COM TÍTULO:/.test(fonte)
+        && /"textoOrigem" tem que trazer o TÍTULO DO BLOCO junto, separado por barra/.test(fonte)
+        && /DINHEIRO \/ RECEBIMENTOS 306,02/.test(fonte),
+      // o caso do Grupo Aero, exatamente
+      'com o título, DINHEIRO aceita o número que veio de RECEBIMENTOS':
+        bate('DINHEIRO', 'DINHEIRO / RECEBIMENTOS 306,02') === true,
+      'sem o título continua recusando (é o que o servidor via antes)':
+        bate('DINHEIRO', 'RECEBIMENTOS 306,02') === false,
+      'vale pros cartões também, que têm o mesmo formato':
+        bate('Cartao Debito', 'CARTAO DEBITO / SUB-TOTAL 921,97') === true
+        && bate('Cartao de Credito', 'CARTAO DE CREDITO / RECEBIMENTOS 2251,00') === true,
+      // a trava existe pra pegar par nome↔valor trocado: não pode afrouxar
+      'e a trava continua pegando troca de verdade':
+        bate('Mussarela', 'Calabresa 12') === false
+        && bate('Dinheiro', 'CARTAO DE CREDITO / RECEBIMENTOS 2251,00') === false,
+      'o que já funcionava continua funcionando':
+        bate('Pick Up', 'Pick Up 0') === true && bate('PickUp', 'Pick Up 0') === true
+        && bate('Pix', 'PIX 100,00') === true && bate('TC', 'TC 214') === true
+        && bate('Valor Total Taxa de Entrega', 'Taxa de Entrega R$65,67') === true,
+      // a dica do grupo é do Master, entra depois das regras e delimitada
+      'a dica do grupo continua entrando no prompt, delimitada':
+        /Instruções específicas do relatório desta loja/.test(fonte)
+        && /const blocoDica = dica \?/.test(fonte),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBlocoTitulo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBlocoTitulo = false; console.log('  erro: ' + e.message); }
+  if (!okBlocoTitulo) ruins += 1;
+  console.log(`${okBlocoTitulo ? '✓' : '✗'} Leitura por foto: campo que é TÍTULO de bloco (DINHEIRO → RECEBIMENTOS) para de voltar vazio`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
