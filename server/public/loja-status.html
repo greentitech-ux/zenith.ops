@@ -321,11 +321,18 @@
   .modal .sub{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
   .modal label{display:block;font-size:11.5px;color:var(--muted);margin:14px 0 6px;font-family:var(--mono);}
   .modal label:first-of-type{margin-top:0;}
-  .modal input[type=text],.modal select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);box-sizing:border-box;}
+  /* o campo de SENHA ficava de fora desta regra: sem ela o navegador
+     desenhava uma caixa BRANCA no meio do modal escuro (era assim na janela
+     de manutenção, bem em cima do botão de reiniciar o parque) */
+  .modal input[type=text],.modal input[type=password],.modal select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);box-sizing:border-box;}
   .modal input:focus,.modal select:focus{outline:none;border-color:var(--accent);}
   textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);resize:vertical;min-height:80px;}
   textarea:focus{outline:none;border-color:var(--accent);}
-  .modal-acoes{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
+  /* flex-wrap: no celular a janela de manutenção tem 6 botões numa linha só
+     de 390px - eles se sobrepunham e o último saía da tela. Sem wrap, o
+     lugar de configurar o reinício automático ficava inutilizável no
+     celular, que é de onde o Master usa. */
+  .modal-acoes{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:14px;}
   .radio-tipo{display:flex;flex-direction:column;gap:8px;margin-top:6px;}
   .radio-tipo label{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--text);font-family:var(--sans);cursor:pointer;font-weight:400;margin:0;}
   .radio-tipo input{width:auto;margin:2px 0 0;flex:none;}
@@ -667,6 +674,44 @@
       <span class="sub" id="manut-contagem" style="align-self:center;font-family:var(--mono);font-size:11px;"></span>
     </div>
     <div id="manut-lista" style="max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;"></div>
+    <!-- REINICIO AUTOMATICO. Fica AQUI, e nao numa tela nova, porque a
+         pergunta "quais maquinas?" ja esta resolvida nesta lista: busca,
+         marcar a unidade inteira, e o aviso de "marcado e fora do filtro".
+         Quem dispara e o servidor (ver POST /api/loja-status/reinicio-diario);
+         a maquina recebe o MESMO comando do reinicio manual, com os mesmos
+         2 minutos de aviso na tela da loja.
+
+         Um dia DESMARCADO nao reinicia - e assim que se faz "so de segunda
+         a sexta". Cada dia tem a sua hora, entao "domingo as 3h, resto as
+         4h" tambem sai daqui, sem segundo controle. -->
+    <div style="margin-top:12px;padding:10px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);">
+      <div style="font-weight:700;font-size:12.5px;margin-bottom:4px;">⏰ Reinício automático</div>
+      <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px;">
+        Marque as máquinas na lista acima, escolha os dias e a hora de cada um. O servidor manda o reinício sozinho, no horário de Brasília, com os mesmos 2 minutos de aviso na tela da loja. Dia desmarcado não reinicia.
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <input type="time" id="manut-hora" value="04:00" step="60"
+               style="padding:7px 8px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:13px;font-family:var(--mono);">
+        <button type="button" class="btn-mini" onclick="manutHoraEmTodosOsDias()" title="Coloca essa hora em todos os dias marcados">↧ em todos os dias</button>
+      </div>
+      <div id="manut-dias" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:6px 8px;"></div>
+      <label style="display:block;font-size:11.5px;color:var(--muted);margin:10px 0 5px;font-family:var(--mono);">
+        Se o servidor estiver fora na hora marcada, ainda vale reiniciar até…
+      </label>
+      <select id="manut-tolerancia" style="width:auto;padding:7px 8px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;">
+        <option value="6">6 minutos depois (padrão)</option>
+        <option value="15">15 minutos depois</option>
+        <option value="30">30 minutos depois</option>
+        <option value="60">1 hora depois</option>
+        <option value="120">2 horas depois</option>
+        <option value="240">4 horas depois</option>
+      </select>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button type="button" class="btn-mini ok" id="manut-agendar" onclick="manutAgendar('ligar')">⏰ Agendar nos selecionados</button>
+        <button type="button" class="btn-mini" id="manut-desagendar" onclick="manutAgendar('desligar')" title="Tira o reinício automático dos selecionados (não precisa de senha)">Desligar</button>
+      </div>
+      <div class="sub" id="manut-agendados" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:8px;"></div>
+    </div>
     <label style="margin-top:10px;">Sua senha de Master (confirma quem está mandando reiniciar)</label>
     <input type="password" id="manut-senha" autocomplete="new-password" placeholder="senha">
     <div class="msg hidden" id="manut-status"></div>
@@ -1147,6 +1192,49 @@ function cliqueAnydeskDetalhe(ev, id){
   alert(`O AnyDesk não abre pelo celular. ID copiado: ${id} — cole no app do AnyDesk.`);
 }
 
+// ---- reinício automático: leitura do plano semanal ----
+// O painel só LÊ; quem valida e grava é o servidor (ver lojaStatus.js).
+// Mesma tabela de dias dos dois lados, na mesma ordem de getDay().
+const NOC_DIAS = [['dom','Dom'],['seg','Seg'],['ter','Ter'],['qua','Qua'],['qui','Qui'],['sex','Sex'],['sab','Sáb']];
+const HORA_RE_NOC = /^([01]\d|2[0-3]):([0-5]\d)$/;
+// compat de leitura: a primeira versão guardava UMA hora valendo pra todo
+// dia. Documento assim é lido como os 7 dias naquela hora - ninguém reescreve
+// dado antigo por conta.
+function planoReinicioDe(c){
+  // mesmo portão do servidor: só computador interno reinicia por comando.
+  // Um ⏰ num card de atendimento seria uma marca que nunca acontece - e
+  // pode sobrar num documento que mudou de tipo depois de agendado.
+  if(!c || c.tipo !== 'interno') return null;
+  if(c.reinicioSemanal && typeof c.reinicioSemanal === 'object') return c.reinicioSemanal;
+  if(HORA_RE_NOC.test(c.reinicioDiario||'')) return NOC_DIAS.reduce((a,[d])=>{ a[d]=c.reinicioDiario; return a; },{});
+  return null;
+}
+// agrupa por hora: "todo dia às 04:00" / "dom às 03:00 · seg, ter, qua, qui,
+// sex às 04:00". É o mesmo texto que o servidor grava no histórico.
+function resumoReinicio(plano){
+  if(!plano) return '';
+  const porHora = new Map();
+  NOC_DIAS.forEach(([d,rot]) => {
+    const h = plano[d];
+    if(!HORA_RE_NOC.test(h||'')) return;
+    if(!porHora.has(h)) porHora.set(h, []);
+    porHora.get(h).push(rot.toLowerCase());
+  });
+  if(!porHora.size) return '';
+  return [...porHora.entries()].sort((a,b)=>a[0].localeCompare(b[0]))
+    .map(([h,dias]) => `${dias.length===7?'todo dia':dias.join(', ')} às ${h}`).join(' · ');
+}
+// o card é estreito: cabe a hora quando é uma só, senão "vários" - o texto
+// inteiro fica no title e no detalhe
+function chipReinicio(plano){
+  if(!plano) return '';
+  const horas = [...new Set(NOC_DIAS.map(([d])=>plano[d]).filter(h=>HORA_RE_NOC.test(h||'')))];
+  if(!horas.length) return '';
+  // no celular não existe hover, então "vários" não levaria a lugar nenhum:
+  // mostra a hora mais cedo com um "+" - o texto inteiro está no detalhe
+  return horas.length === 1 ? horas[0] : `${horas.sort()[0]}+`;
+}
+
 // as tres metricas que cabem num card estreito e que decidem manutencao:
 // quanto do disco esta cheio, temperatura e ha quantos dias sem reiniciar
 // (ver nocMaquina.js pros limites). O volume mostrado e o MAIS APERTADO -
@@ -1172,6 +1260,11 @@ function metricasTileHtml(c){
     const rotulo = dias >= 1 ? `${dias}d` : `${Math.round(c.uptimeHoras)}h`;
     bits.push(`<span class="m-chip ${dias >= 7 ? 'alerta' : ''}" title="sem reiniciar (política: 1x por semana)">🔁 ${rotulo}</span>`);
   }
+  // uma máquina que reinicia sozinha às 4h TEM de dizer isso no card: sem
+  // essa marca, o reinício vira "o computador desligou de madrugada" e abre
+  // chamado de TI
+  const planoTile = planoReinicioDe(c);
+  if(planoTile) bits.push(`<span class="m-chip" style="color:var(--accent);border-color:var(--accent);" title="Reinicia sozinha: ${escapeHtml(resumoReinicio(planoTile))}">⏰ ${escapeHtml(chipReinicio(planoTile))}</span>`);
   return bits.length ? `<div class="tile-metricas">${bits.join('')}</div>` : '';
 }
 
@@ -1225,6 +1318,10 @@ function atualizarConteudoDetalhe(codigo, c){
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
   if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
   if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
+  // quem ligou e pra que hora - a mesma informação que evita o chamado de
+  // "o computador reiniciou sozinho de madrugada"
+  const planoDet = planoReinicioDe(c);
+  if(planoDet) infoBits.push(`⏰ Reinício automático: <b>${escapeHtml(resumoReinicio(planoDet))}</b> · tolerância ${Number(c.reinicioTolerancia)||6} min${c.reinicioDiarioPorEmail ? ` · ligado por ${escapeHtml(c.reinicioDiarioPorEmail)}` : ''}`);
   // o agente conta em que pé está (ver Reportar-EstadoAgente no vigiaScript):
   // a versão que roda DE FATO nessa máquina e por que o Ctrl+Q responde ou não
   if(c.agenteVersao || c.agenteNoPulsoPrint){
@@ -1466,6 +1563,16 @@ function linhaEvento(ev){
   }
   if(ev.tipo==='dispositivo-novo'){
     return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Aparelho novo na rede</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  // reinício automático: quem MANDOU (o servidor, no horário marcado) e quem
+  // LIGOU/DESLIGOU o agendamento. Sem estas duas linhas os dois eventos caíam
+  // no fim desta função e apareciam como "Voltou" - um registro que diz o
+  // contrário do que aconteceu é pior que registro nenhum.
+  if(ev.tipo==='reinicio-diario'){
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>⏰ Reinício automático enviado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  if(ev.tipo==='reinicio-diario-config'){
+    return `<div class="ev-linha"><span class="ev-dot"></span><b>⏰ Agendamento alterado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
   const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
   // O QUE REALMENTE ACONTECEU no silêncio (ver varrerAlertas em
@@ -1972,6 +2079,7 @@ function abrirManutencao(){
   document.getElementById('manut-senha').value = '';
   document.getElementById('manut-status').classList.add('hidden');
   renderManutLista();
+  renderManutDias();
   document.getElementById('manut-overlay').classList.remove('hidden');
 }
 function fecharManutencao(){ document.getElementById('manut-overlay').classList.add('hidden'); }
@@ -2022,6 +2130,7 @@ function renderManutLista(){
           <span class="status-dot ${st}"></span>
           <span>${escapeHtml(c.nome || c.posto)}</span>
           <span style="color:var(--muted);font-size:10.5px;font-family:var(--mono);">${escapeHtml(ESTADO_LABEL[st]||st)}${linkTexto(c) ? ' · ' + escapeHtml(linkTexto(c)) : ''}</span>
+          ${planoReinicioDe(c) ? `<span style="color:var(--accent);font-size:10.5px;font-family:var(--mono);" title="${escapeHtml(resumoReinicio(planoReinicioDe(c)))}">⏰ ${escapeHtml(chipReinicio(planoReinicioDe(c)))}</span>` : ''}
         </label>`;
       }).join('')}
     </div>`;
@@ -2073,6 +2182,113 @@ function atualizarContagemManut(){
   document.getElementById('manut-anydesk').disabled = !n;
   document.getElementById('manut-zebra').disabled = !n;
   document.getElementById('manut-rede').disabled = !n;
+  document.getElementById('manut-agendar').disabled = !n;
+  document.getElementById('manut-desagendar').disabled = !n;
+  // quem JA reinicia sozinha, agrupado por horario: sem isso o Master só
+  // descobre o que está agendado rolando a lista máquina por máquina
+  const porPlano = {};
+  manutElegiveis().forEach(c => {
+    const r = resumoReinicio(planoReinicioDe(c));
+    if(r) porPlano[r] = (porPlano[r]||0) + 1;
+  });
+  const planos = Object.keys(porPlano).sort();
+  document.getElementById('manut-agendados').textContent = planos.length
+    ? 'já agendadas: ' + planos.map(r => `${porPlano[r]}× ${r}`).join(' · ')
+    : 'nenhuma máquina com reinício automático ainda.';
+}
+
+// ---- reinício automático programado ----
+//
+// A pergunta "quais máquinas?" é a MESMA da janela de manutenção, então o
+// alvo é o que está marcado ali - sem segunda lista, sem segunda tela.
+//
+// O plano é SEMANAL: cada dia tem a sua hora, ou está desmarcado (e aí não
+// reinicia nesse dia). Um campo só cobre "todo dia às 4h", "só de segunda a
+// sexta" e "domingo às 3h, resto às 4h" - dois controles separados (um pros
+// dias, outro pra hora) dariam duas fontes de verdade pro mesmo agendamento.
+//
+// Ligar pede a senha do Master (é um reinício recorrente em máquina de
+// loja); desligar não pede, porque parar o agendamento é sempre a operação
+// segura e travar isso atrás da senha só atrapalha quem precisa parar às
+// pressas.
+// dia -> 'HH:MM' | null. Começa em "todo dia às 04:00", que é o caso comum.
+let MANUT_PLANO = NOC_DIAS.reduce((a,[d]) => { a[d] = '04:00'; return a; }, {});
+
+function renderManutDias(){
+  const alvo = document.getElementById('manut-dias');
+  if(!alvo) return;
+  alvo.innerHTML = NOC_DIAS.map(([d, rot]) => {
+    const hora = MANUT_PLANO[d];
+    const on = !!hora;
+    return `<label style="display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);opacity:${on?1:.55};">
+      <input type="checkbox" ${on?'checked':''} onchange="manutToggleDia('${d}', this.checked)">
+      <span style="width:24px;flex:none;">${rot}</span>
+      <input type="time" step="60" value="${on?hora:''}" ${on?'':'disabled'} onchange="manutHoraDoDia('${d}', this.value)"
+        style="flex:1 1 auto;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12px;font-family:var(--mono);">
+    </label>`;
+  }).join('');
+}
+function manutToggleDia(dia, ligado){
+  // ao (re)ligar um dia, herda a hora do campo de cima - digitar a mesma
+  // hora sete vezes seria o caminho normal, e não pode ser
+  MANUT_PLANO[dia] = ligado ? (document.getElementById('manut-hora').value || '04:00') : null;
+  renderManutDias();
+}
+function manutHoraDoDia(dia, valor){
+  MANUT_PLANO[dia] = valor || null;
+  renderManutDias();
+}
+function manutHoraEmTodosOsDias(){
+  const h = document.getElementById('manut-hora').value;
+  if(!/^([01]\d|2[0-3]):([0-5]\d)$/.test(h)) return;
+  // só nos dias MARCADOS: quem desmarcou sábado não quer sábado de volta
+  NOC_DIAS.forEach(([d]) => { if(MANUT_PLANO[d]) MANUT_PLANO[d] = h; });
+  renderManutDias();
+}
+
+async function manutAgendar(modo){
+  const ligar = modo !== 'desligar';
+  const alvos = [...MANUT_MARCADOS].map(k => { const [codigo, posto] = k.split('|'); return { codigo, posto }; });
+  if(!alvos.length) return;
+  const st = document.getElementById('manut-status');
+  const senha = document.getElementById('manut-senha').value;
+  const tolerancia = Number(document.getElementById('manut-tolerancia').value) || 6;
+  const dias = NOC_DIAS.filter(([d]) => MANUT_PLANO[d]);
+  if(ligar && !dias.length){
+    st.textContent = 'Marque pelo menos um dia da semana.'; st.className='msg err'; st.classList.remove('hidden'); return;
+  }
+  if(ligar && !senha){ st.textContent = 'Digite sua senha de Master.'; st.className='msg err'; st.classList.remove('hidden'); return; }
+  const unidades = new Set(alvos.map(a => a.codigo)).size;
+  const resumo = dias.map(([d, rot]) => `${rot} ${MANUT_PLANO[d]}`).join(' · ');
+  const pergunta = ligar
+    ? `Reiniciar ${alvos.length} computador(es) de ${unidades} unidade(s) toda semana?\n\n${resumo}\n\nCada tela mostra o aviso de 2 minutos antes.`
+    : `Desligar o reinício automático de ${alvos.length} computador(es)?`;
+  if(!confirm(pergunta)) return;
+  const btn = document.getElementById(ligar ? 'manut-agendar' : 'manut-desagendar');
+  btn.disabled = true;
+  st.textContent = 'salvando...'; st.className='msg'; st.classList.remove('hidden');
+  try{
+    const r = await fetch('/api/loja-status/reinicio-diario', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ alvos, semanal: ligar ? MANUT_PLANO : null, tolerancia, password: senha }),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Não consegui salvar.');
+    let msg = ligar
+      ? `✅ ${d.aplicados}/${d.total} máquina(s): ${escapeHtml(d.resumo||resumo)} (tolerância ${d.tolerancia} min).`
+      : `✅ Reinício automático desligado em ${d.aplicados}/${d.total} máquina(s).`;
+    if((d.recusados||[]).length){
+      msg += `<br><span style="color:var(--warn);">Recusados ${d.recusados.length}: ` +
+        d.recusados.slice(0,5).map(x => `${escapeHtml(x.nome||x.posto)} (${escapeHtml(x.motivo||'—')})`).join(', ') +
+        (d.recusados.length>5?'…':'') + '</span>';
+    }
+    st.innerHTML = msg; st.className='msg ok';
+    document.getElementById('manut-senha').value = '';
+    // relê o parque: é o que faz o ⏰ aparecer na lista e no card sem F5
+    await carregar();
+    renderManutLista();
+  }catch(e){ st.textContent = e.message; st.className='msg err'; }
+  finally{ btn.disabled = false; atualizarContagemManut(); }
 }
 
 // tarefa: 'reiniciar' (a maquina, com 2min de aviso), 'abortar' ou
