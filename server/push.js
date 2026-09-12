@@ -1125,6 +1125,35 @@ function podeReceberAcessoRemoto(sub) {
 // proprio, entao uma nova NAO deve substituir/esconder um aviso anterior
 // ainda nao visto (diferente do offline/online, onde so o estado mais
 // recente importa)
+// o vigia viu um PROGRAMA NOVO na maquina da loja (ver registrarProgramas em
+// lojaStatus.js - a comparacao e do servidor, nao da maquina). Mesmo publico e
+// mesma urgencia do acesso remoto: e o Master que decide se aquilo devia estar
+// ali. Critico de proposito - instalacao em maquina de loja e sempre suspeita.
+async function notifyProgramaNovo(unidadeNome, codigo, computadorNome, posto, novos) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const lista = (novos || []).slice(0, 3).join(' · ');
+  const resto = (novos || []).length > 3 ? ` (+${novos.length - 3})` : '';
+  const dados = {
+    title: '📦 Programa novo instalado',
+    body: `${prefixo}${unidadeNome || codigo} · ${lista}${resto}`,
+    tag: `programa-novo-${codigo}-${posto || 'principal'}-${Date.now()}`,
+    critical: true,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-programa-novo', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAcessoRemoto(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+    }
+  }
+}
+
 async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, posto, detalhe) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
@@ -1201,6 +1230,7 @@ async function notifyFechamentoLancado(registro, { exceptUserId } = {}) {
 }
 
 module.exports = {
+  notifyProgramaNovo,
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,

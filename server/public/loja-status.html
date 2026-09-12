@@ -521,6 +521,18 @@
 </div>
 
 <div id="agente-root" class="hidden">
+  <!-- papel de parede do parque: UMA imagem pra rede toda; cada computador
+       decide se aplica, na política do card dele -->
+  <div class="agente-titulo"><h2>🖼️ Papel de parede do parque</h2></div>
+  <div class="agente-sub">
+    Uma imagem só pra rede toda. Ela não entra em máquina nenhuma sozinha: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a imagem aqui atualiza quem já está ligado, na próxima consulta da máquina.
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:18px;">
+    <input type="file" id="pp-arquivo" accept="image/png,image/jpeg,image/webp" style="max-width:260px;">
+    <button type="button" class="btn-mini ok" onclick="enviarPapelDeParede()">Enviar imagem</button>
+    <a class="btn-mini" href="/api/loja-status/papel-de-parede" target="_blank" rel="noopener">👁 Ver atual</a>
+    <span class="msg hidden" id="msg-pp"></span>
+  </div>
   <div class="agente-titulo">
     <h2>🤖 Beniboy — Ações do Agente</h2>
   </div>
@@ -841,6 +853,7 @@
     <div class="equip-tile-info" id="detalhe-comp-info"></div>
     <div id="detalhe-comp-eventos" style="margin-top:14px;"></div>
     <div class="equip-tile-acoes" id="detalhe-comp-acoes" style="margin-top:16px;"></div>
+    <div id="detalhe-comp-politica" class="hidden" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px;"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharDetalheComputador()">Fechar</button>
     </div>
@@ -1351,6 +1364,7 @@ function atualizarConteudoDetalhe(codigo, c){
     ${c.tipo === 'interno' ? `<button type="button" class="btn-mini" style="color:var(--warn);" title="Reiniciar este computador - abre a janela de manutenção já com ele marcado" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁 Reiniciar</button>` : ''}
     <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️ Remover</button>
   `;
+  renderPoliticaComputador(codigo, c);
   document.getElementById('detalhe-comp-editar').onclick = () => {
     fecharDetalheComputador();
     abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint);
@@ -2467,6 +2481,67 @@ async function salvarEdicaoComputador(){
   }
 }
 
+async function enviarPapelDeParede(){
+  const input = document.getElementById('pp-arquivo');
+  const msg = document.getElementById('msg-pp');
+  msg.classList.add('hidden');
+  const arquivo = (input.files||[])[0];
+  if(!arquivo){ msg.textContent='Escolha a imagem.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  try{
+    const fd = new FormData();
+    fd.append('imagem', arquivo);
+    const r = await fetch('/api/loja-status/papel-de-parede', { method:'PUT', body: fd });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui enviar.');
+    input.value = '';
+    msg.textContent = 'Imagem enviada. Quem está com o papel de parede ligado troca na próxima consulta.';
+    msg.className = 'msg'; msg.classList.remove('hidden');
+  }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+
+// ---- POLITICA DA MAQUINA (pedido do Master, 12/09/2026) ----
+// Quatro travas, uma a uma, por computador. O texto de cada uma diz o que
+// acontece de verdade na loja - e o que NAO acontece: bloquear pendrive nao
+// derruba pin pad nem impressora, e exigir Administrador pra instalar nao
+// trava a atualizacao do Chrome/PDV. Tudo reversivel: desmarcar volta ao
+// valor de fabrica na proxima consulta da maquina.
+const POLITICA_ITENS = [
+  { campo:'papelDeParedeAtivo', rotulo:'🖼️ Papel de parede da rede', ajuda:'Aplica a imagem enviada abaixo na área de trabalho desta máquina.' },
+  { campo:'bloquearUsbStorage', rotulo:'🔌 Bloquear pendrive / HD externo', ajuda:'Só armazenamento USB. Pin pad, impressora térmica, Zebra, leitor e teclado/mouse continuam funcionando.' },
+  { campo:'bloquearInstalacao', rotulo:'🔒 Instalar exige Administrador', ajuda:'O Windows nega a elevação pedida por usuário comum. Atualização de Chrome/PDV (serviço já elevado) não passa por aí.' },
+  { campo:'alertarInstalacao', rotulo:'📦 Avisar quando instalarem algo', ajuda:'A máquina manda a lista de programas e você recebe alerta do que for novo.' },
+];
+function renderPoliticaComputador(codigo, c){
+  const el = document.getElementById('detalhe-comp-politica');
+  el.classList.toggle('hidden', !IS_MASTER);
+  if(!IS_MASTER) return;
+  const pol = c.politica || {};
+  const aviso = c.tipo === 'interno' ? '' : '<div style="font-size:11px;color:var(--warn);margin-top:6px;">Pendrive e instalação precisam de Administrador na máquina - quem aplica é a tarefa de boot do NOCZenith.</div>';
+  const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
+  el.innerHTML = `<div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Política desta máquina</div>
+    ${POLITICA_ITENS.map(i=>`<label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;cursor:pointer;">
+      <input type="checkbox" data-pol="${i.campo}" ${pol[i.campo]?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);">
+      <span style="font-size:12.5px;">${i.rotulo}<small style="display:block;color:var(--muted);">${i.ajuda}</small></span>
+    </label>`).join('')}
+    ${aviso}${novo}
+    <button type="button" class="btn-mini ok" style="margin-top:8px;" onclick="salvarPoliticaComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar política</button>
+    <div class="msg hidden" id="msg-politica" style="margin-top:6px;"></div>`;
+}
+async function salvarPoliticaComputador(codigo, posto){
+  const corpo = {};
+  document.querySelectorAll('#detalhe-comp-politica [data-pol]').forEach(el=>{ corpo[el.dataset.pol] = el.checked; });
+  const msg = document.getElementById('msg-politica');
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/politica`, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui salvar.');
+    msg.textContent = 'Política salva. A máquina aplica na próxima consulta (interno ~25s, demais até ~2 min).';
+    msg.className = 'msg'; msg.classList.remove('hidden');
+    await carregar();
+  }catch(e){ msg.textContent = e.message; msg.className = 'msg err'; msg.classList.remove('hidden'); }
+}
+
 // "Capturar agora": gatilho sem teclado pro NoPulsoPrint (ver pedirCaptura no
 // lojaStatus.js). Serve pra tirar o print pela loja e, principalmente, pra
 // separar as causas: overlay abrindo pelo botão e não pelo Ctrl+Q = a tecla
@@ -3116,10 +3191,12 @@ async function rejeitarAgenteQa(id){
   await carregarAgenteAprovacoes();
 }
 
+let IS_MASTER = false;
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   const me = await res.json();
+  IS_MASTER = me.role === 'master';
   if(!me.ehTimeSuporte){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;

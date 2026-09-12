@@ -11441,6 +11441,107 @@ setTimeout(async () => {
   console.log(`${okKpiFicha ? '✓' : '✗'} Ficha do fechamento: KPI sai na unidade dele (tempo em min:seg, não R$) e dá pra editar dali`);
 
   // ------------------------------------------------------------------
+  // POLITICA DA MAQUINA (pedido do Master, 12/09/2026): papel de parede, USB,
+  // instalacao e alerta de programa novo - ligados UM A UM por computador.
+  // Decisoes travadas com ele: USB bloqueia SO armazenamento (pendrive/HD
+  // externo; pin pad e impressora continuam), instalar passa a exigir
+  // Administrador, e o alcance e por maquina. O que este bloco segura:
+  // a politica chega ao agente, a versao SOBE a cada mudanca (e como o vigia
+  // sabe que tem coisa nova), a comparacao de programas e do SERVIDOR, a
+  // primeira coleta nao alerta (senao 80 programas viram 80 alertas) e o
+  // alerta so sai onde a chave esta ligada.
+  let okPolitica = false;
+  try {
+    const cabP = { Authorization: 'Bearer ' + token };
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    DOCS.set('lojaStatus/POL__PC1', { codigo: 'POL', posto: 'PC1', nome: 'Loja Politica', tipo: 'interno', agentToken: 'tokpol', ultimoHeartbeatEm: Date.now(), eventos: [] });
+    const rotaPol = '/api/loja-status/POL/computadores/PC1/politica';
+    const semLogin = await enviarJson('PUT', rotaPol, { bloquearUsbStorage: true }, {});
+    // sem login o gate GLOBAL já barra (401) - quem prova o requireMaster é um
+    // usuário logado que NÃO é Master (tem a seção do NOC, mas não decide política)
+    DOCS.set('users/u-pol-comum', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'pol-comum@teste.local', username: 'polcomum',
+      permissions: { sections: ['suporte'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabComum = { Authorization: 'Bearer ' + (await auth.login('pol-comum@teste.local', 'SenhaDeTeste!2026')).token };
+    const comum = await enviarJson('PUT', rotaPol, { bloquearUsbStorage: true }, cabComum);
+    const p1 = await enviarJson('PUT', rotaPol, { papelDeParedeAtivo: true, bloquearUsbStorage: true, bloquearInstalacao: true, alertarInstalacao: true }, cabP);
+    const pol1 = p1.status === 200 ? JSON.parse(p1.corpo) : {};
+    const cfg1 = await ls.configuracaoAgente('POL', 'PC1', 'tokpol');
+    const p2 = await enviarJson('PUT', rotaPol, { alertarInstalacao: true }, cabP);
+    const pol2 = p2.status === 200 ? JSON.parse(p2.corpo) : {};
+    const cfg2 = await ls.configuracaoAgente('POL', 'PC1', 'tokpol');
+    // programas: 1a coleta e foto inicial; a 2a com item novo alerta
+    const rotaProg = '/api/loja-status/POL/computadores/PC1/programas';
+    const cabTok = { 'x-noc-token': 'tokpol' };
+    const prog1 = await postarJson(rotaProg, { programas: ['Google Chrome', 'Adobe Reader'] }, cabTok);
+    const prog2 = await postarJson(rotaProg, { programas: ['Google Chrome', 'Adobe Reader', 'uTorrent'] }, cabTok);
+    const docPol = DOCS.get('lojaStatus/POL__PC1') || {};
+    const progSemToken = await postarJson(rotaProg, { programas: ['X'] }, {});
+    // com o alerta DESLIGADO nao sai aviso nenhum
+    DOCS.set('lojaStatus/POL2__PC1', { codigo: 'POL2', posto: 'PC1', nome: 'Sem alerta', tipo: 'interno', agentToken: 'tok2', ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: false } });
+    await postarJson('/api/loja-status/POL2/computadores/PC1/programas', { programas: ['A'] }, { 'x-noc-token': 'tok2' });
+    const desl = await postarJson('/api/loja-status/POL2/computadores/PC1/programas', { programas: ['A', 'uTorrent'] }, { 'x-noc-token': 'tok2' });
+    const psPol = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'POL', posto: 'PC1', tipo: 'interno', agentToken: 'tokpol' });
+    const htmlNoc = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      'só o Master define a política (usuário do NOC logado não muda trava de máquina)':
+        semLogin.status === 401 && comum.status === 403 && p1.status === 200,
+      'a política chega ao agente pela configuração dele': cfg1.politica.bloquearUsbStorage === true
+        && cfg1.politica.papelDeParedeAtivo === true && cfg1.politica.bloquearInstalacao === true,
+      'a versão SOBE a cada mudança (é como o vigia sabe que tem política nova)':
+        Number(pol1.politicaVersao) > 0 && Number(pol2.politicaVersao) === Number(pol1.politicaVersao) + 1
+        && cfg2.politicaVersao === Number(pol2.politicaVersao),
+      'desmarcar desliga de verdade (não fica ligado pra sempre)':
+        cfg2.politica.bloquearUsbStorage === false && cfg2.politica.papelDeParedeAtivo === false && cfg2.politica.alertarInstalacao === true,
+      'a 1ª coleta é só a foto inicial (80 programas não viram 80 alertas)':
+        prog1.status === 200 && JSON.parse(prog1.corpo).novos === 0,
+      'programa novo é detectado pelo SERVIDOR e vira evento na máquina':
+        prog2.status === 200 && JSON.parse(prog2.corpo).novos === 1
+        && docPol.ultimoProgramaNovoDetalhe === 'uTorrent'
+        && (docPol.eventos || []).some((e) => e.tipo === 'programa-novo'),
+      'a comparação é do servidor (a máquina só manda a lista crua)':
+        /function programasNovos\(anteriores, atuais\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+        && !/programasNovos/.test(psPol),
+      'sem o token do computador a lista é recusada': progSemToken.status === 403,
+      'com o alerta DESLIGADO nenhum programa novo vira aviso':
+        desl.status === 200 && JSON.parse(desl.corpo).novos === 0
+        && !(DOCS.get('lojaStatus/POL2__PC1') || {}).ultimoProgramaNovoEm,
+      // agente: a divisão HKCU x HKLM é o coração disso
+      'papel de parede é HKCU e NÃO roda na instância de boot (SYSTEM não tem área de trabalho)':
+        /function Aplicar-PapelDeParede\(\$ligado\) \{\n  if \(\$Servico\) \{ return \}/.test(psPol)
+        && psPol.includes('HKCU:\\Control Panel\\Desktop'),
+      'USB e instalação são HKLM e exigem Administrador':
+        /function Aplicar-BloqueioUsb\(\$ligado\) \{\n  if \(-not \(Sou-Admin\)\) \{ return \$false \}/.test(psPol)
+        && /function Aplicar-BloqueioInstalacao\(\$ligado\) \{\n  if \(-not \(Sou-Admin\)\) \{ return \$false \}/.test(psPol),
+      'USB bloqueia SÓ armazenamento (USBSTOR 4/3) - pin pad e impressora seguem ligados':
+        psPol.includes('Services\\USBSTOR') && /-Name Start -Value \$\(if \(\$ligado\) \{ 4 \} else \{ 3 \}\)/.test(psPol)
+        && !/DisableUsb|USB\\\\Class|Disable all USB/i.test(psPol),
+      'instalar exige Administrador e VOLTA ao padrão do Windows ao desligar (0/3)':
+        /ConsentPromptBehaviorUser -Value \$\(if \(\$ligado\) \{ 0 \} else \{ 3 \}\)/.test(psPol),
+      'só reaplica quando a versão muda (não reescreve o registro a cada volta do laço)':
+        /if \(\$jaAplicada -eq \$versao\) \{ return \}/.test(psPol),
+      'sem Administrador a instância de boot NÃO marca como aplicada (tenta de novo depois)':
+        /if \(\$Servico -and -not \(\$okUsb -and \$okInst\)\)/.test(psPol),
+      'a tela do NOC tem as 4 chaves por máquina, só pro Master':
+        // as 4 chaves saem do MESMO catálogo que o servidor sanitiza - se uma
+        // sumir daqui, ela deixa de existir na tela sem ninguém notar
+        ['papelDeParedeAtivo', 'bloquearUsbStorage', 'bloquearInstalacao', 'alertarInstalacao']
+          .every((c) => new RegExp(`campo:'${c}'`).test(htmlNoc))
+        && /data-pol="\$\{i\.campo\}"/.test(htmlNoc)
+        && /el\.classList\.toggle\('hidden', !IS_MASTER\);/.test(htmlNoc)
+        && /function enviarPapelDeParede\(\)/.test(htmlNoc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPolitica = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (comum=${comum.status} p1=${p1.status} v1=${pol1.politicaVersao} v2=${pol2.politicaVersao} prog1=${prog1.corpo} prog2=${prog2.corpo} desl=${desl.corpo})`);
+  } catch (e) { okPolitica = false; console.log('  erro: ' + e.message); }
+  if (!okPolitica) ruins += 1;
+  console.log(`${okPolitica ? '✓' : '✗'} Política da máquina: papel de parede, pendrive, instalação com Administrador e alerta de programa novo`);
+
+  // ------------------------------------------------------------------
   // O APP "NoPulso" NAS LOJAS (pedido do Master, 12/09/2026): "no Chrome tem a
   // opcao de instalar e fica com esse App - quero do mesmo jeito ao instalar,
   // e se tiver o app antigo Zenith Ops, remover". O mesmo comando de
@@ -11471,7 +11572,7 @@ setTimeout(async () => {
       }
     } catch (e) { parseOk = false; }
     const conf = {
-      'VERSAO_VIGIA subiu pra 49 (os 52 agentes baixam e passam a instalar o app)': vgA.VERSAO_VIGIA === 49,
+      'VERSAO_VIGIA subiu (os 52 agentes baixam a versão nova e aplicam)': vgA.VERSAO_VIGIA >= 50,
       'todo tipo de computador ganha a funcao Instalar-AppNoPulso': scripts.every((sc) => /function Instalar-AppNoPulso \{/.test(sc)),
       'o script continua comecando com "# NOCZenith" (trava do auto-update)': scripts.every((sc) => sc.startsWith('# NOCZenith')),
       'instala pelo WebAppInstallForceList do Chrome E do Edge, apontando pro APP_BASE_URL':

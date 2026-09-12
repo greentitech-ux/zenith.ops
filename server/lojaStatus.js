@@ -969,6 +969,74 @@ async function tokenDoComputador(codigo, posto) {
 
 // Configuração mínima que o agente consulta com seu token. O print continua
 // exclusivamente local: esta rota só informa se o atalho está habilitado.
+// ---- POLITICA DA MAQUINA (pedido do Master, 12/09/2026) ----
+// Quatro travas de endpoint, LIGADAS UMA A UMA por computador no NOC:
+//   papelDeParede  - imagem fixa da rede na area de trabalho (HKCU)
+//   bloquearUsbStorage - so PENDRIVE/HD externo (USBSTOR). Pin pad, impressora
+//                    termica, Zebra, leitor e teclado/mouse continuam ligados:
+//                    bloquear "USB inteiro" pararia a loja.
+//   bloquearInstalacao - instalar passa a exigir Administrador (UAC nega a
+//                    elevacao pro usuario comum). Atualizacao de Chrome/PDV,
+//                    que roda por servico ja elevado, nao passa por ai.
+//   alertarInstalacao  - o agente manda a lista de programas e o servidor
+//                    avisa quando aparece um que nao estava la antes.
+// Tudo REVERSIVEL: desligar a chave devolve a maquina ao estado anterior.
+function sanitizarPolitica(entrada) {
+  const p = entrada && typeof entrada === 'object' ? entrada : {};
+  return {
+    papelDeParedeAtivo: !!p.papelDeParedeAtivo,
+    bloquearUsbStorage: !!p.bloquearUsbStorage,
+    bloquearInstalacao: !!p.bloquearInstalacao,
+    alertarInstalacao: !!p.alertarInstalacao,
+  };
+}
+
+async function definirPolitica(codigo, posto, entrada) {
+  const politica = sanitizarPolitica(entrada);
+  // a versao sobe a cada mudanca: e assim que o agente sabe que tem politica
+  // nova pra aplicar sem precisar comparar campo a campo na maquina
+  const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data() || {};
+  const politicaVersao = Number(atual.politicaVersao || 0) + 1;
+  await gravarEEspelhar(codigo, posto, { politica, politicaVersao });
+  return { ...politica, politicaVersao };
+}
+
+// programas instalados: o agente manda a lista, o servidor guarda e diz o que
+// e NOVO em relacao a ultima. A comparacao mora aqui (e nao na maquina) pra
+// um agente adulterado nao conseguir esconder o que instalou.
+function programasNovos(anteriores, atuais) {
+  const antes = new Set((anteriores || []).map((x) => String(x)));
+  return (atuais || []).map((x) => String(x)).filter((x) => x && !antes.has(x));
+}
+
+async function registrarProgramas(codigo, posto, lista, token) {
+  const ref = COLLECTION.doc(docIdFor(codigo, posto));
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Computador não encontrado.');
+  const atual = snap.data();
+  exigirTokenSeTiver(atual, token);
+  const limpa = (Array.isArray(lista) ? lista : []).slice(0, 400)
+    .map((x) => String(x || '').trim().slice(0, 120)).filter(Boolean);
+  if (!limpa.length) return { novos: [] };
+  // primeira coleta e so a FOTO inicial - a maquina ja chega com 80 programas
+  // e avisar todos eles seria ruido, nao alerta
+  const primeira = !Array.isArray(atual.programas);
+  // alerta so onde o Master ligou a chave; a lista e guardada de qualquer
+  // jeito, pra quando ele ligar ja existir base de comparacao
+  const alerta = !!(atual.politica && atual.politica.alertarInstalacao);
+  const novos = (primeira || !alerta) ? [] : programasNovos(atual.programas, limpa);
+  const agora = Date.now();
+  const patch = { programas: limpa, programasEm: agora };
+  if (novos.length) {
+    const evento = { tipo: 'programa-novo', em: agora, detalhe: novos.slice(0, 10).join(' · ') };
+    patch.eventos = [...(atual.eventos || []), evento].slice(-EVENTOS_MAX);
+    patch.ultimoProgramaNovoEm = agora;
+    patch.ultimoProgramaNovoDetalhe = evento.detalhe;
+  }
+  await gravarEEspelhar(codigo, posto, patch);
+  return { novos, nome: atual.nome || `${codigo}/${posto}`, primeira };
+}
+
 async function configuracaoAgente(codigo, posto, token) {
   const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
   if (!snap.exists) throw new Error('Computador não encontrado.');
@@ -980,7 +1048,12 @@ async function configuracaoAgente(codigo, posto, token) {
   // so o interno recebe.
   const capturarAgora = capturaPendente(atual);
   if (atual.noPulsoPrintCapturarEm) await gravarEEspelhar(codigo, posto, { noPulsoPrintCapturarEm: null });
-  return { noPulsoPrint: !!atual.noPulsoPrint, capturarAgora };
+  return {
+    noPulsoPrint: !!atual.noPulsoPrint,
+    capturarAgora,
+    politica: sanitizarPolitica(atual.politica),
+    politicaVersao: Number(atual.politicaVersao || 0),
+  };
 }
 
 // pedido de captura do Master vale 5 minutos: tempo de sobra pro agente
@@ -2647,6 +2720,7 @@ module.exports = {
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
+  sanitizarPolitica, definirPolitica, programasNovos, registrarProgramas,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, reportarEstadoAgente, pedirCaptura,
 };

@@ -336,6 +336,10 @@ const ROTA_LOJA_IP_LOCAL_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/
 const ROTA_LOJA_CONFIG_AGENTE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/configuracao-agente$/;
 // O agente conta versao e estado do NoPulsoPrint (ver Reportar-EstadoAgente no
 // vigiaScript.js) - mesmo motivo publico do ip-local: quem chama e a maquina
+// O agente manda a lista de programas instalados (ver Inventariar-Programas no
+// vigiaScript.js). Publica pelo mesmo motivo do ip-local: quem chama e a
+// maquina, com o token dela - quem COMPARA e diz o que e novo e o servidor.
+const ROTA_LOJA_PROGRAMAS_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/programas$/;
 const ROTA_LOJA_ESTADO_AGENTE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/estado-agente$/;
 // NOCZenith reporta o resultado de um comando do agente (ver
 // agenteAcoes.js/lojaStatus.js enfileirarComando) - mesmo motivo publico
@@ -364,6 +368,7 @@ function rotaPublicaSemDashboard(path) {
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
     || ROTA_LOJA_TELEMETRIA_RE.test(path) || ROTA_LOJA_CONFIG_AGENTE_RE.test(path)
+    || ROTA_LOJA_PROGRAMAS_RE.test(path)
     || ROTA_LOJA_ESTADO_AGENTE_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
@@ -1463,6 +1468,30 @@ app.get('/api/loja-status/:codigo/computadores/:posto/configuracao-agente', asyn
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
+});
+
+// o agente reporta os programas instalados; o servidor compara com a ultima
+// lista e alerta o Master no que for NOVO (a comparacao nunca fica na maquina)
+app.post('/api/loja-status/:codigo/computadores/:posto/programas', async (req, res) => {
+  try {
+    const r = await lojaStatus.registrarProgramas(req.params.codigo, req.params.posto, req.body.programas, req.headers['x-noc-token'] || null);
+    if (r.novos && r.novos.length) {
+      const mapa = await construirUnidadesMapa();
+      console.log(`[NOC] programa novo em ${req.params.codigo}/${req.params.posto}: ${r.novos.join(' · ')}`);
+      push.notifyProgramaNovo(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, r.nome, req.params.posto, r.novos)
+        .catch((err) => console.error('Erro no push de programa novo:', err.message));
+    }
+    res.json({ ok: true, novos: (r.novos || []).length });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+app.get('/api/loja-status/papel-de-parede', async (req, res) => {
+  const cfg = await lojaStatus.getConfig();
+  const pp = cfg && cfg.papelDeParede;
+  if (!pp || !pp.caminho) return res.sendStatus(404);
+  storage.streamArquivo(pp.caminho, pp.tipo || 'image/jpeg', res);
 });
 
 // o .ps1 CARREGA o segredo do computador (agentToken) assado dentro dele -
@@ -4866,6 +4895,30 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
 // config do NOC (Master): hoje so o toggle do push de acesso remoto
 app.get('/api/loja-status/config', auth.requireMaster, async (req, res) => {
   res.json(await lojaStatus.getConfig());
+});
+// POLITICA DA MAQUINA (papel de parede, USB, instalacao) - so o Master liga
+app.put('/api/loja-status/:codigo/computadores/:posto/politica', auth.requireMaster, async (req, res) => {
+  try {
+    const politica = await lojaStatus.definirPolitica(req.params.codigo, req.params.posto, req.body);
+    broadcast('loja-status-atualizado', { codigo: req.params.codigo, posto: req.params.posto });
+    res.json(politica);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// papel de parede do parque: UMA imagem pra rede toda; cada computador decide
+// se aplica (politica.papelDeParedeAtivo). Servida sem sessao porque quem
+// baixa e a maquina - o caminho e opaco e a imagem e do proprio grupo.
+app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
+    const caminho = await storage.salvarArquivo('parque', req.file, 'papel-de-parede');
+    const cfg = await lojaStatus.setConfig({ papelDeParede: { caminho, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() } });
+    res.json(cfg.papelDeParede);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 app.put('/api/loja-status/config', auth.requireMaster, async (req, res) => {
   try {
