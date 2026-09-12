@@ -11684,6 +11684,75 @@ setTimeout(async () => {
   console.log(`${okApiToken ? '✓' : '✗'} Token de API do Master: entra como ele mesmo, pelo MESMO caminho de permissão da sessão`);
 
   // ------------------------------------------------------------------
+  // A DOCUMENTACAO DO BENI (docs/BENI_API.md) e' lida por um agente que age
+  // como o Master, sem ninguem conferindo rota por rota. Documento que mente
+  // pro agente nao e' documento desatualizado, e' bug: ele tenta uma rota que
+  // nao existe, ou - pior - acha que pode uma coisa que o servidor so deixa
+  // com a senha do Master, e vai pedir a senha no chat do Cowork.
+  //
+  // Por isso o arquivo e' TESTADO contra o index.js:
+  //   1) toda rota citada existe de verdade;
+  //   2) a lista de "pede a senha do Master" e' exatamente a do codigo - se
+  //      alguem colocar essa trava numa rota nova e esquecer do documento, a
+  //      suite reprova aqui.
+  let okDocBeni = false;
+  try {
+    const fs = require('fs');
+    const doc = fs.readFileSync(__dirname + '/../docs/BENI_API.md', 'utf8');
+    const idxSrc = fs.readFileSync(__dirname + '/index.js', 'utf8');
+    // :id, :codigo, :formato(csv|pdf)... viram o mesmo curinga dos dois lados
+    const norm = (r) => r.replace(/:[A-Za-z0-9_]+(\([^)]*\))?/g, ':X');
+    const registradas = new Set([...idxSrc.matchAll(/^app\.(get|post|put|patch|delete)\('([^']+)'/gm)]
+      .map((m) => `${m[1].toUpperCase()} ${norm(m[2])}`));
+    const citadas = [...new Set([...doc.matchAll(/`(GET|POST|PUT|PATCH|DELETE) (\/api\/[^`]+)`/g)]
+      .map((m) => `${m[1]} ${norm(m[2].trim())}`))];
+    const fantasmas = citadas.filter((r) => !registradas.has(r));
+
+    // quem pede a senha do Master, lido do codigo (a funcao exigirSenhaDoMaster
+    // fica FORA de rota - por isso a declaracao dela nao conta)
+    const comSenha = new Set();
+    let rotaAtual = null;
+    for (const l of idxSrc.split('\n')) {
+      const m = l.match(/^app\.(get|post|put|patch|delete)\('([^']+)'/);
+      if (m) rotaAtual = `${m[1].toUpperCase()} ${norm(m[2])}`;
+      if (/^async function exigirSenhaDoMaster/.test(l)) rotaAtual = null;
+      if (rotaAtual && /exigirSenhaDoMaster\(req, res\)|auth\.verifyPassword\(req\.user\.id/.test(l)) comSenha.add(rotaAtual);
+    }
+    // a TABELA da seção §4 - só as linhas de tabela, porque a seção também
+    // fala das portas /api/bot, que são de outro token e não pedem senha
+    const secao4 = doc.slice(doc.indexOf('## 4.'), doc.indexOf('## 5.'));
+    const tabela4 = secao4.split('\n').filter((l) => l.startsWith('|')).join('\n');
+    const citadasNa4 = new Set([...tabela4.matchAll(/`(GET|POST|PUT|PATCH|DELETE) (\/api\/[^`]+)`/g)]
+      .map((m) => `${m[1]} ${norm(m[2].trim())}`));
+    const naoDocumentadas = [...comSenha].filter((r) => !citadasNa4.has(r));
+    const inventadas = [...citadasNa4].filter((r) => !comSenha.has(r));
+
+    const conf = {
+      'nenhuma rota citada no documento é inventada':
+        fantasmas.length === 0 || `não existem: ${fantasmas.join(' · ')}`,
+      'o documento cita rota de verdade (não ficou vazio por regex errada)':
+        citadas.length >= 30 || `só ${citadas.length} rotas citadas`,
+      'toda rota que pede a senha do Master está avisada no documento':
+        naoDocumentadas.length === 0 || `falta avisar: ${naoDocumentadas.join(' · ')}`,
+      'e o documento não inventa trava que o código não tem':
+        inventadas.length === 0 || `não pedem senha: ${inventadas.join(' · ')}`,
+      'o mínimo de 32 caracteres do token bate com o código':
+        /MASTER_API_TOKEN_MIN = 32/.test(fs.readFileSync(__dirname + '/auth.js', 'utf8'))
+        && /Mínimo de 32\b/.test(doc),
+      // o documento afirma "nada do que voce faz para numa fila" - isso so e'
+      // verdade porque desviarSeQaMaster ignora quem nao e' QA Master
+      'a promessa de "não há fila" bate com o desvio do código':
+        /if \(!req\.isQaMaster\) return false;/.test(idxSrc)
+        && /Não há fila\.|não há fila/i.test(doc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
+    okDocBeni = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDocBeni = false; console.log('  erro: ' + e.message); }
+  if (!okDocBeni) ruins += 1;
+  console.log(`${okDocBeni ? '✓' : '✗'} Documentação do Beni: nenhuma rota inventada, e toda trava de senha avisada`);
+
+  // ------------------------------------------------------------------
   // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
   // adyen-monitor, aposentar de vez"). O CLAUDE.md §4 diz que o dominio velho
   // NUNCA pode ser desligado - e o motivo e concreto: o agente so descobre que
