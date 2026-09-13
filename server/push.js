@@ -890,6 +890,38 @@ async function notifyInternetUnidadeNormalizou(unidadeNome, t) {
   }
 }
 
+// Dispositivo MONITORADO trocou de IP (pedido do Master, 13/09: a Zebra "perde
+// muito IP, muda muito de IP, precisa atualizar no Servidor e isso só
+// manualmente"). É o alerta mais silencioso do NOC de propósito: nada caiu,
+// nada apitou - a impressora continua ativa na rede, só que noutro endereço, e
+// o servidor segue mandando trabalho pro antigo até alguém perceber.
+//
+// O texto traz os DOIS endereços porque a ação é exatamente essa: trocar de um
+// pelo outro na configuração do servidor.
+async function notifyDispositivoIpMudou(unidadeNome, codigo, apelido, tipoRotulo, de, para) {
+  const que = apelido || tipoRotulo || 'Dispositivo';
+  const dados = {
+    title: '🔀 IP mudou',
+    body: `${que} · ${unidadeNome || codigo}: o endereço passou de ${de} para ${para}. `
+      + 'Atualize no servidor da loja — até lá, o trabalho continua saindo pro endereço antigo.',
+    tag: `noc-ip-${codigo}-${apelido || tipoRotulo || 'dispositivo'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-ip', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (IP mudou):', err.message);
+    }
+  }
+}
+
 async function notifyReinicioPendente(unidadeNome, codigo, computadorNome, posto, dias) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
@@ -1344,6 +1376,7 @@ module.exports = {
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyDispositivoOffline, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
+  notifyDispositivoIpMudou,
   notifyDivergenciaCaixa, notifyDispositivoOnline,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,

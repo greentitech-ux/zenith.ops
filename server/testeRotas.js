@@ -6997,6 +6997,134 @@ setTimeout(async () => {
   if (!okDispositivoAlarme) ruins += 1;
   console.log(`${okDispositivoAlarme ? '✓' : '✗'} NOC: impressora/VM marcada como monitorada alarma ao perder rede (só depois de ~2 scans ausentes), nunca pra quem não foi marcado`);
 
+  // ------------------------------------------------------------------
+  // A ZEBRA TROCA DE IP. Pedido do Master (13/09/2026): "ela perde muito IP,
+  // muda muito de IP, precisamos ver uma forma de identificar quando mudar de
+  // IP pois precisa atualizar no Servidor (...) mas se não, precisa ao menos
+  // ter alerta".
+  //
+  // É o alerta mais silencioso do NOC: nada cai. A impressora continua ATIVA
+  // na rede, só que noutro endereço - e o servidor da loja segue mandando
+  // trabalho pro antigo. Nenhum alarme existente pega isso, porque todos eles
+  // perguntam "sumiu?" e a resposta aqui é não.
+  //
+  // Só pra dispositivo MONITORADO: numa loja o DHCP troca IP de celular o dia
+  // inteiro, e alertar por tudo que muda de endereço seria ruído puro.
+  let okIpMudou = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCIP';
+    await ls.cadastrarComputador(UNI, 'PDV-IP', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-IP').posto;
+    const idDoc = `lojaStatus/${UNI}__${posto}`;
+    const MAC_ZEBRA = 'a4:2b:b0:99:88:11';
+    const MAC_CELULAR = 'a4:2b:b0:99:88:22';
+    await ls.definirApelidoDispositivo(UNI, MAC_ZEBRA, { apelido: 'Zebra do balcão', tipo: 'impressora', monitorar: true });
+    // celular NÃO monitorado, trocando de IP o tempo todo (é o caso comum na
+    // loja - e é exatamente por isso que ele não pode alarmar)
+    await ls.definirApelidoDispositivo(UNI, MAC_CELULAR, { apelido: 'Celular do gerente', tipo: 'celular' });
+
+    const comDisp = (zebraIp, celularIp) => {
+      const b = DOCS.get(idDoc);
+      DOCS.set(idDoc, {
+        ...b,
+        dispositivos: [
+          { mac: MAC_ZEBRA, ip: zebraIp, nome: 'ZEBRA', desde: Date.now() - 86400000, visto: Date.now(), ativo: true },
+          { mac: MAC_CELULAR, ip: celularIp, nome: 'CEL', desde: Date.now() - 86400000, visto: Date.now(), ativo: true },
+        ],
+      });
+      ls.descartarEspelhoTeste();
+      return ls.varrerAlertas();
+    };
+    const doIp = (ts) => ts.filter((t) => t.codigo === UNI && t.tipo === 'dispositivo-ip-mudou');
+
+    // 1ª varredura: só grava a linha de base, em silêncio
+    const primeira = doIp(await comDisp('10.0.0.50', '10.0.0.90'));
+    // mesmo IP de novo: nada
+    const parada = doIp(await comDisp('10.0.0.50', '10.0.0.90'));
+    // o DHCP mexeu nos dois - só a Zebra (monitorada) alarma
+    const mudou = doIp(await comDisp('10.0.0.77', '10.0.0.91'));
+    const celularAlarmou = mudou.some((t) => t.mac === MAC_CELULAR);
+    // varrer de novo sem mudar nada não repete
+    const naoRepete = doIp(await comDisp('10.0.0.77', '10.0.0.91'));
+    // trocou outra vez: alarma de novo, e o "de" agora é o endereço do meio
+    // (e não o original - senão o texto mandaria trocar de um IP que já não
+    // está em lugar nenhum)
+    const mudouDeNovo = doIp(await comDisp('10.0.0.88', '10.0.0.91'));
+
+    // sumir e voltar NÃO pode apagar a linha de base do IP: era o que o
+    // patch de "voltou" fazia ao reescrever a entrada inteira
+    const bOff = DOCS.get(idDoc);
+    DOCS.set(idDoc, { ...bOff, dispositivos: bOff.dispositivos.map((d) => (d.mac === MAC_ZEBRA ? { ...d, ativo: false, visto: Date.now() - 130 * 60 * 1000 } : d)) });
+    ls.descartarEspelhoTeste();
+    await ls.varrerAlertas();
+    const voltouMesmoIp = doIp(await comDisp('10.0.0.88', '10.0.0.91'));
+    const alarme = (DOCS.get(idDoc) || {}).dispositivosAlarme || {};
+
+    // o comando de reset da Zebra tem que limpar a FILA DO WINDOWS também
+    const cmdZebra = ls.comandoResetZebra([{ ip: '10.0.0.88' }]);
+    const resolverIp = ls.resolverIpImpressora;
+    const srcIdxIp = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const srcPushIp = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const iN = srcPushIp.indexOf('async function notifyDispositivoIpMudou');
+    const corpoN = srcPushIp.slice(iN, srcPushIp.indexOf('\nasync function ', iN + 10));
+
+    const conf = {
+      'a primeira varredura só grava a linha de base, sem alarmar': !primeira.length,
+      'IP igual não alarma': !parada.length,
+      'trocou de IP: alarma uma vez, com os dois endereços':
+        mudou.length === 1 && mudou[0].mac === MAC_ZEBRA && mudou[0].de === '10.0.0.50' && mudou[0].para === '10.0.0.77'
+        && mudou[0].apelido === 'Zebra do balcão',
+      'celular (não monitorado) trocando de IP nunca alarma': !celularAlarmou,
+      'varrer de novo sem mudança não repete': !naoRepete.length,
+      'trocou outra vez: o "de" é o endereço mais recente, não o original':
+        mudouDeNovo.length === 1 && mudouDeNovo[0].de === '10.0.0.77' && mudouDeNovo[0].para === '10.0.0.88',
+      'sumir e voltar no MESMO IP não alarma (a linha de base sobrevive à volta)':
+        !voltouMesmoIp.length && (alarme[MAC_ZEBRA] || {}).ipAvisado === '10.0.0.88',
+      'o reset da Zebra limpa a fila do WINDOWS antes do ~JA/~JR, só das impressoras daquele IP':
+        /function Limpar-FilaDoIp\(\$ip\)/.test(cmdZebra)
+        && /Win32_TCPIpPrinterPort[\s\S]{0,120}HostAddress -eq \$ip/.test(cmdZebra)
+        && /\$portas -contains \$_\.PortName/.test(cmdZebra)
+        && /CancelAllJobs/.test(cmdZebra)
+        && cmdZebra.indexOf('Limpar-FilaDoIp $ip') < cmdZebra.indexOf('Zpl-Enviar $ip "~JA"'),
+      // o spooler e' compartilhado com a termica da cozinha e a fiscal: este
+      // comando RELATA o travado em vez de reiniciar o servico - a garantia
+      // "nao mexe na maquina" do reset da Zebra continua de pe
+      'trabalho travado no spooler é RELATADO, nunca resolvido reiniciando serviço da máquina':
+        /if \(\$resta -gt 0\) \{ return "\$antes na fila do Windows, \$resta travado\(s\) no spooler/.test(cmdZebra)
+        && !/Restart-Service/.test(cmdZebra) && !/Stop-Service/.test(cmdZebra) && !/shutdown/i.test(cmdZebra),
+      // Dom Bessa, 13/09: a impressora foi de .54 pra .52 e o reset caiu no
+      // .54 ("FALHOU - sem resposta na 9100"). A leitura VELHA ganhava da
+      // leitura de agora só por estar antes na lista.
+      'o comando usa o endereço MAIS FRESCO da impressora, não o primeiro da lista': await (async () => {
+        const outraMaq = 'PDV-IP2';
+        await ls.cadastrarComputador(UNI, outraMaq, 'interno');
+        const posto2 = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === outraMaq).posto;
+        const agora = Date.now();
+        // a máquina que vai rodar o comando tem a leitura VELHA (.54, inativa)
+        const b1 = DOCS.get(idDoc);
+        DOCS.set(idDoc, { ...b1, dispositivos: [{ mac: MAC_ZEBRA, ip: '10.161.124.54', nome: 'ZEBRA', desde: agora - 86400000, visto: agora - 3 * 3600 * 1000, ativo: false }] });
+        // a outra máquina da loja viu o endereço de AGORA (.52, ativo)
+        const b2 = DOCS.get(`lojaStatus/${UNI}__${posto2}`);
+        DOCS.set(`lojaStatus/${UNI}__${posto2}`, { ...b2, dispositivos: [{ mac: MAC_ZEBRA, ip: '10.161.124.52', nome: 'ZEBRA', desde: agora - 86400000, visto: agora, ativo: true }] });
+        ls.descartarEspelhoTeste();
+        const ip = await ls.resolverIpImpressora(UNI, posto);
+        return ip === '10.161.124.52';
+      })(),
+      'index.js despacha o push de IP alterado e deixa a troca no log':
+        /t\.tipo === 'dispositivo-ip-mudou'/.test(srcIdxIp) && /push\.notifyDispositivoIpMudou\(nome, t\.codigo, t\.apelido, t\.tipoRotulo, t\.de, t\.para\)/.test(srcIdxIp)
+        && /trocou de IP: \$\{t\.de\} -> \$\{t\.para\}/.test(srcIdxIp),
+      'o push leva os dois endereços e diz o que fazer, no mesmo gate dos outros alarmes':
+        /passou de \$\{de\} para \$\{para\}/.test(corpoN) && /Atualize no servidor/.test(corpoN)
+        && /podeReceberCritico\(sub\)/.test(corpoN) && !/deu errado|Ops/i.test(corpoN),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okIpMudou = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (primeira=${primeira.length} mudou=${JSON.stringify(mudou)} deNovo=${JSON.stringify(mudouDeNovo)} alarme=${JSON.stringify(alarme[MAC_ZEBRA])})`);
+  } catch (e) { okIpMudou = false; console.log('  erro: ' + e.message); }
+  if (!okIpMudou) ruins += 1;
+  console.log(`${okIpMudou ? '✓' : '✗'} NOC: impressora monitorada que TROCA DE IP vira alerta (e o reset da Zebra zera a fila do Windows)`);
+
   // ---- NOC: tipos de aparelho abertos (Impressora, VM Host, PULSE, GCOM + "+ Novo") ----
   // Pedido do Master: a lista fechada em 2 tipos não cobria o que ele enxerga
   // na loja. O tipo criado numa unidade tem que valer pra rede toda, e um

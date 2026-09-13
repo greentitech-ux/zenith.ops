@@ -14641,6 +14641,14 @@ function aquecerBoot(promessa, ms) {
             .catch((err) => console.error('Erro no push de dispositivo offline:', err.message));
           continue;
         }
+        // trocou de IP: nada caiu, e e' justamente por isso que precisa de
+        // alerta - sem ele a impressora some do servidor em silencio
+        if (t.tipo === 'dispositivo-ip-mudou') {
+          console.log(`[NOC] ${t.apelido || t.tipoRotulo || 'dispositivo'} de ${nome} (${t.codigo}) trocou de IP: ${t.de} -> ${t.para} (mac ${t.mac})`);
+          push.notifyDispositivoIpMudou(nome, t.codigo, t.apelido, t.tipoRotulo, t.de, t.para)
+            .catch((err) => console.error('Erro no push de IP alterado:', err.message));
+          continue;
+        }
         if (t.tipo === 'dispositivo-online') {
           push.notifyDispositivoOnline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac, t.tipoRotulo)
             .catch((err) => console.error('Erro no push de dispositivo voltou:', err.message));
