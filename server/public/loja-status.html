@@ -215,6 +215,19 @@
   .uni-bar .b-nv{background:var(--muted);opacity:.5;}
   @media(max-width:640px){
     .uni-panel{padding:13px 12px;}
+    /* DUAS colunas no celular (pedido do Master, 13/09). Com
+       minmax(210px,1fr) o auto-fill só cabia UMA por linha num telefone -
+       18 unidades viravam 18 telas de rolagem pra ver o parque. Duas
+       colunas fixas cortam isso pela metade sem espremer nada: o nome ganha
+       duas linhas em vez de reticências, e os números continuam grandes,
+       que é o que se lê de longe. */
+    .uni-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+    .uni-card{padding:9px 10px;}
+    .uni-card-nome{font-size:11.5px;margin-bottom:6px;white-space:normal;
+      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+      overflow:hidden;min-height:2.6em;line-height:1.3;}
+    .uni-card-stats{gap:9px;font-size:11px;}
+    .uni-stat b{font-size:14px;}
     .uni-panel-head{align-items:flex-start;}
     .uni-panel-sub{max-width:44%;text-align:right;line-height:1.35;}
     .quedas-tab{min-width:540px;font-size:12px;}

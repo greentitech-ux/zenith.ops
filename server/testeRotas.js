@@ -7125,6 +7125,88 @@ setTimeout(async () => {
   if (!okIpMudou) ruins += 1;
   console.log(`${okIpMudou ? '✓' : '✗'} NOC: impressora monitorada que TROCA DE IP vira alerta (e o reset da Zebra zera a fila do Windows)`);
 
+  // ------------------------------------------------------------------
+  // REINICIAR A PARTIR DA SAÚDE DAS MÁQUINAS. Pedido do Master (13/09/2026):
+  // "se aqui é saúde das máquinas, aqui precisa ter também o botão de
+  // reiniciar". O card já diz "ligado há 24 dias sem reiniciar" - sem a ação
+  // junto, quem lê tem que sair, abrir o NOC e achar a máquina de novo.
+  //
+  // O que este teste protege: a tela NOVA não pode afrouxar a trava da tela
+  // ANTIGA. Reiniciar máquina de loja é Master + senha do Master, e a rota é
+  // a MESMA do NOC - nada de rota nova com regra própria.
+  let okReiniciarSaude = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'noc-maquinas.html'), 'utf8');
+    const corpoConfirmar = (html.match(/async function confirmarReiniciar\(\)\{[\s\S]*?\n\}/) || [''])[0];
+    const corpoEnviar = (html.match(/async function enviarTarefa\(alvo, tarefa, senha\)\{[\s\S]*?\n\}/) || [''])[0];
+    const corpoCard = html.slice(html.indexOf('function cardHtml(c){'), html.indexOf('function render(){'));
+
+    // a rota que a tela chama continua exigindo Master E senha - provado pela
+    // porta, não pelo código: um usuário logado que NÃO é master leva 403
+    let tokenGer = null;
+    try { tokenGer = (await auth.login('gerente-teste@teste.local', 'SenhaDeTeste!2026')).token; } catch {}
+    const semMaster = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: 'DOM_19706', posto: 'PC1' }], tarefa: 'reiniciar', password: 'SenhaDeTeste!2026' },
+      tokenGer ? { Authorization: 'Bearer ' + tokenGer } : {});
+    const semSenha = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: 'DOM_19706', posto: 'PC1' }], tarefa: 'reiniciar' },
+      { Authorization: 'Bearer ' + token });
+    const senhaErrada = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: 'DOM_19706', posto: 'PC1' }], tarefa: 'reiniciar', password: 'nao-e-a-senha' },
+      { Authorization: 'Bearer ' + token });
+
+    const conf = {
+      'o botão existe no card e chama a caixa de confirmação':
+        /<button type="button" class="btn-reiniciar \$\{c\.precisaReiniciar\?'destaque':''\}" onclick="abrirReiniciar\(/.test(corpoCard)
+        && /🔁 Reiniciar<\/button>/.test(corpoCard),
+      'só pra MASTER e só pra computador interno (os outros nem veem o botão)':
+        /const podeComandar = EH_MASTER && c\.tipo === 'interno';/.test(corpoCard)
+        && /const acoes = !podeComandar \? '' :/.test(corpoCard)
+        && /EH_MASTER = me\.role === 'master';/.test(html),
+      'usa a MESMA rota do NOC, com a senha do Master em todo envio':
+        /fetch\('\/api\/loja-status\/manutencao\/reiniciar', \{/.test(corpoEnviar)
+        && /body: JSON\.stringify\(\{ alvos: \[\{ codigo: alvo\.codigo, posto: alvo\.posto \}\], tarefa, password: senha \}\)/.test(corpoEnviar)
+        && /if\(!senha\)\{ erro\.textContent = 'Digite sua senha de Master\.'/.test(corpoConfirmar),
+      'a caixa avisa dos 2 minutos antes de mandar': /aviso de <b>2 minutos<\/b> antes de reiniciar/.test(html),
+      'depois de enfileirar, o mesmo card oferece ABORTAR dentro dos 2 minutos':
+        /ENVIADOS\.set\(chaveDe\(alvo\.codigo, alvo\.posto\), \{ em: Date\.now\(\), senha \}\)/.test(corpoConfirmar)
+        && /setTimeout\(\(\) => \{ ENVIADOS\.delete\(chaveDe\(alvo\.codigo, alvo\.posto\)\); render\(\); \}, 2 \* 60 \* 1000\)/.test(corpoConfirmar)
+        && /✋ Abortar reinício<\/button>/.test(corpoCard)
+        && /enviarTarefa\(alvo, 'abortar', guardado\.senha\)/.test(html),
+      'senha e alvo NÃO ficam guardados no navegador (nem localStorage, nem sessionStorage)':
+        !/localStorage\.setItem/.test(html) && !/sessionStorage/.test(html),
+      'recusa e aprovação pendente aparecem no card, não somem num alert':
+        /if\(d\.pendenteAprovacao\)\{/.test(corpoConfirmar) && /if\(!d\.enfileirados\)\{/.test(corpoConfirmar)
+        && /mostrarMsgCard\(alvo, `Não foi enfileirado: \$\{motivo\}`, 'err'\)/.test(corpoConfirmar),
+      // 13/09: "também precisa aparecer todos os dados do computador que já
+      // temos" - estava tudo no documento e só a ficha do NOC mostrava
+      'a ficha traz o resto do que a máquina já reporta (IP, RAM, agente, Tailscale, reinício)': (() => {
+        const nm = require('fs').readFileSync(__dirname + '/nocMaquina.js', 'utf8');
+        const passaNoPayload = ['ram:', 'ipLocal:', 'abertoDesde:', 'agenteVersao:', 'agenteNoPulsoPrint:', 'tailscale:', 'reinicioResumo:', 'anydeskId:']
+          .every((campo) => nm.includes(campo));
+        const mostraNoCard = ["linha('IP local'", "linha('RAM'", "linha('NOC-NoPulso'", "linha('Tailscale'", "linha('Reinício automático'", "linha('Última batida'"]
+          .every((t) => corpoCard.includes(t));
+        // o resumo do plano vem PRONTO do servidor - a regra não pode ter uma
+        // segunda cópia no navegador
+        const semCopiaDaRegra = /resumoDoPlano\(plano\), reinicioTolerancia: toleranciaDe\(d\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+          && !/reinicioSemanal/.test(html);
+        return passaNoPayload && mostraNoCard && semCopiaDaRegra;
+      })(),
+      'a ficha fica dentro do <details> (card curto continua rolável no celular)':
+        /<details class="detalhe"><summary>ficha completa do computador<\/summary>/.test(corpoCard),
+      'nome de computador com aspa não quebra o onclick (escapeJs no atributo)':
+        /const escapeJs = \(s\) =>/.test(html) && /onclick="abrirReiniciar\('\$\{escapeJs\(c\.codigo\)\}','\$\{escapeJs\(c\.posto\)\}','\$\{escapeJs\(c\.nome\)\}'/.test(corpoCard),
+      'pela porta: quem não é Master leva 403 na rota': semMaster.status === 403,
+      'pela porta: Master sem senha é recusado': semSenha.status === 400 || semSenha.status === 401,
+      'pela porta: senha errada é recusada': senhaErrada.status === 400 || senhaErrada.status === 401,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okReiniciarSaude = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (semMaster=${semMaster.status} semSenha=${semSenha.status} senhaErrada=${senhaErrada.status})`);
+  } catch (e) { okReiniciarSaude = false; console.log('  erro: ' + e.message); }
+  if (!okReiniciarSaude) ruins += 1;
+  console.log(`${okReiniciarSaude ? '✓' : '✗'} Saúde das Máquinas: dá pra reiniciar (e abortar) do próprio card, com a MESMA trava de Master + senha do NOC`);
+
   // ---- NOC: tipos de aparelho abertos (Impressora, VM Host, PULSE, GCOM + "+ Novo") ----
   // Pedido do Master: a lista fechada em 2 tipos não cobria o que ele enxerga
   // na loja. O tipo criado numa unidade tem que valer pra rede toda, e um
@@ -13156,7 +13238,16 @@ setTimeout(async () => {
       'Unidade fica congelada e nome longo corta com reticências no celular':
         /\.quedas-tab th:first-child,\.quedas-tab td:first-child\{position:sticky;left:0;/.test(html)
         && /\.quedas-unidade-nome\{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\}/.test(html)
-        && /@media\(max-width:640px\)[\s\S]{0,800}width:132px;min-width:132px/.test(html),
+        // o BLOCO de celular inteiro, não uma janela de N caracteres: com 800
+        // cravados, qualquer regra nova no topo do bloco (as duas colunas do
+        // "Por unidade", 13/09) empurrava o 132px pra fora e o teste
+        // reprovava sem nada ter quebrado
+        && (() => {
+          const i = html.indexOf('@media(max-width:640px){\n    .uni-panel{padding:13px 12px;}');
+          if (i < 0) return false;
+          return /\.quedas-tab th:first-child,\.quedas-tab td:first-child\{width:132px;min-width:132px/
+            .test(html.slice(i, html.indexOf('\n  }', i)));
+        })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okQuedasPeriodo = !falhas.length;
@@ -19317,6 +19408,32 @@ setTimeout(async () => {
   } catch (e) { okFantasmasRecolhido = false; console.log('  erro: ' + e.message); }
   if (!okFantasmasRecolhido) ruins += 1;
   console.log(`${okFantasmasRecolhido ? '✓' : '✗'} NOC: "Não identificados" nasce recolhido (só a contagem), abre num clique e lembra a escolha`);
+
+  // ------------------------------------------------------------------
+  // "Por unidade" em DUAS colunas no celular. Pedido do Master (13/09/2026,
+  // com o print do telefone): com minmax(210px,1fr) o auto-fill só cabia UMA
+  // unidade por linha num telefone - 18 unidades viravam 18 telas de rolagem.
+  let okUnidadesDuasColunas = false;
+  try {
+    const nocU = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    // a regra tem que estar DENTRO do bloco de celular: no desktop o
+    // auto-fill continua aproveitando a largura que existe
+    const iMedia = nocU.indexOf('@media(max-width:640px){\n    .uni-panel{padding:13px 12px;}');
+    const bloco = iMedia > 0 ? nocU.slice(iMedia, nocU.indexOf('\n  }', iMedia)) : '';
+    const conf = {
+      'no celular são duas colunas, não uma': /\.uni-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\);gap:8px;\}/.test(bloco),
+      'e o desktop continua com auto-fill (não vira duas colunas numa tela larga)':
+        /\.uni-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(210px,1fr\)\);gap:10px;\}/.test(nocU),
+      'o nome da unidade ganha duas linhas em vez de reticências':
+        /-webkit-line-clamp:2/.test(bloco) && /white-space:normal/.test(bloco),
+      'os números continuam grandes (é o que se lê de longe)': /\.uni-stat b\{font-size:14px;\}/.test(bloco),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okUnidadesDuasColunas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okUnidadesDuasColunas = false; console.log('  erro: ' + e.message); }
+  if (!okUnidadesDuasColunas) ruins += 1;
+  console.log(`${okUnidadesDuasColunas ? '✓' : '✗'} NOC: "Por unidade" em duas colunas no celular (metade da rolagem, nome inteiro)`);
 
   // ---- NOC: reinício automático programado ----
   //

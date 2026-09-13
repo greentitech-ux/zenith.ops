@@ -321,6 +321,32 @@ function panorama(docs) {
       precisaReiniciar,
       aparelhosRede: (d.dispositivos || []).filter((x) => x.ativo !== false).length,
       dispositivosEm: d.dispositivosEm || null,
+      // ---- o resto do que a maquina ja reporta ----
+      // Pedido do Master (13/09/2026): "também precisa aparecer todos os
+      // dados do computador que já temos". Estava tudo no doc e so' a ficha
+      // do NOC mostrava: quem abria a Saude via o disco e tinha que sair da
+      // tela pra descobrir o IP ou a versao do agente da MESMA maquina.
+      //
+      // Nao custa leitura nova (e o mesmo documento ja lido) e nao inventa
+      // campo nenhum: cada um destes ja existe e ja e' mostrado em
+      // loja-status.html - aqui so' viaja junto.
+      ram: d.ram || null,
+      ramMedidaEm: d.ramMedidaEm || null,
+      ipLocal: d.ipLocal || null,
+      ip: d.ip || null,
+      abertoDesde: d.abertoDesde || null,
+      agenteVersao: d.agenteVersao || null,
+      agenteNoPulsoPrint: d.agenteNoPulsoPrint || null,
+      tailscale: d.tailscale || null,
+      // o plano vem PRONTO ("todo dia as 04:00" / "seg a sex as 03:30"): a
+      // regra de montar isso a partir de reinicioSemanal/reinicioDiario ja
+      // existe no servidor (resumoDoPlano), e reimplementar no navegador
+      // seria a segunda copia dela
+      reinicioResumo: d.reinicioResumo || null,
+      reinicioTolerancia: d.reinicioTolerancia != null ? d.reinicioTolerancia : null,
+      ehServidor: !!d.ehServidor,
+      ehNotebook: !!d.ehNotebook,
+      anydeskId: d.anydeskId || null,
     };
   });
   const peso = (l) => (l.nivel === 'critico' ? 0 : (l.nivel === 'atencao' ? 1 : (l.temMedicao ? 3 : 2)));

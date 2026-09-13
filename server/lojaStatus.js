@@ -3097,7 +3097,14 @@ async function relatorioQuedas(opcoes) {
 }
 
 async function saudeMaquinas() {
-  const docs = (await cache.cached()).map(comOnline).map(semSegredo);
+  const docs = (await cache.cached()).map(comOnline).map(semSegredo)
+    // resumo do reinicio automatico ja pronto ("todo dia as 04:00"): a regra
+    // de montar isso a partir de reinicioSemanal/reinicioDiario mora aqui
+    // (resumoDoPlano), e reimplementa-la no navegador seria a segunda copia
+    .map((d) => {
+      const plano = planoSemanalDe(d);
+      return plano ? { ...d, reinicioResumo: resumoDoPlano(plano), reinicioTolerancia: toleranciaDe(d) } : d;
+    });
   return {
     computadores: nocMaquina.panorama(docs),
     discos: nocMaquina.discosComProblema(docs),
