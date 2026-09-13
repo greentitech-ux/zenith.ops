@@ -224,6 +224,56 @@ A resposta é `{"ok":true,"gravados":N,"recusados":[...]}`. Se `gravados`
 vier menor que o que você mandou, leia `recusados` e conserte o código da
 loja — não invente outro.
 
+## 3.2 Avisar o NoPulso de algo que você detectou
+
+O caso real: o agente que vigia o **Gestor de Pedidos** roda de hora em hora
+(7:20 às 22:30) e vê **loja fechada fora do horário padrão**. Ele precisa
+avisar o NoPulso.
+
+```bash
+curl -X POST https://www.nopulso.com.br/api/bot/alerta \
+  -H "x-bot-token: $BOT_ALERTA_TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "titulo": "Loja fechada fora do horário",
+    "resumo": "Sem pedidos desde 18:40 e o Gestor de Pedidos mostra a loja fechada. O padrão vai até 23:00.",
+    "unidade": "Dominos Bessa",
+    "origem": "gestor-de-pedidos",
+    "chave": "loja-fechada",
+    "critico": true
+  }'
+```
+
+| Campo | Obrigatório | O que é |
+|---|---|---|
+| `titulo` | **sim** | uma linha, o fato. Máx. 120 caracteres |
+| `resumo` | não | o fato com o número e a hora. Máx. 500 |
+| `unidade` | não | o **código** da loja, o mesmo do Fechamento (`19888`, `Dominos Bessa`). Código que não existe é **recusado**, e a resposta lista os válidos |
+| `origem` | não | quem está avisando (`gestor-de-pedidos`). Entra no silêncio de 1h |
+| `chave` | não | agrupa o mesmo assunto pro silêncio de 1h. Sem ela, vale o título |
+| `critico` | não | `true` toca o alerta sonoro de quem tem o 🔔 ligado |
+| `url` | não | pra onde o clique leva. Padrão: a Central de Alertas |
+
+**O que ela faz:** registra na **Central de Alertas** e manda o **push** pro
+Master e pro Suporte. Só isso. Ela **não** abre tarefa, ticket nem chamado —
+quem decide isso é gente.
+
+**Silêncio de 1 hora, por assunto.** Você roda de hora em hora; se a loja
+ficar fechada a tarde toda, o mesmo aviso sairia 15 vezes. O segundo e os
+seguintes voltam `{"ok":true,"repetido":true,"silencioAteEm":"..."}` — isso
+**não é erro**: é o NoPulso dizendo que já avisou. Não tente contornar
+mudando o título a cada volta.
+
+**O token é o `BOT_ALERTA_TOKEN`, no header `x-bot-token`** — não o seu
+token de Master. E isso não é burocracia: o `MASTER_API_TOKEN` é o Master
+inteiro (aprova pagamento, apaga usuário, reinicia máquina de loja). Pra
+publicar um aviso, seria poder demais em um token que vive no ambiente de um
+agente. Se você recebeu `404 Rota desativada`, o Master ainda não configurou
+o `BOT_ALERTA_TOKEN` no Render — peça a ele, não tente outra rota.
+
+**O que NÃO fazer:** não use `POST /api/bot/solicitacoes` pra isso (aquilo
+cria ticket de pagamento) e não invente `/api/bot/tarefas` — essa rota não
+existe.
+
 **O que acontece depois, sem você:** o servidor compara com o que o gerente
 declarou no fechamento (`faturamento` × PWR, `ifood` × iFood), dentro da
 tolerância que o Master definiu; o resultado vai pro briefing (o e-mail e o

@@ -760,6 +760,73 @@ async function unidadesQueFechamCaixa() {
   });
   return out;
 }
+// ---------- ALERTA VINDO DE FORA (Gestor de Pedidos, Cowork, qualquer robô)
+//
+// Pedido do Master (13/09/2026): o agente que vigia o Gestor de Pedidos
+// precisa avisar o NoPulso quando detectar "loja fechada fora do horário
+// padrão", e ele perguntou por onde mandar.
+//
+// POR QUE NÃO O MASTER_API_TOKEN. Ele é o Master INTEIRO: quem o tem aprova
+// pagamento, apaga usuário, reinicia máquina de loja. Pra publicar um aviso
+// isso é poder demais - e um token que vive no ambiente de um agente externo
+// é o mais fácil de vazar de todos. Esta rota segue o mesmo desenho do
+// /api/bot/vendas-registro: token PRÓPRIO (BOT_ALERTA_TOKEN), que só serve
+// pra isto e pode ser trocado sozinho sem derrubar o resto.
+//
+// O que ela faz é o mínimo honesto: registra na Central de Alertas e manda o
+// push. NÃO cria tarefa, ticket nem chamado - quem decide isso é gente, e
+// robô abrindo ticket sozinho é a receita pra fila de ticket que ninguém
+// fecha (o Master já cortou isso na quebra de caixa, ver tarefas.js).
+const ALERTA_BOT_SILENCIO_MS = 60 * 60 * 1000;
+// último aviso por chave (origem + chave|título): o agente roda de hora em
+// hora das 7:20 às 22:30, e uma loja que ficar fechada a tarde inteira
+// mandaria 15 avisos iguais. Em memória, como o alerta de internet: o que se
+// perde num deploy é só a lembrança de "já avisei".
+const ultimoAlertaBot = new Map();
+app.post('/api/bot/alerta', async (req, res) => {
+  if (!exigirTokenBot(req, res, 'BOT_ALERTA_TOKEN')) return;
+  try {
+    const c = req.body || {};
+    const texto = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+    const titulo = texto(c.titulo, 120);
+    const resumo = texto(c.resumo, 500);
+    if (!titulo) return res.status(400).json({ error: 'Mande pelo menos "titulo".' });
+    // unidade é opcional, mas se vier TEM que existir: alerta sobre uma loja
+    // que não existe manda a operação procurar o que não há
+    let unidadeNome = null;
+    const unidade = texto(c.unidade, 40);
+    if (unidade) {
+      const mapa = await construirUnidadesMapa();
+      if (!mapa[unidade]) {
+        return res.status(400).json({ error: `Unidade "${unidade}" não existe no NoPulso.`, unidades: Object.keys(mapa).sort() });
+      }
+      unidadeNome = mapa[unidade];
+    }
+    const origem = texto(c.origem, 40) || 'robô externo';
+    // a chave agrupa o MESMO assunto pro silêncio de 1h. Sem ela, o título
+    // serve - dois títulos diferentes são dois assuntos diferentes.
+    const chave = `${origem}|${texto(c.chave, 60) || titulo}|${unidade}`;
+    const agora = Date.now();
+    const anterior = ultimoAlertaBot.get(chave) || 0;
+    if (agora - anterior < ALERTA_BOT_SILENCIO_MS) {
+      return res.json({ ok: true, repetido: true, silencioAteEm: new Date(anterior + ALERTA_BOT_SILENCIO_MS).toISOString() });
+    }
+    ultimoAlertaBot.set(chave, agora);
+    const tituloFinal = unidadeNome ? `${titulo} · ${unidadeNome}` : titulo;
+    const corpo = resumo || `Avisado por ${origem}.`;
+    const registro = await alertasCentral.registrar({
+      tipo: 'externo', titulo: tituloFinal, resumo: corpo,
+      url: texto(c.url, 200) || '/central-alertas.html', critico: c.critico === true,
+    });
+    console.log(`[alerta-bot] ${origem}: ${tituloFinal} - ${corpo.slice(0, 140)}`);
+    // push próprio: notifyRaw registraria o alerta na Central DE NOVO (com
+    // tipo 'monitor' e url /monitor.html) - dois cards do mesmo aviso
+    await push.notifyAlertaExterno(tituloFinal, corpo, `bot-alerta-${unidade || 'geral'}`, c.critico === true);
+    res.json({ ok: true, alerta: registro });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.post('/api/bot/vendas-registro', async (req, res) => {
   if (!exigirTokenBot(req, res, 'BOT_VENDAS_TOKEN')) return;
   try {

@@ -898,6 +898,28 @@ async function notifyInternetUnidadeNormalizou(unidadeNome, t) {
 //
 // O texto traz os DOIS endereços porque a ação é exatamente essa: trocar de um
 // pelo outro na configuração do servidor.
+// Alerta que veio de FORA (ver POST /api/bot/alerta): o agente do Gestor de
+// Pedidos avisando "loja fechada fora do horário", por exemplo.
+//
+// Não registra na Central aqui: quem registra é a rota, e com o tipo certo
+// ('externo'). notifyRaw faria o registro DE NOVO, com tipo 'monitor' e url
+// /monitor.html - dois cards do mesmo aviso, um deles mandando pra tela
+// errada. O público é o mesmo dos alarmes do NOC.
+async function notifyAlertaExterno(titulo, corpo, tag, critico) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify({ title: titulo, body: corpo, tag, url: '/central-alertas.html' });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (alerta externo):', err.message);
+    }
+  }
+}
+
 async function notifyDispositivoIpMudou(unidadeNome, codigo, apelido, tipoRotulo, de, para) {
   const que = apelido || tipoRotulo || 'Dispositivo';
   const dados = {
@@ -1376,7 +1398,7 @@ module.exports = {
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyDispositivoOffline, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
-  notifyDispositivoIpMudou,
+  notifyDispositivoIpMudou, notifyAlertaExterno,
   notifyDivergenciaCaixa, notifyDispositivoOnline,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,

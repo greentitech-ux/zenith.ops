@@ -19476,6 +19476,94 @@ setTimeout(async () => {
   if (!okUnidadesDuasColunas) ruins += 1;
   console.log(`${okUnidadesDuasColunas ? '✓' : '✗'} NOC: "Por unidade" em duas colunas no celular (metade da rolagem, nome inteiro)`);
 
+  // ------------------------------------------------------------------
+  // ALERTA VINDO DE FORA (POST /api/bot/alerta). Pedido do Master
+  // (13/09/2026): o agente que vigia o Gestor de Pedidos precisa avisar o
+  // NoPulso quando detectar "loja fechada fora do horário padrão", e ele
+  // perguntou por onde mandar - o agente dele tinha chutado
+  // "/api/bot/tarefas", que não existe, e tinha pedido o MASTER_API_TOKEN.
+  //
+  // O que este teste protege: o token é PRÓPRIO (não o do Master, que é o
+  // Master inteiro), unidade inventada é recusada, e o mesmo aviso de hora em
+  // hora não vira 15 cards.
+  let okAlertaBot = false;
+  try {
+    const alertasC = require(__dirname + '/alertasCentral.js');
+    const TOKEN_ANTES = process.env.BOT_ALERTA_TOKEN;
+    const corpoBase = { titulo: 'Loja fechada fora do horário', resumo: 'Sem pedidos desde 18:40.', origem: 'gestor-de-pedidos', chave: 'loja-fechada' };
+    const comToken = (corpo, tok) => postarJson('/api/bot/alerta', corpo, tok === null ? {} : { 'x-bot-token': tok });
+
+    // sem a env configurada a rota nem existe - ninguém descobre que ela
+    // está lá batendo com token qualquer
+    delete process.env.BOT_ALERTA_TOKEN;
+    const desligada = await comToken(corpoBase, 'qualquer');
+    process.env.BOT_ALERTA_TOKEN = 'b'.repeat(48);
+
+    const semToken = await comToken(corpoBase, null);
+    const tokenErrado = await comToken(corpoBase, 'c'.repeat(48));
+    // o token do MASTER não abre esta rota (são tokens diferentes de propósito)
+    const comTokenDoMaster = await comToken(corpoBase, process.env.MASTER_API_TOKEN);
+    const semTitulo = await comToken({ ...corpoBase, titulo: '' }, process.env.BOT_ALERTA_TOKEN);
+    const unidadeInventada = await comToken({ ...corpoBase, unidade: 'LOJA-QUE-NAO-EXISTE' }, process.env.BOT_ALERTA_TOKEN);
+
+    const externosAntes = (await alertasC.listar()).filter((a) => a.tipo === 'externo').length;
+    const ok1 = await comToken({ ...corpoBase, unidade: '19855', critico: true }, process.env.BOT_ALERTA_TOKEN);
+    const j1 = JSON.parse(ok1.corpo || '{}');
+    // de novo, na hora seguinte: repetido, sem criar card novo
+    const ok2 = await comToken({ ...corpoBase, unidade: '19855' }, process.env.BOT_ALERTA_TOKEN);
+    const j2 = JSON.parse(ok2.corpo || '{}');
+    // OUTRO assunto na mesma loja passa (o silêncio é por assunto, não por loja)
+    const ok3 = await comToken({ ...corpoBase, unidade: '19855', chave: 'outro-assunto', titulo: 'Outra coisa' }, process.env.BOT_ALERTA_TOKEN);
+    const j3 = JSON.parse(ok3.corpo || '{}');
+    const depois = await alertasC.listar();
+    // conta por TIPO, não pelo tamanho da lista: a Central corta em 300
+    // documentos, e no fim da suíte ela já está no teto - o total não cresce
+    // mais e o teste passaria sem provar nada
+    const criados = depois.filter((a) => a.tipo === 'externo').length - externosAntes;
+    const cardDoAlerta = depois.find((a) => a.id === (j1.alerta && j1.alerta.id));
+
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const doc = require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'BENI_API.md'), 'utf8');
+    const env = require('fs').readFileSync(__dirname + '/.env.example', 'utf8');
+    if (TOKEN_ANTES === undefined) delete process.env.BOT_ALERTA_TOKEN; else process.env.BOT_ALERTA_TOKEN = TOKEN_ANTES;
+
+    const conf = {
+      'sem BOT_ALERTA_TOKEN configurado a rota nem existe (404)': desligada.status === 404,
+      'sem token: 401': semToken.status === 401,
+      'token errado: 401': tokenErrado.status === 401,
+      'o token do MASTER não abre esta rota (é token próprio, de propósito)': comTokenDoMaster.status === 401,
+      'sem título: 400 com o motivo': semTitulo.status === 400 && /titulo/.test(semTitulo.corpo),
+      'unidade que não existe é recusada, e a resposta diz quais existem':
+        unidadeInventada.status === 400 && /não existe no NoPulso/.test(unidadeInventada.corpo) && /"unidades"/.test(unidadeInventada.corpo),
+      'o alerta entra na Central com a unidade no título e o tipo externo':
+        ok1.status === 200 && j1.ok === true && !!cardDoAlerta
+        && cardDoAlerta.tipo === 'externo' && /Loja fechada fora do horário · /.test(cardDoAlerta.titulo)
+        && cardDoAlerta.critico === true && cardDoAlerta.url === '/central-alertas.html',
+      'o MESMO aviso de novo é "repetido" e NÃO cria card novo':
+        ok2.status === 200 && j2.repetido === true && !!j2.silencioAteEm && !j2.alerta,
+      'outro assunto na mesma loja passa (o silêncio é por assunto)': ok3.status === 200 && j3.repetido !== true,
+      'dois cards no total, não três': criados === 2,
+      'a rota NÃO cria tarefa, ticket nem chamado': (() => {
+        const i = srcIdx.indexOf("app.post('/api/bot/alerta'");
+        const corpoRota = srcIdx.slice(i, srcIdx.indexOf("app.post('/api/bot/vendas-registro'", i));
+        return !/tarefas\.|solicitacoes\.create|chamadosTI|chamadosManutencao/.test(corpoRota)
+          // e usa o push próprio, não o notifyRaw (que registraria o alerta
+          // de novo, com tipo 'monitor')
+          && /push\.notifyAlertaExterno\(/.test(corpoRota) && !/push\.notifyRaw\(/.test(corpoRota);
+      })(),
+      'está documentado pro Beni, com o porquê de não ser o token do Master':
+        /POST https:\/\/www\.nopulso\.com\.br\/api\/bot\/alerta/.test(doc)
+        && /x-bot-token: \$BOT_ALERTA_TOKEN/.test(doc)
+        && /o `MASTER_API_TOKEN` é o Master\s*\n?inteiro/.test(doc.replace(/\s+/g, ' ').replace(/o `MASTER_API_TOKEN` é o Master inteiro/, 'o `MASTER_API_TOKEN` é o Master\ninteiro')) || /MASTER_API_TOKEN` é o Master/.test(doc),
+      'e o token está no .env.example': /BOT_ALERTA_TOKEN=/.test(env),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAlertaBot = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (desligada=${desligada.status} semToken=${semToken.status} master=${comTokenDoMaster.status} uni=${unidadeInventada.status} ${unidadeInventada.corpo.slice(0,90)} ok1=${ok1.status} ${ok1.corpo.slice(0,120)} ok2=${ok2.corpo.slice(0,120)} criados=${criados})`);
+  } catch (e) { okAlertaBot = false; console.log('  erro: ' + e.message); }
+  if (!okAlertaBot) ruins += 1;
+  console.log(`${okAlertaBot ? '✓' : '✗'} Alerta de fora: POST /api/bot/alerta com token próprio, unidade validada e silêncio de 1h por assunto`);
+
   // ---- NOC: reinício automático programado ----
   //
   // Pedido do Master: "escolho qual reinicia todos os dias às 4h" e, depois,
