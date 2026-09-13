@@ -3609,7 +3609,18 @@ setTimeout(async () => {
       'PDF sobe inteiro (comprimir só mexe em imagem)': /function comprimirImagemRelatorio\([\s\S]{0,200}return file;.*PDF sobe inteiro/.test(html),
       'a compressão nunca trava a leitura por conta própria (qualquer erro devolve o arquivo original)': /catch\(e\)\{\s*\n\s*return file; \/\/ qualquer tropeço/.test(html),
       'cada foto tem prazo de preparo e uma travada não prende a tela': /const PRAZO_PREPARO_FOTO_MS = 12000;/.test(html) && /function comPrazoPreparoRelatorio\(/.test(html) && /if\(!img && window\.createImageBitmap\)/.test(html),
-      'foto pequena pula o decoder e fica disponível imediatamente': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;/.test(html),
+      // 13/09: a exceção é o recorte miúdo (lado < 1400), que precisa ser
+      // AMPLIADO - e mesmo ele é medido pelo cabeçalho do arquivo antes de
+      // qualquer decoder. Foto pequena de lado grande continua saindo na hora.
+      'foto pequena é medida pelo cabeçalho (PNG IHDR / JPEG SOF) sem decodificar; só o recorte miúdo segue pra ampliação':
+        /async function dimensoesDoCabecalho\(file\)/.test(html)
+        && /dv\.getUint32\(16\), height: dv\.getUint32\(20\)/.test(html)
+        && /marcador >= 0xC0 && marcador <= 0xCF && marcador !== 0xC4 && marcador !== 0xC8 && marcador !== 0xCC/.test(html)
+        && /if\(file\.size <= JA_PEQUENA_RELATORIO\)\{\s*\n\s*const dim = await dimensoesDoCabecalho\(file\);\s*\n\s*if\(!dim \|\| Math\.max\(dim\.width, dim\.height\) >= LADO_MIN_RELATORIO\) return file;\s*\n\s*return ampliarRecorteRelatorio\(file\);/.test(html),
+      'recorte miúdo é ampliado até 1400 px (abaixo do teto em que a API reduz de volta) e sai em PNG, pelo <img> tradicional, com prazo':
+        /const LADO_MIN_RELATORIO = 1400;/.test(html)
+        && /async function ampliarRecorteRelatorio\(file\)\{[\s\S]{0,300}comPrazoPreparoRelatorio\(carregarViaImgRelatorio\(file\)\)[\s\S]{0,400}const escala = LADO_MIN_RELATORIO \/ lado;[\s\S]{0,600}imageSmoothingQuality = 'high'[\s\S]{0,300}c\.toBlob\(r, 'image\/png'\)/.test(html)
+        && /async function ampliarRecorteRelatorio\(file\)\{[\s\S]{0,1500}\}catch\(e\)\{\s*\n\s*return file;/.test(html),
       'o lote prepara as fotos de forma independente e informa o progresso': /return Promise\.all\(lista\.map\(async f=>/.test(html) && /Preparando foto \$\{prontas\} de \$\{total\}/.test(html),
       // as duas assertivas viraram uma: o listener comprime E soma. A do Codex
       // cravava `ARQUIVOS_RELATORIO = preparados` (substituir), que era
@@ -3617,7 +3628,9 @@ setTimeout(async () => {
       'o listener comprime antes de guardar, e SOMA em vez de trocar a seleção': !!listener && /const preparados = await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener) && /ARQUIVOS_RELATORIO = juntarFotosRelatorio\(ARQUIVOS_RELATORIO, preparados, MAX_FOTOS_RELATORIO\)/.test(listener),
       'o teto de fotos passa a valer pro TOTAL somado (3 + 3 não vira 6)': !!listener && /ARQUIVOS_RELATORIO\.length \+ arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
       'um lote antigo não sobrescreve o atual (versão de preparo)': !!listener && /const versao = \+\+VERSAO_PREPARO_RELATORIO;/.test(listener) && /if\(versao !== VERSAO_PREPARO_RELATORIO\) return;/.test(listener),
-      'foto pequena não passa pelo decoder (é onde a tela ficava parada)': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;\n  try\{/.test(html),
+      'foto pequena de lado grande não passa pelo decoder (é onde a tela ficava parada) - a ampliação NÃO usa o createImageBitmap':
+        /return ampliarRecorteRelatorio\(file\);\n  \}\n  try\{/.test(html)
+        && !/async function ampliarRecorteRelatorio\(file\)\{[\s\S]{0,1500}createImageBitmap/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okComprimeFotoRelatorio = !falhas.length;
@@ -7195,6 +7208,22 @@ setTimeout(async () => {
         s.includes('MessageBoxButtons]::YesNoCancel') && s.includes('New-Object System.Windows.Forms.SaveFileDialog')
         && s.includes('DialogResult]::Yes') && s.includes('$arquivo = $sfd.FileName')
         && s.includes('if ($arquivo) { $recorte.Save($arquivo')),
+      // ---- v53: recorte miúdo ampliado na origem (a leitura por foto chutava
+      // os tempos do Service Times num print de 330 px) ----
+      'v53 (sem subir, nenhum print sai ampliado)': vg.VERSAO_VIGIA >= 53,
+      'recorte com lado < 1400 é ampliado (bicúbico) ANTES de salvar e de ir pra área de transferência, e a falha mantém o original': scripts.every((s) => {
+        const iAmpl = s.indexOf('if ($ladoRecorte -gt 0 -and $ladoRecorte -lt 1400) {');
+        const iSave = s.indexOf('if ($arquivo) { $recorte.Save($arquivo');
+        const iClip = s.indexOf('$dados.SetImage($recorte)');
+        return iAmpl > 0 && iSave > iAmpl && iClip > iAmpl
+          && s.includes('$escalaRecorte = 1400 / $ladoRecorte')
+          && s.includes('InterpolationMode]::HighQualityBicubic')
+          && s.includes('$gAmpl.DrawImage($recorte, 0, 0, $largAmpl, $altAmpl)')
+          && s.includes('$recorteMiudo = $recorte\n                $recorte = $ampliado\n                $recorteMiudo.Dispose()')
+          && s.includes('} catch { Log-Print "Nao consegui ampliar o recorte (segue no tamanho original)');
+      }),
+      'as marcas são desenhadas ANTES da ampliação (escalam junto, não ficam finas)': scripts.every((s) =>
+        s.indexOf('Desenhar-Marcas $gMarcas $escolhaPrint.marcas') < s.indexOf('$ladoRecorte = [Math]::Max($recorte.Width, $recorte.Height)')),
     };
     // ---- "Capturar agora" de ponta a ponta: Master pede -> agente recebe UMA
     // vez (configuracao-agente e heartbeat) -> some ----
@@ -12077,7 +12106,11 @@ setTimeout(async () => {
     const conf = {
       'o script PADRAO não mudou: sem TLS forçado, sem relógio novo (as 52 máquinas seguem como estão)':
         padrao.every((s) => !/SecurityProtocol|Agora-Ms|Ms-De/.test(s)) && !/SecurityProtocol/.test(cmdPadrao),
-      'e a VERSAO_VIGIA NÃO subiu por causa disto (ninguém reinstala nada)': vg.VERSAO_VIGIA === 52,
+      // a variante NÃO tem versão própria: anuncia a mesma $VersaoScript que o
+      // padrão, então marcar a máquina não força reinstalação por si (a
+      // versão sobe só quando o script de TODOS muda, como na v53)
+      'e a variante antiga anuncia a MESMA VERSAO_VIGIA que o padrão (marcar a máquina não reinstala nada)':
+        antigo.every((s) => s.includes('$VersaoScript = ' + vg.VERSAO_VIGIA)) && padrao.every((s) => s.includes('$VersaoScript = ' + vg.VERSAO_VIGIA)),
       'Windows antigo: o comando de instalação liga TLS 1.2 ANTES de baixar o script': tlsAntesDoRest(cmdAntigo),
       'Windows antigo: os 3 tipos de script ligam TLS 1.2 antes da primeira chamada': antigo.every(tlsAntesDoRest),
       'e SOMA ao que já estava ligado (-bor), não substitui': antigo.every((s) => !/SecurityProtocol\s*=\s*3072\b/.test(s)),

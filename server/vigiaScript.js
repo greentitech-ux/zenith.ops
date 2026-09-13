@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 52;
+const VERSAO_VIGIA = 53;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1129,6 +1129,31 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '              $gMarcas.Dispose()',
     '            }',
     '            $imagem.Dispose()',
+    '            # Recorte miudo e AMPLIADO antes de salvar/copiar. A loja recorta um',
+    '            # quadro do relatorio do Pulse (~330 px de largura, digito de 6 px):',
+    '            # nitido pra quem olha, mas a leitura por foto do fechamento enxerga',
+    '            # a imagem pelo pixel que ela tem, e o modelo chutava os tempos do',
+    '            # Service Times a cada leitura da MESMA foto. Ampliar na origem vale',
+    '            # pra qualquer caminho que o print tome (colar, salvar, WhatsApp).',
+    '            # 1400 fica abaixo do teto em que a API reduz a imagem de volta;',
+    '            # print grande passa intacto. Qualquer falha mantem o recorte original.',
+    '            try {',
+    '              $ladoRecorte = [Math]::Max($recorte.Width, $recorte.Height)',
+    '              if ($ladoRecorte -gt 0 -and $ladoRecorte -lt 1400) {',
+    '                $escalaRecorte = 1400 / $ladoRecorte',
+    '                $largAmpl = [int][Math]::Round($recorte.Width * $escalaRecorte)',
+    '                $altAmpl = [int][Math]::Round($recorte.Height * $escalaRecorte)',
+    '                $ampliado = New-Object System.Drawing.Bitmap($largAmpl, $altAmpl)',
+    '                $gAmpl = [System.Drawing.Graphics]::FromImage($ampliado)',
+    '                $gAmpl.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic',
+    '                $gAmpl.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality',
+    '                $gAmpl.DrawImage($recorte, 0, 0, $largAmpl, $altAmpl)',
+    '                $gAmpl.Dispose()',
+    '                $recorteMiudo = $recorte',
+    '                $recorte = $ampliado',
+    '                $recorteMiudo.Dispose()',
+    '              }',
+    '            } catch { Log-Print "Nao consegui ampliar o recorte (segue no tamanho original): $($_.Exception.Message)" }',
     '            # "Copiar" nao encosta no disco: a captura vai so pra area de',
     '            # transferencia. Quem pediu print pra colar num chamado nao quer',
     '            # a pasta enchendo de PNG que ninguem apaga.',
