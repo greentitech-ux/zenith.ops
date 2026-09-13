@@ -99,6 +99,8 @@
   .kpi-card.kpi-offline .kpi-num{color:var(--bad);}
   .kpi-card.kpi-nunca .kpi-num{color:var(--muted);}
   .kpi-card.kpi-degradado .kpi-num{color:var(--warn);}
+  /* contagem de servidores dentro do status: "43 · 5" (regulares · servidores) */
+  .kpi-serv{font-size:.42em;font-weight:700;color:var(--muted);margin-left:5px;letter-spacing:.02em;vertical-align:middle;white-space:nowrap;}
 
   /* ---- filtros ---- */
   .filtro-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;}
@@ -465,21 +467,6 @@
       <div class="kpi-num" id="kpi-num-nunca">0</div>
       <div class="kpi-label">⚪ Sem agente</div>
     </button>
-  </div>
-
-  <!-- Servidores: infraestrutura sempre-ligada (BOS do Pulse, SQL, etc). Boa
-       prática de NOC (Zabbix/PRTG/Datadog agrupam host por papel): servidor
-       tem prioridade e volume diferentes do PDV - poucos, críticos, e não
-       podem se perder no meio de 65 máquinas. Aberto por padrão. Só aparece
-       se houver máquina marcada como servidor na ficha. Reaproveita o MESMO
-       card da grade (disco/RAM/uptime/temperatura já vêm da telemetria) - é
-       filtro + destaque, não coleta nova. -->
-  <div class="uni-panel hidden" id="servidores-panel">
-    <button type="button" class="uni-panel-head" onclick="alternarPainelServidores()" aria-expanded="true" aria-controls="servidores-corpo">
-      <span><span class="uni-caret" id="servidores-caret">▾</span> 🗄️ Servidores</span>
-      <span class="uni-panel-sub" id="servidores-sub"></span>
-    </button>
-    <div id="servidores-corpo" class="equip-grid" style="margin-top:10px;"></div>
   </div>
 
   <!-- Painel por unidade: cada unidade com quantos computadores online/offline.
@@ -1724,52 +1711,24 @@ function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-uni
 // dos KPIs/Por unidade/grade principal pra nao inflar as contagens
 function computadoresReais(){ return COMPUTADORES.filter(c => c.nome); }
 
-// SERVIDORES - a seção de infraestrutura. Só o que a telemetria JÁ coleta:
-// status, disco (volume mais apertado + temperatura), RAM e uptime. O card é
-// o MESMO da grade (equipTileHtml + metricasTileHtml) - clicar abre o detalhe
-// igual. "Pedindo atenção" = offline, ou disco crítico, ou 7+ dias sem
-// reiniciar (a política da casa). O que NÃO existe hoje e seria o próximo
-// passo de servidor de verdade (serviço do SQL rodando, CPU) está fora de
-// propósito: melhor não mostrar do que inventar.
-function servidorPedeAtencao(c){
-  const st = statusDe(c);
-  if(st === 'offline' || st === 'degradado') return true;
-  if(c.discoNivel === 'critico') return true;
-  if(c.uptimeHoras != null && Math.floor(c.uptimeHoras / 24) >= 7) return true;
-  return false;
-}
-function renderServidores(){
-  const painel = document.getElementById('servidores-panel');
-  if(!painel) return;
-  const servidores = computadoresReais().filter(c => c.ehServidor);
-  // sem servidor marcado, a seção some inteira - não ocupa espaço à toa
-  painel.classList.toggle('hidden', servidores.length === 0);
-  if(!servidores.length) return;
-  servidores.sort((a,b) => {
-    const ORDEM = { offline:0, degradado:1, nunca:2, online:3 };
-    const rank = (c) => ORDEM[statusDe(c)] ?? 9;
-    return rank(a) - rank(b) || (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
-  });
-  const atencao = servidores.filter(servidorPedeAtencao).length;
-  const sub = document.getElementById('servidores-sub');
-  if(sub) sub.innerHTML = atencao
-    ? `<b>${servidores.length}</b> · <span style="color:var(--bad);">${atencao} pedindo atenção</span>`
-    : `<b>${servidores.length}</b> · todos ok`;
-  document.getElementById('servidores-corpo').innerHTML = servidores.map(c => equipTileHtml(c.codigo, c)).join('');
-}
-
 function renderKpis(){
   const reais = computadoresReais();
   const total = reais.length;
-  const online = reais.filter(c => statusDe(c)==='online').length;
-  const degradado = reais.filter(c => statusDe(c)==='degradado').length;
-  const offline = reais.filter(c => statusDe(c)==='offline').length;
-  const nunca = reais.filter(c => statusDe(c)==='nunca').length;
+  // servidores no parque: com ao menos um, cada status vira "regulares · N"
+  // (N = servidores NAQUELE status). Sem servidor nenhum, fica o número puro
+  // de sempre. O Total continua sendo o total geral (soma de tudo).
+  const temServidor = reais.some(c => c.ehServidor);
+  const doStatus = st => reais.filter(c => statusDe(c)===st);
   document.getElementById('kpi-num-total').textContent = total;
-  document.getElementById('kpi-num-online').textContent = online;
-  document.getElementById('kpi-num-degradado').textContent = degradado;
-  document.getElementById('kpi-num-offline').textContent = offline;
-  document.getElementById('kpi-num-nunca').textContent = nunca;
+  [['online','online'],['degradado','degradado'],['offline','offline'],['nunca','nunca']].forEach(([id, st]) => {
+    const lista = doStatus(st);
+    const serv = lista.filter(c => c.ehServidor).length;
+    const el = document.getElementById('kpi-num-'+id);
+    // regulares = os que NÃO são servidor; o "· N" separa os servidores
+    el.innerHTML = temServidor
+      ? `${lista.length - serv}<span class="kpi-serv" title="${serv} servidor(es) neste status">· ${serv}</span>`
+      : String(lista.length);
+  });
   ['total','online','degradado','offline','nunca'].forEach(k => {
     document.getElementById('kpi-'+k).classList.toggle('ativo', FILTRO_STATUS === (k==='total' ? '' : k));
   });
@@ -1864,11 +1823,6 @@ let QUEDAS_UNIDADE = '';
 let QUEDAS_DE = '';
 let QUEDAS_ATE = '';
 let QUEDAS_ORDENACAO = { campo: 'foraMs', direcao: 'desc' };
-function alternarPainelServidores(){
-  const p = document.getElementById('servidores-panel');
-  const abriu = p.classList.toggle('recolhido') === false;
-  p.querySelector('.uni-panel-head').setAttribute('aria-expanded', abriu ? 'true' : 'false');
-}
 function alternarPainelQuedas(){
   const p = document.getElementById('quedas-panel');
   const abriu = p.classList.toggle('recolhido') === false;
@@ -2012,7 +1966,6 @@ async function carregarQuedas(periodo){
 
 function render(){
   renderKpis();
-  renderServidores();
   renderUnidades();
   renderFantasmas();
   if(ULTIMO_REDE_DADOS) renderRede(ULTIMO_REDE_DADOS);
