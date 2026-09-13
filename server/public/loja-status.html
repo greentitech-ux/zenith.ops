@@ -102,6 +102,14 @@
   /* contagem de servidores dentro do status: "43 · 5" (regulares · servidores) */
   /* mesmo tamanho do numero principal (pedido do Master, 13/09): o que separa os dois e a cor, nao o corpo */
   .kpi-serv{font-size:1em;font-weight:800;color:var(--muted);margin-left:6px;letter-spacing:0;vertical-align:baseline;white-space:nowrap;}
+  /* cada numero e' um filtro: o da esquerda = so regulares daquele status, o da
+     direita = so servidores. Zero nao filtra nada e nem parece clicavel */
+  .kpi-serv-sep{color:var(--muted);margin-left:6px;font-weight:800;}
+  .kpi-parte{cursor:pointer;border-bottom:2px solid transparent;padding-bottom:1px;}
+  .kpi-parte:hover{border-bottom-color:currentColor;}
+  .kpi-parte.ativo{border-bottom-color:var(--accent);}
+  .kpi-parte.kpi-zero{cursor:default;opacity:.55;}
+  .kpi-parte.kpi-zero:hover{border-bottom-color:transparent;}
 
   /* ---- filtros ---- */
   .filtro-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;}
@@ -990,6 +998,8 @@ let ULTIMA_CARGA_EM = null;
 let FILTRO_TEXTO = '';
 let FILTRO_UNIDADE = '';
 let FILTRO_STATUS = ''; // '' | 'online' | 'offline' | 'nunca'
+// dentro do status, qual metade do "46 · 1": '' (todos) | 'regular' | 'servidor'
+let FILTRO_SERVIDOR = '';
 let ULTIMO_REDE_DADOS = null; // ultima resposta de /api/loja-status/rede - reaplica o filtro sem refazer a chamada
 
 // A lista do poll de 30s vem RESUMIDA do servidor (sem eventos, aparelhos da
@@ -1722,6 +1732,18 @@ function atualizarDetalheSeAberto(){
 
 function setFiltroStatus(v){
   FILTRO_STATUS = (FILTRO_STATUS === v) ? '' : v;
+  FILTRO_SERVIDOR = '';
+  render();
+}
+// clique num dos dois numeros do card ("46 · 1"): filtra o status E a metade
+// (regulares ou servidores). Pedido do Master (13/09): "se clicar em 47 mostra
+// todas as maquinas daquele grupo; se clicar em 1 aparece todos os
+// servidores; se 0 nao faz nada". Clicar de novo no mesmo numero limpa.
+function filtrarGrupoKpi(ev, st, grupo, n){
+  ev.stopPropagation();
+  if(!n) return;
+  if(FILTRO_STATUS === st && FILTRO_SERVIDOR === grupo){ FILTRO_STATUS = ''; FILTRO_SERVIDOR = ''; }
+  else { FILTRO_STATUS = st; FILTRO_SERVIDOR = grupo; }
   render();
 }
 function onFiltroTexto(){ FILTRO_TEXTO = document.getElementById('filtro-texto').value.trim().toLowerCase(); render(); }
@@ -1744,10 +1766,16 @@ function renderKpis(){
   [['online','online'],['degradado','degradado'],['offline','offline'],['nunca','nunca']].forEach(([id, st]) => {
     const lista = doStatus(st);
     const serv = lista.filter(c => c.ehServidor).length;
+    const reg = lista.length - serv;
     const el = document.getElementById('kpi-num-'+id);
-    // regulares = os que NÃO são servidor; o "· N" separa os servidores
+    // regulares = os que NÃO são servidor; o "· N" separa os servidores.
+    // Cada numero filtra a sua metade (ver filtrarGrupoKpi); zero nao filtra
+    const parte = (grupo, n, classe, titulo) => {
+      const ativo = FILTRO_STATUS === st && FILTRO_SERVIDOR === grupo;
+      return `<span class="kpi-parte ${classe}${n ? '' : ' kpi-zero'}${ativo ? ' ativo' : ''}" title="${titulo}" onclick="filtrarGrupoKpi(event,'${st}','${grupo}',${n})">${n}</span>`;
+    };
     el.innerHTML = temServidor
-      ? `${lista.length - serv}<span class="kpi-serv" title="${serv} servidor(es) neste status">· ${serv}</span>`
+      ? parte('regular', reg, '', `${reg} computador(es) neste status - clique pra ver só eles`) + '<span class="kpi-serv-sep">·</span>' + parte('servidor', serv, 'kpi-serv', `${serv} servidor(es) neste status - clique pra ver só eles`)
       : String(lista.length);
   });
   ['total','online','degradado','offline','nunca'].forEach(k => {
@@ -1994,6 +2022,7 @@ function render(){
   let lista = computadoresReais();
   if(FILTRO_UNIDADE) lista = lista.filter(c => c.codigo === FILTRO_UNIDADE);
   if(FILTRO_STATUS) lista = lista.filter(c => statusDe(c) === FILTRO_STATUS);
+  if(FILTRO_SERVIDOR) lista = lista.filter(c => (FILTRO_SERVIDOR === 'servidor') === !!c.ehServidor);
   if(FILTRO_TEXTO){
     lista = lista.filter(c => {
       const alvo = `${c.nome||''} ${UNIDADES_NOMES[c.codigo]||c.codigo}`.toLowerCase();

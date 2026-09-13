@@ -7288,6 +7288,21 @@ setTimeout(async () => {
         && /Reportar-IpLocal\n  Garantir-GatilhoDeRepeticao\n/.test(s)
         && s.includes('function Garantir-GatilhoDeRepeticao {\n  if ($Servico) { return }')),
       'NOC: a contagem de servidores tem o MESMO corpo do número principal': /\.kpi-serv\{font-size:1em;font-weight:800;/.test(htmlNoc),
+      // 13/09: "quero que a quantidade seja clicável: 47 mostra as máquinas
+      // daquele grupo, 1 mostra os servidores, 0 não faz nada"
+      'NOC: cada número do card filtra a sua metade (regulares · servidores), zero não faz nada, clicar de novo limpa': (() => {
+        const corpoFiltro = (htmlNoc.match(/function filtrarGrupoKpi\(ev, st, grupo, n\)\{[\s\S]*?\n\}/) || [''])[0];
+        return /let FILTRO_SERVIDOR = '';/.test(htmlNoc)
+          && /ev\.stopPropagation\(\);\n  if\(!n\) return;/.test(corpoFiltro)
+          && /if\(FILTRO_STATUS === st && FILTRO_SERVIDOR === grupo\)\{ FILTRO_STATUS = ''; FILTRO_SERVIDOR = ''; \}/.test(corpoFiltro)
+          && /else \{ FILTRO_STATUS = st; FILTRO_SERVIDOR = grupo; \}/.test(corpoFiltro)
+          && /onclick="filtrarGrupoKpi\(event,'\$\{st\}','\$\{grupo\}',\$\{n\}\)"/.test(htmlNoc)
+          && /\$\{n \? '' : ' kpi-zero'\}/.test(htmlNoc)
+          && /parte\('regular', reg, ''/.test(htmlNoc) && /parte\('servidor', serv, 'kpi-serv'/.test(htmlNoc)
+          && /if\(FILTRO_SERVIDOR\) lista = lista\.filter\(c => \(FILTRO_SERVIDOR === 'servidor'\) === !!c\.ehServidor\);/.test(htmlNoc)
+          && /FILTRO_STATUS = \(FILTRO_STATUS === v\) \? '' : v;\n  FILTRO_SERVIDOR = '';/.test(htmlNoc)
+          && /\.kpi-parte\.kpi-zero\{cursor:default/.test(htmlNoc);
+      })(),
     };
     // ---- "Capturar agora" de ponta a ponta: Master pede -> agente recebe UMA
     // vez (configuracao-agente e heartbeat) -> some ----
