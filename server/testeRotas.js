@@ -7224,6 +7224,22 @@ setTimeout(async () => {
       }),
       'as marcas são desenhadas ANTES da ampliação (escalam junto, não ficam finas)': scripts.every((s) =>
         s.indexOf('Desenhar-Marcas $gMarcas $escolhaPrint.marcas') < s.indexOf('$ladoRecorte = [Math]::Max($recorte.Width, $recorte.Height)')),
+      // ---- v54: uma instância por papel. Rodar a instalação de novo "como
+      // Administrador" (a própria mensagem manda) subia uma SEGUNDA cópia:
+      // duas máscaras no Ctrl+Q, névoa ficando depois do print, Esc duas vezes ----
+      'v54 (sem subir, as máquinas com duas cópias continuam com duas)': vg.VERSAO_VIGIA >= 54,
+      'antes do laço, um mutex por papel (login x boot): a cópia que chega depois se encerra': scripts.every((s) =>
+        /if \(\$Loop\) \{\n  Garantir-InstanciaUnica\n  Rodar-Loop/.test(s.replace(/\r/g, ''))
+        && s.includes('$nomeMutex = "Local\\" + $NomeTarefa + "_" + $papel')
+        && s.includes('New-Object System.Threading.Mutex($false, $nomeMutex)')
+        && s.includes('if (-not $dono) { Escrever-Log "Ja existe uma instancia ($papel) do NOCZenith rodando - esta copia se encerra."; exit }')
+        && s.includes('catch [System.Threading.AbandonedMutexException] { $dono = $true }')),
+      'a reinstalação encerra a cópia antiga desta sessão ANTES do Start-Process (e não a de boot)': scripts.every((s) => {
+        const iMata = s.indexOf('$_.CommandLine -match "NOCZenith\\.ps1" -and $_.CommandLine -match "-Loop" -and $_.CommandLine -notmatch "-Servico"');
+        const iStart = s.indexOf('Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Destino`" -Loop"');
+        return iMata > 0 && iStart > iMata && s.includes('$_.ProcessId -ne $PID') && s.includes('Stop-Process -Id $_.ProcessId -Force');
+      }),
+      'NOC: a contagem de servidores tem o MESMO corpo do número principal': /\.kpi-serv\{font-size:1em;font-weight:800;/.test(htmlNoc),
     };
     // ---- "Capturar agora" de ponta a ponta: Master pede -> agente recebe UMA
     // vez (configuracao-agente e heartbeat) -> some ----
@@ -18675,6 +18691,16 @@ setTimeout(async () => {
       'e o aviso leva o ID, copiado':
         /navigator\.clipboard\.writeText\(idLimpo\)/.test(corpo)
         && /ID copiado: ' \+ idLimpo/.test(corpo),
+      // 13/09: "o erro voltou, só que agora mostra o erro porém o AnyDesk
+      // abre" - 1200 ms era pouco pro app vir pra frente, e o alert travava
+      // a tela e continuava mentindo depois que ele abria
+      'espera 3 s (o AnyDesk demora pra vir pra frente), avisa SEM alert, e a faixa some sozinha se a janela perder o foco depois':
+        /var ANYDESK_ESPERA_MS = 3000;/.test(tema7)
+        && !/alert\(/.test(corpo)
+        && /avisoAnydesk\('Se o AnyDesk não abriu/.test(corpo)
+        && /window\.addEventListener\('blur', sumir, \{ once: true \}\)/.test(corpo)
+        && /setTimeout\(sumir, ANYDESK_AVISO_MS\)/.test(corpo)
+        && /#nopulso-anydesk-aviso\{position:fixed/.test(tema7),
       // no card o 🖥️ é "quero o AnyDesk", não "abra a ficha"
       'no card, o 🖥️ não abre a ficha da máquina junto':
         /function cliqueAnydeskTile\(ev, id\)\{ ev\.stopPropagation\(\); if\(window\.zenithAnydesk\) window\.zenithAnydesk\(id\); \}/.test(noc7),
@@ -18697,6 +18723,42 @@ setTimeout(async () => {
   } catch (e) { okAnydeskTenta = false; console.log('  erro: ' + e.message); }
   if (!okAnydeskTenta) ruins += 1;
   console.log(`${okAnydeskTenta ? '✓' : '✗'} AnyDesk: tenta abrir em qualquer aparelho e só avisa se ninguém atender (era o (hover:none) barrando o computador do Master)`);
+
+  // ------------------------------------------------------------------
+  // NOC, painel "Não identificados" RECOLHIDO por padrão. Pedido do Master
+  // (13/09/2026, com 19 fantasmas na tela): "verificar uma forma de ocultar
+  // pois não precisamos desse dado". Fica a linha com a contagem; um clique
+  // abre (é por ali que um computador novo de verdade é cadastrado) e a
+  // escolha é lembrada no navegador.
+  let okFantasmasRecolhido = false;
+  try {
+    const nocF = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const corpoF = (nocF.match(/function renderFantasmas\(\)\{[\s\S]*?\n\}/) || [''])[0];
+    const conf = {
+      'a grade nasce escondida e o cabeçalho é o botão (teclado incluso)':
+        /id="grid-fantasmas" class="equip-grid hidden"/.test(nocF)
+        && /id="fantasmas-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="grid-fantasmas" onclick="alternarFantasmas\(\)"/.test(nocF)
+        && /onkeydown="if\(event\.key==='Enter'\|\|event\.key===' '\)\{event\.preventDefault\(\);alternarFantasmas\(\);\}"/.test(nocF),
+      'fechado por padrão: só abre se o navegador lembrar "1"':
+        /const FANTASMAS_CHAVE = 'nocFantasmasAberto';/.test(nocF)
+        && /localStorage\.getItem\(FANTASMAS_CHAVE\) === '1'/.test(nocF)
+        && /catch\(e\)\{ return false; \}/.test(nocF),
+      'o render respeita a escolha (esconde a grade, troca o rótulo, e nem monta os cards fechado)':
+        /grid\.classList\.toggle\('hidden', !aberto\);/.test(corpoF)
+        && /if\(!aberto\)\{ grid\.innerHTML=''; return; \}/.test(corpoF)
+        && /aberto \? 'ocultar ▾' : 'mostrar ▸'/.test(corpoF)
+        && /setAttribute\('aria-expanded', aberto \? 'true' : 'false'\)/.test(corpoF),
+      'a contagem continua visível mesmo recolhido (o badge é preenchido antes do return)':
+        corpoF.indexOf('badge.textContent = fantasmas.length;') > 0
+        && corpoF.indexOf('badge.textContent = fantasmas.length;') < corpoF.indexOf("if(!aberto){ grid.innerHTML=''; return; }"),
+      'clicar alterna e re-renderiza': /function alternarFantasmas\(\)\{[\s\S]{0,200}localStorage\.setItem\(FANTASMAS_CHAVE, fantasmasAberto\(\) \? '0' : '1'\)[\s\S]{0,80}renderFantasmas\(\);/.test(nocF),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFantasmasRecolhido = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFantasmasRecolhido = false; console.log('  erro: ' + e.message); }
+  if (!okFantasmasRecolhido) ruins += 1;
+  console.log(`${okFantasmasRecolhido ? '✓' : '✗'} NOC: "Não identificados" nasce recolhido (só a contagem), abre num clique e lembra a escolha`);
 
   // ---- NOC: reinício automático programado ----
   //
