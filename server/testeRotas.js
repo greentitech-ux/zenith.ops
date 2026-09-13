@@ -7224,6 +7224,27 @@ setTimeout(async () => {
       }),
       'as marcas são desenhadas ANTES da ampliação (escalam junto, não ficam finas)': scripts.every((s) =>
         s.indexOf('Desenhar-Marcas $gMarcas $escolhaPrint.marcas') < s.indexOf('$ladoRecorte = [Math]::Max($recorte.Width, $recorte.Height)')),
+      // ---- v55: escolher Seta/Linha/Caixa fechava a seleção 1 s depois ----
+      // O botão gravava ocioso = [DateTime]::UtcNow; o Tick faz "ocioso += 1"
+      // e "ocioso -ge 60" - DateTime -ge 60 é True (reproduzido no pwsh), e a
+      // janela fechava como "60 s sem interação". Daí "Ctrl+Z não funciona" e
+      // o diálogo do .NET quando o Close caía dentro do Tick.
+      'v55 (sem subir, a seleção continua fechando ao escolher a ferramenta)': vg.VERSAO_VIGIA >= 55,
+      'escolher a ferramenta ZERA o ocioso (contador de segundos), nunca grava DateTime nele': scripts.every((s) =>
+        s.includes('& $janela.Tag.pintarFerramenta $janela; $janela.Tag.ocioso = 0 }')
+        && !/Tag\.ocioso = \[DateTime\]/.test(s)),
+      'há um botão ↶ Desfazer na barra, com a mesma ação do Ctrl+Z, e os dois redesenham a superfície (Invalidate($true))': scripts.every((s) =>
+        s.includes('$btDesfazer = Botao-Print ([char]0x21B6) 30 "Desfazer a ultima marca (Ctrl+Z)"')
+        && s.includes('$btDesfazer.Add_Click({ param($b, $e) $j = $b.Parent.Parent; if ($j.Tag.marcas.Count -gt 0) { $j.Tag.marcas.RemoveAt($j.Tag.marcas.Count-1) }; $j.Invalidate($true); $j.Tag.ocioso = 0 })')
+        && s.includes('AddRange(@($btSeta,$btLinha,$btCaixa,$btDesfazer,$fio1,')
+        && s.includes('foreach ($bt in @($btSeta, $btLinha, $btCaixa, $btDesfazer)) { $bt.Font = $FonteForma }')),
+      'o runspace do print arma a guarda de exceção do WinForms ANTES de qualquer janela (adeus diálogo "pipeline foi interrompido")': scripts.every((s) => {
+        const iGuarda = s.indexOf('[System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)');
+        const iPrint = s.indexOf('function Selecionar-AreaPrint($tela, $captura) {');
+        const iRunspace = s.indexOf('[void]$psPrint.AddScript({');
+        return iRunspace > 0 && iGuarda > iRunspace && iGuarda < iPrint
+          && s.includes('add_ThreadException({ param($origemErro, $argsErro) try { Log-Print "Excecao na janela do print (engolida de proposito)');
+      }),
       // ---- v54: uma instância por papel. Rodar a instalação de novo "como
       // Administrador" (a própria mensagem manda) subia uma SEGUNDA cópia:
       // duas máscaras no Ctrl+Q, névoa ficando depois do print, Esc duas vezes ----
@@ -17395,7 +17416,7 @@ setTimeout(async () => {
       // deu lugar ao X, e os botoes passaram a nascer do helper Botao-Print
       'a barra tem as 3 ferramentas, Copiar, Salvar e o X': /\$copiar = Botao-Print \$\(if \(\$TemIcones\)/.test(psI)
         && /\$salvar = Botao-Print \$\(if \(\$TemIcones\)/.test(psI) && /\$fechar = Botao-Print \$\(if \(\$TemIcones\) \{ \[char\]0xE711 \} else \{ "X" \}\) 30/.test(psI)
-        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(psI)
+        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btDesfazer,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(psI)
         && !/\$cancelar/.test(psI),
       'Copiar NÃO grava arquivo; só Salvar grava': copiaSemGravar,
       'sem arquivo não entra lista de arquivo na área de transferência': dropListGuardada,
@@ -17792,7 +17813,7 @@ setTimeout(async () => {
       'soltar o botão grava a marca na lista': /if \(\$s\.Tag\.marcaAtual\) \{ \[void\]\$s\.Tag\.marcas\.Add\(\$s\.Tag\.marcaAtual\); \$s\.Tag\.marcaAtual = \$null;/.test(psI),
       'a prévia desenha o que já foi marcado e a marca em curso':
         /Desenhar-Marcas \$e\.Graphics \$s\.Tag\.marcas 0 0; if \(\$s\.Tag\.marcaAtual\) \{ Desenhar-Marcas \$e\.Graphics @\(\$s\.Tag\.marcaAtual\) 0 0 \}/.test(psI),
-      'Ctrl+Z desfaz a última marca': /Keys\]::Z\)\{\$e\.SuppressKeyPress=\$true;if\(\$s\.Tag\.marcas\.Count -gt 0\)\{\$s\.Tag\.marcas\.RemoveAt\(\$s\.Tag\.marcas\.Count-1\);\$s\.Invalidate\(\)\};return\}/.test(psI),
+      'Ctrl+Z desfaz a última marca': /Keys\]::Z\)\{\$e\.SuppressKeyPress=\$true;if\(\$s\.Tag\.marcas\.Count -gt 0\)\{\$s\.Tag\.marcas\.RemoveAt\(\$s\.Tag\.marcas\.Count-1\)\};\$s\.Invalidate\(\$true\);return\}/.test(psI),
       'clicar na ferramenta ATIVA volta para a seleção (senão não dá pra reajustar a área)':
         /if \(\$janela\.Tag\.ferramenta -eq \$qual\) \{ \$janela\.Tag\.ferramenta = "selecao" \}/.test(psI),
       // o que a pessoa vê tem de ser o que ela salva
@@ -18332,7 +18353,7 @@ setTimeout(async () => {
 
     const conf = {
       'a barra existe e é montada de uma vez só': barra.length > 1500
-        && /\$acoes\.Controls\.AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(ps),
+        && /\$acoes\.Controls\.AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btDesfazer,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(ps),
       'botão plano, sem borda e sem o cinza do Windows':
         /\$b\.FlatStyle = \[System\.Windows\.Forms\.FlatStyle\]::Flat/.test(barra)
         && /\$b\.FlatAppearance\.BorderSize = 0/.test(barra)
