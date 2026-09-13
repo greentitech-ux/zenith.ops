@@ -7096,6 +7096,47 @@ setTimeout(async () => {
       // Dom Bessa, 13/09: a impressora foi de .54 pra .52 e o reset caiu no
       // .54 ("FALHOU - sem resposta na 9100"). A leitura VELHA ganhava da
       // leitura de agora só por estar antes na lista.
+      // Pergunta do Master (13/09): "já que temos o MAC, não seria mais
+      // prudente pegar sempre por padrão pelo MAC?" - VMPULSE, VMGCOM, HOST,
+      // Bematech fiscal e Zebra. É por MAC desde sempre no CADASTRO; o furo
+      // estava na tradução MAC -> endereço de agora, que pegava o primeiro
+      // computador que tivesse o MAC. Uma regra só (enderecoAtualDoMac), e
+      // os TRÊS caminhos passam por ela.
+      'a tradução MAC → endereço é UMA função, e os dois caminhos que viram comando passam por ela': (() => {
+        const src = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+        const trecho = (de, ate) => { const i = src.indexOf(de); return i < 0 ? '' : src.slice(i, src.indexOf(ate, i + 10)); };
+        // a definição + as duas chamadas (sondagem da Zebra e o placeholder
+        // {{IP_IMPRESSORA}}); nem uma cópia da regra a mais
+        const usos = (src.match(/enderecoAtualDoMac\(/g) || []).length;
+        return /function enderecoAtualDoMac\(docs, codigo, mac\)/.test(src)
+          && usos === 3
+          && /const atual = enderecoAtualDoMac\(espelho, codigo, mac\);/
+            .test(trecho('async function impressorasPraSondar', '\nmodule.exports'))
+          && /\.map\(\(mac\) => enderecoAtualDoMac\(docs, codigo, mac\)\)/
+            .test(trecho('async function resolverIpImpressora', '\nasync function enfileirarComando'))
+          // e ninguém mais decide "o primeiro computador que tiver o MAC"
+          && !/out\.has\(d\.mac\)/.test(src)
+          // o estado das impressoras vem da sondagem mais RECENTE daquele MAC
+          && /if \(atual && \(\(atual\.est && atual\.est\.em\) \|\| 0\) >= \(\(est && est\.em\) \|\| 0\)\) continue;/
+            .test(trecho('async function estadoImpressorasDaUnidade', '\n// motivos que NAO'));
+      })(),
+      'entre leituras do MESMO MAC vence a mais fresca (ativo, depois visto mais recente)': (() => {
+        const agora = Date.now();
+        const docsFake = [
+          { codigo: 'U1', posto: 'A', dispositivos: [{ mac: 'aa', ip: '10.0.0.54', ativo: false, visto: agora - 3 * 3600 * 1000 }] },
+          { codigo: 'U1', posto: 'B', dispositivos: [{ mac: 'aa', ip: '10.0.0.52', ativo: true, visto: agora }] },
+          { codigo: 'U2', posto: 'C', dispositivos: [{ mac: 'aa', ip: '10.9.9.9', ativo: true, visto: agora + 1000 }] },
+        ];
+        const r = ls.enderecoAtualDoMac(docsFake, 'U1', 'aa');
+        // inativo mais NOVO perde pro ativo? não: ativo vence primeiro
+        const soInativos = ls.enderecoAtualDoMac([
+          { codigo: 'U1', posto: 'A', dispositivos: [{ mac: 'aa', ip: '10.0.0.1', ativo: false, visto: agora - 1000 }] },
+          { codigo: 'U1', posto: 'B', dispositivos: [{ mac: 'aa', ip: '10.0.0.2', ativo: false, visto: agora }] },
+        ], 'U1', 'aa');
+        return r && r.ip === '10.0.0.52'          // não pega o .54 velho
+          && !ls.enderecoAtualDoMac(docsFake, 'U1', 'bb')  // MAC que não existe
+          && soInativos && soInativos.ip === '10.0.0.2';   // entre inativos, o mais recente
+      })(),
       'o comando usa o endereço MAIS FRESCO da impressora, não o primeiro da lista': await (async () => {
         const outraMaq = 'PDV-IP2';
         await ls.cadastrarComputador(UNI, outraMaq, 'interno');

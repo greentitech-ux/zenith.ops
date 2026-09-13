@@ -2304,17 +2304,17 @@ async function resolverIpImpressora(codigo, posto) {
   // o comando continua tendo preferencia, mas so' como desempate - a rede dele
   // e' a que precisa alcancar a impressora, e isso nao vale mais do que estar
   // olhando pro endereco certo.
-  const candidatos = [];
-  for (const d of docs) {
-    if (d.codigo !== codigo) continue;
-    for (const disp of d.dispositivos || []) {
-      if (!macsImpressora.has(disp.mac) || !disp.ip) continue;
-      candidatos.push({ ip: disp.ip, ativo: disp.ativo !== false, visto: disp.visto || 0, daMaquina: d.posto === posto });
-    }
-  }
-  candidatos.sort((a, b) => (b.ativo ? 1 : 0) - (a.ativo ? 1 : 0)
-    || (b.visto || 0) - (a.visto || 0)
-    || (b.daMaquina ? 1 : 0) - (a.daMaquina ? 1 : 0));
+  // mesma tradução MAC -> endereco de agora usada pelo reset (uma regra so').
+  // Entre impressoras diferentes, vence a leitura mais fresca; o computador
+  // que vai rodar o comando so' desempata - a rede dele e' a que precisa
+  // alcancar a impressora, mas isso nao vale mais do que olhar pro endereco
+  // certo.
+  const candidatos = [...macsImpressora]
+    .map((mac) => enderecoAtualDoMac(docs, codigo, mac))
+    .filter(Boolean)
+    .sort((a, b) => (b.ativo ? 1 : 0) - (a.ativo ? 1 : 0)
+      || (b.visto || 0) - (a.visto || 0)
+      || ((b.doc.posto === posto) ? 1 : 0) - ((a.doc.posto === posto) ? 1 : 0));
   if (candidatos.length) return candidatos[0].ip;
   throw new Error('A impressora dessa unidade esta marcada, mas nenhum computador da loja viu o IP dela na ultima varredura de rede. Confira se ela esta ligada na rede.');
 }
@@ -3177,26 +3177,33 @@ async function flushHeartbeatsPendentes() {
 async function estadoImpressorasDaUnidade(codigo) {
   const daUnidade = (await getApelidos())[codigo] || {};
   const espelho = [...(await garantirEspelho()).values()];
-  const vistos = new Set();
-  const out = [];
+  // mesma ideia do enderecoAtualDoMac: a sondagem acontece em cada computador
+  // da loja, e a leitura que vale e' a mais RECENTE daquele MAC - a primeira
+  // que aparecer pode ser de horas atras, e o painel mostraria a impressora
+  // "sem papel" muito depois de alguem ter reposto
+  const melhorPorMac = new Map();
   for (const doc of espelho) {
     if (doc.codigo !== codigo) continue;
     for (const [mac, est] of Object.entries(doc.impressoras || {})) {
-      if (vistos.has(mac)) continue;
       const cad = normalizarEntradaApelido(daUnidade[mac]);
       if (!cad.monitorar || cad.tipo !== 'impressora' || cad.marca !== 'zebra') continue;
-      vistos.add(mac);
-      out.push({
-        mac,
-        ip: (est && est.ip) || null,
-        nome: cad.apelido || null,
-        nivel: (est && est.nivel) || 'desconhecido',
-        motivos: (est && est.motivos) || [],
-        fila: est && est.fila != null ? est.fila : null,
-        em: (est && est.em) || null,
-        computador: { codigo: doc.codigo, posto: doc.posto, nome: doc.nome || null },
-      });
+      const atual = melhorPorMac.get(mac);
+      if (atual && ((atual.est && atual.est.em) || 0) >= ((est && est.em) || 0)) continue;
+      melhorPorMac.set(mac, { est, doc, cad });
     }
+  }
+  const out = [];
+  for (const [mac, { est, doc, cad }] of melhorPorMac) {
+    out.push({
+      mac,
+      ip: (est && est.ip) || null,
+      nome: cad.apelido || null,
+      nivel: (est && est.nivel) || 'desconhecido',
+      motivos: (est && est.motivos) || [],
+      fila: est && est.fila != null ? est.fila : null,
+      em: (est && est.em) || null,
+      computador: { codigo: doc.codigo, posto: doc.posto, nome: doc.nome || null },
+    });
   }
   return out;
 }
@@ -3207,6 +3214,39 @@ async function estadoImpressorasDaUnidade(codigo) {
 const MOTIVOS_QUE_PEDEM_MAO = ['Cabeça aberta', 'Sem papel', 'Sem ribbon'];
 function motivosQuePedemMao(motivos) {
   return (motivos || []).filter((m) => MOTIVOS_QUE_PEDEM_MAO.includes(m));
+}
+
+// O MAC E' A IDENTIDADE; o IP e' so' o endereco de AGORA.
+//
+// Pergunta do Master (13/09/2026): "o IP e' um identificador, porem o MAC
+// acredito que seja mais seguro - ja que temos o MAC, nao seria mais prudente
+// pegar sempre por padrao pelo MAC?". Sim, e e' assim que o cadastro ja
+// funciona: apelido, tipo, marca e o alarme sao gravados POR MAC
+// (definirApelidoDispositivo), pra VMPULSE, VMGCOM, HOST, Bematech fiscal e
+// Zebra igual. O IP nunca foi o cadastro - mas nao da pra mandar ZPL, ping ou
+// impressao pra um MAC: em algum momento ele precisa virar endereco.
+//
+// O furo estava EXATAMENTE nessa tradução. Cada computador da loja mantem a
+// sua propria varredura ARP, e a regra antiga era "pega o primeiro
+// computador que tiver esse MAC" - leitura de 3h atras ganhava da leitura de
+// agora. Foi o que mandou o reset da Zebra pro 10.161.124.54 quando ela ja
+// estava no .52 ("FALHOU - sem resposta na 9100", print do Master).
+//
+// Esta funcao e' a tradução, num lugar so: entre todas as leituras daquele
+// MAC na unidade, vale a mais fresca - ativo vence inativo, visto mais
+// recente vence mais velho.
+function enderecoAtualDoMac(docs, codigo, mac) {
+  const leituras = [];
+  for (const doc of docs) {
+    if (doc.codigo !== codigo) continue;
+    for (const d of doc.dispositivos || []) {
+      if (d.mac !== mac || !d.ip) continue;
+      leituras.push({ ip: d.ip, ativo: d.ativo !== false, visto: d.visto || 0, doc });
+    }
+  }
+  if (!leituras.length) return null;
+  leituras.sort((a, b) => (b.ativo ? 1 : 0) - (a.ativo ? 1 : 0) || (b.visto || 0) - (a.visto || 0));
+  return leituras[0];
 }
 
 async function impressorasPraSondar(codigo) {
@@ -3220,16 +3260,16 @@ async function impressorasPraSondar(codigo) {
   );
   if (!marcados.size) return [];
   const espelho = [...(await garantirEspelho()).values()];
-  const out = new Map();
-  for (const doc of espelho) {
-    if (doc.codigo !== codigo) continue;
-    for (const d of doc.dispositivos || []) {
-      // sem IP nao da pra sondar; o MAC e' so a identidade
-      if (!marcados.has(d.mac) || !d.ip || out.has(d.mac)) continue;
-      out.set(d.mac, { mac: d.mac, ip: d.ip });
-    }
+  // um endereco por MAC, sempre o mais fresco (ver enderecoAtualDoMac). A
+  // regra antiga pegava o primeiro computador que tivesse o MAC, e era por
+  // aqui que o reset da Zebra ia pro IP velho - esta e' a funcao que alimenta
+  // o comandoResetZebra.
+  const out = [];
+  for (const mac of marcados) {
+    const atual = enderecoAtualDoMac(espelho, codigo, mac);
+    if (atual) out.push({ mac, ip: atual.ip });
   }
-  return [...out.values()];
+  return out;
 }
 
 module.exports = {
@@ -3254,7 +3294,7 @@ module.exports = {
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,
-  PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
+  PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,
