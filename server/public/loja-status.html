@@ -555,7 +555,7 @@
        decide se aplica, na política do card dele -->
   <div class="agente-titulo"><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
-    Uma arte por <b>marca</b> — a máquina escreve o próprio nome por cima, no canto de baixo, então a mesma imagem serve pra loja inteira. A marca de cada loja sai do <b>perfil da unidade</b> (tela de Grupos); loja sem marca definida usa a arte <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
+    Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos, e Domino's existe nas duas redes. A máquina escreve o próprio nome por cima, no canto de baixo, então a mesma arte serve a loja inteira. A marca sai do <b>perfil da unidade</b> (tela de Grupos) e o grupo sai do código da loja. Se não houver arte do grupo, cai na arte só da marca; sem essa, na <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
     <select id="pp-marca" style="max-width:200px;"><option value="">Todas as marcas (padrão)</option></select>
@@ -2823,12 +2823,19 @@ async function carregarMarcasPapelDeParede(){
     if(!r.ok) return;
     const d = await r.json();
     const marcado = sel.value;
+    // as combinações grupo+marca vêm PRIMEIRO: é o que ele vai usar quase
+    // sempre. A marca pura fica num grupo separado no fim, pra marca que só
+    // existe numa das redes e não precisa de duas artes.
+    const opc = (valor, label, tem) => `<option value="${escapeHtml(valor)}"${valor===marcado?' selected':''}>${escapeHtml(label)}${tem?' ✓':''}</option>`;
     sel.innerHTML = `<option value="">Todas as marcas (padrão)${d.doParque?' ✓':''}</option>`
-      + (d.marcas||[]).map(m=>`<option value="${escapeHtml(m.id)}"${m.id===marcado?' selected':''}>${escapeHtml(m.label)}${m.temArte?' ✓':''}</option>`).join('');
-    const semArte = (d.marcas||[]).filter(m=>!m.temArte).map(m=>m.label);
+      + `<optgroup label="Grupo + marca">${(d.combinacoes||[]).map(c=>opc(`${c.rede}:${c.marca}`, c.label, c.temArte)).join('')}</optgroup>`
+      + `<optgroup label="Só a marca (vale nos dois grupos)">${(d.marcas||[]).map(m=>opc(m.id, m.label, m.temArte)).join('')}</optgroup>`;
+    // só conta o que falta nas COMBINAÇÕES: é o alvo real. Listar as 5 marcas
+    // puras junto faria parecer que faltam 15 artes quando faltam 10.
+    const semArte = (d.combinacoes||[]).filter(c=>!c.temArte).map(c=>c.label);
     lista.innerHTML = semArte.length
-      ? `Sem arte própria (usam a padrão): <b>${semArte.map(escapeHtml).join(' · ')}</b>`
-      : 'Todas as marcas com arte própria.';
+      ? `Sem arte própria (caem na arte da marca ou na padrão): <b>${semArte.map(escapeHtml).join(' · ')}</b>`
+      : 'Todas as combinações de grupo e marca com arte própria.';
     atualizarVerPapelDeParede();
   }catch(e){ /* a seção continua utilizável só com a arte padrão */ }
 }
@@ -2836,7 +2843,9 @@ function atualizarVerPapelDeParede(){
   const sel = document.getElementById('pp-marca');
   const ver = document.getElementById('pp-ver');
   if(!sel || !ver) return;
-  ver.href = sel.value ? `/api/loja-status/papel-de-parede?marca=${encodeURIComponent(sel.value)}` : '/api/loja-status/papel-de-parede';
+  const [a, b] = (sel.value||'').split(':');
+  const q = b ? `?marca=${encodeURIComponent(b)}&rede=${encodeURIComponent(a)}` : (a ? `?marca=${encodeURIComponent(a)}` : '');
+  ver.href = `/api/loja-status/papel-de-parede${q}`;
 }
 async function enviarPapelDeParede(){
   const input = document.getElementById('pp-arquivo');
@@ -2844,11 +2853,16 @@ async function enviarPapelDeParede(){
   msg.classList.add('hidden');
   const arquivo = (input.files||[])[0];
   if(!arquivo){ msg.textContent='Escolha a imagem.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
-  const marca = (document.getElementById('pp-marca')||{}).value || '';
+  const escolha = (document.getElementById('pp-marca')||{}).value || '';
+  // "GBE:dominos" -> rede + marca; "dominos" -> só marca; "" -> arte padrão
+  const [a, b] = escolha.split(':');
+  const marca = b || a || '';
+  const rede = b ? a : '';
   try{
     const fd = new FormData();
     fd.append('imagem', arquivo);
     if(marca) fd.append('marca', marca);
+    if(rede) fd.append('rede', rede);
     const r = await fetch('/api/loja-status/papel-de-parede', { method:'PUT', body: fd });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui enviar.');
@@ -2856,7 +2870,7 @@ async function enviarPapelDeParede(){
     // enviado: zera o input E o rascunho do tema.js (senao o File voltava
     // ao input num redesenho e ia junto de novo)
     window.zenithRascunhos?.limparAnexoEnviado(input);
-    msg.textContent = `Arte de ${marca ? (document.getElementById('pp-marca').selectedOptions[0].textContent.replace(' ✓','')) : 'todas as marcas'} enviada. Quem está com o papel de parede ligado troca na próxima consulta.`;
+    msg.textContent = `Arte de ${escolha ? (document.getElementById('pp-marca').selectedOptions[0].textContent.replace(' ✓','')) : 'todas as marcas'} enviada. Quem está com o papel de parede ligado troca na próxima consulta.`;
     msg.className = 'msg'; msg.classList.remove('hidden');
   }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }

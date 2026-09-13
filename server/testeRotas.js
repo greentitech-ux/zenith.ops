@@ -11657,11 +11657,16 @@ setTimeout(async () => {
     DOCS.set('unidadesExtras/uniPpDom', { id: 'uniPpDom', codigo: 'PPDOM', nome: 'Dom Teste', marca: 'dominos', areas: [], tiposSolicitacao: [] });
     DOCS.set('unidadesExtras/uniPpSem', { id: 'uniPpSem', codigo: 'PPSEM', nome: 'Sem Marca', marca: null, areas: [], tiposSolicitacao: [] });
     DOCS.set('unidadesExtras/uniPpSpo', { id: 'uniPpSpo', codigo: 'PPSPO', nome: 'Spo Teste', marca: 'spoleto', areas: [], tiposSolicitacao: [] });
+    // MESMA marca, rede diferente: 19855 e a Dom Carrao, ARCFOOD de verdade
+    // (redes.js). E o caso que quebra arte so-por-marca - a logo do grupo
+    // sairia errada na tela da loja.
+    DOCS.set('unidadesExtras/uniPpArc', { id: 'uniPpArc', codigo: '19855', nome: 'Dom Carrao', marca: 'dominos', areas: [], tiposSolicitacao: [] });
     uni.invalidar();
     const comPp = { tipo: 'interno', ultimoHeartbeatEm: Date.now(), eventos: [], politica: { papelDeParedeAtivo: true }, politicaVersao: 3 };
     DOCS.set('lojaStatus/PPDOM__PC1', { codigo: 'PPDOM', posto: 'PC1', nome: 'PDV Dom', agentToken: 'tokdom', ...comPp });
     DOCS.set('lojaStatus/PPSEM__PC1', { codigo: 'PPSEM', posto: 'PC1', nome: 'PDV Sem', agentToken: 'toksem', ...comPp });
     DOCS.set('lojaStatus/PPSPO__PC1', { codigo: 'PPSPO', posto: 'PC1', nome: 'PDV Spo', agentToken: 'tokspo', ...comPp });
+    DOCS.set('lojaStatus/19855__PC1', { codigo: '19855', posto: 'PC1', nome: 'PDV Carrao', agentToken: 'tokarc', ...comPp });
     // maquina com a chave DESLIGADA: nao pode nem resolver arte (custo)
     DOCS.set('lojaStatus/PPDOM__PC2', { codigo: 'PPDOM', posto: 'PC2', nome: 'PDV Desl', agentToken: 'tokdesl', tipo: 'interno', ultimoHeartbeatEm: Date.now(), eventos: [], politica: { papelDeParedeAtivo: false }, politicaVersao: 3 });
 
@@ -11669,6 +11674,11 @@ setTimeout(async () => {
     const envParque = await postarMultipart('/api/loja-status/papel-de-parede', {}, { nome: 'p.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const envDom = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos' }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arteDom = await ls.papelDeParedeDe('PPDOM');
+    // antes de existir arte do grupo, a ARCFOOD cai na arte so-da-marca
+    const arcSoMarca = await ls.papelDeParedeDe('19855');
+    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'ARCFOOD' }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const arcComGrupo = await ls.papelDeParedeDe('19855');
+    const gbeDepois = await ls.papelDeParedeDe('PPDOM');
     const arteSem = await ls.papelDeParedeDe('PPSEM');
     const arteSpo = await ls.papelDeParedeDe('PPSPO');
 
@@ -11691,6 +11701,16 @@ setTimeout(async () => {
     const htmlPp = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
 
     const conf = {
+      // A ARTE CARREGA DUAS LOGOS (grupo + marca), e Domino's existe nas duas
+      // redes: sem a chave por grupo, a Dom Carrão mostraria a logo do GBE.
+      'a arte do GRUPO ganha da arte só-da-marca':
+        envArc.status === 200 && arcComGrupo.rede === 'ARCFOOD' && arcComGrupo.marca === 'dominos',
+      'arte de um grupo não vaza pro outro (mesma marca, redes diferentes)':
+        arcComGrupo.caminho !== gbeDepois.caminho && gbeDepois.marca === 'dominos',
+      'sem arte do grupo, cai na arte só-da-marca (não fica sem)':
+        arcSoMarca.marca === 'dominos' && arcSoMarca.rede === null,
+      'a tela oferece grupo + marca, e não só marca':
+        /optgroup label="Grupo \+ marca"/.test(htmlPp) && /fd\.append\('rede', rede\)/.test(htmlPp),
       'a loja com marca recebe a arte da MARCA, não a do parque':
         envParque.status === 200 && envDom.status === 200 && arteDom.marca === 'dominos',
       'loja sem marca cai na arte do parque (não fica sem papel de parede)':
@@ -11744,7 +11764,7 @@ setTimeout(async () => {
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (parque=${envParque.status} dom=${envDom.status} antes=${antes} depois=${depois} img=${imgMaquina.status} marcas=${marcas.status} ${marcas.corpo.slice(0,200)})`);
   } catch (e) { okPapelMarca = false; console.log('  erro: ' + e.message); }
   if (!okPapelMarca) ruins += 1;
-  console.log(`${okPapelMarca ? '✓' : '✗'} Papel de parede: uma arte por marca, o nome da máquina escrito nela, e trocar a imagem chega na loja`);
+  console.log(`${okPapelMarca ? '✓' : '✗'} Papel de parede: uma arte por grupo + marca (as duas logos), o nome da máquina escrito nela, e trocar a imagem chega na loja`);
 
 
   // ------------------------------------------------------------------
