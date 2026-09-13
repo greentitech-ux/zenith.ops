@@ -7282,6 +7282,13 @@ setTimeout(async () => {
         s.includes('$dono = $global:MutexInstancia.WaitOne(20000)')
         && !/MutexInstancia\.WaitOne\(0\)/.test(s)
         && /segura o mutex ha 20s - encerrando a antiga pra esta assumir\."\n      Encerrar-OutrasInstancias\n      try \{ \$dono = \$global:MutexInstancia\.WaitOne\(5000\)/.test(s)),
+      // ---- v57: a barra some enquanto a seleção anda e volta quando para ----
+      'v57 (sem subir, a barra continua parada em cima da seleção que anda)': vg.VERSAO_VIGIA >= 57,
+      'mover/redimensionar/remarcar esconde a barra no MouseDown, e o MouseUp a reposiciona': scripts.every((s) =>
+        s.includes('if($modo -eq "novo"){$s.Tag.area=$null}; if($s.Tag.barra){$s.Tag.barra.Visible=$false}; $s.Capture=$true; $s.Invalidate() })')
+        && (s.match(/& \$s\.Parent\.Tag\.posBarra \$s\.Parent/g) || []).length >= 2),
+      'seta do teclado move a seleção E a barra acompanha': scripts.every((s) =>
+        s.includes('default{return}};$s.Invalidate($true);& $s.Tag.posBarra $s;$e.Handled=$true} })')),
       'a tarefa de login ganha gatilho de repetição (5 min) na instalação E no próprio agente, sem reinstalar': scripts.every((s) =>
         s.includes('$gatilhoRepeticao = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)')
         && s.includes('return @($gatilhoLogon, $gatilhoRepeticao)')
