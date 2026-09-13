@@ -346,6 +346,10 @@ const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-pub
 const ROTA_LOJA_IP_LOCAL_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/ip-local$/;
 // Configuração local que o agente consulta com seu token; não expõe dados do computador.
 const ROTA_LOJA_CONFIG_AGENTE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/configuracao-agente$/;
+// A arte do papel de parede que ESTA maquina deve aplicar (a marca sai do
+// perfil da unidade). Mesmo motivo publico da configuracao-agente: quem baixa
+// e a maquina, com o token dela, e o que volta e uma imagem do proprio grupo.
+const ROTA_LOJA_PAPEL_PAREDE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/papel-de-parede$/;
 // O agente conta versao e estado do NoPulsoPrint (ver Reportar-EstadoAgente no
 // vigiaScript.js) - mesmo motivo publico do ip-local: quem chama e a maquina
 // O agente manda a lista de programas instalados (ver Inventariar-Programas no
@@ -380,6 +384,7 @@ function rotaPublicaSemDashboard(path) {
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
     || ROTA_LOJA_TELEMETRIA_RE.test(path) || ROTA_LOJA_CONFIG_AGENTE_RE.test(path)
+    || ROTA_LOJA_PAPEL_PAREDE_RE.test(path)
     || ROTA_LOJA_PROGRAMAS_RE.test(path)
     || ROTA_LOJA_ESTADO_AGENTE_RE.test(path);
 }
@@ -1513,9 +1518,29 @@ app.post('/api/loja-status/:codigo/computadores/:posto/programas', async (req, r
 
 app.get('/api/loja-status/papel-de-parede', async (req, res) => {
   const cfg = await lojaStatus.getConfig();
-  const pp = cfg && cfg.papelDeParede;
+  // ?marca=dominos serve a arte daquela marca (o "Ver atual" de cada linha da
+  // tela). Sem marca, ou marca sem arte, continua servindo a do parque - e o
+  // que o agente ANTIGO baixa, entao esta rota nao pode mudar de significado.
+  const marca = unidadesExtras.MARCAS_VALIDAS.includes(String(req.query.marca || '')) ? String(req.query.marca) : null;
+  const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
+  const pp = (marca && porMarca[marca] && porMarca[marca].caminho ? porMarca[marca] : null)
+    || (cfg && cfg.papelDeParede);
   if (!pp || !pp.caminho) return res.sendStatus(404);
   storage.streamArquivo(pp.caminho, pp.tipo || 'image/jpeg', res);
+});
+
+// A arte DESTA maquina: o servidor resolve a marca pelo perfil da unidade e
+// serve a imagem certa. O agente nao escolhe nada - se ele escolhesse, trocar
+// a marca de uma loja no cadastro nao chegaria em maquina nenhuma.
+app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (req, res) => {
+  try {
+    await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null);
+    const arte = await lojaStatus.papelDeParedeDe(req.params.codigo);
+    if (!arte || !arte.caminho) return res.sendStatus(404);
+    storage.streamArquivo(arte.caminho, arte.tipo || 'image/jpeg', res);
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
 });
 
 // o .ps1 CARREGA o segredo do computador (agentToken) assado dentro dele -
@@ -4976,12 +5001,42 @@ app.put('/api/loja-status/:codigo/computadores/:posto/politica', auth.requireMas
 // papel de parede do parque: UMA imagem pra rede toda; cada computador decide
 // se aplica (politica.papelDeParedeAtivo). Servida sem sessao porque quem
 // baixa e a maquina - o caminho e opaco e a imagem e do proprio grupo.
+// Quais marcas ja tem arte enviada, pra tela poder dizer o que falta. Caminho
+// de UM segmento de proposito: /papel-de-parede/marcas colidiria com as rotas
+// /api/loja-status/:codigo/:algo que existem logo abaixo.
+app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (req, res) => {
+  const cfg = await lojaStatus.getConfig();
+  const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
+  res.json({
+    doParque: !!(cfg && cfg.papelDeParede && cfg.papelDeParede.caminho),
+    marcas: unidadesExtras.MARCAS_VALIDAS.map((id) => ({
+      id,
+      label: unidadesExtras.MARCAS_LABEL[id] || id,
+      temArte: !!(porMarca[id] && porMarca[id].caminho),
+      em: (porMarca[id] && porMarca[id].em) || null,
+    })),
+  });
+});
+
 app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
-    const caminho = await storage.salvarArquivo('parque', req.file, 'papel-de-parede');
-    const cfg = await lojaStatus.setConfig({ papelDeParede: { caminho, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() } });
-    res.json(cfg.papelDeParede);
+    // marca vem no MESMO form da imagem (campo de texto do multipart), entao
+    // so existe depois do multer - nao da pra ler antes do upload
+    const marca = unidadesExtras.MARCAS_VALIDAS.includes(String(req.body.marca || '')) ? String(req.body.marca) : null;
+    const arte = { caminho: null, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() };
+    arte.caminho = await storage.salvarArquivo('parque', req.file, marca ? `papel-de-parede-${marca}` : 'papel-de-parede');
+    if (!marca) {
+      const cfg = await lojaStatus.setConfig({ papelDeParede: arte });
+      return res.json(cfg.papelDeParede);
+    }
+    // merge de campo aninhado: setConfig usa { merge: true }, entao mandar o
+    // mapa inteiro apagaria a arte das OUTRAS marcas. Le o que existe e
+    // reescreve com a nova por cima.
+    const atual = await lojaStatus.getConfig();
+    const porMarca = { ...((atual && atual.papelDeParedePorMarca) || {}), [marca]: arte };
+    const cfg = await lojaStatus.setConfig({ papelDeParedePorMarca: porMarca });
+    res.json({ marca, ...cfg.papelDeParedePorMarca[marca] });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -547,14 +547,16 @@
        decide se aplica, na política do card dele -->
   <div class="agente-titulo"><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
-    Uma imagem só pra rede toda. Ela não entra em máquina nenhuma sozinha: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a imagem aqui atualiza quem já está ligado, na próxima consulta da máquina.
+    Uma arte por <b>marca</b> — a máquina escreve o próprio nome por cima, no canto de baixo, então a mesma imagem serve pra loja inteira. A marca de cada loja sai do <b>perfil da unidade</b> (tela de Grupos); loja sem marca definida usa a arte <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
   </div>
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:18px;">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+    <select id="pp-marca" style="max-width:200px;"><option value="">Todas as marcas (padrão)</option></select>
     <input type="file" id="pp-arquivo" accept="image/png,image/jpeg,image/webp" style="max-width:260px;">
     <button type="button" class="btn-mini ok" onclick="enviarPapelDeParede()">Enviar imagem</button>
-    <a class="btn-mini" href="/api/loja-status/papel-de-parede" target="_blank" rel="noopener">👁 Ver atual</a>
+    <a class="btn-mini" id="pp-ver" href="/api/loja-status/papel-de-parede" target="_blank" rel="noopener">👁 Ver atual</a>
     <span class="msg hidden" id="msg-pp"></span>
   </div>
+  <div id="pp-marcas" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
   <div class="agente-titulo">
     <h2>🤖 Beniboy — Ações do Agente</h2>
   </div>
@@ -1675,6 +1677,19 @@ function abrirDetalheComputador(codigo, posto){
     if(d && DETALHE_ATUAL && DETALHE_ATUAL.codigo===codigo && DETALHE_ATUAL.posto===posto) atualizarDetalheSeAberto();
   });
 }
+// Atalho da política até o campo de imagem. A ficha da máquina é um overlay
+// POR CIMA da página: rolar por baixo dela não adianta, então fecha primeiro.
+// O destaque de 2s existe porque a seção fica no fim de uma página longa - no
+// celular, chegar lá e não saber qual campo é dá na mesma que não chegar.
+function irParaPapelDeParede(){
+  fecharDetalheComputador();
+  const campo = document.getElementById('pp-arquivo');
+  if(!campo) return;
+  campo.scrollIntoView({ behavior:'smooth', block:'center' });
+  campo.style.outline = '2px solid var(--accent)';
+  campo.style.outlineOffset = '3px';
+  setTimeout(()=>{ campo.style.outline = ''; campo.style.outlineOffset = ''; }, 2000);
+}
 function fecharDetalheComputador(){
   document.getElementById('detalhe-comp-overlay').classList.add('hidden');
   DETALHE_ATUAL = null;
@@ -2757,22 +2772,52 @@ async function carregarMigracaoEndereco(){
   }catch(e){ /* o painel some em vez de quebrar a tela */ }
 }
 
+// Lista as marcas e diz quais já têm arte. Dizer o que FALTA importa: sem
+// isso o Master sobe uma arte, vê "enviada" e não tem como saber que as
+// outras quatro marcas continuam caindo na imagem padrão.
+async function carregarMarcasPapelDeParede(){
+  const sel = document.getElementById('pp-marca');
+  const lista = document.getElementById('pp-marcas');
+  if(!sel || !lista) return;
+  try{
+    const r = await fetch('/api/loja-status/papel-de-parede-marcas');
+    if(!r.ok) return;
+    const d = await r.json();
+    const marcado = sel.value;
+    sel.innerHTML = `<option value="">Todas as marcas (padrão)${d.doParque?' ✓':''}</option>`
+      + (d.marcas||[]).map(m=>`<option value="${escapeHtml(m.id)}"${m.id===marcado?' selected':''}>${escapeHtml(m.label)}${m.temArte?' ✓':''}</option>`).join('');
+    const semArte = (d.marcas||[]).filter(m=>!m.temArte).map(m=>m.label);
+    lista.innerHTML = semArte.length
+      ? `Sem arte própria (usam a padrão): <b>${semArte.map(escapeHtml).join(' · ')}</b>`
+      : 'Todas as marcas com arte própria.';
+    atualizarVerPapelDeParede();
+  }catch(e){ /* a seção continua utilizável só com a arte padrão */ }
+}
+function atualizarVerPapelDeParede(){
+  const sel = document.getElementById('pp-marca');
+  const ver = document.getElementById('pp-ver');
+  if(!sel || !ver) return;
+  ver.href = sel.value ? `/api/loja-status/papel-de-parede?marca=${encodeURIComponent(sel.value)}` : '/api/loja-status/papel-de-parede';
+}
 async function enviarPapelDeParede(){
   const input = document.getElementById('pp-arquivo');
   const msg = document.getElementById('msg-pp');
   msg.classList.add('hidden');
   const arquivo = (input.files||[])[0];
   if(!arquivo){ msg.textContent='Escolha a imagem.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const marca = (document.getElementById('pp-marca')||{}).value || '';
   try{
     const fd = new FormData();
     fd.append('imagem', arquivo);
+    if(marca) fd.append('marca', marca);
     const r = await fetch('/api/loja-status/papel-de-parede', { method:'PUT', body: fd });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui enviar.');
+    await carregarMarcasPapelDeParede();
     // enviado: zera o input E o rascunho do tema.js (senao o File voltava
     // ao input num redesenho e ia junto de novo)
     window.zenithRascunhos?.limparAnexoEnviado(input);
-    msg.textContent = 'Imagem enviada. Quem está com o papel de parede ligado troca na próxima consulta.';
+    msg.textContent = `Arte de ${marca ? (document.getElementById('pp-marca').selectedOptions[0].textContent.replace(' ✓','')) : 'todas as marcas'} enviada. Quem está com o papel de parede ligado troca na próxima consulta.`;
     msg.className = 'msg'; msg.classList.remove('hidden');
   }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
@@ -2784,7 +2829,11 @@ async function enviarPapelDeParede(){
 // trava a atualizacao do Chrome/PDV. Tudo reversivel: desmarcar volta ao
 // valor de fabrica na proxima consulta da maquina.
 const POLITICA_ITENS = [
-  { campo:'papelDeParedeAtivo', rotulo:'🖼️ Papel de parede da rede', ajuda:'Aplica a imagem enviada abaixo na área de trabalho desta máquina.' },
+  // "a imagem enviada ABAIXO" era mentira: quem envia a imagem é a seção
+  // 🖼️ Papel de parede do parque, no fim da página - e a ficha da máquina
+  // abre POR CIMA dela. Quem lia isso aqui procurava um campo que, nesta
+  // tela, não existe. Agora o texto diz onde é e o botão leva até lá.
+  { campo:'papelDeParedeAtivo', rotulo:'🖼️ Papel de parede da rede', ajuda:'Aplica nesta máquina a imagem do parque. Quem escolhe a imagem é a seção 🖼️ Papel de parede do parque, no fim desta página.', ir:'irParaPapelDeParede' },
   { campo:'bloquearUsbStorage', rotulo:'🔌 Bloquear pendrive / HD externo', ajuda:'Só armazenamento USB. Pin pad, impressora térmica, Zebra, leitor e teclado/mouse continuam funcionando.' },
   { campo:'bloquearInstalacao', rotulo:'🔒 Instalar exige Administrador', ajuda:'O Windows nega a elevação pedida por usuário comum. Atualização de Chrome/PDV (serviço já elevado) não passa por aí.' },
   { campo:'alertarInstalacao', rotulo:'📦 Avisar quando instalarem ou desinstalarem algo', ajuda:'A máquina manda a lista de programas e você recebe alerta do que entrou e do que saiu.' },
@@ -2802,7 +2851,7 @@ function renderPoliticaComputador(codigo, c){
   el.innerHTML = `<div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Política desta máquina</div>
     ${POLITICA_ITENS.map(i=>`<label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;cursor:pointer;">
       <input type="checkbox" data-pol="${i.campo}" ${pol[i.campo]?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);">
-      <span style="font-size:12.5px;">${i.rotulo}<small style="display:block;color:var(--muted);">${i.ajuda}</small></span>
+      <span style="font-size:12.5px;">${i.rotulo}<small style="display:block;color:var(--muted);">${i.ajuda}</small>${i.ir?`<button type="button" class="btn-mini" style="margin-top:5px;" onclick="event.preventDefault();${i.ir}()">🖼️ Enviar / trocar a imagem</button>`:''}</span>
     </label>`).join('')}
     ${aviso}${novo}${sumiu}
     <button type="button" class="btn-mini ok" style="margin-top:8px;" onclick="salvarPoliticaComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar política</button>
@@ -3502,6 +3551,7 @@ async function boot(){
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
     carregarMigracaoEndereco();
+    carregarMarcasPapelDeParede();
     await carregarAgente();
   }
   conectarStream();
