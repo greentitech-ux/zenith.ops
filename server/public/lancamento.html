@@ -1101,7 +1101,7 @@ function esconderMsgLerCanais(){
   const msg = document.getElementById('ler-canais-msg');
   msg.classList.add('hidden'); msg.innerHTML = '';
 }
-const MAX_FOTOS_RELATORIO = 5;
+const MAX_FOTOS_RELATORIO = 10; // pedido do Master: 5 não bastava pro relatório longo do Pulse fotografado em partes. Casa com MAX_FOTOS_RELATORIO_PDV no index.js.
 
 function nomesSelecionados(){
   return ARQUIVOS_RELATORIO.map(a=>a.name || 'foto').join(', ');

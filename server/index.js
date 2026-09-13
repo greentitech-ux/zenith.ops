@@ -164,11 +164,15 @@ const uploadNotaFiscal = multer({
 // relatorio do PDV pra leitura dos Canais/Formas (ver canaisVendaOcr.js):
 // diferente da nota fiscal, aqui podem vir VARIAS imagens do mesmo
 // relatorio - a tela do Pulse nao cabe num print so quando a loja tem
-// muito canal, e o gerente acaba fotografando em partes. O teto de 5 e o
-// ponto em que a conta de tokens por leitura ainda vale a pena.
+// muito canal, e o gerente acaba fotografando em partes. Teto de 10 (pedido
+// do Master: 5 nao bastava pro relatorio longo em partes). Custa tokens por
+// foto, mas o abuso ja e' contido pelo teto por pessoa/dia (ocrUso) - repetir
+// a mesma foto ruim so gasta e nunca muda o resultado. O front (lancamento.html
+// MAX_FOTOS_RELATORIO) usa o MESMO numero.
+const MAX_FOTOS_RELATORIO_PDV = 10;
 const uploadRelatorioPdv = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 5 },
+  limits: { fileSize: 15 * 1024 * 1024, files: MAX_FOTOS_RELATORIO_PDV },
 });
 
 // documento de identidade do cadastro de RH (ver documentoIdentidadeOcr.js):
@@ -5920,7 +5924,7 @@ app.get('/api/ocr/uso', auth.requireMaster, (req, res) => {
   res.json(ocrUso.resumoDoDia(req.query.dia));
 });
 
-app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRelatorioPdv.array('imagem', 5), async (req, res) => {
+app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRelatorioPdv.array('imagem', MAX_FOTOS_RELATORIO_PDV), async (req, res) => {
   try {
     const unidade = req.body.unidade;
     if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
@@ -5935,8 +5939,9 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
       return res.status(400).json({ error: 'Essa loja não usa leitura de Canais por imagem. O Master ativa em Grupos.' });
     }
     // Teto por pessoa/dia. Cada clique aqui custa 2 chamadas de modelo (3 com
-    // desempate) carregando ate 5 fotos - repetir a MESMA foto ruim nunca
-    // muda o resultado, so gasta. O Master fica de fora: e' ele quem testa
+    // desempate) carregando ate MAX_FOTOS_RELATORIO_PDV fotos - repetir a MESMA
+    // foto ruim nunca muda o resultado, so gasta. O Master fica de fora: e' ele
+    // quem testa
     // formato novo de relatorio, e travar isso trava a configuracao da loja.
     if (!req.isMaster) {
       const bloqueio = ocrUso.motivoDeBloqueio(req.user.id);
