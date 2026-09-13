@@ -7255,11 +7255,38 @@ setTimeout(async () => {
         && s.includes('New-Object System.Threading.Mutex($false, $nomeMutex)')
         && s.includes('if (-not $dono) { Escrever-Log "Ja existe uma instancia ($papel) do NOCZenith rodando - esta copia se encerra."; exit }')
         && s.includes('catch [System.Threading.AbandonedMutexException] { $dono = $true }')),
-      'a reinstalação encerra a cópia antiga desta sessão ANTES do Start-Process (e não a de boot)': scripts.every((s) => {
-        const iMata = s.indexOf('$_.CommandLine -match "NOCZenith\\.ps1" -and $_.CommandLine -match "-Loop" -and $_.CommandLine -notmatch "-Servico"');
+      'a reinstalação encerra a cópia antiga do MESMO papel ANTES do Start-Process (Encerrar-OutrasInstancias)': scripts.every((s) => {
+        const iFn = s.indexOf('function Encerrar-OutrasInstancias {');
+        const iChamada = s.indexOf('\n  Encerrar-OutrasInstancias\n  Write-Host "Iniciando agora tambem, nessa sessao..."');
         const iStart = s.indexOf('Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Destino`" -Loop"');
-        return iMata > 0 && iStart > iMata && s.includes('$_.ProcessId -ne $PID') && s.includes('Stop-Process -Id $_.ProcessId -Force');
+        return iFn > 0 && iChamada > iFn && iStart > iChamada
+          && s.includes('$_.CommandLine -match "NOCZenith\\.ps1" -and $_.CommandLine -match "-Loop" -and (($_.CommandLine -match "-Servico") -eq [bool]$Servico)')
+          && s.includes('$_.ProcessId -ne $PID') && s.includes('Stop-Process -Id $_.ProcessId -Force');
       }),
+      // ---- v56: "sempre que tem um deploy ele para de funcionar" ----
+      // A cópia velha subia a nova e dava "exit" - que devolve o controle ao
+      // host, e o host só termina quando as threads acabam: o runspace do
+      // print ficava vivo (duas máscaras a cada deploy). E a tarefa só tinha
+      // AtLogOn: agente morto ficava morto até alguém rodar o comando de novo.
+      'v56 (sem subir, ninguém ganha o reinício limpo nem o gatilho de repetição)': vg.VERSAO_VIGIA >= 56,
+      'no update, a cópia velha encerra print, chat e mutex ANTES de subir a nova, e sai por [Environment]::Exit': scripts.every((s) => {
+        const iArgs = s.indexOf('if ($Servico) { $argsNovo += " -Servico" }');
+        const iPrint = s.indexOf('Encerrar-NoPulsoPrint\n        Encerrar-JanelaChat\n        Soltar-InstanciaUnica\n        Start-Process powershell.exe -ArgumentList $argsNovo\n        Start-Sleep -Seconds 2\n        [Environment]::Exit(0)');
+        return iArgs > 0 && iPrint > iArgs
+          && s.includes('function Encerrar-NoPulsoPrint {') && s.includes('$global:NoPulsoPrintPowerShell.Stop()')
+          && s.includes('function Soltar-InstanciaUnica {') && s.includes('$global:MutexInstancia.ReleaseMutex()');
+      }),
+      'a cópia nova ESPERA o mutex (20 s) em vez de desistir; se a velha travou, encerra a velha e assume': scripts.every((s) =>
+        s.includes('$dono = $global:MutexInstancia.WaitOne(20000)')
+        && !/MutexInstancia\.WaitOne\(0\)/.test(s)
+        && /segura o mutex ha 20s - encerrando a antiga pra esta assumir\."\n      Encerrar-OutrasInstancias\n      try \{ \$dono = \$global:MutexInstancia\.WaitOne\(5000\)/.test(s)),
+      'a tarefa de login ganha gatilho de repetição (5 min) na instalação E no próprio agente, sem reinstalar': scripts.every((s) =>
+        s.includes('$gatilhoRepeticao = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)')
+        && s.includes('return @($gatilhoLogon, $gatilhoRepeticao)')
+        && s.includes('$gatilho = Gatilhos-DaTarefa')
+        && s.includes('Set-ScheduledTask -TaskName $NomeTarefa -Trigger (Gatilhos-DaTarefa) | Out-Null')
+        && /Reportar-IpLocal\n  Garantir-GatilhoDeRepeticao\n/.test(s)
+        && s.includes('function Garantir-GatilhoDeRepeticao {\n  if ($Servico) { return }')),
       'NOC: a contagem de servidores tem o MESMO corpo do número principal': /\.kpi-serv\{font-size:1em;font-weight:800;/.test(htmlNoc),
     };
     // ---- "Capturar agora" de ponta a ponta: Master pede -> agente recebe UMA
