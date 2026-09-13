@@ -60,7 +60,9 @@ function fakeQuery(caminho, filtros = [], ordem = null, lim = null) {
       let docs = [...DOCS.entries()].filter(([k]) => k.startsWith(caminho + '/')).map(([k]) => snapDoc(k));
       for (const f of filtros) {
         docs = docs.filter((d) => {
-          const v = (d.data() || {})[f.campo];
+          // caminho pontilhado ("vinculo.chave") como no Firestore de verdade - sem
+          // isto o where() de sincronizarTicket nunca achava as cópias antigas aqui
+          const v = String(f.campo).split('.').reduce((o, k) => (o == null ? undefined : o[k]), d.data() || {});
           if (f.op === '==') return v === f.valor;
           if (f.op === '!=') return v !== f.valor;
           if (f.op === '<') return v < f.valor;
@@ -11413,7 +11415,7 @@ setTimeout(async () => {
       'e a tarefa vai pra CONCLUIDA (nao fica em "A fazer" com o ticket encerrado)': !!depois && depois.status === 'CONCLUIDA' && !!depois.concluidaEm,
       'a regra vale tambem no re-sync do historico (aprovado + bloqueio = concluida, mesmo sem FINALIZADO)':
         /function ehTicketDeBloqueio\(ticket\)/.test(srcTfE) && /\(ticket\.execucaoStatus === 'FINALIZADO' \|\| ehTicketDeBloqueio\(ticket\)\) \? 'CONCLUIDA' : 'A_FAZER'/.test(srcTfE)
-        && /const versao = 'tickets-v4';/.test(srcTfE),
+        && /const versao = 'tickets-v[5-9]';/.test(srcTfE),
       'decidir pelo link do e-mail sincroniza a tarefa': /await sincronizarTarefasDoTicket\(atualizado\);\n    res\.json\(\{ ok: true, numeroTicket: atualizado\.numeroTicket/.test(srcIdxE),
       'prestacao de contas (adiantamento FINALIZADO) sincroniza a tarefa': /await sincronizarTarefasDoTicket\(registro\); \/\/ prestacao de contas encerra/.test(srcIdxE),
     };
@@ -16965,7 +16967,7 @@ setTimeout(async () => {
       'e a correção não mexe na ordem da lista (atualizadoEm continua sendo movimento)': depois.atualizadoEm !== depois.criadaEm,
       'tarefa manual continua nascendo com a data e hora de agora': manual.dataInicio === hojeIso && String(manual.criadaEm).slice(0, 10) === hojeIso,
       'ticket sem data válida cai no agora, não em undefined': !!semDataDoc.criadaEm && /^\d{4}-\d{2}-\d{2}T/.test(semDataDoc.criadaEm),
-      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v4';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
+      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v5';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okDatas = !falhas.length;
@@ -16973,6 +16975,69 @@ setTimeout(async () => {
   } catch (e) { okDatas = false; console.log('  erro: ' + e.message); }
   if (!okDatas) ruins += 1;
   console.log(`${okDatas ? '✓' : '✗'} Meu Dia: tarefa de ticket carrega a data REAL do ticket, e a tarefa manual a data de agora`);
+
+  // ---- Meu Dia: ticket sem responsável = UMA tarefa, não uma por Master ----
+  // Master (13/09/2026), com a lista na mão: "#11800 manu / #11800 solutions /
+  // #11800 david - o ticket sempre fica repetido, não pode acontecer". A
+  // fila do Master criava uma cópia por Master, e Master enxerga toda tarefa
+  // (podeGerir) - triplicata pura. Agora fica com o Master principal
+  // (MASTER_EMAIL) ou, sem ele, o primeiro por e-mail; as cópias antigas dos
+  // outros Masters somem na sincronização (aberta cancela, concluída arquiva).
+  let okUmaPorTicket = false;
+  try {
+    const tarefasMod = require(__dirname + '/tarefas.js');
+    const masters3 = [
+      { id: 'mst-b', email: 'b-master@teste.local', role: 'master', nome: 'B' },
+      { id: 'mst-a', email: 'a-master@teste.local', role: 'master', nome: 'A' },
+      { id: 'mst-c', email: 'c-master@teste.local', role: 'master', nome: 'C' },
+      { id: 'ger-1', email: 'gerente-x@teste.local', role: 'admin', cargo: 'gerente', permissions: { sections: ['fechamento'] } },
+    ];
+    const docsDoTicket = (chave) => [...DOCS.entries()].filter(([k, v]) => k.startsWith('tarefas/') && v && v.vinculo && v.vinculo.chave === chave).map(([, v]) => v);
+    const masterEmailAntes = process.env.MASTER_EMAIL;
+    process.env.MASTER_EMAIL = 'nao-esta-na-lista@teste.local';
+    // 1) sem responsável: uma tarefa só, do primeiro Master por e-mail
+    const semDono = { id: 'tk-fila-1', numeroTicket: 91001, tipo: 'compra', status: 'PENDENTE', titulo: '155 pares de talheres (garfo e faca)', unidade: 'DOM_19706', criadoEm: '2026-09-13T10:00:00.000Z' };
+    const c1 = await tarefasMod.sincronizarTicket(semDono, masters3, 'solicitacao');
+    const c1b = await tarefasMod.sincronizarTicket(semDono, masters3, 'solicitacao');
+    const doTk1 = docsDoTicket('solicitacao:tk-fila-1');
+    // 2) direcionado a gerente (sem perfil operacional): cai na fila, uma só
+    const paraGerente = { ...semDono, id: 'tk-fila-2', numeroTicket: 91002, direcionadoParaId: 'ger-1', direcionadoParaEmail: 'gerente-x@teste.local' };
+    const c2 = await tarefasMod.sincronizarTicket(paraGerente, masters3, 'solicitacao');
+    // 3) MASTER_EMAIL na lista manda: a fila é dele
+    process.env.MASTER_EMAIL = 'c-master@teste.local';
+    const c3 = await tarefasMod.sincronizarTicket({ ...semDono, id: 'tk-fila-3', numeroTicket: 91003 }, masters3, 'solicitacao');
+    // 4) atribuído explicitamente a dois Masters continua sendo dois (é escolha de quem atribuiu)
+    const c4 = await tarefasMod.sincronizarTicket({ ...semDono, id: 'tk-fila-4', numeroTicket: 91004, atribuidosIds: ['mst-a', 'mst-b'] }, masters3, 'solicitacao');
+    // 5) o estrago antigo: cópias dos outros Masters já gravadas (uma aberta, uma concluída)
+    process.env.MASTER_EMAIL = 'nao-esta-na-lista@teste.local';
+    const velho = { id: 'tk-fila-5', numeroTicket: 91005, tipo: 'compra', status: 'PENDENTE', titulo: 'Cestos de lixo de 50l', criadoEm: '2026-09-12T10:00:00.000Z' };
+    DOCS.set('tarefas/dup-b', { id: 'dup-b', origem: 'ticket', status: 'PENDENTE', responsavelId: 'mst-b', vinculo: { chave: 'solicitacao:tk-fila-5', tipo: 'solicitacao', id: 'tk-fila-5' }, criadaEm: '2026-09-12T10:00:00.000Z', atualizadoEm: '2026-09-12T10:00:00.000Z' });
+    DOCS.set('tarefas/dup-c', { id: 'dup-c', origem: 'ticket', status: 'CONCLUIDA', responsavelId: 'mst-c', vinculo: { chave: 'solicitacao:tk-fila-5', tipo: 'solicitacao', id: 'tk-fila-5' }, criadaEm: '2026-09-12T10:00:00.000Z', atualizadoEm: '2026-09-12T10:00:00.000Z' });
+    // e uma concluída de quem NÃO é Master (gerente que já foi responsável): fica como está
+    DOCS.set('tarefas/dup-g', { id: 'dup-g', origem: 'ticket', status: 'CONCLUIDA', responsavelId: 'ger-1', vinculo: { chave: 'solicitacao:tk-fila-5', tipo: 'solicitacao', id: 'tk-fila-5' }, criadaEm: '2026-09-12T10:00:00.000Z', atualizadoEm: '2026-09-12T10:00:00.000Z' });
+    await tarefasMod.sincronizarTicket(velho, masters3, 'solicitacao');
+    const dupB = DOCS.get('tarefas/dup-b'); const dupC = DOCS.get('tarefas/dup-c'); const dupG = DOCS.get('tarefas/dup-g');
+    const doTk5 = docsDoTicket('solicitacao:tk-fila-5');
+    if (masterEmailAntes === undefined) delete process.env.MASTER_EMAIL; else process.env.MASTER_EMAIL = masterEmailAntes;
+
+    const conf = {
+      'ticket sem responsável cria UMA tarefa, não uma por Master': c1.length === 1 && doTk1.length === 1,
+      'e ela é do primeiro Master por e-mail (determinístico), não do primeiro da lista': c1[0].responsavelId === 'mst-a',
+      'sincronizar de novo não cria outra': c1b.length === 0 && docsDoTicket('solicitacao:tk-fila-1').length === 1,
+      'direcionado a quem não tem perfil operacional cai na fila - uma só': c2.length === 1 && c2[0].responsavelId === 'mst-a',
+      'MASTER_EMAIL presente na lista é o dono da fila': c3.length === 1 && c3[0].responsavelId === 'mst-c',
+      'atribuição explícita a dois Masters continua sendo duas tarefas': c4.length === 2 && c4.map((t) => t.responsavelId).sort().join() === 'mst-a,mst-b',
+      'cópia ABERTA de outro Master é cancelada na sincronização': dupB.status === 'CANCELADA',
+      'cópia CONCLUÍDA de outro Master é arquivada (some da lista, fica no histórico)': dupC.status === 'ARQUIVADA' && /cópia repetida/.test(dupC.arquivadaPorNome || ''),
+      'concluída de quem não é Master não é mexida': dupG.status === 'CONCLUIDA',
+      'sobra exatamente uma tarefa ABERTA pro ticket, do Master da fila': doTk5.filter((t) => ['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO'].includes(t.status)).length === 1 && doTk5.find((t) => t.status === 'PENDENTE').responsavelId === 'mst-a',
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okUmaPorTicket = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (c1=${JSON.stringify(c1.map((t) => t.responsavelId))} c2=${JSON.stringify(c2.map((t) => t.responsavelId))} c3=${JSON.stringify(c3.map((t) => t.responsavelId))} c4=${c4.length} dupB=${dupB && dupB.status} dupC=${dupC && dupC.status} tk5=${JSON.stringify(doTk5.map((t) => [t.responsavelId, t.status]))})`);
+  } catch (e) { okUmaPorTicket = false; console.log('  erro: ' + e.message); }
+  if (!okUmaPorTicket) ruins += 1;
+  console.log(`${okUmaPorTicket ? '✓' : '✗'} Meu Dia: ticket sem responsável vira UMA tarefa (Master da fila), não uma por Master - e as cópias antigas somem`);
 
   // ---- Meu Dia: PDF de ocorrência e relatório consolidado ----
   // Nem toda situação vira solicitação ou formulário: às vezes só aconteceu e

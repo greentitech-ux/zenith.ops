@@ -109,17 +109,34 @@ function podeReceberTicket(usuario) {
   return ['suporte', 'tecnico', 'manutencao'].some((tag) => secoes.includes(tag) || cargo === tag);
 }
 
+// Ticket sem responsável (ou direcionado a quem não tem perfil operacional)
+// vai pra fila do Master - UM Master, não todos. Master enxerga toda tarefa
+// (podeGerir), então uma cópia por Master era triplicata pura: o mesmo
+// #11800 aparecia três vezes (manu, solutions, david) pra quem abrisse o
+// Meu Dia. Master, 13/09: "o ticket sempre fica repetido - não pode
+// acontecer". Fica com o Master principal (MASTER_EMAIL); sem ele entre os
+// usuários, o primeiro Master em ordem de e-mail - determinístico, pra não
+// trocar de dono a cada sincronização.
+function masterDaFila(usuarios) {
+  const masters = usuarios.filter((u) => u.role === 'master');
+  if (!masters.length) return [];
+  const principal = String(process.env.MASTER_EMAIL || '').trim().toLowerCase();
+  const eleito = masters.find((u) => String(u.email || '').trim().toLowerCase() === principal)
+    || [...masters].sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')))[0];
+  return [eleito];
+}
+
 function destinatarios(ticket, usuarios) {
   const ids = Array.isArray(ticket.atribuidosIds) && ticket.atribuidosIds.length
     ? ticket.atribuidosIds : [ticket.direcionadoParaId].filter(Boolean);
   const emails = Array.isArray(ticket.atribuidosEmails) && ticket.atribuidosEmails.length
     ? ticket.atribuidosEmails : [ticket.direcionadoParaEmail].filter(Boolean);
-  if (!ids.length && !emails.length) return usuarios.filter((u) => u.role === 'master');
+  if (!ids.length && !emails.length) return masterDaFila(usuarios);
   const elegiveis = usuarios.filter((u) => podeReceberTicket(u)
     && (ids.includes(u.id) || emails.map((x) => String(x).toLowerCase()).includes(String(u.email || '').toLowerCase())));
   // Um ticket direcionado a alguém sem perfil operacional não desaparece da
   // fila: o Master recebe a pendência para decidir se a delega.
-  return elegiveis.length ? elegiveis : usuarios.filter((u) => u.role === 'master');
+  return elegiveis.length ? elegiveis : masterDaFila(usuarios);
 }
 
 async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
@@ -137,10 +154,17 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
   const alteradas = [];
 
   // Quem deixou de ser responsável não carrega um ticket antigo na fila.
+  const masterIds = new Set(usuarios.filter((u) => u.role === 'master').map((u) => u.id));
   for (const doc of existentes.docs) {
     const tarefa = doc.data();
-    if (STATUS_ABERTO.has(tarefa.status) && !alvoIds.has(tarefa.responsavelId)) {
+    if (alvoIds.has(tarefa.responsavelId)) continue;
+    if (STATUS_ABERTO.has(tarefa.status)) {
       await doc.ref.update({ status: 'CANCELADA', canceladaEm: agora, motivoCancelamento: 'Ticket redirecionado.' });
+    } else if (tarefa.status === 'CONCLUIDA' && masterIds.has(tarefa.responsavelId)) {
+      // cópia CONCLUÍDA de um Master que não é o da fila: é a triplicata
+      // antiga (uma por Master). Some da lista sem apagar o histórico - o
+      // ticket continua com a tarefa do Master da fila.
+      await doc.ref.update({ status: 'ARQUIVADA', arquivadaEm: agora, arquivadaPorNome: 'Sincronização (cópia repetida do ticket)', atualizadoEm: agora });
     }
   }
 
@@ -518,7 +542,10 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   // pra corrigir o que já está gravado, sem precisar de forcar.
   // v4 (12/09/2026): ticket de Login bloqueado aprovado passa a ser CONCLUIDA
   // (ver ehTicketDeBloqueio) - versao nova refaz o historico uma vez no boot
-  const versao = 'tickets-v4';
+  // v5 (13/09/2026): ticket sem responsavel passa a ter UMA tarefa (Master da
+  // fila) em vez de uma por Master - a versao nova refaz o historico uma vez
+  // no boot e some com as copias repetidas (ver masterDaFila)
+  const versao = 'tickets-v5';
   const ref = CONTROLE.doc(`retroativo-${versao}`);
   const anterior = await ref.get();
   if (anterior.exists && !forcar) return { executada: false, motivo: 'já sincronizado nesta versão', ...anterior.data() };
