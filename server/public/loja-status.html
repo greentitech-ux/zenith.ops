@@ -427,11 +427,11 @@
     </div>
     <div class="header-nav">
       <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
-      <button class="back hidden" id="btn-manutencao" onclick="abrirManutencao()" title="Reiniciar computadores do parque - um, uma unidade inteira ou várias unidades">🔁 Reiniciar máquinas</button>
-      <button class="back hidden" id="btn-limpar-travados" onclick="limparTravados()" title="Manda todos os computadores fecharem processos travados do agente NOC-NoPulso">🧹 Destravar lojas</button>
+      <button type="button" class="btn-icone hidden" id="btn-manutencao" onclick="abrirManutencao()" data-dica="Reiniciar máquinas do parque (uma, uma unidade ou várias)" aria-label="Reiniciar máquinas do parque">🔁</button>
+      <button type="button" class="btn-icone hidden" id="btn-limpar-travados" onclick="limparTravados()" data-dica="Destravar lojas: fechar processos travados do agente NOC-NoPulso" aria-label="Destravar lojas">🧹</button>
       <!-- atalho pra central de HD/temperatura/reboot: o card daqui mostra o
            computador que voce ja escolheu; la e a frota inteira de uma vez -->
-      <a class="back" href="/noc-maquinas.html" title="HD, temperatura e tempo ligado de todos os computadores">💽 Saúde das Máquinas</a>
+      <a class="btn-icone" href="/noc-maquinas.html" data-dica="Saúde das máquinas: HD, temperatura e tempo ligado de toda a frota" aria-label="Saúde das máquinas">💽</a>
       <button class="btn-notif" onclick="carregar()" title="Atualizar">🔄</button>
       <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
     </div>
@@ -465,6 +465,21 @@
       <div class="kpi-num" id="kpi-num-nunca">0</div>
       <div class="kpi-label">⚪ Sem agente</div>
     </button>
+  </div>
+
+  <!-- Servidores: infraestrutura sempre-ligada (BOS do Pulse, SQL, etc). Boa
+       prática de NOC (Zabbix/PRTG/Datadog agrupam host por papel): servidor
+       tem prioridade e volume diferentes do PDV - poucos, críticos, e não
+       podem se perder no meio de 65 máquinas. Aberto por padrão. Só aparece
+       se houver máquina marcada como servidor na ficha. Reaproveita o MESMO
+       card da grade (disco/RAM/uptime/temperatura já vêm da telemetria) - é
+       filtro + destaque, não coleta nova. -->
+  <div class="uni-panel hidden" id="servidores-panel">
+    <button type="button" class="uni-panel-head" onclick="alternarPainelServidores()" aria-expanded="true" aria-controls="servidores-corpo">
+      <span><span class="uni-caret" id="servidores-caret">▾</span> 🗄️ Servidores</span>
+      <span class="uni-panel-sub" id="servidores-sub"></span>
+    </button>
+    <div id="servidores-corpo" class="equip-grid" style="margin-top:10px;"></div>
   </div>
 
   <!-- Painel por unidade: cada unidade com quantos computadores online/offline.
@@ -1709,6 +1724,40 @@ function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-uni
 // dos KPIs/Por unidade/grade principal pra nao inflar as contagens
 function computadoresReais(){ return COMPUTADORES.filter(c => c.nome); }
 
+// SERVIDORES - a seção de infraestrutura. Só o que a telemetria JÁ coleta:
+// status, disco (volume mais apertado + temperatura), RAM e uptime. O card é
+// o MESMO da grade (equipTileHtml + metricasTileHtml) - clicar abre o detalhe
+// igual. "Pedindo atenção" = offline, ou disco crítico, ou 7+ dias sem
+// reiniciar (a política da casa). O que NÃO existe hoje e seria o próximo
+// passo de servidor de verdade (serviço do SQL rodando, CPU) está fora de
+// propósito: melhor não mostrar do que inventar.
+function servidorPedeAtencao(c){
+  const st = statusDe(c);
+  if(st === 'offline' || st === 'degradado') return true;
+  if(c.discoNivel === 'critico') return true;
+  if(c.uptimeHoras != null && Math.floor(c.uptimeHoras / 24) >= 7) return true;
+  return false;
+}
+function renderServidores(){
+  const painel = document.getElementById('servidores-panel');
+  if(!painel) return;
+  const servidores = computadoresReais().filter(c => c.ehServidor);
+  // sem servidor marcado, a seção some inteira - não ocupa espaço à toa
+  painel.classList.toggle('hidden', servidores.length === 0);
+  if(!servidores.length) return;
+  servidores.sort((a,b) => {
+    const ORDEM = { offline:0, degradado:1, nunca:2, online:3 };
+    const rank = (c) => ORDEM[statusDe(c)] ?? 9;
+    return rank(a) - rank(b) || (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
+  });
+  const atencao = servidores.filter(servidorPedeAtencao).length;
+  const sub = document.getElementById('servidores-sub');
+  if(sub) sub.innerHTML = atencao
+    ? `<b>${servidores.length}</b> · <span style="color:var(--bad);">${atencao} pedindo atenção</span>`
+    : `<b>${servidores.length}</b> · todos ok`;
+  document.getElementById('servidores-corpo').innerHTML = servidores.map(c => equipTileHtml(c.codigo, c)).join('');
+}
+
 function renderKpis(){
   const reais = computadoresReais();
   const total = reais.length;
@@ -1815,6 +1864,11 @@ let QUEDAS_UNIDADE = '';
 let QUEDAS_DE = '';
 let QUEDAS_ATE = '';
 let QUEDAS_ORDENACAO = { campo: 'foraMs', direcao: 'desc' };
+function alternarPainelServidores(){
+  const p = document.getElementById('servidores-panel');
+  const abriu = p.classList.toggle('recolhido') === false;
+  p.querySelector('.uni-panel-head').setAttribute('aria-expanded', abriu ? 'true' : 'false');
+}
 function alternarPainelQuedas(){
   const p = document.getElementById('quedas-panel');
   const abriu = p.classList.toggle('recolhido') === false;
@@ -1958,6 +2012,7 @@ async function carregarQuedas(periodo){
 
 function render(){
   renderKpis();
+  renderServidores();
   renderUnidades();
   renderFantasmas();
   if(ULTIMO_REDE_DADOS) renderRede(ULTIMO_REDE_DADOS);
@@ -2409,7 +2464,7 @@ async function manutEnviar(tarefa){
 async function limparTravados(){
   if(!confirm('Mandar TODOS os computadores fecharem processos travados do NOCZenith?\n\nCada máquina executa na próxima batida (até ~25s). O agente NOC-NoPulso que está saudável continua rodando — só os processos órfãos são encerrados.')) return;
   const b = document.getElementById('btn-limpar-travados');
-  b.disabled = true; b.textContent = '⏳ Enviando...';
+  b.disabled = true; b.textContent = '⏳';
   try{
     const r = await fetch('/api/loja-status/limpar-travados', { method: 'POST' });
     const d = await r.json();
@@ -2421,7 +2476,7 @@ async function limparTravados(){
       + (jaTinham ? `\n\n(${jaTinham} já tinham o comando na fila de um envio anterior — também vão executar.)` : '')
       + (falhas.length ? `\n\nNão foi possível enviar para:\n` + falhas.map(f => `• ${f.nome || f.posto}: ${f.motivo}`).join('\n') : ''));
   }catch(e){ alert('Erro: ' + e.message); }
-  b.disabled = false; b.textContent = '🧹 Destravar lojas';
+  b.disabled = false; b.textContent = '🧹';
 }
 
 // ---- diagnostico de rede (ver redeDiagnostico.js no servidor) ------------
