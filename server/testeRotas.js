@@ -1146,6 +1146,18 @@ setTimeout(async () => {
     const iProvaResgate = src.indexOf('conferirPelaLinha([...itens, ...resgatados])');
 
     const conf = {
+      // FORMATO US no quadro de Formas do Pulse ("R$469.40" = 469,40, nao
+      // 46.940): o parser antigo lia ponto como milhar e REPROVAVA a leitura
+      // certa do AdyenV2/IFOOD. Agora os dois formatos convivem.
+      'US: "R$469.40" (ponto decimal) casa com o valor 469,40 - nao mais 46.940':
+        ocrL.conferirPelaLinha([it('adyen', 'AdyenV2 R$469.40', 469.40, 'forma')]).reprovados.length === 0,
+      'US com milhar: "R$2,841.82" casa com 2841,82':
+        ocrL.conferirPelaLinha([it('ifood', 'IFOOD R$2,841.82', 2841.82, 'forma')]).reprovados.length === 0,
+      'e o parser devolve os dois formatos certos (BR e US)':
+        ocrL.numerosEmReais('R$469.40')[0] === 469.40 && ocrL.numerosEmReais('R$4.065,11')[0] === 4065.11
+        && ocrL.numerosEmReais('R$2,841.82')[0] === 2841.82 && ocrL.parseValorMonetario('4.065') === 4065,
+      'US errado ainda é barrado (469,40 lido como 4,69 não casa com a linha)':
+        ocrL.conferirPelaLinha([it('adyen', 'AdyenV2 R$469.40', 4.69, 'forma')]).reprovados.length === 1,
       // o caso dele, com os números dele
       'o 85.353,77 é barrado porque a linha diz R$6.353,77':
         c1.reprovados.length === 1 && c1.reprovados[0].campo === 'moto'

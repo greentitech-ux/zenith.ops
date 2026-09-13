@@ -593,12 +593,39 @@ function conferirPelaLinha(itens) {
 // uma trava.
 const TEM_REAIS = /r\$/i;
 
+// O relatorio do Domino's Pulse MISTURA formatos de numero: o quadro de
+// Canais imprime em BR ("R$4.065,11" = ponto milhar, virgula decimal), mas o
+// de Formas de Pagamento imprime em US ("R$469.40" = ponto decimal;
+// "R$2,841.82" = virgula milhar, ponto decimal) - Pulse e' sistema
+// americano. O parser antigo assumia BR sempre, entao lia "469.40" como
+// 46.940 e REPROVAVA a leitura correta do AdyenV2/IFOOD. Este entende os dois
+// sem ambiguidade, pela regra universal: o ULTIMO separador seguido de 1-2
+// digitos e' o decimal; os outros sao milhar; separador seguido de 3 digitos
+// e' milhar (nao ha decimal). Para relatorio 100% BR o resultado e' IDENTICO
+// ao de antes.
+function parseValorMonetario(bruto) {
+  const s = String(bruto || '').trim();
+  if (!/\d/.test(s)) return NaN;
+  const ultimoSep = Math.max(s.lastIndexOf('.'), s.lastIndexOf(','));
+  if (ultimoSep === -1) return Number(s.replace(/\D/g, ''));
+  const casasDepois = s.length - ultimoSep - 1;
+  // 1-2 digitos apos o ultimo separador = decimal (BR ",11" ou US ".40");
+  // 3 digitos = milhar sem decimal (ex "4.065" = 4065)
+  if (casasDepois >= 1 && casasDepois <= 2) {
+    const inteiro = s.slice(0, ultimoSep).replace(/[.,]/g, '');
+    const frac = s.slice(ultimoSep + 1).replace(/\D/g, '');
+    return Number(`${inteiro}.${frac}`);
+  }
+  return Number(s.replace(/[.,]/g, ''));
+}
+
 function numerosEmReais(texto) {
   const out = [];
-  const re = /r\$\s*(\d[\d.]*(?:,\d{1,2})?)/gi;
+  // o grupo captura digitos com ponto E virgula juntos (US "2,841.82" cabe)
+  const re = /r\$\s*(\d[\d.,]*)/gi;
   let m = re.exec(String(texto || ''));
   while (m) {
-    const n = Number(m[1].replace(/\./g, '').replace(',', '.'));
+    const n = parseValorMonetario(m[1]);
     if (Number.isFinite(n)) out.push(n);
     m = re.exec(String(texto || ''));
   }
@@ -1042,4 +1069,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   }
 }
 
-module.exports = { ativo, lerCanais, extrairJson, resgatarSobras, conferirPelaLinha, percentualNaLinha, rotuloBateComOrigem, normalizarTexto, conferirSomas, conferirPercentuais, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi };
+module.exports = { ativo, lerCanais, extrairJson, resgatarSobras, conferirPelaLinha, percentualNaLinha, rotuloBateComOrigem, normalizarTexto, conferirSomas, conferirPercentuais, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi, parseValorMonetario, numerosEmReais };
