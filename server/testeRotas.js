@@ -298,7 +298,7 @@ function pedir(caminho, headers = {}) {
 // com ou sem arquivo - o risco a cobrir e a abertura sem anexo ter quebrado)
 // nomeCampo/headers sao opcionais: o chat manda "anexo" sem auth, a leitura
 // de Canais manda "imagem" com Bearer - mesma montagem de corpo
-function postarMultipart(caminho, campos, arquivo, nomeCampo = 'anexo', headers = {}) {
+function postarMultipart(caminho, campos, arquivo, nomeCampo = 'anexo', headers = {}, metodo = 'POST') {
   const B = '----zenithteste' + Math.random().toString(36).slice(2);
   const partes = [];
   Object.entries(campos).forEach(([k, v]) => {
@@ -315,7 +315,7 @@ function postarMultipart(caminho, campos, arquivo, nomeCampo = 'anexo', headers 
   const corpo = Buffer.concat(partes);
   return new Promise((resolve) => {
     const req = http.request({
-      host: '127.0.0.1', port: 8899, path: caminho, method: 'POST',
+      host: '127.0.0.1', port: 8899, path: caminho, method: metodo,
       headers: { 'Content-Type': `multipart/form-data; boundary=${B}`, 'Content-Length': corpo.length, ...headers },
     }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b })); });
     req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
@@ -11601,12 +11601,130 @@ setTimeout(async () => {
         && /el\.classList\.toggle\('hidden', !IS_MASTER\);/.test(htmlNoc)
         && /function enviarPapelDeParede\(\)/.test(htmlNoc),
     };
-    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+  
+  const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPolitica = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (comum=${comum.status} p1=${p1.status} v1=${pol1.politicaVersao} v2=${pol2.politicaVersao} prog1=${prog1.corpo} prog2=${prog2.corpo} desl=${desl.corpo})`);
   } catch (e) { okPolitica = false; console.log('  erro: ' + e.message); }
   if (!okPolitica) ruins += 1;
   console.log(`${okPolitica ? '✓' : '✗'} Política da máquina: papel de parede, pendrive, instalação com Administrador e alerta de programa novo`);
+
+  // ---- PAPEL DE PAREDE POR MARCA (pedido do Master, 13/09/2026) ----
+  //
+  // Ele quer a maquina da loja com a cara certa: arte da marca (Domino's,
+  // Spoleto, Sao Braz...) e o NOME da maquina escrito nela. Duas decisoes que
+  // este teste tranca:
+  //
+  // 1. UMA arte por MARCA, nao uma por maquina - quem escreve o nome e o
+  //    agente, na propria maquina. Compor no servidor pediria biblioteca de
+  //    imagem no deploy pra desenhar duas linhas de texto.
+  // 2. A marca sai do perfil da unidade que JA existe (unidades.js), nao de
+  //    um cadastro novo - e nunca do nome da loja ("Spoleto Domino's
+  //    Aeroporto" tem as duas no nome).
+  //
+  // E conserta um defeito que estava calado: a politica so era reaplicada
+  // quando politicaVersao mudava, e trocar a IMAGEM nao mexia nessa versao -
+  // arte nova nao chegava em maquina nenhuma, enquanto a tela dizia que sim.
+  let okPapelMarca = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const uni = require('/home/user/adyen-monitor/server/unidades.js');
+    const cabPP = { Authorization: 'Bearer ' + token };
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+
+    // duas unidades: uma Domino's, outra sem marca nenhuma
+    DOCS.set('unidadesExtras/uniPpDom', { id: 'uniPpDom', codigo: 'PPDOM', nome: 'Dom Teste', marca: 'dominos', areas: [], tiposSolicitacao: [] });
+    DOCS.set('unidadesExtras/uniPpSem', { id: 'uniPpSem', codigo: 'PPSEM', nome: 'Sem Marca', marca: null, areas: [], tiposSolicitacao: [] });
+    DOCS.set('unidadesExtras/uniPpSpo', { id: 'uniPpSpo', codigo: 'PPSPO', nome: 'Spo Teste', marca: 'spoleto', areas: [], tiposSolicitacao: [] });
+    uni.invalidar();
+    const comPp = { tipo: 'interno', ultimoHeartbeatEm: Date.now(), eventos: [], politica: { papelDeParedeAtivo: true }, politicaVersao: 3 };
+    DOCS.set('lojaStatus/PPDOM__PC1', { codigo: 'PPDOM', posto: 'PC1', nome: 'PDV Dom', agentToken: 'tokdom', ...comPp });
+    DOCS.set('lojaStatus/PPSEM__PC1', { codigo: 'PPSEM', posto: 'PC1', nome: 'PDV Sem', agentToken: 'toksem', ...comPp });
+    DOCS.set('lojaStatus/PPSPO__PC1', { codigo: 'PPSPO', posto: 'PC1', nome: 'PDV Spo', agentToken: 'tokspo', ...comPp });
+    // maquina com a chave DESLIGADA: nao pode nem resolver arte (custo)
+    DOCS.set('lojaStatus/PPDOM__PC2', { codigo: 'PPDOM', posto: 'PC2', nome: 'PDV Desl', agentToken: 'tokdesl', tipo: 'interno', ultimoHeartbeatEm: Date.now(), eventos: [], politica: { papelDeParedeAtivo: false }, politicaVersao: 3 });
+
+    // arte do parque (a de sempre) + arte da marca Domino's
+    const envParque = await postarMultipart('/api/loja-status/papel-de-parede', {}, { nome: 'p.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const envDom = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos' }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const arteDom = await ls.papelDeParedeDe('PPDOM');
+    const arteSem = await ls.papelDeParedeDe('PPSEM');
+    const arteSpo = await ls.papelDeParedeDe('PPSPO');
+
+    // a versao de aplicacao tem de MEXER quando so a imagem troca
+    const antes = (await ls.configuracaoAgente('PPDOM', 'PC1', 'tokdom')).versaoAplicacao;
+    await new Promise((r) => setTimeout(r, 5));
+    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos' }, { nome: 'd2.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const depois = (await ls.configuracaoAgente('PPDOM', 'PC1', 'tokdom')).versaoAplicacao;
+    const cfgDesl = await ls.configuracaoAgente('PPDOM', 'PC2', 'tokdesl');
+
+    // subir arte de UMA marca nao pode apagar a das outras (setConfig e merge)
+    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'spoleto' }, { nome: 's.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const domAindaTem = !!(await ls.papelDeParedeDe('PPDOM')).marca;
+    const spoAgoraTem = (await ls.papelDeParedeDe('PPSPO')).marca === 'spoleto';
+
+    const imgMaquina = await pedir('/api/loja-status/PPDOM/computadores/PC1/papel-de-parede', { 'x-noc-token': 'tokdom' });
+    const imgSemToken = await pedir('/api/loja-status/PPDOM/computadores/PC1/papel-de-parede', {});
+    const marcas = await pedir('/api/loja-status/papel-de-parede-marcas', cabPP);
+    const psPp = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'PPDOM', posto: 'PC1', tipo: 'interno', agentToken: 'tokdom' });
+    const htmlPp = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    const conf = {
+      'a loja com marca recebe a arte da MARCA, não a do parque':
+        envParque.status === 200 && envDom.status === 200 && arteDom.marca === 'dominos',
+      'loja sem marca cai na arte do parque (não fica sem papel de parede)':
+        !!arteSem && arteSem.marca === null && !!arteSem.caminho,
+      'marca sem arte enviada também cai na do parque':
+        !!arteSpo && arteSpo.marca === null,
+      // O DEFEITO: antes, trocar a imagem não mexia em versão nenhuma e a
+      // máquina nunca rebaixava a arte. A tela prometia o contrário.
+      'trocar SÓ a imagem já faz a máquina reaplicar':
+        typeof antes === 'string' && typeof depois === 'string' && antes !== depois,
+      'a versão de aplicação carrega a da política junto (mexer na trava também reaplica)':
+        antes.split('.')[0] === '3',
+      // §3: máquina com a chave desligada não paga leitura de config/unidades
+      'máquina com papel de parede desligado não resolve arte nenhuma':
+        cfgDesl.versaoAplicacao === '3.0' && cfgDesl.politica.papelDeParedeAtivo === false,
+      'subir a arte de uma marca não apaga a das outras': domAindaTem && spoAgoraTem,
+      'a máquina baixa a arte DELA, com o token dela': imgMaquina.status === 200,
+      'sem o token do computador a arte é recusada': imgSemToken.status === 403,
+      'a tela sabe dizer quais marcas ainda não têm arte':
+        marcas.status === 200 && Array.isArray(JSON.parse(marcas.corpo).marcas)
+        && JSON.parse(marcas.corpo).marcas.some((m) => m.id === 'dominos' && m.temArte === true),
+      // ---- agente ----
+      'o agente baixa da URL da PRÓPRIA máquina (quem escolhe a marca é o servidor)':
+        /\$UrlPapelDeParede = "[^"]*\/api\/loja-status\/PPDOM\/computadores\/PC1\/papel-de-parede"/.test(psPp)
+        && /Invoke-WebRequest -Uri \$UrlPapelDeParede -Headers \$CabecalhosAgente/.test(psPp),
+      'o agente carimba o nome da máquina na arte':
+        /function Carimbar-NomeNaArte/.test(psPp) && /\$nome = \$env:COMPUTERNAME/.test(psPp)
+        && /\$UnidadePosto = "PPDOM \/ PC1"/.test(psPp),
+      // sem isto, uma falha do System.Drawing deixaria a loja SEM papel de
+      // parede - pior do que papel de parede sem o nome escrito
+      'se o carimbo falhar, aplica a arte crua em vez de desistir':
+        /return \$origem \}/.test(psPp) && /\$destino = Carimbar-NomeNaArte \$bruto \$destino/.test(psPp),
+      'o agente compara a versão de aplicação, com queda pra política se o servidor for antigo':
+        /\$versao = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
+        && /\$versao = "\$\(\$cfg\.politicaVersao\)"/.test(psPp),
+      // agente novo = 52 maquinas baixando de novo; sem subir a versao,
+      // ninguem baixa e a mudanca toda fica so no servidor
+      'a versão do vigia subiu junto (senão nenhuma máquina pega o script novo)':
+        require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 53,
+      // ---- tela ----
+      'a tela manda a marca junto da imagem e mostra o que falta':
+        /fd\.append\('marca', marca\)/.test(htmlPp) && /id="pp-marca"/.test(htmlPp)
+        && /function carregarMarcasPapelDeParede\(\)/.test(htmlPp),
+      // o texto antigo mandava o Master procurar um campo que, na ficha da
+      // maquina, nao existe - ele procurou e nao achou
+      'a política não diz mais "a imagem enviada abaixo" (não havia nada abaixo)':
+        !/Aplica a imagem enviada abaixo/.test(htmlPp) && /function irParaPapelDeParede\(\)/.test(htmlPp),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPapelMarca = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (parque=${envParque.status} dom=${envDom.status} antes=${antes} depois=${depois} img=${imgMaquina.status} marcas=${marcas.status} ${marcas.corpo.slice(0,200)})`);
+  } catch (e) { okPapelMarca = false; console.log('  erro: ' + e.message); }
+  if (!okPapelMarca) ruins += 1;
+  console.log(`${okPapelMarca ? '✓' : '✗'} Papel de parede: uma arte por marca, o nome da máquina escrito nela, e trocar a imagem chega na loja`);
+
 
   // ------------------------------------------------------------------
   // "INCLUSIVE QUERO TAMBEM SER AVISADO QUANDO DESINSTALADO" (Master,

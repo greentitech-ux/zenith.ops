@@ -42,6 +42,7 @@ const redeDiagnostico = require('./redeDiagnostico');
 const nocMaquina = require('./nocMaquina');
 const impressoraStatus = require('./impressoraStatus');
 const ouiFabricantes = require('./ouiFabricantes');
+const unidades = require('./unidades');
 
 const COLLECTION = db.collection('lojaStatus');
 // fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
@@ -76,6 +77,48 @@ async function setConfig(patch) {
   configCache = null;
   return getConfig();
 }
+// ---- PAPEL DE PAREDE: UMA ARTE POR MARCA, NAO UMA POR MAQUINA ----
+//
+// O que muda de um PDV pro outro e so o NOME da maquina, e quem carimba o
+// nome e o proprio agente, na tela dela (ver Aplicar-PapelDeParede no
+// vigiaScript.js). O servidor nunca compoe imagem: nao tem biblioteca de
+// imagem no projeto e por em teria custo de deploy pra desenhar uma linha de
+// texto que a maquina desenha de graca.
+//
+// A MARCA sai do perfil da unidade (unidades.js, MARCAS_VALIDAS) - o mesmo
+// cadastro que o Master ja preenche. Nao ha campo novo de marca em lugar
+// nenhum, e marca NAO se deduz do nome da loja: "Spoleto Domino's Aeroporto"
+// tem as duas no nome (o motivo esta escrito no proprio unidades.js).
+//
+// Sem marca, ou marca sem arte enviada: cai no papel de parede do parque, que
+// e exatamente o comportamento de antes desta mudanca.
+async function papelDeParedeDe(codigo) {
+  const cfg = await getConfig();
+  const doParque = cfg && cfg.papelDeParede && cfg.papelDeParede.caminho ? cfg.papelDeParede : null;
+  // perfil() devolve null pra unidade que nunca foi cadastrada em runtime -
+  // nesse caso nao ha marca e a maquina cai no papel de parede do parque
+  const perfilUnidade = await unidades.perfil(codigo).catch(() => null);
+  const marca = (perfilUnidade && perfilUnidade.marca) || null;
+  const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
+  const arte = marca && porMarca[marca] && porMarca[marca].caminho ? porMarca[marca] : null;
+  if (arte) return { ...arte, marca };
+  return doParque ? { ...doParque, marca: null } : null;
+}
+
+// Versao que o AGENTE compara pra decidir se reaplica.
+//
+// O bug que isto conserta: a politica so era reaplicada quando politicaVersao
+// mudava, e trocar a IMAGEM nao mexia nessa versao. Na pratica o Master subia
+// arte nova e nenhuma maquina trocava - a tela do NOC dizia que trocava.
+// Juntando as duas versoes numa so, subir imagem nova ja e motivo de
+// reaplicar, sem inventar rota de "forcar".
+//
+// Fica em campo SEPARADO em vez de bagunçar politicaVersao: aquela e a versao
+// da politica, contada de 1 em 1, e tem tela e teste que leem como numero.
+function versaoAplicacao(politicaVersao, arte) {
+  return `${Number(politicaVersao || 0)}.${(arte && arte.versao) || 0}`;
+}
+
 async function pushAcessoRemotoAtivo() {
   const c = await getConfig();
   return c.pushAcessoRemoto === true; // default false
@@ -1090,11 +1133,16 @@ async function configuracaoAgente(codigo, posto, token) {
   // so o interno recebe.
   const capturarAgora = capturaPendente(atual);
   if (atual.noPulsoPrintCapturarEm) await gravarEEspelhar(codigo, posto, { noPulsoPrintCapturarEm: null });
+  const politica = sanitizarPolitica(atual.politica);
+  // so resolve a arte quando a maquina de fato aplica papel de parede: quem
+  // esta com a chave desligada nao paga leitura de config nem de unidades
+  const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo) : null;
   return {
     noPulsoPrint: !!atual.noPulsoPrint,
     capturarAgora,
-    politica: sanitizarPolitica(atual.politica),
+    politica,
     politicaVersao: Number(atual.politicaVersao || 0),
+    versaoAplicacao: versaoAplicacao(atual.politicaVersao, arte),
   };
 }
 
@@ -3083,7 +3131,7 @@ module.exports = {
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
-  sanitizarPolitica, definirPolitica, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
+  sanitizarPolitica, definirPolitica, papelDeParedeDe, versaoAplicacao, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, reportarEstadoAgente, pedirCaptura,
