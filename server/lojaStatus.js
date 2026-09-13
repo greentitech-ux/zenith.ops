@@ -43,6 +43,7 @@ const nocMaquina = require('./nocMaquina');
 const impressoraStatus = require('./impressoraStatus');
 const ouiFabricantes = require('./ouiFabricantes');
 const unidades = require('./unidades');
+const redes = require('./redes');
 
 const COLLECTION = db.collection('lojaStatus');
 // fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
@@ -92,6 +93,18 @@ async function setConfig(patch) {
 //
 // Sem marca, ou marca sem arte enviada: cai no papel de parede do parque, que
 // e exatamente o comportamento de antes desta mudanca.
+// A arte carrega DUAS logos: a do grupo e a da marca. Por isso a chave e
+// GRUPO x MARCA, e nao so a marca: Domino's existe nas duas redes (ARCFOOD e
+// GBE, ver redes.js), entao arte so por marca poria a logo do grupo errado na
+// tela da Dom Mooca. A rede sai do proprio codigo da unidade - nao ha cadastro
+// novo, e ela ja e a mesma nos dois espacos de codigo da loja.
+//
+// Tres degraus, do mais especifico pro mais generico, e cada um so existe se
+// alguem tiver enviado a arte:
+//   GBE:dominos  ->  dominos  ->  papel de parede do parque
+// O degrau do meio e o que ja estava no ar antes desta mudanca; quem so tem
+// arte por marca continua funcionando igual.
+const chaveArte = (rede, marca) => `${rede}:${marca}`;
 async function papelDeParedeDe(codigo) {
   const cfg = await getConfig();
   const doParque = cfg && cfg.papelDeParede && cfg.papelDeParede.caminho ? cfg.papelDeParede : null;
@@ -99,10 +112,16 @@ async function papelDeParedeDe(codigo) {
   // nesse caso nao ha marca e a maquina cai no papel de parede do parque
   const perfilUnidade = await unidades.perfil(codigo).catch(() => null);
   const marca = (perfilUnidade && perfilUnidade.marca) || null;
+  const rede = redes.redeDaUnidade(codigo);
   const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
-  const arte = marca && porMarca[marca] && porMarca[marca].caminho ? porMarca[marca] : null;
-  if (arte) return { ...arte, marca };
-  return doParque ? { ...doParque, marca: null } : null;
+  const temArte = (k) => (k && porMarca[k] && porMarca[k].caminho ? porMarca[k] : null);
+  if (marca) {
+    const doGrupo = rede ? temArte(chaveArte(rede, marca)) : null;
+    if (doGrupo) return { ...doGrupo, marca, rede };
+    const soMarca = temArte(marca);
+    if (soMarca) return { ...soMarca, marca, rede: null };
+  }
+  return doParque ? { ...doParque, marca: null, rede: null } : null;
 }
 
 // Versao que o AGENTE compara pra decidir se reaplica.
@@ -3131,7 +3150,7 @@ module.exports = {
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
-  sanitizarPolitica, definirPolitica, papelDeParedeDe, versaoAplicacao, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
+  sanitizarPolitica, definirPolitica, papelDeParedeDe, versaoAplicacao, chaveArte, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, reportarEstadoAgente, pedirCaptura,

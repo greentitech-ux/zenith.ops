@@ -1597,9 +1597,9 @@ app.get('/api/loja-status/papel-de-parede', async (req, res) => {
   // ?marca=dominos serve a arte daquela marca (o "Ver atual" de cada linha da
   // tela). Sem marca, ou marca sem arte, continua servindo a do parque - e o
   // que o agente ANTIGO baixa, entao esta rota nao pode mudar de significado.
-  const marca = unidadesExtras.MARCAS_VALIDAS.includes(String(req.query.marca || '')) ? String(req.query.marca) : null;
+  const { chave } = chaveDaArteDoPedido(req.query);
   const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
-  const pp = (marca && porMarca[marca] && porMarca[marca].caminho ? porMarca[marca] : null)
+  const pp = (chave && porMarca[chave] && porMarca[chave].caminho ? porMarca[chave] : null)
     || (cfg && cfg.papelDeParede);
   if (!pp || !pp.caminho) return res.sendStatus(404);
   storage.streamArquivo(pp.caminho, pp.tipo || 'image/jpeg', res);
@@ -5081,31 +5081,50 @@ app.put('/api/loja-status/:codigo/computadores/:posto/politica', auth.requireMas
 // papel de parede do parque: UMA imagem pra rede toda; cada computador decide
 // se aplica (politica.papelDeParedeAtivo). Servida sem sessao porque quem
 // baixa e a maquina - o caminho e opaco e a imagem e do proprio grupo.
+// Marca e rede do request -> chave da arte. Uma funcao so pras tres rotas:
+// se amanha entrar uma marca ou uma rede nova, as tres aprendem no mesmo
+// commit. Rede sem marca nao existe (a logo do grupo sozinha nao identifica a
+// loja), entao vale a marca pura, que e o degrau do meio do papelDeParedeDe.
+function chaveDaArteDoPedido(origem) {
+  const marca = unidadesExtras.MARCAS_VALIDAS.includes(String(origem.marca || '')) ? String(origem.marca) : null;
+  if (!marca) return { marca: null, rede: null, chave: null };
+  const rede = redes.REDES.some((r) => r.id === String(origem.rede || '')) ? String(origem.rede) : null;
+  return { marca, rede, chave: rede ? lojaStatus.chaveArte(rede, marca) : marca };
+}
+
 // Quais marcas ja tem arte enviada, pra tela poder dizer o que falta. Caminho
 // de UM segmento de proposito: /papel-de-parede/marcas colidiria com as rotas
 // /api/loja-status/:codigo/:algo que existem logo abaixo.
 app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (req, res) => {
   const cfg = await lojaStatus.getConfig();
   const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
+  const arte = (chave) => ({ temArte: !!(porMarca[chave] && porMarca[chave].caminho), em: (porMarca[chave] && porMarca[chave].em) || null });
   res.json({
     doParque: !!(cfg && cfg.papelDeParede && cfg.papelDeParede.caminho),
+    // a marca pura fica na lista de proposito: e a arte que vale pras duas
+    // redes, util pra marca que so existe em uma delas (Saltiverso, Milky Moo)
     marcas: unidadesExtras.MARCAS_VALIDAS.map((id) => ({
       id,
       label: unidadesExtras.MARCAS_LABEL[id] || id,
-      temArte: !!(porMarca[id] && porMarca[id].caminho),
-      em: (porMarca[id] && porMarca[id].em) || null,
+      ...arte(id),
     })),
+    combinacoes: redes.REDES.flatMap((r) => unidadesExtras.MARCAS_VALIDAS.map((m) => ({
+      rede: r.id,
+      marca: m,
+      label: `${r.nome} · ${unidadesExtras.MARCAS_LABEL[m] || m}`,
+      ...arte(lojaStatus.chaveArte(r.id, m)),
+    }))),
   });
 });
 
 app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
-    // marca vem no MESMO form da imagem (campo de texto do multipart), entao
-    // so existe depois do multer - nao da pra ler antes do upload
-    const marca = unidadesExtras.MARCAS_VALIDAS.includes(String(req.body.marca || '')) ? String(req.body.marca) : null;
+    // marca e rede vem no MESMO form da imagem (campos de texto do multipart),
+    // entao so existem depois do multer - nao da pra ler antes do upload
+    const { marca, chave } = chaveDaArteDoPedido(req.body);
     const arte = { caminho: null, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() };
-    arte.caminho = await storage.salvarArquivo('parque', req.file, marca ? `papel-de-parede-${marca}` : 'papel-de-parede');
+    arte.caminho = await storage.salvarArquivo('parque', req.file, chave ? `papel-de-parede-${chave.replace(':', '-')}` : 'papel-de-parede');
     if (!marca) {
       const cfg = await lojaStatus.setConfig({ papelDeParede: arte });
       return res.json(cfg.papelDeParede);
@@ -5114,9 +5133,9 @@ app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo
     // mapa inteiro apagaria a arte das OUTRAS marcas. Le o que existe e
     // reescreve com a nova por cima.
     const atual = await lojaStatus.getConfig();
-    const porMarca = { ...((atual && atual.papelDeParedePorMarca) || {}), [marca]: arte };
+    const porMarca = { ...((atual && atual.papelDeParedePorMarca) || {}), [chave]: arte };
     const cfg = await lojaStatus.setConfig({ papelDeParedePorMarca: porMarca });
-    res.json({ marca, ...cfg.papelDeParedePorMarca[marca] });
+    res.json({ chave, ...cfg.papelDeParedePorMarca[chave] });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
