@@ -14666,6 +14666,23 @@ function aquecerBoot(promessa, ms) {
             .catch((err) => console.error('Erro no push de reinício:', err.message));
           continue;
         }
+        // INTERNET DA UNIDADE (pedido do Master, 13/09/2026: "a internet em
+        // uma das unidades está com problema, quero ser notificado quando
+        // isso acontecer"). É o único alerta do NOC cujo alvo é a LOJA e não
+        // o computador - link ruim não derruba ninguém, então até aqui ele
+        // não acordava nada: a loja operava lenta e só aparecia pra quem
+        // abrisse a tela de rede. t.codigo é a unidade; não há posto.
+        if (t.tipo === 'internet-ruim') {
+          console.log(`[NOC] internet ruim em ${nome} (${t.codigo}): motivo=${t.motivo} loja=${t.mediaUnidade}ms frota=${t.baselineFrota}ms wan=${t.wanMedia}ms/${t.wanPerda}% (${t.lentos}/${t.medindo} computadores)`);
+          push.notifyInternetUnidade(nome, t)
+            .catch((err) => console.error('Erro no push de internet da unidade:', err.message));
+          continue;
+        }
+        if (t.tipo === 'internet-normalizou') {
+          push.notifyInternetUnidadeNormalizou(nome, t)
+            .catch((err) => console.error('Erro no push de internet normalizada:', err.message));
+          continue;
+        }
         // caiu a Ethernet mas a máquina segue no ar (Wi-Fi): degradação,
         // não queda - por isso não passa pelo caminho de offline abaixo
         if (t.tipo === 'link') {

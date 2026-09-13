@@ -17770,6 +17770,163 @@ setTimeout(async () => {
   if (!okPulsoPrint) ruins += 1;
   console.log(`${okPulsoPrint ? '✓' : '✗'} NoPulsoPrint: o NOC para de dizer "pronto" com o laço travado, e a seleção invisível não mata mais o Ctrl+Q`);
 
+  // ------------------------------------------------------------------
+  // ALERTA DE INTERNET POR UNIDADE. Pedido do Master (13/09/2026, olhando a
+  // tela de rede): "a internet em uma das unidades está com problema, quero
+  // ser notificado quando isso acontecer - Dominos Bessa". Até aqui o NOC só
+  // acordava alguém quando uma MÁQUINA caía; link ruim não derruba ninguém,
+  // então a loja operava lenta o dia inteiro em silêncio.
+  //
+  // O que este teste protege são as quatro decisões que separam alarme útil
+  // de ruído: alvo é a unidade (não o computador), janela é a hora corrente
+  // (não a média do dia), frota lenta é o servidor (não a loja), e nada é
+  // anunciado sem duas leituras seguidas no mesmo sentido.
+  let okInternetUnidade = false;
+  try {
+    const rd = require(__dirname + '/redeDiagnostico.js');
+    const HORA = 60 * 60 * 1000;
+    const T0 = Date.parse('2026-09-13T20:30:00.000Z'); // 17h30 em Brasília
+    const DIA = new Date(T0).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    // um computador com a hora corrente cheia (n amostras) na média pedida
+    const pc = (codigo, posto, mediaMs, agora, { nome = posto, n = 60, wanMedia = null, wanPerda = 0 } = {}) => ({
+      codigo, posto, nome,
+      redeHoras: [{ h: rd.horaDe(agora), n, soma: mediaMs * n, max: mediaMs, lentas: 0, falhas: 0 }],
+      redeDia: { dia: DIA, amostras: n, somaLatencia: mediaMs * n, maxLatencia: mediaMs, lentas: 0, falhas: 0,
+        somaGateway: 12 * n, amostrasGateway: n, somaPerdaGateway: 0,
+        ...(wanMedia === null ? {} : { somaWan: wanMedia * n, amostrasWan: n, somaPerdaWan: wanPerda * n }) },
+    });
+    // frota saudável de fundo: 6 lojas em ~300ms (é ela que prova que o
+    // servidor está bem e o problema é da loja)
+    const frotaBoa = (agora) => Array.from({ length: 6 }, (_, i) => pc('OUTRA' + i, 'PC1', 300, agora));
+    const bessaRuim = (agora) => [pc('BESSA', 'GER', 1900, agora), pc('BESSA', 'ATM02', 1750, agora), pc('BESSA', 'ATM01', 2100, agora)];
+    const bessaBoa = (agora) => [pc('BESSA', 'GER', 320, agora), pc('BESSA', 'ATM02', 280, agora), pc('BESSA', 'ATM01', 300, agora)];
+    const rodar = (docs, agora, estado) => rd.avaliarInternetUnidades(docs, { dia: DIA, agora, estado });
+
+    // 1) duas leituras seguidas ruins = UM aviso, na segunda
+    let est = new Map();
+    const p1 = rodar([...frotaBoa(T0), ...bessaRuim(T0)], T0, est); est = p1.estado;
+    const p2 = rodar([...frotaBoa(T0 + 60000), ...bessaRuim(T0 + 60000)], T0 + 60000, est); est = p2.estado;
+    const p3 = rodar([...frotaBoa(T0 + 120000), ...bessaRuim(T0 + 120000)], T0 + 120000, est); est = p3.estado;
+    const aviso = p2.transicoes.find((t) => t.tipo === 'internet-ruim');
+
+    // 2) volta ao normal: também precisa de duas, e conta quanto durou
+    const p4 = rodar([...frotaBoa(T0 + 180000), ...bessaBoa(T0 + 180000)], T0 + 180000, est); est = p4.estado;
+    const p5 = rodar([...frotaBoa(T0 + 240000), ...bessaBoa(T0 + 240000)], T0 + 240000, est); est = p5.estado;
+    const volta = p5.transicoes.find((t) => t.tipo === 'internet-normalizou');
+
+    // 3) a MESMA loja ruim de novo logo depois: cota de 1h segura o aviso,
+    //    e sem aviso não pode sair "normalizou" depois
+    let est3 = est;
+    const r1 = rodar([...frotaBoa(T0 + 300000), ...bessaRuim(T0 + 300000)], T0 + 300000, est3); est3 = r1.estado;
+    const r2 = rodar([...frotaBoa(T0 + 360000), ...bessaRuim(T0 + 360000)], T0 + 360000, est3); est3 = r2.estado;
+    const v1 = rodar([...frotaBoa(T0 + 420000), ...bessaBoa(T0 + 420000)], T0 + 420000, est3); est3 = v1.estado;
+    const v2 = rodar([...frotaBoa(T0 + 480000), ...bessaBoa(T0 + 480000)], T0 + 480000, est3); est3 = v2.estado;
+    // e passada a cota (1h), volta a avisar
+    const d1 = rodar([...frotaBoa(T0 + 2 * HORA), ...bessaRuim(T0 + 2 * HORA)], T0 + 2 * HORA, est3);
+    const d2 = rodar([...frotaBoa(T0 + 2 * HORA + 60000), ...bessaRuim(T0 + 2 * HORA + 60000)], T0 + 2 * HORA + 60000, d1.estado);
+
+    // 4) FROTA lenta = servidor, não a loja (o NoPulso é o gargalo)
+    const frotaLenta = (agora) => Array.from({ length: 6 }, (_, i) => pc('OUTRA' + i, 'PC1', 1800, agora));
+    let estS = new Map();
+    const s1 = rodar([...frotaLenta(T0), ...bessaRuim(T0)], T0, estS); estS = s1.estado;
+    const s2 = rodar([...frotaLenta(T0 + 60000), ...bessaRuim(T0 + 60000)], T0 + 60000, estS);
+
+    // 5) só UM computador da loja lento: é a máquina, não o link
+    const bessaUmLento = (agora) => [pc('BESSA', 'GER', 1900, agora), pc('BESSA', 'ATM02', 300, agora), pc('BESSA', 'ATM01', 280, agora)];
+    let estU = new Map();
+    const u1 = rodar([...frotaBoa(T0), ...bessaUmLento(T0)], T0, estU); estU = u1.estado;
+    const u2 = rodar([...frotaBoa(T0 + 60000), ...bessaUmLento(T0 + 60000)], T0 + 60000, estU);
+
+    // 6) loja com UM computador só, lento, sem medição de link: não dá pra
+    //    dizer que é a internet da loja
+    const soUm = (agora) => [pc('SOZINHA', 'PC1', 2000, agora)];
+    let estSo = new Map();
+    const o1 = rodar([...frotaBoa(T0), ...soUm(T0)], T0, estSo); estSo = o1.estado;
+    const o2 = rodar([...frotaBoa(T0 + 60000), ...soUm(T0 + 60000)], T0 + 60000, estSo);
+
+    // 7) ping da OPERADORA ruim: avisa mesmo com um computador só, e o texto
+    //    leva o número do chamado
+    const opRuim = (agora) => [pc('OPER', 'PC1', 400, agora, { wanMedia: 380, wanPerda: 7 })];
+    let estOp = new Map();
+    const q1 = rodar([...frotaBoa(T0), ...opRuim(T0)], T0, estOp); estOp = q1.estado;
+    const q2 = rodar([...frotaBoa(T0 + 60000), ...opRuim(T0 + 60000)], T0 + 60000, estOp);
+    const avisoOp = q2.transicoes.find((t) => t.tipo === 'internet-ruim');
+
+    // 8) fantasma (heartbeat de posto nunca cadastrado, sem nome) não fala
+    //    pela loja
+    const fantasmas = (agora) => bessaRuim(agora).map((c) => ({ ...c, nome: null }));
+    let estF = new Map();
+    const f1 = rodar([...frotaBoa(T0), ...fantasmas(T0)], T0, estF); estF = f1.estado;
+    const f2 = rodar([...frotaBoa(T0 + 60000), ...fantasmas(T0 + 60000)], T0 + 60000, estF);
+
+    // 9) medição VELHA (a hora corrente não tem balde): sem opinião, não vira
+    //    alarme nem silêncio falso
+    const velhos = (agora) => bessaRuim(agora - 3 * HORA);
+    let estV = new Map();
+    const w1 = rodar([...frotaBoa(T0), ...velhos(T0)], T0, estV); estV = w1.estado;
+    const w2 = rodar([...frotaBoa(T0 + 60000), ...velhos(T0 + 60000)], T0 + 60000, estV);
+
+    // 10) balde recém-aberto (poucas amostras) soma a hora anterior em vez de
+    //     decidir com 2 medições
+    const recemAberto = [{
+      codigo: 'BESSA', posto: 'GER', nome: 'GER',
+      redeHoras: [
+        { h: rd.horaDe(T0 - HORA), n: 50, soma: 1900 * 50, max: 1900, lentas: 0, falhas: 0 },
+        { h: rd.horaDe(T0), n: 3, soma: 1900 * 3, max: 1900, lentas: 0, falhas: 0 },
+      ],
+    }];
+    const janelaCheia = rd.janelaRecente(recemAberto[0], T0);
+    const janelaCurta = rd.janelaRecente({ codigo: 'X', redeHoras: [{ h: rd.horaDe(T0), n: 3, soma: 900, max: 400, lentas: 0 }] }, T0);
+
+    // 11) o texto do push: número e comparação, nunca "algo deu errado"
+    const pushMod = require(__dirname + '/push.js');
+    const txtLenta = pushMod.textoInternetRuim(aviso || {}, 'Dominos Bessa');
+    const txtOper = pushMod.textoInternetRuim(avisoOp || {}, 'Dominos Bessa');
+
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const srcLs = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+
+    const conf = {
+      'uma leitura ruim não avisa ninguém': !p1.transicoes.length,
+      'a segunda leitura ruim seguida avisa, UMA vez, pela unidade': !!aviso && aviso.codigo === 'BESSA' && p2.transicoes.length === 1,
+      'o aviso leva os números: quantos computadores, o tempo da loja e o da frota':
+        !!aviso && aviso.motivo === 'lenta' && aviso.medindo === 3 && aviso.lentos === 3
+        && aviso.mediaUnidade === 1917 && aviso.baselineFrota === 300,
+      'seguir ruim não repete o aviso': !p3.transicoes.length,
+      'uma leitura boa ainda não diz que voltou': !p4.transicoes.length,
+      'duas boas seguidas dizem que normalizou, com quanto tempo durou':
+        !!volta && volta.codigo === 'BESSA' && volta.duracaoMs === 180000 && volta.mediaUnidade === 300,
+      'a mesma loja ruim de novo dentro de 1h não avisa outra vez (cota)': !r1.transicoes.length && !r2.transicoes.length,
+      'e sem ter avisado, não chega "normalizou" do nada': !v1.transicoes.length && !v2.transicoes.length,
+      'passada a cota de 1h, volta a avisar': !d1.transicoes.length && d2.transicoes.some((t) => t.tipo === 'internet-ruim'),
+      'frota lenta é o SERVIDOR: nenhuma loja é acusada': !s1.transicoes.length && !s2.transicoes.length,
+      'um computador lento entre três não é a internet da loja': !u1.transicoes.length && !u2.transicoes.length,
+      'loja com um computador só e sem medição de link não vira alarme de internet': !o1.transicoes.length && !o2.transicoes.length,
+      'ping da operadora ruim avisa mesmo com um computador, com ms e % de perda':
+        !!avisoOp && avisoOp.motivo === 'operadora' && avisoOp.wanMedia === 380 && avisoOp.wanPerda === 7,
+      'computador fantasma (sem cadastro) não fala pela loja': !f1.transicoes.length && !f2.transicoes.length,
+      'medição de horas atrás não vira opinião': !w1.transicoes.length && !w2.transicoes.length,
+      'balde recém-aberto soma a hora anterior; sem amostra nenhuma, não opina':
+        !!janelaCheia && janelaCheia.amostras === 53 && janelaCheia.media === 1900 && janelaCurta === null,
+      'o texto do push diz o fato e o número (nunca "algo deu errado")':
+        /1917ms/.test(txtLenta.body) && /300ms/.test(txtLenta.body) && /3 computadores/.test(txtLenta.body)
+        && /380ms/.test(txtOper.body) && /7% de perda/.test(txtOper.body) && /operadora/.test(txtOper.body)
+        && !/deu errado|Ops/i.test(txtLenta.body + txtOper.body),
+      'a avaliação roda dentro da varredura que JÁ lê os documentos (zero leitura nova no Firestore)':
+        /redeDiagnostico\.avaliarInternetUnidades\(docs, \{ dia, agora: Date\.now\(\), estado: estadoInternetUnidade \}\)/.test(srcLs)
+        && !/listUncached\(\)[\s\S]{0,200}avaliarInternetUnidades/.test(srcLs),
+      'o NOC dispara os dois pushes e registra a linha de diagnóstico no log':
+        /if \(t\.tipo === 'internet-ruim'\) \{/.test(srcIdx) && /push\.notifyInternetUnidade\(nome, t\)/.test(srcIdx)
+        && /if \(t\.tipo === 'internet-normalizou'\) \{/.test(srcIdx) && /push\.notifyInternetUnidadeNormalizou\(nome, t\)/.test(srcIdx)
+        && /\[NOC\] internet ruim em \$\{nome\}/.test(srcIdx),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okInternetUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (aviso=${JSON.stringify(aviso)} volta=${JSON.stringify(volta)} op=${JSON.stringify(avisoOp)} janela=${JSON.stringify(janelaCheia)})`);
+  } catch (e) { okInternetUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okInternetUnidade) ruins += 1;
+  console.log(`${okInternetUnidade ? '✓' : '✗'} NOC: internet ruim na UNIDADE vira alerta (loja lenta ou link da operadora), com histerese, cota e "normalizou"`);
+
   // A CAUSA de "o NoPulsoPrint não funciona": em New-Object Tipo(a,b) os
   // parênteses NÃO são lista de argumentos de método - são expressão de array, e
   // em PowerShell a vírgula tem precedência MAIOR que + e -. Sem parênteses

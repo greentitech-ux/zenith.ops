@@ -483,6 +483,157 @@ function quedasPorDia(eventos, tz = 'America/Sao_Paulo') {
   return [...porDia.values()].sort((a, b) => (a.dia < b.dia ? 1 : -1));
 }
 
+// ------------------------------------------- ALERTA: a internet DA UNIDADE
+//
+// Pedido do Master (13/09/2026, com a Dominos Bessa na tela): "a internet em
+// uma das unidades esta com problema, quero ser notificado quando isso
+// acontecer". Ate aqui o NOC so avisava por COMPUTADOR (caiu, Ethernet
+// caiu, disco) - link ruim nao derruba ninguem, entao nao havia alarme
+// nenhum: a loja operava lenta o dia inteiro e so aparecia pra quem abrisse
+// a tela de rede.
+//
+// Tres decisoes que separam alarme util de ruido:
+//
+// 1) O alvo e a UNIDADE, nao o computador. Link ruim atinge a loja inteira;
+//    avisar por maquina mandaria 3-5 notificacoes do mesmo problema.
+// 2) A janela e a HORA CORRENTE (redeHoras), nao a media do dia. Se a
+//    internet piorou as 17h, a media do dia mal se mexe e o aviso chegaria
+//    de madrugada. Balde recem-aberto (poucas amostras) cai pra hora
+//    anterior em vez de decidir com 2 medicoes.
+// 3) Frota lenta NAO vira alerta de loja. Se a mediana da frota tambem esta
+//    ruim, o gargalo e o servidor (mesma logica do veredito) - avisar
+//    "internet da loja" ai manda abrir chamado na operadora errada.
+//
+// Custo: ZERO no Firestore. Le o mesmo espelho em memoria que a varredura de
+// alertas ja percorre a cada minuto.
+
+// so' considera a loja lenta com a hora corrente tendo pelo menos isto de
+// medicao - com heartbeat de 25s, 8 amostras e' ~3,5 min de evidencia
+const INTERNET_MIN_AMOSTRAS = 8;
+// duas leituras seguidas (a varredura roda de minuto em minuto) antes de
+// avisar, e duas seguidas boas antes de dizer que normalizou: oscilacao de
+// um minuto nao acorda ninguem e nao dispara "voltou" cedo demais
+const INTERNET_CONFIRMACOES = 2;
+// mesmo problema so volta a avisar depois disto - loja que fica na fronteira
+// nao vira uma notificacao por hora
+const INTERNET_REAVISO_MS = 60 * 60 * 1000;
+
+// Junta a hora corrente do computador; se ela ainda tem pouca amostra, soma a
+// anterior. Devolve null quando nao ha evidencia suficiente pra opinar.
+function janelaRecente(doc, agora) {
+  const lista = Array.isArray(doc && doc.redeHoras) ? doc.redeHoras : [];
+  if (!lista.length) return null;
+  const hAgora = horaDe(agora);
+  const atual = lista[lista.length - 1];
+  if (!atual || atual.h !== hAgora) return null; // sem medicao nesta hora = sem opiniao
+  let n = atual.n || 0; let soma = atual.soma || 0; let lentas = atual.lentas || 0;
+  if (n < INTERNET_MIN_AMOSTRAS && lista.length > 1) {
+    const anterior = lista[lista.length - 2];
+    if (anterior) { n += anterior.n || 0; soma += anterior.soma || 0; lentas += anterior.lentas || 0; }
+  }
+  if (n < INTERNET_MIN_AMOSTRAS) return null;
+  return { media: Math.round(soma / n), amostras: n, lentas };
+}
+
+// A leitura de AGORA, unidade por unidade. Sem estado: quem decide se isso
+// vira aviso e' avaliarInternetUnidades abaixo.
+function lerInternetDasUnidades(docs, dia, agora) {
+  const frota = baselineDaFrota(docs, dia);
+  // frota lenta = problema do servidor, nao das lojas (ver veredito)
+  const frotaLenta = frota.baselineMs !== null && frota.medidos >= 3 && frota.baselineMs > LATENCIA_LENTA_MS;
+  const porUnidade = new Map();
+  for (const doc of (docs || [])) {
+    if (!doc || !doc.codigo) continue;
+    // computador sem nome nunca passou pelo cadastro (fantasma do NOC): nao
+    // representa a loja e nao pode disparar alarme por ela
+    if (!doc.nome) continue;
+    const janela = janelaRecente(doc, agora);
+    const resumo = resumir((doc.redeDia && doc.redeDia.dia === dia) ? doc.redeDia : null);
+    const u = porUnidade.get(doc.codigo) || { codigo: doc.codigo, medindo: 0, lentos: 0, nomes: [], somaMedia: 0, wan: [], perdas: [] };
+    if (janela) {
+      u.medindo += 1;
+      u.somaMedia += janela.media;
+      if (janela.media > LATENCIA_LENTA_MS) { u.lentos += 1; u.nomes.push(doc.nome); }
+    }
+    if (!resumo.semDados && resumo.wanMedia !== null) {
+      u.wan.push(resumo.wanMedia);
+      u.perdas.push(resumo.wanPerda || 0);
+    }
+    porUnidade.set(doc.codigo, u);
+  }
+  const leituras = [];
+  for (const u of porUnidade.values()) {
+    const mediaUnidade = u.medindo ? Math.round(u.somaMedia / u.medindo) : null;
+    const wanMedia = u.wan.length ? Math.round(u.wan.reduce((t, v) => t + v, 0) / u.wan.length) : null;
+    const wanPerda = u.perdas.length ? Math.max(...u.perdas) : null;
+    // operadora: o numero que se leva pro chamado. Vale mesmo com UM
+    // computador medindo - ping ruim e' medicao do link, nao da maquina.
+    const operadoraRuim = wanMedia !== null && (wanMedia > 120 || (wanPerda || 0) > 2);
+    // loja lenta: TODOS os computadores que medem estao acima do limiar. Com
+    // um so' medindo isso nao se distingue de problema da maquina (o card
+    // individual ja cobre esse caso), entao exige 2+.
+    const lojaLenta = u.medindo >= 2 && u.lentos === u.medindo && !frotaLenta;
+    const ruim = operadoraRuim || lojaLenta;
+    leituras.push({
+      codigo: u.codigo,
+      ruim,
+      motivo: !ruim ? null : (operadoraRuim ? 'operadora' : 'lenta'),
+      medindo: u.medindo,
+      lentos: u.lentos,
+      mediaUnidade,
+      wanMedia,
+      wanPerda,
+      baselineFrota: frota.baselineMs,
+      nomes: u.nomes.slice(0, 4),
+    });
+  }
+  return leituras.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo)));
+}
+
+// Aplica a histerese e devolve as TRANSICOES (e o estado novo). O relogio
+// entra por parametro pra que o teste consiga andar no tempo sem esperar.
+//
+// estado: Map(codigo -> { ruim, desde, confirmacoes, ultimoAvisoEm, avisado, motivo })
+//
+// ultimoAvisoEm e' o RELOGIO DA COTA (nunca zera na volta) e `avisado` diz se
+// o episodio CORRENTE chegou a ser anunciado. Sao coisas diferentes: se
+// zerassem juntos, uma loja oscilando avisaria "ruim"/"normalizou" a cada 4
+// minutos; se fossem a mesma coisa, chegaria um "normalizou" de um problema
+// que ninguem soube que existia.
+function avaliarInternetUnidades(docs, { dia, agora = Date.now(), estado = new Map() } = {}) {
+  const leituras = lerInternetDasUnidades(docs, dia, agora);
+  const novo = new Map(estado);
+  const transicoes = [];
+  for (const l of leituras) {
+    const st = novo.get(l.codigo) || { ruim: false, desde: null, confirmacoes: 0, ultimoAvisoEm: 0, avisado: false, motivo: null };
+    // confirmacoes conta leituras SEGUIDAS no mesmo sentido; qualquer
+    // mudanca de sentido zera - e' o que impede alarme de um minuto so'
+    if (l.ruim === st.ruim) { st.confirmacoes = 0; novo.set(l.codigo, st); continue; }
+    st.confirmacoes += 1;
+    if (st.confirmacoes < INTERNET_CONFIRMACOES) { novo.set(l.codigo, st); continue; }
+    st.confirmacoes = 0;
+    if (l.ruim) {
+      const podeAvisar = !st.ultimoAvisoEm || (agora - st.ultimoAvisoEm) >= INTERNET_REAVISO_MS;
+      st.ruim = true; st.desde = agora; st.motivo = l.motivo;
+      st.avisado = podeAvisar;
+      if (podeAvisar) {
+        st.ultimoAvisoEm = agora;
+        transicoes.push({ tipo: 'internet-ruim', ...l });
+      }
+      novo.set(l.codigo, st);
+    } else {
+      const duracaoMs = st.desde ? agora - st.desde : null;
+      const avisou = st.avisado;
+      st.ruim = false; st.desde = null; st.motivo = null; st.avisado = false;
+      // "normalizou" so' pra quem recebeu o aviso de problema - senao chega
+      // um "voltou" de algo que ninguem soube que tinha ido
+      if (avisou) transicoes.push({ tipo: 'internet-normalizou', ...l, duracaoMs });
+      novo.set(l.codigo, st);
+    }
+  }
+  return { transicoes, estado: novo };
+}
+
 // ---------------------------------------------------------------- fachada
 
 // Junta tudo pro painel: pega o doc cru do computador e devolve o diagnostico
@@ -548,5 +699,7 @@ module.exports = {
   quedasPorDia, analisarComputador, ranking, baselineDaFrota,
   acumularHora, serieHoraria, horaDe, HORAS_MAX,
   acumularMinuto, serieMinutos, serieDias, baldeMinuto, MINUTOS_MAX,
+  lerInternetDasUnidades, avaliarInternetUnidades, janelaRecente,
+  INTERNET_MIN_AMOSTRAS, INTERNET_CONFIRMACOES, INTERNET_REAVISO_MS,
   LATENCIA_BOA_MS, LATENCIA_RUIM_MS, LATENCIA_LENTA_MS, SINAL_WIFI_BAIXO, HISTORICO_DIAS_MAX,
 };

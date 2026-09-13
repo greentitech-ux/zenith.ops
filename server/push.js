@@ -815,6 +815,81 @@ async function notifyLinkDegradado(unidadeNome, codigo, computadorNome, posto, l
   }
 }
 
+// Internet da UNIDADE (ver avaliarInternetUnidades em redeDiagnostico.js).
+// Diferente de todo o resto do NOC, o alvo aqui e' a LOJA, nao a maquina:
+// link ruim atinge todo mundo lá dentro, e um push por computador seria a
+// mesma noticia repetida 3-5 vezes.
+//
+// O texto carrega o numero que resolve: pro caso da operadora, o ping e a
+// perda (e' isso que o chamado exige); pro caso de loja lenta, o tempo da
+// loja CONTRA a mediana da frota - e' a comparacao que prova que o problema
+// e' o link dela, nao o NoPulso.
+function textoInternetRuim(t, unidadeNome) {
+  const loja = unidadeNome || t.codigo;
+  if (t.motivo === 'operadora') {
+    const perda = t.wanPerda ? `, com ${t.wanPerda}% de perda de pacote` : '';
+    return {
+      title: '🌐 Link da operadora ruim',
+      body: `${loja}: a saída para a internet está em ${t.wanMedia}ms${perda}. `
+        + 'A rede interna da loja está normal — esse é o número para abrir chamado na operadora.',
+    };
+  }
+  const quantos = t.medindo === 1 ? 'o computador está' : `os ${t.medindo} computadores estão`;
+  const comparacao = t.baselineFrota !== null && t.baselineFrota !== undefined
+    ? ` — a frota inteira está em ${t.baselineFrota}ms pelo mesmo servidor` : '';
+  return {
+    title: '🌐 Internet ruim na loja',
+    body: `${loja}: ${quantos} respondendo em ${t.mediaUnidade}ms${comparacao}. `
+      + 'Todos os pontos da loja ao mesmo tempo: é o link dela, não o NoPulso.',
+  };
+}
+
+async function notifyInternetUnidade(unidadeNome, t) {
+  const dados = {
+    ...textoInternetRuim(t, unidadeNome),
+    tag: `noc-internet-${t.codigo}`,
+    url: '/noc-rede.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-internet', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (internet da unidade):', err.message);
+    }
+  }
+}
+
+async function notifyInternetUnidadeNormalizou(unidadeNome, t) {
+  const min = t.duracaoMs ? Math.max(1, Math.round(t.duracaoMs / 60000)) : null;
+  const quanto = min === null ? '' : (min < 60 ? ` depois de ${min}min` : ` depois de ${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`);
+  const agora = t.mediaUnidade !== null && t.mediaUnidade !== undefined ? `voltou a ${t.mediaUnidade}ms` : 'voltou ao normal';
+  const dados = {
+    title: '🌐 Internet normalizou',
+    body: `${unidadeNome || t.codigo}: ${agora}${quanto}.`,
+    tag: `noc-internet-${t.codigo}`,
+    url: '/noc-rede.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-internet', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (internet normalizou):', err.message);
+    }
+  }
+}
+
 async function notifyReinicioPendente(unidadeNome, codigo, computadorNome, posto, dias) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
@@ -1268,6 +1343,7 @@ module.exports = {
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyDispositivoOffline, notifyImpressoraProblema, notifyImpressoraNormalizou,
+  notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDivergenciaCaixa, notifyDispositivoOnline,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,

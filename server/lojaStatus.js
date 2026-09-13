@@ -2551,6 +2551,12 @@ async function gravarEEspelhar(codigo, posto, patch) {
   cacheBase.invalidar();
 }
 
+// Quem ja esta em alerta de internet, por unidade (ver o bloco no fim de
+// varrerAlertas). Map(codigo -> { ruim, desde, confirmacoes, ultimoAvisoEm }).
+let estadoInternetUnidade = new Map();
+// pro teste conseguir partir de um estado limpo entre cenarios
+function _resetarEstadoInternet() { estadoInternetUnidade = new Map(); }
+
 async function varrerAlertas() {
   const docs = await listUncached();
   const apelidosTodos = await getApelidos();
@@ -2792,6 +2798,21 @@ async function varrerAlertas() {
     }
   }
   if (transicoes.length) cache.invalidar();
+  // Internet da UNIDADE (ver avaliarInternetUnidades em redeDiagnostico.js).
+  // Entra na MESMA varredura porque os documentos ja estao lidos aqui - avaliar
+  // link nao custa uma leitura a mais no Firestore.
+  //
+  // O estado vive em memoria, de proposito: gravar seria uma escrita por
+  // unidade a cada transicao, e a unica coisa que se perde num deploy e' a
+  // lembranca de "ja avisei". Loja que continuar ruim depois de um deploy
+  // recebe um aviso novo - o que, num deploy manual e raro, e' o lado certo
+  // pra errar: melhor repetir do que calar.
+  try {
+    const dia = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const r = redeDiagnostico.avaliarInternetUnidades(docs, { dia, agora: Date.now(), estado: estadoInternetUnidade });
+    estadoInternetUnidade = r.estado;
+    transicoes.push(...r.transicoes);
+  } catch (e) { console.error('varrerAlertas: falha ao avaliar internet das unidades. %s', e.message); }
   return transicoes;
 }
 
@@ -3129,6 +3150,9 @@ module.exports = {
   flushHeartbeatsPendentes,
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
+  // alerta de internet por unidade: o estado vive em memoria, e o teste
+  // precisa comecar cada cenario do zero
+  _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
