@@ -593,16 +593,16 @@ function conferirPelaLinha(itens) {
 // uma trava.
 const TEM_REAIS = /r\$/i;
 
-// O relatorio do Domino's Pulse MISTURA formatos de numero: o quadro de
-// Canais imprime em BR ("R$4.065,11" = ponto milhar, virgula decimal), mas o
-// de Formas de Pagamento imprime em US ("R$469.40" = ponto decimal;
-// "R$2,841.82" = virgula milhar, ponto decimal) - Pulse e' sistema
-// americano. O parser antigo assumia BR sempre, entao lia "469.40" como
-// 46.940 e REPROVAVA a leitura correta do AdyenV2/IFOOD. Este entende os dois
-// sem ambiguidade, pela regra universal: o ULTIMO separador seguido de 1-2
-// digitos e' o decimal; os outros sao milhar; separador seguido de 3 digitos
-// e' milhar (nao ha decimal). Para relatorio 100% BR o resultado e' IDENTICO
-// ao de antes.
+// O relatorio imprime tudo em Real brasileiro ("R$4.065,11" = ponto milhar,
+// virgula decimal) - palavra do Master: "todos os formatos sao Real
+// brasileiro". Quem troca os separadores e' o MODELO ao copiar a linha pro
+// textoOrigem ("AdyenV2 R$469.40", "IFOOD R$2,841.82" - o Haiku fez isso no
+// quadro de Formas), e o parser antigo, assumindo BR sempre, lia "469.40"
+// como 46.940 e REPROVAVA uma leitura cujo valor estava certo. Este entende
+// os dois sem ambiguidade, pela regra universal: o ULTIMO separador seguido
+// de 1-2 digitos e' o decimal; os outros sao milhar; separador seguido de 3
+// digitos e' milhar (nao ha decimal). Para a linha copiada em BR, que e' o
+// caso normal, o resultado e' IDENTICO ao de antes.
 function parseValorMonetario(bruto) {
   const s = String(bruto || '').trim();
   if (!/\d/.test(s)) return NaN;
@@ -830,6 +830,7 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   // uma conexao HTTP parada aguenta. O streaming entrega em pedacos e o
   // finalMessage() remonta: mesmo objeto de resposta, mesmo custo, so muda o
   // transporte. Nada abaixo desta chamada percebe a diferenca.
+  const inicioChamada = Date.now();
   const resp = await getCliente().messages.stream({
     model: modelo,
     // relatorio com muito KPI cadastrado (Service Times Summary do PDV da
@@ -861,6 +862,17 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
     });
   } catch (e) { console.error('ocrUso: falha ao registrar (leitura segue). %s', e.message); }
   const texto = (resp.content || []).map((b) => b.text || '').join('');
+  // Quanto a chamada demorou e o que veio dentro da resposta. Trocar o modelo
+  // por env (OCR_MODELO) muda os dois sem aviso: a MESMA leitura (5 fotos da
+  // 19855) que o Haiku devolvia em ~1.800 tokens de saida veio com 20.473 no
+  // Sonnet - 11x mais pra escrever, 15x o custo, e a loja esperando minutos.
+  // O [ocr-uso] mostra o total, mas nao diz o que e' o excesso: se a resposta
+  // e' texto puro, e' JSON verboso (aperta-se o prompt); se ha bloco que nao
+  // e' texto (thinking), e' raciocinio cobrado como saida (desliga-se). As
+  // duas correcoes sao diferentes, entao a linha traz tipos e tamanho.
+  const tiposDeBloco = (resp.content || []).map((b) => b.type).join(',');
+  console.log('[ocr-tempo] modelo=%s ms=%s stop=%s blocos=%s chars=%s',
+    modelo, Date.now() - inicioChamada, resp.stop_reason || '-', tiposDeBloco || '-', texto.length);
   let dados;
   try {
     dados = extrairJson(texto);

@@ -1203,6 +1203,13 @@ setTimeout(async () => {
         && /itens\.push\(\.\.\.pelaLinha\.aprovados\);\s*suspeitos\.push\(\.\.\.pelaLinha\.reprovados\);\s*\}\s*resgatados\.forEach\(\(r\) => vistos\.add/.test(src),
       'cada leitura deixa no log o que entrou e o que foi barrado, com a linha de origem':
         /console\.log\('\[ocr-leitura\] unidade=%s aprovados=%s suspeitos=%s sobrou=%s faltando=%s'/.test(src),
+      // trocar OCR_MODELO fez a mesma leitura passar de ~1.800 pra 20.473
+      // tokens de saida: sem duracao e tipo de bloco no log nao da pra saber
+      // se e' JSON verboso ou thinking cobrado como saida
+      'cada chamada deixa no log quanto demorou e que blocos vieram na resposta':
+        /console\.log\('\[ocr-tempo\] modelo=%s ms=%s stop=%s blocos=%s chars=%s'/.test(src)
+        && /Date\.now\(\) - inicioChamada/.test(src)
+        && /\.map\(\(b\) => b\.type\)\.join\(','\)/.test(src),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPelaLinha = !falhas.length;
