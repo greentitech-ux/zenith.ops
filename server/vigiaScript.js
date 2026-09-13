@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 53;
+const VERSAO_VIGIA = 54;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -299,6 +299,22 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $t = [int64]((Get-Content $CaminhoFlagUi -First 1))',
     '    return (([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $t) -lt 90000)',
     '  } catch { return $false }',
+    '}',
+    '# ---- uma instancia por papel (login x boot). A instalacao termina com um',
+    '# Start-Process da copia nova, e a mensagem dela manda rodar DE NOVO "como',
+    '# Administrador" pra ganhar a tarefa de boot - quem obedecia subia uma',
+    '# SEGUNDA copia ao lado da que ja rodava: duas mascaras no Ctrl+Q, a nevoa',
+    '# ficando depois do print, Esc duas vezes (Sao Braz, 13/09). O mutex vive',
+    '# enquanto o processo viver; a copia que chega depois se encerra.',
+    'function Garantir-InstanciaUnica {',
+    '  $papel = if ($Servico) { "boot" } else { "login" }',
+    '  $nomeMutex = "Local\\" + $NomeTarefa + "_" + $papel',
+    '  try {',
+    '    $global:MutexInstancia = New-Object System.Threading.Mutex($false, $nomeMutex)',
+    '    $dono = $false',
+    '    try { $dono = $global:MutexInstancia.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $dono = $true }',
+    '    if (-not $dono) { Escrever-Log "Ja existe uma instancia ($papel) do NOCZenith rodando - esta copia se encerra."; exit }',
+    '  } catch { Escrever-Log "Nao consegui checar instancia unica: $($_.Exception.Message)" }',
     '}',
     '',
     '# ---- deteccao de acesso remoto (AnyDesk, TeamViewer, DWService, RustDesk,',
@@ -2043,6 +2059,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
 
   const linhasFinal = [
     'if ($Loop) {',
+    '  Garantir-InstanciaUnica',
     '  Rodar-Loop',
     '} else {',
     '  # instala numa pasta fixa e protegida (%LOCALAPPDATA%\\NOCZenith): assim o',
@@ -2109,6 +2126,13 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    Write-Host "Pra ele voltar sozinho apos reinicios, rode este mesmo comando num PowerShell aberto COMO ADMINISTRADOR."',
     '  }',
     '  try { Instalar-AppNoPulso; Write-Host "App NoPulso: o Chrome/Edge instala (e o Zenith Ops antigo sai) na proxima vez que abrir." } catch { Write-Host "AVISO: app NoPulso nao configurado ($($_.Exception.Message))." }',
+    '  # reinstalacao com o agente ja rodando: encerra a copia antiga ANTES de',
+    '  # subir a nova - o -MultipleInstances IgnoreNew da tarefa nao alcanca este',
+    '  # Start-Process, e ficavam duas (ver Garantir-InstanciaUnica). A de boot',
+    '  # (SYSTEM) fica de fora: nao e desta sessao e o mutex dela e outro.',
+    '  try {',
+    '    Get-CimInstance Win32_Process -Filter "Name = \'powershell.exe\'" -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -match "NOCZenith\\.ps1" -and $_.CommandLine -match "-Loop" -and $_.CommandLine -notmatch "-Servico" } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Escrever-Log "Reinstalacao: instancia antiga (PID $($_.ProcessId)) encerrada." } catch {} }',
+    '  } catch {}',
     '  Write-Host "Iniciando agora tambem, nessa sessao..."',
     '  Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Destino`" -Loop"',
     '  Read-Host "Pronto! Pode fechar essa janela (aperte Enter)"',
