@@ -11981,6 +11981,39 @@ setTimeout(async () => {
   console.log(`${okConc ? '✓' : '✗'} Conciliação PWR/iFood × declarado: entra pelo robô, compara no servidor, e a divergência vira tarefa pro gerente (uma vez só)`);
 
   // ------------------------------------------------------------------
+  // TETO DA DICA DE LEITURA (pedido do Master: a dica do Domino's, que mapeia
+  // campo por campo os quadros do relatorio, nao cabia em 600 caracteres e a
+  // tela cortava). Subiu pra 3000. O teste trava os TRES pontos que precisam
+  // andar juntos - o sanitizador do servidor e os dois textareas - e garante
+  // que o campo VIZINHO (instrucoes do pedido semanal) NAO foi bumpado junto.
+  let okTetoDica = false;
+  try {
+    const fs = require('fs');
+    const gj = require('/home/user/adyen-monitor/server/grupos.js');
+    const gsrc = fs.readFileSync(__dirname + '/grupos.js', 'utf8');
+    const ghtml = fs.readFileSync(__dirname + '/public/grupos.html', 'utf8');
+    // comportamento: uma dica de 1500 chars sobrevive (nao volta a ser cortada em 600)
+    const dicaLonga = 'x'.repeat(1500);
+    const g = await gj.create({ nome: 'Grupo Dica', unidades: [], dicaLeituraCanais: dicaLonga });
+    const lida = (await gj.list()).find((x) => x.id === g.id) || {};
+    const conf = {
+      'uma dica de 1500 caracteres não é mais cortada em 600':
+        (lida.dicaLeituraCanais || '').length === 1500,
+      'o teto do servidor é 3000 (não 600)':
+        /const LIMITE_DICA_LEITURA = 3000;/.test(gsrc) && !/slice\(0, 600\)/.test(gsrc.split('function sanitizarDicaLeitura')[1] || ''),
+      'os dois textareas da dica aceitam 3000':
+        (ghtml.match(/id="[ce]-dica-leitura-canais" rows="\d+" maxlength="3000"/g) || []).length === 2,
+      'o campo vizinho (instruções do pedido semanal) NÃO foi bumpado junto':
+        /id="psf-instrucoes" rows="\d+" maxlength="600"/.test(ghtml),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTetoDica = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (len=${(lida.dicaLeituraCanais || '').length})`);
+  } catch (e) { okTetoDica = false; console.log('  erro: ' + e.message); }
+  if (!okTetoDica) ruins += 1;
+  console.log(`${okTetoDica ? '✓' : '✗'} Dica de leitura: teto de 3000 (a dica detalhada do Domino's cabe inteira), sem cortar o campo vizinho`);
+
+  // ------------------------------------------------------------------
   // NOCZenith NO WINDOWS SERVER 2012 R2 (o BOS do Pulse da 19855 - e' onde a
   // Zebra fica). Print do Master, 12/09: o comando de instalacao morria em
   // "Nao foi possivel criar um canal seguro para SSL/TLS". O .NET dessa
