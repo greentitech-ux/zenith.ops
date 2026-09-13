@@ -1018,6 +1018,17 @@ function juntarFotosRelatorio(atuais, novas, maximo){
 const LADO_MAX_RELATORIO = 2000;
 const QUALIDADE_RELATORIO = 0.85;
 const JA_PEQUENA_RELATORIO = 1500000; // ~1,5 MB: nao vale mexer, so perderia nitidez
+// O problema OPOSTO, visto na 19855 (13/09): a loja recorta cada quadro do
+// relatorio do Pulse num print de ~19 KB - uns 330x260 px, digito de 6 px.
+// Nitido pra quem olha na tela, mas o modelo enxerga a imagem pelo que ela
+// tem de pixel (~115 tokens de visao por foto), e o Haiku chutava os tempos
+// do Service Times a cada leitura (Leg Time 27,89 / 6,73 / 8,54 / 22,98 na
+// MESMA foto). Ampliar o recorte antes de subir nao inventa detalhe, mas da
+// ao modelo ~2.000 tokens de visao por foto em vez de 115 - e custa centavos
+// (R$0,05 numa leitura de 5 fotos), contra R$1 de trocar pro Sonnet.
+// Abaixo deste lado maior, o recorte e' ampliado ate ele. Fica abaixo dos
+// 1568 px em que a API reduz a imagem, senao a ampliacao seria desfeita la.
+const LADO_MIN_RELATORIO = 1400;
 // Em alguns navegadores/arquivos (principalmente fotos recebidas por WhatsApp),
 // createImageBitmap pode ficar pendente sem disparar erro. O arquivo original
 // ainda serve para a leitura: a preparação não pode prender a tela por isso.
@@ -1038,12 +1049,70 @@ function carregarViaImgRelatorio(file){
     img.src = url;
   });
 }
+// Largura e altura lidas do CABECALHO do arquivo, sem decodificar a imagem:
+// PNG traz as duas no IHDR (bytes 16-23), JPEG no primeiro marcador SOF.
+// E' o que permite saber se a foto pequena e' um recorte miudo sem abrir o
+// decoder que travava o Chrome. Formato que nao se sabe ler devolve null.
+async function dimensoesDoCabecalho(file){
+  try{
+    const buf = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
+    const dv = new DataView(buf.buffer);
+    if(buf.length > 24 && buf[0]===0x89 && buf[1]===0x50 && buf[2]===0x4E && buf[3]===0x47){
+      return { width: dv.getUint32(16), height: dv.getUint32(20) };
+    }
+    if(buf.length > 4 && buf[0]===0xFF && buf[1]===0xD8){
+      let i = 2;
+      while(i + 9 < buf.length){
+        if(buf[i] !== 0xFF){ i += 1; continue; }
+        const marcador = buf[i+1];
+        if(marcador === 0xFF){ i += 1; continue; }
+        // SOF0..SOF15 (C0-CF), menos DHT (C4), JPG (C8) e DAC (CC), que nao sao frame
+        if(marcador >= 0xC0 && marcador <= 0xCF && marcador !== 0xC4 && marcador !== 0xC8 && marcador !== 0xCC){
+          return { width: dv.getUint16(i+7), height: dv.getUint16(i+5) };
+        }
+        i += 2 + dv.getUint16(i+2);
+      }
+    }
+  }catch(e){}
+  return null;
+}
+// Recorte miudo (ver LADO_MIN_RELATORIO): amplia ate o lado minimo e devolve
+// PNG - e' texto de tela, e JPEG estraga justamente o traco do digito. Usa o
+// <img> tradicional, nao o createImageBitmap que travava, e com o mesmo
+// prazo: qualquer tropeco devolve o original, a leitura nunca fica presa.
+async function ampliarRecorteRelatorio(file){
+  try{
+    const img = await comPrazoPreparoRelatorio(carregarViaImgRelatorio(file));
+    if(!img || !img.width || !img.height) return file;
+    const lado = Math.max(img.width, img.height);
+    if(lado >= LADO_MIN_RELATORIO) return file;
+    const escala = LADO_MIN_RELATORIO / lado;
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * escala);
+    c.height = Math.round(img.height * escala);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(r=>c.toBlob(r, 'image/png'));
+    if(!blob) return file;
+    return new File([blob], String(file.name||'foto').replace(/\.[^.]+$/,'') + '.png', { type: 'image/png' });
+  }catch(e){
+    return file;
+  }
+}
 async function comprimirImagemRelatorio(file){
   if(!file || !/^image\//.test(file.type||'')) return file; // PDF sobe inteiro
   // Capturas como as do relatório diário têm poucos KB. Não há ganho em abrir
   // canvas para elas — e pular o decoder evita os travamentos vistos no Chrome.
   // A checagem já existia, mas só DEPOIS de decodificar: tarde demais.
-  if(file.size <= JA_PEQUENA_RELATORIO) return file;
+  // A unica excecao e' o recorte miudo, que precisa ser AMPLIADO - e mesmo
+  // ele so entra no decoder depois de medido pelo cabecalho do arquivo.
+  if(file.size <= JA_PEQUENA_RELATORIO){
+    const dim = await dimensoesDoCabecalho(file);
+    if(!dim || Math.max(dim.width, dim.height) >= LADO_MIN_RELATORIO) return file;
+    return ampliarRecorteRelatorio(file);
+  }
   try{
     let img = window.createImageBitmap
       ? await comPrazoPreparoRelatorio(createImageBitmap(file))
@@ -1101,7 +1170,7 @@ function esconderMsgLerCanais(){
   const msg = document.getElementById('ler-canais-msg');
   msg.classList.add('hidden'); msg.innerHTML = '';
 }
-const MAX_FOTOS_RELATORIO = 5;
+const MAX_FOTOS_RELATORIO = 10; // pedido do Master: 5 não bastava pro relatório longo do Pulse fotografado em partes. Casa com MAX_FOTOS_RELATORIO_PDV no index.js.
 
 function nomesSelecionados(){
   return ARQUIVOS_RELATORIO.map(a=>a.name || 'foto').join(', ');

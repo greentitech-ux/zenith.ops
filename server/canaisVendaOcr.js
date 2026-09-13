@@ -593,12 +593,39 @@ function conferirPelaLinha(itens) {
 // uma trava.
 const TEM_REAIS = /r\$/i;
 
+// O relatorio imprime tudo em Real brasileiro ("R$4.065,11" = ponto milhar,
+// virgula decimal) - palavra do Master: "todos os formatos sao Real
+// brasileiro". Quem troca os separadores e' o MODELO ao copiar a linha pro
+// textoOrigem ("AdyenV2 R$469.40", "IFOOD R$2,841.82" - o Haiku fez isso no
+// quadro de Formas), e o parser antigo, assumindo BR sempre, lia "469.40"
+// como 46.940 e REPROVAVA uma leitura cujo valor estava certo. Este entende
+// os dois sem ambiguidade, pela regra universal: o ULTIMO separador seguido
+// de 1-2 digitos e' o decimal; os outros sao milhar; separador seguido de 3
+// digitos e' milhar (nao ha decimal). Para a linha copiada em BR, que e' o
+// caso normal, o resultado e' IDENTICO ao de antes.
+function parseValorMonetario(bruto) {
+  const s = String(bruto || '').trim();
+  if (!/\d/.test(s)) return NaN;
+  const ultimoSep = Math.max(s.lastIndexOf('.'), s.lastIndexOf(','));
+  if (ultimoSep === -1) return Number(s.replace(/\D/g, ''));
+  const casasDepois = s.length - ultimoSep - 1;
+  // 1-2 digitos apos o ultimo separador = decimal (BR ",11" ou US ".40");
+  // 3 digitos = milhar sem decimal (ex "4.065" = 4065)
+  if (casasDepois >= 1 && casasDepois <= 2) {
+    const inteiro = s.slice(0, ultimoSep).replace(/[.,]/g, '');
+    const frac = s.slice(ultimoSep + 1).replace(/\D/g, '');
+    return Number(`${inteiro}.${frac}`);
+  }
+  return Number(s.replace(/[.,]/g, ''));
+}
+
 function numerosEmReais(texto) {
   const out = [];
-  const re = /r\$\s*(\d[\d.]*(?:,\d{1,2})?)/gi;
+  // o grupo captura digitos com ponto E virgula juntos (US "2,841.82" cabe)
+  const re = /r\$\s*(\d[\d.,]*)/gi;
   let m = re.exec(String(texto || ''));
   while (m) {
-    const n = Number(m[1].replace(/\./g, '').replace(',', '.'));
+    const n = parseValorMonetario(m[1]);
     if (Number.isFinite(n)) out.push(n);
     m = re.exec(String(texto || ''));
   }
@@ -803,6 +830,7 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   // uma conexao HTTP parada aguenta. O streaming entrega em pedacos e o
   // finalMessage() remonta: mesmo objeto de resposta, mesmo custo, so muda o
   // transporte. Nada abaixo desta chamada percebe a diferenca.
+  const inicioChamada = Date.now();
   const resp = await getCliente().messages.stream({
     model: modelo,
     // relatorio com muito KPI cadastrado (Service Times Summary do PDV da
@@ -834,6 +862,17 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
     });
   } catch (e) { console.error('ocrUso: falha ao registrar (leitura segue). %s', e.message); }
   const texto = (resp.content || []).map((b) => b.text || '').join('');
+  // Quanto a chamada demorou e o que veio dentro da resposta. Trocar o modelo
+  // por env (OCR_MODELO) muda os dois sem aviso: a MESMA leitura (5 fotos da
+  // 19855) que o Haiku devolvia em ~1.800 tokens de saida veio com 20.473 no
+  // Sonnet - 11x mais pra escrever, 15x o custo, e a loja esperando minutos.
+  // O [ocr-uso] mostra o total, mas nao diz o que e' o excesso: se a resposta
+  // e' texto puro, e' JSON verboso (aperta-se o prompt); se ha bloco que nao
+  // e' texto (thinking), e' raciocinio cobrado como saida (desliga-se). As
+  // duas correcoes sao diferentes, entao a linha traz tipos e tamanho.
+  const tiposDeBloco = (resp.content || []).map((b) => b.type).join(',');
+  console.log('[ocr-tempo] modelo=%s ms=%s stop=%s blocos=%s chars=%s',
+    modelo, Date.now() - inicioChamada, resp.stop_reason || '-', tiposDeBloco || '-', texto.length);
   let dados;
   try {
     dados = extrairJson(texto);
@@ -1042,4 +1081,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   }
 }
 
-module.exports = { ativo, lerCanais, extrairJson, resgatarSobras, conferirPelaLinha, percentualNaLinha, rotuloBateComOrigem, normalizarTexto, conferirSomas, conferirPercentuais, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi };
+module.exports = { ativo, lerCanais, extrairJson, resgatarSobras, conferirPelaLinha, percentualNaLinha, rotuloBateComOrigem, normalizarTexto, conferirSomas, conferirPercentuais, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi, parseValorMonetario, numerosEmReais };

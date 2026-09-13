@@ -152,10 +152,15 @@ function sanitizarCamposExtras(lista) {
 // sabe ("o Delivery e o SEGUNDO numero da linha; o primeiro e sempre zero e
 // nao vale") nao cabem num codigo generico - se cada bandeira precisasse de
 // um `if` aqui, o modulo viraria uma colcha de retalhos e cada loja nova
-// exigiria deploy. Texto livre, curto de proposito: e instrucao pontual, nao
-// manual.
+// exigiria deploy. Teto de 3000 (era 600): o relatorio do Domino's tem
+// varios quadros - Canais, Formas, Resumo de Pedidos, Service Times, Orders
+// per Dispatch - e mapear campo por campo pra reduzir o erro nao cabia em
+// 600. O texto vai inteiro pro prompt (custa tokens, mas pouco perto das
+// fotos), entao ainda ha um teto - so mais alto. O maxlength dos textareas
+// em grupos.html usa o MESMO numero.
+const LIMITE_DICA_LEITURA = 3000;
 function sanitizarDicaLeitura(s) {
-  return String(s || '').trim().slice(0, 600);
+  return String(s || '').trim().slice(0, LIMITE_DICA_LEITURA);
 }
 
 // nome padrao das maquininhas (ex: "Maquininha 1", "Maquininha 2"...) -

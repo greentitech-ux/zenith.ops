@@ -103,6 +103,7 @@ const qaAprovacoes = require('./qaAprovacoes');
 const alertasCentral = require('./alertasCentral');
 const botIndicadores = require('./botIndicadores');
 const briefingEmail = require('./briefingEmail');
+const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
 const vigiaScript = require('./vigiaScript');
 const loginCustom = require('./loginCustom');
@@ -163,11 +164,15 @@ const uploadNotaFiscal = multer({
 // relatorio do PDV pra leitura dos Canais/Formas (ver canaisVendaOcr.js):
 // diferente da nota fiscal, aqui podem vir VARIAS imagens do mesmo
 // relatorio - a tela do Pulse nao cabe num print so quando a loja tem
-// muito canal, e o gerente acaba fotografando em partes. O teto de 5 e o
-// ponto em que a conta de tokens por leitura ainda vale a pena.
+// muito canal, e o gerente acaba fotografando em partes. Teto de 10 (pedido
+// do Master: 5 nao bastava pro relatorio longo em partes). Custa tokens por
+// foto, mas o abuso ja e' contido pelo teto por pessoa/dia (ocrUso) - repetir
+// a mesma foto ruim so gasta e nunca muda o resultado. O front (lancamento.html
+// MAX_FOTOS_RELATORIO) usa o MESMO numero.
+const MAX_FOTOS_RELATORIO_PDV = 10;
 const uploadRelatorioPdv = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 5 },
+  limits: { fileSize: 15 * 1024 * 1024, files: MAX_FOTOS_RELATORIO_PDV },
 });
 
 // documento de identidade do cadastro de RH (ver documentoIdentidadeOcr.js):
@@ -303,6 +308,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/solicitacoes/publico',
   '/api/bot/solicitacoes',
   '/api/bot/indicadores',
+  '/api/bot/vendas-registro',
   '/decidir.html',
   '/api/solicitacoes/decidir-info',
   '/api/solicitacoes/decidir',
@@ -738,10 +744,67 @@ app.get('/api/bot/indicadores', async (req, res) => {
   }
 });
 
+// ---------- CONCILIAÇÃO PWR/iFood x declarado (ver conciliacao.js) ----------
+//
+// Entrada do numero que veio de FORA: o Cowork entra no portal do PWR e do
+// iFood as 8:30, le o total de ontem por loja e manda TUDO numa chamada so.
+// Mesmo desenho do robo de cobrancas (header x-bot-token, so cria, nunca le
+// nem decide), mas com token PROPRIO (BOT_VENDAS_TOKEN): a regra da casa e'
+// que cada token abre UMA rota - um vazado daqui nao cria solicitacao nem le
+// venda nenhuma. Loja que nao existe e RECUSADA, nunca criada.
+async function unidadesQueFechamCaixa() {
+  const extras = await unidadesExtras.mapa().catch(() => ({}));
+  const out = {};
+  Object.entries({ ...FECHAMENTO_UNIDADES_NOMES, ...extras }).forEach(([codigo, nome]) => {
+    if (codigo !== 'Administrativa') out[codigo] = nome;
+  });
+  return out;
+}
+app.post('/api/bot/vendas-registro', async (req, res) => {
+  if (!exigirTokenBot(req, res, 'BOT_VENDAS_TOKEN')) return;
+  try {
+    const corpo = req.body || {};
+    const registros = Array.isArray(corpo.registros) ? corpo.registros : [corpo];
+    const r = await conciliacao.registrar({ registros, unidadesConhecidas: await unidadesQueFechamCaixa(), hoje: hojeBrasiliaISO(), origem: 'bot-vendas' });
+    if (!r.gravados.length) return res.status(400).json({ error: 'Nenhum registro válido.', recusados: r.recusados });
+    console.log(`[conciliacao] ${r.gravados.length} registro(s) de venda recebido(s)${r.recusados.length ? `, ${r.recusados.length} recusado(s)` : ''}: ${r.gravados.map((g) => `${g.unidade} ${g.data} ${g.fonte} ${g.total}`).join(' · ')}`);
+    res.json({ ok: true, gravados: r.gravados.length, recusados: r.recusados });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+// o resultado, pra tela e pro Beni: e o MESMO bloco que vai no e-mail
+app.get('/api/conciliacao', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const ind = await montarIndicadoresBot({ compacto: String(req.query.compacto || '') === '1', incluirTodos: true });
+    res.json(ind.conciliacao);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.get('/api/conciliacao-config', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  res.json(await conciliacao.getConfig());
+});
+app.post('/api/conciliacao-config', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await conciliacao.salvarConfig(req.body || {}, req.user.email));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+// "cobrar agora": o mesmo que o relogio das 8:45 faz, sem esperar por ele
+app.post('/api/conciliacao/cobrar', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    res.json({ ok: true, cobrancas: await conciliacao.rodarCobranca(`manual por ${req.user.email}`) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // junta as fontes (todas cacheadas) e monta o objeto de indicadores - usado
 // pela rota acima e pelo e-mail diario abaixo, pra os dois sairem IGUAIS
 async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = false } = {}) {
-  const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes, listaGrupos] = await Promise.all([
+  const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes, listaGrupos, registrosVenda, configConciliacao] = await Promise.all([
     fechamentosLive.listAll(),
     sangrias.listAll().then((l) => l.map(sangrias.comoFechamento)),
     saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)),
@@ -750,6 +813,10 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
     alertasCentral.listar().catch(() => []),
     solicitacoes.listAll().catch(() => []),
     grupos.list().catch(() => []),
+    // PWR/iFood registrados de fora (ver conciliacao.js) - lista cacheada,
+    // uma leitura por briefing, mesmo custo das outras fontes acima
+    conciliacao.listarRegistros().catch(() => []),
+    conciliacao.getConfig().catch(() => conciliacao.CONFIG_PADRAO),
   ]);
   const mesclados = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
   // TC: o bot le `f.tc`, mas o TC das lojas vive nos KPI's do grupo com um
@@ -774,9 +841,18 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
     if (!incluirTodos && ARCFOOD_FECHAMENTO.has(codigo)) return;
     unidadesLoja[codigo] = nome;
   });
+  // a conciliacao olha uma janela propria (ontem e os 2 dias antes), nao o
+  // periodo do briefing: registro que chega atrasado ainda e comparado, e o
+  // mes inteiro nao e reaberto toda manha
+  const hojeConc = hojeBrasiliaISO();
+  const conciliado = conciliacao.conciliar({
+    fechamentos: todos, registros: registrosVenda, unidadesLoja, config: configConciliacao,
+    inicio: conciliacao.somarDiasISO(hojeConc, -conciliacao.DIAS_JANELA), fim: conciliacao.somarDiasISO(hojeConc, -1),
+  });
   return botIndicadores.montarIndicadores({
     fechamentos: todos,
     unidadesLoja,
+    conciliacao: conciliado,
     pedidoSemanal: pedidoSemanal.statusDasUnidades(ctxPedido.base, ctxPedido),
     alertas,
     solicitacoes: todasSolicitacoes,
@@ -1572,7 +1648,10 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     if (!liberado) return res.status(403).type('text/plain').send('# Acesso negado. Baixe o agente pela tela NOC-NoPulso (logado como Master/Suporte).');
     const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
     const noPulsoPrint = await lojaStatus.noPulsoPrintDoComputador(codigo, posto);
-    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint });
+    // marcada na ficha: sai a versao pra Windows antigo (Server 2012 R2) - e a
+    // autoatualizacao dessa maquina continua recebendo a versao certa
+    const windowsAntigo = await lojaStatus.windowsAntigoDoComputador(codigo, posto);
+    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo });
     res.type('text/plain').send(conteudo);
   } catch (err) {
     res.status(400).type('text/plain').send('# Erro ao gerar o script: ' + err.message);
@@ -1593,7 +1672,8 @@ app.get('/api/loja-status/:codigo/computadores/:posto/comando-instalacao', auth.
     const tipo = lojaStatus.TIPOS_COMPUTADOR.includes(req.query.tipo) ? req.query.tipo : 'atendimento';
     const { codigo, posto } = req.params;
     const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
-    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken }) });
+    const windowsAntigo = await lojaStatus.windowsAntigoDoComputador(codigo, posto);
+    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3631,7 +3711,7 @@ function urlComputador(codigo, posto, tipo) {
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
     if (!(await unidadesExtras.apareceEm(req.params.codigo, 'noc'))) return res.status(400).json({ error: 'Essa unidade não tem NOC habilitado.' });
-    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint);
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo);
     const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -3641,7 +3721,7 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint);
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo);
     const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -5899,7 +5979,7 @@ app.get('/api/ocr/uso', auth.requireMaster, (req, res) => {
   res.json(ocrUso.resumoDoDia(req.query.dia));
 });
 
-app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRelatorioPdv.array('imagem', 5), async (req, res) => {
+app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRelatorioPdv.array('imagem', MAX_FOTOS_RELATORIO_PDV), async (req, res) => {
   try {
     const unidade = req.body.unidade;
     if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
@@ -5914,8 +5994,9 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
       return res.status(400).json({ error: 'Essa loja não usa leitura de Canais por imagem. O Master ativa em Grupos.' });
     }
     // Teto por pessoa/dia. Cada clique aqui custa 2 chamadas de modelo (3 com
-    // desempate) carregando ate 5 fotos - repetir a MESMA foto ruim nunca
-    // muda o resultado, so gasta. O Master fica de fora: e' ele quem testa
+    // desempate) carregando ate MAX_FOTOS_RELATORIO_PDV fotos - repetir a MESMA
+    // foto ruim nunca muda o resultado, so gasta. O Master fica de fora: e' ele
+    // quem testa
     // formato novo de relatorio, e travar isso trava a configuracao da loja.
     if (!req.isMaster) {
       const bloqueio = ocrUso.motivoDeBloqueio(req.user.id);
@@ -14739,6 +14820,9 @@ function aquecerBoot(promessa, ms) {
     // credencial de e-mail - o envio e que vai reclamar, com o erro certo,
     // e a tela mostra no historico
     briefingEmail.iniciar({ montar: montarIndicadoresBot }).catch((err) => console.error('[briefing] erro ao agendar e-mail diário de indicadores:', err.message));
+    // cobranca automatica da conciliacao (divergencia PWR/iFood vira tarefa
+    // pro gerente) - mesmo relogio, mesma montagem do briefing
+    conciliacao.iniciar({ montar: montarIndicadoresBot, hoje: hojeBrasiliaISO }).catch((err) => console.error('[conciliacao] erro ao agendar cobrança:', err.message));
   });
 
   // Desligamento: grava o que ficou pendente das batidas de heartbeat.

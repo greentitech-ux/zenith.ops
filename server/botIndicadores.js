@@ -116,6 +116,9 @@ function agregarPorUnidade(lista, nomesUnidades, kpiPedidosPorUnidade) {
 function montarIndicadores({
   fechamentos = [], unidadesLoja = {}, pedidoSemanal = [], alertas = [], solicitacoes = [],
   hoje, dias = DIAS_PADRAO, compacto = false, limiteAlertas, limiteSolicitacoes, kpiPedidosPorUnidade = {},
+  // PWR/iFood x declarado, ja comparado (ver conciliacao.js conciliar) - vem
+  // pronto porque a regra e do Master e a comparacao e do servidor
+  conciliacao = null,
 }) {
   if (limiteAlertas == null) limiteAlertas = compacto ? 15 : 30;
   if (limiteSolicitacoes == null) limiteSolicitacoes = compacto ? 20 : 40;
@@ -231,6 +234,12 @@ function montarIndicadores({
     },
     alertasCentral: { abertos: alertasAbertos.length, lista: alertasAbertos },
     solicitacoes: { pendentes: pendentes.length, porTipo: pendentesPorTipo, lista: solicitacoesPendentes },
+    // compacto: so o que exige acao (divergente / sem registro / sem
+    // fechamento); o "ok" so entra no completo
+    conciliacao: conciliacao ? {
+      janela: conciliacao.janela, regra: conciliacao.regra, resumo: conciliacao.resumo,
+      itens: compacto ? (conciliacao.itens || []).filter((i) => i.status !== 'ok') : (conciliacao.itens || []),
+    } : null,
   };
 }
 
@@ -268,11 +277,32 @@ function montarEmailHtml(ind) {
     linhas,
     '</table>',
     `<p style="margin:12px 0 4px;color:#555">Quebras ≥ R$ 50: ${(ind.quebrasRelevantes || []).length} · Pedido semanal atrasado: ${(ind.pedidoSemanal || {}).atrasados || 0} · Alertas abertos: ${(ind.alertasCentral || {}).abertos || 0} · Solicitações pendentes: ${(ind.solicitacoes || {}).pendentes || 0}</p>`,
+    ...blocoConciliacaoHtml(ind.conciliacao),
     '<p style="margin:16px 0 4px;color:#555">Dados completos (lidos pelo assistente):</p>',
     `<pre id="indicadores-json" style="font-size:11px;white-space:pre-wrap;background:#f4f4f4;padding:8px">${escaparHtml(JSON.stringify(ind))}</pre>`,
     '</div>',
   ].join('\n');
   return html;
+}
+
+// Conciliação PWR/iFood x declarado (ver conciliacao.js). Só as linhas que
+// exigem ação: divergente, sem registro, sem fechamento. "ok" não ocupa
+// espaço no e-mail - quem lê precisa bater o olho no que cobrar.
+function blocoConciliacaoHtml(c) {
+  if (!c || !c.resumo) return [];
+  const r = c.resumo;
+  const fonteNome = (f) => (f === 'pwr' ? 'PWR' : 'iFood');
+  const statusNome = { divergente: 'DIVERGENTE', 'sem-registro': 'sem registro', 'sem-fechamento': 'sem fechamento' };
+  const linhas = (c.itens || []).filter((i) => i.status !== 'ok').slice(0, 40).map((i) =>
+    `<tr><td>${escaparHtml(i.data)}</td><td>${escaparHtml(i.unidadeNome || i.unidade)}</td><td>${fonteNome(i.fonte)}</td>`
+    + `<td align="right">${i.declarado == null ? '—' : brl(i.declarado)}</td><td align="right">${i.registro == null ? '—' : brl(i.registro)}</td>`
+    + `<td align="right">${i.diferenca == null ? '—' : brl(i.diferenca)}</td><td>${statusNome[i.status] || i.status}${i.tarefaNumero ? ` · #${i.tarefaNumero}` : ''}</td></tr>`).join('');
+  return [
+    `<p style="margin:12px 0 4px"><b>Conciliação PWR/iFood × declarado</b> (${c.janela.dias} dias até ${escaparHtml(c.janela.fim || '')}): ${r.comparados} comparações · <b>${r.divergentes} divergente(s)</b> · ${r.semRegistro} sem registro · ${r.semFechamento} sem fechamento. Tolerância: ${brl(c.regra.toleranciaReais)} ou ${c.regra.toleranciaPct}%.</p>`,
+    linhas
+      ? `<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th>Dia</th><th align="left">Loja</th><th>Fonte</th><th>Declarado</th><th>Registro</th><th>Diferença</th><th align="left">Situação</th></tr>${linhas}</table>`
+      : '<p style="margin:0 0 8px;color:#555">Nada a cobrar na janela.</p>',
+  ];
 }
 
 // caminho inverso do montarEmailHtml: acha o JSON no HTML do e-mail

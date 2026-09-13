@@ -99,6 +99,8 @@
   .kpi-card.kpi-offline .kpi-num{color:var(--bad);}
   .kpi-card.kpi-nunca .kpi-num{color:var(--muted);}
   .kpi-card.kpi-degradado .kpi-num{color:var(--warn);}
+  /* contagem de servidores dentro do status: "43 · 5" (regulares · servidores) */
+  .kpi-serv{font-size:.42em;font-weight:700;color:var(--muted);margin-left:5px;letter-spacing:.02em;vertical-align:middle;white-space:nowrap;}
 
   /* ---- filtros ---- */
   .filtro-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;}
@@ -427,11 +429,11 @@
     </div>
     <div class="header-nav">
       <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
-      <button class="back hidden" id="btn-manutencao" onclick="abrirManutencao()" title="Reiniciar computadores do parque - um, uma unidade inteira ou várias unidades">🔁 Reiniciar máquinas</button>
-      <button class="back hidden" id="btn-limpar-travados" onclick="limparTravados()" title="Manda todos os computadores fecharem processos travados do agente NOC-NoPulso">🧹 Destravar lojas</button>
+      <button type="button" class="btn-icone hidden" id="btn-manutencao" onclick="abrirManutencao()" data-dica="Reiniciar máquinas do parque (uma, uma unidade ou várias)" aria-label="Reiniciar máquinas do parque">🔁</button>
+      <button type="button" class="btn-icone hidden" id="btn-limpar-travados" onclick="limparTravados()" data-dica="Destravar lojas: fechar processos travados do agente NOC-NoPulso" aria-label="Destravar lojas">🧹</button>
       <!-- atalho pra central de HD/temperatura/reboot: o card daqui mostra o
            computador que voce ja escolheu; la e a frota inteira de uma vez -->
-      <a class="back" href="/noc-maquinas.html" title="HD, temperatura e tempo ligado de todos os computadores">💽 Saúde das Máquinas</a>
+      <a class="btn-icone" href="/noc-maquinas.html" data-dica="Saúde das máquinas: HD, temperatura e tempo ligado de toda a frota" aria-label="Saúde das máquinas">💽</a>
       <button class="btn-notif" onclick="carregar()" title="Atualizar">🔄</button>
       <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
     </div>
@@ -498,7 +500,7 @@
     <select id="filtro-unidade" onchange="onFiltroUnidade()">
       <option value="">Todas as unidades</option>
     </select>
-    <button type="button" class="btn-secundario hidden" id="btn-push-ar" onclick="togglePushAcessoRemoto()" title="Ligar/desligar o alerta no celular quando o vigia detecta acesso remoto (AnyDesk/TeamViewer/etc). Fica sempre no histórico do computador.">🔔 Alerta acesso remoto: …</button>
+    <button type="button" class="btn-secundario hidden" id="btn-push-ar" onclick="togglePushAcessoRemoto()" title="Ligar/desligar o alerta no celular quando o NOC-NoPulso detecta acesso remoto (AnyDesk/TeamViewer/etc). Fica sempre no histórico do computador.">🔔 Alerta acesso remoto: …</button>
     <button type="button" class="btn-primary" onclick="abrirModalNovoComputador()">➕ Computador</button>
   </div>
 
@@ -817,6 +819,10 @@
       <span><b>🗄️ É servidor</b><small style="display:block;color:var(--muted);">identifica a máquina de servidor no parque monitorado</small></span>
     </label>
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="novo-comp-windows-antigo" style="margin-top:3px;">
+      <span><b>🕰️ Windows antigo</b><small style="display:block;color:var(--muted);">Server 2012 R2, Windows 7/8 (ex: o BOS do Pulse). O agente sai numa versão própria: força TLS 1.2 e não usa comando do PowerShell 5. As outras máquinas não mudam.</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="novo-comp-gcom" style="margin-top:3px;">
       <span><b>🖥️ Possui GCOM</b><small style="display:block;color:var(--muted);">mostra o indicador GCOM no cartão da máquina</small></span>
     </label>
@@ -897,6 +903,10 @@
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="editar-comp-servidor" style="margin-top:3px;">
       <span><b>🗄️ É servidor</b><small style="display:block;color:var(--muted);">identifica a máquina de servidor no parque monitorado</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="editar-comp-windows-antigo" style="margin-top:3px;">
+      <span><b>🕰️ Windows antigo</b><small style="display:block;color:var(--muted);">Server 2012 R2, Windows 7/8 (ex: o BOS do Pulse). O agente sai numa versão própria: força TLS 1.2 e não usa comando do PowerShell 5. As outras máquinas não mudam.</small></span>
     </label>
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="editar-comp-gcom" style="margin-top:3px;">
@@ -1497,7 +1507,7 @@ function atualizarConteudoDetalhe(codigo, c){
   renderPoliticaComputador(codigo, c);
   document.getElementById('detalhe-comp-editar').onclick = () => {
     fecharDetalheComputador();
-    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint);
+    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo);
   };
 }
 
@@ -1719,15 +1729,21 @@ function computadoresReais(){ return COMPUTADORES.filter(c => c.nome); }
 function renderKpis(){
   const reais = computadoresReais();
   const total = reais.length;
-  const online = reais.filter(c => statusDe(c)==='online').length;
-  const degradado = reais.filter(c => statusDe(c)==='degradado').length;
-  const offline = reais.filter(c => statusDe(c)==='offline').length;
-  const nunca = reais.filter(c => statusDe(c)==='nunca').length;
+  // servidores no parque: com ao menos um, cada status vira "regulares · N"
+  // (N = servidores NAQUELE status). Sem servidor nenhum, fica o número puro
+  // de sempre. O Total continua sendo o total geral (soma de tudo).
+  const temServidor = reais.some(c => c.ehServidor);
+  const doStatus = st => reais.filter(c => statusDe(c)===st);
   document.getElementById('kpi-num-total').textContent = total;
-  document.getElementById('kpi-num-online').textContent = online;
-  document.getElementById('kpi-num-degradado').textContent = degradado;
-  document.getElementById('kpi-num-offline').textContent = offline;
-  document.getElementById('kpi-num-nunca').textContent = nunca;
+  [['online','online'],['degradado','degradado'],['offline','offline'],['nunca','nunca']].forEach(([id, st]) => {
+    const lista = doStatus(st);
+    const serv = lista.filter(c => c.ehServidor).length;
+    const el = document.getElementById('kpi-num-'+id);
+    // regulares = os que NÃO são servidor; o "· N" separa os servidores
+    el.innerHTML = temServidor
+      ? `${lista.length - serv}<span class="kpi-serv" title="${serv} servidor(es) neste status">· ${serv}</span>`
+      : String(lista.length);
+  });
   ['total','online','degradado','offline','nunca'].forEach(k => {
     document.getElementById('kpi-'+k).classList.toggle('ativo', FILTRO_STATUS === (k==='total' ? '' : k));
   });
@@ -2414,9 +2430,9 @@ async function manutEnviar(tarefa){
 // Confirma antes porque encerra processo em maquina de loja, e avisa que nao
 // e instantaneo: cada uma so pega o comando na proxima batida (ate ~25s).
 async function limparTravados(){
-  if(!confirm('Mandar TODOS os computadores fecharem processos travados do NOCZenith?\n\nCada máquina executa na próxima batida (até ~25s). O vigia que está saudável continua rodando — só os processos órfãos são encerrados.')) return;
+  if(!confirm('Mandar TODOS os computadores fecharem processos travados do NOCZenith?\n\nCada máquina executa na próxima batida (até ~25s). O agente NOC-NoPulso que está saudável continua rodando — só os processos órfãos são encerrados.')) return;
   const b = document.getElementById('btn-limpar-travados');
-  b.disabled = true; b.textContent = '⏳ Enviando...';
+  b.disabled = true; b.textContent = '⏳';
   try{
     const r = await fetch('/api/loja-status/limpar-travados', { method: 'POST' });
     const d = await r.json();
@@ -2428,7 +2444,7 @@ async function limparTravados(){
       + (jaTinham ? `\n\n(${jaTinham} já tinham o comando na fila de um envio anterior — também vão executar.)` : '')
       + (falhas.length ? `\n\nNão foi possível enviar para:\n` + falhas.map(f => `• ${f.nome || f.posto}: ${f.motivo}`).join('\n') : ''));
   }catch(e){ alert('Erro: ' + e.message); }
-  b.disabled = false; b.textContent = '🧹 Destravar lojas';
+  b.disabled = false; b.textContent = '🧹';
 }
 
 // ---- diagnostico de rede (ver redeDiagnostico.js no servidor) ------------
@@ -2575,6 +2591,7 @@ function abrirModalNovoComputador(){
   if(FILTRO_UNIDADE) select.value = FILTRO_UNIDADE;
   document.getElementById('novo-comp-nome').value = '';
   document.getElementById('novo-comp-servidor').checked = false;
+  document.getElementById('novo-comp-windows-antigo').checked = false;
   document.getElementById('novo-comp-gcom').checked = false;
   document.getElementById('novo-comp-mede-quedas').checked = false;
   document.getElementById('novo-comp-nopulso-print').checked = false;
@@ -2595,7 +2612,7 @@ async function salvarNovoComputador(){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo, ehServidor: document.getElementById('novo-comp-servidor').checked, temGcom: document.getElementById('novo-comp-gcom').checked, medeQuedas: document.getElementById('novo-comp-mede-quedas').checked, noPulsoPrint: document.getElementById('novo-comp-nopulso-print').checked }),
+      body: JSON.stringify({ nome, tipo, ehServidor: document.getElementById('novo-comp-servidor').checked, temGcom: document.getElementById('novo-comp-gcom').checked, medeQuedas: document.getElementById('novo-comp-mede-quedas').checked, noPulsoPrint: document.getElementById('novo-comp-nopulso-print').checked, windowsAntigo: document.getElementById('novo-comp-windows-antigo').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
@@ -2682,8 +2699,9 @@ async function baixarVigia(codigo, posto, tipo){
 
 let EDITAR_COMP_CODIGO = null;
 let EDITAR_COMP_POSTO = null;
-function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint){
+function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo){
   document.getElementById('editar-comp-notebook').checked = !!ehNotebook;
+  document.getElementById('editar-comp-windows-antigo').checked = !!windowsAntigo;
   document.getElementById('editar-comp-servidor').checked = !!ehServidor;
   document.getElementById('editar-comp-gcom').checked = !!temGcom;
   document.getElementById('editar-comp-mede-quedas').checked = !!medeQuedas;
@@ -2728,7 +2746,7 @@ async function salvarEdicaoComputador(){
     }
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked, ehServidor: document.getElementById('editar-comp-servidor').checked, temGcom: document.getElementById('editar-comp-gcom').checked, medeQuedas: document.getElementById('editar-comp-mede-quedas').checked, noPulsoPrint: document.getElementById('editar-comp-nopulso-print').checked }),
+      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked, ehServidor: document.getElementById('editar-comp-servidor').checked, temGcom: document.getElementById('editar-comp-gcom').checked, medeQuedas: document.getElementById('editar-comp-mede-quedas').checked, noPulsoPrint: document.getElementById('editar-comp-nopulso-print').checked, windowsAntigo: document.getElementById('editar-comp-windows-antigo').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');

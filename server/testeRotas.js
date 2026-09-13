@@ -1146,6 +1146,18 @@ setTimeout(async () => {
     const iProvaResgate = src.indexOf('conferirPelaLinha([...itens, ...resgatados])');
 
     const conf = {
+      // FORMATO US no quadro de Formas do Pulse ("R$469.40" = 469,40, nao
+      // 46.940): o parser antigo lia ponto como milhar e REPROVAVA a leitura
+      // certa do AdyenV2/IFOOD. Agora os dois formatos convivem.
+      'US: "R$469.40" (ponto decimal) casa com o valor 469,40 - nao mais 46.940':
+        ocrL.conferirPelaLinha([it('adyen', 'AdyenV2 R$469.40', 469.40, 'forma')]).reprovados.length === 0,
+      'US com milhar: "R$2,841.82" casa com 2841,82':
+        ocrL.conferirPelaLinha([it('ifood', 'IFOOD R$2,841.82', 2841.82, 'forma')]).reprovados.length === 0,
+      'e o parser devolve os dois formatos certos (BR e US)':
+        ocrL.numerosEmReais('R$469.40')[0] === 469.40 && ocrL.numerosEmReais('R$4.065,11')[0] === 4065.11
+        && ocrL.numerosEmReais('R$2,841.82')[0] === 2841.82 && ocrL.parseValorMonetario('4.065') === 4065,
+      'US errado ainda é barrado (469,40 lido como 4,69 não casa com a linha)':
+        ocrL.conferirPelaLinha([it('adyen', 'AdyenV2 R$469.40', 4.69, 'forma')]).reprovados.length === 1,
       // o caso dele, com os números dele
       'o 85.353,77 é barrado porque a linha diz R$6.353,77':
         c1.reprovados.length === 1 && c1.reprovados[0].campo === 'moto'
@@ -1191,6 +1203,13 @@ setTimeout(async () => {
         && /itens\.push\(\.\.\.pelaLinha\.aprovados\);\s*suspeitos\.push\(\.\.\.pelaLinha\.reprovados\);\s*\}\s*resgatados\.forEach\(\(r\) => vistos\.add/.test(src),
       'cada leitura deixa no log o que entrou e o que foi barrado, com a linha de origem':
         /console\.log\('\[ocr-leitura\] unidade=%s aprovados=%s suspeitos=%s sobrou=%s faltando=%s'/.test(src),
+      // trocar OCR_MODELO fez a mesma leitura passar de ~1.800 pra 20.473
+      // tokens de saida: sem duracao e tipo de bloco no log nao da pra saber
+      // se e' JSON verboso ou thinking cobrado como saida
+      'cada chamada deixa no log quanto demorou e que blocos vieram na resposta':
+        /console\.log\('\[ocr-tempo\] modelo=%s ms=%s stop=%s blocos=%s chars=%s'/.test(src)
+        && /Date\.now\(\) - inicioChamada/.test(src)
+        && /\.map\(\(b\) => b\.type\)\.join\(','\)/.test(src),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPelaLinha = !falhas.length;
@@ -3590,7 +3609,18 @@ setTimeout(async () => {
       'PDF sobe inteiro (comprimir só mexe em imagem)': /function comprimirImagemRelatorio\([\s\S]{0,200}return file;.*PDF sobe inteiro/.test(html),
       'a compressão nunca trava a leitura por conta própria (qualquer erro devolve o arquivo original)': /catch\(e\)\{\s*\n\s*return file; \/\/ qualquer tropeço/.test(html),
       'cada foto tem prazo de preparo e uma travada não prende a tela': /const PRAZO_PREPARO_FOTO_MS = 12000;/.test(html) && /function comPrazoPreparoRelatorio\(/.test(html) && /if\(!img && window\.createImageBitmap\)/.test(html),
-      'foto pequena pula o decoder e fica disponível imediatamente': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;/.test(html),
+      // 13/09: a exceção é o recorte miúdo (lado < 1400), que precisa ser
+      // AMPLIADO - e mesmo ele é medido pelo cabeçalho do arquivo antes de
+      // qualquer decoder. Foto pequena de lado grande continua saindo na hora.
+      'foto pequena é medida pelo cabeçalho (PNG IHDR / JPEG SOF) sem decodificar; só o recorte miúdo segue pra ampliação':
+        /async function dimensoesDoCabecalho\(file\)/.test(html)
+        && /dv\.getUint32\(16\), height: dv\.getUint32\(20\)/.test(html)
+        && /marcador >= 0xC0 && marcador <= 0xCF && marcador !== 0xC4 && marcador !== 0xC8 && marcador !== 0xCC/.test(html)
+        && /if\(file\.size <= JA_PEQUENA_RELATORIO\)\{\s*\n\s*const dim = await dimensoesDoCabecalho\(file\);\s*\n\s*if\(!dim \|\| Math\.max\(dim\.width, dim\.height\) >= LADO_MIN_RELATORIO\) return file;\s*\n\s*return ampliarRecorteRelatorio\(file\);/.test(html),
+      'recorte miúdo é ampliado até 1400 px (abaixo do teto em que a API reduz de volta) e sai em PNG, pelo <img> tradicional, com prazo':
+        /const LADO_MIN_RELATORIO = 1400;/.test(html)
+        && /async function ampliarRecorteRelatorio\(file\)\{[\s\S]{0,300}comPrazoPreparoRelatorio\(carregarViaImgRelatorio\(file\)\)[\s\S]{0,400}const escala = LADO_MIN_RELATORIO \/ lado;[\s\S]{0,600}imageSmoothingQuality = 'high'[\s\S]{0,300}c\.toBlob\(r, 'image\/png'\)/.test(html)
+        && /async function ampliarRecorteRelatorio\(file\)\{[\s\S]{0,1500}\}catch\(e\)\{\s*\n\s*return file;/.test(html),
       'o lote prepara as fotos de forma independente e informa o progresso': /return Promise\.all\(lista\.map\(async f=>/.test(html) && /Preparando foto \$\{prontas\} de \$\{total\}/.test(html),
       // as duas assertivas viraram uma: o listener comprime E soma. A do Codex
       // cravava `ARQUIVOS_RELATORIO = preparados` (substituir), que era
@@ -3598,7 +3628,9 @@ setTimeout(async () => {
       'o listener comprime antes de guardar, e SOMA em vez de trocar a seleção': !!listener && /const preparados = await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener) && /ARQUIVOS_RELATORIO = juntarFotosRelatorio\(ARQUIVOS_RELATORIO, preparados, MAX_FOTOS_RELATORIO\)/.test(listener),
       'o teto de fotos passa a valer pro TOTAL somado (3 + 3 não vira 6)': !!listener && /ARQUIVOS_RELATORIO\.length \+ arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
       'um lote antigo não sobrescreve o atual (versão de preparo)': !!listener && /const versao = \+\+VERSAO_PREPARO_RELATORIO;/.test(listener) && /if\(versao !== VERSAO_PREPARO_RELATORIO\) return;/.test(listener),
-      'foto pequena não passa pelo decoder (é onde a tela ficava parada)': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;\n  try\{/.test(html),
+      'foto pequena de lado grande não passa pelo decoder (é onde a tela ficava parada) - a ampliação NÃO usa o createImageBitmap':
+        /return ampliarRecorteRelatorio\(file\);\n  \}\n  try\{/.test(html)
+        && !/async function ampliarRecorteRelatorio\(file\)\{[\s\S]{0,1500}createImageBitmap/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okComprimeFotoRelatorio = !falhas.length;
@@ -7176,6 +7208,22 @@ setTimeout(async () => {
         s.includes('MessageBoxButtons]::YesNoCancel') && s.includes('New-Object System.Windows.Forms.SaveFileDialog')
         && s.includes('DialogResult]::Yes') && s.includes('$arquivo = $sfd.FileName')
         && s.includes('if ($arquivo) { $recorte.Save($arquivo')),
+      // ---- v53: recorte miúdo ampliado na origem (a leitura por foto chutava
+      // os tempos do Service Times num print de 330 px) ----
+      'v53 (sem subir, nenhum print sai ampliado)': vg.VERSAO_VIGIA >= 53,
+      'recorte com lado < 1400 é ampliado (bicúbico) ANTES de salvar e de ir pra área de transferência, e a falha mantém o original': scripts.every((s) => {
+        const iAmpl = s.indexOf('if ($ladoRecorte -gt 0 -and $ladoRecorte -lt 1400) {');
+        const iSave = s.indexOf('if ($arquivo) { $recorte.Save($arquivo');
+        const iClip = s.indexOf('$dados.SetImage($recorte)');
+        return iAmpl > 0 && iSave > iAmpl && iClip > iAmpl
+          && s.includes('$escalaRecorte = 1400 / $ladoRecorte')
+          && s.includes('InterpolationMode]::HighQualityBicubic')
+          && s.includes('$gAmpl.DrawImage($recorte, 0, 0, $largAmpl, $altAmpl)')
+          && s.includes('$recorteMiudo = $recorte\n                $recorte = $ampliado\n                $recorteMiudo.Dispose()')
+          && s.includes('} catch { Log-Print "Nao consegui ampliar o recorte (segue no tamanho original)');
+      }),
+      'as marcas são desenhadas ANTES da ampliação (escalam junto, não ficam finas)': scripts.every((s) =>
+        s.indexOf('Desenhar-Marcas $gMarcas $escolhaPrint.marcas') < s.indexOf('$ladoRecorte = [Math]::Max($recorte.Width, $recorte.Height)')),
     };
     // ---- "Capturar agora" de ponta a ponta: Master pede -> agente recebe UMA
     // vez (configuracao-agente e heartbeat) -> some ----
@@ -11957,6 +12005,254 @@ setTimeout(async () => {
   } catch (e) { okSemHtml = false; console.log('  erro: ' + e.message); }
   if (!okSemHtml) ruins += 1;
   console.log(`${okSemHtml ? '✓' : '✗'} Link sem ".html": /atendimento abre igual, o endereço antigo continua, e o cliente não cai no muro de senha`);
+
+  // ------------------------------------------------------------------
+  // CONCILIAÇÃO PWR/iFood x DECLARADO (pedido do Master, 13/09/2026: "se o
+  // gerente colocar que vendeu 10 mil mas vendeu 12, essa conciliação vai
+  // mostrar" - e o briefing DENTRO do NoPulso). Ver conciliacao.js.
+  //
+  // O que este bloco segura: a entrada e' pelo token do robo e recusa loja
+  // que nao existe; a comparacao e' do servidor com a regra do Master
+  // (tolerancia em R$ E em %, PWR com/sem iFood); mandar o mesmo dia de novo
+  // sobrescreve em vez de duplicar; divergencia vira alerta + tarefa pro
+  // GERENTE DA LOJA (ou pro Master, se a loja nao tem gerente cadastrado) e
+  // NUNCA e' cobrada duas vezes; o e-mail do briefing traz o bloco; a rota
+  // esta' na lista publica e o relogio e' ligado no boot.
+  let okConc = false;
+  try {
+    const conc = require('/home/user/adyen-monitor/server/conciliacao.js');
+    const fs = require('fs');
+    const fonteIdx = fs.readFileSync(__dirname + '/index.js', 'utf8');
+    const envBotAntes = process.env.BOT_VENDAS_TOKEN;
+    process.env.BOT_VENDAS_TOKEN = 'token-robo-conc';
+    const cabBot = { 'x-bot-token': 'token-robo-conc' };
+    const cabM = { Authorization: 'Bearer ' + token };
+    const ontem = conc.somarDiasISO(hoje, -1);
+    // gerente da Bessa (tag + unidade no acesso); a Tatuape nao tem gerente
+    DOCS.set('users/u-ger-conc', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'gerente-bessa@teste.local', username: 'gerentebessa', cargo: 'gerente',
+      permissions: { sections: ['lancamento'], unidades: ['Dominos Bessa'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    // a lista de usuarios e' cacheada (60s): sem invalidar, a cobranca nao acha o gerente recem-semeado
+    require('/home/user/adyen-monitor/server/users.js').invalidar();
+    // o gerente da Bessa declarou 10 mil (e R$ 800 de iFood); a Tatuape 1 mil;
+    // a Mooca 5.020 - e o PWR vai dizer 12 mil, 3 mil e 5 mil
+    DOCS.set('fechamentosLive/f-conc-bessa', { id: 'f-conc-bessa', unidade: 'Dominos Bessa', unidadeNome: 'Dom Bessa', data: ontem, faturamento: 10000, ifood: 800, gerente: 'Fulano da Bessa' });
+    DOCS.set('fechamentosLive/f-conc-tat', { id: 'f-conc-tat', unidade: '19889', unidadeNome: 'Dom Tatuape', data: ontem, faturamento: 1000, ifood: 0 });
+    DOCS.set('fechamentosLive/f-conc-moo', { id: 'f-conc-moo', unidade: '19888', unidadeNome: 'Dom Mooca', data: ontem, faturamento: 5020, ifood: 0 });
+    // o cache dos fechamentos tem TTL de 6h: sem invalidar, o briefing nao ve o que acabou de ser semeado
+    require('/home/user/adyen-monitor/server/fechamentosLive.js').invalidarCache();
+    const lote = { registros: [
+      { unidade: 'Dominos Bessa', data: ontem, fonte: 'pwr', total: 12000, pedidos: 310 },
+      { unidade: 'Dominos Bessa', data: ontem, fonte: 'ifood', total: 820 },
+      { unidade: '19889', data: ontem, fonte: 'pwr', total: 3000 },
+      { unidade: '19888', data: ontem, fonte: 'pwr', total: 5000 },
+      { unidade: 'LOJA_QUE_NAO_EXISTE', data: ontem, fonte: 'pwr', total: 1 },
+      { unidade: '19888', data: ontem, fonte: 'xyz', total: 1 },
+      { unidade: '19888', data: conc.somarDiasISO(hoje, 1), fonte: 'pwr', total: 1 },
+    ] };
+    const semToken = await postarJson('/api/bot/vendas-registro', lote, {});
+    const envio = await postarJson('/api/bot/vendas-registro', lote, cabBot);
+    const envioJ = envio.status === 200 ? JSON.parse(envio.corpo) : {};
+    const docsRegistro = () => [...DOCS.keys()].filter((k) => k.startsWith('vendasRegistro/'));
+    const antesReenvio = docsRegistro().length;
+    // portal corrigiu D+1: reenvio do MESMO dia sobrescreve, nao duplica
+    const reenvio = await postarJson('/api/bot/vendas-registro', { unidade: 'Dominos Bessa', data: ontem, fonte: 'pwr', total: 12100 }, cabBot);
+    const depoisReenvio = docsRegistro().length;
+
+    const resultado = await pedir('/api/conciliacao', cabM);
+    const c = resultado.status === 200 ? JSON.parse(resultado.corpo) : { itens: [], resumo: {} };
+    const item = (u, f) => (c.itens || []).find((i) => i.unidade === u && i.fonte === f) || {};
+    const preview = await pedir('/api/briefing/preview', cabM);
+    const htmlPrev = preview.status === 200 ? (JSON.parse(preview.corpo).html || preview.corpo) : '';
+
+    // regra pura: PWR sem iFood soma o iFood registrado; tolerancia em %
+    const base = { unidadesLoja: { X: 'Loja X' }, inicio: '2026-09-01', fim: '2026-09-30' };
+    const semIfood = conc.conciliar({ ...base, config: { pwrIncluiIfood: false },
+      fechamentos: [{ unidade: 'X', data: '2026-09-10', faturamento: 10000, ifood: 800 }],
+      registros: [{ id: 'a', unidade: 'X', data: '2026-09-10', fonte: 'pwr', total: 9200 }, { id: 'b', unidade: 'X', data: '2026-09-10', fonte: 'ifood', total: 800 }] });
+    const faltaIfood = conc.conciliar({ ...base, config: { pwrIncluiIfood: false },
+      fechamentos: [{ unidade: 'X', data: '2026-09-10', faturamento: 10000, ifood: 800 }],
+      registros: [{ id: 'a', unidade: 'X', data: '2026-09-10', fonte: 'pwr', total: 9200 }] });
+    const pctOk = conc.conciliar({ ...base, config: { toleranciaReais: 50, toleranciaPct: 1 },
+      fechamentos: [{ unidade: 'X', data: '2026-09-10', faturamento: 100900 }],
+      registros: [{ id: 'a', unidade: 'X', data: '2026-09-10', fonte: 'pwr', total: 100000 }] });
+    const pctFora = conc.conciliar({ ...base, config: { toleranciaReais: 50, toleranciaPct: 0.5 },
+      fechamentos: [{ unidade: 'X', data: '2026-09-10', faturamento: 100900 }],
+      registros: [{ id: 'a', unidade: 'X', data: '2026-09-10', fonte: 'pwr', total: 100000 }] });
+
+    // a cobranca: 2 divergencias (Bessa e Tatuape); Mooca esta' dentro dos R$ 50
+    const cobra1 = await postarJson('/api/conciliacao/cobrar', {}, cabM);
+    const cob1 = cobra1.status === 200 ? JSON.parse(cobra1.corpo).cobrancas || [] : [];
+    const cobra2 = await postarJson('/api/conciliacao/cobrar', {}, cabM);
+    const cob2 = cobra2.status === 200 ? JSON.parse(cobra2.corpo).cobrancas || [] : [];
+    const tarefasConc = [...DOCS.entries()].filter(([k, v]) => k.startsWith('tarefas/') && v.origem === 'conciliacao').map(([, v]) => v);
+    const alertasConc = [...DOCS.entries()].filter(([k, v]) => k.startsWith('alertasCentral/') && v.tipo === 'conciliacao-divergente').map(([, v]) => v);
+    const tBessa = tarefasConc.find((t) => t.unidade === 'Dominos Bessa') || {};
+    const tTat = tarefasConc.find((t) => t.unidade === '19889') || {};
+    const regBessa = DOCS.get(`vendasRegistro/${'Dominos Bessa'.replace(/[^A-Za-z0-9_.-]/g, '_')}__${ontem}__pwr`) || {};
+
+    // config: o Master muda a regra sem deploy, e a rota devolve o que salvou
+    const cfgSalva = await postarJson('/api/conciliacao-config', { toleranciaReais: 100, toleranciaPct: 2, pwrIncluiIfood: false, horaCobranca: '09:15' }, cabM);
+    const cfgLida = await pedir('/api/conciliacao-config', cabM);
+    const cfgJ = cfgLida.status === 200 ? JSON.parse(cfgLida.corpo) : {};
+    await postarJson('/api/conciliacao-config', conc.CONFIG_PADRAO, cabM);
+    const cfgComum = await postarJson('/api/conciliacao-config', { toleranciaReais: 1 }, { Authorization: 'Bearer ' + (await auth.login('gerente-bessa@teste.local', 'SenhaDeTeste!2026')).token });
+
+    const conf = {
+      'sem o token a entrada é recusada, e é um token PRÓPRIO (o do robô de cobranças não abre esta rota)':
+        semToken.status === 401 && /exigirTokenBot\(req, res, 'BOT_VENDAS_TOKEN'\)/.test(fonteIdx),
+      'o lote entra numa chamada só, e cada registro inválido é recusado com o motivo (loja inexistente, fonte, data futura)':
+        envio.status === 200 && envioJ.gravados === 4 && (envioJ.recusados || []).length === 3
+        && envioJ.recusados.some((r) => /unidade desconhecida/.test(r.motivo))
+        && envioJ.recusados.some((r) => /fonte inválida/.test(r.motivo))
+        && envioJ.recusados.some((r) => /futuro/.test(r.motivo)),
+      'reenviar o mesmo dia SOBRESCREVE (o portal corrige D+1), não duplica':
+        reenvio.status === 200 && depoisReenvio === antesReenvio && antesReenvio === 4,
+      'Bessa: declarou 10 mil, PWR 12.100 → divergente, com a diferença e o gerente do fechamento':
+        item('Dominos Bessa', 'pwr').status === 'divergente' && item('Dominos Bessa', 'pwr').diferenca === -2100
+        && item('Dominos Bessa', 'pwr').gerente === 'Fulano da Bessa' && (c.resumo || {}).divergentes === 2,
+      'Bessa iFood: R$ 20 de diferença fica dentro dos R$ 50 → ok': item('Dominos Bessa', 'ifood').status === 'ok',
+      'Mooca: R$ 20 de diferença no PWR → ok (não vira cobrança)': item('19888', 'pwr').status === 'ok',
+      'PWR sem iFood: o esperado é PWR + iFood registrado; sem o iFood registrado não compara':
+        semIfood.itens.find((i) => i.fonte === 'pwr').registro === 10000 && semIfood.itens.find((i) => i.fonte === 'pwr').status === 'ok'
+        && faltaIfood.itens.find((i) => i.fonte === 'pwr').status === 'sem-registro' && /iFood/.test(faltaIfood.itens.find((i) => i.fonte === 'pwr').motivo || ''),
+      'tolerância em %: 900 em 100 mil passa com 1% e reprova com 0,5%':
+        pctOk.itens[0].status === 'ok' && pctFora.itens[0].status === 'divergente',
+      'divergência vira tarefa pro GERENTE DA LOJA, prioridade alta, com o texto do fato':
+        cob1.length === 2 && tBessa.responsavelId === 'u-ger-conc' && tBessa.prioridade === 'alta'
+        && /declarou R\$ 10\.000,00, PWR R\$ 12\.100,00 \(R\$ 2\.100,00 a menos\)/.test(tBessa.titulo || ''),
+      'loja sem gerente cadastrado: a tarefa fica com o Master': tTat.responsavelEmail === 'master@teste.local',
+      'e vira alerta crítico na Central': alertasConc.length === 2 && alertasConc.every((a) => a.critico === true),
+      'a mesma divergência NUNCA é cobrada duas vezes (o registro fica marcado)':
+        cob2.length === 0 && !!regBessa.cobradoEm && regBessa.tarefaNumero === tBessa.numeroTicket && tarefasConc.length === 2,
+      'o e-mail do briefing traz o bloco de conciliação com a divergência':
+        /Conciliação PWR\/iFood × declarado/.test(htmlPrev) && /DIVERGENTE/.test(htmlPrev) && /Dom Bessa/.test(htmlPrev),
+      'o Master muda a regra sem deploy (e usuário comum não)':
+        cfgSalva.status === 200 && cfgJ.toleranciaReais === 100 && cfgJ.toleranciaPct === 2 && cfgJ.pwrIncluiIfood === false && cfgJ.horaCobranca === '09:15'
+        && cfgComum.status === 403,
+      'a entrada do robô está na lista pública (senão o muro de senha barra o Cowork)':
+        /'\/api\/bot\/vendas-registro',/.test(fonteIdx),
+      'o relógio da cobrança é ligado no boot, com a MESMA montagem do briefing':
+        /conciliacao\.iniciar\(\{ montar: montarIndicadoresBot, hoje: hojeBrasiliaISO \}\)/.test(fonteIdx),
+    };
+    if (envBotAntes === undefined) delete process.env.BOT_VENDAS_TOKEN; else process.env.BOT_VENDAS_TOKEN = envBotAntes;
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okConc = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (envio=${envio.status} ${envio.corpo.slice(0, 200)} conc=${resultado.status} itens=${JSON.stringify((c.itens || []).map((i) => [i.unidade, i.fonte, i.status, i.declarado, i.registro]))} cob1=${cobra1.status} ${cobra1.corpo.slice(0, 160)} preview=${preview.status})`);
+  } catch (e) { okConc = false; console.log('  erro: ' + e.stack); }
+  if (!okConc) ruins += 1;
+  console.log(`${okConc ? '✓' : '✗'} Conciliação PWR/iFood × declarado: entra pelo robô, compara no servidor, e a divergência vira tarefa pro gerente (uma vez só)`);
+
+  // ------------------------------------------------------------------
+  // TETO DA DICA DE LEITURA (pedido do Master: a dica do Domino's, que mapeia
+  // campo por campo os quadros do relatorio, nao cabia em 600 caracteres e a
+  // tela cortava). Subiu pra 3000. O teste trava os TRES pontos que precisam
+  // andar juntos - o sanitizador do servidor e os dois textareas - e garante
+  // que o campo VIZINHO (instrucoes do pedido semanal) NAO foi bumpado junto.
+  let okTetoDica = false;
+  try {
+    const fs = require('fs');
+    const gj = require('/home/user/adyen-monitor/server/grupos.js');
+    const gsrc = fs.readFileSync(__dirname + '/grupos.js', 'utf8');
+    const ghtml = fs.readFileSync(__dirname + '/public/grupos.html', 'utf8');
+    // comportamento: uma dica de 1500 chars sobrevive (nao volta a ser cortada em 600)
+    const dicaLonga = 'x'.repeat(1500);
+    const g = await gj.create({ nome: 'Grupo Dica', unidades: [], dicaLeituraCanais: dicaLonga });
+    const lida = (await gj.list()).find((x) => x.id === g.id) || {};
+    const conf = {
+      'uma dica de 1500 caracteres não é mais cortada em 600':
+        (lida.dicaLeituraCanais || '').length === 1500,
+      'o teto do servidor é 3000 (não 600)':
+        /const LIMITE_DICA_LEITURA = 3000;/.test(gsrc) && !/slice\(0, 600\)/.test(gsrc.split('function sanitizarDicaLeitura')[1] || ''),
+      'os dois textareas da dica aceitam 3000':
+        (ghtml.match(/id="[ce]-dica-leitura-canais" rows="\d+" maxlength="3000"/g) || []).length === 2,
+      'o campo vizinho (instruções do pedido semanal) NÃO foi bumpado junto':
+        /id="psf-instrucoes" rows="\d+" maxlength="600"/.test(ghtml),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTetoDica = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (len=${(lida.dicaLeituraCanais || '').length})`);
+  } catch (e) { okTetoDica = false; console.log('  erro: ' + e.message); }
+  if (!okTetoDica) ruins += 1;
+  console.log(`${okTetoDica ? '✓' : '✗'} Dica de leitura: teto de 3000 (a dica detalhada do Domino's cabe inteira), sem cortar o campo vizinho`);
+
+  // ------------------------------------------------------------------
+  // NOCZenith NO WINDOWS SERVER 2012 R2 (o BOS do Pulse da 19855 - e' onde a
+  // Zebra fica). Print do Master, 12/09: o comando de instalacao morria em
+  // "Nao foi possivel criar um canal seguro para SSL/TLS". O .NET dessa
+  // maquina nao tenta TLS 1.2 sozinho, e o nopulso.com.br so aceita 1.2+. E
+  // tem PowerShell 4 / .NET 4.5: [DateTimeOffset]::new e ToUnixTimeMilliseconds
+  // nao existem la - o script instalado na mao pararia no primeiro tick.
+  //
+  // REGRA DO MASTER: "nao mexer no que ja funciona; se for fazer, faz uma
+  // versao especifica pra nao quebrar a que esta ok". Entao a primeira
+  // asserçao deste bloco e' que o script PADRAO nao ganhou nada - nem TLS,
+  // nem relogio novo - e a VERSAO_VIGIA nao subiu (ninguem reinstala). A
+  // versao de Windows antigo so sai pra maquina MARCADA na ficha, e a marca
+  // vale pro comando de instalacao, pro download e pra autoatualizacao.
+  //
+  // O pwsh daqui e' o 7, entao "parse OK" nao prova compatibilidade; a prova
+  // e' no fonte gerado.
+  let okServer2012 = false;
+  try {
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const fs = require('fs');
+    const tipos = ['interno', 'atendimento', 'abastecimento'];
+    const padrao = tipos.map((tipo) => vg.montarScriptVigia({ codigo: '19855', posto: 'BOS', tipo, agentToken: 'abc' }));
+    const antigo = tipos.map((tipo) => vg.montarScriptVigia({ codigo: '19855', posto: 'BOS', tipo, agentToken: 'abc', windowsAntigo: true }));
+    const decod = (cmd) => Buffer.from(cmd.split(' ').pop(), 'base64').toString('utf16le');
+    const cmdPadrao = decod(vg.montarComandoInstalacao({ codigo: '19855', posto: 'BOS', tipo: 'interno', agentToken: 'abc' }));
+    const cmdAntigo = decod(vg.montarComandoInstalacao({ codigo: '19855', posto: 'BOS', tipo: 'interno', agentToken: 'abc', windowsAntigo: true }));
+    const TLS = /\[Net\.ServicePointManager\]::SecurityProtocol\s*=\s*\[Net\.ServicePointManager\]::SecurityProtocol -bor 3072/;
+    const tlsAntesDoRest = (src) => TLS.test(src) && src.search(TLS) < src.indexOf('Invoke-RestMethod');
+
+    // pela porta: a marca na ficha muda o comando, o download e a autoatualizacao
+    const cabM = { Authorization: 'Bearer ' + token };
+    DOCS.set('lojaStatus/19855__BOS', { codigo: '19855', posto: 'BOS', nome: 'BOS Pulse', tipo: 'interno', agentToken: 'tokbos', ultimoHeartbeatEm: Date.now(), eventos: [] });
+    const marcou = await enviarJson('PUT', '/api/loja-status/19855/computadores/BOS', { nome: 'BOS Pulse', tipo: 'interno', ehServidor: true, windowsAntigo: true }, cabM);
+    const cmdRota = await pedir('/api/loja-status/19855/computadores/BOS/comando-instalacao?tipo=interno', cabM);
+    const cmdRotaDecod = cmdRota.status === 200 ? decod(JSON.parse(cmdRota.corpo).comando) : '';
+    // autoatualizacao: o proprio agente baixa com o token dele, sem sessao
+    const psAuto = await pedir('/api/loja-status/19855/computadores/BOS/vigia.ps1?tipo=interno', { 'x-noc-token': 'tokbos' });
+    // e a maquina do bloco de politica (POL/PC1), SEM a marca, continua no padrao
+    const psPadraoRota = await pedir('/api/loja-status/POL/computadores/PC1/vigia.ps1?tipo=interno', { 'x-noc-token': 'tokpol' });
+    const htmlNoc = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    const conf = {
+      'o script PADRAO não mudou: sem TLS forçado, sem relógio novo (as 52 máquinas seguem como estão)':
+        padrao.every((s) => !/SecurityProtocol|Agora-Ms|Ms-De/.test(s)) && !/SecurityProtocol/.test(cmdPadrao),
+      // a variante NÃO tem versão própria: anuncia a mesma $VersaoScript que o
+      // padrão, então marcar a máquina não força reinstalação por si (a
+      // versão sobe só quando o script de TODOS muda, como na v53)
+      'e a variante antiga anuncia a MESMA VERSAO_VIGIA que o padrão (marcar a máquina não reinstala nada)':
+        antigo.every((s) => s.includes('$VersaoScript = ' + vg.VERSAO_VIGIA)) && padrao.every((s) => s.includes('$VersaoScript = ' + vg.VERSAO_VIGIA)),
+      'Windows antigo: o comando de instalação liga TLS 1.2 ANTES de baixar o script': tlsAntesDoRest(cmdAntigo),
+      'Windows antigo: os 3 tipos de script ligam TLS 1.2 antes da primeira chamada': antigo.every(tlsAntesDoRest),
+      'e SOMA ao que já estava ligado (-bor), não substitui': antigo.every((s) => !/SecurityProtocol\s*=\s*3072\b/.test(s)),
+      'nada de [DateTimeOffset]::new nem ToUnixTimeMilliseconds sobra na versão antiga (PowerShell 4 / .NET 4.5 não tem)':
+        antigo.every((s) => !/::new\(/.test(s) && !/ToUnixTimeMilliseconds/.test(s)),
+      'o relógio em ms é um só, definido antes de ser usado':
+        antigo.every((s) => /function Agora-Ms \{/.test(s) && s.indexOf('function Agora-Ms') < s.indexOf('(Agora-Ms)') && /function Ms-De\(\[DateTime\]\$d\)/.test(s)),
+      'a versão antiga continua começando com # NOCZenith (a trava contra arquivo quebrado)': antigo.every((s) => s.startsWith('# NOCZenith')),
+      'a marca na ficha vale pro comando de instalação': marcou.status === 200 && tlsAntesDoRest(cmdRotaDecod),
+      'e pra autoatualização (o agente baixa com o token dele e recebe a versão certa)':
+        psAuto.status === 200 && tlsAntesDoRest(psAuto.corpo) && /function Agora-Ms/.test(psAuto.corpo),
+      'máquina sem a marca continua recebendo o padrão pela mesma rota':
+        psPadraoRota.status === 200 && !/SecurityProtocol|Agora-Ms/.test(psPadraoRota.corpo),
+      'a ficha da máquina tem a caixa "Windows antigo" e manda a marca pro servidor':
+        /id="editar-comp-windows-antigo"/.test(htmlNoc) && /id="novo-comp-windows-antigo"/.test(htmlNoc)
+        && /windowsAntigo: document\.getElementById\('editar-comp-windows-antigo'\)\.checked/.test(htmlNoc)
+        && /!!c\.windowsAntigo\)/.test(htmlNoc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okServer2012 = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (marcou=${marcou.status} cmd=${cmdRota.status} auto=${psAuto.status} padrao=${psPadraoRota.status})`);
+  } catch (e) { okServer2012 = false; console.log('  erro: ' + e.message); }
+  if (!okServer2012) ruins += 1;
+  console.log(`${okServer2012 ? '✓' : '✗'} NOCZenith no Windows Server 2012 R2: versão específica pra máquina marcada (TLS 1.2 e sem PowerShell 5), e o padrão das outras intacto`);
 
   // ------------------------------------------------------------------
   // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
