@@ -537,7 +537,40 @@
   // Windows com AnyDesk, no Windows sem AnyDesk e no celular.
   //
   // Fica no tema.js porque sao duas telas (NOC e Painel) e copia diverge.
-  var ANYDESK_ESPERA_MS = 1200;
+  //
+  // 1200 ms era pouco: em maquina lenta o AnyDesk leva 2-4 s pra vir pra
+  // frente, e o Master via "nao consegui abrir" com o AnyDesk abrindo logo
+  // atras (13/09). E o aviso era um alert - errado duas vezes: travava o NOC
+  // e, quando o app abria atrasado, ficava ali mentindo. Agora espera mais,
+  // avisa numa faixa que nao trava nada, e a faixa some sozinha se a janela
+  // perder o foco depois (o AnyDesk chegou) ou passado um tempo.
+  var ANYDESK_ESPERA_MS = 3000;
+  var ANYDESK_AVISO_MS = 12000;
+  function avisoAnydesk(texto) {
+    var el = document.getElementById('nopulso-anydesk-aviso');
+    if (!el) {
+      var st = document.createElement('style');
+      st.textContent = '#nopulso-anydesk-aviso{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;'
+        + 'max-width:min(92vw,520px);background:var(--panel,#161a20);color:var(--text,#e8ecf1);border:1px solid var(--line,#2a2f3a);'
+        + 'border-radius:10px;padding:10px 14px;font:13px/1.4 var(--sans,system-ui,sans-serif);box-shadow:0 8px 28px rgba(0,0,0,.35);'
+        + 'display:flex;gap:10px;align-items:flex-start;}'
+        + '#nopulso-anydesk-aviso button{background:none;border:0;color:var(--muted,#8b93a1);cursor:pointer;font-size:16px;line-height:1;padding:0;margin-left:auto;}';
+      document.head.appendChild(st);
+      el = document.createElement('div');
+      el.id = 'nopulso-anydesk-aviso';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '';
+    var span = document.createElement('span');
+    span.textContent = texto;
+    var fechar = document.createElement('button');
+    fechar.type = 'button'; fechar.title = 'Fechar'; fechar.textContent = '\u2715';
+    fechar.addEventListener('click', function () { el.remove(); });
+    el.appendChild(span);
+    el.appendChild(fechar);
+    return el;
+  }
   window.zenithAnydesk = function (id) {
     var idLimpo = String(id == null ? '' : id).trim();
     if (!idLimpo) return;
@@ -552,7 +585,14 @@
       // se ela apareceu, o esquema TEM quem atenda e nao ha o que avisar
       if (saiuDaPagina || document.hidden || !document.hasFocus()) return;
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(idLimpo).catch(function () {});
-      alert('Não consegui abrir o AnyDesk neste aparelho. ID copiado: ' + idLimpo + ' — cole no app do AnyDesk.');
+      var faixa = avisoAnydesk('Se o AnyDesk não abriu neste aparelho: ID copiado: ' + idLimpo + ' — cole no app do AnyDesk.');
+      var sumir = function () {
+        window.removeEventListener('blur', sumir);
+        if (faixa && faixa.parentNode) faixa.remove();
+      };
+      // abriu atrasado: a janela perde o foco e a faixa some sem ninguem clicar
+      window.addEventListener('blur', sumir, { once: true });
+      setTimeout(sumir, ANYDESK_AVISO_MS);
     }, ANYDESK_ESPERA_MS);
   };
 

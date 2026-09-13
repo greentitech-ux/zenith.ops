@@ -100,7 +100,8 @@
   .kpi-card.kpi-nunca .kpi-num{color:var(--muted);}
   .kpi-card.kpi-degradado .kpi-num{color:var(--warn);}
   /* contagem de servidores dentro do status: "43 · 5" (regulares · servidores) */
-  .kpi-serv{font-size:.42em;font-weight:700;color:var(--muted);margin-left:5px;letter-spacing:.02em;vertical-align:middle;white-space:nowrap;}
+  /* mesmo tamanho do numero principal (pedido do Master, 13/09): o que separa os dois e a cor, nao o corpo */
+  .kpi-serv{font-size:1em;font-weight:800;color:var(--muted);margin-left:6px;letter-spacing:0;vertical-align:baseline;white-space:nowrap;}
 
   /* ---- filtros ---- */
   .filtro-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;}
@@ -304,6 +305,8 @@
      cadastrado, ver renderFantasmas) */
   .fantasmas-badge{background:var(--warn-dim);color:var(--warn);font-family:var(--mono);font-size:10.5px;padding:1px 8px;border-radius:20px;margin-left:8px;}
   .fantasma-dup{font-family:var(--mono);font-size:10px;color:var(--warn);background:var(--warn-dim);border-radius:6px;padding:5px 7px;line-height:1.4;}
+  .fantasmas-head{cursor:pointer;user-select:none;}
+  .fantasmas-head:hover #fantasmas-acao,.fantasmas-head:focus-visible #fantasmas-acao{color:var(--accent);}
 
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
   .overlay.hidden{display:none!important;}
@@ -510,12 +513,15 @@
        que não existe no banco (link/atalho velho de um computador removido/
        recriado, ou alguém abriu o link errado). Separado da grade principal
        pra não confundir com computador de verdade - ver renderFantasmas() -->
+  <!-- Recolhido por padrão (pedido do Master, 13/09: "não precisamos desse
+       dado"): fica só a linha com a contagem; um clique abre, e a escolha é
+       lembrada no navegador (nocFantasmasAberto) -->
   <div class="uni-panel hidden" id="fantasmas-panel">
-    <div class="uni-panel-head">
+    <div class="uni-panel-head fantasmas-head" id="fantasmas-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="grid-fantasmas" onclick="alternarFantasmas()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();alternarFantasmas();}">
       <span>🕵️ Não identificados<span class="fantasmas-badge" id="fantasmas-badge">0</span></span>
-      <span class="uni-panel-sub">nunca cadastrados - provável atalho velho</span>
+      <span class="uni-panel-sub">nunca cadastrados - provável atalho velho · <span id="fantasmas-acao">mostrar ▸</span></span>
     </div>
-    <div id="grid-fantasmas" class="equip-grid"></div>
+    <div id="grid-fantasmas" class="equip-grid hidden"></div>
   </div>
 </div>
 
@@ -2065,6 +2071,15 @@ function promoverFantasma(codigo, posto, tipo){
 // recriado (o posto muda toda vez), ainda batendo heartbeat pro posto que
 // não existe mais. Separado da grade principal pra não confundir com
 // computador de verdade nem inflar os KPIs
+// Recolhido por padrão: o Master pediu pra ocultar ("não precisamos desse
+// dado") - mas a lista continua a um clique, porque é por ela que um
+// computador novo de verdade é cadastrado. A escolha fica no navegador.
+const FANTASMAS_CHAVE = 'nocFantasmasAberto';
+function fantasmasAberto(){ try{ return localStorage.getItem(FANTASMAS_CHAVE) === '1'; }catch(e){ return false; } }
+function alternarFantasmas(){
+  try{ localStorage.setItem(FANTASMAS_CHAVE, fantasmasAberto() ? '0' : '1'); }catch(e){}
+  renderFantasmas();
+}
 function renderFantasmas(){
   const painel = document.getElementById('fantasmas-panel');
   const grid = document.getElementById('grid-fantasmas');
@@ -2075,6 +2090,12 @@ function renderFantasmas(){
   if(!fantasmas.length){ painel.classList.add('hidden'); grid.innerHTML=''; return; }
   painel.classList.remove('hidden');
   badge.textContent = fantasmas.length;
+  const aberto = fantasmasAberto();
+  document.getElementById('fantasmas-toggle').setAttribute('aria-expanded', aberto ? 'true' : 'false');
+  document.getElementById('fantasmas-acao').textContent = aberto ? 'ocultar ▾' : 'mostrar ▸';
+  grid.classList.toggle('hidden', !aberto);
+  // recolhido, nem monta os cards: 19 fantasmas x 60s de recarga é DOM à toa
+  if(!aberto){ grid.innerHTML=''; return; }
   fantasmas.sort((a,b) => (b.ultimoHeartbeatEm||0) - (a.ultimoHeartbeatEm||0));
   grid.innerHTML = fantasmas.map(c => {
     const reaisDaUnidade = reais.filter(r => r.codigo === c.codigo);
