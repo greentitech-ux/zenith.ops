@@ -1422,7 +1422,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // a entrega do comando/chat (ver lojaStatus.heartbeat); presenca/IP nao
     // dependem dele, pra maquina legada nao sumir do painel
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
       // medicao de link (ver redeDiagnostico.js). Vem do agente/navegador e
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
@@ -1430,7 +1430,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       rede: req.body.rede,
       tailscale: req.body.tailscale,
     }, token);
-    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora });
+    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

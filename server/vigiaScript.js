@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 55;
+const VERSAO_VIGIA = 56;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1445,6 +1445,14 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# so reaplica quando a versao da politica muda (o NOC sobe a versao a cada',
     '# alteracao) - sem isso o vigia reescreveria as mesmas chaves a cada volta',
     '# do laco, de graca',
+    '# versao que ESTA maquina ja aplicou. O heartbeat devolve a versao atual;\n'
+    + '# so quando os dois numeros diferem e que vale buscar a politica inteira -\n'
+    + '# consultar de tempos em tempos custaria milhares de leituras por dia.',
+    'function Versao-PoliticaAplicada {',
+    '  if (-not (Test-Path $CaminhoPolitica)) { return "" }',
+    '  try { return (Get-Content $CaminhoPolitica -First 1).Trim() } catch { return "" }',
+    '}',
+    '',
     'function Sincronizar-Politica {',
     '  try {',
     '    $cfg = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10',
@@ -1456,9 +1464,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # antigo nao manda o campo: cai no politicaVersao, como era.',
     '    $versao = "$($cfg.versaoAplicacao)"',
     '    if (-not $versao -or $versao -eq "") { $versao = "$($cfg.politicaVersao)" }',
-    '    $jaAplicada = ""',
-    '    if (Test-Path $CaminhoPolitica) { try { $jaAplicada = (Get-Content $CaminhoPolitica -First 1).Trim() } catch {} }',
-    '    if ($jaAplicada -eq $versao) { return }',
+    '    if ((Versao-PoliticaAplicada) -eq $versao) { return }',
     '    Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
@@ -1938,6 +1944,19 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      # resposta para aplicar a opção do print imediatamente, sem reinstalar.',
     '      if (-not $Servico -and $null -ne $resp.noPulsoPrint) {',
     '        try { Aplicar-NoPulsoPrint ([bool]$resp.noPulsoPrint) ([bool]$resp.capturarAgora) } catch { Escrever-Log "NoPulsoPrint nao sincronizou: $($_.Exception.Message)" }',
+    '      }',
+    // O DEFEITO QUE ISTO CONSERTA: este laco (o do tipo interno) chamava
+    // Sincronizar-Politica UMA VEZ, ao subir, e nunca mais. Ligar o papel de
+    // parede - ou qualquer trava - numa maquina interna nao acontecia ate o
+    // agente reiniciar, enquanto a tela prometia "na proxima consulta, ~25s".
+    //
+    // A comparacao e local e de graca: o heartbeat ja devolve a versao atual
+    // (sem custo, sai do espelho em memoria do servidor) e a versao aplicada
+    // sai de um arquivo ao lado do script. So quando os dois diferem e que o
+    // agente busca a politica inteira - 1 leitura por mudanca REAL, em vez de
+    // uma consulta a cada volta do laco.
+    '      if ($null -ne $resp.versaoAplicacao -and "$($resp.versaoAplicacao)" -ne (Versao-PoliticaAplicada)) {',
+    '        try { Sincronizar-Politica } catch { Escrever-Log "Politica nao sincronizou: $($_.Exception.Message)" }',
     '      }',
     '      if ($resp.comandoPendente) {',
     '        Escrever-Log "Comando recebido (id=$($resp.comandoPendente.comandoId))"',
