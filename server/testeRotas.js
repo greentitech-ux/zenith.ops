@@ -7334,8 +7334,14 @@ setTimeout(async () => {
     const sAt = vg.montarScriptVigia({ codigo: 'DomCG', posto: 'CX1', tipo: 'atendimento', agentToken: 'ab12' });
     const htmlNoc = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
     const confVigia = {
+      // a ação das duas tarefas passou a sair de Acao-DaTarefa (lançador sem
+      // janela, com queda pro powershell.exe onde o wscript não existe) - o
+      // que tem de continuar valendo é a tarefa de boot rodar como SYSTEM, no
+      // arranque, e em modo -Servico
       'instala tarefa de BOOT (SYSTEM, -AtStartup) quando roda como Admin':
-        sInt.includes('-AtStartup') && sInt.includes('New-ScheduledTaskPrincipal -UserId "SYSTEM"') && sInt.includes('-Loop -Servico'),
+        sInt.includes('-AtStartup') && sInt.includes('New-ScheduledTaskPrincipal -UserId "SYSTEM"')
+        && sInt.includes('$acaoBoot = Acao-DaTarefa $Destino $true')
+        && sInt.includes('if ($ehServico) { $argPs += " -Servico" }'),
       'sem o limite de 72h do Windows que matava a tarefa em silêncio':
         sInt.includes('-ExecutionTimeLimit (New-TimeSpan -Seconds 0)') && sInt.includes('MultipleInstances IgnoreNew'),
       'instância de boot cede a vez pra de login (sem heartbeat/comando dobrado)':
@@ -7524,17 +7530,69 @@ setTimeout(async () => {
       'v56 (sem subir, ninguém ganha o reinício limpo nem o gatilho de repetição)': vg.VERSAO_VIGIA >= 56,
       'no update, a cópia velha encerra print, chat e mutex ANTES de subir a nova, e sai por [Environment]::Exit': scripts.every((s) => {
         const iArgs = s.indexOf('if ($Servico) { $argsNovo += " -Servico" }');
-        const iPrint = s.indexOf('Encerrar-NoPulsoPrint\n        Encerrar-JanelaChat\n        Soltar-InstanciaUnica\n        Start-Process powershell.exe -ArgumentList $argsNovo\n        Start-Sleep -Seconds 2\n        [Environment]::Exit(0)');
-        return iArgs > 0 && iPrint > iArgs
+        const iPrint = s.indexOf('Encerrar-NoPulsoPrint\n        Encerrar-JanelaChat\n        Soltar-InstanciaUnica\n        if ($viaLancador) {');
+        const iSai = s.indexOf('        Start-Sleep -Seconds 2\n        [Environment]::Exit(0)');
+        return iArgs > 0 && iPrint > iArgs && iSai > iPrint
           && s.includes('function Encerrar-NoPulsoPrint {') && s.includes('$global:NoPulsoPrintPowerShell.Stop()')
           && s.includes('function Soltar-InstanciaUnica {') && s.includes('$global:MutexInstancia.ReleaseMutex()');
       }),
-      'a cópia nova ESPERA o mutex (20 s) em vez de desistir; se a velha travou, encerra a velha e assume': scripts.every((s) =>
+      // A espera de 20 s continua (WaitOne(0) fazia a cópia nova desistir
+      // enquanto a velha ainda saía). O que mudou é o DEPOIS: matar sempre
+      // quem segura o mutex virou um ciclo com o gatilho de 5 min - a cada
+      // volta o agendador subia uma cópia que derrubava o agente saudável.
+      // Agora quem está batendo ponto está vivo, e a recém-chegada se encerra.
+      'a cópia nova ESPERA o mutex (20 s) em vez de desistir; e só toma o lugar de quem PAROU de bater ponto': scripts.every((s) =>
         s.includes('$dono = $global:MutexInstancia.WaitOne(20000)')
         && !/MutexInstancia\.WaitOne\(0\)/.test(s)
-        && /segura o mutex ha 20s - encerrando a antiga pra esta assumir\."\n      Encerrar-OutrasInstancias\n      try \{ \$dono = \$global:MutexInstancia\.WaitOne\(5000\)/.test(s)),
+        && /if \(Batida-Fresca 120\) \{\n        Escrever-Log "Ja existe uma instancia \(\$papel\) viva \(batendo ponto\) - esta copia se encerra\."\n        exit\n      \}\n      Escrever-Log "Outra instancia \(\$papel\) segura o mutex ha 20s e parou de bater ponto - encerrando a antiga pra esta assumir\."\n      Encerrar-OutrasInstancias\n      try \{ \$dono = \$global:MutexInstancia\.WaitOne\(5000\)/.test(s)),
       // ---- v57: a barra some enquanto a seleção anda e volta quando para ----
       'v57 (sem subir, a barra continua parada em cima da seleção que anda)': vg.VERSAO_VIGIA >= 57,
+      // ---- v60: a tela do PowerShell que ficava piscando ----
+      // Master (14/09): "por que tem nao para de piscar a tela do powershell em
+      // um computador? nao pode ficar piscando".
+      // Eram DUAS coisas somadas. (1) A tarefa chamava powershell.exe direto: o
+      // -WindowStyle Hidden só é aplicado DEPOIS que o Windows criou o console,
+      // então todo disparo dá um lampejo preto. (2) O gatilho de repetição de 5
+      // min (v56) dispara pra sempre quando o agente não é a instância DA
+      // TAREFA - e era isso que acontecia, porque a instalação e o auto-update
+      // subiam o agente por Start-Process, por fora do agendador.
+      'v60 (sem subir, ninguém migra pro lançador e o lampejo continua)': vg.VERSAO_VIGIA >= 60,
+      'a tarefa sobe pelo lançador sem janela, com queda pro powershell.exe onde não há Windows Script Host': scripts.every((s) =>
+        s.includes('function Acao-DaTarefa($destino, $ehServico) {')
+        && s.includes('$acao = Acao-DaTarefa $Destino $false')
+        && s.includes('-Execute (Join-Path $env:SystemRoot "System32\\wscript.exe")')
+        && s.includes('if (-not (Test-Path $wscript)) { return $false }')
+        && /\$lancadorOk = Gravar-Lancador\n  if \(\$lancadorOk\) \{/.test(s)
+        && s.includes('return (New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argPs)')),
+      // o .vbs é o que de fato apaga o lampejo: wscript é programa de JANELA,
+      // não cria console nenhum, e sobe o powershell com estilo 0
+      'o lançador esconde a janela (0) e ESPERA o agente (True)': scripts.every((s) =>
+        s.includes('Set sh = CreateObject("WScript.Shell")')
+        && s.includes('a = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File """ & WScript.Arguments(0) & """ -Loop"')
+        && s.includes('If WScript.Arguments.Count > 1 Then a = a & " -Servico"')
+        && s.includes('sh.Run "powershell.exe " & a, 0, True')),
+      // esperar é o que mantém a instância da TAREFA viva junto com o agente -
+      // sem isso o wscript sairia na hora, o agendador acharia a tarefa parada
+      // e o gatilho de 5 min voltaria a disparar pra sempre
+      'e quem já está instalado migra sozinho, sem reinstalar nas 52 máquinas': scripts.every((s) =>
+        s.includes('function Garantir-AcaoSemJanela {')
+        && s.includes('$nome = if ($Servico) { $NomeTarefa + "_Boot" } else { $NomeTarefa }')
+        && s.includes('foreach ($ac in $tarefa.Actions) { if ($ac.Execute -and ($ac.Execute -match "wscript")) { $jaTem = $true } }')
+        && s.includes('Set-ScheduledTask -TaskName $nome -Action $novaAcao | Out-Null')
+        && (s.match(/  Garantir-AcaoSemJanela\n/g) || []).length >= 1),
+      // instalar por fora do agendador era o que soltava o gatilho de 5 min
+      'a instalação sobe o agente PELA TAREFA, não por Start-Process solto': scripts.every((s) =>
+        s.includes('try { Start-ScheduledTask -TaskName $NomeTarefa -ErrorAction Stop; $subiu = $true }')
+        && /if \(-not \$subiu\) \{ Start-Process powershell\.exe/.test(s)),
+      'e o auto-update reinicia pelo lançador (nada de console piscando a cada deploy)': scripts.every((s) =>
+        s.includes('$viaLancador = (Gravar-Lancador)')
+        && s.includes('} else { Start-Process powershell.exe -ArgumentList $argsNovo }')),
+      'o agente bate ponto a cada volta do laço (é assim que a outra cópia sabe que ele está vivo)': scripts.every((s) =>
+        s.includes('function Bater-Ponto { try { [IO.File]::WriteAllText($CaminhoBatida, [DateTime]::UtcNow.ToString("o")) } catch {} }')
+        && s.includes('function Batida-Fresca($segundos) {')
+        && (s.match(/^    Bater-Ponto$/gm) || []).length >= 1
+        // um arquivo por PAPEL: a de boot e a de login não podem usar o mesmo
+        && s.includes('("NOCZenith-" + $(if ($Servico) { "boot" } else { "login" }) + ".batida")')),
       'mover/redimensionar/remarcar esconde a barra no MouseDown, e o MouseUp a reposiciona': scripts.every((s) =>
         s.includes('if($modo -eq "novo"){$s.Tag.area=$null}; if($s.Tag.barra){$s.Tag.barra.Visible=$false}; $s.Capture=$true; $s.Invalidate() })')
         && (s.match(/& \$s\.Parent\.Tag\.posBarra \$s\.Parent/g) || []).length >= 2),
@@ -19933,6 +19991,24 @@ setTimeout(async () => {
       'e os escapes são só o que quebra redigitado: código, comando e senha':
         /code,kbd,pre,samp,\.nao-maiusc,\.nao-maiusc \*\{text-transform:none;\}/.test(temaSrc)
         && /input\[type=password\]\{text-transform:none;\}/.test(temaSrc),
+      // Master (14/09): "nao ainda tem nome de usuario MINUSCULO, fazer uma
+      // varredura em todos os nomes de usuario e deixar Maiusculos". A varredura
+      // achou UMA causa pra todos os casos: o body sozinho não alcança campo de
+      // formulário, porque o Chromium traz text-transform:none pra select,
+      // input, textarea e button na folha do próprio navegador. Era por isso
+      // que o rótulo "RESPONSÁVEL" subia e o nome dentro do campo continuava
+      // "joel" - e valia pro app inteiro, não só pra essa tela.
+      'campo de formulário também sobe (é onde o nome de usuário aparece)':
+        /select,optgroup,option,input,textarea,button\{text-transform:uppercase;\}/.test(temaSrc),
+      // o que alguém RELÊ e redigita em outro lugar continua exato: chave Pix
+      // aleatória e senha gerada. Aqui não é feio x bonito - é o pagamento cair
+      // na conta errada ou a pessoa não conseguir entrar.
+      'chave Pix e senha gerada ficam fora, marcadas no campo':
+        /\.valor-exato,\.valor-exato \*\{text-transform:none;\}/.test(temaSrc)
+        && ['public/central-historico.html', 'public/estorno-cliente.html', 'public/rh-cadastro.html', 'public/rh.html']
+          .every((f) => /class="valor-exato"/.test(require('fs').readFileSync(__dirname + '/' + f, 'utf8')))
+        && /<input type="text" class="valor-exato" id="ca-senha"/.test(require('fs').readFileSync(__dirname + '/public/central-historico.html', 'utf8'))
+        && (require('fs').readFileSync(__dirname + '/public/rh.html', 'utf8').match(/class="valor-exato"/g) || []).length === 3,
       'o nome no menu sobe pra maiúsculo': /classList\.add\('maiusc'\)/.test(navSrc) || /'maiusc'/.test(navSrc),
       'nada disso reescreve o que está gravado (é exibição, não migração)':
         !/toLocaleUpperCase/.test(require('fs').readFileSync(__dirname + '/users.js', 'utf8')),

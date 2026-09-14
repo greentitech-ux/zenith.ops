@@ -451,11 +451,22 @@
       // não muda, e COPIAR devolve o original (o navegador copia o texto de
       // origem, não o transformado). Desfazer é apagar esta linha.
       + 'body{text-transform:uppercase;}'
+      // O body sozinho NAO alcanca campo de formulario: o Chromium traz
+      // text-transform:none na folha de estilo do proprio navegador pra
+      // select, input, textarea e button. Era por isso que o rotulo
+      // "RESPONSAVEL" subia e o nome dentro do campo continuava "joel"
+      // (Master, 14/09: "nao ainda tem nome de usuario MINUSCULO"). Precisa
+      // nomear os quatro - e o <option>, que e o nome que a lista mostra.
+      + 'select,optgroup,option,input,textarea,button{text-transform:uppercase;}'
       // ESCAPES - só o que quebra se for redigitado à mão, não o que é feio:
       // bloco de código/comando (o comando de instalação do NOCZenith é
       // colado no PowerShell, e maiúsculo no Base64 não roda) e o que o
       // código marcar como valor exato (token, MAC, IP, chave).
       + 'code,kbd,pre,samp,.nao-maiusc,.nao-maiusc *{text-transform:none;}'
+      // valor que alguem RELE e redigita em outro lugar tem que sair como
+      // esta: chave Pix aleatoria e senha gerada. Aqui nao e feio x bonito -
+      // e o pagamento cair na conta errada ou a pessoa nao conseguir entrar.
+      + '.valor-exato,.valor-exato *{text-transform:none;}'
       // senha: o campo mostra pontos, mas quando a tela deixa "ver a senha"
       // o que aparece tem que ser o que foi digitado
       + 'input[type=password]{text-transform:none;}'
