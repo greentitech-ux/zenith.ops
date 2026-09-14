@@ -10290,6 +10290,48 @@ app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
 // Tres rotas granulares em vez de um PUT que troca a lista inteira: dois
 // navegadores abertos na mesma tarefa nao apagam o passo que o outro acabou de
 // criar (o mesmo motivo de anexo ser por id, e nao por posicao).
+// REUNIÃO VIRA TAREFA. A reunião não é duplicada: ela deixa de ser reunião.
+// Duplicar criaria dois protocolos pro mesmo assunto e deixaria o histórico
+// (comentários, anexos) no lado errado.
+app.post('/api/tarefas/:id/virar-tarefa', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.virarTarefa(req.params.id, acessoDasTarefas(req), {
+      dataEntrega: req.body?.dataEntrega, prioridade: req.body?.prioridade,
+    });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// DECISÕES DA REUNIÃO VIRAM TRABALHO: uma tarefa com subtarefas, ou uma
+// tarefa por decisão. O responsável é resolvido AQUI, pela mesma regra de
+// acesso a unidade que vale pros participantes - o módulo não busca usuário.
+app.post('/api/tarefas/:id/decisoes', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeCriarTarefaManual(req)) return res.status(403).json({ error: 'Criar tarefa exige a seção Meu Dia, ou ser Master, Admin ou gerente da unidade.' });
+    const acesso = acessoDasTarefas(req);
+    const reuniao = await tarefas.getOne(req.params.id);
+    if (!reuniao) return res.status(404).json({ error: 'Reunião não encontrada.' });
+    let responsavel = null;
+    const responsavelId = String(req.body?.responsavelId || '').trim();
+    if (responsavelId) {
+      const [escolhido] = await resolverColaboradores(req, acesso, [responsavelId], reuniao.unidade || null, false, true);
+      if (!escolhido) return res.status(400).json({ error: 'Responsável não encontrado ou inativo.' });
+      responsavel = escolhido;
+    }
+    const r = await tarefas.decisoesEmTarefas(req.params.id, acesso, {
+      modo: req.body?.modo, titulo: req.body?.titulo, itens: req.body?.itens,
+      responsavel, dataEntrega: req.body?.dataEntrega, prioridade: req.body?.prioridade,
+    });
+    broadcast('tarefas-atualizada', { id: r.reuniao.id, unidade: r.reuniao.unidade }, 'tarefas');
+    res.json({ reuniao: r.reuniao, criadas: r.criadas.map((t) => ({ id: t.id, numeroTicket: t.numeroTicket, titulo: t.titulo })) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/tarefas/:id/subtarefas', auth.requireAuth, async (req, res) => {
   try {
     const atualizada = await tarefas.adicionarSubtarefa(req.params.id, acessoDasTarefas(req), req.body?.titulo);

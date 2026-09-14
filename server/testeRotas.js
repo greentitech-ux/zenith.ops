@@ -21015,9 +21015,12 @@ setTimeout(async () => {
       'o link já era gerado e gravado na criação': /linkReuniao: colado \? limparLinkColado\(linkReuniao\) : gerarLinkReuniao\(\)/.test(tj),
       'e agora aparece no detalhe, com Entrar, copiar e a URL à vista':
         /<div id="REUNIAODET" class="info reuniao-box" hidden><\/div>/.test(tar)
-        && /function pintarReuniao\(\)/.test(tar) && /pintarReuniao\(\);pintarEquipe\(\)/.test(tar)
+        && /function pintarReuniao\(\)/.test(tar) && /pintarReuniao\(\);pintarDecisoes\(\);pintarEquipe\(\)/.test(tar)
         && /▶ Entrar<\/a>/.test(tar) && /data-dica="Copiar link"/.test(tar)
-        && /<code class="reuniao-url">/.test(tar),
+        && /<code class="reuniao-url">/.test(tar)
+        // a marca do topo diz quando a sala é do Workspace, não só "Reunião"
+        && /const marca=O\.linkOrigem==='google'\?'📹 Reunião · Google Meet':'📹 Reunião';/.test(tar)
+        && /cx\.innerHTML=`<div class="reuniao-quando"><b>\$\{marca\}<\/b>/.test(tar),
       'link abre em aba nova sem entregar a página de origem':
         /target="_blank" rel="noopener noreferrer"/.test(tar),
       'tarefa que não é reunião não ganha o bloco':
@@ -21068,6 +21071,163 @@ setTimeout(async () => {
   } catch (e) { okTarefasTela = false; console.log('  erro: ' + e.message); }
   if (!okTarefasTela) ruins += 1;
   console.log(`${okTarefasTela ? '✓' : '✗'} Tarefas: buscar nome na lista, link da reunião à vista e ações só-ícone`);
+
+  // ---------------------------------------------------------------------
+  // O que sai da reunião: sala do Workspace, virar tarefa e decisões viram
+  // trabalho. Master (14/09): "a funcao de criar sala da reuniao precisa ser
+  // conectada no workspace", "ter um botao de a Reuniao virar uma tarefa e
+  // importante", "decisoes influenciar em criacao de 1 tarefa com varias
+  // subtarefas mas tambem varias tarefas".
+  // ---------------------------------------------------------------------
+  let okReuniaoSai = false;
+  try {
+    const cabR = { Authorization: 'Bearer ' + token };
+    const tf = require(__dirname + '/tarefas.js');
+    const rg = require(__dirname + '/reuniaoGoogle.js');
+    const htmlR = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const idxR = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const sheets = require('fs').readFileSync(__dirname + '/sheetsSync.js', 'utf8');
+    const gauth = require('fs').readFileSync(__dirname + '/googleAuth.js', 'utf8');
+    const tjs = require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8');
+
+    // uma reunião de verdade, pela rota
+    const cri = await postarJson('/api/tarefas', {
+      titulo: 'Reunião semanal', descricao: 'pauta', dataInicio: '2026-09-14', dataEntrega: '2026-09-14',
+      ehReuniao: true, horaInicio: '16:00', duracaoMin: 60,
+    }, cabR);
+    const reu = cri.status === 200 ? JSON.parse(cri.corpo) : {};
+
+    // UMA tarefa com as decisões como subtarefas
+    const rUma = await postarJson(`/api/tarefas/${reu.id}/decisoes`, {
+      modo: 'uma', titulo: 'Virada da Bessa',
+      itens: ['trocar o roteador', '  ', 'refazer o cabo', 'testar a Zebra'],
+      prioridade: 'alta',
+    }, cabR);
+    const uma = rUma.status === 200 ? JSON.parse(rUma.corpo) : { criadas: [] };
+    const listaMinhas = async () => { const r = JSON.parse((await pedir('/api/tarefas/minhas', cabR)).corpo); return Array.isArray(r) ? r : (r.tarefas || []); };
+    const tarefaUma = uma.criadas[0] ? (await listaMinhas()).find((t) => t.id === uma.criadas[0].id) : null;
+
+    // UMA TAREFA POR DECISÃO
+    const rVarias = await postarJson(`/api/tarefas/${reu.id}/decisoes`, {
+      modo: 'varias', itens: ['comprar o cabo', 'abrir chamado na operadora'],
+    }, cabR);
+    const varias = rVarias.status === 200 ? JSON.parse(rVarias.corpo) : { criadas: [] };
+    const semNada = await postarJson(`/api/tarefas/${reu.id}/decisoes`, { modo: 'uma', itens: ['  ', ''] }, cabR);
+
+    // a reunião VIRA tarefa
+    const virou = await postarJson(`/api/tarefas/${reu.id}/virar-tarefa`, { prioridade: 'media' }, cabR);
+    const jaTarefa = virou.status === 200 ? JSON.parse(virou.corpo) : {};
+    const deNovo = await postarJson(`/api/tarefas/${reu.id}/virar-tarefa`, {}, cabR);
+
+    const conf = {
+      // ---- infraestrutura: uma autenticação Google só ----
+      // estava dentro do sheetsSync, presa ao escopo de planilha e com cache
+      // de UMA posição. A agenda usa a MESMA credencial: copiar o caminho
+      // faria duas cópias que envelhecem separado.
+      'a autenticação com o Google mora num módulo só, e o sheetsSync usa ele':
+        /function getAccessToken\(\) \{\n  return googleAuth\.tokenDeAcesso\(SHEETS_SCOPE/.test(sheets)
+        && !/jwt\.sign/.test(sheets) && !/oauth2\.googleapis\.com/.test(sheets)
+        && /module\.exports = \{ tokenDeAcesso, configurado, limparCache, TOKEN_URL \};/.test(gauth),
+      'o cache é POR ESCOPO E USUÁRIO (pedir a agenda não derruba o token da planilha)':
+        /const chave = `\$\{scope\}\|\$\{comoUsuario\}`;/.test(gauth) && /const cache = new Map\(\);/.test(gauth),
+      'representar um usuário do Workspace é o `sub` do JWT (é o que a delegação autoriza)':
+        /if \(comoUsuario\) corpo\.sub = comoUsuario;/.test(gauth)
+        && /unauthorized_client/.test(gauth),
+
+      // ---- a sala do Meet ----
+      'a sala é pedida ao Calendar com conferenceData, e o convite vai junto':
+        /conferenceSolutionKey: \{ type: 'hangoutsMeet' \}/.test(require('fs').readFileSync(__dirname + '/reuniaoGoogle.js', 'utf8'))
+        && /conferenceDataVersion=1&sendUpdates=all/.test(require('fs').readFileSync(__dirname + '/reuniaoGoogle.js', 'utf8'))
+        && rg.CALENDAR_SCOPE === 'https://www.googleapis.com/auth/calendar.events',
+      'hora vira janela com fuso nomeado, e reunião que passa da meia-noite não termina antes de começar':
+        rg.janela('2026-09-14', '16:00', 60).fim === '2026-09-14T17:00:00'
+        && rg.janela('2026-09-14', '23:30', 90).fim === '2026-09-15T01:00:00',
+      'convidado repetido, inválido e o próprio organizador ficam de fora':
+        (() => {
+          const antes = process.env.GOOGLE_MEET_USUARIO;
+          process.env.GOOGLE_MEET_USUARIO = 'admin@x.com';
+          const r = rg.convidadosLimpos(['A@X.com', 'a@x.com', 'admin@x.com', 'zzz', 'b@y.com']).map((c) => c.email);
+          if (antes === undefined) delete process.env.GOOGLE_MEET_USUARIO; else process.env.GOOGLE_MEET_USUARIO = antes;
+          return JSON.stringify(r) === JSON.stringify(['a@x.com', 'b@y.com']);
+        })(),
+      // FALLBACK É REGRA: reunião sem sala nenhuma seria o único desfecho
+      // inaceitável - alguém marca, avisa a equipe, e na hora não há onde entrar
+      'Workspace desligado ou falhando NÃO impede a reunião: ela nasce com a sala própria':
+        !rg.configurado()
+        && reu.ehReuniao === true && /^https:\/\/[^ ]+\/nopulso-[0-9a-f]{18}$/.test(reu.linkReuniao || '')
+        && reu.linkOrigem === 'gerado'
+        && /catch \(e\) \{\n    console\.warn\('\[reuniao\] Workspace não criou a sala, seguindo com a sala própria:'/.test(tjs),
+      'e a troca só acontece quando o link seria gerado (link colado à mão fica como está)':
+        /if \(!reuniao\.ehReuniao \|\| reuniao\.linkOrigem !== 'gerado'\) return \{\};/.test(tjs),
+      'cancelar a reunião tira o compromisso da agenda de quem foi convidado':
+        /if \(tarefa\.eventoGoogleId\) await reuniaoGoogle\.cancelarSala\(tarefa\.eventoGoogleId\);/.test(tjs),
+
+      // ---- decisões viram trabalho ----
+      'uma tarefa com as decisões como subtarefas (e linha em branco não vira subtarefa)':
+        rUma.status === 200 && uma.criadas.length === 1
+        && !!tarefaUma && tarefaUma.titulo === 'Virada da Bessa'
+        && (tarefaUma.subtarefas || []).length === 3
+        && (tarefaUma.subtarefas || []).map((x) => x.titulo).join('|') === 'trocar o roteador|refazer o cabo|testar a Zebra',
+      'ou uma tarefa por decisão, cada uma com seu protocolo':
+        rVarias.status === 200 && varias.criadas.length === 2
+        && varias.criadas[0].titulo === 'comprar o cabo' && varias.criadas[1].titulo === 'abrir chamado na operadora'
+        && varias.criadas[0].numeroTicket !== varias.criadas[1].numeroTicket,
+      'decisão vazia é recusada (tarefa sem título não ajuda ninguém)': semNada.status === 400,
+      // rastro nos dois lados: a reunião diz o que gerou, a tarefa diz de onde veio
+      'a reunião guarda o que saiu dela, e comenta o que criou':
+        (jaTarefa.decisoes || []).length === 3
+        && (jaTarefa.comentarios || []).some((c) => /1 tarefa com 3 subtarefas/.test(c.texto))
+        && (jaTarefa.comentarios || []).some((c) => /2 tarefas/.test(c.texto))
+        && !!tarefaUma && /Decidido na reunião "Reunião semanal"/.test(tarefaUma.descricao || ''),
+
+      // ---- reunião vira tarefa ----
+      // não duplica: duplicar criaria dois protocolos pro mesmo assunto e
+      // deixaria comentários e anexos no lado errado
+      'a reunião VIRA a tarefa (mesmo protocolo), perdendo hora e sala':
+        virou.status === 200 && jaTarefa.id === reu.id && jaTarefa.numeroTicket === reu.numeroTicket
+        && jaTarefa.ehReuniao === false && jaTarefa.horaInicio === null
+        && jaTarefa.linkReuniao === null && jaTarefa.linkOrigem === null,
+      'e fica registrado que ela foi reunião, com o dia e a hora que era':
+        !!jaTarefa.veioDeReuniao && jaTarefa.veioDeReuniao.quando === '2026-09-14' && jaTarefa.veioDeReuniao.hora === '16:00',
+      // o SLA recomeça: herdar o da reunião faria a tarefa nascer atrasada
+      // pelo tempo que a reunião esperou pra acontecer
+      'o SLA recomeça agora, não herda o da reunião': !!jaTarefa.slaPrazo && jaTarefa.slaPrazo !== reu.slaPrazo,
+      'tarefa que já é tarefa não vira de novo': deNovo.status === 400,
+
+      // ---- tela ----
+      'o botão de virar tarefa segue o padrão só-ícone e só aparece em reunião':
+        /id="BTNVIRAR" class="btn-icone" data-dica="Reunião vira tarefa" aria-label="Reunião vira tarefa"/.test(htmlR)
+        && /\$\('BTNVIRAR'\)\.hidden=!O\.ehReuniao\|\|acompanha\|\|!O\.podeGerir/.test(htmlR),
+      'o painel de decisões só existe em reunião, e some na tarefa comum':
+        /if\(!O\|\|!O\.ehReuniao\)\{cx\.hidden=true;cx\.innerHTML='';return\}/.test(htmlR)
+        && /function pintarDecisoes\(\)/.test(htmlR) && /pintarDecisoes\(\);/.test(htmlR),
+      // escolher a forma ANTES de escrever obrigaria a redigitar
+      'escreve primeiro, escolhe a forma depois - e trocar a forma não apaga o que já foi preenchido':
+        /function decModo\(m\)\{const t=\(\$\('DECTIT'\)\|\|\{\}\)\.value\|\|''/.test(htmlR)
+        && /if\(\$\('DECTIT'\)\)\$\('DECTIT'\)\.value=t;/.test(htmlR),
+      'a tela diz de onde veio a sala quando ela é do Workspace':
+        /O\.linkOrigem==='google'/.test(htmlR) && /Google Meet/.test(htmlR),
+      'as duas rotas existem e passam pela permissão de criar tarefa':
+        /app\.post\('\/api\/tarefas\/:id\/virar-tarefa', auth\.requireAuth/.test(idxR)
+        && /app\.post\('\/api\/tarefas\/:id\/decisoes', auth\.requireAuth/.test(idxR)
+        && /if \(!podeCriarTarefaManual\(req\)\) return res\.status\(403\)[\s\S]{0,200}?const reuniao = await tarefas\.getOne\(req\.params\.id\);/.test(idxR),
+      // o módulo não busca usuário: quem sabe validar acesso a unidade é a rota
+      'o responsável das tarefas novas é resolvido pela rota, com a MESMA regra dos participantes':
+        /const \[escolhido\] = await resolverColaboradores\(req, acesso, \[responsavelId\], reuniao\.unidade \|\| null, false, true\);/.test(idxR)
+        && /async function decisoesEmTarefas\(id, acesso, \{ modo, titulo, itens, responsavel, dataEntrega, prioridade \} = \{\}\)/.test(tjs),
+      'o que o Workspace precisa está escrito, com os dois erros comuns':
+        (() => {
+          const doc = require('fs').readFileSync(__dirname + '/../docs/GOOGLE_WORKSPACE.md', 'utf8');
+          return /calendar\.events/.test(doc) && /delegação em todo o domínio/i.test(doc)
+            && /unauthorized_client/.test(doc) && /GOOGLE_MEET_USUARIO/.test(doc);
+        })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okReuniaoSai = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (cri=${cri.status} uma=${rUma.status} varias=${rVarias.status} virou=${virou.status} ${String(rUma.corpo || '').slice(0, 140)})`);
+  } catch (e) { okReuniaoSai = false; console.log('  erro: ' + e.message); }
+  if (!okReuniaoSai) ruins += 1;
+  console.log(`${okReuniaoSai ? '✓' : '✗'} Reunião: sala do Workspace (com queda pra sala própria), virar tarefa e decisões virando trabalho`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
