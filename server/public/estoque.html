@@ -465,7 +465,7 @@
     </div>
   </h2>
   <div class="sub" style="margin-top:4px;margin-bottom:10px;max-width:680px;">
-    Cada dia contado vira uma coluna. Abaixo da contagem, a <b>saída</b> do dia = contagem do dia anterior − contagem do dia (o que saiu do estoque entre as duas contagens). É uma leitura só das contagens — não desconta recebimento (pra isso use a aba Diferenças).
+    Cada dia contado vira uma coluna. Abaixo da contagem, o movimento do dia = contagem do dia anterior − contagem do dia: <b style="color:var(--ok);">▼ saiu</b> do estoque, <b style="color:var(--bad);">▲ entrou</b>. As duas últimas colunas somam cada ponta <b>separadamente</b> — nunca uma descontando a outra, porque um item que saiu 9 e entrou 11 não movimentou &minus;2, movimentou as duas coisas. É uma leitura só das contagens — não desconta recebimento (pra isso use a aba Diferenças).
   </div>
   <div class="toolbar" style="margin-top:6px;">
     <div class="presets" id="h-presets"></div>
@@ -1511,6 +1511,22 @@ let HIST_PRESET = null;
 let HISTORICO_ATUAL = null;
 let HIST_INICIADO = false;
 function fmtNum(v){ if(v==null) return '—'; const n=Number(v); return (Number.isInteger(n)?String(n):n.toFixed(3).replace(/\.?0+$/,'')).replace('.',','); }
+// QUILO SE ESCREVE COM TRÊS CASAS. Pedido do Master (14/09/2026): "o que é
+// kilo tem que ser tratado como 1,500 / 10,450". Não é enfeite - em peso a
+// casa decimal é GRAMA, e "1,5" e "1,500" comunicam coisas diferentes pra
+// quem está com a balança na mão: um parece arredondado, o outro é a
+// medida. Item contado por unidade continua inteiro: "18 latas", não
+// "18,000".
+function ehQuilo(unidadeMedida){
+  return /^KG/.test(String(unidadeMedida||'').trim().toUpperCase());
+}
+function fmtQtd(v, unidadeMedida){
+  if(v==null) return '—';
+  const n = Number(v);
+  if(!Number.isFinite(n)) return '—';
+  if(!ehQuilo(unidadeMedida)) return fmtNum(n);
+  return n.toFixed(3).replace('.', ',');
+}
 function fmtDataCurta(d){ if(!d) return ''; const [,m,dd]=d.split('-'); return `${dd}/${m}`; }
 function renderPresetsHist(){
   document.getElementById('h-presets').innerHTML = Object.entries(ROTULOS_PRESET).map(([tipo,rotulo])=>
@@ -1556,28 +1572,40 @@ function renderHistorico(){
   const setorFiltro = document.getElementById('h-setor').value;
   const lista = setorFiltro ? itens.filter(i=>i.setor===setorFiltro) : itens;
   if(!datas.length){ head.innerHTML=''; body.innerHTML = '<tr><td class="sub" style="padding:16px;">nenhuma contagem nesse período.</td></tr>'; return; }
-  // cabeçalho: Item + uma coluna por dia + Saída total
+  // cabeçalho: Item + uma coluna por dia + SAÍDA e ENTRADA, separadas
+  //
+  // Uma coluna só, somando os dois, não significava nada: a "LATA UVA" saía 9
+  // e entrava 11 e o total aparecia como -2 (Master, 14/09/2026: "não é para
+  // fazer um pelo outro, preciso do total de saída e o total de entrada").
+  // Um número que mistura as duas pontas não responde nem "quanto consumiu"
+  // nem "quanto chegou" - e era o único número da tabela.
   head.innerHTML = `<tr><th style="text-align:left;position:sticky;left:0;background:var(--panel);">Item</th>${
     datas.map(d=>`<th style="text-align:center;">${fmtDataCurta(d)}</th>`).join('')
-  }<th style="text-align:center;">Saída total</th></tr>`;
+  }<th style="text-align:center;">Saída total</th><th style="text-align:center;">Entrada total</th></tr>`;
   if(!lista.length){ body.innerHTML = '<tr><td class="sub" style="padding:16px;">nenhum item nesse setor.</td></tr>'; return; }
   body.innerHTML = lista.map(item=>{
-    let saidaTotal = 0, temSaida = false;
+    // as duas pontas contadas separadas: o que a contagem mostra que SAIU
+    // (delta positivo) e o que mostra que ENTROU (delta negativo). Nunca uma
+    // descontando a outra.
+    let saidaTotal = 0, entradaTotal = 0, temMovimento = false;
     const celulas = datas.map(d=>{
       const v = item.valores[d];
       if(!v) return `<td style="text-align:center;color:var(--muted);">·</td>`;
       let saidaHtml = '';
       if(v.saida!=null){
-        temSaida = true; saidaTotal += v.saida;
+        temMovimento = true;
+        if(v.saida > 0) saidaTotal += v.saida;
+        else if(v.saida < 0) entradaTotal += -v.saida;
         const cor = v.saida>0 ? 'var(--ok)' : (v.saida<0 ? 'var(--bad)' : 'var(--muted)');
-        saidaHtml = `<div style="font-size:10.5px;font-family:var(--mono);color:${cor};" title="saída do dia">${v.saida>0?'▼':(v.saida<0?'▲':'')} ${fmtNum(v.saida)}</div>`;
+        saidaHtml = `<div style="font-size:10.5px;font-family:var(--mono);color:${cor};" title="saída do dia">${v.saida>0?'▼':(v.saida<0?'▲':'')} ${fmtQtd(Math.abs(v.saida), item.unidadeMedida)}</div>`;
       }
-      return `<td style="text-align:center;"><div style="font-weight:600;">${fmtNum(v.contagem)}</div>${saidaHtml}</td>`;
+      return `<td style="text-align:center;"><div style="font-weight:600;">${fmtQtd(v.contagem, item.unidadeMedida)}</div>${saidaHtml}</td>`;
     }).join('');
     return `<tr>
       <td style="text-align:left;position:sticky;left:0;background:var(--panel);"><b>${escapeHtml(item.nome)}</b><span class="sub un">${escapeHtml(item.unidadeMedida||'')}</span></td>
       ${celulas}
-      <td style="text-align:center;font-family:var(--mono);font-weight:700;">${temSaida?fmtNum(Math.round(saidaTotal*1000)/1000):'—'}</td>
+      <td style="text-align:center;font-family:var(--mono);font-weight:700;color:${saidaTotal>0?'var(--ok)':'inherit'};">${temMovimento?fmtQtd(Math.round(saidaTotal*1000)/1000, item.unidadeMedida):'—'}</td>
+      <td style="text-align:center;font-family:var(--mono);font-weight:700;color:${entradaTotal>0?'var(--bad)':'inherit'};">${temMovimento?fmtQtd(Math.round(entradaTotal*1000)/1000, item.unidadeMedida):'—'}</td>
     </tr>`;
   }).join('');
 }

@@ -19871,6 +19871,78 @@ setTimeout(async () => {
   if (!okMaiusculo) ruins += 1;
   console.log(`${okMaiusculo ? '✓' : '✗'} Maiúsculo: nome de pessoa e preenchimento sobem; e-mail, link e código NÃO (e nada é reescrito no banco)`);
 
+  // ------------------------------------------------------------------
+  // HISTÓRICO DE CONTAGENS: saída e entrada SEPARADAS. Master (14/09/2026,
+  // olhando a tabela): "não é para fazer um pelo outro, preciso do total de
+  // saída e o total de entrada".
+  //
+  // A coluna única somava os dois deltas e devolvia um número que não
+  // responde nada: a LATA UVA saiu 9 e entrou 11, e o total aparecia como
+  // -2 - nem consumo, nem recebimento, nem saldo de nada.
+  let okSaidaEntrada = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'estoque.html'), 'utf8');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const corpo = html.slice(html.indexOf('function renderHistorico(){'), html.indexOf('function baixarRelatorioHistorico'));
+    const rota = idx.slice(idx.indexOf("app.get('/api/inventario/historico-contagens/relatorio"), idx.indexOf('const nomeArquivo = reportUtil.nomeArquivoComData(`inventario-historico'));
+
+    // a conta em si, reproduzida: os deltas da LATA UVA do print do Master
+    const deltas = [1, 2, 2, -11, 0, 3, 1];
+    const saida = deltas.filter((d) => d > 0).reduce((a, b) => a + b, 0);
+    const entrada = deltas.filter((d) => d < 0).reduce((a, b) => a - b, 0);
+
+    const conf = {
+      'a conta separada bate com o caso real do print (saiu 9, entrou 11 - não "-2")':
+        saida === 9 && entrada === 11 && (saida - entrada) === -2,
+      'a tela tem DUAS colunas, saída e entrada':
+        /<th style="text-align:center;">Saída total<\/th><th style="text-align:center;">Entrada total<\/th>/.test(corpo),
+      'e uma NUNCA desconta a outra (positivo numa, negativo na outra, sem somar junto)':
+        /if\(v\.saida > 0\) saidaTotal \+= v\.saida;\s*\n\s*else if\(v\.saida < 0\) entradaTotal \+= -v\.saida;/.test(corpo)
+        && !/saidaTotal \+= v\.saida;\s*\n/.test(corpo.replace(/if\(v\.saida > 0\) saidaTotal \+= v\.saida;/, '')),
+      // a REGRA, não a expressão: duas colunas declaradas, os deltas somados
+      // em baldes separados, e as duas linhas preenchidas (o formato de cada
+      // uma é conferido na asserção do quilo)
+      'CSV e PDF levam as mesmas duas colunas':
+        /\{ key: 'saidaTotal', label: 'Saída total' \},\s*\n\s*\{ key: 'entradaTotal', label: 'Entrada total' \},/.test(rota)
+        && /if \(v\.saida > 0\) saidaTotal \+= v\.saida;\s*\n\s*else if \(v\.saida < 0\) entradaTotal \+= -v\.saida;/.test(rota)
+        && /linha\.saidaTotal = temMovimento \?/.test(rota)
+        && /linha\.entradaTotal = temMovimento \?/.test(rota),
+      'item sem nenhuma contagem continua mostrando "—" nas duas, não zero':
+        (corpo.match(/temMovimento\?fmtQtd\([\s\S]*?, item\.unidadeMedida\):'—'/g) || []).length === 2,
+      'o texto da tela para de prometer um número só': /somam cada ponta <b>separadamente<\/b>/.test(html),
+      // Master (14/09): "o que é kilo tem que ser tratado como 1,500 /
+      // 10,450". Em peso a casa decimal é GRAMA - "1,5" parece arredondado,
+      // "1,500" é a medida. Unidade contada inteira continua inteira.
+      'quilo sai com TRÊS casas e vírgula; o resto não vira 18,000': (() => {
+        const ehQuilo = (u) => /^KG/.test(String(u || '').trim().toUpperCase());
+        const fmtNum = (v) => { const n = Number(v); return (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')).replace('.', ','); };
+        const fmtQtd = (v, u) => { const n = Number(v); if (!Number.isFinite(n)) return '—'; return ehQuilo(u) ? n.toFixed(3).replace('.', ',') : fmtNum(n); };
+        return fmtQtd(1.5, 'KG') === '1,500' && fmtQtd(10.45, 'KG') === '10,450'
+          && fmtQtd(18.8, 'KG') === '18,800' && fmtQtd(76, 'KG') === '76,000'
+          && fmtQtd(18, 'UN') === '18' && fmtQtd(18, 'UND') === '18'
+          // e a função de verdade está nos dois lados, com a mesma regra
+          && /function fmtQtd\(v, unidadeMedida\)\{/.test(html)
+          && /return n\.toFixed\(3\)\.replace\('\.', ','\);/.test(html)
+          && /const fmtQtd = \(v, u\) => \{/.test(idx)
+          && /if \(ehQuilo\(u\)\) return n\.toFixed\(3\)\.replace\('\.', ','\);/.test(idx);
+      })(),
+      'a contagem, o movimento do dia e os dois totais passam TODOS pelo formato do quilo':
+        /fmtQtd\(v\.contagem, item\.unidadeMedida\)/.test(corpo)
+        && /fmtQtd\(Math\.abs\(v\.saida\), item\.unidadeMedida\)/.test(corpo)
+        && /fmtQtd\(Math\.round\(saidaTotal\*1000\)\/1000, item\.unidadeMedida\)/.test(corpo)
+        && /fmtQtd\(Math\.round\(entradaTotal\*1000\)\/1000, item\.unidadeMedida\)/.test(corpo),
+      'e o CSV/PDF leva o mesmo formato (o papel da conferência tem que bater com a tela)':
+        /linha\[`d_\$\{d\}`\] = v \? fmtQtd\(v\.contagem, item\.unidadeMedida\) : '—';/.test(rota)
+        && /linha\.saidaTotal = temMovimento \? fmtQtd\(/.test(rota)
+        && /linha\.entradaTotal = temMovimento \? fmtQtd\(/.test(rota),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSaidaEntrada = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSaidaEntrada = false; console.log('  erro: ' + e.message); }
+  if (!okSaidaEntrada) ruins += 1;
+  console.log(`${okSaidaEntrada ? '✓' : '✗'} Histórico de contagens: saída e entrada em colunas separadas, uma nunca descontando a outra`);
+
   // ---- NOC: reinício automático programado ----
   //
   // Pedido do Master: "escolho qual reinicia todos os dias às 4h" e, depois,
