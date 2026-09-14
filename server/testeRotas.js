@@ -12596,6 +12596,21 @@ setTimeout(async () => {
       'o relógio em ms é um só, definido antes de ser usado':
         antigo.every((s) => /function Agora-Ms \{/.test(s) && s.indexOf('function Agora-Ms') < s.indexOf('(Agora-Ms)') && /function Ms-De\(\[DateTime\]\$d\)/.test(s)),
       'a versão antiga continua começando com # NOCZenith (a trava contra arquivo quebrado)': antigo.every((s) => s.startsWith('# NOCZenith')),
+      // Windows 7 / Server 2008 R2 (PowerShell 2.0): o instalador morria no
+      // PRIMEIRO comando com "Invoke-RestMethod não é reconhecido", no meio
+      // de 300 caracteres de linha - 20 minutos de mistério pra um
+      // diagnóstico de 5 segundos (MAKELINE da Dom Bessa, 13/09/2026).
+      // cmdPadrao e cmdAntigo já vêm decodificados aqui (ver decod acima).
+      'o instalador avisa em português no PowerShell 2, ANTES de tentar rede': [cmdPadrao, cmdAntigo].every((t) => {
+        const iGuarda = t.indexOf('$PSVersionTable.PSVersion.Major -lt 3');
+        const iRede = t.indexOf('Invoke-RestMethod');
+        return t.startsWith('if ($PSVersionTable.PSVersion.Major -lt 3) {') && iRede > iGuarda
+          && /instalar o PowerShell novo NAO resolve/i.test(t)
+          && /aparelho monitorado/i.test(t)
+          && /exit \}/.test(t);
+      }),
+      'e a guarda vem antes até do TLS da versão antiga (no PS2 nada mais importa)':
+        cmdAntigo.indexOf('$PSVersionTable.PSVersion.Major -lt 3') < cmdAntigo.indexOf('SecurityProtocol'),
       'a marca na ficha vale pro comando de instalação': marcou.status === 200 && tlsAntesDoRest(cmdRotaDecod),
       'e pra autoatualização (o agente baixa com o token dele e recebe a versão certa)':
         psAuto.status === 200 && tlsAntesDoRest(psAuto.corpo) && /function Agora-Ms/.test(psAuto.corpo),

@@ -2320,6 +2320,28 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
   // o script real (baixa direto pra pasta fixa - sem Mark of the Web, entao o
   // Controle de Aplicativo Inteligente nao bloqueia - e roda de la)
   const script = [
+    // GUARDA DE VERSAO, antes de tudo. No PowerShell 2.0 (Windows 7 e Server
+    // 2008 R2) a primeira coisa que o instalador faz - Invoke-RestMethod -
+    // nem existe, e a pessoa recebe "nao e reconhecido como nome de cmdlet"
+    // no meio de 300 caracteres de comando: 20 minutos de mistério pra um
+    // diagnóstico de 5 segundos (caso real da MAKELINE da Dom Bessa,
+    // 13/09/2026).
+    //
+    // E o aviso diz a verdade inteira, incluindo a parte que decepciona:
+    // instalar o PowerShell novo NAO resolve. Register-ScheduledTask,
+    // Get-NetAdapter, Get-PhysicalDisk e Get-Volume sao modulos do Windows
+    // 8/Server 2012 pra frente - nao vem com PowerShell nenhum no Windows 7.
+    // Sem essa frase, a pessoa gasta a tarde instalando o WMF 5.1 pra
+    // descobrir que o agente morre no primeiro reboot.
+    //
+    // $PSVersionTable e Write-Host existem no PS2, entao o proprio aviso
+    // roda onde o resto nao roda. Windows 8/8.1 tem PS3/PS4 e passa direto.
+    "if ($PSVersionTable.PSVersion.Major -lt 3) { Write-Host ''; "
+      + "Write-Host 'NOCZenith: este computador nao pode receber o agente.' -ForegroundColor Red; "
+      + "Write-Host (\"PowerShell \" + $PSVersionTable.PSVersion.ToString() + \" - o agente precisa da versao 3 ou mais nova.\"); "
+      + "Write-Host 'Isso e Windows 7 ou Server 2008 R2. Instalar o PowerShell novo NAO resolve: a tarefa agendada, o disco e a rede que o agente le sao recursos do Windows 8 / Server 2012 pra frente.'; "
+      + "Write-Host 'Essa maquina pode ser acompanhada pelo NOC SEM agente: marque ela como aparelho monitorado na ficha de outro computador da loja (a varredura de rede ja enxerga ela pelo MAC).' -ForegroundColor Yellow; "
+      + "Write-Host ''; Read-Host 'Pode fechar essa janela (aperte Enter)'; exit }",
     "$ErrorActionPreference='Stop'",
     // Windows antigo: TLS 1.2 ANTES do download - a 19855 morria aqui, antes
     // de baixar qualquer coisa (ver adaptarParaWindowsAntigo). Padrao: nada.
