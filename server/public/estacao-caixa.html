@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Caixa · Estação da Comida · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<link rel="stylesheet" href="/estacao.css">
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">NoPulso · Estação da Comida</div>
+      <h1>Caixa</h1>
+    </div>
+  </div>
+  <button class="back" onclick="logout()">🚪 Sair</button>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso ao Caixa da Estação da Comida. Fale com o Master.</div>
+
+<div id="root" class="hidden">
+
+  <div class="est-barra">
+    <label>Unidade<select id="unidade" onchange="trocarUnidade()"></select></label>
+    <label style="flex:0 1 130px;">Caixa<select id="caixa"></select></label>
+  </div>
+
+  <!-- QUEM ESTÁ PAGANDO. O Master: "se alguém quiser pagar 2, 3 pessoas é só
+       informar os números das comandas". Por isso é uma LISTA, não um campo. -->
+  <div class="est-card">
+    <h2>Quem está pagando</h2>
+    <div class="est-sub">Digite o número do cartão e toque em juntar. Dá pra juntar quantas pessoas quiser numa conta só.</div>
+    <div class="est-barra" style="margin-bottom:10px;">
+      <label style="flex:1 1 150px;">Número do cartão<input id="numero" type="number" inputmode="numeric" min="1" max="999" placeholder="ex: 12" onkeydown="if(event.key==='Enter'){event.preventDefault();juntar()}"></label>
+      <button type="button" class="est-btn principal" style="flex:none;" onclick="juntar()">+ Juntar</button>
+    </div>
+    <div id="escolhidas"></div>
+    <div class="est-erro" id="erro-numero"></div>
+  </div>
+
+  <!-- BALCÃO: quem só passou pra comprar uma água, ou levou uma na saída -->
+  <div class="est-card" id="card-balcao">
+    <h2>Balcão</h2>
+    <div class="est-sub">O que o caixa vende direto, sem comanda. Quem escolhe os itens é o Master ou o Gerente, no estoque.</div>
+    <div class="est-grade" id="grade-balcao"><div class="est-vazio">carregando...</div></div>
+    <div id="carrinho-balcao"></div>
+  </div>
+
+  <div class="est-card">
+    <h2>Conta</h2>
+    <label style="display:flex;gap:9px;align-items:center;font-size:13px;color:var(--text);margin:0 0 10px;">
+      <input type="checkbox" id="com-servico" checked onchange="recarregarConta()" style="width:auto;accent-color:var(--accent);">
+      Cobrar serviço <span id="rotulo-servico" class="est-tag">10%</span>
+    </label>
+    <div id="conta"><div class="est-vazio">Informe uma comanda ou escolha um item do balcão.</div></div>
+  </div>
+
+  <div class="est-card" id="card-pagamento" hidden>
+    <h2>Recebimento</h2>
+    <div class="est-sub">Some as formas até fechar o total. O troco não entra aqui: registre o que de fato entrou.</div>
+    <div id="formas"></div>
+    <div class="est-totais">
+      <div class="est-linha"><span>Informado</span><b id="soma-pago">R$ 0,00</b></div>
+      <div class="est-linha"><span>Falta</span><b id="falta">R$ 0,00</b></div>
+    </div>
+    <div class="est-acoes" style="margin-top:12px;">
+      <button type="button" class="est-btn principal" id="btn-receber" onclick="receber()">Receber e fechar</button>
+      <button type="button" class="est-btn" onclick="limparTudo()">Limpar</button>
+    </div>
+    <div class="est-erro" id="erro-receber"></div>
+  </div>
+
+  <div class="est-card" id="card-recibo" hidden>
+    <h2>Pago ✅</h2>
+    <div id="recibo"></div>
+    <div class="est-acoes" style="margin-top:12px;"><button type="button" class="est-btn principal" onclick="limparTudo()">Próxima conta</button></div>
+  </div>
+
+</div>
+
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+<script>
+const authToken = localStorage.getItem('authToken');
+if(!authToken) location = '/';
+const fetchOriginal = fetch.bind(window);
+window.fetch = (url, opcoes = {}) => fetchOriginal(url, { ...opcoes,
+  headers: { ...(opcoes.headers||{}), ...(String(url).startsWith('/api/') ? { Authorization: 'Bearer ' + authToken } : {}) } });
+
+function logout(){ localStorage.removeItem('authToken'); location = '/'; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// com separador de milhar: o total do dia passa de mil, e "R$ 1888,34" é mais
+// difícil de conferir de bate-pronto que "R$ 1.888,34"
+function fmtReal(v){ return 'R$ ' + Number(v||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function num(v){ const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0; }
+
+const FORMAS = [['dinheiro','Dinheiro'],['pix','Pix'],['debito','Débito'],['credito','Crédito'],['voucher','Voucher']];
+const CAIXAS = ['01','02','03','04','05'];
+// mesmo vocabulário do servidor (estacaoComida.js): a tela não inventa faixa
+const ROTULO_TIPO = { adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':'Criança até 5' };
+const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
+function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
+
+let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGOS = {};
+
+function unidadeAtual(){ return document.getElementById('unidade').value; }
+function unidadeNomeAtual(){ const u = UNIDADES.find(x=>x.codigo===unidadeAtual()); return u ? u.nome : unidadeAtual(); }
+function comServico(){ return document.getElementById('com-servico').checked; }
+function itensBalcaoLista(){ return [...CARRINHO.entries()].map(([itemId, quantidade]) => ({ itemId, quantidade })); }
+
+async function pedir(url, opcoes){
+  const r = await fetch(url, opcoes);
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.error || 'Não deu pra completar. Tente de novo.');
+  return d;
+}
+
+// ---------- comandas escolhidas ----------
+async function juntar(){
+  const campo = document.getElementById('numero');
+  const erro = document.getElementById('erro-numero');
+  erro.textContent = '';
+  const n = String(campo.value || '').trim();
+  if(!n){ erro.textContent = 'Digite o número do cartão.'; return; }
+  if(NUMEROS.includes(n)){ erro.textContent = `A comanda ${n} já está nesta conta.`; return; }
+  NUMEROS.push(n);
+  campo.value = '';
+  campo.focus();
+  // a validação é do servidor: ele é quem sabe se a comanda está aberta
+  const ok = await recarregarConta();
+  if(!ok){
+    // número errado NÃO pode derrubar a conta que já estava montada: tira o
+    // número que falhou e REFAZ a conta com os que valem. Sem o refazer, a
+    // tela continuava mostrando o total antigo mas o botão de receber morria
+    // - o pior estado possível num caixa com fila.
+    NUMEROS = NUMEROS.filter(x=>x!==n);
+    const msg = ULTIMO_ERRO;
+    await recarregarConta();
+    erro.textContent = msg;
+  }
+}
+function tirarNumero(n){ NUMEROS = NUMEROS.filter(x=>x!==n); recarregarConta(); }
+
+function renderEscolhidas(){
+  document.getElementById('escolhidas').innerHTML = NUMEROS.length
+    ? `<div class="est-comandas">${NUMEROS.map(n=>{
+        const c = (CONTA?.comandas||[]).find(x=>String(x.numero)===String(n));
+        return `<div class="est-comanda" style="cursor:default;">
+          <span class="est-comanda-num">${esc(n)}</span>
+          <span class="est-comanda-corpo">
+            <span class="est-comanda-nome">${c ? marcaTipo(c) + (c.mesa?` · mesa ${c.mesa}`:'') : 'conferindo...'}</span>
+            <span class="est-comanda-meta">${c ? `${(c.itens||[]).length} item(ns) no consumo` : ''}</span>
+          </span>
+          <span class="est-comanda-val">${c ? fmtReal(c.totais.total) : ''}</span>
+          <button type="button" class="est-btn perigo" style="min-height:36px;padding:6px 10px;" onclick="tirarNumero('${esc(n)}')">✕</button>
+        </div>`;
+      }).join('')}</div>`
+    : '<div class="est-vazio">Nenhuma comanda nesta conta.</div>';
+}
+
+// ---------- balcão ----------
+function renderBalcao(){
+  document.getElementById('grade-balcao').innerHTML = BALCAO.length
+    ? BALCAO.map(i=>`<button type="button" class="est-btn" onclick="addBalcao('${esc(i.id)}')"><span>${esc(i.nome)}</span><small>${fmtReal(i.precoVenda)}</small></button>`).join('')
+    : '<div class="est-vazio">Nenhum item liberado pro balcão nesta unidade.</div>';
+  const linhas = [...CARRINHO.entries()].map(([id, qtd]) => {
+    const it = BALCAO.find(x=>x.id===id);
+    if(!it) return '';
+    return `<div class="est-item">
+      <span class="est-item-nome">${esc(it.nome)} <span class="est-tag">${qtd}x</span></span>
+      <span class="est-item-val">${fmtReal(qtd*it.precoVenda)}</span>
+      <button type="button" class="est-btn perigo" style="min-height:36px;padding:6px 10px;" onclick="tirarBalcao('${esc(id)}')">✕</button>
+    </div>`;
+  }).join('');
+  document.getElementById('carrinho-balcao').innerHTML = linhas ? `<div class="est-lista" style="margin-top:10px;">${linhas}</div>` : '';
+}
+function addBalcao(id){ CARRINHO.set(id, (CARRINHO.get(id)||0) + 1); renderBalcao(); recarregarConta(); }
+function tirarBalcao(id){
+  const q = (CARRINHO.get(id)||0) - 1;
+  if(q > 0) CARRINHO.set(id, q); else CARRINHO.delete(id);
+  renderBalcao(); recarregarConta();
+}
+
+// ---------- conta ----------
+let ULTIMO_ERRO = '';
+async function recarregarConta(){
+  const unidade = unidadeAtual();
+  const balcao = itensBalcaoLista().map(i=>`${i.itemId}:${i.quantidade}`).join(',');
+  if(!NUMEROS.length && !balcao){
+    CONTA = null;
+    document.getElementById('conta').innerHTML = '<div class="est-vazio">Informe uma comanda ou escolha um item do balcão.</div>';
+    document.getElementById('card-pagamento').hidden = true;
+    renderEscolhidas();
+    return true;
+  }
+  try{
+    CONTA = await pedir(`/api/estacao/conta?unidade=${encodeURIComponent(unidade)}&numeros=${encodeURIComponent(NUMEROS.join(','))}&balcao=${encodeURIComponent(balcao)}&servico=${comServico()?'1':'0'}`);
+    ULTIMO_ERRO = '';
+  }catch(e){ ULTIMO_ERRO = e.message; CONTA = null; renderEscolhidas(); return false; }
+  renderEscolhidas();
+  renderConta();
+  return true;
+}
+
+function renderConta(){
+  const c = CONTA;
+  const itens = (c.itensBalcao||[]).map(i=>`<div class="est-linha"><span>${esc(i.nome)}${i.quantidade>1?` (${i.quantidade}x)`:''}</span><b>${fmtReal(i.total)}</b></div>`).join('');
+  document.getElementById('conta').innerHTML = `
+    <div class="est-totais" style="margin-top:0;padding-top:0;border-top:0;">
+      ${c.comandas.length ? `<div class="est-linha"><span>Rodízio · ${c.comandas.length} pessoa(s)</span><b>${fmtReal(c.rodizio)}</b></div>` : ''}
+      ${c.consumo ? `<div class="est-linha"><span>Consumo</span><b>${fmtReal(c.consumo)}</b></div>` : ''}
+      ${itens}
+      ${c.servico ? `<div class="est-linha"><span>Serviço ${c.servicoPct}%</span><b>${fmtReal(c.servico)}</b></div>` : ''}
+      <div class="est-linha total"><span>Total</span><b>${fmtReal(c.total)}</b></div>
+    </div>`;
+  document.getElementById('card-pagamento').hidden = false;
+  renderFormas();
+}
+
+// ---------- recebimento ----------
+function renderFormas(){
+  document.getElementById('formas').innerHTML = `<div class="est-barra" style="margin-bottom:0;">${
+    FORMAS.map(([id, rotulo])=>`<label style="flex:1 1 120px;">${rotulo}<input type="text" inputmode="decimal" id="pg-${id}" value="${PAGOS[id]||''}" placeholder="0,00" oninput="somarPagos()"></label>`).join('')
+  }</div>`;
+  somarPagos();
+}
+function somarPagos(){
+  FORMAS.forEach(([id])=>{ PAGOS[id] = document.getElementById('pg-'+id)?.value || ''; });
+  const soma = FORMAS.reduce((s,[id]) => s + num(PAGOS[id]), 0);
+  const total = CONTA ? CONTA.total : 0;
+  const falta = Math.round((total - soma) * 100) / 100;
+  document.getElementById('soma-pago').textContent = fmtReal(soma);
+  const el = document.getElementById('falta');
+  el.textContent = falta > 0 ? fmtReal(falta) : (falta < 0 ? 'troco ' + fmtReal(-falta) : 'nada');
+  el.style.color = falta > 0 ? 'var(--warn)' : 'var(--ok)';
+  document.getElementById('btn-receber').disabled = !CONTA || soma <= 0;
+}
+
+async function receber(){
+  const erro = document.getElementById('erro-receber');
+  erro.textContent = '';
+  const pagamentos = FORMAS.map(([id]) => ({ forma: id, valor: num(PAGOS[id]) })).filter(p=>p.valor > 0);
+  if(!pagamentos.length){ erro.textContent = 'Informe como foi pago.'; return; }
+  document.getElementById('btn-receber').disabled = true;
+  try{
+    const r = await pedir('/api/estacao/receber', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        unidade: unidadeAtual(), unidadeNome: unidadeNomeAtual(),
+        numeros: NUMEROS, caixa: document.getElementById('caixa').value,
+        pagamentos, comServico: comServico(), itensBalcao: itensBalcaoLista(),
+      }),
+    });
+    mostrarRecibo(r);
+  }catch(e){ erro.textContent = e.message; document.getElementById('btn-receber').disabled = false; }
+}
+
+function mostrarRecibo(r){
+  document.getElementById('card-recibo').hidden = false;
+  document.getElementById('recibo').innerHTML = `
+    <div class="est-totais" style="margin-top:0;padding-top:0;border-top:0;">
+      <div class="est-linha"><span>Caixa</span><b>${esc(r.caixa)}</b></div>
+      ${r.numeros.length ? `<div class="est-linha"><span>Comanda(s)</span><b>${r.numeros.join(', ')}</b></div>` : ''}
+      ${r.mesas.length ? `<div class="est-linha"><span>Mesa(s)</span><b>${r.mesas.join(', ')}</b></div>` : ''}
+      <div class="est-linha total"><span>Recebido</span><b>${fmtReal(r.total)}</b></div>
+    </div>`;
+  document.getElementById('card-pagamento').hidden = true;
+  document.getElementById('conta').innerHTML = '<div class="est-vazio">Conta fechada.</div>';
+  document.getElementById('escolhidas').innerHTML = '';
+  document.getElementById('card-balcao').hidden = true;
+}
+
+function limparTudo(){
+  NUMEROS = []; CARRINHO = new Map(); CONTA = null; PAGOS = {};
+  document.getElementById('card-recibo').hidden = true;
+  document.getElementById('card-balcao').hidden = false;
+  document.getElementById('numero').value = '';
+  renderBalcao();
+  recarregarConta();
+  document.getElementById('numero').focus();
+}
+
+async function trocarUnidade(){
+  const unidade = unidadeAtual();
+  if(!unidade) return;
+  NUMEROS = []; CARRINHO = new Map();
+  BALCAO = await fetch(`/api/estacao/itens-balcao?unidade=${encodeURIComponent(unidade)}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
+  renderBalcao();
+  await recarregarConta();
+}
+
+async function boot(){
+  const r = await fetch('/api/me');
+  if(!r.ok){ logout(); return; }
+  ME = await r.json();
+  const secoes = ME.role==='master' ? ['estacao-caixa'] : (ME.permissions?.sections||[]);
+  if(!secoes.includes('estacao-caixa')){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('caixa').innerHTML = CAIXAS.map(c=>`<option value="${c}">Caixa ${c}</option>`).join('');
+  UNIDADES = await fetch('/api/estacao/unidades').then(x=>x.json()).catch(()=>[]);
+  document.getElementById('unidade').innerHTML = UNIDADES.length
+    ? UNIDADES.map(u=>`<option value="${esc(u.codigo)}">${esc(u.nome)}</option>`).join('')
+    : '<option value="" disabled selected>nenhuma unidade liberada</option>';
+  document.getElementById('root').classList.remove('hidden');
+  await trocarUnidade();
+}
+boot();
+</script>
+</body>
+</html>

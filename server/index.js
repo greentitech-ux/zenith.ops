@@ -8747,6 +8747,19 @@ app.get('/api/saltiverso/catalogo', requireSection('parque-loja'), async (req, r
 // garçom não fecha conta e o caixa não lança consumo.
 const podeUnidadeEstacao = (req, unidade) => podeUnidadeInventario(req, unidade);
 
+// As unidades que a pessoa pode ver na Estação. Existe separado de
+// /api/inventario/unidades porque o garçom tem "estacao-salao" e NÃO tem
+// "inventario": sem isto, a primeira tela que ele abre já responde 403 e o
+// seletor de unidade nasce vazio. A lista é a mesma (a permissão de unidade
+// da Estação é a do inventário, ver podeUnidadeEstacao) - o que muda é quem
+// pode perguntar.
+app.get('/api/estacao/unidades', requireAnySection('estacao-salao', 'estacao-caixa', 'estacao-fechamento'), (req, res) => {
+  const unidades = req.isMaster
+    ? Object.keys(INVENTARIO_UNIDADES_NOMES)
+    : (req.permissions.unidades || []).filter((u) => INVENTARIO_UNIDADES_NOMES[u]);
+  res.json(unidades.map((codigo) => ({ codigo, nome: INVENTARIO_UNIDADES_NOMES[codigo] })));
+});
+
 app.get('/api/estacao/precos', requireSection('estacao-fechamento'), async (req, res) => {
   try {
     if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -8756,8 +8769,8 @@ app.get('/api/estacao/precos', requireSection('estacao-fechamento'), async (req,
 // preço é dinheiro que entra: só o Master mexe na tabela
 app.post('/api/estacao/precos', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
-    const { unidade, rodizio, servicoPct } = req.body || {};
-    res.json(await estacaoComida.salvarPrecos(unidade, { rodizio, servicoPct }, req.user.email));
+    const { unidade, rodizio, servicoPct, feriados } = req.body || {};
+    res.json(await estacaoComida.salvarPrecos(unidade, { rodizio, servicoPct, feriados }, req.user.email));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 

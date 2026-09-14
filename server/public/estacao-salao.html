@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Salão · Estação da Comida · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<link rel="stylesheet" href="/estacao.css">
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">NoPulso · Estação da Comida</div>
+      <h1>Salão</h1>
+    </div>
+  </div>
+  <button class="back" onclick="logout()">🚪 Sair</button>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso ao Salão da Estação da Comida. Fale com o Master.</div>
+
+<div id="root" class="hidden">
+
+  <div class="est-barra">
+    <label>Unidade<select id="unidade" onchange="trocarUnidade()"></select></label>
+  </div>
+
+  <!-- ABRIR COMANDA. O número é o do CARTÃO físico que a pessoa recebe na
+       entrada - é ele que o caixa vai pedir na hora de pagar. -->
+  <div class="est-card">
+    <h2>Abrir comanda</h2>
+    <div class="est-sub">Uma comanda por pessoa. A mesa entra depois, quando o garçom souber onde ela sentou.</div>
+    <div class="est-barra" style="margin-bottom:10px;">
+      <label style="flex:1 1 120px;">Número do cartão<input id="novo-numero" type="number" inputmode="numeric" min="1" max="999" placeholder="ex: 12"></label>
+      <label style="flex:1 1 170px;">Rodízio<select id="novo-tipo"><option value="adulto">Adulto</option><option value="crianca">Criança (6 a 10)</option><option value="crianca-ate-5">Criança até 5 (não paga)</option></select></label>
+      <label style="flex:1 1 110px;">Mesa (opcional)<input id="novo-mesa" type="number" inputmode="numeric" min="1" max="200" placeholder="ex: 7"></label>
+    </div>
+    <div class="est-acoes"><button type="button" class="est-btn principal" onclick="abrirComanda()">Abrir comanda</button></div>
+    <div class="est-erro" id="erro-abrir"></div>
+  </div>
+
+  <div class="est-card">
+    <h2>Salão agora</h2>
+    <div class="est-sub" id="resumo-salao">carregando...</div>
+    <div id="mesas"></div>
+    <div id="sem-mesa"></div>
+  </div>
+
+</div>
+
+<!-- COMANDA ABERTA: onde o garçom lança o que a pessoa pediu -->
+<div class="est-modal" id="modal" onclick="if(event.target===this)fecharComanda()">
+  <div class="est-dialogo">
+    <div class="est-dialogo-topo">
+      <div>
+        <div class="eyebrow" id="mod-eyebrow">Comanda</div>
+        <h1 id="mod-titulo" style="font-size:22px;">—</h1>
+      </div>
+      <button type="button" class="est-fechar" onclick="fecharComanda()" aria-label="Fechar">×</button>
+    </div>
+    <div id="mod-corpo"></div>
+  </div>
+</div>
+
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+<script>
+const authToken = localStorage.getItem('authToken');
+if(!authToken) location = '/';
+const fetchOriginal = fetch.bind(window);
+window.fetch = (url, opcoes = {}) => fetchOriginal(url, { ...opcoes,
+  headers: { ...(opcoes.headers||{}), ...(String(url).startsWith('/api/') ? { Authorization: 'Bearer ' + authToken } : {}) } });
+
+function logout(){ localStorage.removeItem('authToken'); location = '/'; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// com separador de milhar: o total do dia passa de mil, e "R$ 1888,34" é mais
+// difícil de conferir de bate-pronto que "R$ 1.888,34"
+function fmtReal(v){ return 'R$ ' + Number(v||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function horaCurta(iso){ const d = new Date(iso); return isNaN(d.getTime()) ? '' : `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+
+// mesmo vocabulário do servidor (estacaoComida.js ROTULO_TIPO/ROTULO_TURNO):
+// a tela não inventa nome de faixa nem de turno
+const ROTULO_TIPO = { adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':'Criança até 5' };
+const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
+const ROTULO_TURNO = { almoco:'almoço', jantar:'jantar' };
+function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
+
+let ME = null, UNIDADES = [], SALAO = null, CATALOGO = [], COMANDA_ABERTA = null;
+
+function unidadeAtual(){ return document.getElementById('unidade').value; }
+function unidadeNomeAtual(){ const u = UNIDADES.find(x=>x.codigo===unidadeAtual()); return u ? u.nome : unidadeAtual(); }
+
+async function pedir(url, opcoes){
+  const r = await fetch(url, opcoes);
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.error || 'Não deu pra completar. Tente de novo.');
+  return d;
+}
+async function enviar(url, corpo, metodo='POST'){
+  return pedir(url, { method: metodo, headers: { 'Content-Type':'application/json' }, body: corpo===undefined?undefined:JSON.stringify(corpo) });
+}
+
+// ---------- salão ----------
+async function carregarSalao(){
+  const unidade = unidadeAtual();
+  if(!unidade) return;
+  try{
+    SALAO = await pedir(`/api/estacao/salao?unidade=${encodeURIComponent(unidade)}`);
+  }catch(e){ document.getElementById('resumo-salao').textContent = e.message; return; }
+  renderSalao();
+  if(COMANDA_ABERTA) pintarComanda(acharComanda(COMANDA_ABERTA));
+}
+
+function todasComandas(){
+  if(!SALAO) return [];
+  return [...SALAO.mesas.flatMap(m=>m.comandas), ...SALAO.semMesa];
+}
+function acharComanda(id){ return todasComandas().find(c=>c.id===id) || null; }
+
+function renderSalao(){
+  const s = SALAO;
+  document.getElementById('resumo-salao').textContent = s.pessoas
+    ? `${s.pessoas} pessoa(s) no salão · ${fmtReal(s.subtotalAberto)} em aberto · serviço ${s.servicoPct}%`
+    : 'Nenhuma comanda aberta.';
+
+  document.getElementById('mesas').innerHTML = s.mesas.length
+    ? `<div class="est-mesas">${s.mesas.map(m=>`
+        <button type="button" class="est-mesa" onclick="verMesa(${m.mesa})">
+          <div class="est-mesa-cap">Mesa</div>
+          <div class="est-mesa-num">${m.mesa}</div>
+          <div class="est-mesa-cap">${m.pessoas} pessoa(s) · desde ${esc(horaCurta(m.desde))}</div>
+          <div class="est-mesa-val">${fmtReal(m.subtotal)}</div>
+        </button>`).join('')}</div>`
+    : '';
+
+  // SEM MESA fica em destaque: é comanda aberta que ninguém sentou ainda, e
+  // é o que some na hora de fechar a conta da mesa
+  document.getElementById('sem-mesa').innerHTML = s.semMesa.length
+    ? `<h2 style="margin:16px 0 4px;font-size:13px;">Sem mesa <span class="est-tag sem-mesa">${s.semMesa.length}</span></h2>
+       <div class="est-sub">Toque pra dizer em que mesa a pessoa sentou.</div>
+       <div class="est-comandas">${s.semMesa.map(linhaComanda).join('')}</div>`
+    : (s.mesas.length ? '' : '<div class="est-vazio">Nenhuma comanda aberta. Abra a primeira acima.</div>');
+}
+
+function linhaComanda(c){
+  const t = c.totais || { subtotal: 0 };
+  return `<button type="button" class="est-comanda" onclick="abrirFicha('${esc(c.id)}')">
+    <span class="est-comanda-num">${c.numero}</span>
+    <span class="est-comanda-corpo">
+      <span class="est-comanda-nome">${marcaTipo(c)} ${c.mesa?`· mesa ${c.mesa}`:'<span class="est-tag sem-mesa">sem mesa</span>'}</span>
+      <span class="est-comanda-meta">desde ${esc(horaCurta(c.abertaEm))} · ${(c.itens||[]).length} item(ns)</span>
+    </span>
+    <span class="est-comanda-val">${fmtReal(t.subtotal)}</span>
+  </button>`;
+}
+
+function verMesa(mesa){
+  // dá pra tocar antes do salão chegar (rede da loja é lenta): sem a guarda,
+  // o toque vira erro de JS e a tela trava
+  const m = SALAO && SALAO.mesas.find(x=>x.mesa===mesa);
+  if(!m) return;
+  COMANDA_ABERTA = null;
+  document.getElementById('mod-eyebrow').textContent = 'Mesa';
+  document.getElementById('mod-titulo').textContent = String(mesa);
+  document.getElementById('mod-corpo').innerHTML = `
+    <div class="est-sub">${m.pessoas} pessoa(s) · aberta desde ${esc(horaCurta(m.desde))}</div>
+    <div class="est-comandas">${m.comandas.map(linhaComanda).join('')}</div>
+    <div class="est-totais">
+      <div class="est-linha"><span>Consumo da mesa</span><b>${fmtReal(m.consumo)}</b></div>
+      <div class="est-linha total"><span>Subtotal</span><b>${fmtReal(m.subtotal)}</b></div>
+    </div>
+    <div class="est-sub" style="margin-top:10px;">O pagamento é feito no caixa, pelos números dos cartões.</div>`;
+  document.getElementById('modal').classList.add('aberto');
+}
+
+// ---------- uma comanda ----------
+function abrirFicha(id){
+  COMANDA_ABERTA = id;
+  pintarComanda(acharComanda(id));
+  document.getElementById('modal').classList.add('aberto');
+}
+function fecharComanda(){ COMANDA_ABERTA = null; document.getElementById('modal').classList.remove('aberto'); }
+
+function pintarComanda(c){
+  if(!c){ fecharComanda(); return; }
+  const t = c.totais || {};
+  document.getElementById('mod-eyebrow').textContent = `Comanda · ${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}${c.turno?` · ${ROTULO_TURNO[c.turno]||c.turno}`:''}`;
+  document.getElementById('mod-titulo').textContent = 'Nº ' + c.numero;
+  document.getElementById('mod-corpo').innerHTML = `
+    <div class="est-barra">
+      <label style="flex:1 1 130px;">Mesa<input id="mesa-comanda" type="number" inputmode="numeric" min="1" max="200" value="${c.mesa||''}" placeholder="onde sentou"></label>
+      <button type="button" class="est-btn" style="flex:none;" onclick="salvarMesa('${esc(c.id)}')">Salvar mesa</button>
+    </div>
+    <div class="est-erro" id="erro-comanda"></div>
+
+    <h2 style="margin-top:14px;">Lançar no consumo</h2>
+    <div class="est-sub">O rodízio já está na conta. Aqui vai o que é cobrado à parte (bebida, sobremesa).</div>
+    <div class="est-grade" id="grade-itens">${
+      CATALOGO.length
+        ? CATALOGO.map(i=>`<button type="button" class="est-btn" onclick="lancar('${esc(c.id)}','${esc(i.id)}')"><span>${esc(i.nome)}</span><small>${fmtReal(i.precoVenda)}</small></button>`).join('')
+        : '<div class="est-vazio">Nenhum item com preço de venda no catálogo desta unidade.</div>'
+    }</div>
+
+    <h2 style="margin-top:14px;">Consumo</h2>
+    ${(c.itens||[]).length ? `<div class="est-lista">${c.itens.map((it,i)=>`
+      <div class="est-item">
+        <span class="est-item-nome">${esc(it.nome)}${it.quantidade>1?` <span class="est-tag">${it.quantidade}x</span>`:''}</span>
+        <span class="est-item-val">${fmtReal(it.quantidade*it.precoUnitario)}</span>
+        <button type="button" class="est-btn perigo" style="min-height:36px;padding:6px 10px;" onclick="tirar('${esc(c.id)}',${i},'${esc(it.nome)}')">✕</button>
+      </div>`).join('')}</div>` : '<div class="est-vazio">Nada lançado ainda.</div>'}
+
+    <div class="est-totais">
+      <div class="est-linha"><span>Rodízio · ${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}${c.turno?` (${ROTULO_TURNO[c.turno]})`:''}</span><b>${t.rodizio?fmtReal(t.rodizio):'não paga'}</b></div>
+      <div class="est-linha"><span>Consumo</span><b>${fmtReal(t.consumo)}</b></div>
+      <div class="est-linha"><span>Serviço ${t.servicoPct||0}%</span><b>${fmtReal(t.servico)}</b></div>
+      <div class="est-linha total"><span>Total desta pessoa</span><b>${fmtReal(t.total)}</b></div>
+    </div>
+    <div class="est-sub" style="margin-top:10px;">Aberta às ${esc(horaCurta(c.abertaEm))}. O pagamento é no caixa, pelo número ${c.numero}.</div>`;
+}
+
+async function salvarMesa(id){
+  const mesa = document.getElementById('mesa-comanda').value;
+  try{
+    await enviar(`/api/estacao/comandas/${encodeURIComponent(id)}/mesa`, { mesa }, 'PATCH');
+    await carregarSalao();
+  }catch(e){ document.getElementById('erro-comanda').textContent = e.message; }
+}
+async function lancar(id, itemId){
+  try{
+    await enviar(`/api/estacao/comandas/${encodeURIComponent(id)}/itens`, { itemId, quantidade: 1 });
+    await carregarSalao();
+  }catch(e){ const el = document.getElementById('erro-comanda'); if(el) el.textContent = e.message; }
+}
+async function tirar(id, indice, nome){
+  // o NOME vai junto: entre desenhar a tela e o toque, outra pessoa pode ter
+  // lançado algo, e por posição o clique tiraria o item errado
+  try{
+    await pedir(`/api/estacao/comandas/${encodeURIComponent(id)}/itens/${indice}?nome=${encodeURIComponent(nome)}`, { method: 'DELETE' });
+    await carregarSalao();
+  }catch(e){ const el = document.getElementById('erro-comanda'); if(el) el.textContent = e.message; }
+}
+
+async function abrirComanda(){
+  const erro = document.getElementById('erro-abrir');
+  erro.textContent = '';
+  const numero = document.getElementById('novo-numero').value;
+  if(!numero){ erro.textContent = 'Informe o número do cartão.'; return; }
+  try{
+    const c = await enviar('/api/estacao/comandas', {
+      unidade: unidadeAtual(), unidadeNome: unidadeNomeAtual(),
+      numero, mesa: document.getElementById('novo-mesa').value,
+      tipoRodizio: document.getElementById('novo-tipo').value,
+    });
+    document.getElementById('novo-numero').value = '';
+    document.getElementById('novo-mesa').value = '';
+    await carregarSalao();
+    abrirFicha(c.id);
+  }catch(e){ erro.textContent = e.message; }
+}
+
+async function trocarUnidade(){
+  const unidade = unidadeAtual();
+  if(!unidade) return;
+  CATALOGO = await fetch(`/api/estacao/itens?unidade=${encodeURIComponent(unidade)}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
+  await carregarSalao();
+}
+
+async function boot(){
+  const r = await fetch('/api/me');
+  if(!r.ok){ logout(); return; }
+  ME = await r.json();
+  const secoes = ME.role==='master' ? ['estacao-salao'] : (ME.permissions?.sections||[]);
+  if(!secoes.includes('estacao-salao')){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  UNIDADES = await fetch('/api/estacao/unidades').then(x=>x.json()).catch(()=>[]);
+  document.getElementById('unidade').innerHTML = UNIDADES.length
+    ? UNIDADES.map(u=>`<option value="${esc(u.codigo)}">${esc(u.nome)}</option>`).join('')
+    : '<option value="" disabled selected>nenhuma unidade liberada</option>';
+  document.getElementById('root').classList.remove('hidden');
+  await trocarUnidade();
+  // o salão muda na mão de outro garçom: o servidor avisa (broadcast
+  // estacao-salao-mudou) em vez de a tela ficar perguntando de 5 em 5s
+  try{
+    const es = new EventSource('/api/stream?token='+encodeURIComponent(authToken));
+    es.addEventListener('estacao-salao-mudou', (ev)=>{
+      try{ if(JSON.parse(ev.data).unidade !== unidadeAtual()) return; }catch(x){}
+      carregarSalao();
+    });
+  }catch(e){ /* sem stream a tela segue, só não atualiza sozinha */ }
+}
+boot();
+</script>
+</body>
+</html>
