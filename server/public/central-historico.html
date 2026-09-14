@@ -598,7 +598,7 @@
       <div class="sub" style="margin-top:4px;">Copia as seções, unidades e tipos de solicitação desse usuário. <b>Não</b> copia Admin nem permissões especiais — se precisar, ligue depois em Usuários.</div>
 
       <label style="margin-top:8px;">Senha provisória</label>
-      <input type="text" id="ca-senha" placeholder="gerada sozinha">
+      <input type="text" class="valor-exato" id="ca-senha" placeholder="gerada sozinha">
       <div class="sub" style="margin-top:4px;">Anote e repasse por fora do app. O NoPulso obriga a trocar no primeiro login.</div>
 
       <div class="msg hidden" id="msg-criar-acesso"></div>
@@ -2330,7 +2330,7 @@ function campoEdicaoHtml(c){
           <div><label>Telefone do cliente</label><input type="text" id="ed-telefoneCliente" value="${escapeHtml(c.telefoneCliente||'')}"></div>
         </div>
         <label>Chave Pix (pra devolução)</label>
-        <input type="text" id="ed-pixChave" value="${escapeHtml(c.pixChave||'')}">
+        <input type="text" class="valor-exato" id="ed-pixChave" value="${escapeHtml(c.pixChave||'')}">
         <div class="grid2">
           <div><label>Nome do titular</label><input type="text" id="ed-pixNomeTitular" value="${escapeHtml(c.pixNomeTitular||'')}"></div>
           <div><label>Banco</label><input type="text" id="ed-pixBanco" value="${escapeHtml(c.pixBanco||'')}"></div>
