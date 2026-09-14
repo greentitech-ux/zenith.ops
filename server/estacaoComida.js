@@ -291,8 +291,21 @@ function sanitizarNumero(v) {
   if (!(n > 0) || n > 999999) throw new Error('Número de comanda inválido.');
   return n;
 }
-function sanitizarMesa(v) {
-  if (v === null || v === undefined || v === '') return null;
+// MESA E' OBRIGATORIA (decisao do Master, 14/09/2026).
+//
+// Muda o desenho original: a comanda continua sendo a unidade atomica (cada
+// pessoa e' uma conta), mas ela nasce JA numa mesa em vez de ser vinculada
+// depois. O motivo e' o QR Code: cada mesa tem o seu, colado nela, e ler o
+// codigo tem de responder "quem esta aqui e quanto deu" - comanda sem mesa nao
+// aparece em QR nenhum e vira dinheiro que ninguem acha.
+//
+// definirMesa() continua existindo: a pessoa troca de mesa, e o cartao vai
+// junto. O que deixou de existir e' comanda SEM mesa.
+function sanitizarMesa(v, { obrigatoria = false } = {}) {
+  if (v === null || v === undefined || v === '') {
+    if (obrigatoria) throw new Error('Informe a mesa: é ela que o QR Code identifica, e é por ela que a conta é encontrada.');
+    return null;
+  }
   const n = Math.trunc(num(v));
   if (!(n > 0) || n > 9999) throw new Error('Número de mesa inválido.');
   return n;
@@ -300,6 +313,10 @@ function sanitizarMesa(v) {
 
 async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, porEmail, agora = new Date() }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
+  // A MESA VEM PRIMEIRO, antes de qualquer leitura: é ela que o QR Code
+  // identifica. Barrar aqui também custa zero no Firestore - comanda sem mesa
+  // nem chega a consultar número repetido nem tabela de preço (§3).
+  const mesaN = sanitizarMesa(mesa, { obrigatoria: true });
   const n = sanitizarNumero(numero);
   const tipo = TIPOS_RODIZIO.includes(tipoRodizio) ? tipoRodizio : null;
   if (!tipo) throw new Error('Escolha se a comanda é rodízio adulto ou criança.');
@@ -330,7 +347,7 @@ async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, p
     numero: n,
     data,
     status: 'ABERTA',
-    mesa: sanitizarMesa(mesa),
+    mesa: mesaN,
     tipoRodizio: tipo,
     turno,              // almoço ou jantar, pela hora em que ela foi aberta
     precoRodizio,       // congelado aqui: mudar a tabela não reescreve o passado
@@ -350,7 +367,7 @@ async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, p
 async function definirMesa(id, mesa, porEmail) {
   const comanda = await getComanda(id);
   if (comanda.status !== 'ABERTA') throw new Error('Essa comanda já foi fechada.');
-  const nova = sanitizarMesa(mesa);
+  const nova = sanitizarMesa(mesa, { obrigatoria: true });
   const anterior = comanda.mesa || null;
   // só registra TROCA de verdade: salvar a mesma mesa de novo não é evento
   const historicoMesa = anterior === nova
