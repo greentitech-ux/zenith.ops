@@ -16647,7 +16647,10 @@ setTimeout(async () => {
       'Master APROVA: arquiva e some de todas as listas': aprovou.status === 200 && JSON.parse(aprovou.corpo).tarefa.status === 'ARQUIVADA' && !sumiuU && !sumiuM,
       'Master exclui direto pelo DELETE (arquiva)': apagou.status === 200 && !sumiuDir,
       'listarMinhas esconde CANCELADA de quem não é Master (na fonte)': /tarefa\.status !== 'CANCELADA' \|\| acesso\.isMaster/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
-      'a tela tem botão Cancelar e Excluir/Pedir exclusão': /id="BTNCANCEL"[^>]*onclick="cancelarTarefa\(\)"/.test(html) && /id="BTNDEL"[^>]*onclick="excluirTarefa\(\)"/.test(html) && /CTX\.isMaster\?'🗑 Excluir':'🗑 Pedir exclusão'/.test(html),
+      // a linha de ações virou só-ícone: o rótulo que antes era o texto do
+      // botão agora é o balão (data-dica) e o leitor de tela (aria-label). A
+      // GARANTIA é a mesma - a tela oferece a ação e diz o nome dela.
+      'a tela tem botão Cancelar e Excluir/Pedir exclusão': /id="BTNCANCEL"[^>]*onclick="cancelarTarefa\(\)"/.test(html) && /id="BTNDEL"[^>]*onclick="excluirTarefa\(\)"/.test(html) && /id="BTNCANCEL" class="btn-icone" data-dica="Cancelar tarefa" aria-label="Cancelar tarefa"/.test(html) && /rotuloIcone\('BTNDEL',CTX\.isMaster\?'Excluir':'Pedir exclusão'\)/.test(html),
       'a coluna Cancelados existe e só aparece pro Master': /id="COLX"[^>]*hidden><h2>Cancelados/.test(html) && /\$\('COLX'\)\.hidden=!CTX\.isMaster/.test(html) && /if\(t\.status==='CANCELADA'\)return'X'/.test(html),
       // (atualizado) o fechar agora e' o ✕ redondo flutuante da quina, FORA da caixa
       // que rola - por construcao nunca some no scroll; o titulo continua sticky
@@ -17401,7 +17404,9 @@ setTimeout(async () => {
       'tarefa real de outra pessoa não entra no relatório de quem pediu': relIntruso.status === 400 && /Nenhuma tarefa no filtro/i.test(JSON.parse(relIntruso.corpo).error || ''),
       'relatório sem nenhuma tarefa é recusado com motivo': relVazio.status === 400 && /Nenhuma tarefa no filtro/i.test(JSON.parse(relVazio.corpo).error || ''),
       'a tela deixa marcar ocorrência e filtrar só por elas': /id="OCOR"/.test(html) && /ehOcorrencia:MODO_REUNIAO\?false:\$\('OCOR'\)\.checked/.test(html) && /if\(v==='__ocorrencia'\)return !!t\.ehOcorrencia;/.test(html),
-      'e oferece ver antes de baixar nos dois PDFs': /onclick="pdfDaTarefa\(false\)">👁 Ver PDF</.test(html) && /onclick="pdfDaLista\(false\)">👁 Ver relatório do filtro</.test(html),
+      // o da TAREFA virou só-ícone (o nome foi pro balão); o do FILTRO fica
+      // com texto, que é botão de barra e não de linha de ação
+      'e oferece ver antes de baixar nos dois PDFs': /data-dica="Ver PDF" aria-label="Ver PDF" onclick="pdfDaTarefa\(false\)">👁</.test(html) && /onclick="pdfDaLista\(false\)">👁 Ver relatório do filtro</.test(html),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPdfMD = !falhas.length;
@@ -19218,8 +19223,13 @@ setTimeout(async () => {
       'só foco de TECLADO mostra (clique e toque também focam - era isso que prendia o balão)':
         /matches\(':focus-visible'\)/.test(temaCodigo),
       'respeita quem pediu menos animação': /@media \(prefers-reduced-motion:reduce\)/.test(bloco),
+      // a regra existe por causa do ACENTO: no tema Claro o tema.js troca
+      // --accent, e cor cravada escapa da troca. O #0b0d10 do texto SOBRE o
+      // acento é o contrário disso - a CLAUDE.md crava ele de propósito
+      // ("Texto sobre o acento é sempre #0b0d10"), e ele não pode virar token
+      // de fundo, senão no Claro o rótulo sairia branco em cima do limão.
       'toda cor está dentro de var(--token,…), nenhuma solta':
-        !/#[0-9a-f]{6}/i.test(bloco.replace(/var\(--[a-z0-9-]+,\s*#[0-9a-f]{6}\)/gi, ''))
+        !/#[0-9a-f]{6}/i.test(bloco.replace(/var\(--[a-z0-9-]+,\s*#[0-9a-f]{6}\)/gi, '').replace(/color:#0b0d10;/g, ''))
         && (bloco.match(/var\(--/g) || []).length >= 8,
       'o botão só-ícone é quadrado e sem relevo':
         /\.btn-icone\{width:34px;height:34px;/.test(bloco) && /\.btn-icone:hover\{border-color:var\(--accent/.test(bloco),
@@ -20675,6 +20685,106 @@ setTimeout(async () => {
   } catch (e) { okHoraLog = false; console.log('  erro: ' + e.message); }
   if (!okHoraLog) ruins += 1;
   console.log(`${okHoraLog ? '✓' : '✗'} Acesso remoto: a hora do log do AnyDesk (UTC) vira hora de Brasília antes de virar alarme`);
+
+  // ---------------------------------------------------------------------
+  // Tela de tarefas: buscar nome, link da reunião e ações só-ícone
+  // Master (14/09), três pedidos sobre a MESMA tela:
+  //   "um campo para pesquisar o nome já que e muitos as vezes"
+  //   "tem o botao de criacao automatica do link da reuniao mas pra onde esse
+  //    link vai ? nao aparece apos criado"
+  //   "seguir com o padrao de deixar so o icone e o houver com o nome"
+  // ---------------------------------------------------------------------
+  let okTarefasTela = false;
+  try {
+    const tar = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tarefas.html'), 'utf8');
+    const tj = require('fs').readFileSync(require('path').join(__dirname, 'tarefas.js'), 'utf8');
+    const temaT = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    const acoesT = (tar.match(/<div class="actions">[\s\S]*?<\/div>/) || [''])[0];
+    const iconesT = acoesT.match(/<button[^>]*>/g) || [];
+    const conf = {
+      // --- buscar nome ---
+      // O RISCO da busca é apagar escolha: se o filtro redesenhasse a lista,
+      // quem marcasse 3 nomes e depois digitasse o quarto salvaria só esse.
+      // Por isso o filtro só ESCONDE a linha (classe .oculto) - o checkbox
+      // continua no DOM, marcado, e entra no salvar.
+      'o filtro esconde a linha, nunca redesenha a lista':
+        /l\.classList\.toggle\('oculto', ?!bate\)/.test(tar)
+        && /\.checklist label\.oculto\{display:none\}/.test(tar)
+        && !/innerHTML=/.test((tar.match(/function filtrarNomes\([\s\S]*?\n(?=function )/) || [''])[0].replace(/conta\.innerHTML=[^\n]*/, '')),
+      // marcado que fica fora da busca some da vista - a contagem é o que
+      // impede a pessoa de achar que perdeu a escolha
+      'a contagem diz quantos estão marcados e quantos ficaram fora da busca':
+        /marcados\+\+;if\(!bate\)ocultosMarcados\+\+/.test(tar)
+        && /ocultosMarcados\?` · \$\{ocultosMarcados\} fora da busca`/.test(tar),
+      'busca sem acento acha nome com acento':
+        /normalize\('NFD'\)\.replace\(\/\[\\u0300-\\u036f\]\/g,''\)/.test(tar),
+      'numa lista curta o campo nem aparece':
+        /const LIMIAR_BUSCA_NOMES=6;/.test(tar)
+        && /lista\.length>=LIMIAR_BUSCA_NOMES\?campoBuscaNomes\('COLABBUSCA'/.test(tar)
+        && /lista\.length>=LIMIAR_BUSCA_NOMES\?campoBuscaNomes\('EQBUSCA'/.test(tar),
+      'as DUAS listas de participantes têm busca (criar e alterar depois)':
+        /campoBuscaNomes\('COLABBUSCA','COLAB','COLABCONTA'\)/.test(tar)
+        && /campoBuscaNomes\('EQBUSCA','EQLISTA','EQCONTA'\)/.test(tar),
+      'busca que não acha ninguém diz isso, em vez de caixa vazia':
+        /nada\.textContent='Nenhum nome com "'\+texto\.trim\(\)\+'\."'?/.test(tar.replace(/\.'\)/g, ".'")) || /Nenhum nome com/.test(tar),
+      // --- link da reunião ---
+      // ele JÁ era gerado e gravado desde sempre; o que faltava era mostrar
+      'o link já era gerado e gravado na criação': /linkReuniao: colado \? limparLinkColado\(linkReuniao\) : gerarLinkReuniao\(\)/.test(tj),
+      'e agora aparece no detalhe, com Entrar, copiar e a URL à vista':
+        /<div id="REUNIAODET" class="info reuniao-box" hidden><\/div>/.test(tar)
+        && /function pintarReuniao\(\)/.test(tar) && /pintarReuniao\(\);pintarEquipe\(\)/.test(tar)
+        && /▶ Entrar<\/a>/.test(tar) && /data-dica="Copiar link"/.test(tar)
+        && /<code class="reuniao-url">/.test(tar),
+      'link abre em aba nova sem entregar a página de origem':
+        /target="_blank" rel="noopener noreferrer"/.test(tar),
+      'tarefa que não é reunião não ganha o bloco':
+        /if\(!O\|\|!O\.ehReuniao\)\{cx\.hidden=true;cx\.innerHTML='';return\}/.test(tar),
+      // o link é credencial: quem tem o link entra. Fica na tela e no chat da
+      // Beni (quem pediu a reunião), NUNCA no PDF nem no relatório.
+      'o link continua fora do PDF e do relatório':
+        !/linkReuniao/.test(require('fs').readFileSync(require('path').join(__dirname, 'tarefaRelatorio.js'), 'utf8'))
+        && /trate como senha/.test(tar),
+      // --- ações só-ícone (o mesmo mecanismo da ficha da máquina) ---
+      'a linha de ações da tarefa virou só-ícone, sem sobrar botão com texto':
+        !!acoesT && iconesT.length >= 8 && !/class="btn(\s|")/.test(acoesT),
+      'todo ícone tem balão E leitor de tela, com o MESMO rótulo':
+        iconesT.length >= 8 && iconesT.every((attr) => {
+          const dica = (attr.match(/data-dica="([^"]*)"/) || [])[1];
+          const aria = (attr.match(/aria-label="([^"]*)"/) || [])[1];
+          return dica && aria && dica === aria;
+        }),
+      'sem title nativo por cima do balão': !/title="/.test(acoesT),
+      'excluir é o único em vermelho': (acoesT.match(/btn-icone perigo/g) || []).length === 1,
+      // Master exclui, os outros PEDEM exclusão: o rótulo muda pros dois
+      // canais juntos (balão e leitor de tela), não só pro texto que sumiu
+      'o 🗑 que muda de rótulo muda balão e leitor de tela juntos':
+        /function rotuloIcone\(id,texto\)\{[^}]*setAttribute\('data-dica',texto\);[^}]*setAttribute\('aria-label',texto\)/.test(tar)
+        && /rotuloIcone\('BTNDEL',CTX\.isMaster\?'Excluir':'Pedir exclusão'\)/.test(tar),
+      // a ação principal continua sendo a principal depois de virar ícone
+      'concluir e reabrir seguem no acento, e o acento vem do token':
+        /id="BTNCON" class="btn-icone principal"/.test(tar) && /id="BTNREABRIR" class="btn-icone principal"/.test(tar)
+        && /\.btn-icone\.principal\{background:var\(--accent,#b8ff3c\);border-color:var\(--accent,#b8ff3c\);color:#0b0d10;\}/.test(temaT),
+      'e nenhuma dessas telas tem CSS de balão próprio': !/\[data-dica\]::after/.test(tar),
+      // --- quando, sempre em destaque ---
+      // Master (14/09): "data e hora sempre destacado ou so data mas sempre
+      // destacado / uma cor mais chamativa". As DUAS formas - reunião com hora
+      // e tarefa só com o dia - saem do mesmo <b class="prazo">.
+      'o quando do card sai destacado nas duas formas (com hora e só o dia)':
+        /<b class="prazo\$\{venceu\?' late':''\}">\$\{quando\}<\/b>/.test(tar)
+        && /x\.ehReuniao\?`\$\{x\.dataEntrega\.split\('-'\)\.reverse\(\)\.join\('\/'\)\} às \$\{e\(x\.horaInicio\|\|''\)\}`:`previsão /.test(tar),
+      'o destaque vem do token, nunca do hex cravado':
+        /\.prazo\{color:var\(--accent\);/.test(tar) && !/\.prazo\{[^}]*#b8ff3c/.test(tar),
+      // gravidade não pode virar marca: prazo vencido continua vermelho
+      'prazo vencido continua no vermelho de gravidade, não no acento':
+        /\.prazo\.late\{color:var\(--bad\)\}/.test(tar)
+        && /const venceu=!!x\.dataEntrega&&x\.dataEntrega<hoje\(\)&&!\['CONCLUIDA','CANCELADA','ARQUIVADA'\]\.includes\(x\.status\)/.test(tar),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTarefasTela = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTarefasTela = false; console.log('  erro: ' + e.message); }
+  if (!okTarefasTela) ruins += 1;
+  console.log(`${okTarefasTela ? '✓' : '✗'} Tarefas: buscar nome na lista, link da reunião à vista e ações só-ícone`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
