@@ -12153,6 +12153,14 @@ setTimeout(async () => {
       'o agente baixa da URL da PRÓPRIA máquina (quem escolhe a marca é o servidor)':
         /\$UrlPapelDeParede = "[^"]*\/api\/loja-status\/PPDOM\/computadores\/PC1\/papel-de-parede"/.test(psPp)
         && /Invoke-WebRequest -Uri \$UrlPapelDeParede -Headers \$CabecalhosAgente/.test(psPp),
+      // decisao do Master: centralizado, logo abaixo da marca (o modelo que ele
+      // mandou). O agente nao enxerga a arte - a posicao e' convencao, e a tela
+      // avisa pra arte deixar a faixa livre
+      'o nome sai centralizado a 60% da altura, e a tela avisa pra deixar a faixa livre':
+        /\$y = \[int\]\(\$img\.Height \* 0\.60\)/.test(psPp)
+        && /\$x = \(\$img\.Width - \$tamNome\.Width\) \/ 2/.test(psPp)
+        && /\$xSub = \(\$img\.Width - \$tamSub\.Width\) \/ 2/.test(psPp)
+        && /centralizado, a 60% da altura/.test(htmlPp),
       'o agente carimba o nome da máquina na arte':
         /function Carimbar-NomeNaArte/.test(psPp) && /\$nome = \$env:COMPUTERNAME/.test(psPp)
         && /\$UnidadePosto = "PPDOM \/ PC1"/.test(psPp),
