@@ -14685,6 +14685,69 @@ setTimeout(async () => {
   console.log(`${okEstoqueExport ? '✓' : '✗'} Estoque/Inventário: CSV/PDF em Saída e Histórico de contagens (faltavam)`);
 
   // ------------------------------------------------------------------
+  // FILTRO DE PERIODO: janela que anda, alterna, e nao e' desfeita pelo
+  // guarda-rascunho. Relato do Master: "quando clica em mes trava e buga...
+  // mes ele entende que e o mes atual e na verdade e para ser de mes em mes;
+  // quando marcar alguma opcao precisa ter como desmarcar clicando novamente".
+  //
+  // O "trava" nao era do estoque.html: era o guarda-rascunho do tema.js
+  // reescrevendo TODO campo da pagina a cada mutacao do DOM. O botao gravava o
+  // periodo novo, o redesenho mexia no DOM e no quadro seguinte as datas
+  // antigas voltavam - o filtro dizia "Mes" e as datas eram outras. Por isso a
+  // trava principal esta no tema.js: campo que continuou vivo na tela nunca
+  // precisou ser restaurado.
+  let okPeriodoPreset = false;
+  try {
+    const fsP = require('fs'), pathP = require('path');
+    const htmlE = fsP.readFileSync(pathP.join(__dirname, 'public', 'estoque.html'), 'utf8');
+    const temaP = fsP.readFileSync(pathP.join(__dirname, 'public', 'tema.js'), 'utf8');
+
+    // roda a MESMA funcao da tela, extraida do HTML - regex sobre o texto
+    // provaria que a linha existe, nao que a conta esta certa
+    const fonte = htmlE.match(/function calcularPreset\([\s\S]*?\n\}\n\/\/ setMonth\(\)[\s\S]*?\nfunction recuarMeses\([\s\S]*?\n\}/);
+    const calc = new Function(`
+      const isoLocal = (d) => \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`;
+      ${fonte ? fonte[0] : 'function calcularPreset(){ return {}; }'}
+      return calcularPreset;
+    `)();
+    const p = (t, hoje) => calc(t, hoje);
+
+    const conf = {
+      'nenhum período termina no futuro (o mês do calendário pedia dia que nem aconteceu)':
+        ['ontem', 'semana', 'mes', 'trimestre'].every((t) => p(t, '2026-09-14').fim <= '2026-09-14'),
+      'Mês é de mês em mês, terminando hoje':
+        p('mes', '2026-09-14').inicio === '2026-08-14' && p('mes', '2026-09-14').fim === '2026-09-14',
+      // no dia 1o, o "mes do calendario" mostrava UM dia so
+      'no dia 1º o Mês continua sendo um mês inteiro':
+        p('mes', '2026-09-01').inicio === '2026-08-01' && p('mes', '2026-09-01').fim === '2026-09-01',
+      // setMonth() sozinho vira "31 de fevereiro" = 3 de marco: a janela de um
+      // mes viraria tres dias, e ninguem olharia duas vezes pro numero
+      'dia 31 não estoura pro mês seguinte (31/03 volta pra 28/02, não pra 03/03)':
+        p('mes', '2026-03-31').inicio === '2026-02-28' && p('trimestre', '2026-05-31').inicio === '2026-02-28',
+      'Semana são 7 dias contando com hoje':
+        p('semana', '2026-09-14').inicio === '2026-09-08',
+      'Ontem continua sendo um dia só (é pra olhar uma contagem específica)':
+        p('ontem', '2026-09-14').inicio === '2026-09-13' && p('ontem', '2026-09-14').fim === '2026-09-13',
+      'clicar no período já ativo desmarca, nas duas abas':
+        /if\(PRESET_ATIVO === tipo\)\{ PRESET_ATIVO = null; renderPresetsDif\(\); return; \}/.test(htmlE)
+        && /if\(HIST_PRESET === tipo\)\{ HIST_PRESET = null; renderPresetsHist\(\); return; \}/.test(htmlE),
+      'o Histórico abre no mês (uma semana não tem contagem suficiente pra comparar)':
+        /aplicarPresetHist\('mes'\)/.test(htmlE) && !/aplicarPresetHist\('semana'\)/.test(htmlE),
+      // A CAUSA do "trava": varredura geral a cada mutacao do DOM
+      'o guarda-rascunho só restaura campo que acabou de nascer, não a página toda':
+        /mudancas\.forEach\(function \(m\) \{ m\.addedNodes\.forEach\(aplicarEm\); \}\);\s*\}\)\.observe/.test(temaP),
+      'a tela avisa o guarda-rascunho quando ela mesma escreve no campo':
+        /sincronizar: sincronizar/.test(temaP)
+        && (htmlE.match(/window\.zenithRascunhos\?\.sincronizar\(\[ci, cf\]\)/g) || []).length === 2,
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okPeriodoPreset = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPeriodoPreset = false; console.log('  erro: ' + e.message); }
+  if (!okPeriodoPreset) ruins += 1;
+  console.log(`${okPeriodoPreset ? '✓' : '✗'} Filtro de período: janela que anda até hoje, clique que desmarca, e o rascunho parando de desfazer o filtro`);
+
+  // ------------------------------------------------------------------
   // Nome da unidade em destaque proprio (amarelo/negrito/maior) em qualquer
   // card ou detalhe de ticket/chamado - pedido do usuario ao ver o nome da
   // loja se misturando com email/data na mesma cor. Token+classe moram no

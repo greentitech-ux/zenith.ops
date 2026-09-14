@@ -596,13 +596,34 @@ function agoraBrasilia(){
   return new Date(`${o.year}-${o.month}-${o.day}T${hora}:${o.minute}:${o.second}`);
 }
 function hojeBrasilia(){ return isoLocal(agoraBrasilia()); }
+// JANELA QUE ANDA, e nao mes/semana de calendario.
+//
+// Como era: "Mes" = do dia 1 ao ultimo dia do mes atual; "Semana" = de domingo
+// a sabado. Dois problemas de uso real. O periodo terminava no FUTURO - dia 14
+// pedia contagem ate 30, metade do filtro em dias que nem aconteceram. E no
+// dia 1o do mes, "Mes" mostrava um dia so.
+//
+// Agora todos terminam HOJE e andam pra tras: e o "de mes em mes" que ele
+// pediu. Ontem continua sendo um dia so, de proposito - e o unico que serve
+// pra olhar uma contagem especifica.
 function calcularPreset(tipo, refIso){
   const ref = new Date(refIso+'T00:00:00');
   if(tipo==='ontem'){ const o=new Date(ref); o.setDate(o.getDate()-1); return {inicio:isoLocal(o),fim:isoLocal(o)}; }
-  if(tipo==='semana'){ const dow=ref.getDay(); const i=new Date(ref); i.setDate(ref.getDate()-dow); const f=new Date(i); f.setDate(i.getDate()+6); return {inicio:isoLocal(i),fim:isoLocal(f)}; }
-  if(tipo==='mes'){ const i=new Date(ref.getFullYear(),ref.getMonth(),1); const f=new Date(ref.getFullYear(),ref.getMonth()+1,0); return {inicio:isoLocal(i),fim:isoLocal(f)}; }
-  const i=new Date(ref.getFullYear(),ref.getMonth()-2,1); const f=new Date(ref.getFullYear(),ref.getMonth()+1,0);
-  return {inicio:isoLocal(i),fim:isoLocal(f)};
+  // -6 e nao -7: a janela INCLUI hoje, entao sao 7 dias contando com ele
+  if(tipo==='semana'){ const i=new Date(ref); i.setDate(ref.getDate()-6); return {inicio:isoLocal(i),fim:isoLocal(ref)}; }
+  return {inicio:isoLocal(recuarMeses(ref, tipo==='mes' ? 1 : 3)), fim:isoLocal(ref)};
+}
+// setMonth() sozinho ESTOURA: em 31/03, voltar um mes daria "31 de fevereiro",
+// que o JavaScript converte pra 03/03 - a janela de um mes viraria tres dias.
+// Quando o dia nao existe no mes de destino, vale o ultimo dia dele.
+function recuarMeses(ref, meses){
+  const d = new Date(ref);
+  const dia = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - meses);
+  const ultimoDia = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(dia, ultimoDia));
+  return d;
 }
 
 // setores/tipos vem do servidor agora (fixos + os que o Master for
@@ -1496,11 +1517,17 @@ function renderPresetsDif(){
     `<button type="button" class="preset-btn ${PRESET_ATIVO===tipo?'active':''}" onclick="aplicarPresetDif('${tipo}')">${rotulo}</button>`
   ).join('');
 }
+// Clicar no botao JA ativo desmarca (pedido do Master). As datas ficam onde
+// estao: quem desmarca quer editar o periodo na mao, nao perder o que via.
 function aplicarPresetDif(tipo){
+  if(PRESET_ATIVO === tipo){ PRESET_ATIVO = null; renderPresetsDif(); return; }
   PRESET_ATIVO = tipo;
   const {inicio,fim} = calcularPreset(tipo, hojeBrasilia());
-  document.getElementById('d-inicio').value = inicio;
-  document.getElementById('d-fim').value = fim;
+  const ci = document.getElementById('d-inicio'), cf = document.getElementById('d-fim');
+  ci.value = inicio; cf.value = fim;
+  // sem isto o guarda-rascunho do tema.js devolveria o periodo antigo se os
+  // campos forem recriados depois - foi o que travava o filtro
+  window.zenithRascunhos?.sincronizar([ci, cf]);
   renderPresetsDif();
   carregarDiferencas();
 }
@@ -1534,10 +1561,12 @@ function renderPresetsHist(){
   ).join('');
 }
 function aplicarPresetHist(tipo){
+  if(HIST_PRESET === tipo){ HIST_PRESET = null; renderPresetsHist(); return; }
   HIST_PRESET = tipo;
   const {inicio,fim} = calcularPreset(tipo, hojeBrasilia());
-  document.getElementById('h-inicio').value = inicio;
-  document.getElementById('h-fim').value = fim;
+  const ci = document.getElementById('h-inicio'), cf = document.getElementById('h-fim');
+  ci.value = inicio; cf.value = fim;
+  window.zenithRascunhos?.sincronizar([ci, cf]);
   renderPresetsHist();
   carregarHistorico();
 }
@@ -1548,7 +1577,10 @@ function iniciarHistorico(){
     // setores no filtro
     document.getElementById('h-setor').innerHTML = '<option value="">Todos os setores</option>' +
       ORDEM_SETORES.map(s=>`<option value="${s}">${escapeHtml(SETORES[s])}</option>`).join('');
-    aplicarPresetHist('semana'); // padrao: última semana
+    // padrao: o ultimo mes. A semana mostrava 2 ou 3 colunas - a loja nao
+    // conta todo dia, entao uma semana costuma nao ter contagem suficiente
+    // pra comparar nada.
+    aplicarPresetHist('mes');
     return;
   }
   carregarHistorico();
