@@ -25,7 +25,7 @@
 .sub-check:disabled{cursor:default;opacity:.5}
 .sub-item span.sub-nome{flex:1;min-width:0;line-height:1.35;overflow-wrap:anywhere}
 .sub-item.feita span.sub-nome{color:var(--muted);text-decoration:line-through}
-.sub-chip{flex:none;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:999px;padding:3px 9px;font:11px var(--mono);cursor:pointer;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.sub-chip{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:34px;min-height:26px;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:999px;padding:3px 9px;font:11px var(--mono);cursor:pointer;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 .sub-chip:hover{border-color:var(--accent);color:var(--accent)}
 .sub-chip.tem{border-style:solid;border-color:var(--line);color:var(--text)}
 .sub-chip.tem.atrasada{color:var(--bad);border-color:var(--bad)}
@@ -34,6 +34,7 @@
 .sub-x:hover{color:var(--bad)}
 /* a gaveta que abre embaixo da linha quando se clica num chip */
 .sub-edita{display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:10px 2px 12px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+.sub-edita>.sub-x{margin-left:auto;align-self:center}
 .sub-edita label{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:grid;gap:4px}
 .sub-edita input,.sub-edita select{margin:0;height:36px;min-width:150px}
 @media(max-width:700px){.sub-chip{max-width:96px}.sub-edita input,.sub-edita select{min-width:0;width:100%}.sub-edita label{flex:1 1 100%}}
@@ -561,11 +562,20 @@ function dataCurta(iso){
   const [,m,d] = iso.split('-');
   return `${d} ${['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m)-1]}`;
 }
+// SVG de traço, não emoji: o 🗓 sai como um quadradinho com um "1" dentro no
+// Windows do Master (o print dele mostra isso). Um desenho de 14px, na cor do
+// texto ao redor, é o que o Asana usa e é o que sobrevive a qualquer fonte.
+const ICONE_DATA = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>';
+const ICONE_PESSOA = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px"><circle cx="12" cy="8" r="3.6"/><path d="M4.6 20a7.4 7.4 0 0 1 14.8 0"/></svg>';
 function iniciais(nome){
   const p = String(nome||'').trim().split(/\s+/).filter(Boolean);
   return ((p[0]||'?')[0] + (p.length>1 ? p[p.length-1][0] : '')).toUpperCase();
 }
-let SUB_ABERTA = null; // id do passo com a gaveta de edição aberta
+// {id, aba} do passo com a gaveta aberta. A ABA importa: os dois chips faziam
+// a mesma coisa (abriam tudo), e o Master reclamou com razão - quem clica no
+// calendário quer datar, quem clica na pessoa quer atribuir. Um clique, um
+// campo.
+let SUB_ABERTA = null;
 function pintarSubtarefas(){
   const lista = (O && O.subtarefas) || [];
   const feitas = lista.filter(x=>x.feita).length;
@@ -582,22 +592,26 @@ function pintarSubtarefas(){
     const linha = `<div class="sub-item${x.feita?' feita':''}">
       <button type="button" class="sub-check" aria-pressed="${x.feita?'true':'false'}" ${pode?'':'disabled'} onclick="marcarSub('${e(x.id)}',${x.feita?'false':'true'})" aria-label="${x.feita?'Desmarcar':'Concluir'} ${e(x.titulo)}" data-dica="${x.feita&&x.feitaPorNome?('Feita por '+e(x.feitaPorNome)):(x.feita?'Feita':'Marcar como feita')}">✓</button>
       <span class="sub-nome">${e(x.titulo)}</span>
-      <button type="button" class="sub-chip${rotuloData?' tem':''}${atrasada?' atrasada':''}" onclick="abrirEdicaoSub('${e(x.id)}')" data-dica="${e(dica)}" aria-label="Datas da subtarefa">${rotuloData||'🗓'}</button>
-      <button type="button" class="sub-chip pessoa${x.responsavelNome?' tem':''}" onclick="abrirEdicaoSub('${e(x.id)}')" data-dica="${x.responsavelNome?('Com '+e(x.responsavelNome)):'Definir responsável'}" aria-label="Responsável pela subtarefa">${x.responsavelNome?e(iniciais(x.responsavelNome)):'👤'}</button>
+      <button type="button" class="sub-chip${rotuloData?' tem':''}${atrasada?' atrasada':''}" onclick="abrirEdicaoSub('${e(x.id)}','data')" data-dica="${e(dica)}" aria-label="Datas da subtarefa">${rotuloData||ICONE_DATA}</button>
+      <button type="button" class="sub-chip pessoa${x.responsavelNome?' tem':''}" onclick="abrirEdicaoSub('${e(x.id)}','pessoa')" data-dica="${x.responsavelNome?('Com '+e(x.responsavelNome)):'Definir responsável'}" aria-label="Responsável pela subtarefa">${x.responsavelNome?e(iniciais(x.responsavelNome)):ICONE_PESSOA}</button>
       <button type="button" class="sub-x" onclick="removerSub('${e(x.id)}')" aria-label="Remover subtarefa" data-dica="Remover subtarefa">✕</button>
     </div>`;
-    if(SUB_ABERTA!==x.id) return linha;
-    return linha + `<div class="sub-edita">
-      <label>Início<input type="date" value="${e(x.dataInicio||'')}" ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','dataInicio',this.value)"></label>
-      <label>Previsão<input type="date" value="${e(x.dataEntrega||'')}" ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','dataEntrega',this.value)"></label>
-      <label>Responsável<select ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','responsavelId',this.value)"><option value="">Ninguém ainda</option>${[...gente].map(([id,nome])=>`<option value="${e(id)}"${id===x.responsavelId?' selected':''}>${e(nome)}</option>`).join('')}</select></label>
-      <button type="button" class="btn" onclick="abrirEdicaoSub(null)">Fechar</button>
-    </div>`;
+    if(!SUB_ABERTA || SUB_ABERTA.id!==x.id) return linha;
+    const campos = SUB_ABERTA.aba==='pessoa'
+      ? `<label>Responsável<select ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','responsavelId',this.value)"><option value="">Ninguém ainda</option>${[...gente].map(([id,nome])=>`<option value="${e(id)}"${id===x.responsavelId?' selected':''}>${e(nome)}</option>`).join('')}</select></label>`
+      : `<label>Início<input type="date" value="${e(x.dataInicio||'')}" ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','dataInicio',this.value)"></label>
+         <label>Previsão<input type="date" value="${e(x.dataEntrega||'')}" ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','dataEntrega',this.value)"></label>`;
+    return linha + `<div class="sub-edita">${campos}<button type="button" class="sub-x" onclick="abrirEdicaoSub(null)" aria-label="Fechar" data-dica="Fechar">✕</button></div>`;
   }).join('') : '<div class="empty">Sem subtarefas. Quebre a tarefa nos passos que ela realmente tem.</div>';
 }
 // abre UMA gaveta por vez: duas abertas fariam a lista pular na tela a cada
 // clique, e o passo que interessa sumiria pra baixo
-function abrirEdicaoSub(id){ SUB_ABERTA = (SUB_ABERTA===id ? null : id); pintarSubtarefas(); }
+// clicar no mesmo chip de novo fecha; clicar no outro chip TROCA de aba sem
+// fechar - senão datar e atribuir viraria abrir, fechar, abrir
+function abrirEdicaoSub(id, aba){
+  SUB_ABERTA = (!id || (SUB_ABERTA && SUB_ABERTA.id===id && SUB_ABERTA.aba===aba)) ? null : { id, aba: aba||'data' };
+  pintarSubtarefas();
+}
 async function salvarCampoSub(subId, campo, valor){
   try{
     O = await req('/api/tarefas/'+O.id+'/subtarefas/'+encodeURIComponent(subId),{[campo]:valor},'PUT');

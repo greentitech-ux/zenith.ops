@@ -18928,7 +18928,26 @@ setTimeout(async () => {
       'não dá pra atribuir a subtarefa a quem não está na tarefa': foraDaTarefa.status === 400,
       'previsão antes do início é recusada': aoContrario.status === 400,
       'data em formato inválido é recusada': dataTorta.status === 400,
+      // O DEFEITO QUE ELE VIVEU: a rota devolvia a tarefa CRUA, sem podeGerir -
+      // e podeGerir não existe no documento, é calculado por listarMinhas. A
+      // tela guardava essa resposta e travava tudo como se o usuário não
+      // pudesse nada: depois de marcar um passo, as datas da tarefa ficavam
+      // bloqueadas e o check parava de responder.
+      'a resposta das rotas de subtarefa vem no mesmo formato da lista (com podeGerir)':
+        JSON.parse(datou.corpo).podeGerir === true
+        && JSON.parse(add.corpo).podeGerir === true
+        && JSON.parse(some.corpo).podeGerir === true,
       // ---- tela ----
+      // os dois chips abriam a MESMA coisa - quem clica no calendário quer
+      // datar, quem clica na pessoa quer atribuir
+      'o chip de data e o de pessoa abrem campos diferentes':
+        /abrirEdicaoSub\('\$\{e\(x\.id\)\}','data'\)/.test(htmlT)
+        && /abrirEdicaoSub\('\$\{e\(x\.id\)\}','pessoa'\)/.test(htmlT)
+        && /SUB_ABERTA\.aba==='pessoa'/.test(htmlT),
+      // o emoji 🗓 sai como um quadradinho com "1" dentro no Windows dele
+      'os ícones são SVG de traço, não emoji (o 🗓 não desenha no Windows dele)':
+        /const ICONE_DATA = '<svg/.test(htmlT) && /const ICONE_PESSOA = '<svg/.test(htmlT)
+        && !/\|\|'🗓'/.test(htmlT),
       'o check é o botão redondo do exemplo dele, não uma caixinha quadrada':
         /class="sub-check"/.test(htmlT) && /aria-pressed="\$\{x\.feita\?'true':'false'\}/.test(htmlT)
         && !/<input type="checkbox"[^>]*onchange="marcarSub/.test(htmlT),

@@ -222,9 +222,21 @@ async function listarMinhas(acesso) {
     .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
 }
 
-async function getOne(id) {
+// A tela decide o que desabilitar (prazo, participantes, remover, marcar passo)
+// por `podeGerir` - e esse campo NÃO existe no documento: listarMinhas calcula
+// e pendura. Quem responde com o documento cru devolve `podeGerir: undefined`,
+// e a tela que guardar essa resposta trava tudo como se o usuário não pudesse
+// nada. Foi exatamente o que aconteceu: depois de marcar uma subtarefa, as
+// datas da tarefa ficavam bloqueadas.
+//
+// Então getOne passa a aceitar o acesso e devolver a tarefa do MESMO formato
+// que a lista. Sem acesso, continua devolvendo o documento cru - é o que os
+// chamadores internos (relatório, PDF, sincronização) querem.
+async function getOne(id, acesso) {
   const snap = await COLLECTION.doc(id).get();
-  return snap.exists ? snap.data() : null;
+  if (!snap.exists) return null;
+  const tarefa = snap.data();
+  return acesso ? { ...tarefa, podeGerir: podeGerir(tarefa, acesso) } : tarefa;
 }
 
 function pessoasParaColaboradores(pessoas, responsavelId) {
@@ -326,7 +338,7 @@ async function adicionarSubtarefa(id, acesso, titulo) {
     criadaEm: agora, criadaPorId: acesso.usuario.id, criadaPorNome: nomeUsuario(acesso.usuario),
   };
   await ref.update({ subtarefas: [...lista, item], atualizadoEm: agora });
-  return getOne(id);
+  return getOne(id, acesso);
 }
 const DATA_ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 // Quem pode ser dono de um passo: SÓ quem já está na tarefa (o responsável e
@@ -396,10 +408,10 @@ async function atualizarSubtarefa(id, acesso, subId, patch) {
       mudanca.responsavelNome = permitidos.get(quem);
     }
   }
-  if (!Object.keys(mudanca).length) return getOne(id);
+  if (!Object.keys(mudanca).length) return getOne(id, acesso);
   const nova = lista.map((x) => (x && x.id === String(subId) ? { ...x, ...mudanca } : x));
   await ref.update({ subtarefas: nova, atualizadoEm: agora });
-  return getOne(id);
+  return getOne(id, acesso);
 }
 // nome antigo mantido: era o que a rota chamava quando so existia marcar
 const alternarSubtarefa = (id, acesso, subId, feita) => atualizarSubtarefa(id, acesso, subId, { feita });
@@ -415,7 +427,7 @@ async function removerSubtarefa(id, acesso, subId) {
   if (!podeGerir(tarefa, acesso) && alvo.criadaPorId !== acesso.usuario.id) throw new Error('Só quem criou a subtarefa (ou o dono da tarefa) pode removê-la.');
   const agora = new Date().toISOString();
   await ref.update({ subtarefas: lista.filter((x) => x && x.id !== String(subId)), atualizadoEm: agora });
-  return getOne(id);
+  return getOne(id, acesso);
 }
 
 async function adicionarAnexo(id, acesso, anexo) {
