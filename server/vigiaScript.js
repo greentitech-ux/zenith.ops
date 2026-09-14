@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 58;
+const VERSAO_VIGIA = 59;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -229,13 +229,27 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  }',
     '  # 2) manda o Chrome e o Edge instalarem o app NoPulso (icone na area de trabalho, abre em janela)',
     '  $politica = \'[{"url":"\' + $urlApp + \'","create_desktop_shortcut":true,"default_launch_container":"window"}]\'',
+    // -ErrorAction Stop NAO e detalhe: sem ele, New-Item e New-ItemProperty
+    // falham com erro NAO-TERMINANTE, que try/catch nao pega. O catch abaixo
+    // era decoracao - o erro escapava e o Windows despejava um bloco vermelho
+    // na tela da loja, em ingles, no meio da instalacao.
+    //
+    // E essa falha e ESPERADA em maquina gerenciada: onde a organizacao manda
+    // nas politicas (dominio/Intune), HKCU\Software\Policies e' somente
+    // leitura. Nao ha o que consertar na maquina - o app so nao se instala
+    // sozinho, e o resto do NOCZenith segue normal.
+    '  $okPolitica = 0',
     '  foreach ($raiz in @("HKCU:\\Software\\Policies\\Google\\Chrome", "HKCU:\\Software\\Policies\\Microsoft\\Edge")) {',
     '    try {',
-    '      if (-not (Test-Path $raiz)) { New-Item -Path $raiz -Force | Out-Null }',
-    '      New-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -Value $politica -PropertyType String -Force | Out-Null',
+    '      if (-not (Test-Path $raiz)) { New-Item -Path $raiz -Force -ErrorAction Stop | Out-Null }',
+    '      New-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -Value $politica -PropertyType String -Force -ErrorAction Stop | Out-Null',
+    '      $okPolitica++',
     '    } catch { Escrever-Log "Nao consegui gravar a politica do app em ${raiz}: $($_.Exception.Message)" }',
     '  }',
-    '  Escrever-Log "App NoPulso: politica de instalacao gravada ($urlApp) - o navegador instala na proxima abertura."',
+    // dizer "gravada" quando nada foi gravado e' pior que nao dizer nada: o log
+    // e' o unico lugar onde se descobre por que o icone nunca apareceu
+    '  if ($okPolitica -gt 0) { Escrever-Log "App NoPulso: politica de instalacao gravada em $okPolitica navegador(es) ($urlApp) - instala na proxima abertura." }',
+    '  else { Escrever-Log "App NoPulso: nenhum navegador aceitou a politica (maquina gerenciada bloqueia HKCU\\Software\\Policies). O icone tem de ser criado na mao, em Chrome > Instalar app." }',
     '}',
     '',
     '$NomeTarefa = "' + nomeTarefa + '"',
@@ -1490,18 +1504,27 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $destino = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-nome.jpg"',
     '  $chave = "HKCU:\\Control Panel\\Desktop"',
     '  if ($ligado) {',
-    '    try { Invoke-WebRequest -Uri $UrlPapelDeParede -Headers $CabecalhosAgente -OutFile $bruto -TimeoutSec 30 -UseBasicParsing } catch { Escrever-Log "Papel de parede: nao baixou ($($_.Exception.Message))"; return }',
-    '    if (-not (Test-Path $bruto)) { return }',
+    '    try { Invoke-WebRequest -Uri $UrlPapelDeParede -Headers $CabecalhosAgente -OutFile $bruto -TimeoutSec 30 -UseBasicParsing } catch { Escrever-Log "Papel de parede: nao baixou ($($_.Exception.Message))"; return $false }',
+    '    if (-not (Test-Path $bruto)) { return $false }',
     '    $destino = Carimbar-NomeNaArte $bruto $destino',
-    '    Set-ItemProperty -Path $chave -Name Wallpaper -Value $destino',
-    '    Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "10"',
-    '    Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0"',
-    '  } else {',
-    '    # desligar NAO apaga a imagem do Windows: so para de forcar a nossa',
-    '    Set-ItemProperty -Path $chave -Name Wallpaper -Value ""',
     '  }',
-    '  rundll32.exe user32.dll,UpdatePerUserSystemParameters 1, True',
+    // Set-ItemProperty tambem falha SEM terminar. Sem o -ErrorAction Stop, uma
+    // maquina que bloqueie a chave despejaria vermelho na tela E o log diria
+    // "aplicado" - e, pior, Sincronizar-Politica marcaria a versao como
+    // aplicada e nunca mais tentaria. Devolve $true/$false pra quem chamou.
+    '  try {',
+    '    if ($ligado) {',
+    '      Set-ItemProperty -Path $chave -Name Wallpaper -Value $destino -ErrorAction Stop',
+    '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "10" -ErrorAction Stop',
+    '      Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
+    '    } else {',
+    '      # desligar NAO apaga a imagem do Windows: so para de forcar a nossa',
+    '      Set-ItemProperty -Path $chave -Name Wallpaper -Value "" -ErrorAction Stop',
+    '    }',
+    '  } catch { Escrever-Log "Papel de parede: o Windows negou a gravacao ($($_.Exception.Message))."; return $false }',
+    '  rundll32.exe user32.dll,UpdatePerUserSystemParameters 1, True | Out-Null',
     '  Escrever-Log "Papel de parede: $(if ($ligado) { "aplicado" } else { "liberado" })."',
+    '  return $true',
     '}',
     '',
     '# SO armazenamento USB (pendrive, HD externo): e por ai que vaza dado e',
@@ -1513,7 +1536,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $svc = "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\USBSTOR"',
     '  if (-not (Test-Path $svc)) { return $false }',
     '  # 4 = desabilitado, 3 = normal (valor de fabrica)',
-    '  Set-ItemProperty -Path $svc -Name Start -Value $(if ($ligado) { 4 } else { 3 }) -Type DWord',
+    '  try { Set-ItemProperty -Path $svc -Name Start -Value $(if ($ligado) { 4 } else { 3 }) -Type DWord -ErrorAction Stop }',
+    '  catch { Escrever-Log "USB: o Windows negou a gravacao ($($_.Exception.Message))."; return $false }',
     '  Escrever-Log "USB (pendrive/HD externo): $(if ($ligado) { "BLOQUEADO" } else { "liberado" })."',
     '  return $true',
     '}',
@@ -1526,8 +1550,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if (-not (Sou-Admin)) { return $false }',
     '  $k = "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"',
     '  if (-not (Test-Path $k)) { return $false }',
-    '  Set-ItemProperty -Path $k -Name ConsentPromptBehaviorUser -Value $(if ($ligado) { 0 } else { 3 }) -Type DWord',
-    '  if ($ligado) { Set-ItemProperty -Path $k -Name EnableLUA -Value 1 -Type DWord }',
+    '  try {',
+    '    Set-ItemProperty -Path $k -Name ConsentPromptBehaviorUser -Value $(if ($ligado) { 0 } else { 3 }) -Type DWord -ErrorAction Stop',
+    '    if ($ligado) { Set-ItemProperty -Path $k -Name EnableLUA -Value 1 -Type DWord -ErrorAction Stop }',
+    '  } catch { Escrever-Log "Instalacao: o Windows negou a gravacao ($($_.Exception.Message))."; return $false }',
     '  Escrever-Log "Instalacao de programa: $(if ($ligado) { "exige Administrador" } else { "liberada" })."',
     '  return $true',
     '}',
@@ -1559,12 +1585,17 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $versao = "$($cfg.versaoAplicacao)"',
     '    if (-not $versao -or $versao -eq "") { $versao = "$($cfg.politicaVersao)" }',
     '    if ((Versao-PoliticaAplicada) -eq $versao) { return }',
-    '    Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
+    '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
     '    # so marca como aplicada quando TUDO que aquela instancia podia fazer',
     '    # deu certo - senao a de boot (que tem admin) nunca mais tentaria',
     '    if ($Servico -and -not ($okUsb -and $okInst)) { Escrever-Log "Politica: sem Administrador, HKLM nao aplicado - tentando de novo depois."; return }',
+    // O papel de parede e' tarefa da instancia de LOGIN (a de boot nem tenta,
+    // SYSTEM nao tem area de trabalho). Se a gravacao falhou, NAO pode marcar
+    // como aplicada: a versao ficaria carimbada e a maquina nunca mais tentaria
+    // - a loja ficaria pra sempre sem o papel de parede, calada.
+    '    if (-not $Servico -and -not $okPapel) { Escrever-Log "Politica: papel de parede nao aplicou - tentando de novo na proxima mudanca."; return }',
     '    Set-Content -Path $CaminhoPolitica -Value $versao -Force',
     '    Escrever-Log "Politica versao $versao aplicada."',
     '  } catch { Escrever-Log "Falha ao sincronizar a politica: $($_.Exception.Message)" }',

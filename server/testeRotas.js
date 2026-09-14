@@ -12011,6 +12011,25 @@ setTimeout(async () => {
         arcComGrupo.caminho !== gbeDepois.caminho && gbeDepois.marca === 'dominos',
       'sem arte do grupo, cai na arte só-da-marca (não fica sem)':
         arcSoMarca.marca === 'dominos' && arcSoMarca.rede === null,
+      // ---- CLASSE DE DEFEITO (o bloco vermelho que ele viu na tela da loja) ----
+      // No PowerShell, New-Item/Set-ItemProperty falham com erro NÃO-TERMINANTE:
+      // sem -ErrorAction Stop o try/catch é decoração, o erro escapa pra tela em
+      // inglês e o código segue como se tivesse dado certo. Em máquina gerenciada
+      // (domínio/Intune) essas chaves são somente leitura, então isso NÃO é caso
+      // raro - é o dia a dia do parque dele.
+      'toda gravação de registro do agente falha de um jeito que o try/catch pega':
+        psPp.split('\n')
+          .filter((l) => /\b(New-ItemProperty|Set-ItemProperty)\b/.test(l) || /New-Item -Path/.test(l))
+          .every((l) => /-ErrorAction Stop/.test(l)),
+      // dizer "gravada" quando nada foi gravado deixa o log inútil justamente
+      // no dia em que alguém for descobrir por que o ícone não apareceu
+      'quando nenhum navegador aceita a política, o log diz isso em vez de "gravada"':
+        /nenhum navegador aceitou a politica/.test(psPp) && /\$okPolitica \+\+|\$okPolitica\+\+/.test(psPp),
+      // se marcasse a versão como aplicada, a máquina NUNCA mais tentaria e a
+      // loja ficaria sem papel de parede pra sempre, calada
+      'papel de parede que não gravou não é marcado como aplicado':
+        /catch \{ Escrever-Log "Papel de parede: o Windows negou a gravacao[^"]*"; return \$false \}/.test(psPp)
+        && /if \(-not \$Servico -and -not \$okPapel\) \{[^}]*return \}/.test(psPp),
       'a tela oferece grupo + marca, e não só marca':
         /optgroup label="Grupo \+ marca"/.test(htmlPp) && /fd\.append\('rede', rede\)/.test(htmlPp),
       'a loja com marca recebe a arte da MARCA, não a do parque':
