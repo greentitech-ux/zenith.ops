@@ -933,6 +933,11 @@
     '.btn-icone:hover{border-color:var(--accent,#b8ff3c);}',
     '.btn-icone:disabled{opacity:.5;cursor:default;}',
     '.btn-icone.perigo:hover{border-color:var(--bad,#ff6b6b);}',
+    // a ação principal da linha continua sendo a principal depois de virar
+    // ícone: mesmo quadrado, só que no acento. O rótulo sobre o acento é o
+    // quase-preto do app, cravado pela CLAUDE.md (e por isso não é token).
+    '.btn-icone.principal{background:var(--accent,#b8ff3c);border-color:var(--accent,#b8ff3c);color:#0b0d10;}',
+    '.btn-icone.principal:hover{filter:brightness(1.08);}',
   ].join('\n');
   document.head.appendChild(dicas);
 
