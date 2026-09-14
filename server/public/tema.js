@@ -480,6 +480,56 @@
   window.maiusc = function (t) {
     return t === null || t === undefined ? t : String(t).toLocaleUpperCase('pt-BR');
   };
+  // ---- painel flutuante que não sai da tela ----
+  // O menu "Todas as unidades" abria ancorado só na ESQUERDA do botão, sem
+  // limite: no celular, com nome comprido ("Dom Car Aero Recife (Domino's
+  // Carrinho Aeroporto Recife)"), metade da lista ficava fora da tela e não
+  // havia como ler nem rolar até ela. Quatro telas tinham a mesma conta
+  // copiada (fechamentos, entregas, iFood, monitor) e as quatro erravam - a
+  // do monitor até tentava corrigir, mas media o painel ainda escondido, e
+  // largura zero faz a guarda passar batido.
+  //
+  // Mesma regra do balão de dica logo acima: ENCOSTA NA BORDA em vez de sair
+  // da tela, e abre pra cima quando não há espaço embaixo.
+  //
+  // Precisa ser chamada com o painel JÁ VISÍVEL - escondido ele mede zero.
+  window.posicionarFlutuante = function (painel, alvo, opcoes) {
+    if (!painel || !alvo) return;
+    var o = opcoes || {};
+    var margem = o.margem == null ? 8 : o.margem;
+    var folga = o.folga == null ? 4 : o.folga;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var r = alvo.getBoundingClientRect();
+    // MEDIR ANTES DE POSICIONAR, e num lugar com espaço. O painel é fixed sem
+    // largura declarada: a largura dele depende de quanto espaço sobra à
+    // direita de onde ele está - e a posição depende da largura. Medindo onde
+    // ele está, a conta sai com a largura errada e o painel para no lugar
+    // errado (foi o que aconteceu: media 329, assentava 340, e sobrava 8px
+    // fora da tela). Encostado na margem esquerda ele tem o máximo de espaço,
+    // então a largura ali é a largura final - o max-width do CSS é que manda.
+    // A altura travada da abertura anterior também sai, senão o painel nunca
+    // volta a crescer.
+    painel.style.maxHeight = '';
+    painel.style.left = margem + 'px';
+    painel.style.top = margem + 'px';
+    var larg = painel.offsetWidth;
+    var alt = painel.offsetHeight;
+    // HORIZONTAL: alinhado pela esquerda do botão, mas sem passar da borda.
+    // O segundo Math.max protege o caso em que nem com a margem cabe - aí a
+    // borda esquerda manda, e o painel fica legível a partir dela.
+    painel.style.left = Math.min(Math.max(margem, r.left), Math.max(margem, vw - larg - margem)) + 'px';
+    // VERTICAL: abre pra baixo; se não couber e couber melhor em cima, sobe.
+    var abaixo = vh - r.bottom - folga - margem;
+    var acima = r.top - folga - margem;
+    var paraCima = alt > abaixo && acima > abaixo;
+    var espaco = paraCima ? acima : abaixo;
+    painel.style.top = (paraCima ? Math.max(margem, r.top - folga - Math.min(alt, espaco)) : r.bottom + folga) + 'px';
+    // e a altura é o que couber: painel que passa do rodapé não tem como ser
+    // rolado até o fim no celular
+    if (espaco > 60) painel.style.maxHeight = Math.floor(espaco) + 'px';
+  };
+
   // NOME DE PESSOA na tela. Sai como <span class="maiusc">, não em maiúsculo
   // de verdade: o texto continua o que está gravado (copiar devolve o
   // original) e um dia dá pra desfazer apagando uma regra de CSS. Escapa o

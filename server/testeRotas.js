@@ -21487,6 +21487,71 @@ setTimeout(async () => {
   if (!okMarcaPdf) ruins += 1;
   console.log(`${okMarcaPdf ? '✓' : '✗'} PDF: a marca do grupo alinhada à margem e acima da linha preta, com a faixa medida`);
 
+  // ---------------------------------------------------------------------
+  // O menu "Todas as unidades" saindo da tela no celular. Master (14/09):
+  // "Bug no mobile" - no print, metade da lista ficava fora da borda direita,
+  // com os nomes cortados pela tela (não por reticência) e sem como rolar.
+  // Causa: o painel era ancorado só na ESQUERDA do botão, sem limite e sem
+  // teto de largura; com nome comprido ("Domino's Carrinho Aeroporto Recife")
+  // ele crescia além dos 360px do aparelho. A conta estava COPIADA em quatro
+  // telas, e as quatro erravam.
+  // ---------------------------------------------------------------------
+  let okPainelFlutuante = false;
+  try {
+    const temaP = require('fs').readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const telas = ['fechamentos', 'entregas', 'ifood', 'monitor'];
+    const fontes = Object.fromEntries(telas.map((t) => [t, require('fs').readFileSync(`${__dirname}/public/${t}.html`, 'utf8')]));
+
+    const conf = {
+      // a conta mora num lugar só - o mesmo arquivo do balão de dica, que já
+      // resolvia exatamente este problema pra outro elemento flutuante
+      'a posição do painel sai do tema.js, não de uma cópia por tela':
+        /window\.posicionarFlutuante = function \(painel, alvo, opcoes\)/.test(temaP)
+        && telas.every((t) => /function posicionar\(\)\{ posicionarFlutuante\(panel, btn\); \}/.test(fontes[t]))
+        && telas.every((t) => !/panel\.style\.left = r\.left/.test(fontes[t]))
+        // a tentativa antiga de clamp do monitor sai junto: media o painel
+        // escondido, e largura zero fazia a guarda passar batido
+        && !/const maxLeft = window\.innerWidth - panel\.offsetWidth - 8;/.test(fontes.monitor),
+      // MEDIR ANTES DE POSICIONAR: o painel é fixed sem largura declarada, e a
+      // largura dele depende de quanto espaço sobra à direita de onde ele
+      // está. Medindo onde ele está, a conta usa a largura errada (media 329,
+      // assentava 340) e sobravam 8px fora da tela.
+      'o painel é medido encostado na margem, antes de ser posicionado':
+        /painel\.style\.left = margem \+ 'px';\s*\n\s*painel\.style\.top = margem \+ 'px';\s*\n\s*var larg = painel\.offsetWidth;/.test(temaP)
+        && temaP.indexOf("var larg = painel.offsetWidth;") < temaP.indexOf("painel.style.left = Math.min("),
+      'encosta na borda em vez de sair da tela, nos dois lados':
+        /painel\.style\.left = Math\.min\(Math\.max\(margem, r\.left\), Math\.max\(margem, vw - larg - margem\)\) \+ 'px';/.test(temaP),
+      'sem espaço embaixo, abre pra cima - e a altura é o que couber':
+        /var paraCima = alt > abaixo && acima > abaixo;/.test(temaP)
+        && /if \(espaco > 60\) painel\.style\.maxHeight = Math\.floor\(espaco\) \+ 'px';/.test(temaP)
+        && /painel\.style\.maxHeight = '';/.test(temaP),
+      // posicionar com o painel ainda escondido mede ZERO - foi assim que a
+      // tentativa do monitor virou código morto
+      'o painel é posicionado DEPOIS de abrir (escondido ele mede zero)':
+        ['fechamentos', 'entregas', 'ifood'].every((t) =>
+          /if\(abrindo\)\{ panel\.classList\.add\('open'\); posicionar\(\); \}/.test(fontes[t]))
+        && /if\(abrindo\)\{\n      wrap\.classList\.add\('open'\);\n      panel\.classList\.add\('open'\);\n      posicionar\(\);\n    \}/.test(fontes.monitor),
+      // nome cortado com "..." deixaria "Dom Praça Aero..." e "Dom Car
+      // Aero..." indistinguíveis: o nome QUEBRA em vez de ser cortado
+      'o painel nunca fica mais largo que a tela, e o nome quebra em vez de sumir':
+        telas.every((t) => /max-width:min\(340px,calc\(100vw - 16px\)\);\}/.test(fontes[t]))
+        && telas.every((t) => /\.multiselect-panel label\{[^}]*white-space:normal;/.test(fontes[t]))
+        && telas.every((t) => !/\.multiselect-panel label\{[^}]*white-space:nowrap;/.test(fontes[t]))
+        && telas.every((t) => /\.multiselect-panel label span\{min-width:0;overflow-wrap:anywhere;\}/.test(fontes[t])),
+      // painel fixed posicionado uma vez só fica parado em cima de um botão
+      // que já rolou pra fora - mas rolar DENTRO do painel não pode movê-lo
+      'acompanha rolagem e giro de tela, sem se mexer quando a rolagem é dentro dele':
+        telas.every((t) => /window\.addEventListener\('scroll', reposicionar, true\);/.test(fontes[t])
+          || /window\.addEventListener\('scroll', \(\)=>\{ if\(panel\.classList\.contains\('open'\)\) posicionar\(\); \}, true\);/.test(fontes[t]))
+        && ['fechamentos', 'entregas', 'ifood'].every((t) => /!\(e && e\.target && panel\.contains\(e\.target\)\)/.test(fontes[t])),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPainelFlutuante = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPainelFlutuante = false; console.log('  erro: ' + e.message); }
+  if (!okPainelFlutuante) ruins += 1;
+  console.log(`${okPainelFlutuante ? '✓' : '✗'} Celular: o menu de unidades cabe na tela (encosta na borda, abre pra cima e o nome quebra)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
