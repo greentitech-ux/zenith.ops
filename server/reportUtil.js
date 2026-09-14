@@ -57,6 +57,63 @@ function nomeArquivoComData(base) {
   return `${slugify(base)}-${dataArquivo()}`;
 }
 
+// NOME DE RELATÓRIO DE PERÍODO: diz DE QUE PERÍODO ele é, não de quando foi
+// baixado. O Master puxou o fechamento do dia 04/09 e o arquivo saiu com a
+// data de hoje: na pasta Downloads, dois relatórios de períodos diferentes
+// baixados no mesmo dia ficavam com o mesmo nome, e nenhum dos dois dizia do
+// que era. O formato pedido:
+//
+//     fechamentos-03.04.05-09-2026-dom-bessa.pdf
+//     \_______/ \________________/ \________/
+//        o quê      os dias            quem
+//
+// Os DIAS são os que aparecem no relatório, não as bordas do filtro: se o
+// filtro pegou a semana e só três dias têm lançamento, o nome fala dos três.
+// Duas quedas pro formato de lista, porque ele só funciona num caso:
+//   - período longo (acima de MAX_DIAS_NO_NOME) vira intervalo, senão um mês
+//     inteiro daria um nome de 90 caracteres;
+//   - período que atravessa o mês também vira intervalo - "03.04.05-09-2026"
+//     mentiria sobre dias que são de outubro.
+// E o "quem": até MAX_NOMES_NO_NOME lojas, os nomes delas; acima disso, o
+// grupo - foi o pedido, e é o que cabe.
+const MAX_DIAS_NO_NOME = 5;
+const MAX_NOMES_NO_NOME = 3;
+
+function trechoDeDatas(datas) {
+  const dias = [...new Set((datas || [])
+    .map((d) => String(d || '').slice(0, 10))
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].sort();
+  // sem nenhuma data legível não dá pra falar de período: cai na data de
+  // hoje, que é o que o nome já dizia antes
+  if (!dias.length) return dataArquivo();
+  const paraBR = (iso) => iso.split('-').reverse().join('-');
+  const mesmoMes = new Set(dias.map((d) => d.slice(0, 7))).size === 1;
+  if (mesmoMes && dias.length <= MAX_DIAS_NO_NOME) {
+    const [ano, mes] = dias[0].split('-');
+    return `${dias.map((d) => d.slice(8)).join('.')}-${mes}-${ano}`;
+  }
+  return dias.length === 1 ? paraBR(dias[0]) : `${paraBR(dias[0])}-a-${paraBR(dias[dias.length - 1])}`;
+}
+
+function trechoDeQuem(nomes, grupo) {
+  const limpos = [...new Set((nomes || []).map((n) => String(n || '').trim()).filter(Boolean))];
+  if (limpos.length && limpos.length <= MAX_NOMES_NO_NOME) return limpos.map((n) => slugify(n, 'unidade')).join('-');
+  return slugify(grupo || 'todas-as-unidades', 'todas-as-unidades');
+}
+
+// O nome vai dentro de um header HTTP e vira nome de arquivo no disco: aspas,
+// quebra de linha e barra estragam o header ou o caminho. Isto LIMPA sem
+// reformatar - diferente do slugify, que troca ponto por hífen e desmancharia
+// o "03.04.05-09-2026" que o Master pediu.
+function nomeSeguroDeArquivo(nome, fallback = 'relatorio') {
+  const limpo = String(nome || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+  return limpo || fallback;
+}
+
+function nomeArquivoPeriodo(base, { datas, nomes, grupo } = {}) {
+  return `${slugify(base)}-${trechoDeDatas(datas)}-${trechoDeQuem(nomes, grupo)}`;
+}
+
 // Documentos individuais precisam ser identificáveis fora do NoPulso. O
 // formato unico evita "conversa-suporte (3).pdf" e UUIDs impossiveis de
 // reconhecer na pasta Downloads:
@@ -113,7 +170,7 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, resumo, larguras, s
   const dinamico = linhasDinamicas !== false;
   const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo || slugify(titulo)}.pdf"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${nomeSeguroDeArquivo(nomeArquivo || slugify(titulo))}.pdf"`);
   doc.pipe(res);
 
   const tableX = doc.page.margins.left;
@@ -197,4 +254,4 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, resumo, larguras, s
   doc.end();
 }
 
-module.exports = { slugify, toCSV, writePDF, fmtMoneyBR, fmtDataBR, fmtDataHoraBR, agoraBrasiliaFmt, dataArquivo, dataHoraArquivo, nomeArquivoComData, nomeArquivoRegistro };
+module.exports = { slugify, toCSV, writePDF, fmtMoneyBR, fmtDataBR, fmtDataHoraBR, agoraBrasiliaFmt, dataArquivo, dataHoraArquivo, nomeArquivoComData, nomeArquivoRegistro, nomeArquivoPeriodo, nomeSeguroDeArquivo, trechoDeDatas, trechoDeQuem, MAX_DIAS_NO_NOME, MAX_NOMES_NO_NOME };

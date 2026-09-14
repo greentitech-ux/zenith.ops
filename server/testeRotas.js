@@ -21765,6 +21765,76 @@ setTimeout(async () => {
   if (!okPeriodoQuedas) ruins += 1;
   console.log(`${okPeriodoQuedas ? '✓' : '✗'} Quedas: o período sai do rodapé e vai pro lado do PDF, onde a escolha é feita`);
 
+  // ---------------------------------------------------------------------
+  // O nome do relatório de fechamento diz DE QUE PERÍODO ele é.
+  // Master (14/09): "estou puxando relatorio de fechamento do dia 04-09 e o
+  // nome do PDF esta com a data de hoje, dia do download. Precisa ser o nome
+  // do que se trata, no caso fechamento - data do periodo. Ex:
+  // 03.04.05-09-2026-nome da loja; se mais de 3 lojas, nome do Grupo."
+  // Na pasta Downloads, dois relatórios de períodos diferentes baixados no
+  // mesmo dia ficavam com o MESMO nome, e nenhum dizia do que era.
+  // ---------------------------------------------------------------------
+  let okNomeRelatorio = false;
+  try {
+    const cabN = token ? { Authorization: 'Bearer ' + token } : {};
+    const ru = require(__dirname + '/reportUtil.js');
+    const nome = (r) => {
+      const cd = (r.headers || {})['content-disposition'] || '';
+      return (cd.match(/filename="([^"]+)"/) || [])[1] || '';
+    };
+    // três dias seguidos na MESMA loja - é o exemplo do Master
+    ['2026-07-03', '2026-07-04', '2026-07-05'].forEach((dia, i) => {
+      DOCS.set(`fechamentosLive/UnidNomeArq__${dia}`, {
+        id: `UnidNomeArq__${dia}`, unidade: 'UnidNomeArq', unidadeNome: 'Dom Bessa',
+        grupo: 'GBE', data: dia, faturamento: 1000 * (i + 1), totalDeclarado: 1000 * (i + 1), diferenca: 0,
+      });
+    });
+    require(__dirname + '/fechamentosLive.js').invalidarCache();
+    const filtro = 'unidades=UnidNomeArq&inicio=2026-07-01&fim=2026-07-31';
+    const pdf = await pedirBinario(`/api/fechamentos/relatorio.pdf?${filtro}`, cabN);
+    const csv = await pedirBinario(`/api/fechamentos/relatorio.csv?${filtro}`, cabN);
+    const porUnidade = await pedirBinario(`/api/fechamentos/relatorio-unidades.csv?${filtro}`, cabN);
+    // e o caso de um dia só, que é o do print
+    const umDia = await pedirBinario(`/api/fechamentos/relatorio.pdf?unidades=UnidNomeArq&inicio=2026-07-04&fim=2026-07-04`, cabN);
+
+    const conf = {
+      // O PONTO: os dias são os que estão NO relatório. O filtro aqui pegou o
+      // mês inteiro e só três dias têm lançamento - o nome fala dos três.
+      'o nome traz os dias do período, não a data do download':
+        nome(pdf) === 'fechamentos-03.04.05-07-2026-dom-bessa.pdf'
+        && nome(csv) === 'fechamentos-03.04.05-07-2026-dom-bessa.csv',
+      'um dia só sai como um dia só': nome(umDia) === 'fechamentos-04-07-2026-dom-bessa.pdf',
+      'o comparativo por unidade segue a mesma regra':
+        nome(porUnidade) === 'fechamentos-por-unidade-03.04.05-07-2026-dom-bessa.csv',
+      'e a data de hoje não aparece mais no nome':
+        !nome(pdf).includes(ru.dataArquivo()) && !nome(csv).includes(ru.dataArquivo()),
+      // ---- a regra, direto na função ----
+      'até 3 lojas vão pelo nome; acima disso, o grupo':
+        ru.trechoDeQuem(['Dom Bessa', 'Dom Caruaru', 'Saltiverso Patteo'], 'Grupo Bravo (GBE)') === 'dom-bessa-dom-caruaru-saltiverso-patteo'
+        && ru.trechoDeQuem(['Dom Bessa', 'Dom Caruaru', 'Saltiverso Patteo', 'Dom Carrão'], 'Grupo Bravo (GBE)') === 'grupo-bravo-gbe'
+        && ru.MAX_NOMES_NO_NOME === 3,
+      // a loja repetida em 30 dias é UMA loja, não 30
+      'a mesma loja repetida conta uma vez':
+        ru.trechoDeQuem(['Dom Bessa', 'Dom Bessa', 'Dom Bessa', 'Dom Bessa'], 'Grupo Bravo (GBE)') === 'dom-bessa',
+      // listar 30 dias daria um nome de ~90 caracteres
+      'período longo vira intervalo em vez de listar todo dia':
+        ru.trechoDeDatas(Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`)) === '01-09-2026-a-30-09-2026',
+      // "03.04-09-2026" mentiria sobre um dia que é de outubro
+      'período que atravessa o mês vira intervalo':
+        ru.trechoDeDatas(['2026-09-28', '2026-10-02']) === '28-09-2026-a-02-10-2026',
+      'sem nenhuma data legível, cai na data de hoje (é o que o nome já dizia)':
+        ru.trechoDeDatas([]) === ru.dataArquivo() && ru.trechoDeDatas([null, 'lixo']) === ru.dataArquivo(),
+      // o nome vai num header HTTP e vira nome de arquivo no disco
+      'o nome não carrega acento, espaço nem barra':
+        /^[a-z0-9.\-]+$/.test(ru.nomeArquivoPeriodo('fechamentos', { datas: ['2026-09-03'], nomes: ['Dom Praça Aero / Recife'] })),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okNomeRelatorio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pdf=${nome(pdf)} csv=${nome(csv)} unid=${nome(porUnidade)} umDia=${nome(umDia)})`);
+  } catch (e) { okNomeRelatorio = false; console.log('  erro: ' + e.message); }
+  if (!okNomeRelatorio) ruins += 1;
+  console.log(`${okNomeRelatorio ? '✓' : '✗'} Relatório de fechamento: o nome do arquivo diz o período e a loja, não o dia do download`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

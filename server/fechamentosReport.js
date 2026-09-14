@@ -19,6 +19,7 @@
 // quem le a somar na mao pra chegar no numero de cada uma, e era exatamente
 // isso que se fazia toda vez que o relatorio era usado.
 const PDFDocument = require('pdfkit');
+const { nomeSeguroDeArquivo } = require('./reportUtil');
 const redes = require('./redes');
 
 function slugify(text) {
@@ -307,7 +308,9 @@ function dividirEmPartes(colunas, areaUtil = AREA_UTIL_PT) {
 function writePDF(res, { titulo, subtitulo, colunas, linhas, secoes, nomeArquivo }) {
   const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${slugify(nomeArquivo || titulo)}.pdf"`);
+  // LIMPA, mas nao reformata: o slugify troca ponto por hifen e desmancharia
+  // o "03.04.05-09-2026" do nome de periodo (ver reportUtil.nomeArquivoPeriodo)
+  res.setHeader('Content-Disposition', `attachment; filename="${nomeSeguroDeArquivo(nomeArquivo || slugify(titulo))}.pdf"`);
   doc.pipe(res);
 
   const tableX = doc.page.margins.left;
