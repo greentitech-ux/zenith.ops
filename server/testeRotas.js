@@ -2281,7 +2281,7 @@ setTimeout(async () => {
   console.log(`${okMapaRh ? '✓' : '✗'} mesma unidade continua no seletor de RH: HTTP ${mapaRh.status} ${mapaRh.corpo.slice(0, 90)}`);
 
   const lancouFech = await postarJson('/api/fechamentos/lancar', {
-    unidade: 'MVPAR_TESTE', unidadeNome: 'MVPar Teste', data: '2026-08-18', gerente: 'Teste', campos: { delivery: 100, entradaDinheiro: 100 },
+    unidade: 'MVPAR_TESTE', unidadeNome: 'MVPar Teste', data: '2026-08-18', gerente: 'Teste', campos: { caixaFinal: 200, delivery: 100, entradaDinheiro: 100 },
   }, { Authorization: 'Bearer ' + token });
   let okBloqueiaFech = false;
   try {
@@ -2296,7 +2296,7 @@ setTimeout(async () => {
   // req.user.username||req.user.email - antes era texto livre, sem vinculo
   // nenhum com quem estava logado de verdade ----
   const lancouComGerenteForjado = await postarJson('/api/fechamentos/lancar', {
-    unidade: '19855', unidadeNome: 'Dom Carrão', data: '2026-08-19', gerente: 'Nome Forjado Que Nao Deveria Valer', campos: { delivery: 100, entradaDinheiro: 100 },
+    unidade: '19855', unidadeNome: 'Dom Carrão', data: '2026-08-19', gerente: 'Nome Forjado Que Nao Deveria Valer', campos: { caixaFinal: 200, delivery: 100, entradaDinheiro: 100 },
   }, { Authorization: 'Bearer ' + token });
   let okGerenteTravado = false;
   try {
@@ -2369,7 +2369,7 @@ setTimeout(async () => {
   console.log(`${okRestritas ? '✓' : '✗'} unidade fixa restrita aparece em unidades-restritas?area=fechamento (pra telas com base pré-populada removerem): HTTP ${restritas.status} ${restritas.corpo.slice(0, 90)}`);
 
   const lancouFixaRestrita = await postarJson('/api/fechamentos/lancar', {
-    unidade: '19821', unidadeNome: 'Dom Sao Miguel', data: '2026-08-18', gerente: 'Teste', campos: { delivery: 100, entradaDinheiro: 100 },
+    unidade: '19821', unidadeNome: 'Dom Sao Miguel', data: '2026-08-18', gerente: 'Teste', campos: { caixaFinal: 200, delivery: 100, entradaDinheiro: 100 },
   }, { Authorization: 'Bearer ' + token });
   let okBloqueiaFixa = false;
   try {
@@ -2889,12 +2889,12 @@ setTimeout(async () => {
       unidade: 'TESTE_POS_OFF', unidadeNome: 'Dom Sao Miguel (teste)', grupo: 'Grupo Sem POS', data: '2026-09-01',
       // balanceado de propósito: o que importa aqui é o adyenPos ficar
       // gravado em ONTEM, não a diferença desse dia
-      campos: { delivery: 2207.14, adyen: 1000, adyenPos: 1207.14 },
+      campos: { caixaFinal: 200, delivery: 2207.14, adyen: 1000, adyenPos: 1207.14 },
     }, cabP);
     // hoje: os números exatos do fechamento dele
     const hoje = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_POS_OFF', unidadeNome: 'Dom Sao Miguel (teste)', grupo: 'Grupo Sem POS', data: '2026-09-02',
-      campos: {
+      campos: { caixaFinal: 200,
         delivery: 1954.23, carryout: 513.80, pickup: 98.90,
         adyen: 820.60, ifood: 989.83, food99: 466.90, pix: 289.60,
       },
@@ -2905,11 +2905,11 @@ setTimeout(async () => {
     await postarJson('/api/grupos', { nome: 'Grupo Com POS', unidades: ['TESTE_POS_ON'], maquininhaPosHabilitado: true }, cabP);
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_POS_ON', unidadeNome: 'Loja Com POS', grupo: 'Grupo Com POS', data: '2026-09-01',
-      campos: { delivery: 2207.14, adyen: 1000, adyenPos: 1207.14 },
+      campos: { caixaFinal: 200, delivery: 2207.14, adyen: 1000, adyenPos: 1207.14 },
     }, cabP);
     const hojeComPos = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_POS_ON', unidadeNome: 'Loja Com POS', grupo: 'Grupo Com POS', data: '2026-09-02',
-      campos: {
+      campos: { caixaFinal: 200,
         delivery: 1954.23, carryout: 513.80, pickup: 98.90,
         adyen: 820.60, ifood: 989.83, food99: 466.90, pix: 289.60,
       },
@@ -2993,8 +2993,10 @@ setTimeout(async () => {
   try {
     const cabT = { Authorization: 'Bearer ' + token };
     const base = { unidade: 'TESTE_TRAVA', unidadeNome: 'Loja Trava', grupo: 'ARCFOOD' };
+    // caixaFinal em TODO lançamento: virou obrigatório na rota (regra do Master,
+    // 14/09) - sem ele nenhum destes casos chegaria nas travas que o teste quer
     const lancar = (data, campos, observacao) => postarJson('/api/fechamentos/lancar',
-      { ...base, data, campos, ...(observacao ? { observacao } : {}) }, cabT);
+      { ...base, data, campos: { caixaFinal: 200, ...campos }, ...(observacao ? { observacao } : {}) }, cabT);
     const erroDe = (r) => { try { return JSON.parse(r.corpo).error || ''; } catch (e) { return r.corpo; } };
 
     // 1. faturamento zerado: só formas preenchidas
@@ -3769,7 +3771,7 @@ setTimeout(async () => {
     // dia 05: o app tem o fechamento (é o "Dom Carrão" do PDF)
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Sangria Sumida', grupo: 'ARCFOOD', data: '2026-08-05',
-      campos: { delivery: 107, entradaDinheiro: 107 },
+      campos: { caixaFinal: 200, delivery: 107, entradaDinheiro: 107 },
       detalhesSaidas: [{ descricao: 'oleo de soja', valor: 29.12 }, { descricao: 'copo descartavel', valor: 21.59 }],
     }, cabMaster);
     require('./fechamentos-snapshot.json').push(
@@ -9705,7 +9707,7 @@ setTimeout(async () => {
 
     const fech = await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SAIDA_ARC', unidadeNome: 'Loja Teste ARC', grupo: 'ARCFOOD', data: '2026-08-20',
-      campos: { delivery: 500, entradaDinheiro: 500 },
+      campos: { caixaFinal: 200, delivery: 500, entradaDinheiro: 500 },
       detalhesSaidas: [
         { descricao: 'Motoboy extra (painel saidas)', valor: 37.5 },
         { descricao: 'Compra de gelo (painel saidas)', valor: 12 },
@@ -9905,7 +9907,7 @@ setTimeout(async () => {
     // segura: ver o bloco de correcao de saida da planilha, mais abaixo.)
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia', grupo: 'ARCFOOD', data: '2026-10-05',
-      campos: { delivery: 300, entradaDinheiro: 300 }, detalhesSaidas: [{ descricao: 'Saída do dia 05', valor: 40 }],
+      campos: { caixaFinal: 200, delivery: 300, entradaDinheiro: 300 }, detalhesSaidas: [{ descricao: 'Saída do dia 05', valor: 40 }],
     }, cabMaster);
     require('./fechamentos-snapshot.json').push({
       id: 'pl-entrada-dia-05', grupo: 'ARCFOOD', unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia',
@@ -9928,7 +9930,7 @@ setTimeout(async () => {
     // outro dia da mesma loja - tem que continuar sendo linha separada
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia', grupo: 'ARCFOOD', data: '2026-10-06',
-      campos: { delivery: 90, entradaDinheiro: 90 },
+      campos: { caixaFinal: 200, delivery: 90, entradaDinheiro: 90 },
     }, cabMaster);
 
     const periodo = 'inicio=2026-10-05&fim=2026-10-07';
@@ -10120,7 +10122,7 @@ setTimeout(async () => {
     // dia 1: entra 1000, sai 100 -> sobra 900 pra sangrar
     const f1 = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-01',
-      campos: { delivery: 1000, entradaDinheiro: 1000 }, detalhesSaidas: [{ descricao: 'Motoboy', valor: 100 }],
+      campos: { caixaFinal: 200, delivery: 1000, entradaDinheiro: 1000 }, detalhesSaidas: [{ descricao: 'Motoboy', valor: 100 }],
     }, cabMaster)).corpo);
     const sg = JSON.parse((await postarJson('/api/sangrias', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-01',
@@ -10141,7 +10143,7 @@ setTimeout(async () => {
     // Dia 02: entram 300, não sai nada -> a 2ª sangria espera exatamente 300.
     const f2 = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
-      campos: { delivery: 300, entradaDinheiro: 300 },
+      campos: { caixaFinal: 200, delivery: 300, entradaDinheiro: 300 },
     }, cabMaster)).corpo);
     const inicial2 = await ler();
     const sg2 = JSON.parse((await postarJson('/api/sangrias', {
@@ -10157,14 +10159,14 @@ setTimeout(async () => {
     // pode ressuscitar esse passado como gaveta
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_CAIXA_ANTIGO', unidadeNome: 'Loja Movimento Antigo', grupo: 'ARCFOOD', data: '2026-06-15',
-      campos: { delivery: 800, entradaDinheiro: 800 }, detalhesSaidas: [{ descricao: 'Gás', valor: 50 }],
+      campos: { caixaFinal: 200, delivery: 800, entradaDinheiro: 800 }, detalhesSaidas: [{ descricao: 'Gás', valor: 50 }],
     }, cabMaster);
     // loja com sangria ANTIGA (junho) e entrada de julho: a janela NÃO pode
     // voltar até a sangria de junho (traria os 300 de julho) - ela abre no
     // piso e conta só os 60 de agosto
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-07-10',
-      campos: { delivery: 300, entradaDinheiro: 300 },
+      campos: { caixaFinal: 200, delivery: 300, entradaDinheiro: 300 },
     }, cabMaster);
     await postarJson('/api/sangrias', {
       unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-06-20',
@@ -10173,7 +10175,7 @@ setTimeout(async () => {
     }, cabMaster);
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-08-05',
-      campos: { delivery: 60, entradaDinheiro: 60 },
+      campos: { caixaFinal: 200, delivery: 60, entradaDinheiro: 60 },
     }, cabMaster);
     // O CASO SAO MIGUEL (27/08): sangria lancada num dia, cobrindo o periodo
     // que terminou no dia ANTERIOR. O dinheiro que entrou no dia da retirada
@@ -10181,11 +10183,11 @@ setTimeout(async () => {
     // deixando em loja so o que entrou no dia - R$ 91".
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-25',
-      campos: { delivery: 450, entradaDinheiro: 450 },
+      campos: { caixaFinal: 200, delivery: 450, entradaDinheiro: 450 },
     }, cabMaster);
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-26',
-      campos: { delivery: 91, entradaDinheiro: 91 },
+      campos: { caixaFinal: 200, delivery: 91, entradaDinheiro: 91 },
     }, cabMaster);
     const sgSobra = JSON.parse((await postarJson('/api/sangrias', {
       unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-26',
@@ -12357,6 +12359,131 @@ setTimeout(async () => {
   if (!okProgramasAba) ruins += 1;
   console.log(`${okProgramasAba ? '✓' : '✗'} NOC: programas da máquina em janela própria (o que entrou, o que saiu, e o que está instalado agora)`);
 
+  // ------------------------------------------------------------------
+  // CAIXA INICIAL / CAIXA FINAL NO RELATORIO (pedido do Master, 14/09/2026)
+  // "preciso que nesse fechamento mostre caixa inicial e caixa final da loja".
+  //
+  // O dado sempre existiu - a loja lanca os dois (lancamento.html) e a planilha
+  // importa "Caixa Inicial" (bravoImport.js). So nunca teve coluna: era gravado
+  // e ficava invisivel pra quem confere.
+  //
+  // A decisao que este teste tranca: FUNDO DE CAIXA NAO SE SOMA. E' o mesmo
+  // valor que dorme na gaveta todo dia; somar sete dias daria R$ 1.400 de
+  // "caixa inicial", numero que nao existe em lugar nenhum do mundo real -
+  // pela mesma razao que a linha de subtotal nao repete data nem unidade.
+  let okCaixaRelatorio = false;
+  try {
+    const rel = require(__dirname + '/fechamentosReport.js');
+    const linhas = [
+      { data: '2026-09-03', unidade: 'BESSA', unidadeNome: 'Dom Bessa', caixaInicial: 200, caixaFinal: 200, loja: 1000 },
+      { data: '2026-09-04', unidade: 'BESSA', unidadeNome: 'Dom Bessa', caixaInicial: 200, caixaFinal: 200, loja: 1500 },
+    ];
+    const pronto = rel.prepararRelatorio ? rel.prepararRelatorio(linhas, [], null, null) : null;
+    const colunas = (pronto && pronto.colunas) || [];
+    const colIni = colunas.find((c) => c.key === 'caixaInicial') || null;
+    const soma = pronto && typeof rel.somar === 'function' ? rel.somar(colunas, pronto.linhas || []) : null;
+    const htmlF = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+    const repTx = require('fs').readFileSync(__dirname + '/fechamentosReport.js', 'utf8');
+
+    const conf = {
+      'o relatório ganhou as duas colunas': !!colIni
+        && !!colunas.find((c) => c.key === 'caixaFinal'),
+      'a coluna aparece com o rótulo que a loja já conhece':
+        !!colIni && colIni.label === 'Caixa inicial',
+      // a mesma lista, na mesma ordem, nos dois lugares - o proprio arquivo
+      // avisa que tela e relatorio precisam concordar
+      'a tela e o relatório têm os mesmos dois campos':
+        /\{campo:'caixaInicial', label:'Caixa inicial', naoSoma:true\}/.test(htmlF)
+        && /\{campo:'caixaFinal', label:'Caixa final', naoSoma:true\}/.test(htmlF)
+        && /key: 'caixaInicial', label: 'Caixa inicial', naoSoma: true/.test(repTx),
+      // A DECISAO: fundo de caixa fica FORA do subtotal
+      'o subtotal NÃO soma o fundo de caixa (R$ 200 em 2 dias não são R$ 400)':
+        !!soma && soma.caixaInicial === undefined && soma.caixaFinal === undefined,
+      'as outras colunas continuam somando normalmente':
+        !!soma && soma.loja === 2500,
+      'na tela a coluna de fundo de caixa também fica sem total no rodapé':
+        /\.\.\.\(c\.naoSoma\?\{\}:\{soma:d=>valorColuna\(d, c\)\}\)/.test(htmlF),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okCaixaRelatorio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (colunas=${colunas.map((c) => c.key).join(',')} soma=${JSON.stringify(soma)})`);
+  } catch (e) { okCaixaRelatorio = false; console.log('  erro: ' + e.message); }
+  if (!okCaixaRelatorio) ruins += 1;
+  console.log(`${okCaixaRelatorio ? '✓' : '✗'} Fechamento: caixa inicial e caixa final no relatório, e fora do subtotal (fundo não se soma)`);
+
+  // ------------------------------------------------------------------
+  // CAIXA EM CORRENTE (pedido do Master, 14/09/2026)
+  // "quero que seja obrigatorio so o caixa final, e o inicial sempre sera o
+  // final do dia anterior".
+  //
+  // Deixa de ser digitacao e vira CORRENTE: o dinheiro que dormiu na gaveta
+  // ontem e' o mesmo que abre hoje. Quem digitava os dois podia digitar
+  // valores que nao se encaixam e ninguem via - agora so existe UM numero por
+  // dia, e ele e' contado por quem fecha a loja.
+  let okCaixaCorrente = false;
+  try {
+    const fl = require(__dirname + '/fechamentosLive.js');
+    // fechamento CONSISTENTE (canal e forma batendo) - as travas de faturamento
+    // e declarado zerados rodam antes e recusariam qualquer coisa solta
+    const dia = (data, caixaFinal, extra) => ({
+      unidade: 'CXA', unidadeNome: 'Dom Caixa', grupo: 'MANUAL', data, gerente: 'Teste',
+      criadoPorId: 'u1', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 1000, adyen: 1000, caixaFinal, ...(extra || {}) },
+    });
+
+    // 1o fechamento da unidade: NAO ha corrente pra puxar - a loja informa
+    const dia1 = await fl.create(dia('2026-11-01', 250, { caixaInicial: 200 }));
+    // 2o: o inicial vem de ontem, e o que o navegador mandar e' IGNORADO
+    const dia2 = await fl.create(dia('2026-11-02', 180, { caixaInicial: 999999 }));
+    // BURACO no calendario (loja fechou dia 3): dia 4 herda do dia 2, nao zera
+    const dia4 = await fl.create(dia('2026-11-04', 300));
+
+    let recusouVazio = null;
+    try { await fl.create(dia('2026-11-05', '')); } catch (e2) { recusouVazio = e2.message; }
+    let aceitouZero = false;
+    try { aceitouZero = (await fl.create(dia('2026-11-05', 0))).caixaFinal === 0; } catch (e2) { aceitouZero = false; }
+    // A ARMADILHA: bravoImport usa o MESMO create(). Sem lancamentoDaLoja, a
+    // planilha tem de continuar entrando como sempre entrou.
+    const daPlanilha = await fl.create({
+      unidade: 'CXA2', unidadeNome: 'Planilha', grupo: 'BRAVO', data: '2026-11-01', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', campos: { delivery: 500, adyen: 500, caixaInicial: 77 },
+    });
+
+    const htmlL = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
+    const conf = {
+      'o primeiro fechamento da unidade aceita o valor informado (não há corrente ainda)':
+        dia1.caixaInicial === 200 && dia1.caixaInicialDe === null,
+      'o inicial vem do caixa final do fechamento anterior':
+        dia2.caixaInicial === 250 && dia2.caixaInicialDe === '2026-11-01',
+      // a trava que importa: dinheiro nunca vem do navegador
+      'o que o navegador manda em caixa inicial é IGNORADO': dia2.caixaInicial !== 999999,
+      // loja que fechou na segunda nao teve a gaveta esvaziada
+      'dia sem fechamento no meio não zera a corrente (herda do último lançado)':
+        dia4.caixaInicial === 180 && dia4.caixaInicialDe === '2026-11-02',
+      'caixa final vazio é recusado, com um texto que diz o porquê':
+        !!recusouVazio && /caixa final/i.test(recusouVazio),
+      // gaveta vazia acontece; o que nao pode e' ninguem ter contado
+      'caixa final ZERO é aceito (vazio ≠ zero)': aceitouZero,
+      // se isto quebrar, a sincronização da planilha para de entrar
+      'a planilha continua importando sem caixa final, e com o inicial DELA':
+        daPlanilha.caixaInicial === 77 && daPlanilha.caixaInicialDe === undefined,
+      'é a rota do lançamento que liga a regra, não o modelo':
+        /lancamentoDaLoja: true,/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8')),
+      'na tela o inicial é só-leitura e o final é obrigatório':
+        /id="f-caixaInicial" readonly/.test(htmlL) && /id="f-caixaFinal" required/.test(htmlL)
+        && /function carregarCaixaInicial\(\)/.test(htmlL),
+      'a tela diz de qual dia veio o caixa inicial':
+        /Caixa final do fechamento de \$\{\(r\.de\|\|''\)/.test(htmlL),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okCaixaCorrente = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (d1=${dia1.caixaInicial} d2=${dia2.caixaInicial} d4=${dia4.caixaInicial} planilha=${daPlanilha.caixaInicial} vazio=${recusouVazio})`);
+  } catch (e) { okCaixaCorrente = false; console.log('  erro: ' + e.message); }
+  if (!okCaixaCorrente) ruins += 1;
+  console.log(`${okCaixaCorrente ? '✓' : '✗'} Fechamento: caixa final obrigatório, e o inicial vem sozinho do último fechamento`);
+
+
+
 
 
   // ------------------------------------------------------------------
@@ -13171,12 +13298,12 @@ setTimeout(async () => {
     const cabT = { Authorization: 'Bearer ' + token };
     await postarJson('/api/grupos', { nome: 'Grupo Trava POS', unidades: ['TESTE_TRAVA_POS'], maquininhaPosHabilitado: true }, cabT);
     const base = { unidade: 'TESTE_TRAVA_POS', unidadeNome: 'Loja Trava POS', grupo: 'Grupo Trava POS' };
-    const semObs = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-20', campos: { delivery: 500, adyen: 0, adyenPos: 500 } }, cabT);
-    const comObs = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-21', campos: { delivery: 500, adyen: 0, adyenPos: 500 }, observacao: 'Loja abriu só depois da meia-noite (evento).' }, cabT);
+    const semObs = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-20', campos: { caixaFinal: 200, delivery: 500, adyen: 0, adyenPos: 500 } }, cabT);
+    const comObs = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-21', campos: { caixaFinal: 200, delivery: 500, adyen: 0, adyenPos: 500 }, observacao: 'Loja abriu só depois da meia-noite (evento).' }, cabT);
     // data longe das outras de propósito: dia colado num que lançou POS ganha
     // o desconto automático de ontem (ajustePosDoDiaAnterior) e zeraria o
     // declarado - o que faria este caso falhar por outro motivo
-    const comCartao = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-25', campos: { delivery: 500, adyen: 300, adyenPos: 200 } }, cabT);
+    const comCartao = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-25', campos: { caixaFinal: 200, delivery: 500, adyen: 300, adyenPos: 200 } }, cabT);
     // a função INTEIRA, não a primeira linha dela: com um recorte curto, uma
     // chamada reintroduzida na linha seguinte passava batido (a sabotagem
     // provou isso)
@@ -14377,12 +14504,12 @@ setTimeout(async () => {
     // 2 dias de fechamento: entrou 1000, saiu 150 em saída avulsa
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-01',
-      campos: { delivery: 600, entradaDinheiro: 600 },
+      campos: { caixaFinal: 200, delivery: 600, entradaDinheiro: 600 },
       detalhesSaidas: [{ descricao: 'Motoboy', valor: 50 }],
     }, cabMaster);
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-02',
-      campos: { delivery: 400, entradaDinheiro: 400 },
+      campos: { caixaFinal: 200, delivery: 400, entradaDinheiro: 400 },
       detalhesSaidas: [{ descricao: 'Gelo', valor: 100 }],
     }, cabMaster);
 
@@ -14403,7 +14530,7 @@ setTimeout(async () => {
     // (02/09), entao a janela abre e o esperado passa a existir.
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-03',
-      campos: { delivery: 300, entradaDinheiro: 300 }, detalhesSaidas: [],
+      campos: { caixaFinal: 200, delivery: 300, entradaDinheiro: 300 }, detalhesSaidas: [],
     }, cabMaster);
     const esperado2 = JSON.parse((await pedir(`/api/sangrias/esperado?unidade=${UNI}&ate=2026-09-03`, cabMaster)).corpo);
 
@@ -14425,7 +14552,7 @@ setTimeout(async () => {
     // mais um dia com entrada, pra abrir janela nova depois da retirada de 03/09
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-04',
-      campos: { delivery: 200, entradaDinheiro: 200 }, detalhesSaidas: [],
+      campos: { caixaFinal: 200, delivery: 200, entradaDinheiro: 200 }, detalhesSaidas: [],
     }, cabMaster);
 
     // agora com motivo, a divergencia salva e fica registrada: esperado 200
@@ -14506,7 +14633,7 @@ setTimeout(async () => {
 
     const fech = await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Edita Saída', grupo: 'ARCFOOD', data: '2026-09-10',
-      campos: { delivery: 900, entradaDinheiro: 900, totalSaida: 230 },
+      campos: { caixaFinal: 200, delivery: 900, entradaDinheiro: 900, totalSaida: 230 },
       detalhesSaidas: [{ descricao: 'Uber com valor errado', valor: 200 }, { descricao: 'Gelo', valor: 30 }],
     }, cabMaster);
     const fechId = JSON.parse(fech.corpo).id;
@@ -14798,7 +14925,7 @@ setTimeout(async () => {
     const cabMaster = { Authorization: 'Bearer ' + token };
     const descLonga = 'uber para pegar nutella e ingredientes que faltaram de última hora pro bolo de aniversário da equipe';
     await postarJson('/api/fechamentos/lancar', {
-      unidade: 'TESTE_SAIDA_DESC', unidadeNome: 'Loja Teste Descrição', grupo: 'ARCFOOD', data: '2026-08-21', campos: { delivery: 100, entradaDinheiro: 100 },
+      unidade: 'TESTE_SAIDA_DESC', unidadeNome: 'Loja Teste Descrição', grupo: 'ARCFOOD', data: '2026-08-21', campos: { caixaFinal: 200, delivery: 100, entradaDinheiro: 100 },
       detalhesSaidas: [{ descricao: descLonga, valor: 19 }],
     }, cabMaster);
     const pdfResp = await pedirBinario(`/api/saidas-painel/relatorio.pdf?inicio=2026-08-21&fim=2026-08-21&grupo=ARCFOOD`, cabMaster);

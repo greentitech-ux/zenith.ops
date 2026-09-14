@@ -244,11 +244,13 @@
       <div class="grid2">
         <div>
           <label>Caixa inicial (R$)</label>
-          <input type="number" step="0.01" inputmode="decimal" id="f-caixaInicial">
+          <input type="number" step="0.01" inputmode="decimal" id="f-caixaInicial" readonly>
+          <small id="caixa-inicial-nota" style="display:block;color:var(--muted);font-size:11.5px;line-height:1.4;margin-top:4px;">Vem sozinho do caixa final do último fechamento.</small>
         </div>
         <div>
-          <label>Caixa final (R$)</label>
-          <input type="number" step="0.01" inputmode="decimal" id="f-caixaFinal">
+          <label>Caixa final (R$) <span style="color:var(--bad)">*</span></label>
+          <input type="number" step="0.01" inputmode="decimal" id="f-caixaFinal" required>
+          <small style="display:block;color:var(--muted);font-size:11.5px;line-height:1.4;margin-top:4px;">O que fica na gaveta. É ele que abre o caixa de amanhã.</small>
         </div>
       </div>
       <div class="grid2">
@@ -582,6 +584,32 @@ async function carregarAjustePosOntem(){
     const r = await fetch(`/api/fechamentos/ajuste-pos-anterior?unidade=${encodeURIComponent(unidade)}&data=${encodeURIComponent(data)}`).then(x=>x.ok?x.json():null);
     AJUSTE_POS_ONTEM = r ? num(r.ajuste) : 0;
   }catch(e){ AJUSTE_POS_ONTEM = 0; }
+  atualizarResumo();
+}
+// CAIXA INICIAL: so leitura, vindo do ultimo fechamento da unidade. O campo
+// nao e' digitavel de proposito - se fosse, voltaria a existir um numero que
+// pode nao encaixar com o dia anterior, que e' justamente o que essa regra
+// acaba. Primeiro fechamento da unidade e' a excecao: nao ha corrente pra
+// puxar, entao ali a loja informa a abertura de verdade da gaveta.
+async function carregarCaixaInicial(){
+  const unidade = document.getElementById('f-unidade').value;
+  const data = document.getElementById('f-data').value;
+  const campo = document.getElementById('f-caixaInicial');
+  const nota = document.getElementById('caixa-inicial-nota');
+  if(!unidade || !data){ campo.value=''; campo.readOnly=true; nota.textContent='Escolha unidade e data.'; atualizarResumo(); return; }
+  try{
+    const r = await fetch(`/api/fechamentos/caixa-anterior?unidade=${encodeURIComponent(unidade)}&data=${encodeURIComponent(data)}`).then(x=>x.ok?x.json():null);
+    if(r && r.valor !== null && r.valor !== undefined){
+      campo.value = r.valor;
+      campo.readOnly = true;
+      nota.textContent = `Caixa final do fechamento de ${(r.de||'').split('-').reverse().join('/')}.`;
+    }else{
+      // PRIMEIRO fechamento da unidade - aqui, sim, alguem conta a gaveta
+      campo.value = '';
+      campo.readOnly = false;
+      nota.textContent = 'Primeiro fechamento desta unidade: informe quanto havia na gaveta ao abrir.';
+    }
+  }catch(e){ campo.readOnly = true; nota.textContent = 'Não consegui buscar o caixa do último fechamento.'; }
   atualizarResumo();
 }
 async function carregarSangriaDoDia(){
@@ -1568,8 +1596,8 @@ function aplicarFranquia(unidade){
   aplicarSecoesGrupo(unidade);
   atualizarResumo();
 }
-document.getElementById('f-unidade').addEventListener('change', (ev)=>{ aplicarFranquia(ev.target.value); carregarSangriaDoDia(); carregarRemakesDoDia(); carregarAjustePosOntem(); });
-document.getElementById('f-data').addEventListener('input', ()=>{ carregarSangriaDoDia(); carregarRemakesDoDia(); carregarAjustePosOntem(); });
+document.getElementById('f-unidade').addEventListener('change', (ev)=>{ aplicarFranquia(ev.target.value); carregarSangriaDoDia(); carregarRemakesDoDia(); carregarAjustePosOntem(); carregarCaixaInicial(); });
+document.getElementById('f-data').addEventListener('input', ()=>{ carregarSangriaDoDia(); carregarRemakesDoDia(); carregarAjustePosOntem(); carregarCaixaInicial(); });
 
 // ---------- sangria (retirada de caixa) registrada em campo - separado do
 // fechamento em si, soma automatico no fechamento do dia (server junta na

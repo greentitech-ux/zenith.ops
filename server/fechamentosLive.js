@@ -375,6 +375,39 @@ async function ajustePosDoDiaAnterior(unidade, data) {
   return ontem ? -num(ontem.adyenPos) : 0;
 }
 
+// ---------- CAIXA: O FINAL DE ONTEM E' O INICIAL DE HOJE ----------
+//
+// Regra do Master (14/09/2026): "quero que seja obrigatorio so o caixa final, e
+// o inicial sempre sera o final do dia anterior".
+//
+// Isso deixa de ser digitacao e vira CORRENTE: o dinheiro que dormiu na gaveta
+// ontem e' o mesmo que abriu hoje. Quem digitava os dois podia digitar valores
+// que nao se encaixam e ninguem via - agora nao ha o que nao encaixar, porque
+// so existe um numero por dia.
+//
+// "DIA ANTERIOR" E' O ULTIMO FECHAMENTO LANCADO, nao literalmente ontem. Loja
+// que fechou na segunda nao teve a gaveta esvaziada: o caixa de terca abre com
+// o que sobrou no domingo. Usar diaAnterior() literal (como faz o ajuste da
+// maquininha POS, que ali esta certo porque a venda pos-meia-noite e' de UMA
+// noite) daria zero toda vez que a loja emendasse um feriado.
+//
+// O VALOR E' GRAVADO, nao calculado na leitura: o historico precisa continuar
+// legivel exatamente como foi lancado (CLAUDE.md §1). Se o fechamento de ontem
+// for corrigido depois, o inicial de hoje NAO se reescreve sozinho - e' isso
+// que deixa a diferenca aparecer numa conferencia, em vez de sumir calada.
+const LIMITE_BUSCA_CAIXA_ANTERIOR = 60;
+async function caixaFinalAnterior(unidade, data) {
+  const todos = await listAll();
+  const anteriores = todos
+    .filter((f) => f.unidade === unidade && f.data < data)
+    .sort((a, b) => String(b.data).localeCompare(String(a.data)))
+    .slice(0, LIMITE_BUSCA_CAIXA_ANTERIOR);
+  const ultimo = anteriores[0];
+  // nenhum fechamento antes: e' o PRIMEIRO da unidade. Nao ha corrente pra
+  // puxar, entao vale o que a loja informar (a abertura de verdade da gaveta).
+  return ultimo ? { valor: num(ultimo.caixaFinal), de: ultimo.data } : null;
+}
+
 // Faturamento = canais de venda; Total Declarado = formas de pagamento
 // (maquininhas + iFood + 99Food + Pix + Pix CNPJ + Outros) + dinheiro -
 // sempre recalculado a partir dos campos que realmente compoem cada um,
@@ -477,7 +510,7 @@ async function tiposKpiDaUnidade(unidade) {
   return out;
 }
 
-async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpisExtras, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas, criadoPorId, criadoPorEmail }) {
+async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpisExtras, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas, criadoPorId, criadoPorEmail, lancamentoDaLoja = false }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new Error('Data inválida.');
 
@@ -494,6 +527,28 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
   // Maquininha POS (ver ajustePosDoDiaAnterior) - calculado uma vez aqui, na
   // criação, e guardado (nao e recalculado se ontem for corrigido depois)
   registro.ajustePosAnterior = await ajustePosDoDiaAnterior(unidade, data);
+  // ---- A CORRENTE DO CAIXA vale SO no lançamento da loja ----
+  //
+  // `lancamentoDaLoja` e' ligado APENAS pela rota do lançamento. A importação
+  // da planilha usa este mesmo create() (ver bravoImport.js) e traz dado
+  // HISTORICO: exigir caixa final ali derrubaria a sincronização inteira, e
+  // sobrescrever o "Caixa Inicial" que a planilha traz seria escrever migração
+  // nova sobre dado antigo - o que o CLAUDE.md §1 proíbe em letras garrafais.
+  // Planilha continua entrando exatamente como sempre entrou.
+  if (lancamentoDaLoja) {
+    // CAIXA FINAL e' obrigatorio - e' o unico dos dois que a loja conta. Zero
+    // vale (gaveta vazia acontece); vazio, nao: campo em branco quer dizer
+    // "ninguem contou", e e' exatamente isso que nao pode passar.
+    const finalInformado = campos ? campos.caixaFinal : undefined;
+    if (finalInformado === undefined || finalInformado === null || String(finalInformado).trim() === '') {
+      throw new Error('Informe o caixa final: é o valor que fica na gaveta e vira o caixa inicial de amanhã.');
+    }
+    // CAIXA INICIAL nao vem do navegador. Sai do ultimo fechamento da unidade -
+    // so o primeiro fechamento de todos aceita o valor informado.
+    const anterior = await caixaFinalAnterior(unidade, data);
+    registro.caixaInicial = anterior ? anterior.valor : num(campos?.caixaInicial);
+    registro.caixaInicialDe = anterior ? anterior.de : null;
+  }
   const tiposKpi = await tiposKpiDaUnidade(unidade);
   const grupoKpi = await grupos.grupoDaUnidade(unidade);
   // Guarda a lista de campos que chegaram vazios para o aviso e o relatório.
@@ -1306,5 +1361,5 @@ module.exports = {
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,
   suspenderInvalidacao, retomarInvalidacao,
   backfillQuebraCaixa,
-  ajustePosDoDiaAnterior,
+  ajustePosDoDiaAnterior, caixaFinalAnterior,
 };
