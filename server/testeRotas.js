@@ -11912,7 +11912,7 @@ setTimeout(async () => {
       'instalar exige Administrador e VOLTA ao padrão do Windows ao desligar (0/3)':
         /ConsentPromptBehaviorUser -Value \$\(if \(\$ligado\) \{ 0 \} else \{ 3 \}\)/.test(psPol),
       'só reaplica quando a versão muda (não reescreve o registro a cada volta do laço)':
-        /if \(\$jaAplicada -eq \$versao\) \{ return \}/.test(psPol),
+        /if \(\(Versao-PoliticaAplicada\) -eq \$versao\) \{ return \}/.test(psPol),
       'sem Administrador a instância de boot NÃO marca como aplicada (tenta de novo depois)':
         /if \(\$Servico -and -not \(\$okUsb -and \$okInst\)\)/.test(psPol),
       'a tela do NOC tem as 4 chaves por máquina, só pro Master':
@@ -12011,6 +12011,25 @@ setTimeout(async () => {
         arcComGrupo.caminho !== gbeDepois.caminho && gbeDepois.marca === 'dominos',
       'sem arte do grupo, cai na arte só-da-marca (não fica sem)':
         arcSoMarca.marca === 'dominos' && arcSoMarca.rede === null,
+      // ---- CLASSE DE DEFEITO (o bloco vermelho que ele viu na tela da loja) ----
+      // No PowerShell, New-Item/Set-ItemProperty falham com erro NÃO-TERMINANTE:
+      // sem -ErrorAction Stop o try/catch é decoração, o erro escapa pra tela em
+      // inglês e o código segue como se tivesse dado certo. Em máquina gerenciada
+      // (domínio/Intune) essas chaves são somente leitura, então isso NÃO é caso
+      // raro - é o dia a dia do parque dele.
+      'toda gravação de registro do agente falha de um jeito que o try/catch pega':
+        psPp.split('\n')
+          .filter((l) => /\b(New-ItemProperty|Set-ItemProperty)\b/.test(l) || /New-Item -Path/.test(l))
+          .every((l) => /-ErrorAction Stop/.test(l)),
+      // dizer "gravada" quando nada foi gravado deixa o log inútil justamente
+      // no dia em que alguém for descobrir por que o ícone não apareceu
+      'quando nenhum navegador aceita a política, o log diz isso em vez de "gravada"':
+        /nenhum navegador aceitou a politica/.test(psPp) && /\$okPolitica \+\+|\$okPolitica\+\+/.test(psPp),
+      // se marcasse a versão como aplicada, a máquina NUNCA mais tentaria e a
+      // loja ficaria sem papel de parede pra sempre, calada
+      'papel de parede que não gravou não é marcado como aplicado':
+        /catch \{ Escrever-Log "Papel de parede: o Windows negou a gravacao[^"]*"; return \$false \}/.test(psPp)
+        && /if \(-not \$Servico -and -not \$okPapel\) \{[^}]*return \}/.test(psPp),
       'a tela oferece grupo + marca, e não só marca':
         /optgroup label="Grupo \+ marca"/.test(htmlPp) && /fd\.append\('rede', rede\)/.test(htmlPp),
       'a loja com marca recebe a arte da MARCA, não a do parque':
@@ -12029,6 +12048,17 @@ setTimeout(async () => {
       'máquina com papel de parede desligado não resolve arte nenhuma':
         cfgDesl.versaoAplicacao === '3.0' && cfgDesl.politica.papelDeParedeAtivo === false,
       'subir a arte de uma marca não apaga a das outras': domAindaTem && spoAgoraTem,
+      // O DEFEITO QUE ELE VIVEU: ligar a chave numa máquina INTERNA não
+      // acontecia até o agente reiniciar - o laço do interno chamava
+      // Sincronizar-Politica uma vez, ao subir, e nunca mais. Agora a versão
+      // desce no heartbeat (de graça: sai do espelho em memória) e o agente
+      // só busca a política inteira quando o número muda.
+      'o heartbeat leva a versão, e o agente interno reage a ela (antes só aplicava ao reiniciar)':
+        typeof (await ls.heartbeat('PPDOM', 'PC1', { userAgent: 'NOCZenith/1.0' }, 'tokdom')).versaoAplicacao === 'string'
+        && /if \(\$null -ne \$resp\.versaoAplicacao -and "\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
+        && /try \{ Sincronizar-Politica \}/.test(psPp),
+      'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
+        (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
       'a máquina baixa a arte DELA, com o token dela': imgMaquina.status === 200,
       'sem o token do computador a arte é recusada': imgSemToken.status === 403,
       'a tela sabe dizer quais marcas ainda não têm arte':

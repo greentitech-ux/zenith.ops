@@ -867,6 +867,18 @@ async function heartbeat(codigo, posto, info, token) {
   // (ver `cache` acima) ja fica bem abaixo do LIMIAR_OFFLINE_MS (90s), entao
   // o status online/offline calculado por comOnline() nunca fica visivelmente
   // desatualizado mesmo sem invalidar na hora
+  // A VERSAO DA POLITICA VAI NO HEARTBEAT, e isso conserta um defeito de
+  // verdade: o laco do tipo 'interno' so chamava Sincronizar-Politica UMA VEZ,
+  // ao subir. Na pratica, ligar "papel de parede" (ou qualquer outra trava)
+  // numa maquina interna nao acontecia ate o agente reiniciar - a tela dizia
+  // "aplica na proxima consulta (~25s)" e nao aplicava nunca.
+  //
+  // Nao custa leitura: `atual` ja veio do espelho em memoria, getConfig tem
+  // cache de 30s e o perfil da unidade sai do cache do unidades.js. O agente
+  // so busca a configuracao inteira (1 leitura) QUANDO este numero muda -
+  // pesquisar de tempos em tempos custaria milhares de leituras por dia (§3).
+  const politicaLigada = !!(atual && atual.politica && atual.politica.papelDeParedeAtivo);
+  const arteDaMaquina = politicaLigada ? await papelDeParedeDe(codigo) : null;
   return {
     mensagemPendente,
     comandoPendente,
@@ -875,6 +887,7 @@ async function heartbeat(codigo, posto, info, token) {
     // precisar baixar/reinstalar o NOCZenith.
     noPulsoPrint: !!(atual && atual.noPulsoPrint),
     capturarAgora,
+    versaoAplicacao: versaoAplicacao(atual && atual.politicaVersao, arteDaMaquina),
   };
 }
 
