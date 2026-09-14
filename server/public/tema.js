@@ -1516,10 +1516,21 @@
       var caixa = botao.closest('[role="dialog"],.modal,.overlay,.sheet-wrap,.painel-conversa');
       if (caixa) limparNo(caixa);
     }, true);
+    // SO nos nos que ACABARAM de nascer. A varredura geral que existia aqui
+    // ("agendarRestauracao()" a cada mutacao) reescrevia TODO campo da pagina,
+    // inclusive os que nunca sairam do DOM - e ai o rascunho velho ganhava de
+    // qualquer valor que a propria tela tivesse acabado de por no campo.
+    //
+    // Era isso o "clica em Mes e trava": o botao escrevia o periodo novo nas
+    // duas datas, o redesenho dos botoes mexia no DOM, e no quadro seguinte
+    // esta camada devolvia as datas antigas. O filtro dizia "Mes" e as datas
+    // eram outras - e clicar de novo nao mudava nada.
+    //
+    // O proposito da camada e sobreviver a re-render que RECRIA o campo; campo
+    // que continuou vivo na tela nunca precisou ser restaurado.
     if (document.documentElement) {
       new MutationObserver(function (mudancas) {
         mudancas.forEach(function (m) { m.addedNodes.forEach(aplicarEm); });
-        agendarRestauracao();
       }).observe(document.documentElement, { childList: true, subtree: true });
     }
     // Disponivel para fluxos que concluem/salvam e precisam limpar o que foi
@@ -1547,7 +1558,15 @@
       limparNo(campo);
       if (campo && 'value' in campo) campo.value = '';
     }
-    window.zenithRascunhos = { limpar: limparNo, limparCampoEnviado: limparCampoEnviado, limparAnexoEnviado: limparAnexoEnviado, restaurar: agendarRestauracao };
+    // Quando a TELA escreve no campo (um botao de periodo, um valor calculado),
+    // nao ha evento 'input'/'change' - o rascunho guardado continua sendo o
+    // valor antigo e voltaria se o campo fosse recriado depois. Uma linha
+    // depois de mexer no campo resolve, sem a tela precisar saber como esta
+    // camada guarda as coisas.
+    function sincronizar(campo) {
+      [].concat(campo || []).forEach(function (c) { if (c) guardarCampo(c); });
+    }
+    window.zenithRascunhos = { limpar: limparNo, limparCampoEnviado: limparCampoEnviado, limparAnexoEnviado: limparAnexoEnviado, restaurar: agendarRestauracao, sincronizar: sincronizar };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', agendarRestauracao);
     else agendarRestauracao();
   })();
