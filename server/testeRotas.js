@@ -12142,6 +12142,18 @@ setTimeout(async () => {
         && /\$UnidadePosto = "PPDOM \/ PC1"/.test(psPp),
       // sem isto, uma falha do System.Drawing deixaria a loja SEM papel de
       // parede - pior do que papel de parede sem o nome escrito
+      // INCIDENTE 14/09: "o plano de fundo de todas as unidades ficou preto".
+      // Desligar gravava Wallpaper = "", que nao e' "para de forcar a nossa" -
+      // e' APAGAR, e o Windows pinta o fundo solido (preto). O ramo quase nunca
+      // rodava; quando a politica voltou a ser relida, rodou em todas de uma vez.
+      'desligar NUNCA grava papel de parede vazio':
+        !/Name Wallpaper -Value ""/.test(psPp),
+      'desligar so mexe se a imagem for nossa, ou se a tela estiver apagada':
+        /if \(-not \$nossa -and \$atual -ne ""\) \{ return \$true \}/.test(psPp)
+        && psPp.includes('Web\\Wallpaper\\Windows\\img0.jpg'),
+      'quem ligou o papel de parede deixa marca, pra saber que foi nosso':
+        /papel-de-parede-aplicado\.txt/.test(psPp)
+        && /Set-Content -Path \$marca -Value \(Get-Date\)/.test(psPp),
       'se o carimbo falhar, aplica a arte crua em vez de desistir':
         /return \$origem \}/.test(psPp) && /\$destino = Carimbar-NomeNaArte \$bruto \$destino/.test(psPp),
       'o agente compara a versão de aplicação, com queda pra política se o servidor for antigo':

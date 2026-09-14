@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 60;
+const VERSAO_VIGIA = 61;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1600,14 +1600,46 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // maquina que bloqueie a chave despejaria vermelho na tela E o log diria
     // "aplicado" - e, pior, Sincronizar-Politica marcaria a versao como
     // aplicada e nunca mais tentaria. Devolve $true/$false pra quem chamou.
+    // INCIDENTE 14/09/2026 - "o plano de fundo de todas as unidades ficou preto".
+    //
+    // O DEFEITO: desligar gravava Wallpaper = "". String vazia nao e' "para de
+    // forcar a nossa", e' APAGAR o papel de parede - o Windows passa a pintar o
+    // fundo solido, que e' preto. O comentario antigo dizia o contrario do que
+    // a linha fazia, e ninguem conferiu.
+    //
+    // POR QUE ESTOUROU SO AGORA: ate a correcao da vespera, o laco do tipo
+    // interno sincronizava a politica UMA vez, ao subir, e o arquivo de versao
+    // ja batia - esse ramo quase nunca rodava. Quando a versao passou a descer
+    // no heartbeat E mudou de formato (numero -> "politica.arte"), toda maquina
+    // leu "versao nova" na primeira batida e reaplicou a politica. Na maioria a
+    // chave esta DESLIGADA, que e' o padrao: 52 telas apagadas de uma vez.
+    //
+    // REGRA AGORA: desligado nao mexe no papel de parede de ninguem.
+    //  - se fomos NOS que aplicamos (existe a marca), devolve o de fabrica;
+    //  - se a tela esta VAZIA e nao ha marca, foi este defeito que apagou:
+    //    devolve o de fabrica tambem, que e' o unico conserto possivel - o que
+    //    estava antes ninguem guardou;
+    //  - caso contrario, nao toca em nada. Imagem de quem nunca pediu nada nao
+    //    e' assunto do agente.
+    '  $marca = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-aplicado.txt"',
     '  try {',
     '    if ($ligado) {',
     '      Set-ItemProperty -Path $chave -Name Wallpaper -Value $destino -ErrorAction Stop',
     '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "10" -ErrorAction Stop',
     '      Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
+    '      Set-Content -Path $marca -Value (Get-Date).ToString() -Force -ErrorAction SilentlyContinue',
     '    } else {',
-    '      # desligar NAO apaga a imagem do Windows: so para de forcar a nossa',
-    '      Set-ItemProperty -Path $chave -Name Wallpaper -Value "" -ErrorAction Stop',
+    '      $atual = ""',
+    '      try { $atual = [string](Get-ItemProperty -Path $chave -Name Wallpaper -ErrorAction Stop).Wallpaper } catch {}',
+    '      $nossa = Test-Path $marca',
+    '      if (-not $nossa -and $atual -ne "") { return $true }   # nao e nossa e nao esta apagada: nao mexe',
+    '      $padrao = Join-Path $env:SystemRoot "Web\\Wallpaper\\Windows\\img0.jpg"',
+    '      if (Test-Path $padrao) {',
+    '        Set-ItemProperty -Path $chave -Name Wallpaper -Value $padrao -ErrorAction Stop',
+    '        Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "10" -ErrorAction Stop',
+    '        Escrever-Log "Papel de parede: devolvido o padrao do Windows$(if (-not $nossa) { " (a tela estava apagada)" })."',
+    '      }',
+    '      if ($nossa) { Remove-Item $marca -Force -ErrorAction SilentlyContinue }',
     '    }',
     '  } catch { Escrever-Log "Papel de parede: o Windows negou a gravacao ($($_.Exception.Message))."; return $false }',
     '  rundll32.exe user32.dll,UpdatePerUserSystemParameters 1, True | Out-Null',
