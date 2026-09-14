@@ -1666,7 +1666,7 @@ app.get('/api/loja-status/papel-de-parede', async (req, res) => {
   // ?marca=dominos serve a arte daquela marca (o "Ver atual" de cada linha da
   // tela). Sem marca, ou marca sem arte, continua servindo a do parque - e o
   // que o agente ANTIGO baixa, entao esta rota nao pode mudar de significado.
-  const { chave } = chaveDaArteDoPedido(req.query);
+  const { chave } = await chaveDaArteDoPedido(req.query);
   const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
   const pp = (chave && porMarca[chave] && porMarca[chave].caminho ? porMarca[chave] : null)
     || (cfg && cfg.papelDeParede);
@@ -5154,10 +5154,14 @@ app.put('/api/loja-status/:codigo/computadores/:posto/politica', auth.requireMas
 // se amanha entrar uma marca ou uma rede nova, as tres aprendem no mesmo
 // commit. Rede sem marca nao existe (a logo do grupo sozinha nao identifica a
 // loja), entao vale a marca pura, que e o degrau do meio do papelDeParedeDe.
-function chaveDaArteDoPedido(origem) {
+async function chaveDaArteDoPedido(origem) {
   const marca = unidadesExtras.MARCAS_VALIDAS.includes(String(origem.marca || '')) ? String(origem.marca) : null;
   if (!marca) return { marca: null, rede: null, chave: null };
-  const rede = redes.REDES.some((r) => r.id === String(origem.rede || '')) ? String(origem.rede) : null;
+  // o grupo vem do cadastro de EMPRESAS (o que o Master edita), nao de uma
+  // lista fixa de duas redes - ver papelDeParedeDe no lojaStatus.js
+  const pedido = String(origem.rede || '');
+  const valida = pedido ? (await empresas.listAtivas().catch(() => [])).some((e) => String(e.id) === pedido) : false;
+  const rede = valida ? pedido : null;
   return { marca, rede, chave: rede ? lojaStatus.chaveArte(rede, marca) : marca };
 }
 
@@ -5177,11 +5181,13 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
       label: unidadesExtras.MARCAS_LABEL[id] || id,
       ...arte(id),
     })),
-    combinacoes: redes.REDES.flatMap((r) => unidadesExtras.MARCAS_VALIDAS.map((m) => ({
-      rede: r.id,
+    // uma linha por GRUPO cadastrado x marca. Grupo novo aparece aqui sozinho,
+    // no dia em que o Master cadastrar a empresa - sem deploy.
+    combinacoes: (await empresas.listAtivas().catch(() => [])).flatMap((e) => unidadesExtras.MARCAS_VALIDAS.map((m) => ({
+      rede: e.id,
       marca: m,
-      label: `${r.nome} · ${unidadesExtras.MARCAS_LABEL[m] || m}`,
-      ...arte(lojaStatus.chaveArte(r.id, m)),
+      label: `${e.nome} · ${unidadesExtras.MARCAS_LABEL[m] || m}`,
+      ...arte(lojaStatus.chaveArte(e.id, m)),
     }))),
   });
 });
@@ -5191,7 +5197,7 @@ app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
     // marca e rede vem no MESMO form da imagem (campos de texto do multipart),
     // entao so existem depois do multer - nao da pra ler antes do upload
-    const { marca, chave } = chaveDaArteDoPedido(req.body);
+    const { marca, chave } = await chaveDaArteDoPedido(req.body);
     const arte = { caminho: null, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() };
     arte.caminho = await storage.salvarArquivo('parque', req.file, chave ? `papel-de-parede-${chave.replace(':', '-')}` : 'papel-de-parede');
     if (!marca) {

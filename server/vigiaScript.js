@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 60;
+const VERSAO_VIGIA = 62;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1541,9 +1541,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# so o nome - compor no servidor exigiria biblioteca de imagem no deploy',
     '# pra desenhar duas linhas de texto que o Windows desenha de graca.',
     '#',
-    '# Sai NO CANTO INFERIOR DIREITO porque o canto esquerdo e onde o Windows',
-    '# empilha os icones da area de trabalho. Vai com sombra atras: a arte de',
-    '# cada marca tem cor propria e texto claro sozinho some em fundo claro.',
+    '# Sai CENTRALIZADO, a 60% da altura - logo abaixo de onde a logo da marca',
+    '# fica na arte. Vai com sombra atras: a arte de cada marca tem cor propria',
+    '# e texto claro sozinho some em fundo claro.',
     '#',
     '# Se qualquer parte disso falhar a funcao devolve a imagem CRUA em vez de',
     '# $null: melhor papel de parede sem nome do que maquina sem papel de parede.',
@@ -1564,18 +1564,28 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '          try {',
     '            $nome = $env:COMPUTERNAME',
     '            $sub = $UnidadePosto',
-    '            $margem = [int]($alturaFonte * 1.2)',
     '            $tamNome = $g.MeasureString($nome, $fonteNome)',
     '            $tamSub = $g.MeasureString($sub, $fonteSub)',
-    '            $x = $img.Width - $margem - [Math]::Max($tamNome.Width, $tamSub.Width)',
-    '            $y = $img.Height - $margem - $tamNome.Height - $tamSub.Height',
+    // CENTRALIZADO, LOGO ABAIXO DA MARCA (decisao do Master, 14/09/2026).
+    //
+    // O agente nao enxerga a arte: nao tem como saber onde a logo da marca
+    // termina. Entao a posicao e' uma CONVENCAO - 60% da altura, que e' onde o
+    // nome cai no modelo que ele mandou, logo abaixo do bloco da logo. A arte
+    // tem de deixar essa faixa livre, e a tela do NOC avisa isso.
+    //
+    // Cada linha centrada por si (e nao o bloco): nome e unidade tem larguras
+    // diferentes, e alinhar pelo bloco deixaria as duas tortas em relacao ao
+    // eixo da arte - que e' justamente o que se ve num papel de parede.
+    '            $y = [int]($img.Height * 0.60)',
+    '            $x = ($img.Width - $tamNome.Width) / 2',
+    '            $xSub = ($img.Width - $tamSub.Width) / 2',
     '            $sombra = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(170, 0, 0, 0))',
     '            $claro = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(240, 255, 255, 255))',
     '            try {',
     '              $g.DrawString($nome, $fonteNome, $sombra, ($x + 2), ($y + 2))',
     '              $g.DrawString($nome, $fonteNome, $claro, $x, $y)',
-    '              $g.DrawString($sub, $fonteSub, $sombra, ($x + 1), ($y + $tamNome.Height + 1))',
-    '              $g.DrawString($sub, $fonteSub, $claro, $x, ($y + $tamNome.Height))',
+    '              $g.DrawString($sub, $fonteSub, $sombra, ($xSub + 1), ($y + $tamNome.Height + 1))',
+    '              $g.DrawString($sub, $fonteSub, $claro, $xSub, ($y + $tamNome.Height))',
     '            } finally { $sombra.Dispose(); $claro.Dispose() }',
     '          } finally { $fonteNome.Dispose(); $fonteSub.Dispose() }',
     '        } finally { $g.Dispose() }',
@@ -1600,14 +1610,46 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // maquina que bloqueie a chave despejaria vermelho na tela E o log diria
     // "aplicado" - e, pior, Sincronizar-Politica marcaria a versao como
     // aplicada e nunca mais tentaria. Devolve $true/$false pra quem chamou.
+    // INCIDENTE 14/09/2026 - "o plano de fundo de todas as unidades ficou preto".
+    //
+    // O DEFEITO: desligar gravava Wallpaper = "". String vazia nao e' "para de
+    // forcar a nossa", e' APAGAR o papel de parede - o Windows passa a pintar o
+    // fundo solido, que e' preto. O comentario antigo dizia o contrario do que
+    // a linha fazia, e ninguem conferiu.
+    //
+    // POR QUE ESTOUROU SO AGORA: ate a correcao da vespera, o laco do tipo
+    // interno sincronizava a politica UMA vez, ao subir, e o arquivo de versao
+    // ja batia - esse ramo quase nunca rodava. Quando a versao passou a descer
+    // no heartbeat E mudou de formato (numero -> "politica.arte"), toda maquina
+    // leu "versao nova" na primeira batida e reaplicou a politica. Na maioria a
+    // chave esta DESLIGADA, que e' o padrao: 52 telas apagadas de uma vez.
+    //
+    // REGRA AGORA: desligado nao mexe no papel de parede de ninguem.
+    //  - se fomos NOS que aplicamos (existe a marca), devolve o de fabrica;
+    //  - se a tela esta VAZIA e nao ha marca, foi este defeito que apagou:
+    //    devolve o de fabrica tambem, que e' o unico conserto possivel - o que
+    //    estava antes ninguem guardou;
+    //  - caso contrario, nao toca em nada. Imagem de quem nunca pediu nada nao
+    //    e' assunto do agente.
+    '  $marca = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-aplicado.txt"',
     '  try {',
     '    if ($ligado) {',
     '      Set-ItemProperty -Path $chave -Name Wallpaper -Value $destino -ErrorAction Stop',
     '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "10" -ErrorAction Stop',
     '      Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
+    '      Set-Content -Path $marca -Value (Get-Date).ToString() -Force -ErrorAction SilentlyContinue',
     '    } else {',
-    '      # desligar NAO apaga a imagem do Windows: so para de forcar a nossa',
-    '      Set-ItemProperty -Path $chave -Name Wallpaper -Value "" -ErrorAction Stop',
+    '      $atual = ""',
+    '      try { $atual = [string](Get-ItemProperty -Path $chave -Name Wallpaper -ErrorAction Stop).Wallpaper } catch {}',
+    '      $nossa = Test-Path $marca',
+    '      if (-not $nossa -and $atual -ne "") { return $true }   # nao e nossa e nao esta apagada: nao mexe',
+    '      $padrao = Join-Path $env:SystemRoot "Web\\Wallpaper\\Windows\\img0.jpg"',
+    '      if (Test-Path $padrao) {',
+    '        Set-ItemProperty -Path $chave -Name Wallpaper -Value $padrao -ErrorAction Stop',
+    '        Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "10" -ErrorAction Stop',
+    '        Escrever-Log "Papel de parede: devolvido o padrao do Windows$(if (-not $nossa) { " (a tela estava apagada)" })."',
+    '      }',
+    '      if ($nossa) { Remove-Item $marca -Force -ErrorAction SilentlyContinue }',
     '    }',
     '  } catch { Escrever-Log "Papel de parede: o Windows negou a gravacao ($($_.Exception.Message))."; return $false }',
     '  rundll32.exe user32.dll,UpdatePerUserSystemParameters 1, True | Out-Null',

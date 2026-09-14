@@ -12047,7 +12047,13 @@ setTimeout(async () => {
     const arteDom = await ls.papelDeParedeDe('PPDOM');
     // antes de existir arte do grupo, a ARCFOOD cai na arte so-da-marca
     const arcSoMarca = await ls.papelDeParedeDe('19855');
-    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'ARCFOOD' }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    // grupo agora sai do CADASTRO de empresas (o Master edita), nao de uma lista
+    // fixa de duas redes: Estacao e' uma empresa nova, nao uma linha de codigo
+    const emp = require('/home/user/adyen-monitor/server/empresas.js');
+    DOCS.set('empresas/empArcTeste', { id: 'empArcTeste', nome: 'ARCFOOD', ativa: true, tipoNegocio: 'alimentacao', unidades: ['19855'] });
+    DOCS.set('empresas/empBravoTeste', { id: 'empBravoTeste', nome: 'Grupo Bravo', ativa: true, tipoNegocio: 'alimentacao', unidades: ['PPDOM'] });
+    emp.invalidarCache();
+    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'empArcTeste' }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arcComGrupo = await ls.papelDeParedeDe('19855');
     const gbeDepois = await ls.papelDeParedeDe('PPDOM');
     const arteSem = await ls.papelDeParedeDe('PPSEM');
@@ -12075,7 +12081,17 @@ setTimeout(async () => {
       // A ARTE CARREGA DUAS LOGOS (grupo + marca), e Domino's existe nas duas
       // redes: sem a chave por grupo, a Dom Carrão mostraria a logo do GBE.
       'a arte do GRUPO ganha da arte só-da-marca':
-        envArc.status === 200 && arcComGrupo.rede === 'ARCFOOD' && arcComGrupo.marca === 'dominos',
+        envArc.status === 200 && arcComGrupo.rede === 'empArcTeste' && arcComGrupo.marca === 'dominos',
+      // "maquinas do Grupo Bravo, logo Bravo; ARCFOOD, ARCFOOD; ESTACAO,
+      // Estacao, e assim vai" - redes.js so tem DOIS valores e GBE e' "o
+      // resto": a Estacao cairia calada no Bravo e mostraria a logo errada
+      'o grupo sai do cadastro de empresas, que aceita grupo novo sem deploy':
+        /empresas\.empresaDaUnidade\(codigo\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+        && !/redes\.redeDaUnidade/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
+      // nunca CHUTAR um grupo: unidade sem empresa cadastrada cai na arte da
+      // marca, nao na logo de um grupo que ninguem disse que e' o dela
+      'unidade sem empresa não herda a logo de grupo nenhum':
+        arcSoMarca.rede === null,
       'arte de um grupo não vaza pro outro (mesma marca, redes diferentes)':
         arcComGrupo.caminho !== gbeDepois.caminho && gbeDepois.marca === 'dominos',
       'sem arte do grupo, cai na arte só-da-marca (não fica sem)':
@@ -12137,11 +12153,31 @@ setTimeout(async () => {
       'o agente baixa da URL da PRÓPRIA máquina (quem escolhe a marca é o servidor)':
         /\$UrlPapelDeParede = "[^"]*\/api\/loja-status\/PPDOM\/computadores\/PC1\/papel-de-parede"/.test(psPp)
         && /Invoke-WebRequest -Uri \$UrlPapelDeParede -Headers \$CabecalhosAgente/.test(psPp),
+      // decisao do Master: centralizado, logo abaixo da marca (o modelo que ele
+      // mandou). O agente nao enxerga a arte - a posicao e' convencao, e a tela
+      // avisa pra arte deixar a faixa livre
+      'o nome sai centralizado a 60% da altura, e a tela avisa pra deixar a faixa livre':
+        /\$y = \[int\]\(\$img\.Height \* 0\.60\)/.test(psPp)
+        && /\$x = \(\$img\.Width - \$tamNome\.Width\) \/ 2/.test(psPp)
+        && /\$xSub = \(\$img\.Width - \$tamSub\.Width\) \/ 2/.test(psPp)
+        && /centralizado, a 60% da altura/.test(htmlPp),
       'o agente carimba o nome da máquina na arte':
         /function Carimbar-NomeNaArte/.test(psPp) && /\$nome = \$env:COMPUTERNAME/.test(psPp)
         && /\$UnidadePosto = "PPDOM \/ PC1"/.test(psPp),
       // sem isto, uma falha do System.Drawing deixaria a loja SEM papel de
       // parede - pior do que papel de parede sem o nome escrito
+      // INCIDENTE 14/09: "o plano de fundo de todas as unidades ficou preto".
+      // Desligar gravava Wallpaper = "", que nao e' "para de forcar a nossa" -
+      // e' APAGAR, e o Windows pinta o fundo solido (preto). O ramo quase nunca
+      // rodava; quando a politica voltou a ser relida, rodou em todas de uma vez.
+      'desligar NUNCA grava papel de parede vazio':
+        !/Name Wallpaper -Value ""/.test(psPp),
+      'desligar so mexe se a imagem for nossa, ou se a tela estiver apagada':
+        /if \(-not \$nossa -and \$atual -ne ""\) \{ return \$true \}/.test(psPp)
+        && psPp.includes('Web\\Wallpaper\\Windows\\img0.jpg'),
+      'quem ligou o papel de parede deixa marca, pra saber que foi nosso':
+        /papel-de-parede-aplicado\.txt/.test(psPp)
+        && /Set-Content -Path \$marca -Value \(Get-Date\)/.test(psPp),
       'se o carimbo falhar, aplica a arte crua em vez de desistir':
         /return \$origem \}/.test(psPp) && /\$destino = Carimbar-NomeNaArte \$bruto \$destino/.test(psPp),
       'o agente compara a versão de aplicação, com queda pra política se o servidor for antigo':

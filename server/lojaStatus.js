@@ -43,7 +43,7 @@ const nocMaquina = require('./nocMaquina');
 const impressoraStatus = require('./impressoraStatus');
 const ouiFabricantes = require('./ouiFabricantes');
 const unidades = require('./unidades');
-const redes = require('./redes');
+const empresas = require('./empresas');
 
 const COLLECTION = db.collection('lojaStatus');
 // fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
@@ -94,10 +94,22 @@ async function setConfig(patch) {
 // Sem marca, ou marca sem arte enviada: cai no papel de parede do parque, que
 // e exatamente o comportamento de antes desta mudanca.
 // A arte carrega DUAS logos: a do grupo e a da marca. Por isso a chave e
-// GRUPO x MARCA, e nao so a marca: Domino's existe nas duas redes (ARCFOOD e
-// GBE, ver redes.js), entao arte so por marca poria a logo do grupo errado na
-// tela da Dom Mooca. A rede sai do proprio codigo da unidade - nao ha cadastro
-// novo, e ela ja e a mesma nos dois espacos de codigo da loja.
+// GRUPO x MARCA, e nao so a marca: Domino's existe em mais de um grupo, entao
+// arte so por marca poria a logo do grupo errado na tela da loja.
+//
+// O GRUPO SAI DE empresas.js, E NAO DE redes.js - correcao de 14/09/2026.
+// Regra do Master: "maquinas do Grupo Bravo, logo Bravo; maquinas da ARCFOOD,
+// logo ARCFOOD; maquinas da ESTACAO, Estacao, e assim vai".
+//
+// redes.js so conhece DOIS valores (ARCFOOD e GBE) e, pior, GBE e' "o resto":
+// uma maquina da Estacao cairia calada no Grupo Bravo e mostraria a logo
+// errada na tela da loja. empresas.js e' cadastro de verdade - colecao que o
+// Master edita, uma unidade pertence a no maximo uma empresa, e NAO existe
+// catch-all: unidade que ninguem listou nao pertence a ninguem. E' exatamente
+// o "e assim vai": grupo novo e' um cadastro, nao uma linha de codigo.
+//
+// Sem empresa, a maquina cai na arte da marca. Nunca se CHUTA um grupo - por
+// isso o degrau do meio existe.
 //
 // Tres degraus, do mais especifico pro mais generico, e cada um so existe se
 // alguem tiver enviado a arte:
@@ -112,7 +124,8 @@ async function papelDeParedeDe(codigo) {
   // nesse caso nao ha marca e a maquina cai no papel de parede do parque
   const perfilUnidade = await unidades.perfil(codigo).catch(() => null);
   const marca = (perfilUnidade && perfilUnidade.marca) || null;
-  const rede = redes.redeDaUnidade(codigo);
+  const empresa = await empresas.empresaDaUnidade(codigo).catch(() => null);
+  const rede = empresa && empresa.id ? String(empresa.id) : null;
   const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
   const temArte = (k) => (k && porMarca[k] && porMarca[k].caminho ? porMarca[k] : null);
   if (marca) {
