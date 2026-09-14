@@ -297,10 +297,20 @@ async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, p
 }
 
 // mudar de mesa é rotina (o grupo troca de lugar, ou o garçom errou o número)
+// Trocar de mesa é rotina (o grupo muda de lugar, ou o garçom errou o número)
+// - e por isso mesmo fica REGISTRADO. Sem o histórico, "essa comanda estava na
+// 92, agora está na 110" vira palavra contra palavra quando a conta da mesa
+// não bate no fim da noite.
 async function definirMesa(id, mesa, porEmail) {
   const comanda = await getComanda(id);
   if (comanda.status !== 'ABERTA') throw new Error('Essa comanda já foi fechada.');
-  return gravarEEspelhar({ ...comanda, mesa: sanitizarMesa(mesa), mesaPorEmail: porEmail || null });
+  const nova = sanitizarMesa(mesa);
+  const anterior = comanda.mesa || null;
+  // só registra TROCA de verdade: salvar a mesma mesa de novo não é evento
+  const historicoMesa = anterior === nova
+    ? (comanda.historicoMesa || [])
+    : [...(comanda.historicoMesa || []), { de: anterior, para: nova, em: new Date().toISOString(), porEmail: porEmail || null }].slice(-20);
+  return gravarEEspelhar({ ...comanda, mesa: nova, mesaPorEmail: porEmail || null, historicoMesa });
 }
 
 async function getComanda(id) {

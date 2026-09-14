@@ -21930,9 +21930,40 @@ setTimeout(async () => {
     const css = fsx.readFileSync(__dirname + '/public/estacao.css', 'utf8');
     const nav = fsx.readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
     const idx2 = fsx.readFileSync(__dirname + '/index.js', 'utf8');
+    const redes = require(__dirname + '/redes.js');
+    const est2Fonte = fsx.readFileSync(__dirname + '/estacaoComida.js', 'utf8');
     const todas = Object.values(telas);
 
     const conf = {
+      // ---- EMPRESA SEPARADA ----
+      // Master (14/09): "a estação da comida é a nova empresa, um novo grupo,
+      // não se mistura nem com grupo bravo nem com arcfood". No print, o
+      // seletor do garçom mostrava "Dom Sao Miguel" - loja do Bravo.
+      'a Estação é uma REDE própria, não o "resto" que cai no Bravo':
+        redes.redeDaUnidade('Estacao Comida') === redes.ESTACAO
+        && redes.redeDaUnidade('Estação da Comida') === redes.ESTACAO
+        && redes.NOME_DA_REDE[redes.ESTACAO] === 'Estação da Comida'
+        && redes.redeDaUnidade('Dominos Bessa') === redes.GBE
+        && redes.redeDaUnidade('19888') === redes.ARCFOOD,
+      'as telas da Estação listam SÓ as unidades dela':
+        idx2.includes("const ESTACAO_UNIDADES_NOMES = {")
+        && idx2.includes("  'Estacao Comida': 'Estação da Comida',")
+        && idx2.includes('? Object.keys(ESTACAO_UNIDADES_NOMES)')
+        // a rota de unidades da Estação não olha mais a lista do inventário
+        && !/\/api\/estacao\/unidades'[\s\S]{0,400}?INVENTARIO_UNIDADES_NOMES/.test(idx2),
+      // sem isto bastava mandar o código de uma loja do Bravo na URL pra abrir
+      // comanda lá dentro
+      'e o servidor recusa unidade que não é da Estação, venha de onde vier':
+        /const podeUnidadeEstacao = \(req, unidade\) => \{[\s\S]*?if \(!ESTACAO_UNIDADES_NOMES\[u\]\) return false;/.test(idx2),
+      // o PDF de tarefa desenha a marca do GRUPO: sem rede própria, um
+      // documento da Estação sairia com a LOGO DO GRUPO BRAVO em cima
+      'documento da Estação não carrega a marca de outro grupo':
+        (() => {
+          const tr = require('fs').readFileSync(__dirname + '/tarefaRelatorio.js', 'utf8');
+          return /\[redes\.ARCFOOD\]: \{ w: 64, h: 48 \}/.test(tr) && /\[redes\.GBE\]: \{ w: 94, h: 48 \}/.test(tr)
+            && !/redes\.ESTACAO/.test(tr)
+            && /const caixaDaMarca = \(rede\) => CAIXA_MARCA\[rede\] \|\| null;/.test(tr);
+        })(),
       'as três telas existem e são as que o menu aponta':
         ['estacao-salao', 'estacao-caixa', 'estacao-fechamento'].every((t) => fsx.existsSync(`${__dirname}/public/${t}.html`))
         && /href: '\/estacao-salao\.html'/.test(nav) && /href: '\/estacao-caixa\.html'/.test(nav) && /href: '\/estacao-fechamento\.html'/.test(nav),
@@ -21974,6 +22005,15 @@ setTimeout(async () => {
       'criança até 5 não entra na tabela (não paga em dia nenhum)':
         !/crianca-ate-5/.test(telas.fechamento.slice(telas.fechamento.indexOf('LINHAS_TABELA')))
         && /Criança até 5 anos não paga e não entra aqui/.test(telas.fechamento),
+      // a tabela nasce vazia, e montá-la é digitar 28 números: o botão põe os
+      // valores do cardápio nos CAMPOS - quem grava é o Master, no Salvar
+      'o botão do cardápio preenche a tabela com os valores da foto, sem gravar':
+        /const TABELA_DO_CARDAPIO = \{/.test(telas.fechamento)
+        && /seg:\{adulto:39\.9,crianca:30\}/.test(telas.fechamento)
+        && /sab:\{adulto:59\.9,crianca:40\}, dom:\{adulto:59\.9,crianca:40\}, feriado:\{adulto:59\.9,crianca:40\}/.test(telas.fechamento)
+        && /sex:\{adulto:49\.9,crianca:35\}, sab:\{adulto:49\.9,crianca:35\}/.test(telas.fechamento)
+        && /nada foi gravado ainda/.test(telas.fechamento)
+        && /onclick="preencherDoCardapio\(\)"/.test(telas.fechamento),
       'as datas de feriado são marcadas à mão, e a tela deixa marcar':
         /function addFeriado\(\)/.test(telas.fechamento) && /function tirarFeriado\(/.test(telas.fechamento)
         && /feriados: PRECOS\.feriados \|\| \[\]/.test(telas.fechamento),
@@ -21993,6 +22033,36 @@ setTimeout(async () => {
         /new EventSource\('\/api\/stream\?token='/.test(telas.salao)
         && /addEventListener\('estacao-salao-mudou'/.test(telas.salao)
         && /broadcast\('estacao-salao-mudou'/.test(idx2),
+      // ---- a ficha da comanda (Master, 14/09) ----
+      // "Numero da comanda antes da caixa de inserir a mesa" - é por ele que
+      // tudo acontece, e no celular o título da janela sai de vista assim que
+      // a lista rola
+      'o número da comanda aparece antes do campo da mesa':
+        telas.salao.includes('const cabeca = `<div class="est-comanda"')
+        && telas.salao.includes('est-comanda-num">${c.numero}</span>')
+        && telas.salao.indexOf('const cabeca =') < telas.salao.indexOf('id="mesa-comanda"')
+        && telas.salao.includes("innerHTML = cabeca + abas"),
+      // "No lugar de salvar mesa trocar por dois botões trocar e consumo"
+      'a ficha tem os dois botões, um painel de cada vez':
+        telas.salao.includes('onclick="modoFicha(\'mesa\')">↔ Trocar mesa</button>')
+        && telas.salao.includes('onclick="modoFicha(\'consumo\')">🍽 Consumo</button>')
+        && telas.salao.includes("let MODO_FICHA = 'consumo';"),
+      // trocar de mesa é rotina, e por isso mesmo fica registrado: sem o
+      // histórico, "estava na 92, agora está na 110" vira palavra contra
+      // palavra quando a conta da mesa não bate no fim da noite
+      'trocar de mesa deixa histórico, e a tela mostra de → para':
+        est2Fonte.includes('const historicoMesa = anterior === nova')
+        && est2Fonte.includes('{ de: anterior, para: nova, em: new Date().toISOString(), porEmail: porEmail || null }')
+        && telas.salao.includes("h.de==null?'sem mesa':h.de} <span style=\"color:var(--accent);\">→</span> ${h.para==null?'sem mesa':h.para}"),
+      // "Consumo mostra o cardapio sempre no topo refrigerantes coca normal /
+      // Coca zero" - o grupo é o TIPO que o estoque já usa, a tela não inventa
+      'o consumo abre com o cardápio no topo, agrupado pelo tipo do item':
+        telas.salao.includes('const porTipo = new Map();')
+        && telas.salao.includes("const g = (i.tipo || 'OUTROS');")
+        && telas.salao.indexOf('const painelConsumo') < telas.salao.indexOf('<h2 style="margin-top:6px;">Lançado</h2>'),
+      // comanda sem mesa abre na mesa: é a única coisa que falta nela
+      'comanda sem mesa abre no painel da mesa, não no cardápio':
+        telas.salao.includes("MODO_FICHA = (acharComanda(id) || {}).mesa ? 'consumo' : 'mesa';"),
       // remover item por POSIÇÃO tiraria o errado se outro garçom lançasse no
       // meio do caminho
       'remover item manda o NOME junto, não só a posição':
