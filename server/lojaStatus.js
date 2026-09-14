@@ -1143,6 +1143,9 @@ function leituraSuspeita(anteriores, sumidos) {
   return fora >= SUMICO_SUSPEITO_MIN && fora * 2 > antes;
 }
 
+// 60 entradas: historico de sobra pra responder "o que entrou nessa maquina e
+// quando", sem inchar um documento que e' lido a cada abertura de ficha.
+const PROGRAMAS_HISTORICO_MAX = 60;
 async function registrarProgramas(codigo, posto, lista, token) {
   const ref = COLLECTION.doc(docIdFor(codigo, posto));
   const snap = await ref.get();
@@ -1170,24 +1173,39 @@ async function registrarProgramas(codigo, posto, lista, token) {
   }
   const agora = Date.now();
   const patch = { programas: limpa, programasEm: agora };
-  const eventos = [...(atual.eventos || [])];
-  if (novos.length) {
-    const evento = { tipo: 'programa-novo', em: agora, detalhe: novos.slice(0, 10).join(' · ') };
-    eventos.push(evento);
-    patch.ultimoProgramaNovoEm = agora;
-    patch.ultimoProgramaNovoDetalhe = evento.detalhe;
-  }
-  // desinstalacao entra na MESMA linha do tempo e so avisa com a chave
-  // ligada, igual a instalacao: pra quem olha o Registro de atividades, "o
-  // que saiu" conta tanto quanto "o que entrou"
+  // ---- HISTORICO DE PROGRAMAS, EM LISTA PROPRIA ----
+  //
+  // Pedido do Master (14/09): "quando um programa novo instalado, quando um
+  // programa e desinstalado, ter um icone ao clicar abrir uma aba mostrando -
+  // para nao poluir nem ficar baguncado os registros".
+  //
+  // Antes isto ia pro array `eventos`, que e' o Registro de atividades - o
+  // mesmo lugar de online/offline, comando, acesso remoto. Uma maquina que
+  // atualiza Chrome toda semana empurrava queda de rede pra fora da tela, e a
+  // linha do tempo que serve pra investigar incidente virava lista de
+  // instalador. Agora e' um array separado, com aba propria na ficha.
+  //
+  // Cabe no MESMO documento e na MESMA escrita que ja acontece: nao custa
+  // leitura nem escrita a mais (§3). 60 entradas e' historico de sobra pra
+  // responder "quem instalou isso e quando", e cada entrada e' pequena.
   const sumidosAlerta = alerta ? sumidos : [];
-  if (sumidosAlerta.length) {
-    const evento = { tipo: 'programa-sumido', em: agora, detalhe: sumidosAlerta.slice(0, 10).join(' · ') };
-    eventos.push(evento);
-    patch.ultimoProgramaSumidoEm = agora;
-    patch.ultimoProgramaSumidoDetalhe = evento.detalhe;
+  if (novos.length) {
+    patch.ultimoProgramaNovoEm = agora;
+    patch.ultimoProgramaNovoDetalhe = novos.slice(0, 10).join(' · ');
   }
-  if (novos.length || sumidosAlerta.length) patch.eventos = eventos.slice(-EVENTOS_MAX);
+  if (sumidosAlerta.length) {
+    patch.ultimoProgramaSumidoEm = agora;
+    patch.ultimoProgramaSumidoDetalhe = sumidosAlerta.slice(0, 10).join(' · ');
+  }
+  if (novos.length || sumidosAlerta.length) {
+    // entrou e saiu na MESMA entrada quando acontecem na mesma leitura: uma
+    // atualizacao de programa e' isso - o nome velho sai e o novo entra, e
+    // separar em duas linhas faria parecer que sao dois acontecimentos
+    patch.programasHistorico = [
+      ...(Array.isArray(atual.programasHistorico) ? atual.programasHistorico : []),
+      { em: agora, entrou: novos.slice(0, 20), saiu: sumidosAlerta.slice(0, 20) },
+    ].slice(-PROGRAMAS_HISTORICO_MAX);
+  }
   await gravarEEspelhar(codigo, posto, patch);
   return { novos, sumidos: sumidosAlerta, nome, primeira };
 }

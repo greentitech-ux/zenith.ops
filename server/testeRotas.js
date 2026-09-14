@@ -11956,7 +11956,11 @@ setTimeout(async () => {
       'programa novo é detectado pelo SERVIDOR e vira evento na máquina':
         prog2.status === 200 && JSON.parse(prog2.corpo).novos === 1
         && docPol.ultimoProgramaNovoDetalhe === 'uTorrent'
-        && (docPol.eventos || []).some((e) => e.tipo === 'programa-novo'),
+        // AGORA em lista propria, nao no Registro de atividades: uma maquina que
+        // atualiza Chrome toda semana empurrava queda de rede pra fora da tela
+        // (pedido do Master: "para nao poluir nem ficar baguncado os registros")
+        && (docPol.programasHistorico || []).some((h) => (h.entrou || []).includes('uTorrent'))
+        && !(docPol.eventos || []).some((e) => e.tipo === 'programa-novo'),
       'a comparação é do servidor (a máquina só manda a lista crua)':
         /function programasNovos\(anteriores, atuais\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
         && !/programasNovos/.test(psPol),
@@ -12241,6 +12245,83 @@ setTimeout(async () => {
   if (!okMedidor) ruins += 1;
   console.log(`${okMedidor ? '✓' : '✗'} NOC: um aparelho da rede vira o medidor de quedas da unidade (o modem, que ninguém desliga)`);
 
+  // ------------------------------------------------------------------
+  // PROGRAMAS DA MAQUINA EM JANELA PROPRIA (pedido do Master, 14/09/2026)
+  // "quando um programa novo instalado, quando um programa e desinstalado, ter
+  // um icone ao clicar abrir uma aba mostrando - para nao poluir nem ficar
+  // baguncado os registros. E 1 aba com os programas atuais na maquina".
+  //
+  // A decisao que este teste tranca: instalacao/desinstalacao SAI do array
+  // `eventos`. Aquele array e' o Registro de atividades - o mesmo lugar de
+  // queda, comando e acesso remoto, que e' o que se olha pra investigar
+  // incidente. Uma maquina que atualiza Chrome toda semana empurrava a queda de
+  // rede pra fora da tela.
+  //
+  // A aba "instalados agora" nao custa nada: a lista JA era guardada pra servir
+  // de base de comparacao. So nunca tinha sido mostrada.
+  let okProgramasAba = false;
+  try {
+    const cabPr = { Authorization: 'Bearer ' + token };
+    const rotaPr = '/api/loja-status/PROG/computadores/PC1/programas';
+    DOCS.set('lojaStatus/PROG__PC1', {
+      codigo: 'PROG', posto: 'PC1', nome: 'PDV Programas', tipo: 'interno', agentToken: 'tokprog',
+      ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: true },
+    });
+    const cabTokPr = { 'x-noc-token': 'tokprog' };
+    // 1a coleta = foto inicial (nao vira historico); a 2a troca um programa
+    await postarJson(rotaPr, { programas: ['Google Chrome', 'Adobe Reader', 'WinRAR'] }, cabTokPr);
+    await postarJson(rotaPr, { programas: ['Google Chrome', 'Adobe Reader', 'AnyDesk'] }, cabTokPr);
+    const doc1 = DOCS.get('lojaStatus/PROG__PC1') || {};
+    const hist = doc1.programasHistorico || [];
+    // uma terceira leitura, so instalacao
+    await postarJson(rotaPr, { programas: ['Google Chrome', 'Adobe Reader', 'AnyDesk', 'Notepad++'] }, cabTokPr);
+    const doc2 = DOCS.get('lojaStatus/PROG__PC1') || {};
+    const detalhe = await pedir('/api/loja-status/PROG/computadores/PC1/detalhe', cabPr);
+    const dJson = detalhe.status === 200 ? JSON.parse(detalhe.corpo) : {};
+    const htmlP = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    const conf = {
+      'a 1ª coleta não vira histórico (80 programas não são 80 mudanças)':
+        hist.length === 1,
+      // trocar um programa por outro e' UMA mudanca, nao duas: separar faria
+      // uma atualizacao parecer dois acontecimentos
+      'entrou e saiu na mesma leitura ficam na MESMA entrada':
+        (hist[0].entrou || []).includes('AnyDesk') && (hist[0].saiu || []).includes('WinRAR'),
+      'cada mudança nova é uma entrada a mais, com a hora':
+        (doc2.programasHistorico || []).length === 2
+        && (doc2.programasHistorico[1].entrou || []).includes('Notepad++')
+        && !(doc2.programasHistorico[1].saiu || []).length
+        && doc2.programasHistorico[1].em > 0,
+      // O PEDIDO: sai do Registro de atividades, que e' pra investigar incidente
+      'instalação e desinstalação NÃO poluem mais o Registro de atividades':
+        !(doc2.eventos || []).some((e) => e.tipo === 'programa-novo' || e.tipo === 'programa-sumido'),
+      'o card continua mostrando a última mudança (sem precisar abrir a janela)':
+        doc2.ultimoProgramaNovoDetalhe === 'Notepad++' && !!doc2.ultimoProgramaNovoEm,
+      // a lista inteira ja era guardada como base de comparacao: mostrar nao
+      // custa leitura nenhuma
+      'a ficha já traz a lista atual e o histórico, sem rota nem leitura nova':
+        detalhe.status === 200 && (dJson.programas || []).includes('Notepad++')
+        && (dJson.programasHistorico || []).length === 2 && dJson.programasEm > 0,
+      'o histórico tem teto (não incha o documento que a ficha lê toda vez)':
+        /PROGRAMAS_HISTORICO_MAX = \d+/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+        && /\.slice\(-PROGRAMAS_HISTORICO_MAX\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
+      'a tela tem o ícone e as duas abas que ele pediu':
+        /onclick="abrirProgramas\('/.test(htmlP) && /id="prog-aba-mudancas"/.test(htmlP)
+        && /id="prog-aba-atuais"/.test(htmlP) && /function pintarProgramas\(\)/.test(htmlP),
+      'a lista de instalados é ordenada e dá pra buscar (uma máquina tem ~100)':
+        /sort\(\(a,b\)=>a\.localeCompare\(b,'pt-BR'\)\)/.test(htmlP) && /id="prog-busca"/.test(htmlP),
+      // sem essa explicacao, uma janela vazia parece defeito
+      'janela vazia explica que o aviso depende da chave da política':
+        /Nenhuma mudança registrada ainda/.test(htmlP) && /Avisar quando instalarem/.test(htmlP),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okProgramasAba = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (hist=${JSON.stringify(hist).slice(0, 200)})`);
+  } catch (e) { okProgramasAba = false; console.log('  erro: ' + e.message); }
+  if (!okProgramasAba) ruins += 1;
+  console.log(`${okProgramasAba ? '✓' : '✗'} NOC: programas da máquina em janela própria (o que entrou, o que saiu, e o que está instalado agora)`);
+
+
 
   // ------------------------------------------------------------------
   // "INCLUSIVE QUERO TAMBEM SER AVISADO QUANDO DESINSTALADO" (Master,
@@ -12295,7 +12376,8 @@ setTimeout(async () => {
       'desinstalação é detectada e vira alerta, campo e evento na máquina':
         some.status === 200 && JSON.parse(some.corpo).sumidos === 3
         && docDes.ultimoProgramaSumidoDetalhe === 'Avast Antivirus · NOCZenith · 7-Zip'
-        && (docDes.eventos || []).some((e) => e.tipo === 'programa-sumido')
+        && (docDes.programasHistorico || []).some((h) => (h.saiu || []).length)
+        && !(docDes.eventos || []).some((e) => e.tipo === 'programa-sumido')
         && docDes.programas.length === 3,
       'leitura truncada NÃO vira alerta de desinstalação em massa':
         truncada.status === 200 && JSON.parse(truncada.corpo).sumidos === 0

@@ -332,6 +332,18 @@
   .fantasmas-head:hover #fantasmas-acao,.fantasmas-head:focus-visible #fantasmas-acao{color:var(--accent);}
 
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
+  .prog-abas{display:flex;gap:6px;margin:4px 0 2px;}
+  .prog-aba{flex:1 1 0;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:8px;padding:8px 10px;font:inherit;font-size:12.5px;cursor:pointer;}
+  .prog-aba:hover{color:var(--text);border-color:var(--accent);}
+  .prog-aba.ativa{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:700;}
+  .prog-dia{font:10.5px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;}
+  .prog-linha{display:flex;gap:8px;align-items:baseline;padding:6px 2px;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.4;}
+  .prog-sinal{flex:none;font:11px var(--mono);width:16px;text-align:center;}
+  .prog-linha.entrou .prog-sinal{color:var(--ok);}
+  .prog-linha.saiu .prog-sinal{color:var(--bad);}
+  .prog-linha.saiu span{color:var(--muted);}
+  .prog-vazio{color:var(--muted);font-size:12.5px;padding:16px 2px;line-height:1.5;}
+  .prog-rodape{color:var(--muted);font:11px var(--mono);margin-top:12px;}
   .overlay.hidden{display:none!important;}
   /* Mensagem, apelido de dispositivo e editar computador sao abertos DE
      DENTRO do modal de detalhe. Como todos sao .overlay com o mesmo
@@ -960,6 +972,24 @@
   </div>
 </div>
 
+<!-- Programas da maquina, em janela PROPRIA (pedido do Master): o Registro de
+     atividades e' pra investigar incidente - queda, comando, acesso remoto. Uma
+     maquina que atualiza Chrome toda semana empurrava isso pra fora da tela. -->
+<div class="overlay hidden" id="prog-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharProgramas()">✕</span>
+  <div class="modal" role="dialog" aria-label="Programas da máquina">
+    <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
+      <h3 id="prog-titulo" style="margin:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Programas</h3>
+    </div>
+    <div class="prog-abas">
+      <button type="button" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
+      <button type="button" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
+    </div>
+    <input type="search" id="prog-busca" placeholder="Buscar programa..." oninput="pintarProgramas()" style="margin:10px 0 6px;">
+    <div id="prog-corpo"></div>
+  </div></div>
+</div>
 <div class="overlay hidden" id="detalhe-comp-overlay">
   <div class="sheet-wrap">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDetalheComputador()">✕</span>
@@ -1547,6 +1577,7 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-icone" data-dica="Baixar o agente NOC-NoPulso" aria-label="Baixar o agente NOC-NoPulso" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
     ${c.noPulsoPrint ? `<button type="button" class="btn-icone" data-dica="Capturar a tela desta máquina agora" aria-label="Capturar a tela desta máquina agora" onclick="capturarAgora('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📸</button>` : ''}
     ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Reiniciar este computador" aria-label="Reiniciar este computador" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁</button>` : ''}
+    <button type="button" class="btn-icone" data-dica="Programas desta máquina" aria-label="Programas desta máquina" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
     <button type="button" class="btn-icone perigo" data-dica="Remover do NOC" aria-label="Remover do NOC" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
   `;
   renderPoliticaComputador(codigo, c);
@@ -1554,6 +1585,61 @@ function atualizarConteudoDetalhe(codigo, c){
     fecharDetalheComputador();
     abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo);
   };
+}
+
+// ================= PROGRAMAS DA MÁQUINA =================
+// Janela própria, com duas abas, porque são duas perguntas diferentes:
+//   "o que mudou aqui?"      -> Mudanças (o histórico entrou/saiu)
+//   "o que tem instalado?"   -> Instalados agora (a última varredura inteira)
+// Nenhuma leitura nova no Firestore: o agente já manda a lista, o servidor já
+// a guarda, e a ficha da máquina já trouxe tudo (ver detalhar/listar).
+let PROG_ATUAL = null;
+let PROG_ABA = 'mudancas';
+function abrirProgramas(codigo, posto){
+  const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
+  const extra = DETALHE_EXTRA[chaveComp(codigo, posto)] || {};
+  PROG_ATUAL = { ...(c||{}), ...extra, codigo, posto };
+  PROG_ABA = 'mudancas';
+  document.getElementById('prog-titulo').textContent = `📦 Programas · ${PROG_ATUAL.nome || posto}`;
+  document.getElementById('prog-busca').value = '';
+  trocarAbaProgramas('mudancas');
+  document.getElementById('prog-overlay').classList.remove('hidden');
+}
+function fecharProgramas(){ document.getElementById('prog-overlay').classList.add('hidden'); PROG_ATUAL = null; }
+function trocarAbaProgramas(aba){
+  PROG_ABA = aba;
+  document.getElementById('prog-aba-mudancas').classList.toggle('ativa', aba==='mudancas');
+  document.getElementById('prog-aba-atuais').classList.toggle('ativa', aba==='atuais');
+  pintarProgramas();
+}
+function pintarProgramas(){
+  const corpo = document.getElementById('prog-corpo');
+  if(!PROG_ATUAL){ corpo.innerHTML=''; return; }
+  const busca = (document.getElementById('prog-busca').value||'').trim().toLowerCase();
+  const casa = (t)=> !busca || String(t).toLowerCase().includes(busca);
+  const quando = PROG_ATUAL.programasEm ? `Última varredura ${tempoRelativo(PROG_ATUAL.programasEm)}.` : 'A máquina ainda não mandou a lista.';
+
+  if(PROG_ABA==='atuais'){
+    const lista = (PROG_ATUAL.programas||[]).filter(casa).slice().sort((a,b)=>a.localeCompare(b,'pt-BR'));
+    document.getElementById('prog-aba-atuais').textContent = `Instalados agora (${(PROG_ATUAL.programas||[]).length})`;
+    corpo.innerHTML = lista.length
+      ? lista.map(x=>`<div class="prog-linha"><span class="prog-sinal">•</span><span>${escapeHtml(x)}</span></div>`).join('') + `<div class="prog-rodape">${escapeHtml(quando)}</div>`
+      : `<div class="prog-vazio">${busca ? 'Nenhum programa com esse nome.' : 'A máquina ainda não mandou a lista de programas. Ela envia na primeira consulta depois de instalada.'}</div>`;
+    return;
+  }
+
+  // mais RECENTE primeiro: quem abre isso quer saber o que mudou agora, não o
+  // que mudou há dois meses
+  const hist = (PROG_ATUAL.programasHistorico||[]).slice().reverse();
+  const blocos = hist.map(h=>{
+    const entrou = (h.entrou||[]).filter(casa);
+    const saiu = (h.saiu||[]).filter(casa);
+    if(!entrou.length && !saiu.length) return '';
+    return `<div class="prog-dia">${escapeHtml(fmtDataHora(h.em))} · ${tempoRelativo(h.em)}</div>`
+      + entrou.map(x=>`<div class="prog-linha entrou"><span class="prog-sinal">+</span><span>${escapeHtml(x)}</span></div>`).join('')
+      + saiu.map(x=>`<div class="prog-linha saiu"><span class="prog-sinal">−</span><span>${escapeHtml(x)}</span></div>`).join('');
+  }).filter(Boolean).join('');
+  corpo.innerHTML = blocos || `<div class="prog-vazio">${busca ? 'Nada com esse nome no histórico.' : 'Nenhuma mudança registrada ainda.<br>O aviso depende da chave <b>📦 Avisar quando instalarem ou desinstalarem algo</b> na política da máquina — sem ela, a lista é guardada mas nada é comparado.'}</div>`;
 }
 
 // ---- Registro de atividades do detalhe ----
