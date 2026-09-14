@@ -345,14 +345,54 @@ async function salao(unidade) {
   };
 }
 
+// ------------------------------------------------- venda de balcão
+//
+// O caixa NÃO lança consumo de mesa - isso é do garçom, e a separação é de
+// propósito (ver as seções). Mas ele vende o que está ao alcance da mão:
+// "o cliente quer uma água, um refri na hora de ir embora" (Master,
+// 14/09/2026). Então existe uma lista curta de itens marcados como
+// disponíveis no balcão, e o caixa só vende esses - se pudesse vender o
+// catálogo inteiro, chopp sairia sem passar pelo salão.
+//
+// Quem marca é o Master ou o Gerente da unidade, no próprio item do catálogo
+// (campo noBalcao) - não há cadastro paralelo: item é item, e duas listas do
+// mesmo produto divergem.
+//
+// SEM os 10%: garrafa levada na saída não é serviço de mesa. Se um dia
+// precisar entrar, é uma linha - mas não invento cobrança.
+async function itensDoBalcao(unidade) {
+  const catalogo = await inventario.listCatalogo(unidade);
+  return catalogo.filter((i) => i.ativo !== false && i.noBalcao === true && i.precoVenda > 0);
+}
+
+function sanitizarItensBalcao(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista
+    .map((l) => ({ itemId: texto(l && l.itemId, 80), quantidade: Math.trunc(num(l && l.quantidade)) || 1 }))
+    .filter((l) => l.itemId && l.quantidade > 0 && l.quantidade <= 99);
+}
+
+// preço SEMPRE do catálogo, e só do que está liberado pro balcão
+async function resolverItensBalcao(unidade, lista) {
+  const pedidos = sanitizarItensBalcao(lista);
+  if (!pedidos.length) return { itens: [], total: 0 };
+  const disponiveis = new Map((await itensDoBalcao(unidade)).map((i) => [i.id, i]));
+  const itens = pedidos.map((l) => {
+    const item = disponiveis.get(l.itemId);
+    if (!item) throw new Error('Esse item não está liberado pra venda no balcão. Peça pro Master ou Gerente marcar no catálogo.');
+    return { itemId: item.id, nome: item.nome, quantidade: l.quantidade, precoUnitario: num(item.precoVenda) };
+  });
+  return { itens, total: arred(itens.reduce((t, i) => t + i.quantidade * i.precoUnitario, 0)) };
+}
+
 // ------------------------------------------------------------- caixa
 //
 // Receber UMA OU VÁRIAS comandas de uma vez ("se alguém quiser pagar 2, 3
 // pessoas é só informar os números das comandas"). O caixa manda NÚMEROS, que
 // é o que ele lê no cartão; o servidor resolve pra sessão aberta de cada um.
-async function contaDe(unidade, numeros, comServico = true) {
+async function contaDe(unidade, numeros, comServico = true, itensBalcao = []) {
   const precos = await getPrecos(unidade);
-  const lista = Array.isArray(numeros) ? numeros : [numeros];
+  const lista = Array.isArray(numeros) ? numeros : (numeros === undefined || numeros === null || numeros === '' ? [] : [numeros]);
   const vistos = new Set();
   const comandas = [];
   for (const bruto of lista) {
@@ -363,13 +403,20 @@ async function contaDe(unidade, numeros, comServico = true) {
     if (!c) throw new Error(`A comanda ${n} não está aberta. Confira o número no cartão.`);
     comandas.push({ ...c, totais: totaisDaComanda(c, precos.servicoPct, comServico) });
   }
-  if (!comandas.length) throw new Error('Informe pelo menos uma comanda.');
+  const balcao = await resolverItensBalcao(unidade, itensBalcao);
+  // venda de balcão SEM comanda é venda válida (quem só passou pra comprar
+  // uma água); o que não existe é pagamento sem nada dentro
+  if (!comandas.length && !balcao.itens.length) throw new Error('Informe pelo menos uma comanda ou um item do balcão.');
   const soma = (campo) => arred(comandas.reduce((s, c) => s + c.totais[campo], 0));
   return {
     comandas,
     servicoPct: comServico ? precos.servicoPct : 0,
     rodizio: soma('rodizio'), consumo: soma('consumo'), subtotal: soma('subtotal'),
-    servico: soma('servico'), total: soma('total'),
+    servico: soma('servico'),
+    // o balcão entra DEPOIS do serviço, e por isso fica num campo próprio:
+    // é o que deixa o fechamento separar venda de mesa de venda de balcão
+    itensBalcao: balcao.itens, balcao: balcao.total,
+    total: arred(soma('total') + balcao.total),
   };
 }
 
@@ -383,10 +430,10 @@ function sanitizarPagamentos(lista) {
     .filter((p) => p.forma && p.valor > 0);
 }
 
-async function receber({ unidade, unidadeNome, numeros, caixa, pagamentos, comServico = true, porEmail, agora = new Date() }) {
+async function receber({ unidade, unidadeNome, numeros, caixa, pagamentos, comServico = true, itensBalcao = [], porEmail, agora = new Date() }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!CAIXAS.includes(String(caixa))) throw new Error(`Caixa inválido - use ${CAIXAS.join(', ')}.`);
-  const conta = await contaDe(unidade, numeros, comServico);
+  const conta = await contaDe(unidade, numeros, comServico, itensBalcao);
   const pagosOk = sanitizarPagamentos(pagamentos);
   if (!pagosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
   const somaPag = arred(pagosOk.reduce((s, p) => s + p.valor, 0));
@@ -403,7 +450,9 @@ async function receber({ unidade, unidadeNome, numeros, caixa, pagamentos, comSe
     mesas: [...new Set(conta.comandas.map((c) => c.mesa).filter(Boolean))],
     pessoas: conta.comandas.length,
     rodizio: conta.rodizio, consumo: conta.consumo, subtotal: conta.subtotal,
-    servicoPct: conta.servicoPct, servico: conta.servico, total: conta.total,
+    servicoPct: conta.servicoPct, servico: conta.servico,
+    itensBalcao: conta.itensBalcao, balcao: conta.balcao,
+    total: conta.total,
     pagamentos: pagosOk,
     em: new Date(agora).toISOString(),
     porEmail: porEmail || null,
@@ -422,12 +471,16 @@ async function receber({ unidade, unidadeNome, numeros, caixa, pagamentos, comSe
   // baixa de estoque por bebida vendida (rastreabilidade - mesma ideia do
   // balcão do Saltiverso). Falha aqui NÃO desfaz o pagamento: o dinheiro já
   // entrou, e estoque se reconcilia na contagem.
-  for (const c of conta.comandas) {
-    for (const item of c.itens || []) {
+  const paraBaixar = [
+    ...conta.comandas.flatMap((c) => (c.itens || []).map((i) => ({ ...i, de: `Comanda ${c.numero}` }))),
+    ...conta.itensBalcao.map((i) => ({ ...i, de: 'Balcão' })),
+  ];
+  for (const grupo of [{ itens: paraBaixar }]) {
+    for (const item of grupo.itens) {
       try {
         await inventario.criarSaida({
           unidade, unidadeNome: unidadeNome || unidade, itemId: item.itemId, tipo: 'VENDA',
-          quantidade: item.quantidade, motivo: `Comanda ${c.numero} · Estação da Comida`,
+          quantidade: item.quantidade, motivo: `${item.de} · Estação da Comida`,
           data, valorUnitario: item.precoUnitario, vendaId: registro.id,
         });
       } catch (e) {
@@ -451,7 +504,7 @@ const pagamentosDoDiaCache = createCache(async (chave) => {
 async function fechamentoDoDia(unidade, data) {
   const dia = data || hojeBrasiliaISO();
   const pagos = await pagamentosDoDiaCache.cached(`${unidade}|${dia}`);
-  const vazio = () => ({ pagamentos: 0, pessoas: 0, rodizio: 0, consumo: 0, subtotal: 0, servico: 0, total: 0, formas: {} });
+  const vazio = () => ({ pagamentos: 0, pessoas: 0, rodizio: 0, consumo: 0, subtotal: 0, servico: 0, balcao: 0, total: 0, formas: {} });
   const total = vazio();
   const porCaixa = new Map(CAIXAS.map((c) => [c, { caixa: c, ...vazio() }]));
   pagos.forEach((p) => {
@@ -463,6 +516,7 @@ async function fechamentoDoDia(unidade, data) {
       a.consumo = arred(a.consumo + num(p.consumo));
       a.subtotal = arred(a.subtotal + num(p.subtotal));
       a.servico = arred(a.servico + num(p.servico));
+      a.balcao = arred(a.balcao + num(p.balcao));
       a.total = arred(a.total + num(p.total));
       (p.pagamentos || []).forEach((f) => { a.formas[f.forma] = arred(num(a.formas[f.forma]) + num(f.valor)); });
     });
@@ -486,6 +540,7 @@ module.exports = {
   STATUS, TIPOS_RODIZIO, CAIXAS, DIAS_SEMANA, SERVICO_PCT_PADRAO,
   hojeBrasiliaISO, diaDaSemanaBR,
   getPrecos, salvarPrecos, precoRodizioDoDia, precosVazios,
+  itensDoBalcao, resolverItensBalcao,
   abrirComanda, definirMesa, getComanda, lancarItem, removerItem, cancelarComanda,
   totaisDaComanda, salao, contaDe, receber, abertaDoNumero,
   fechamentoDoDia, invalidarFechamento,

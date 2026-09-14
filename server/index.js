@@ -8733,6 +8733,29 @@ app.get('/api/estacao/itens', requireSection('estacao-salao'), async (req, res) 
     res.json(catalogo.filter((i) => i.ativo !== false && i.precoVenda > 0));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
+// o que o CAIXA pode vender: só os itens marcados como disponíveis no balcão
+app.get('/api/estacao/itens-balcao', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.itensDoBalcao(req.query.unidade));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// marcar/desmarcar um item como disponível no balcão. Master OU Gerente da
+// unidade (pedido do Master: "o master ou gerente pode configurar") - não é
+// cadastro novo, é uma marca no item que já existe no catálogo.
+app.patch('/api/estacao/itens/:id/balcao', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    // obterItemUnidade devolve a UNIDADE do item (string), não o item
+    const unidadeDoItem = await inventario.obterItemUnidade(req.params.id);
+    if (!unidadeDoItem) return res.status(404).json({ error: 'Item não encontrado.' });
+    if (!podeUnidadeEstacao(req, unidadeDoItem)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!req.isMaster && !users.ehCargoGerente(req.user.cargo)) {
+      return res.status(403).json({ error: 'Só o Master ou o Gerente da unidade define o que o caixa pode vender.' });
+    }
+    res.json(await inventario.atualizarItem(req.params.id, { noBalcao: (req.body || {}).noBalcao === true }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/estacao/comandas', requireSection('estacao-salao'), async (req, res) => {
   try {
     const { unidade, unidadeNome, numero, mesa, tipoRodizio } = req.body || {};
@@ -8779,15 +8802,19 @@ app.get('/api/estacao/conta', requireSection('estacao-caixa'), async (req, res) 
     const unidade = req.query.unidade;
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const numeros = String(req.query.numeros || '').split(',').map((x) => x.trim()).filter(Boolean);
-    res.json(await estacaoComida.contaDe(unidade, numeros, req.query.servico !== '0'));
+    // itens do balcão vêm como "id:qtd,id:qtd" - a conta do caixa precisa
+    // mostrar o total COM a água que ele acabou de pegar, antes de receber
+    const itensBalcao = String(req.query.balcao || '').split(',').filter(Boolean)
+      .map((par) => { const [itemId, qtd] = par.split(':'); return { itemId, quantidade: Number(qtd) || 1 }; });
+    res.json(await estacaoComida.contaDe(unidade, numeros, req.query.servico !== '0', itensBalcao));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 app.post('/api/estacao/receber', requireSection('estacao-caixa'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, numeros, caixa, pagamentos, comServico } = req.body || {};
+    const { unidade, unidadeNome, numeros, caixa, pagamentos, comServico, itensBalcao } = req.body || {};
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const r = await estacaoComida.receber({
-      unidade, unidadeNome, numeros, caixa, pagamentos,
+      unidade, unidadeNome, numeros, caixa, pagamentos, itensBalcao,
       comServico: comServico !== false, porEmail: req.user.email,
     });
     estacaoComida.invalidarFechamento();

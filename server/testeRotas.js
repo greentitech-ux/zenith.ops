@@ -19682,6 +19682,34 @@ setTimeout(async () => {
     // serviço pode ser tirado no caixa (o cliente não quis os 10%)
     const contaSemServico = await est.contaDe(UNI, [7543], false);
 
+    // ---- VENDA DE BALCÃO no caixa (Master, 14/09: "o caixa não lança nada
+    // mas pode sim realizar uma venda dos itens que ficarem disponíveis no
+    // balcão... se o cliente quiser uma água, um refri na hora de ir embora")
+    const refri = await inv.criarItem({ unidade: UNI, nome: 'Refrigerante lata', setor: 'geladeira', tipo: 'BEBIDA', unidadeMedida: 'un', precoVenda: 8 });
+    // só o que está MARCADO fica disponível pro caixa
+    await inv.atualizarItem(refri.id, { noBalcao: true });
+    await inv.atualizarItem(agua.id, { noBalcao: true });
+    const balcaoDisponivel = await est.itensDoBalcao(UNI);
+    // o chopp NÃO está marcado: o caixa não pode vendê-lo (sairia sem passar
+    // pelo salão)
+    let erroBalcaoNaoLiberado = null;
+    try { await est.resolverItensBalcao(UNI, [{ itemId: chopp.id, quantidade: 1 }]); } catch (e) { erroBalcaoNaoLiberado = e.message; }
+
+    // a 7543 leva um refri na saída: entra na conta, SEM os 10%
+    const contaComBalcao = await est.contaDe(UNI, [7543], true, [{ itemId: refri.id, quantidade: 2 }]);
+    // e se o navegador mandar um preço junto, ele é IGNORADO - o preço é o do
+    // catálogo, sempre (a sanitização nem deixa o campo passar)
+    const contaComPrecoForjado = await est.contaDe(UNI, [7543], true, [{ itemId: refri.id, quantidade: 2, preco: 0.01, precoUnitario: 0.01, precoVenda: 0.01 }]);
+    // venda de balcão SEM comanda nenhuma (só passou pra comprar uma água)
+    const soBalcao = await est.receber({
+      unidade: UNI, numeros: [], caixa: '03', itensBalcao: [{ itemId: agua.id, quantidade: 1 }],
+      pagamentos: [{ forma: 'dinheiro', valor: 6 }], porEmail: 'caixa@teste.local', agora: emTerca,
+    });
+    let erroPagamentoVazio = null;
+    try {
+      await est.receber({ unidade: UNI, numeros: [], caixa: '03', pagamentos: [{ forma: 'pix', valor: 1 }], porEmail: 'c@t', agora: emTerca });
+    } catch (e) { erroPagamentoVazio = e.message; }
+
     // e o dia fecha
     const fech = await est.fechamentoDoDia(UNI, TER);
     const caixa02 = fech.porCaixa.find((c) => c.caixa === '02');
@@ -19726,6 +19754,22 @@ setTimeout(async () => {
       'o que ficou ABERTO entra no fechamento (mesa que sobrou é gente que não pagou)':
         fech.abertas.length >= 2 && fech.subtotalAberto > 0,
       'cada bebida paga dá baixa no estoque': saidas.length === 3 && saidas.some((x) => x.quantidade === 2),
+      // ---- venda de balcão pelo caixa ----
+      'o caixa só vê os itens MARCADOS como disponíveis no balcão':
+        balcaoDisponivel.length === 2 && balcaoDisponivel.every((i) => ['Água', 'Refrigerante lata'].includes(i.nome)),
+      'item não marcado não pode ser vendido no balcão (o chopp passa pelo salão)':
+        !!erroBalcaoNaoLiberado && /não está liberado/.test(erroBalcaoNaoLiberado),
+      'preço mandado pelo navegador é ignorado no balcão (vale o do catálogo)':
+        contaComPrecoForjado.balcao === 16 && contaComPrecoForjado.itensBalcao[0].precoUnitario === 8,
+      'o item do balcão entra na conta com preço do catálogo e SEM os 10%':
+        contaComBalcao.balcao === 16 && contaComBalcao.itensBalcao.length === 1
+        && contaComBalcao.total === Math.round((39.9 * 1.1 + 16) * 100) / 100,
+      'venda de balcão SEM comanda é venda válida': soBalcao.total === 6 && soBalcao.pessoas === 0 && soBalcao.balcao === 6,
+      'mas pagamento sem comanda E sem item é recusado':
+        !!erroPagamentoVazio && /pelo menos uma comanda ou um item/.test(erroPagamentoVazio),
+      'o fechamento separa a venda de balcão da venda de mesa':
+        fech.total.balcao === 6 && fech.porCaixa.find((c) => c.caixa === '03').balcao === 6
+        && fech.porCaixa.find((c) => c.caixa === '02').balcao === 0,
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okEstacao = !falhas.length;
