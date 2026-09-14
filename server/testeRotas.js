@@ -12047,7 +12047,13 @@ setTimeout(async () => {
     const arteDom = await ls.papelDeParedeDe('PPDOM');
     // antes de existir arte do grupo, a ARCFOOD cai na arte so-da-marca
     const arcSoMarca = await ls.papelDeParedeDe('19855');
-    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'ARCFOOD' }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    // grupo agora sai do CADASTRO de empresas (o Master edita), nao de uma lista
+    // fixa de duas redes: Estacao e' uma empresa nova, nao uma linha de codigo
+    const emp = require('/home/user/adyen-monitor/server/empresas.js');
+    DOCS.set('empresas/empArcTeste', { id: 'empArcTeste', nome: 'ARCFOOD', ativa: true, tipoNegocio: 'alimentacao', unidades: ['19855'] });
+    DOCS.set('empresas/empBravoTeste', { id: 'empBravoTeste', nome: 'Grupo Bravo', ativa: true, tipoNegocio: 'alimentacao', unidades: ['PPDOM'] });
+    emp.invalidarCache();
+    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'empArcTeste' }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arcComGrupo = await ls.papelDeParedeDe('19855');
     const gbeDepois = await ls.papelDeParedeDe('PPDOM');
     const arteSem = await ls.papelDeParedeDe('PPSEM');
@@ -12075,7 +12081,17 @@ setTimeout(async () => {
       // A ARTE CARREGA DUAS LOGOS (grupo + marca), e Domino's existe nas duas
       // redes: sem a chave por grupo, a Dom Carrão mostraria a logo do GBE.
       'a arte do GRUPO ganha da arte só-da-marca':
-        envArc.status === 200 && arcComGrupo.rede === 'ARCFOOD' && arcComGrupo.marca === 'dominos',
+        envArc.status === 200 && arcComGrupo.rede === 'empArcTeste' && arcComGrupo.marca === 'dominos',
+      // "maquinas do Grupo Bravo, logo Bravo; ARCFOOD, ARCFOOD; ESTACAO,
+      // Estacao, e assim vai" - redes.js so tem DOIS valores e GBE e' "o
+      // resto": a Estacao cairia calada no Bravo e mostraria a logo errada
+      'o grupo sai do cadastro de empresas, que aceita grupo novo sem deploy':
+        /empresas\.empresaDaUnidade\(codigo\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+        && !/redes\.redeDaUnidade/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
+      // nunca CHUTAR um grupo: unidade sem empresa cadastrada cai na arte da
+      // marca, nao na logo de um grupo que ninguem disse que e' o dela
+      'unidade sem empresa não herda a logo de grupo nenhum':
+        arcSoMarca.rede === null,
       'arte de um grupo não vaza pro outro (mesma marca, redes diferentes)':
         arcComGrupo.caminho !== gbeDepois.caminho && gbeDepois.marca === 'dominos',
       'sem arte do grupo, cai na arte só-da-marca (não fica sem)':
