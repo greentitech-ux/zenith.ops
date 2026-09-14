@@ -46,13 +46,29 @@
 
   <!-- ABRIR COMANDA. O número é o do CARTÃO físico que a pessoa recebe na
        entrada - é ele que o caixa vai pedir na hora de pagar. -->
+  <!-- LER A MESA: o garçom aponta a câmera pro adesivo da mesa, ou digita o
+       número. O QR não guarda valor nenhum - ele só diz QUAL mesa é; o valor
+       vem da consulta ao vivo, senão um adesivo colado hoje mostraria o
+       consumo de ontem pra sempre. -->
+  <div class="est-card" id="card-mesa">
+    <h2>Conta da mesa</h2>
+    <div class="est-sub">Leia o QR Code da mesa, ou digite o número. Mostra quem está lá e quanto deu.</div>
+    <div class="est-barra" style="margin-bottom:10px;">
+      <label style="flex:1 1 120px;">Mesa<input id="busca-mesa" type="number" inputmode="numeric" min="1" max="200" placeholder="ex: 7" onkeydown="if(event.key==='Enter'){event.preventDefault();buscarMesa()}"></label>
+      <button type="button" class="est-btn principal" style="flex:none;" onclick="buscarMesa()">Ver conta</button>
+      <button type="button" class="est-btn" style="flex:none;" id="btn-ler-qr" onclick="lerQrCode()">📷 Ler QR</button>
+    </div>
+    <video id="qr-video" playsinline hidden style="width:100%;max-width:340px;border-radius:10px;background:#000;"></video>
+    <div class="est-erro" id="erro-mesa"></div>
+  </div>
+
   <div class="est-card">
     <h2>Abrir comanda</h2>
-    <div class="est-sub">Uma comanda por pessoa. A mesa entra depois, quando o garçom souber onde ela sentou.</div>
+    <div class="est-sub">Uma comanda por pessoa. A <b>mesa vem primeiro</b>: é ela que o QR Code identifica, e é por ela que a conta é encontrada.</div>
     <div class="est-barra" style="margin-bottom:10px;">
-      <label style="flex:1 1 120px;">Número do cartão<input id="novo-numero" type="number" inputmode="numeric" min="1" max="999" placeholder="ex: 12"></label>
+      <label style="flex:1 1 110px;">Mesa <span style="color:var(--bad)">*</span><input id="novo-mesa" type="number" inputmode="numeric" min="1" max="200" placeholder="ex: 7" required></label>
       <label style="flex:1 1 170px;">Rodízio<select id="novo-tipo"><option value="adulto">Adulto</option><option value="crianca">Criança (6 a 10)</option><option value="crianca-ate-5">Criança até 5 (não paga)</option></select></label>
-      <label style="flex:1 1 110px;">Mesa (opcional)<input id="novo-mesa" type="number" inputmode="numeric" min="1" max="200" placeholder="ex: 7"></label>
+      <label style="flex:1 1 120px;">Número do cartão<input id="novo-numero" type="number" inputmode="numeric" min="1" max="999" placeholder="ex: 12"></label>
     </div>
     <div class="est-acoes"><button type="button" class="est-btn principal" onclick="abrirComanda()">Abrir comanda</button></div>
     <div class="est-erro" id="erro-abrir"></div>
@@ -176,8 +192,8 @@ function linhaComanda(c){
 function verMesa(mesa){
   // dá pra tocar antes do salão chegar (rede da loja é lenta): sem a guarda,
   // o toque vira erro de JS e a tela trava
-  const m = SALAO && SALAO.mesas.find(x=>x.mesa===mesa);
-  if(!m) return;
+  const m = SALAO && SALAO.mesas.find(x=>Number(x.mesa)===Number(mesa));
+  if(!m) return false;
   COMANDA_ABERTA = null;
   document.getElementById('mod-eyebrow').textContent = 'Mesa';
   document.getElementById('mod-titulo').textContent = String(mesa);
@@ -190,6 +206,7 @@ function verMesa(mesa){
     </div>
     <div class="est-sub" style="margin-top:10px;">O pagamento é feito no caixa, pelos números dos cartões.</div>`;
   document.getElementById('modal').classList.add('aberto');
+  return true;
 }
 
 // ---------- uma comanda ----------
@@ -317,19 +334,89 @@ async function tirar(id, indice, nome){
 async function abrirComanda(){
   const erro = document.getElementById('erro-abrir');
   erro.textContent = '';
+  // a MESA vem primeiro na tela e na conferencia: e' ela que o QR identifica
+  const mesa = document.getElementById('novo-mesa').value;
+  if(!mesa){ erro.textContent = 'Informe a mesa. É ela que o QR Code identifica.'; document.getElementById('novo-mesa').focus(); return; }
   const numero = document.getElementById('novo-numero').value;
   if(!numero){ erro.textContent = 'Informe o número do cartão.'; return; }
   try{
     const c = await enviar('/api/estacao/comandas', {
       unidade: unidadeAtual(), unidadeNome: unidadeNomeAtual(),
-      numero, mesa: document.getElementById('novo-mesa').value,
+      numero, mesa,
       tipoRodizio: document.getElementById('novo-tipo').value,
     });
+    // o numero do cartao some, a MESA fica: numa mesa de 4 pessoas sao 4
+    // comandas seguidas, e redigitar a mesa em cada uma e' atrito puro
     document.getElementById('novo-numero').value = '';
-    document.getElementById('novo-mesa').value = '';
+    document.getElementById('novo-numero').focus();
     await carregarSalao();
     abrirFicha(c.id);
   }catch(e){ erro.textContent = e.message; }
+}
+
+// ---------- CONTA DA MESA (QR ou número digitado) ----------
+//
+// Não há rota nova: salao() já devolve as mesas agrupadas com pessoas, consumo
+// e as comandas de cada uma. Ler o QR é FILTRAR o que a tela já tem - nenhuma
+// leitura a mais no Firestore (§3).
+//
+// Quem mostra a conta é o verMesa() de sempre, o mesmo que abre ao tocar no
+// tile do salão: duas telas diferentes pra mesma coisa é como o garçom aprende
+// errado.
+function buscarMesa(mesa){
+  const n = Number(mesa !== undefined ? mesa : document.getElementById('busca-mesa').value);
+  const erro = document.getElementById('erro-mesa');
+  erro.textContent = '';
+  if(!(n > 0)){ erro.textContent = 'Informe o número da mesa, ou leia o QR Code dela.'; return; }
+  document.getElementById('busca-mesa').value = n;
+  if(!verMesa(n)) erro.textContent = `Mesa ${n} está sem comanda aberta agora.`;
+}
+
+// LEITOR DE QR sem biblioteca: BarcodeDetector é nativo no Chrome/Android, que
+// é o aparelho do garçom. Em quem não tem (iPhone, navegador antigo), o botão
+// diz isso e o número digitado continua funcionando - a tela nunca fica sem
+// saída por causa da câmera.
+let QR_PARAR = null;
+async function lerQrCode(){
+  const erro = document.getElementById('erro-mesa');
+  const video = document.getElementById('qr-video');
+  if(QR_PARAR){ QR_PARAR(); return; }
+  if(!('BarcodeDetector' in window)){
+    erro.textContent = 'Este aparelho não lê QR Code pelo navegador. Digite o número da mesa.';
+    return;
+  }
+  erro.textContent = '';
+  let stream;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  }catch(e){ erro.textContent = 'Não consegui abrir a câmera. Autorize o acesso, ou digite o número da mesa.'; return; }
+  const detector = new BarcodeDetector({ formats: ['qr_code'] });
+  video.srcObject = stream; video.hidden = false; await video.play();
+  document.getElementById('btn-ler-qr').textContent = '✕ Parar';
+  let vivo = true;
+  QR_PARAR = () => {
+    vivo = false; QR_PARAR = null;
+    stream.getTracks().forEach(t=>t.stop());
+    video.hidden = true; video.srcObject = null;
+    document.getElementById('btn-ler-qr').textContent = '📷 Ler QR';
+  };
+  const laco = async () => {
+    if(!vivo) return;
+    try{
+      const achados = await detector.detect(video);
+      const mesa = achados.map(a=>mesaDoQr(a.rawValue)).find(x=>x);
+      if(mesa){ QR_PARAR(); buscarMesa(mesa); return; }
+    }catch(e){ /* quadro ruim: tenta o proximo */ }
+    requestAnimationFrame(laco);
+  };
+  requestAnimationFrame(laco);
+}
+// o QR da mesa é uma URL com ?mesa=N (ver a folha de impressão). Aceita também
+// o número puro, pra quem gerar o adesivo por fora sem saber da URL.
+function mesaDoQr(texto){
+  const t = String(texto || '').trim();
+  if(/^\d{1,4}$/.test(t)) return Number(t);
+  try{ const u = new URL(t); const m = Number(u.searchParams.get('mesa')); return m > 0 ? m : null; }catch(e){ return null; }
 }
 
 async function trocarUnidade(){

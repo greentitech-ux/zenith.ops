@@ -12551,6 +12551,111 @@ setTimeout(async () => {
   if (!okTurnoEstacao) ruins += 1;
   console.log(`${okTurnoEstacao ? '✓' : '✗'} Estação: quem abre o turno é o caixa, e o preço do rodízio segue ele (não o relógio)`);
 
+  // ------------------------------------------------------------------
+  // "PRIMEIRO TEM QUE SER A MESA E POR ULTIMO O NUMERO DO CARTAO / MESA E
+  //  SEMPRE OBRIGATORIO AFINAL, CADA MESA TERA UM QRCODE" (Master)
+  //
+  // A mesa deixou de ser opcional. Comanda sem mesa nao aparece em QR nenhum:
+  // o garcom le o adesivo, e o que ficou "sem mesa" some da conta - vira
+  // dinheiro que ninguem acha no fim da noite.
+  //
+  // O QR nao guarda VALOR. Ele so diz QUAL mesa e'; o valor vem da consulta ao
+  // vivo. Adesivo impresso hoje com o total de hoje mostraria o consumo de
+  // ontem pra sempre.
+  let okMesaQr = false;
+  try {
+    const em = require(__dirname + '/estacaoComida.js');
+    const htmlS = require('fs').readFileSync(__dirname + '/public/estacao-salao.html', 'utf8');
+    const modM = require('fs').readFileSync(__dirname + '/estacaoComida.js', 'utf8');
+
+    const abrirSemMesa = async (mesa) => {
+      try {
+        await em.abrirComanda({ unidade: 'MESA_T', numero: 31, mesa, tipoRodizio: 'crianca-ate-5', porEmail: 'g@teste.local' });
+        return null;
+      } catch (e2) { return e2.message; }
+    };
+    const semMesa = await abrirSemMesa(undefined);
+    const mesaVazia = await abrirSemMesa('');
+    const mesaZero = await abrirSemMesa(0);
+    // crianca ate 5 nao precisa de preco: se passar, e' porque a mesa passou
+    const comMesa = await em.abrirComanda({ unidade: 'MESA_T', numero: 31, mesa: 7, tipoRodizio: 'crianca-ate-5', porEmail: 'g@teste.local' });
+
+    // COMANDA ANTIGA, de antes da regra: ela ficou sem mesa no banco e nao pode
+    // sumir da tela por causa disso - e' consumo que alguem tem de pagar. O
+    // agrupamento "sem mesa" continua existindo pra ela, so nao nasce mais.
+    const dbT = require('./firestore');
+    await dbT.collection('estacaoComandas').doc('legado-sem-mesa').set({
+      id: 'legado-sem-mesa', unidade: 'MESA_T', unidadeNome: 'MESA_T', numero: 99,
+      data: em.hojeBrasiliaISO(), status: 'ABERTA', mesa: null, tipoRodizio: 'adulto',
+      turno: 'jantar', precoRodizio: 79.9, itens: [],
+      abertaEm: new Date().toISOString(), abertaPorEmail: 'antigo@teste.local',
+      pagaEm: null, pagaPorEmail: null, caixa: null, pagamentoId: null,
+    });
+    em._limparEspelhoTeste();
+    const salaoLegado = await em.salao('MESA_T');
+
+    let trocaSemMesa = null;
+    try { await em.definirMesa(comMesa.id, '', 'g@teste.local'); } catch (e2) { trocaSemMesa = e2.message; }
+    const trocou = await em.definirMesa(comMesa.id, 9, 'g@teste.local');
+
+    // a ordem dos campos na tela: mesa ANTES do numero do cartao
+    const posMesa = htmlS.indexOf('id="novo-mesa"');
+    const posNumero = htmlS.indexOf('id="novo-numero"');
+
+    const conf = {
+      'mesa em branco barra a comanda, e o erro diz por que':
+        !!semMesa && /Informe a mesa/.test(semMesa)
+        && !!mesaVazia && /Informe a mesa/.test(mesaVazia),
+      'mesa 0 tambem nao passa': !!mesaZero,
+      // barrar ANTES de ler o Firestore: comanda sem mesa custa 0 leitura (§3)
+      'a mesa e checada antes de qualquer leitura (numero repetido, tabela de preco)':
+        /const mesaN = sanitizarMesa\(mesa, \{ obrigatoria: true \}\);[\s\S]{0,200}?const n = sanitizarNumero\(numero\);/.test(modM)
+        && /const mesaN = sanitizarMesa[\s\S]*?await abertaDoNumero/.test(modM),
+      'com mesa, a comanda abre e guarda o numero da mesa': !!comMesa && comMesa.mesa === 7,
+      'comanda antiga, sem mesa no banco, continua aparecendo (e consumo a pagar)':
+        salaoLegado.semMesa.length === 1 && salaoLegado.semMesa[0].numero === 99,
+      'trocar de mesa tambem exige mesa': !!trocaSemMesa && /Informe a mesa/.test(trocaSemMesa),
+      'a troca de mesa continua funcionando e fica registrada':
+        trocou.mesa === 9 && (trocou.historicoMesa || []).some((h) => h.de === 7 && h.para === 9),
+      // O PEDIDO literal: primeiro a mesa, por ultimo o cartao
+      'na tela, a mesa vem antes do numero do cartao':
+        posMesa > 0 && posNumero > 0 && posMesa < posNumero
+        && /id="novo-mesa"[^>]*required/.test(htmlS),
+      // numa mesa de 4 sao 4 comandas seguidas: redigitar a mesa em cada uma e' atrito
+      'depois de abrir, a mesa fica e so o numero do cartao e limpo':
+        /getElementById\('novo-numero'\)\.value = '';/.test(htmlS)
+        && !/getElementById\('novo-mesa'\)\.value = '';/.test(htmlS),
+      'o garcom pode digitar a mesa OU ler o QR':
+        /id="busca-mesa"/.test(htmlS) && /onclick="lerQrCode\(\)"/.test(htmlS),
+      // uma apresentacao so: o QR abre a MESMA janela que o toque no tile
+      'ler o QR mostra a conta na mesma janela do toque no salao':
+        (htmlS.match(/^function verMesa\(/gm) || []).length === 1
+        && /if\(mesa\)\{ QR_PARAR\(\); buscarMesa\(mesa\); return; \}/.test(htmlS)
+        && /if\(!verMesa\(n\)\)/.test(htmlS),
+      // o QR aponta pra mesa, nao carrega valor
+      'o QR identifica a mesa (numero puro ou ?mesa=N), nunca um valor':
+        /function mesaDoQr\(texto\)/.test(htmlS)
+        && /\/\^\\d\{1,4\}\$\//.test(htmlS)
+        && /searchParams\.get\('mesa'\)/.test(htmlS),
+      // ler o QR e' FILTRAR o que a tela ja tem - nenhuma leitura a mais
+      'a conta da mesa sai do salao ja carregado, sem rota nova':
+        /SALAO\.mesas\.find\(x=>Number\(x\.mesa\)===Number\(mesa\)\)/.test(htmlS)
+        && !/fetch\([^)]*\/api\/estacao\/mesa/.test(htmlS),
+      // aparelho sem BarcodeDetector (iPhone) nao pode ficar sem saida
+      'aparelho que nao le QR diz isso e o numero digitado continua valendo':
+        /'BarcodeDetector' in window/.test(htmlS)
+        && /Este aparelho não lê QR Code pelo navegador\. Digite o número da mesa\./.test(htmlS),
+      'a camera e desligada quando para de ler':
+        /stream\.getTracks\(\)\.forEach\(t=>t\.stop\(\)\)/.test(htmlS),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n2]) => n2);
+    okMesaQr = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (semMesa=${semMesa} comMesa=${comMesa && comMesa.mesa})`);
+  } catch (e) { okMesaQr = false; console.log('  erro: ' + e.message); }
+  if (!okMesaQr) ruins += 1;
+  console.log(`${okMesaQr ? '✓' : '✗'} Estação: mesa obrigatória e primeiro campo, e o garçom acha a conta pelo QR da mesa`);
+
+
 
 
 
@@ -20405,8 +20510,9 @@ setTimeout(async () => {
     const c1 = await abrir(7541, 74);
     const c2 = await abrir(7542, 74);
     const c3 = await abrir(7543, 74, 'crianca');
-    // e uma que pegou o cartão mas ainda não sentou
-    const c4 = await abrir(7544, null);
+    // e uma quarta pessoa, na mesa 80: desde que a mesa virou obrigatória não
+    // existe mais "pegou o cartão e não sentou" - o cartão já nasce numa mesa
+    const c4 = await abrir(7544, 80);
     // a criança de 4 anos senta na mesa 74 também: não paga, mas ocupa lugar
     const c5 = await abrir(7545, 74, est.TIPO_ISENTO);
 
@@ -20416,7 +20522,7 @@ setTimeout(async () => {
 
     // sem preço cadastrado pro dia, não abre (em vez de abrir valendo zero)
     let erroSemPreco = null;
-    try { await est.abrirComanda({ unidade: UNI, numero: 9001, tipoRodizio: 'adulto', porEmail: 'g@t', agora: new Date('2026-09-16T20:00:00-03:00') }); } catch (e) { erroSemPreco = e.message; }
+    try { await est.abrirComanda({ unidade: UNI, numero: 9001, mesa: 90, tipoRodizio: 'adulto', porEmail: 'g@t', agora: new Date('2026-09-16T20:00:00-03:00') }); } catch (e) { erroSemPreco = e.message; }
 
     // lançamentos: 2 chopps e 1 água na 7541
     await est.lancarItem({ comandaId: c1.id, itemId: chopp.id, quantidade: 2, porEmail: 'garcom@teste.local' });
@@ -20543,8 +20649,10 @@ setTimeout(async () => {
       // 4 comandas: dois adultos, uma criança de 6-10 e uma até 5 anos (que
       // não paga, mas está sentada na mesa e conta como pessoa)
       'a mesa é derivada: 4 comandas na 74 = 4 pessoas': !!mesa74 && mesa74.pessoas === 4,
-      'quem pegou o cartão e não sentou aparece à parte, não numa mesa fantasma':
-        salaoAntes.semMesa.length === 1 && salaoAntes.semMesa[0].numero === 7544 && salaoAntes.mesas.every((m) => m.mesa !== null),
+      // a mesa virou obrigatoria (o QR é por mesa): nada mais cai no "sem mesa"
+      'nada nasce sem mesa, e toda mesa do salão tem número':
+        salaoAntes.semMesa.length === 0 && salaoAntes.mesas.every((m) => m.mesa !== null)
+        && !!salaoAntes.mesas.find((m) => m.mesa === 80),
       'o preço do item vem do CATÁLOGO, não do navegador': mesa74.consumo === 14.5 * 2 + 6 + 6,
       'item sem preço de venda não pode ser lançado': !!erroSemPrecoVenda && /não tem preço de venda/.test(erroSemPrecoVenda),
       // a isenta entra com 0: o subtotal é o mesmo de antes dela
