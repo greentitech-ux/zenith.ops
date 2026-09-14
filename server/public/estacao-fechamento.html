@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Fechamento · Estação da Comida · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<link rel="stylesheet" href="/estacao.css">
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">NoPulso · Estação da Comida</div>
+      <h1>Fechamento</h1>
+    </div>
+  </div>
+  <button class="back" onclick="logout()">🚪 Sair</button>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso ao Fechamento da Estação da Comida. Fale com o Master.</div>
+
+<div id="root" class="hidden">
+
+  <div class="est-barra">
+    <label>Unidade<select id="unidade" onchange="carregar()"></select></label>
+    <label style="flex:0 1 180px;">Dia<input id="data" type="date" onchange="carregar()"></label>
+  </div>
+
+  <div class="est-card">
+    <h2>O dia</h2>
+    <div class="est-sub" id="resumo-dia">carregando...</div>
+    <div id="total-dia"></div>
+  </div>
+
+  <div class="est-card">
+    <h2>Por caixa</h2>
+    <div class="est-sub">É por aqui que se confere a gaveta de cada um. Caixa sem movimento aparece zerado, de propósito.</div>
+    <div id="por-caixa"></div>
+  </div>
+
+  <!-- ABERTAS: mesa que sobrou no fim do dia é gente que saiu sem pagar ou
+       comanda que ninguém baixou. Não é nota de rodapé - é parte do
+       fechamento. -->
+  <div class="est-card" id="card-abertas" hidden>
+    <h2>Ainda abertas <span class="est-tag sem-mesa" id="qtd-abertas">0</span></h2>
+    <div class="est-sub">Comandas do dia que não foram pagas nem canceladas. Resolva no caixa antes de fechar.</div>
+    <div id="abertas"></div>
+  </div>
+
+  <div class="est-card">
+    <h2>Preço do rodízio</h2>
+    <div class="est-sub" id="sub-precos">Por dia da semana, porque sábado e domingo não custam o mesmo que terça.</div>
+    <div id="precos"></div>
+    <div class="est-acoes" id="acoes-precos" hidden style="margin-top:12px;">
+      <button type="button" class="est-btn principal" onclick="salvarPrecos()">Salvar tabela</button>
+    </div>
+    <div class="est-erro" id="erro-precos"></div>
+  </div>
+
+</div>
+
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+<script>
+const authToken = localStorage.getItem('authToken');
+if(!authToken) location = '/';
+const fetchOriginal = fetch.bind(window);
+window.fetch = (url, opcoes = {}) => fetchOriginal(url, { ...opcoes,
+  headers: { ...(opcoes.headers||{}), ...(String(url).startsWith('/api/') ? { Authorization: 'Bearer ' + authToken } : {}) } });
+
+function logout(){ localStorage.removeItem('authToken'); location = '/'; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// com separador de milhar: o total do dia passa de mil, e "R$ 1888,34" é mais
+// difícil de conferir de bate-pronto que "R$ 1.888,34"
+function fmtReal(v){ return 'R$ ' + Number(v||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function num(v){ const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0; }
+const FUSO_BR = 'America/Sao_Paulo';
+function hojeBrasilia(){
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone:FUSO_BR, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(new Date());
+  const o = {}; p.forEach(x=>{ if(x.type!=='literal') o[x.type]=x.value; });
+  return `${o.year}-${o.month}-${o.day}`;
+}
+
+// mesmo vocabulário do servidor (estacaoComida.js): dias e formas não são
+// inventados aqui
+const DIAS = [['dom','Domingo'],['seg','Segunda'],['ter','Terça'],['qua','Quarta'],['qui','Quinta'],['sex','Sexta'],['sab','Sábado']];
+const FORMAS = [['dinheiro','Dinheiro'],['pix','Pix'],['debito','Débito'],['credito','Crédito'],['voucher','Voucher']];
+const TURNOS = [['almoco','Almoço'],['jantar','Jantar']];
+const ROTULO_TIPO = { adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':'Criança até 5' };
+const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
+function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
+
+let ME = null, IS_MASTER = false, UNIDADES = [], PRECOS = null;
+function unidadeAtual(){ return document.getElementById('unidade').value; }
+
+async function pedir(url, opcoes){
+  const r = await fetch(url, opcoes);
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.error || 'Não deu pra completar. Tente de novo.');
+  return d;
+}
+
+async function carregar(){
+  const unidade = unidadeAtual();
+  if(!unidade) return;
+  const data = document.getElementById('data').value || hojeBrasilia();
+  let f;
+  try{
+    f = await pedir(`/api/estacao/fechamento?unidade=${encodeURIComponent(unidade)}&data=${encodeURIComponent(data)}`);
+  }catch(e){ document.getElementById('resumo-dia').textContent = e.message; return; }
+  renderDia(f);
+  await carregarPrecos();
+}
+
+function linhasFormas(formas){
+  return FORMAS.filter(([id])=>num(formas[id]) > 0)
+    .map(([id, rotulo])=>`<div class="est-linha"><span>${rotulo}</span><b>${fmtReal(formas[id])}</b></div>`).join('');
+}
+
+function renderDia(f){
+  const t = f.total;
+  document.getElementById('resumo-dia').textContent = t.pagamentos
+    ? `${t.pagamentos} conta(s) fechada(s) · ${t.pessoas} pessoa(s) · ticket médio ${fmtReal(t.ticketMedio)}`
+    : 'Nenhuma conta fechada neste dia.';
+  document.getElementById('total-dia').innerHTML = `
+    <div class="est-totais" style="margin-top:0;padding-top:0;border-top:0;">
+      <div class="est-linha"><span>Rodízio</span><b>${fmtReal(t.rodizio)}</b></div>
+      <div class="est-linha"><span>Consumo</span><b>${fmtReal(t.consumo)}</b></div>
+      <div class="est-linha"><span>Balcão</span><b>${fmtReal(t.balcao)}</b></div>
+      <div class="est-linha"><span>Serviço</span><b>${fmtReal(t.servico)}</b></div>
+      <div class="est-linha total"><span>Total do dia</span><b>${fmtReal(t.total)}</b></div>
+      ${linhasFormas(t.formas)}
+    </div>`;
+
+  document.getElementById('por-caixa').innerHTML = `<div class="est-lista">${
+    f.porCaixa.map(c=>`<div class="est-item" style="display:block;">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
+        <b style="font-family:var(--mono);font-size:15px;">Caixa ${esc(c.caixa)}</b>
+        <b style="font-family:var(--mono);color:${c.total?'var(--accent)':'var(--muted)'};">${fmtReal(c.total)}</b>
+      </div>
+      <div class="est-comanda-meta">${c.pagamentos} conta(s) · ${c.pessoas} pessoa(s)</div>
+      ${c.total ? `<div class="est-totais" style="margin-top:8px;padding-top:8px;">${linhasFormas(c.formas)}</div>` : ''}
+    </div>`).join('')
+  }</div>`;
+
+  const ab = f.abertas || [];
+  document.getElementById('card-abertas').hidden = !ab.length;
+  document.getElementById('qtd-abertas').textContent = ab.length;
+  document.getElementById('abertas').innerHTML = ab.length
+    ? `<div class="est-comandas">${ab.map(c=>`<div class="est-comanda" style="cursor:default;">
+        <span class="est-comanda-num">${c.numero}</span>
+        <span class="est-comanda-corpo">
+          <span class="est-comanda-nome">${marcaTipo(c)} ${c.mesa?`· mesa ${c.mesa}`:'<span class="est-tag sem-mesa">sem mesa</span>'}</span>
+          <span class="est-comanda-meta">${(c.itens||[]).length} item(ns) no consumo</span>
+        </span>
+        <span class="est-comanda-val">${fmtReal(c.totais.subtotal)}</span>
+      </div>`).join('')}</div>
+      <div class="est-totais"><div class="est-linha total"><span>Em aberto</span><b>${fmtReal(f.subtotalAberto)}</b></div></div>`
+    : '';
+}
+
+// ---------- tabela de preços ----------
+// A TABELA DA CASA tem três eixos (foto do cardápio): dia × TURNO × faixa.
+// Um preço por dia não cobria "almoço 39,90 / jantar 49,90 na sexta".
+// FERIADO é uma linha a mais, e vale só no ALMOÇO - é o que o cardápio diz
+// ("almoço sábado, domingo E FERIADOS"; o jantar não menciona feriado). As
+// datas de feriado são marcadas à mão: não existe calendário nacional aqui, e
+// feriado de cidade não sairia de calendário nenhum.
+const LINHAS_TABELA = [...DIAS, ['feriado','Feriado']];
+
+async function carregarPrecos(){
+  try{
+    PRECOS = await pedir(`/api/estacao/precos?unidade=${encodeURIComponent(unidadeAtual())}`);
+  }catch(e){ document.getElementById('precos').innerHTML = `<div class="est-vazio">${esc(e.message)}</div>`; return; }
+  const editavel = IS_MASTER;
+  document.getElementById('acoes-precos').hidden = !editavel;
+  document.getElementById('sub-precos').textContent = editavel
+    ? 'Por dia da semana e por turno, como no cardápio. Criança até 5 anos não paga e não entra aqui. Só o Master altera.'
+    : 'Por dia da semana e por turno, como no cardápio. Quem altera é o Master.';
+
+  const campo = (linha, turno, tipo) => editavel
+    ? `<input type="text" inputmode="decimal" id="pr-${linha}-${turno}-${tipo}" value="${String(PRECOS.rodizio[linha][turno][tipo] || 0).replace('.', ',')}" style="height:36px;">`
+    : `<b style="font-family:var(--mono);">${fmtReal(PRECOS.rodizio[linha][turno][tipo])}</b>`;
+
+  const bloco = (turno, rotuloTurno) => `
+    <h2 style="margin:14px 0 4px;font-size:13px;">${rotuloTurno}</h2>
+    <div class="est-lista">${LINHAS_TABELA.map(([linha, rotulo])=>`
+      <div class="est-item" style="display:grid;grid-template-columns:minmax(72px,1fr) 1fr 1fr;gap:9px;align-items:center;">
+        <span class="est-item-nome">${rotulo}</span>
+        <label style="display:grid;gap:3px;font:10px var(--mono);color:var(--muted);text-transform:uppercase;margin:0;">Adulto${campo(linha,turno,'adulto')}</label>
+        <label style="display:grid;gap:3px;font:10px var(--mono);color:var(--muted);text-transform:uppercase;margin:0;">Criança 6-10${campo(linha,turno,'crianca')}</label>
+      </div>`).join('')}
+    </div>`;
+
+  document.getElementById('precos').innerHTML =
+    TURNOS.map(([turno, rotulo])=>bloco(turno, rotulo)).join('')
+    + `<div class="est-barra" style="margin:14px 0 0;">
+        <label style="flex:0 1 180px;">Serviço (%)${editavel
+          ? `<input type="text" inputmode="decimal" id="pr-servico" value="${String(PRECOS.servicoPct).replace('.', ',')}">`
+          : `<b style="font-family:var(--mono);font-size:15px;">${PRECOS.servicoPct}%</b>`}</label>
+      </div>`
+    + `<h2 style="margin:14px 0 4px;font-size:13px;">Feriados</h2>
+       <div class="est-sub">As datas que usam a linha "Feriado" no almoço. O jantar de feriado segue o dia da semana.</div>
+       <div id="lista-feriados"></div>
+       ${editavel ? `<div class="est-barra" style="margin:10px 0 0;">
+          <label style="flex:1 1 170px;">Marcar data<input type="date" id="novo-feriado"></label>
+          <button type="button" class="est-btn" style="flex:none;" onclick="addFeriado()">+ Feriado</button>
+        </div>` : ''}`
+    + (PRECOS.atualizadoEm ? `<div class="est-sub" style="margin:12px 0 0;">Última alteração em ${new Date(PRECOS.atualizadoEm).toLocaleString('pt-BR')}${PRECOS.atualizadoPorEmail?` por ${esc(PRECOS.atualizadoPorEmail)}`:''}.</div>` : '');
+  renderFeriados();
+}
+
+function renderFeriados(){
+  const el = document.getElementById('lista-feriados');
+  if(!el) return;
+  const lista = PRECOS.feriados || [];
+  el.innerHTML = lista.length
+    ? `<div class="est-lista" style="margin-top:8px;">${lista.map(d=>`
+        <div class="est-item">
+          <span class="est-item-nome">${d.split('-').reverse().join('/')}</span>
+          ${IS_MASTER ? `<button type="button" class="est-btn perigo" style="min-height:36px;padding:6px 10px;" onclick="tirarFeriado('${esc(d)}')">✕</button>` : ''}
+        </div>`).join('')}</div>`
+    : '<div class="est-vazio">Nenhuma data marcada.</div>';
+}
+function addFeriado(){
+  const v = document.getElementById('novo-feriado').value;
+  if(!v) return;
+  PRECOS.feriados = [...new Set([...(PRECOS.feriados||[]), v])].sort();
+  document.getElementById('novo-feriado').value = '';
+  renderFeriados();
+}
+function tirarFeriado(d){
+  PRECOS.feriados = (PRECOS.feriados||[]).filter(x=>x!==d);
+  renderFeriados();
+}
+
+async function salvarPrecos(){
+  const erro = document.getElementById('erro-precos');
+  erro.textContent = '';
+  const rodizio = {};
+  LINHAS_TABELA.forEach(([linha])=>{
+    rodizio[linha] = {};
+    TURNOS.forEach(([turno])=>{
+      rodizio[linha][turno] = {
+        adulto: num(document.getElementById(`pr-${linha}-${turno}-adulto`).value),
+        crianca: num(document.getElementById(`pr-${linha}-${turno}-crianca`).value),
+      };
+    });
+  });
+  try{
+    // o preço vale da PRÓXIMA comanda em diante: o que já foi aberto ficou
+    // com o preço congelado na abertura (estacaoComida.js) - mudar a tabela
+    // não pode remarcar quem já está na mesa
+    await pedir('/api/estacao/precos', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        unidade: unidadeAtual(), rodizio,
+        servicoPct: num(document.getElementById('pr-servico').value),
+        feriados: PRECOS.feriados || [],
+      }),
+    });
+    erro.style.color = 'var(--ok)';
+    erro.textContent = 'Tabela salva. Vale pras próximas comandas — quem já está na mesa mantém o preço de quando entrou.';
+    await carregarPrecos();
+  }catch(e){ erro.style.color = 'var(--bad)'; erro.textContent = e.message; }
+}
+
+async function boot(){
+  const r = await fetch('/api/me');
+  if(!r.ok){ logout(); return; }
+  ME = await r.json();
+  IS_MASTER = ME.role === 'master';
+  const secoes = IS_MASTER ? ['estacao-fechamento'] : (ME.permissions?.sections||[]);
+  if(!secoes.includes('estacao-fechamento')){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  const hoje = hojeBrasilia();
+  document.getElementById('data').value = hoje;
+  document.getElementById('data').max = hoje;
+  UNIDADES = await fetch('/api/estacao/unidades').then(x=>x.json()).catch(()=>[]);
+  document.getElementById('unidade').innerHTML = UNIDADES.length
+    ? UNIDADES.map(u=>`<option value="${esc(u.codigo)}">${esc(u.nome)}</option>`).join('')
+    : '<option value="" disabled selected>nenhuma unidade liberada</option>';
+  document.getElementById('root').classList.remove('hidden');
+  await carregar();
+}
+boot();
+</script>
+</body>
+</html>

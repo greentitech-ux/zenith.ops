@@ -1,0 +1,125 @@
+/* ---- base herdada do Saltiverso (paleta, corpo, cabeçalho, gaveta) ----
+ * O Master pediu a Estação "do mesmo jeito da saltiverso - apenas o estilo
+ * que ela tem". Copiada UMA vez pras três telas, em vez de uma vez por tela. */
+:root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:760px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin-left:-12px;margin-right:-12px;margin-top:-16px;padding-left:12px;padding-right:12px;padding-top:12px;padding-bottom:12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
+  .hidden{display:none!important;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .empty,.est-vazio{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.erro{background:var(--bad-dim);color:var(--bad);}
+
+/* Estação da Comida — o visual das três telas (Salão, Caixa, Fechamento).
+ *
+ * POR QUE UM ARQUIVO SÓ. São três telas do MESMO fluxo, vistas em sequência
+ * pela mesma equipe: comanda, conta, fechamento. Com o CSS copiado em cada
+ * uma, elas divergem na primeira correção — foi o que aconteceu com o painel
+ * de filtros que saía da tela no celular, que tinha quatro cópias e as quatro
+ * erravam. O tema (cores, fontes, balão de dica, maiúsculo) continua vindo do
+ * tema.js; aqui fica só o que é desta aba.
+ *
+ * PENSADO PRO CELULAR PRIMEIRO: quem usa o Salão é o garçom, de pé, com uma
+ * mão. Alvo de toque nunca abaixo de 44px, número grande e legível de longe. */
+
+.est-barra{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:14px;}
+.est-barra label{display:grid;gap:5px;font:10px var(--mono);letter-spacing:.07em;color:var(--muted);text-transform:uppercase;flex:1 1 200px;min-width:0;}
+.est-barra select,.est-barra input{width:100%;height:42px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:8px 10px;font:14px var(--sans);}
+.est-barra select:focus,.est-barra input:focus{outline:none;border-color:var(--accent);}
+
+.est-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+.est-card h2{margin:0 0 4px;font-size:15px;}
+.est-card .est-sub{color:var(--muted);font:11px var(--mono);margin-bottom:12px;line-height:1.5;}
+
+/* botão de ação — 44px é o mínimo pra dedo, e o principal vai no acento */
+.est-btn{min-height:44px;padding:11px 16px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:600 14px var(--sans);cursor:pointer;}
+.est-btn:hover{border-color:var(--accent);}
+.est-btn:disabled{opacity:.45;cursor:default;}
+.est-btn.principal{background:var(--accent);border-color:var(--accent);color:#0b0d10;}
+.est-btn.perigo{color:var(--bad);}
+.est-acoes{display:flex;gap:8px;flex-wrap:wrap;}
+
+/* MESA: o cartão que o garçom bate o olho de longe */
+.est-mesas{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+.est-mesa{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:11px;cursor:pointer;text-align:left;width:100%;min-height:44px;}
+.est-mesa:hover{border-color:var(--accent);}
+.est-mesa-num{font:700 22px var(--mono);color:var(--accent);line-height:1.1;}
+.est-mesa-cap{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;}
+.est-mesa-val{font:600 14px var(--mono);margin-top:6px;}
+
+/* COMANDA: o número do cartão é a identidade — grande e em mono */
+.est-comandas{display:grid;gap:8px;}
+.est-comanda{display:flex;gap:11px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;width:100%;min-height:52px;}
+.est-comanda:hover{border-color:var(--accent);}
+.est-comanda.marcada{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--panel2));}
+.est-comanda-num{font:700 20px var(--mono);color:var(--accent);flex:none;min-width:46px;}
+.est-comanda-corpo{flex:1 1 auto;min-width:0;}
+.est-comanda-nome{font-size:13px;line-height:1.3;overflow-wrap:anywhere;}
+.est-comanda-meta{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:3px;}
+.est-comanda-val{font:600 14px var(--mono);flex:none;text-align:right;}
+
+.est-tag{display:inline-block;padding:2px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);font:10px var(--mono);}
+.est-tag.crianca{background:color-mix(in srgb,var(--accent2) 16%,transparent);color:var(--accent2);}
+.est-tag.sem-mesa{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn);}
+
+/* linhas de total — o que a pessoa confere antes de cobrar */
+.est-totais{display:grid;gap:6px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line);}
+.est-linha{display:flex;justify-content:space-between;gap:14px;font-size:13px;}
+.est-linha span{color:var(--muted);}
+.est-linha b{font-family:var(--mono);}
+.est-linha.total{font-size:16px;padding-top:7px;border-top:1px solid var(--line);}
+.est-linha.total b{color:var(--accent);font-size:19px;}
+
+.est-lista{display:grid;gap:7px;}
+.est-item{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;}
+.est-item-nome{flex:1 1 auto;min-width:0;font-size:13px;overflow-wrap:anywhere;}
+.est-item-val{font:600 13px var(--mono);flex:none;}
+
+.est-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;}
+.est-grade .est-btn{display:grid;gap:3px;text-align:left;align-content:center;}
+.est-grade small{font:10px var(--mono);color:var(--muted);}
+
+.est-vazio{color:var(--muted);font-size:13px;padding:16px 4px;text-align:center;}
+.est-erro{color:var(--bad);font-size:12.5px;margin-top:8px;min-height:16px;}
+
+/* modal da comanda — no celular ele toma a tela inteira, que é o certo:
+   o garçom está dentro de UMA comanda, não navegando */
+.est-modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:14px;z-index:20;}
+.est-modal.aberto{display:flex;}
+.est-dialogo{width:min(560px,100%);max-height:92vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;}
+.est-dialogo-topo{display:flex;justify-content:space-between;align-items:start;gap:12px;margin-bottom:12px;}
+.est-fechar{border:0;background:var(--panel2);color:var(--muted);font-size:20px;line-height:1;cursor:pointer;flex:none;width:38px;height:38px;border-radius:50%;}
+.est-fechar:hover{color:var(--text);}
+
+@media(max-width:560px){
+  .est-mesas{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));}
+  .est-dialogo{width:100%;max-height:100vh;border-radius:0;padding:14px 12px;}
+  .est-modal{padding:0;align-items:stretch;}
+}

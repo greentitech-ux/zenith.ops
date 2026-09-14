@@ -51,7 +51,28 @@ const FUSO_BR = 'America/Sao_Paulo';
 // ABERTA -> PAGA (caixa recebeu) ou ABERTA -> CANCELADA (erro de digitação,
 // pessoa que foi embora antes de consumir). Três estados, disjuntos.
 const STATUS = ['ABERTA', 'PAGA', 'CANCELADA'];
-const TIPOS_RODIZIO = ['adulto', 'crianca'];
+// A TABELA DE VALORES DA CASA (foto do cardápio, 14/09) tem três eixos, não
+// um. O primeiro modelo aqui guardava um preço por DIA, e isso não cobre o
+// que está no papel:
+//
+//   ALMOÇO  seg a sex (exceto feriados)  39,90   |  sáb, dom e feriados  59,90
+//   JANTAR  dom a qui                    39,90   |  sex e sáb            49,90
+//   CRIANÇA 6 a 10 anos: 30 / 40 no almoço, 30 / 35 no jantar
+//   Criança até 5 anos NÃO PAGA.
+//
+// Então o preço é dia × TURNO × tipo, e o feriado muda o almoço (vira fim de
+// semana) sem mudar o jantar - exatamente como o cardápio diz.
+const TURNOS = ['almoco', 'jantar'];
+// A criança até 5 anos entra como TIPO, não como "não abre comanda": ela
+// ocupa lugar, come, e precisa aparecer na contagem de pessoas da mesa e no
+// ticket médio. O que ela não faz é somar dinheiro - o preço dela é sempre 0.
+const TIPOS_RODIZIO = ['adulto', 'crianca', 'crianca-ate-5'];
+const TIPO_ISENTO = 'crianca-ate-5';
+const ROTULO_TIPO = { adulto: 'adulto', crianca: 'criança (6 a 10)', 'crianca-ate-5': 'criança até 5 anos' };
+const ROTULO_TURNO = { almoco: 'almoço', jantar: 'jantar' };
+// o cardápio: almoço até as 18h (11h-15h em dia de semana, 11h-18h no fim de
+// semana), jantar das 18h às 23h. A virada às 18h atende os dois calendários.
+const HORA_VIRADA_JANTAR = 18;
 // os 5 caixas da casa (o Master: "e assim e fechado pelo caixa 01 02 03 04 ou
 // 05"). Lista fechada de propósito: caixa é conferência de dinheiro, e um
 // campo livre viraria "caixa 3", "Caixa 3", "cx3" no mesmo fechamento.
@@ -96,8 +117,13 @@ function diaDaSemanaBR(dataISO) {
 // dias, adulto e criança, mais o percentual de serviço.
 function precosVazios(unidade) {
   const rodizio = {};
-  DIAS_SEMANA.forEach((d) => { rodizio[d] = { adulto: 0, crianca: 0 }; });
-  return { unidade, rodizio, servicoPct: SERVICO_PCT_PADRAO, atualizadoEm: null, atualizadoPorEmail: null };
+  // 'feriado' é uma linha a mais na tabela, ao lado dos sete dias: no almoço
+  // o feriado tem preço próprio, e guardá-lo como um oitavo "dia" evita
+  // espalhar exceção por todo lado
+  [...DIAS_SEMANA, 'feriado'].forEach((d) => {
+    rodizio[d] = { almoco: { adulto: 0, crianca: 0 }, jantar: { adulto: 0, crianca: 0 } };
+  });
+  return { unidade, rodizio, feriados: [], servicoPct: SERVICO_PCT_PADRAO, atualizadoEm: null, atualizadoPorEmail: null };
 }
 
 async function getPrecos(unidade) {
@@ -106,28 +132,45 @@ async function getPrecos(unidade) {
   if (!snap.exists) return precosVazios(unidade);
   const d = snap.data() || {};
   const base = precosVazios(unidade);
-  DIAS_SEMANA.forEach((dia) => {
+  [...DIAS_SEMANA, 'feriado'].forEach((dia) => {
     const v = (d.rodizio || {})[dia] || {};
-    base.rodizio[dia] = { adulto: Math.max(0, num(v.adulto)), crianca: Math.max(0, num(v.crianca)) };
+    TURNOS.forEach((turno) => {
+      // aceita o formato ANTIGO (um preço por dia, sem turno) como se fosse o
+      // almoço: quem já tinha tabela preenchida não perde o que cadastrou
+      const t = v[turno] || (turno === 'almoco' && (v.adulto !== undefined || v.crianca !== undefined) ? v : {});
+      base.rodizio[dia][turno] = { adulto: Math.max(0, num(t.adulto)), crianca: Math.max(0, num(t.crianca)) };
+    });
   });
+  base.feriados = [...new Set((Array.isArray(d.feriados) ? d.feriados : [])
+    .map((x) => String(x || '').slice(0, 10)).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort();
   base.servicoPct = d.servicoPct != null ? Math.min(100, Math.max(0, num(d.servicoPct))) : SERVICO_PCT_PADRAO;
   base.atualizadoEm = d.atualizadoEm || null;
   base.atualizadoPorEmail = d.atualizadoPorEmail || null;
   return base;
 }
 
-async function salvarPrecos(unidade, { rodizio, servicoPct }, porEmail) {
+async function salvarPrecos(unidade, { rodizio, servicoPct, feriados }, porEmail) {
   const atual = await getPrecos(unidade);
   const novo = { ...atual };
   if (rodizio && typeof rodizio === 'object') {
-    DIAS_SEMANA.forEach((dia) => {
+    [...DIAS_SEMANA, 'feriado'].forEach((dia) => {
       const v = rodizio[dia];
       if (!v || typeof v !== 'object') return;
-      novo.rodizio[dia] = {
-        adulto: v.adulto === undefined ? atual.rodizio[dia].adulto : Math.max(0, num(v.adulto)),
-        crianca: v.crianca === undefined ? atual.rodizio[dia].crianca : Math.max(0, num(v.crianca)),
-      };
+      TURNOS.forEach((turno) => {
+        const t = v[turno];
+        if (!t || typeof t !== 'object') return;
+        novo.rodizio[dia][turno] = {
+          adulto: t.adulto === undefined ? atual.rodizio[dia][turno].adulto : Math.max(0, num(t.adulto)),
+          crianca: t.crianca === undefined ? atual.rodizio[dia][turno].crianca : Math.max(0, num(t.crianca)),
+        };
+      });
     });
+  }
+  // os feriados são as DATAS marcadas à mão: não existe calendário nacional
+  // aqui, e feriado de cidade (padroeira) não sairia de calendário nenhum
+  if (Array.isArray(feriados)) {
+    novo.feriados = [...new Set(feriados.map((x) => String(x || '').slice(0, 10))
+      .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort().slice(0, 60);
   }
   if (servicoPct !== undefined) novo.servicoPct = Math.min(100, Math.max(0, num(servicoPct)));
   novo.atualizadoEm = new Date().toISOString();
@@ -139,9 +182,25 @@ async function salvarPrecos(unidade, { rodizio, servicoPct }, porEmail) {
 // pura: o preço do rodízio daquele dia. Mudar a tabela vale pras comandas
 // ABERTAS daqui pra frente - quem já está na mesa mantém o que foi cobrado
 // (ver precoRodizio gravado em abrirComanda).
-function precoRodizioDoDia(precos, dataISO, tipo) {
-  const dia = diaDaSemanaBR(dataISO);
-  const doDia = (precos && precos.rodizio && precos.rodizio[dia]) || { adulto: 0, crianca: 0 };
+// O turno sai da HORA em que a comanda foi aberta, não de uma escolha do
+// garçom: às 19h é jantar, e pedir isso na tela seria um campo a mais pra
+// errar no meio do salão cheio.
+function turnoDe(agora = new Date()) {
+  const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: FUSO_BR, hour: '2-digit', hourCycle: 'h23' }).format(new Date(agora)));
+  return h >= HORA_VIRADA_JANTAR ? 'jantar' : 'almoco';
+}
+// Feriado vira fim de semana NO ALMOÇO e só nele - é o que o cardápio diz
+// ("almoço sábado, domingo E FERIADOS"; o jantar não menciona feriado).
+function linhaDaTabela(precos, dataISO, turno) {
+  const ehFeriado = turno === 'almoco' && (precos.feriados || []).includes(String(dataISO || '').slice(0, 10));
+  return ehFeriado ? 'feriado' : diaDaSemanaBR(dataISO);
+}
+function precoRodizioDoDia(precos, dataISO, tipo, turno) {
+  // criança até 5 anos não paga: é 0 sempre, e não depende de tabela
+  if (tipo === TIPO_ISENTO) return 0;
+  const t = TURNOS.includes(turno) ? turno : 'almoco';
+  const linha = linhaDaTabela(precos, dataISO, t);
+  const doDia = ((precos && precos.rodizio && precos.rodizio[linha]) || {})[t] || { adulto: 0, crianca: 0 };
   return num(tipo === 'crianca' ? doDia.crianca : doDia.adulto);
 }
 
@@ -211,9 +270,11 @@ async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, p
   }
   const data = hojeBrasiliaISO(agora);
   const precos = await getPrecos(unidade);
-  const precoRodizio = precoRodizioDoDia(precos, data, tipo);
-  if (!(precoRodizio > 0)) {
-    throw new Error(`O rodízio ${tipo === 'crianca' ? 'criança' : 'adulto'} de ${diaDaSemanaBR(data)} não tem preço cadastrado. Peça pro Master preencher a tabela de preços.`);
+  const turno = turnoDe(agora);
+  const precoRodizio = precoRodizioDoDia(precos, data, tipo, turno);
+  // criança até 5 anos custa 0 DE PROPÓSITO - só ela pode passar sem preço
+  if (tipo !== TIPO_ISENTO && !(precoRodizio > 0)) {
+    throw new Error(`O rodízio ${ROTULO_TIPO[tipo]} do ${ROTULO_TURNO[turno]} de ${linhaDaTabela(precos, data, turno)} não tem preço cadastrado. Peça pro Master preencher a tabela de preços.`);
   }
   const ref = COMANDAS.doc();
   const comanda = {
@@ -225,6 +286,7 @@ async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, p
     status: 'ABERTA',
     mesa: sanitizarMesa(mesa),
     tipoRodizio: tipo,
+    turno,              // almoço ou jantar, pela hora em que ela foi aberta
     precoRodizio,       // congelado aqui: mudar a tabela não reescreve o passado
     itens: [],
     abertaEm: new Date(agora).toISOString(),
@@ -539,7 +601,8 @@ function invalidarFechamento() { pagamentosDoDiaCache.invalidar(); }
 module.exports = {
   STATUS, TIPOS_RODIZIO, CAIXAS, DIAS_SEMANA, SERVICO_PCT_PADRAO,
   hojeBrasiliaISO, diaDaSemanaBR,
-  getPrecos, salvarPrecos, precoRodizioDoDia, precosVazios,
+  getPrecos, salvarPrecos, precoRodizioDoDia, precosVazios, turnoDe, linhaDaTabela,
+  TURNOS, TIPO_ISENTO, ROTULO_TIPO, ROTULO_TURNO, HORA_VIRADA_JANTAR,
   itensDoBalcao, resolverItensBalcao,
   abrirComanda, definirMesa, getComanda, lancarItem, removerItem, cancelarComanda,
   totaisDaComanda, salao, contaDe, receber, abertaDoNumero,

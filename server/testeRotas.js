@@ -20234,10 +20234,15 @@ setTimeout(async () => {
     const UNI = 'Estacao Comida';
     est._limparEspelhoTeste();
 
-    // tabela de preços: sábado mais caro que terça (é pra isso que existe o
-    // "programar por dia da semana")
+    // tabela de preços: dia × TURNO × tipo, como no cardápio da casa. O teste
+    // usa o jantar de terça como preço base (as comandas abrem às 20h).
     await est.salvarPrecos(UNI, {
-      rodizio: { ter: { adulto: 79.9, crianca: 39.9 }, sab: { adulto: 99.9, crianca: 49.9 } },
+      rodizio: {
+        ter: { almoco: { adulto: 39.9, crianca: 30 }, jantar: { adulto: 79.9, crianca: 39.9 } },
+        sab: { almoco: { adulto: 59.9, crianca: 40 }, jantar: { adulto: 99.9, crianca: 49.9 } },
+        feriado: { almoco: { adulto: 59.9, crianca: 40 }, jantar: { adulto: 0, crianca: 0 } },
+      },
+      feriados: ['2026-09-07'],
       servicoPct: 10,
     }, 'master@teste.local');
     const precos = await est.getPrecos(UNI);
@@ -20258,6 +20263,8 @@ setTimeout(async () => {
     const c3 = await abrir(7543, 74, 'crianca');
     // e uma que pegou o cartão mas ainda não sentou
     const c4 = await abrir(7544, null);
+    // a criança de 4 anos senta na mesa 74 também: não paga, mas ocupa lugar
+    const c5 = await abrir(7545, 74, est.TIPO_ISENTO);
 
     // mesmo número de novo, com a primeira ainda aberta: recusa
     let erroDuplicado = null;
@@ -20279,7 +20286,7 @@ setTimeout(async () => {
 
     // o preço MUDA no meio do serviço: quem já está na mesa mantém o que foi
     // combinado (o valor está congelado na comanda, não é recalculado)
-    await est.salvarPrecos(UNI, { rodizio: { ter: { adulto: 120, crianca: 60 } } }, 'master@teste.local');
+    await est.salvarPrecos(UNI, { rodizio: { ter: { jantar: { adulto: 120, crianca: 60 } } } }, 'master@teste.local');
     const salaoDepoisDoAumento = await est.salao(UNI);
     const mesa74Depois = salaoDepoisDoAumento.mesas.find((m) => m.mesa === 74);
 
@@ -20354,26 +20361,59 @@ setTimeout(async () => {
     const saidas = [...DOCS.entries()].filter(([k, v]) => k.startsWith('inventarioSaidas/') && v && v.vendaId === pago.id).map(([, v]) => v);
 
     const conf = {
-      'preço do rodízio sai da tabela do DIA DA SEMANA':
-        est.precoRodizioDoDia(precos, TER, 'adulto') === 79.9 && est.precoRodizioDoDia(precos, SAB, 'adulto') === 99.9
-        && est.precoRodizioDoDia(precos, TER, 'crianca') === 39.9,
+      // A TABELA DA CASA tem três eixos (foto do cardápio, 14/09): dia ×
+      // TURNO × tipo. Um preço por dia não cobria "almoço 39,90 / jantar
+      // 49,90 na sexta" - e era o que estava aqui.
+      'preço do rodízio sai de dia × turno × tipo':
+        est.precoRodizioDoDia(precos, TER, 'adulto', 'almoco') === 39.9
+        && est.precoRodizioDoDia(precos, TER, 'adulto', 'jantar') === 79.9
+        && est.precoRodizioDoDia(precos, SAB, 'adulto', 'jantar') === 99.9
+        && est.precoRodizioDoDia(precos, TER, 'crianca', 'jantar') === 39.9,
+      // o cardápio: almoço até as 18h, jantar das 18h às 23h
+      'o turno sai da HORA, não de uma escolha do garçom':
+        est.turnoDe(new Date('2026-09-15T12:00:00-03:00')) === 'almoco'
+        && est.turnoDe(new Date('2026-09-15T17:59:00-03:00')) === 'almoco'
+        && est.turnoDe(new Date('2026-09-15T18:00:00-03:00')) === 'jantar'
+        && est.turnoDe(new Date('2026-09-15T20:00:00-03:00')) === 'jantar',
+      // "almoço sábado, domingo E FERIADOS" - o jantar não menciona feriado
+      'feriado vira fim de semana no ALMOÇO, e só nele':
+        est.linhaDaTabela(precos, '2026-09-07', 'almoco') === 'feriado'
+        && est.linhaDaTabela(precos, '2026-09-07', 'jantar') === 'seg'
+        && est.linhaDaTabela(precos, TER, 'almoco') === 'ter'
+        && est.precoRodizioDoDia(precos, '2026-09-07', 'adulto', 'almoco') === 59.9,
+      // "crianças até 5 anos não pagam" - mas ocupam lugar e contam como
+      // pessoa no ticket médio, então viram TIPO, não ausência de comanda
+      'criança até 5 anos não paga, em nenhum dia nem turno':
+        est.precoRodizioDoDia(precos, TER, est.TIPO_ISENTO, 'jantar') === 0
+        && est.precoRodizioDoDia(precos, SAB, est.TIPO_ISENTO, 'almoco') === 0
+        && est.TIPO_ISENTO === 'crianca-ate-5',
       'dia sem preço cadastrado não abre comanda (em vez de abrir valendo zero)':
         !!erroSemPreco && /não tem preço cadastrado/.test(erroSemPreco),
       'o preço do rodízio é congelado na comanda, não no ato de olhar': c1.precoRodizio === 79.9 && c3.precoRodizio === 39.9,
+      // sem esta exceção a criança de 4 anos esbarraria no "não tem preço
+      // cadastrado" e ficaria de fora da contagem da mesa
+      'a criança até 5 anos ABRE comanda valendo zero, e conta como pessoa':
+        c5.precoRodizio === 0 && c5.tipoRodizio === est.TIPO_ISENTO && c5.status === 'ABERTA',
+      'e a comanda guarda em que turno ela foi aberta': c1.turno === 'jantar' && c5.turno === 'jantar',
       'só UMA comanda aberta por número': !!erroDuplicado && /já está aberta/.test(erroDuplicado) && /mesa 74/.test(erroDuplicado),
-      'a mesa é derivada: 3 comandas na 74 = 3 pessoas': !!mesa74 && mesa74.pessoas === 3,
+      // 4 comandas: dois adultos, uma criança de 6-10 e uma até 5 anos (que
+      // não paga, mas está sentada na mesa e conta como pessoa)
+      'a mesa é derivada: 4 comandas na 74 = 4 pessoas': !!mesa74 && mesa74.pessoas === 4,
       'quem pegou o cartão e não sentou aparece à parte, não numa mesa fantasma':
         salaoAntes.semMesa.length === 1 && salaoAntes.semMesa[0].numero === 7544 && salaoAntes.mesas.every((m) => m.mesa !== null),
       'o preço do item vem do CATÁLOGO, não do navegador': mesa74.consumo === 14.5 * 2 + 6 + 6,
       'item sem preço de venda não pode ser lançado': !!erroSemPrecoVenda && /não tem preço de venda/.test(erroSemPrecoVenda),
-      'a mesa soma rodízio + consumo das comandas dela': mesa74.subtotal === Math.round((79.9 * 2 + 39.9 + 14.5 * 2 + 6 + 6) * 100) / 100,
+      // a isenta entra com 0: o subtotal é o mesmo de antes dela
+      'a mesa soma rodízio + consumo das comandas dela': mesa74.subtotal === Math.round((79.9 * 2 + 39.9 + 0 + 14.5 * 2 + 6 + 6) * 100) / 100,
       'aumentar a tabela NO MEIO DO SERVIÇO não mexe em quem já está na mesa':
         !!mesa74Depois && mesa74Depois.subtotal === mesa74.subtotal,
       'a conta de duas comandas soma as duas, com os 10%': Math.abs(conta.total - totalEsperado) < 0.02 && conta.comandas.length === 2,
       'pagamento que não fecha com o total é recusado': !!erroSomaPagamento && /precisa bater com o total/.test(erroSomaPagamento),
       'caixa fora de 01-05 é recusado': !!erroCaixa && /Caixa inválido/.test(erroCaixa),
-      'pagar 2 comandas desce da mesa exatamente o que foi pago, e a 3ª continua lá':
-        !!mesa74Pago && mesa74Pago.pessoas === 1
+      // pagaram a 7541 e a 7542: sobram a criança de 6-10 (39,90) e a de até
+      // 5 anos (0) - duas pessoas ainda sentadas, uma delas sem valor
+      'pagar 2 comandas desce da mesa exatamente o que foi pago, e quem não pagou continua lá':
+        !!mesa74Pago && mesa74Pago.pessoas === 2
         && mesa74Pago.subtotal === Math.round((39.9) * 100) / 100,
       'comanda paga não aceita mais lançamento': !!erroLancarPaga && /já foi fechada/.test(erroLancarPaga),
       'o mesmo número pode ser entregue DE NOVO depois de pago (o cartão volta pro maço)':
@@ -21853,6 +21893,170 @@ setTimeout(async () => {
   } catch (e) { okPeriodoQuedas = false; console.log('  erro: ' + e.message); }
   if (!okPeriodoQuedas) ruins += 1;
   console.log(`${okPeriodoQuedas ? '✓' : '✗'} Quedas: o período sai do rodapé e vai pro lado do PDF, onde a escolha é feita`);
+
+  // ---------------------------------------------------------------------
+  // O nome do relatório de fechamento diz DE QUE PERÍODO ele é.
+  // Master (14/09): "estou puxando relatorio de fechamento do dia 04-09 e o
+  // nome do PDF esta com a data de hoje, dia do download. Precisa ser o nome
+  // do que se trata, no caso fechamento - data do periodo. Ex:
+  // 03.04.05-09-2026-nome da loja; se mais de 3 lojas, nome do Grupo."
+  // Na pasta Downloads, dois relatórios de períodos diferentes baixados no
+  // mesmo dia ficavam com o MESMO nome, e nenhum dizia do que era.
+  // ---------------------------------------------------------------------
+  let okNomeRelatorio = false;
+  try {
+    const cabN = token ? { Authorization: 'Bearer ' + token } : {};
+    const ru = require(__dirname + '/reportUtil.js');
+    const nome = (r) => {
+      const cd = (r.headers || {})['content-disposition'] || '';
+      return (cd.match(/filename="([^"]+)"/) || [])[1] || '';
+    };
+    // três dias seguidos na MESMA loja - é o exemplo do Master
+    ['2026-07-03', '2026-07-04', '2026-07-05'].forEach((dia, i) => {
+      DOCS.set(`fechamentosLive/UnidNomeArq__${dia}`, {
+        id: `UnidNomeArq__${dia}`, unidade: 'UnidNomeArq', unidadeNome: 'Dom Bessa',
+        grupo: 'GBE', data: dia, faturamento: 1000 * (i + 1), totalDeclarado: 1000 * (i + 1), diferenca: 0,
+      });
+    });
+    require(__dirname + '/fechamentosLive.js').invalidarCache();
+    const filtro = 'unidades=UnidNomeArq&inicio=2026-07-01&fim=2026-07-31';
+    const pdf = await pedirBinario(`/api/fechamentos/relatorio.pdf?${filtro}`, cabN);
+    const csv = await pedirBinario(`/api/fechamentos/relatorio.csv?${filtro}`, cabN);
+    const porUnidade = await pedirBinario(`/api/fechamentos/relatorio-unidades.csv?${filtro}`, cabN);
+    // e o caso de um dia só, que é o do print
+    const umDia = await pedirBinario(`/api/fechamentos/relatorio.pdf?unidades=UnidNomeArq&inicio=2026-07-04&fim=2026-07-04`, cabN);
+
+    const conf = {
+      // O PONTO: os dias são os que estão NO relatório. O filtro aqui pegou o
+      // mês inteiro e só três dias têm lançamento - o nome fala dos três.
+      'o nome traz os dias do período, não a data do download':
+        nome(pdf) === 'fechamentos-03.04.05-07-2026-dom-bessa.pdf'
+        && nome(csv) === 'fechamentos-03.04.05-07-2026-dom-bessa.csv',
+      'um dia só sai como um dia só': nome(umDia) === 'fechamentos-04-07-2026-dom-bessa.pdf',
+      'o comparativo por unidade segue a mesma regra':
+        nome(porUnidade) === 'fechamentos-por-unidade-03.04.05-07-2026-dom-bessa.csv',
+      'e a data de hoje não aparece mais no nome':
+        !nome(pdf).includes(ru.dataArquivo()) && !nome(csv).includes(ru.dataArquivo()),
+      // ---- a regra, direto na função ----
+      'até 3 lojas vão pelo nome; acima disso, o grupo':
+        ru.trechoDeQuem(['Dom Bessa', 'Dom Caruaru', 'Saltiverso Patteo'], 'Grupo Bravo (GBE)') === 'dom-bessa-dom-caruaru-saltiverso-patteo'
+        && ru.trechoDeQuem(['Dom Bessa', 'Dom Caruaru', 'Saltiverso Patteo', 'Dom Carrão'], 'Grupo Bravo (GBE)') === 'grupo-bravo-gbe'
+        && ru.MAX_NOMES_NO_NOME === 3,
+      // a loja repetida em 30 dias é UMA loja, não 30
+      'a mesma loja repetida conta uma vez':
+        ru.trechoDeQuem(['Dom Bessa', 'Dom Bessa', 'Dom Bessa', 'Dom Bessa'], 'Grupo Bravo (GBE)') === 'dom-bessa',
+      // listar 30 dias daria um nome de ~90 caracteres
+      'período longo vira intervalo em vez de listar todo dia':
+        ru.trechoDeDatas(Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`)) === '01-09-2026-a-30-09-2026',
+      // "03.04-09-2026" mentiria sobre um dia que é de outubro
+      'período que atravessa o mês vira intervalo':
+        ru.trechoDeDatas(['2026-09-28', '2026-10-02']) === '28-09-2026-a-02-10-2026',
+      'sem nenhuma data legível, cai na data de hoje (é o que o nome já dizia)':
+        ru.trechoDeDatas([]) === ru.dataArquivo() && ru.trechoDeDatas([null, 'lixo']) === ru.dataArquivo(),
+      // o nome vai num header HTTP e vira nome de arquivo no disco
+      'o nome não carrega acento, espaço nem barra':
+        /^[a-z0-9.\-]+$/.test(ru.nomeArquivoPeriodo('fechamentos', { datas: ['2026-09-03'], nomes: ['Dom Praça Aero / Recife'] })),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okNomeRelatorio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pdf=${nome(pdf)} csv=${nome(csv)} unid=${nome(porUnidade)} umDia=${nome(umDia)})`);
+  } catch (e) { okNomeRelatorio = false; console.log('  erro: ' + e.message); }
+  if (!okNomeRelatorio) ruins += 1;
+  console.log(`${okNomeRelatorio ? '✓' : '✗'} Relatório de fechamento: o nome do arquivo diz o período e a loja, não o dia do download`);
+
+  // ---------------------------------------------------------------------
+  // Estação da Comida: as TRÊS TELAS (Salão, Caixa, Fechamento).
+  // O servidor já existia; faltavam as telas. Elas seguem o estilo do
+  // Saltiverso, como o Master pediu, e compartilham UM css - três cópias do
+  // mesmo visual divergem na primeira correção (foi o que aconteceu com o
+  // painel de filtros que saía da tela, que tinha quatro cópias).
+  // ---------------------------------------------------------------------
+  let okEstacaoTelas = false;
+  try {
+    const est2 = require(__dirname + '/estacaoComida.js');
+    const fsx = require('fs');
+    const telas = {
+      salao: fsx.readFileSync(__dirname + '/public/estacao-salao.html', 'utf8'),
+      caixa: fsx.readFileSync(__dirname + '/public/estacao-caixa.html', 'utf8'),
+      fechamento: fsx.readFileSync(__dirname + '/public/estacao-fechamento.html', 'utf8'),
+    };
+    const css = fsx.readFileSync(__dirname + '/public/estacao.css', 'utf8');
+    const nav = fsx.readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
+    const idx2 = fsx.readFileSync(__dirname + '/index.js', 'utf8');
+    const todas = Object.values(telas);
+
+    const conf = {
+      'as três telas existem e são as que o menu aponta':
+        ['estacao-salao', 'estacao-caixa', 'estacao-fechamento'].every((t) => fsx.existsSync(`${__dirname}/public/${t}.html`))
+        && /href: '\/estacao-salao\.html'/.test(nav) && /href: '\/estacao-caixa\.html'/.test(nav) && /href: '\/estacao-fechamento\.html'/.test(nav),
+      'o visual mora num css só, e as três o carregam':
+        todas.every((t) => /<link rel="stylesheet" href="\/estacao\.css">/.test(t))
+        && !todas.some((t) => /<style>/.test(t))
+        && /\.est-comanda\{/.test(css) && /\.est-mesa\{/.test(css),
+      // quem usa o Salão é o garçom, de pé, com uma mão
+      'alvo de toque não fica abaixo de 44px':
+        /\.est-btn\{min-height:44px/.test(css) && /\.est-comanda\{[^}]*min-height:52px/.test(css) && /\.est-mesa\{[^}]*min-height:44px/.test(css),
+      // o garçom NÃO tem a seção inventario: sem rota própria, o seletor de
+      // unidade nasceria vazio com 403 na primeira tela que ele abre
+      'a lista de unidades tem rota própria da Estação, não a do inventário':
+        /app\.get\('\/api\/estacao\/unidades', requireAnySection\('estacao-salao', 'estacao-caixa', 'estacao-fechamento'\)/.test(idx2)
+        && todas.every((t) => /fetch\('\/api\/estacao\/unidades'\)/.test(t))
+        && !todas.some((t) => /api\/inventario\/unidades/.test(t)),
+      // cada tela checa a SUA seção: caixa não é salão
+      'cada tela exige a própria seção antes de mostrar qualquer coisa':
+        /secoes\.includes\('estacao-salao'\)/.test(telas.salao)
+        && /secoes\.includes\('estacao-caixa'\)/.test(telas.caixa)
+        && /secoes\.includes\('estacao-fechamento'\)/.test(telas.fechamento),
+
+      // ---- o vocabulário é o do servidor, não inventado na tela ----
+      'as três faixas do cardápio aparecem na abertura da comanda':
+        /<option value="adulto">Adulto<\/option><option value="crianca">Criança \(6 a 10\)<\/option><option value="crianca-ate-5">Criança até 5 \(não paga\)<\/option>/.test(telas.salao)
+        && est2.TIPOS_RODIZIO.join(',') === 'adulto,crianca,crianca-ate-5',
+      'o rótulo da faixa sai de um mapa só, igual nas três telas':
+        todas.every((t) => /const ROTULO_TIPO = \{ adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':'Criança até 5' \};/.test(t)),
+      'os cinco caixas e as cinco formas são os do servidor':
+        /const CAIXAS = \['01','02','03','04','05'\];/.test(telas.caixa)
+        && est2.CAIXAS.join(',') === '01,02,03,04,05'
+        && /\['dinheiro','Dinheiro'\],\['pix','Pix'\],\['debito','Débito'\],\['credito','Crédito'\],\['voucher','Voucher'\]/.test(telas.caixa),
+
+      // ---- a tabela de preços é a do cardápio: dia × turno × faixa ----
+      'a tela de preços tem os dois turnos e a linha de feriado':
+        /const TURNOS = \[\['almoco','Almoço'\],\['jantar','Jantar'\]\];/.test(telas.fechamento)
+        && /const LINHAS_TABELA = \[\.\.\.DIAS, \['feriado','Feriado'\]\];/.test(telas.fechamento)
+        && /id="pr-\$\{linha\}-\$\{turno\}-\$\{tipo\}"/.test(telas.fechamento),
+      'criança até 5 não entra na tabela (não paga em dia nenhum)':
+        !/crianca-ate-5/.test(telas.fechamento.slice(telas.fechamento.indexOf('LINHAS_TABELA')))
+        && /Criança até 5 anos não paga e não entra aqui/.test(telas.fechamento),
+      'as datas de feriado são marcadas à mão, e a tela deixa marcar':
+        /function addFeriado\(\)/.test(telas.fechamento) && /function tirarFeriado\(/.test(telas.fechamento)
+        && /feriados: PRECOS\.feriados \|\| \[\]/.test(telas.fechamento),
+
+      // ---- o que o caixa não pode perder ----
+      // número errado zerava a conta montada: a tela seguia mostrando o total
+      // antigo e o botão de receber morria - o pior estado num caixa com fila
+      'número errado não derruba a conta que já estava montada':
+        /NUMEROS = NUMEROS\.filter\(x=>x!==n\);\s*\n\s*const msg = ULTIMO_ERRO;\s*\n\s*await recarregarConta\(\);\s*\n\s*erro\.textContent = msg;/.test(telas.caixa),
+      'o total do dia sai com separador de milhar (é dinheiro de fechar caixa)':
+        todas.every((t) => /toLocaleString\('pt-BR', \{ minimumFractionDigits: 2, maximumFractionDigits: 2 \}\)/.test(t)),
+      // tocar antes do dado chegar não pode virar erro de JS na loja
+      'tocar numa mesa antes do salão chegar não quebra a tela':
+        /const m = SALAO && SALAO\.mesas\.find/.test(telas.salao),
+      // o salão muda na mão de outro garçom
+      'o salão se atualiza pelo aviso do servidor, sem ficar perguntando':
+        /new EventSource\('\/api\/stream\?token='/.test(telas.salao)
+        && /addEventListener\('estacao-salao-mudou'/.test(telas.salao)
+        && /broadcast\('estacao-salao-mudou'/.test(idx2),
+      // remover item por POSIÇÃO tiraria o errado se outro garçom lançasse no
+      // meio do caminho
+      'remover item manda o NOME junto, não só a posição':
+        /itens\/\$\{indice\}\?nome=\$\{encodeURIComponent\(nome\)\}/.test(telas.salao),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okEstacaoTelas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEstacaoTelas = false; console.log('  erro: ' + e.message); }
+  if (!okEstacaoTelas) ruins += 1;
+  console.log(`${okEstacaoTelas ? '✓' : '✗'} Estação da Comida: as três telas (Salão, Caixa, Fechamento), com a tabela do cardápio`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

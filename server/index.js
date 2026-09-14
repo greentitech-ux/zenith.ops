@@ -5830,7 +5830,9 @@ async function montarRelatorioFechamentos(req) {
   // colunas escondidas/reordenadas no seletor 🧩 Colunas da tela (fechamentos.html)
   const ocultas = new Set(String(req.query.ocultas || '').split(',').filter(Boolean));
   const ordem = String(req.query.ordem || '').split(',').filter(Boolean);
-  return fechamentosReport.prepararRelatorio(fechamentos, listaGrupos, ocultas, ordem);
+  // devolve tambem os fechamentos crus: e deles que sai o nome do arquivo
+  // (quais dias e quais lojas entraram de verdade no relatorio)
+  return { ...fechamentosReport.prepararRelatorio(fechamentos, listaGrupos, ocultas, ordem), fechamentos };
 }
 
 // mesma agregacao por unidade do painel "Comparativo por unidade" da tela
@@ -5920,36 +5922,52 @@ function prepararFechamentosPorUnidade(rows, listaGrupos) {
   return { colunas, linhas, unidades: agregados.length };
 }
 
+// O nome do arquivo tem que dizer DE QUE PERÍODO ele é, não de quando foi
+// baixado (ver reportUtil.nomeArquivoPeriodo). Os dias saem dos fechamentos
+// que entraram no relatório - não das bordas do filtro: se o filtro pegou a
+// semana e só três dias têm lançamento, o nome fala dos três.
+function recorteDoRelatorioFechamentos(fechamentos) {
+  const lista = fechamentos || [];
+  const redesPresentes = [...new Set(lista.map((f) => redes.redeDaUnidade(f.unidade || f.unidadeNome)).filter(Boolean))];
+  return {
+    datas: lista.map((f) => f.data),
+    nomes: lista.map((f) => f.unidadeNome || f.unidade),
+    // uma rede só: o nome dela. Mais de uma, dizer o nome de uma seria mentira
+    grupo: redesPresentes.length === 1 ? (redes.NOME_DA_REDE[redesPresentes[0]] || redesPresentes[0]) : 'todos-os-grupos',
+  };
+}
+
 app.get('/api/fechamentos/relatorio-unidades.:formato(csv|pdf)', requireSection('fechamentos'), async (req, res) => {
   const [linhasFiltradas, listaGrupos] = await Promise.all([fechamentosFiltrados(req), grupos.list()]);
   const { colunas, linhas, unidades } = prepararFechamentosPorUnidade(linhasFiltradas, listaGrupos);
+  const nomeArquivo = reportUtil.nomeArquivoPeriodo('fechamentos-por-unidade', recorteDoRelatorioFechamentos(linhasFiltradas));
   if (req.params.formato === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${reportUtil.nomeArquivoComData('fechamentos-por-unidade')}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.csv"`);
     return res.send(reportUtil.toCSV(colunas, linhas));
   }
-  reportUtil.writePDF(res, { titulo: 'Fechamentos · Comparativo por Unidade', subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()} · ${unidades} unidade(s) · dividido por rede`, colunas, linhas, nomeArquivo: reportUtil.nomeArquivoComData('fechamentos-por-unidade') });
+  reportUtil.writePDF(res, { titulo: 'Fechamentos · Comparativo por Unidade', subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()} · ${unidades} unidade(s) · dividido por rede`, colunas, linhas, nomeArquivo });
 });
 
 // ---------- relatorio de Fechamentos (CSV/PDF) do periodo filtrado na tela -
 // mesma secao 'fechamentos' da tela (nao restrito ao Master), respeitando as
 // unidades que o usuario tem permissao de ver ----------
 app.get('/api/fechamentos/relatorio.csv', requireSection('fechamentos'), async (req, res) => {
-  const { colunas, linhas, secoes } = await montarRelatorioFechamentos(req);
+  const { colunas, linhas, secoes, fechamentos } = await montarRelatorioFechamentos(req);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${fechamentosReport.slugify('relatorio-fechamentos')}-${reportUtil.dataArquivo()}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${reportUtil.nomeArquivoPeriodo('fechamentos', recorteDoRelatorioFechamentos(fechamentos))}.csv"`);
   res.send(fechamentosReport.toCSV(colunas, linhas, secoes));
 });
 
 app.get('/api/fechamentos/relatorio.pdf', requireSection('fechamentos'), async (req, res) => {
   const { inicio, fim } = req.query;
-  const { colunas, linhas, secoes } = await montarRelatorioFechamentos(req);
+  const { colunas, linhas, secoes, fechamentos } = await montarRelatorioFechamentos(req);
   const periodo = inicio || fim ? ` · período: ${inicio || 'início'} a ${fim || 'hoje'}` : '';
   // dizer QUAIS redes entraram evita a duvida de "cade a ARCFOOD?" quando o
   // filtro da tela deixou uma delas de fora
   const porRede = secoes.map((sc) => `${sc.nome}: ${sc.qtd}`).join(' · ');
   const subtitulo = `Exportado em ${agoraBrasiliaFmt()}${periodo} · ${linhas.length} fechamento(s)${porRede ? ' · ' + porRede : ''}`;
-  fechamentosReport.writePDF(res, { titulo: 'Relatório de Fechamentos', subtitulo, colunas, linhas, secoes, nomeArquivo: `relatorio-fechamentos-${reportUtil.dataArquivo()}` });
+  fechamentosReport.writePDF(res, { titulo: 'Relatório de Fechamentos', subtitulo, colunas, linhas, secoes, nomeArquivo: reportUtil.nomeArquivoPeriodo('fechamentos', recorteDoRelatorioFechamentos(fechamentos)) });
 });
 
 // ---------- recordes de venda (maior/menor dia, maior/menor semana) por
@@ -8729,6 +8747,19 @@ app.get('/api/saltiverso/catalogo', requireSection('parque-loja'), async (req, r
 // garçom não fecha conta e o caixa não lança consumo.
 const podeUnidadeEstacao = (req, unidade) => podeUnidadeInventario(req, unidade);
 
+// As unidades que a pessoa pode ver na Estação. Existe separado de
+// /api/inventario/unidades porque o garçom tem "estacao-salao" e NÃO tem
+// "inventario": sem isto, a primeira tela que ele abre já responde 403 e o
+// seletor de unidade nasce vazio. A lista é a mesma (a permissão de unidade
+// da Estação é a do inventário, ver podeUnidadeEstacao) - o que muda é quem
+// pode perguntar.
+app.get('/api/estacao/unidades', requireAnySection('estacao-salao', 'estacao-caixa', 'estacao-fechamento'), (req, res) => {
+  const unidades = req.isMaster
+    ? Object.keys(INVENTARIO_UNIDADES_NOMES)
+    : (req.permissions.unidades || []).filter((u) => INVENTARIO_UNIDADES_NOMES[u]);
+  res.json(unidades.map((codigo) => ({ codigo, nome: INVENTARIO_UNIDADES_NOMES[codigo] })));
+});
+
 app.get('/api/estacao/precos', requireSection('estacao-fechamento'), async (req, res) => {
   try {
     if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -8738,8 +8769,8 @@ app.get('/api/estacao/precos', requireSection('estacao-fechamento'), async (req,
 // preço é dinheiro que entra: só o Master mexe na tabela
 app.post('/api/estacao/precos', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
-    const { unidade, rodizio, servicoPct } = req.body || {};
-    res.json(await estacaoComida.salvarPrecos(unidade, { rodizio, servicoPct }, req.user.email));
+    const { unidade, rodizio, servicoPct, feriados } = req.body || {};
+    res.json(await estacaoComida.salvarPrecos(unidade, { rodizio, servicoPct, feriados }, req.user.email));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
