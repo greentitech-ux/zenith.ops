@@ -1,0 +1,548 @@
+// estacaoComida.js
+// Rodízio com comanda por PESSOA (Estação da Comida). Desenhado com o Master
+// em 14/09/2026, dentro do restaurante, olhando a comanda de papel que ele
+// quer aposentar.
+//
+// A COMANDA É A UNIDADE ATÔMICA, NÃO A MESA. Cada pessoa que entra recebe um
+// cartão numerado; a mesa é só o agrupamento que nasce quando as comandas são
+// vinculadas a ela. Isso é o contrário do PDV comum (conta da mesa, dividida
+// no fim) e é exatamente o que faz "pagar a minha parte" ser trivial: não se
+// divide nada, cada comanda já é uma conta. Pagar por 3 pessoas é informar 3
+// números.
+//
+// O NÚMERO NÃO É A IDENTIDADE. O cartão volta pro maço quando a pessoa paga,
+// então a 7541 sai às 19h e é entregue de novo às 21h - no MESMO dia. Quem
+// tratasse "número + data" como chave juntaria duas pessoas diferentes na
+// mesma conta. Aqui a identidade é a SESSÃO (um documento por abertura), o
+// número é só busca, e existe uma regra dura: só pode haver UMA comanda
+// ABERTA por número na unidade.
+//
+// MESA NÃO É COLEÇÃO. "Mesa 74 com 4 pessoas e R$ 320" é derivado das
+// comandas ABERTAS com mesa=74 - nenhum documento a mais, nenhuma escrita a
+// mais, e nada pra ficar fora de sincronia. Mesa ocupada é mesa que tem
+// comanda aberta.
+//
+// ESPELHO EM MEMÓRIA (CLAUDE.md §3). O salão é uma tela que fica aberta e
+// recarrega sozinha; ler as comandas abertas do Firestore a cada recarga
+// custaria ~80 documentos por consulta numa casa cheia - milhares de leituras
+// por hora, que foi exatamente o erro que custou ~R$900/mês no NOC. Aqui vale
+// a mesma solução: as abertas do dia vivem em memória e cada escrita aplica o
+// patch no espelho em vez de forçar releitura (ver gravarEEspelhar).
+//
+// PREÇO NUNCA VEM DO NAVEGADOR. Mesma regra do saltiversoVendas.js: o preço
+// do rodízio sai da tabela do dia e o da bebida sai do catálogo do inventário
+// daquela unidade. Fecha a brecha óbvia de lançar valor menor e embolsar a
+// diferença.
+//
+// E O QUE FOI COBRADO FICA CONGELADO. O preço do rodízio é gravado na
+// comanda na ABERTURA e o da bebida no LANÇAMENTO. Mudar a tabela amanhã não
+// reescreve o que já foi vendido - o histórico tem que continuar legível
+// exatamente como foi.
+const db = require('./firestore');
+const { createCache } = require('./liveCache');
+const inventario = require('./inventario');
+const { FORMAS_PAGAMENTO_SPLIT } = require('./parque');
+
+const COMANDAS = db.collection('estacaoComandas');
+const PAGAMENTOS = db.collection('estacaoPagamentos');
+const PRECOS = db.collection('estacaoPrecos');
+
+const FUSO_BR = 'America/Sao_Paulo';
+// ABERTA -> PAGA (caixa recebeu) ou ABERTA -> CANCELADA (erro de digitação,
+// pessoa que foi embora antes de consumir). Três estados, disjuntos.
+const STATUS = ['ABERTA', 'PAGA', 'CANCELADA'];
+const TIPOS_RODIZIO = ['adulto', 'crianca'];
+// os 5 caixas da casa (o Master: "e assim e fechado pelo caixa 01 02 03 04 ou
+// 05"). Lista fechada de propósito: caixa é conferência de dinheiro, e um
+// campo livre viraria "caixa 3", "Caixa 3", "cx3" no mesmo fechamento.
+const CAIXAS = ['01', '02', '03', '04', '05'];
+const DIAS_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+const SERVICO_PCT_PADRAO = 10;
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+function arred(v) {
+  return Math.round((v + Number.EPSILON) * 100) / 100;
+}
+function texto(v, max) {
+  return String(v == null ? '' : v).trim().slice(0, max);
+}
+
+// Dia de NEGÓCIO. Hoje é o dia de calendário em São Paulo, e está escrito
+// aqui porque é uma decisão, não um detalhe: se a casa virar a madrugada, uma
+// comanda aberta 00:20 cai no dia seguinte e o fechamento da noite fica
+// partido em dois. Quando isso for real, entra uma hora de corte na
+// configuração - não invento uma agora.
+function hojeBrasiliaISO(agora = new Date()) {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: FUSO_BR, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(agora);
+  const o = {};
+  partes.forEach((p) => { if (p.type !== 'literal') o[p.type] = p.value; });
+  return `${o.year}-${o.month}-${o.day}`;
+}
+function diaDaSemanaBR(dataISO) {
+  // meio-dia UTC evita a virada de fuso jogar a data pro dia anterior
+  const d = new Date(`${dataISO}T12:00:00Z`);
+  return DIAS_SEMANA[d.getUTCDay()];
+}
+
+// ------------------------------------------------------------ preços
+//
+// Tabela por DIA DA SEMANA (pedido do Master: "preço deixar aberto para mudar
+// quando necessário e também a opção de programar por dia da semana"). Sete
+// dias, adulto e criança, mais o percentual de serviço.
+function precosVazios(unidade) {
+  const rodizio = {};
+  DIAS_SEMANA.forEach((d) => { rodizio[d] = { adulto: 0, crianca: 0 }; });
+  return { unidade, rodizio, servicoPct: SERVICO_PCT_PADRAO, atualizadoEm: null, atualizadoPorEmail: null };
+}
+
+async function getPrecos(unidade) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  const snap = await PRECOS.doc(unidade).get();
+  if (!snap.exists) return precosVazios(unidade);
+  const d = snap.data() || {};
+  const base = precosVazios(unidade);
+  DIAS_SEMANA.forEach((dia) => {
+    const v = (d.rodizio || {})[dia] || {};
+    base.rodizio[dia] = { adulto: Math.max(0, num(v.adulto)), crianca: Math.max(0, num(v.crianca)) };
+  });
+  base.servicoPct = d.servicoPct != null ? Math.min(100, Math.max(0, num(d.servicoPct))) : SERVICO_PCT_PADRAO;
+  base.atualizadoEm = d.atualizadoEm || null;
+  base.atualizadoPorEmail = d.atualizadoPorEmail || null;
+  return base;
+}
+
+async function salvarPrecos(unidade, { rodizio, servicoPct }, porEmail) {
+  const atual = await getPrecos(unidade);
+  const novo = { ...atual };
+  if (rodizio && typeof rodizio === 'object') {
+    DIAS_SEMANA.forEach((dia) => {
+      const v = rodizio[dia];
+      if (!v || typeof v !== 'object') return;
+      novo.rodizio[dia] = {
+        adulto: v.adulto === undefined ? atual.rodizio[dia].adulto : Math.max(0, num(v.adulto)),
+        crianca: v.crianca === undefined ? atual.rodizio[dia].crianca : Math.max(0, num(v.crianca)),
+      };
+    });
+  }
+  if (servicoPct !== undefined) novo.servicoPct = Math.min(100, Math.max(0, num(servicoPct)));
+  novo.atualizadoEm = new Date().toISOString();
+  novo.atualizadoPorEmail = porEmail || null;
+  await PRECOS.doc(unidade).set(novo, { merge: true });
+  return novo;
+}
+
+// pura: o preço do rodízio daquele dia. Mudar a tabela vale pras comandas
+// ABERTAS daqui pra frente - quem já está na mesa mantém o que foi cobrado
+// (ver precoRodizio gravado em abrirComanda).
+function precoRodizioDoDia(precos, dataISO, tipo) {
+  const dia = diaDaSemanaBR(dataISO);
+  const doDia = (precos && precos.rodizio && precos.rodizio[dia]) || { adulto: 0, crianca: 0 };
+  return num(tipo === 'crianca' ? doDia.crianca : doDia.adulto);
+}
+
+// --------------------------------------------------- espelho das abertas
+//
+// Map(unidade -> { em, comandas: Map(id -> comanda) }). Só as ABERTAS: comanda
+// paga sai do espelho na hora e vira histórico, que ninguém fica recarregando.
+const espelho = new Map();
+const ESPELHO_TTL_MS = 5 * 60 * 1000;
+
+async function listarAbertasUncached(unidade) {
+  const snap = await COMANDAS.where('unidade', '==', unidade).where('status', '==', 'ABERTA').get();
+  return snap.docs.map((d) => d.data());
+}
+
+async function garantirEspelho(unidade) {
+  const atual = espelho.get(unidade);
+  if (atual && Date.now() - atual.em < ESPELHO_TTL_MS) return atual.comandas;
+  const lista = await listarAbertasUncached(unidade);
+  const mapa = new Map(lista.map((c) => [c.id, c]));
+  espelho.set(unidade, { em: Date.now(), comandas: mapa });
+  return mapa;
+}
+
+// grava no Firestore E aplica o patch no espelho - nunca invalida o espelho
+// inteiro (CLAUDE.md §3: uma escrita não pode custar a releitura de tudo)
+async function gravarEEspelhar(comanda) {
+  await COMANDAS.doc(comanda.id).set(comanda, { merge: true });
+  const mapa = await garantirEspelho(comanda.unidade);
+  if (comanda.status === 'ABERTA') mapa.set(comanda.id, comanda);
+  else mapa.delete(comanda.id);
+  return comanda;
+}
+
+function _limparEspelhoTeste() { espelho.clear(); }
+
+// ------------------------------------------------------------ comandas
+
+async function abertaDoNumero(unidade, numero) {
+  const mapa = await garantirEspelho(unidade);
+  for (const c of mapa.values()) if (c.numero === numero) return c;
+  return null;
+}
+
+function sanitizarNumero(v) {
+  const n = Math.trunc(num(v));
+  if (!(n > 0) || n > 999999) throw new Error('Número de comanda inválido.');
+  return n;
+}
+function sanitizarMesa(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Math.trunc(num(v));
+  if (!(n > 0) || n > 9999) throw new Error('Número de mesa inválido.');
+  return n;
+}
+
+async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, porEmail, agora = new Date() }) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  const n = sanitizarNumero(numero);
+  const tipo = TIPOS_RODIZIO.includes(tipoRodizio) ? tipoRodizio : null;
+  if (!tipo) throw new Error('Escolha se a comanda é rodízio adulto ou criança.');
+  // UMA aberta por número: sem isso, a 7541 entregue de novo à noite somaria
+  // o consumo da pessoa que já foi embora
+  const jaAberta = await abertaDoNumero(unidade, n);
+  if (jaAberta) {
+    throw new Error(`A comanda ${n} já está aberta${jaAberta.mesa ? ` na mesa ${jaAberta.mesa}` : ''}. Feche no caixa antes de entregar esse cartão de novo.`);
+  }
+  const data = hojeBrasiliaISO(agora);
+  const precos = await getPrecos(unidade);
+  const precoRodizio = precoRodizioDoDia(precos, data, tipo);
+  if (!(precoRodizio > 0)) {
+    throw new Error(`O rodízio ${tipo === 'crianca' ? 'criança' : 'adulto'} de ${diaDaSemanaBR(data)} não tem preço cadastrado. Peça pro Master preencher a tabela de preços.`);
+  }
+  const ref = COMANDAS.doc();
+  const comanda = {
+    id: ref.id,
+    unidade,
+    unidadeNome: unidadeNome || unidade,
+    numero: n,
+    data,
+    status: 'ABERTA',
+    mesa: sanitizarMesa(mesa),
+    tipoRodizio: tipo,
+    precoRodizio,       // congelado aqui: mudar a tabela não reescreve o passado
+    itens: [],
+    abertaEm: new Date(agora).toISOString(),
+    abertaPorEmail: porEmail || null,
+    pagaEm: null, pagaPorEmail: null, caixa: null, pagamentoId: null,
+  };
+  return gravarEEspelhar(comanda);
+}
+
+// mudar de mesa é rotina (o grupo troca de lugar, ou o garçom errou o número)
+async function definirMesa(id, mesa, porEmail) {
+  const comanda = await getComanda(id);
+  if (comanda.status !== 'ABERTA') throw new Error('Essa comanda já foi fechada.');
+  return gravarEEspelhar({ ...comanda, mesa: sanitizarMesa(mesa), mesaPorEmail: porEmail || null });
+}
+
+async function getComanda(id) {
+  const snap = await COMANDAS.doc(String(id || '')).get();
+  if (!snap.exists) throw new Error('Comanda não encontrada.');
+  return snap.data();
+}
+
+// Lançar bebida/sobremesa. O preço vem do CATÁLOGO da unidade (inventario),
+// nunca do navegador, e fica congelado na linha - igual ao balcão do
+// Saltiverso.
+async function lancarItem({ comandaId, itemId, quantidade, porEmail, agora = new Date() }) {
+  const comanda = await getComanda(comandaId);
+  if (comanda.status !== 'ABERTA') throw new Error('Essa comanda já foi fechada.');
+  const qtd = num(quantidade) || 1;
+  if (!(qtd > 0) || qtd > 99) throw new Error('Quantidade inválida.');
+  const catalogo = await inventario.listCatalogo(comanda.unidade);
+  const item = catalogo.find((i) => i.id === itemId);
+  if (!item) throw new Error('Item não encontrado no catálogo dessa unidade.');
+  if (!(item.precoVenda > 0)) throw new Error(`"${item.nome}" não tem preço de venda cadastrado.`);
+  const linha = {
+    itemId: item.id,
+    nome: item.nome,
+    quantidade: qtd,
+    precoUnitario: num(item.precoVenda),
+    em: new Date(agora).toISOString(),
+    porEmail: porEmail || null,
+  };
+  return gravarEEspelhar({ ...comanda, itens: [...(comanda.itens || []), linha] });
+}
+
+// Tirar uma linha lançada errado. Pelo ÍNDICE e com o nome conferido: no
+// salão cheio, duas linhas iguais na mesma comanda são comuns (dois chopps),
+// e apagar "o chopp" apagaria o errado.
+async function removerItem({ comandaId, indice, nome, porEmail }) {
+  const comanda = await getComanda(comandaId);
+  if (comanda.status !== 'ABERTA') throw new Error('Essa comanda já foi fechada.');
+  const itens = [...(comanda.itens || [])];
+  const i = Math.trunc(num(indice));
+  if (!(i >= 0) || i >= itens.length) throw new Error('Lançamento não encontrado.');
+  if (nome && texto(itens[i].nome, 80) !== texto(nome, 80)) {
+    throw new Error('A lista mudou desde que você abriu a tela - confira de novo antes de remover.');
+  }
+  const [removida] = itens.splice(i, 1);
+  const remocoes = [...(comanda.remocoes || []), { ...removida, removidoEm: new Date().toISOString(), removidoPorEmail: porEmail || null }];
+  return gravarEEspelhar({ ...comanda, itens, remocoes });
+}
+
+async function cancelarComanda({ id, motivo, porEmail }) {
+  const comanda = await getComanda(id);
+  if (comanda.status === 'PAGA') throw new Error('Comanda já paga não pode ser cancelada.');
+  if (comanda.status === 'CANCELADA') return comanda;
+  const texto_ = texto(motivo, 200);
+  if (!texto_) throw new Error('Diga por que está cancelando.');
+  return gravarEEspelhar({
+    ...comanda, status: 'CANCELADA',
+    canceladaEm: new Date().toISOString(), canceladaPorEmail: porEmail || null, motivoCancelamento: texto_,
+  });
+}
+
+// ------------------------------------------------------------- totais
+//
+// Pura, e usada nos dois lados (tela e cobrança) - duas contas diferentes pro
+// mesmo valor é como um PDV passa a mentir.
+function totaisDaComanda(comanda, servicoPct, comServico = true) {
+  const consumo = arred((comanda.itens || []).reduce((s, i) => s + num(i.quantidade) * num(i.precoUnitario), 0));
+  const rodizio = num(comanda.precoRodizio);
+  const subtotal = arred(rodizio + consumo);
+  const pct = comServico ? Math.min(100, Math.max(0, num(servicoPct))) : 0;
+  const servico = arred(subtotal * (pct / 100));
+  return { rodizio, consumo, subtotal, servicoPct: pct, servico, total: arred(subtotal + servico) };
+}
+
+// ------------------------------------------------------------- salão
+//
+// Mesas derivadas das comandas abertas (ver cabeçalho): nada é gravado, nada
+// pode dessincronizar. Comanda sem mesa aparece à parte - é quem já recebeu o
+// cartão na porta mas ainda não sentou.
+async function salao(unidade) {
+  const mapa = await garantirEspelho(unidade);
+  const precos = await getPrecos(unidade);
+  const abertas = [...mapa.values()];
+  const porMesa = new Map();
+  const semMesa = [];
+  abertas.forEach((c) => {
+    const t = totaisDaComanda(c, precos.servicoPct);
+    const resumo = { ...c, totais: t };
+    if (!c.mesa) { semMesa.push(resumo); return; }
+    if (!porMesa.has(c.mesa)) porMesa.set(c.mesa, { mesa: c.mesa, pessoas: 0, consumo: 0, subtotal: 0, comandas: [], desde: c.abertaEm });
+    const m = porMesa.get(c.mesa);
+    m.pessoas += 1;
+    m.consumo = arred(m.consumo + t.consumo);
+    m.subtotal = arred(m.subtotal + t.subtotal);
+    m.comandas.push(resumo);
+    if (c.abertaEm < m.desde) m.desde = c.abertaEm;
+  });
+  return {
+    unidade,
+    servicoPct: precos.servicoPct,
+    mesas: [...porMesa.values()].sort((a, b) => a.mesa - b.mesa),
+    semMesa: semMesa.sort((a, b) => a.numero - b.numero),
+    pessoas: abertas.length,
+    subtotalAberto: arred(abertas.reduce((s, c) => s + totaisDaComanda(c, precos.servicoPct).subtotal, 0)),
+  };
+}
+
+// ------------------------------------------------- venda de balcão
+//
+// O caixa NÃO lança consumo de mesa - isso é do garçom, e a separação é de
+// propósito (ver as seções). Mas ele vende o que está ao alcance da mão:
+// "o cliente quer uma água, um refri na hora de ir embora" (Master,
+// 14/09/2026). Então existe uma lista curta de itens marcados como
+// disponíveis no balcão, e o caixa só vende esses - se pudesse vender o
+// catálogo inteiro, chopp sairia sem passar pelo salão.
+//
+// Quem marca é o Master ou o Gerente da unidade, no próprio item do catálogo
+// (campo noBalcao) - não há cadastro paralelo: item é item, e duas listas do
+// mesmo produto divergem.
+//
+// SEM os 10%: garrafa levada na saída não é serviço de mesa. Se um dia
+// precisar entrar, é uma linha - mas não invento cobrança.
+async function itensDoBalcao(unidade) {
+  const catalogo = await inventario.listCatalogo(unidade);
+  return catalogo.filter((i) => i.ativo !== false && i.noBalcao === true && i.precoVenda > 0);
+}
+
+function sanitizarItensBalcao(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista
+    .map((l) => ({ itemId: texto(l && l.itemId, 80), quantidade: Math.trunc(num(l && l.quantidade)) || 1 }))
+    .filter((l) => l.itemId && l.quantidade > 0 && l.quantidade <= 99);
+}
+
+// preço SEMPRE do catálogo, e só do que está liberado pro balcão
+async function resolverItensBalcao(unidade, lista) {
+  const pedidos = sanitizarItensBalcao(lista);
+  if (!pedidos.length) return { itens: [], total: 0 };
+  const disponiveis = new Map((await itensDoBalcao(unidade)).map((i) => [i.id, i]));
+  const itens = pedidos.map((l) => {
+    const item = disponiveis.get(l.itemId);
+    if (!item) throw new Error('Esse item não está liberado pra venda no balcão. Peça pro Master ou Gerente marcar no catálogo.');
+    return { itemId: item.id, nome: item.nome, quantidade: l.quantidade, precoUnitario: num(item.precoVenda) };
+  });
+  return { itens, total: arred(itens.reduce((t, i) => t + i.quantidade * i.precoUnitario, 0)) };
+}
+
+// ------------------------------------------------------------- caixa
+//
+// Receber UMA OU VÁRIAS comandas de uma vez ("se alguém quiser pagar 2, 3
+// pessoas é só informar os números das comandas"). O caixa manda NÚMEROS, que
+// é o que ele lê no cartão; o servidor resolve pra sessão aberta de cada um.
+async function contaDe(unidade, numeros, comServico = true, itensBalcao = []) {
+  const precos = await getPrecos(unidade);
+  const lista = Array.isArray(numeros) ? numeros : (numeros === undefined || numeros === null || numeros === '' ? [] : [numeros]);
+  const vistos = new Set();
+  const comandas = [];
+  for (const bruto of lista) {
+    const n = sanitizarNumero(bruto);
+    if (vistos.has(n)) continue;   // digitou o mesmo número duas vezes
+    vistos.add(n);
+    const c = await abertaDoNumero(unidade, n);
+    if (!c) throw new Error(`A comanda ${n} não está aberta. Confira o número no cartão.`);
+    comandas.push({ ...c, totais: totaisDaComanda(c, precos.servicoPct, comServico) });
+  }
+  const balcao = await resolverItensBalcao(unidade, itensBalcao);
+  // venda de balcão SEM comanda é venda válida (quem só passou pra comprar
+  // uma água); o que não existe é pagamento sem nada dentro
+  if (!comandas.length && !balcao.itens.length) throw new Error('Informe pelo menos uma comanda ou um item do balcão.');
+  const soma = (campo) => arred(comandas.reduce((s, c) => s + c.totais[campo], 0));
+  return {
+    comandas,
+    servicoPct: comServico ? precos.servicoPct : 0,
+    rodizio: soma('rodizio'), consumo: soma('consumo'), subtotal: soma('subtotal'),
+    servico: soma('servico'),
+    // o balcão entra DEPOIS do serviço, e por isso fica num campo próprio:
+    // é o que deixa o fechamento separar venda de mesa de venda de balcão
+    itensBalcao: balcao.itens, balcao: balcao.total,
+    total: arred(soma('total') + balcao.total),
+  };
+}
+
+function sanitizarPagamentos(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista
+    .map((p) => ({
+      forma: FORMAS_PAGAMENTO_SPLIT.includes(p && p.forma) ? p.forma : null,
+      valor: arred(Math.max(0, num(p && p.valor))),
+    }))
+    .filter((p) => p.forma && p.valor > 0);
+}
+
+async function receber({ unidade, unidadeNome, numeros, caixa, pagamentos, comServico = true, itensBalcao = [], porEmail, agora = new Date() }) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  if (!CAIXAS.includes(String(caixa))) throw new Error(`Caixa inválido - use ${CAIXAS.join(', ')}.`);
+  const conta = await contaDe(unidade, numeros, comServico, itensBalcao);
+  const pagosOk = sanitizarPagamentos(pagamentos);
+  if (!pagosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
+  const somaPag = arred(pagosOk.reduce((s, p) => s + p.valor, 0));
+  if (Math.abs(somaPag - conta.total) > 0.01) {
+    throw new Error(`A soma das formas de pagamento (R$${somaPag.toFixed(2)}) precisa bater com o total (R$${conta.total.toFixed(2)}).`);
+  }
+  const data = hojeBrasiliaISO(agora);
+  const ref = PAGAMENTOS.doc();
+  const registro = {
+    id: ref.id, unidade, unidadeNome: unidadeNome || unidade, data,
+    caixa: String(caixa),
+    comandaIds: conta.comandas.map((c) => c.id),
+    numeros: conta.comandas.map((c) => c.numero),
+    mesas: [...new Set(conta.comandas.map((c) => c.mesa).filter(Boolean))],
+    pessoas: conta.comandas.length,
+    rodizio: conta.rodizio, consumo: conta.consumo, subtotal: conta.subtotal,
+    servicoPct: conta.servicoPct, servico: conta.servico,
+    itensBalcao: conta.itensBalcao, balcao: conta.balcao,
+    total: conta.total,
+    pagamentos: pagosOk,
+    em: new Date(agora).toISOString(),
+    porEmail: porEmail || null,
+  };
+  await ref.set(registro);
+  // as comandas viram PAGA depois do pagamento existir: se algo falhar no
+  // meio, sobra um pagamento sem comanda fechada (que o fechamento mostra)
+  // em vez de comanda fechada sem pagamento, que seria dinheiro sumido
+  for (const c of conta.comandas) {
+    await gravarEEspelhar({
+      ...c, totais: undefined, status: 'PAGA',
+      pagaEm: registro.em, pagaPorEmail: porEmail || null, caixa: registro.caixa, pagamentoId: registro.id,
+      totalCobrado: c.totais.total, servicoCobrado: c.totais.servico,
+    });
+  }
+  // baixa de estoque por bebida vendida (rastreabilidade - mesma ideia do
+  // balcão do Saltiverso). Falha aqui NÃO desfaz o pagamento: o dinheiro já
+  // entrou, e estoque se reconcilia na contagem.
+  const paraBaixar = [
+    ...conta.comandas.flatMap((c) => (c.itens || []).map((i) => ({ ...i, de: `Comanda ${c.numero}` }))),
+    ...conta.itensBalcao.map((i) => ({ ...i, de: 'Balcão' })),
+  ];
+  for (const grupo of [{ itens: paraBaixar }]) {
+    for (const item of grupo.itens) {
+      try {
+        await inventario.criarSaida({
+          unidade, unidadeNome: unidadeNome || unidade, itemId: item.itemId, tipo: 'VENDA',
+          quantidade: item.quantidade, motivo: `${item.de} · Estação da Comida`,
+          data, valorUnitario: item.precoUnitario, vendaId: registro.id,
+        });
+      } catch (e) {
+        console.error('estacaoComida: baixa de estoque falhou (pagamento mantido). %s', e.message);
+      }
+    }
+  }
+  return registro;
+}
+
+// -------------------------------------------------------- fechamento
+//
+// O dia por caixa e consolidado. Serviço separado da venda de propósito: são
+// dinheiros com destino diferente.
+const pagamentosDoDiaCache = createCache(async (chave) => {
+  const [unidade, data] = String(chave).split('|');
+  const snap = await PAGAMENTOS.where('unidade', '==', unidade).where('data', '==', data).get();
+  return snap.docs.map((d) => d.data());
+}, 30 * 1000);
+
+async function fechamentoDoDia(unidade, data) {
+  const dia = data || hojeBrasiliaISO();
+  const pagos = await pagamentosDoDiaCache.cached(`${unidade}|${dia}`);
+  const vazio = () => ({ pagamentos: 0, pessoas: 0, rodizio: 0, consumo: 0, subtotal: 0, servico: 0, balcao: 0, total: 0, formas: {} });
+  const total = vazio();
+  const porCaixa = new Map(CAIXAS.map((c) => [c, { caixa: c, ...vazio() }]));
+  pagos.forEach((p) => {
+    const alvos = [total, porCaixa.get(p.caixa) || porCaixa.set(p.caixa, { caixa: p.caixa, ...vazio() }).get(p.caixa)];
+    alvos.forEach((a) => {
+      a.pagamentos += 1;
+      a.pessoas += num(p.pessoas);
+      a.rodizio = arred(a.rodizio + num(p.rodizio));
+      a.consumo = arred(a.consumo + num(p.consumo));
+      a.subtotal = arred(a.subtotal + num(p.subtotal));
+      a.servico = arred(a.servico + num(p.servico));
+      a.balcao = arred(a.balcao + num(p.balcao));
+      a.total = arred(a.total + num(p.total));
+      (p.pagamentos || []).forEach((f) => { a.formas[f.forma] = arred(num(a.formas[f.forma]) + num(f.valor)); });
+    });
+  });
+  // o que ficou aberto é parte do fechamento, não uma nota de rodapé: mesa que
+  // sobrou às 23h é gente que saiu sem pagar ou comanda que ninguém baixou
+  const abertas = [...(await garantirEspelho(unidade)).values()].filter((c) => c.data === dia);
+  const precos = await getPrecos(unidade);
+  return {
+    unidade, data: dia,
+    total: { ...total, ticketMedio: total.pessoas ? arred(total.total / total.pessoas) : 0 },
+    porCaixa: [...porCaixa.values()].filter((c) => c.pagamentos > 0 || CAIXAS.includes(c.caixa)),
+    abertas: abertas.map((c) => ({ ...c, totais: totaisDaComanda(c, precos.servicoPct) })).sort((a, b) => a.numero - b.numero),
+    subtotalAberto: arred(abertas.reduce((s, c) => s + totaisDaComanda(c, precos.servicoPct).subtotal, 0)),
+  };
+}
+
+function invalidarFechamento() { pagamentosDoDiaCache.invalidar(); }
+
+module.exports = {
+  STATUS, TIPOS_RODIZIO, CAIXAS, DIAS_SEMANA, SERVICO_PCT_PADRAO,
+  hojeBrasiliaISO, diaDaSemanaBR,
+  getPrecos, salvarPrecos, precoRodizioDoDia, precosVazios,
+  itensDoBalcao, resolverItensBalcao,
+  abrirComanda, definirMesa, getComanda, lancarItem, removerItem, cancelarComanda,
+  totaisDaComanda, salao, contaDe, receber, abertaDoNumero,
+  fechamentoDoDia, invalidarFechamento,
+  _limparEspelhoTeste,
+};

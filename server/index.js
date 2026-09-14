@@ -87,6 +87,7 @@ const mensalistas = require('./mensalistas');
 const termoResponsabilidade = require('./termoResponsabilidade');
 const saltiversoImport = require('./saltiversoImport');
 const saltiversoVendas = require('./saltiversoVendas');
+const estacaoComida = require('./estacaoComida');
 const saltiversoFechamento = require('./saltiversoFechamento');
 const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
@@ -760,6 +761,73 @@ async function unidadesQueFechamCaixa() {
   });
   return out;
 }
+// ---------- ALERTA VINDO DE FORA (Gestor de Pedidos, Cowork, qualquer robô)
+//
+// Pedido do Master (13/09/2026): o agente que vigia o Gestor de Pedidos
+// precisa avisar o NoPulso quando detectar "loja fechada fora do horário
+// padrão", e ele perguntou por onde mandar.
+//
+// POR QUE NÃO O MASTER_API_TOKEN. Ele é o Master INTEIRO: quem o tem aprova
+// pagamento, apaga usuário, reinicia máquina de loja. Pra publicar um aviso
+// isso é poder demais - e um token que vive no ambiente de um agente externo
+// é o mais fácil de vazar de todos. Esta rota segue o mesmo desenho do
+// /api/bot/vendas-registro: token PRÓPRIO (BOT_ALERTA_TOKEN), que só serve
+// pra isto e pode ser trocado sozinho sem derrubar o resto.
+//
+// O que ela faz é o mínimo honesto: registra na Central de Alertas e manda o
+// push. NÃO cria tarefa, ticket nem chamado - quem decide isso é gente, e
+// robô abrindo ticket sozinho é a receita pra fila de ticket que ninguém
+// fecha (o Master já cortou isso na quebra de caixa, ver tarefas.js).
+const ALERTA_BOT_SILENCIO_MS = 60 * 60 * 1000;
+// último aviso por chave (origem + chave|título): o agente roda de hora em
+// hora das 7:20 às 22:30, e uma loja que ficar fechada a tarde inteira
+// mandaria 15 avisos iguais. Em memória, como o alerta de internet: o que se
+// perde num deploy é só a lembrança de "já avisei".
+const ultimoAlertaBot = new Map();
+app.post('/api/bot/alerta', async (req, res) => {
+  if (!exigirTokenBot(req, res, 'BOT_ALERTA_TOKEN')) return;
+  try {
+    const c = req.body || {};
+    const texto = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+    const titulo = texto(c.titulo, 120);
+    const resumo = texto(c.resumo, 500);
+    if (!titulo) return res.status(400).json({ error: 'Mande pelo menos "titulo".' });
+    // unidade é opcional, mas se vier TEM que existir: alerta sobre uma loja
+    // que não existe manda a operação procurar o que não há
+    let unidadeNome = null;
+    const unidade = texto(c.unidade, 40);
+    if (unidade) {
+      const mapa = await construirUnidadesMapa();
+      if (!mapa[unidade]) {
+        return res.status(400).json({ error: `Unidade "${unidade}" não existe no NoPulso.`, unidades: Object.keys(mapa).sort() });
+      }
+      unidadeNome = mapa[unidade];
+    }
+    const origem = texto(c.origem, 40) || 'robô externo';
+    // a chave agrupa o MESMO assunto pro silêncio de 1h. Sem ela, o título
+    // serve - dois títulos diferentes são dois assuntos diferentes.
+    const chave = `${origem}|${texto(c.chave, 60) || titulo}|${unidade}`;
+    const agora = Date.now();
+    const anterior = ultimoAlertaBot.get(chave) || 0;
+    if (agora - anterior < ALERTA_BOT_SILENCIO_MS) {
+      return res.json({ ok: true, repetido: true, silencioAteEm: new Date(anterior + ALERTA_BOT_SILENCIO_MS).toISOString() });
+    }
+    ultimoAlertaBot.set(chave, agora);
+    const tituloFinal = unidadeNome ? `${titulo} · ${unidadeNome}` : titulo;
+    const corpo = resumo || `Avisado por ${origem}.`;
+    const registro = await alertasCentral.registrar({
+      tipo: 'externo', titulo: tituloFinal, resumo: corpo,
+      url: texto(c.url, 200) || '/central-alertas.html', critico: c.critico === true,
+    });
+    console.log(`[alerta-bot] ${origem}: ${tituloFinal} - ${corpo.slice(0, 140)}`);
+    // push próprio: notifyRaw registraria o alerta na Central DE NOVO (com
+    // tipo 'monitor' e url /monitor.html) - dois cards do mesmo aviso
+    await push.notifyAlertaExterno(tituloFinal, corpo, `bot-alerta-${unidade || 'geral'}`, c.critico === true);
+    res.json({ ok: true, alerta: registro });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.post('/api/bot/vendas-registro', async (req, res) => {
   if (!exigirTokenBot(req, res, 'BOT_VENDAS_TOKEN')) return;
   try {
@@ -8629,6 +8697,140 @@ app.get('/api/saltiverso/catalogo', requireSection('parque-loja'), async (req, r
   }
 });
 
+// ---------- ESTAÇÃO DA COMIDA: rodízio com comanda por pessoa ----------
+// Ver estacaoComida.js. Três seções porque são três papéis diferentes na
+// casa: quem anda no salão, quem fica no caixa e quem confere o dia. O
+// garçom não fecha conta e o caixa não lança consumo.
+const podeUnidadeEstacao = (req, unidade) => podeUnidadeInventario(req, unidade);
+
+app.get('/api/estacao/precos', requireSection('estacao-fechamento'), async (req, res) => {
+  try {
+    if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.getPrecos(req.query.unidade));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// preço é dinheiro que entra: só o Master mexe na tabela
+app.post('/api/estacao/precos', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const { unidade, rodizio, servicoPct } = req.body || {};
+    res.json(await estacaoComida.salvarPrecos(unidade, { rodizio, servicoPct }, req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// o salão inteiro numa chamada: mesas derivadas das comandas abertas
+app.get('/api/estacao/salao', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.salao(req.query.unidade));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// o que dá pra lançar na comanda: o catálogo da unidade com preço de venda
+app.get('/api/estacao/itens', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const catalogo = await inventario.listCatalogo(unidade);
+    res.json(catalogo.filter((i) => i.ativo !== false && i.precoVenda > 0));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// o que o CAIXA pode vender: só os itens marcados como disponíveis no balcão
+app.get('/api/estacao/itens-balcao', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.itensDoBalcao(req.query.unidade));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// marcar/desmarcar um item como disponível no balcão. Master OU Gerente da
+// unidade (pedido do Master: "o master ou gerente pode configurar") - não é
+// cadastro novo, é uma marca no item que já existe no catálogo.
+app.patch('/api/estacao/itens/:id/balcao', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    // obterItemUnidade devolve a UNIDADE do item (string), não o item
+    const unidadeDoItem = await inventario.obterItemUnidade(req.params.id);
+    if (!unidadeDoItem) return res.status(404).json({ error: 'Item não encontrado.' });
+    if (!podeUnidadeEstacao(req, unidadeDoItem)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!req.isMaster && !users.ehCargoGerente(req.user.cargo)) {
+      return res.status(403).json({ error: 'Só o Master ou o Gerente da unidade define o que o caixa pode vender.' });
+    }
+    res.json(await inventario.atualizarItem(req.params.id, { noBalcao: (req.body || {}).noBalcao === true }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/estacao/comandas', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, numero, mesa, tipoRodizio } = req.body || {};
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const c = await estacaoComida.abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.patch('/api/estacao/comandas/:id/mesa', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const c = await estacaoComida.definirMesa(req.params.id, (req.body || {}).mesa, req.user.email);
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/comandas/:id/itens', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const { itemId, quantidade } = req.body || {};
+    const c = await estacaoComida.lancarItem({ comandaId: req.params.id, itemId, quantidade, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.delete('/api/estacao/comandas/:id/itens/:indice', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const c = await estacaoComida.removerItem({ comandaId: req.params.id, indice: req.params.indice, nome: req.query.nome, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// cancelar é do caixa/gerente, não do salão: é a porta de sair sem pagar
+app.post('/api/estacao/comandas/:id/cancelar', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    const c = await estacaoComida.cancelarComanda({ id: req.params.id, motivo: (req.body || {}).motivo, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// CAIXA: a conta de uma ou várias comandas, pelos NÚMEROS do cartão
+app.get('/api/estacao/conta', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const numeros = String(req.query.numeros || '').split(',').map((x) => x.trim()).filter(Boolean);
+    // itens do balcão vêm como "id:qtd,id:qtd" - a conta do caixa precisa
+    // mostrar o total COM a água que ele acabou de pegar, antes de receber
+    const itensBalcao = String(req.query.balcao || '').split(',').filter(Boolean)
+      .map((par) => { const [itemId, qtd] = par.split(':'); return { itemId, quantidade: Number(qtd) || 1 }; });
+    res.json(await estacaoComida.contaDe(unidade, numeros, req.query.servico !== '0', itensBalcao));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/receber', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, numeros, caixa, pagamentos, comServico, itensBalcao } = req.body || {};
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const r = await estacaoComida.receber({
+      unidade, unidadeNome, numeros, caixa, pagamentos, itensBalcao,
+      comServico: comServico !== false, porEmail: req.user.email,
+    });
+    estacaoComida.invalidarFechamento();
+    broadcast('estacao-salao-mudou', { unidade }, 'estacao-salao');
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/estacao/fechamento', requireSection('estacao-fechamento'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.fechamentoDoDia(unidade, req.query.data));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, res) => {
   try {
     const { unidade, unidadeNome, itens, pagamentos } = req.body;
@@ -14641,6 +14843,14 @@ function aquecerBoot(promessa, ms) {
             .catch((err) => console.error('Erro no push de dispositivo offline:', err.message));
           continue;
         }
+        // trocou de IP: nada caiu, e e' justamente por isso que precisa de
+        // alerta - sem ele a impressora some do servidor em silencio
+        if (t.tipo === 'dispositivo-ip-mudou') {
+          console.log(`[NOC] ${t.apelido || t.tipoRotulo || 'dispositivo'} de ${nome} (${t.codigo}) trocou de IP: ${t.de} -> ${t.para} (mac ${t.mac})`);
+          push.notifyDispositivoIpMudou(nome, t.codigo, t.apelido, t.tipoRotulo, t.de, t.para)
+            .catch((err) => console.error('Erro no push de IP alterado:', err.message));
+          continue;
+        }
         if (t.tipo === 'dispositivo-online') {
           push.notifyDispositivoOnline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac, t.tipoRotulo)
             .catch((err) => console.error('Erro no push de dispositivo voltou:', err.message));
@@ -14664,6 +14874,23 @@ function aquecerBoot(promessa, ms) {
         if (t.tipo === 'reiniciou') {
           push.notifyMaquinaReiniciou(nome, t.codigo, t.nome, t.posto, t.inesperado)
             .catch((err) => console.error('Erro no push de reinício:', err.message));
+          continue;
+        }
+        // INTERNET DA UNIDADE (pedido do Master, 13/09/2026: "a internet em
+        // uma das unidades está com problema, quero ser notificado quando
+        // isso acontecer"). É o único alerta do NOC cujo alvo é a LOJA e não
+        // o computador - link ruim não derruba ninguém, então até aqui ele
+        // não acordava nada: a loja operava lenta e só aparecia pra quem
+        // abrisse a tela de rede. t.codigo é a unidade; não há posto.
+        if (t.tipo === 'internet-ruim') {
+          console.log(`[NOC] internet ruim em ${nome} (${t.codigo}): motivo=${t.motivo} loja=${t.mediaUnidade}ms frota=${t.baselineFrota}ms wan=${t.wanMedia}ms/${t.wanPerda}% (${t.lentos}/${t.medindo} computadores)`);
+          push.notifyInternetUnidade(nome, t)
+            .catch((err) => console.error('Erro no push de internet da unidade:', err.message));
+          continue;
+        }
+        if (t.tipo === 'internet-normalizou') {
+          push.notifyInternetUnidadeNormalizou(nome, t)
+            .catch((err) => console.error('Erro no push de internet normalizada:', err.message));
           continue;
         }
         // caiu a Ethernet mas a máquina segue no ar (Wi-Fi): degradação,

@@ -99,6 +99,53 @@
   .linha-det{font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:4px;}
   .linha-det b{color:var(--text);font-weight:600;}
 
+  /* ---- reiniciar daqui (pedido do Master, 13/09: "se aqui é saúde das
+     máquinas, aqui precisa ter também o botão de reiniciar") ----
+     O card já diz "ligado há 24 dias sem reiniciar"; sem a ação junto, quem
+     lê tem que sair, abrir o NOC, achar a máquina de novo e só então agir. */
+  .card-acoes{display:flex;gap:8px;margin-top:11px;}
+  .btn-reiniciar{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--panel2);
+    border:1px solid var(--line);border-radius:12px;padding:6px 11px;cursor:pointer;white-space:nowrap;}
+  .btn-reiniciar:hover{color:var(--text);border-color:var(--accent);}
+  .btn-reiniciar:disabled{opacity:.5;cursor:default;}
+  /* a máquina que o card diz precisar reiniciar tem a ação em destaque - é a
+     única razão de o card estar amarelo */
+  .btn-reiniciar.destaque{color:var(--warn);border-color:var(--warn);}
+  .card-msg{font-size:11.5px;line-height:1.5;margin-top:8px;}
+  /* ficha do computador: o resto do que a máquina já reporta (IP, RAM,
+     versão do agente, Tailscale, reinício automático). Fica dentro do
+     <details> junto com o disco - o card curto é o que mantém a lista
+     rolável no celular, e quem precisa do detalhe abre. */
+  .ficha{display:grid;grid-template-columns:auto 1fr;gap:3px 8px;margin-top:8px;
+    font-size:11.5px;line-height:1.6;align-items:baseline;}
+  .ficha dt{color:var(--muted);font-family:var(--mono);font-size:10.5px;white-space:nowrap;}
+  .ficha dd{margin:0;color:var(--text);overflow-wrap:anywhere;}
+  .ficha dd b{font-family:var(--mono);font-weight:600;}
+  .ficha dd .sub{color:var(--muted);}
+  .ficha dd .ok{color:var(--ok);} .ficha dd .warn{color:var(--warn);} .ficha dd .bad{color:var(--bad);}
+  .card-msg.ok{color:var(--ok);} .card-msg.err{color:var(--bad);}
+
+  /* caixa da senha: a rota exige a senha do Master a cada envio (é a mesma
+     trava do NOC), então ela não fica guardada em lugar nenhum */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;
+    justify-content:center;z-index:80;padding:16px;}
+  .modal .caixa{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:18px;max-width:400px;width:100%;}
+  .modal h2{font-size:15px;margin:0 0 4px;}
+  .modal .alvo{font-family:var(--mono);font-size:11.5px;color:var(--accent);margin-bottom:10px;}
+  .modal p{font-size:12px;color:var(--muted);line-height:1.6;margin:0 0 12px;}
+  .modal label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:5px;}
+  .modal input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:10px;padding:9px 11px;font-size:13px;font-family:var(--sans);}
+  .modal input:focus{outline:none;border-color:var(--accent);}
+  .modal .linha-botoes{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;}
+  .modal .btn-ok{background:var(--accent);color:#0b0d10;border:none;border-radius:10px;
+    padding:9px 15px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .modal .btn-ok:disabled{opacity:.6;cursor:default;}
+  .modal .btn-cancelar{background:none;border:1px solid var(--line);color:var(--muted);
+    border-radius:10px;padding:9px 15px;font-size:12.5px;cursor:pointer;font-family:var(--sans);}
+  .modal .erro{font-size:11.5px;color:var(--bad);margin-top:10px;line-height:1.5;}
+
   /* desktop: mais respiro e cards lado a lado - o layout de celular
      continua sendo a base, isto so aproveita a largura que sobra */
   @media(min-width:720px){
@@ -135,6 +182,23 @@
   <div class="lista" id="lista"><div class="vazio">carregando...</div></div>
 </div>
 
+<!-- confirmação do reinício. Mesma trava do NOC: só Master, e a senha dele a
+     cada envio - o comando desliga uma máquina de loja. -->
+<div class="modal hidden" id="modal-reiniciar">
+  <div class="caixa" role="dialog" aria-modal="true" aria-labelledby="mr-titulo">
+    <h2 id="mr-titulo">🔁 Reiniciar computador</h2>
+    <div class="alvo" id="mr-alvo"></div>
+    <p>A tela da loja mostra um aviso de <b>2 minutos</b> antes de reiniciar — dá tempo de quem está no caixa fechar o que estiver aberto, e de abortar se o alvo estiver errado.</p>
+    <label for="mr-senha">Sua senha de Master</label>
+    <input type="password" id="mr-senha" autocomplete="new-password" placeholder="senha">
+    <div class="erro hidden" id="mr-erro"></div>
+    <div class="linha-botoes">
+      <button type="button" class="btn-cancelar" onclick="fecharReiniciar()">Cancelar</button>
+      <button type="button" class="btn-ok" id="mr-confirmar" onclick="confirmarReiniciar()">Reiniciar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // O token do login mora no localStorage e TEM que ir em toda chamada de
 // /api/ - sem isso o servidor responde 401 e a pagina mostrava "Você não
@@ -156,9 +220,19 @@ function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 let DADOS = null;
 let FILTRO = 'todos';   // todos | critico | atencao | reiniciar | ok
 let BUSCA = '';
+// o botão de reiniciar só existe pra Master: a rota é requireMaster E pede a
+// senha dele. Mostrar pra suporte/admin (que enxergam esta tela) seria um
+// botão que nunca funciona.
+let EH_MASTER = false;
+// o que foi enfileirado nesta sessão da tela, por máquina - é o que permite
+// abortar dentro dos 2 minutos sem sair daqui
+const ENVIADOS = new Map();
 
 const escapeHtml = (s) => String(s==null?'':s).replace(/[&<>"']/g, (c) => (
   {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// pro que entra DENTRO de onclick="..." - escapeHtml sozinho deixaria uma
+// aspa simples no nome do computador quebrar o atributo
+const escapeJs = (s) => String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'\\x3c');
 
 function tempoRelativo(quando){
   if(!quando) return 'nunca';
@@ -244,6 +318,102 @@ function barraDisco(v){
   </div>`;
 }
 
+// ---- reiniciar a partir do card -----------------------------------------
+// A ação é a mesma do NOC (POST /api/loja-status/manutencao/reiniciar), e não
+// uma rota nova: a trava de Master, a senha, a aprovação do QA e o registro
+// da ação já moram lá. Duplicar isso aqui seria duplicar a parte perigosa.
+const chaveDe = (codigo, posto) => `${codigo}|${posto}`;
+let ALVO_REINICIO = null;
+
+function abrirReiniciar(codigo, posto, nome, unidade){
+  ALVO_REINICIO = { codigo, posto, nome, unidade };
+  document.getElementById('mr-alvo').textContent = `${nome} · ${unidade}`;
+  document.getElementById('mr-senha').value = '';
+  const erro = document.getElementById('mr-erro');
+  erro.classList.add('hidden'); erro.textContent = '';
+  document.getElementById('modal-reiniciar').classList.remove('hidden');
+  document.getElementById('mr-senha').focus();
+}
+function fecharReiniciar(){
+  ALVO_REINICIO = null;
+  document.getElementById('modal-reiniciar').classList.add('hidden');
+}
+// Enter na senha confirma; Esc fecha - a caixa é de um campo só
+document.addEventListener('keydown', (ev) => {
+  if(document.getElementById('modal-reiniciar').classList.contains('hidden')) return;
+  if(ev.key === 'Escape') fecharReiniciar();
+  if(ev.key === 'Enter' && document.activeElement === document.getElementById('mr-senha')) confirmarReiniciar();
+});
+
+async function enviarTarefa(alvo, tarefa, senha){
+  const r = await fetch('/api/loja-status/manutencao/reiniciar', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ alvos: [{ codigo: alvo.codigo, posto: alvo.posto }], tarefa, password: senha }),
+  });
+  const d = await r.json();
+  if(!r.ok) throw new Error(d.error || 'Não consegui enviar.');
+  return d;
+}
+
+async function confirmarReiniciar(){
+  if(!ALVO_REINICIO) return;
+  const alvo = ALVO_REINICIO;
+  const senha = document.getElementById('mr-senha').value;
+  const erro = document.getElementById('mr-erro');
+  if(!senha){ erro.textContent = 'Digite sua senha de Master.'; erro.classList.remove('hidden'); return; }
+  const botao = document.getElementById('mr-confirmar');
+  botao.disabled = true; botao.textContent = 'enviando...';
+  try{
+    const d = await enviarTarefa(alvo, 'reiniciar', senha);
+    fecharReiniciar();
+    if(d.pendenteAprovacao){
+      mostrarMsgCard(alvo, 'Enviado pra aprovação do Master.', 'ok');
+      return;
+    }
+    if(!d.enfileirados){
+      const motivo = (d.recusados && d.recusados[0] && d.recusados[0].motivo) || 'a máquina recusou o comando';
+      mostrarMsgCard(alvo, `Não foi enfileirado: ${motivo}`, 'err');
+      return;
+    }
+    // guarda a senha SÓ na memória desta página e só pelos 2 minutos da
+    // contagem: é o que permite o "abortar" sem digitar de novo, e ela some
+    // junto com o botão (a rota exige a senha em todo envio)
+    ENVIADOS.set(chaveDe(alvo.codigo, alvo.posto), { em: Date.now(), senha });
+    render();
+    setTimeout(() => { ENVIADOS.delete(chaveDe(alvo.codigo, alvo.posto)); render(); }, 2 * 60 * 1000);
+  }catch(e){
+    erro.textContent = e.message; erro.classList.remove('hidden');
+  }finally{
+    botao.disabled = false; botao.textContent = 'Reiniciar';
+  }
+}
+
+async function abortarReinicio(codigo, posto){
+  const guardado = ENVIADOS.get(chaveDe(codigo, posto));
+  if(!guardado) return;
+  const alvo = { codigo, posto };
+  try{
+    await enviarTarefa(alvo, 'abortar', guardado.senha);
+    ENVIADOS.delete(chaveDe(codigo, posto));
+    render();
+    mostrarMsgCard(alvo, 'Reinício abortado — a máquina recebe o cancelamento na próxima batida (até ~25s).', 'ok');
+  }catch(e){ mostrarMsgCard(alvo, e.message, 'err'); }
+}
+
+// mensagem no próprio card, não um alert: o alert some e leva junto a
+// informação de qual máquina respondeu o quê
+function mostrarMsgCard(alvo, texto, classe){
+  const el = document.getElementById('msg-' + chaveDe(alvo.codigo, alvo.posto).replace(/[^a-zA-Z0-9]/g,'_'));
+  if(!el){ alert(texto); return; }
+  el.textContent = texto;
+  el.className = 'card-msg ' + (classe || '');
+}
+
+async function copiarTexto(txt){
+  try{ await navigator.clipboard.writeText(txt); alert('Copiado: ' + txt); }
+  catch(e){ alert(txt); }
+}
+
 function cardHtml(c){
   const nivelCard = c.temMedicao ? c.nivel : 'sem';
   const selo = { critico:'crítico', atencao:'atenção', ok:'ok', sem:'sem medir' }[nivelCard];
@@ -284,11 +454,63 @@ function cardHtml(c){
     .filter(v=>!c.volumeCritico || v.letra !== c.volumeCritico.letra)
     .map(v=>`<div class="linha-det">• <b>${escapeHtml(v.letra)}</b> ${v.livreGb} GB livres de ${v.totalGb} (${v.livrePct}%)</div>`).join('');
   const medidoEm = c.disco && c.disco.em ? `<div class="linha-det">medido ${escapeHtml(tempoRelativo(c.disco.em))}</div>` : '';
-  const detalhe = (discos || outrosVolumes || medidoEm)
-    ? `<details class="detalhe"><summary>detalhes do disco</summary>${discos}${outrosVolumes}${medidoEm}</details>` : '';
+  // FICHA: o resto do que esta máquina já reporta e que só a tela do NOC
+  // mostrava. Nada aqui é campo novo - é o mesmo documento, já lido.
+  const ficha = [];
+  const linha = (rot, val) => ficha.push(`<dt>${rot}</dt><dd>${val}</dd>`);
+  if(c.ipLocal) linha('IP local', `<b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-reiniciar" style="padding:2px 7px;font-size:10px;" onclick="copiarTexto('${escapeJs(c.ipLocal)}')">📋</button>`);
+  if(c.ip) linha('IP público', escapeHtml(c.ip));
+  if(c.anydeskId) linha('AnyDesk', `<b>${escapeHtml(c.anydeskId)}</b>`);
+  if(c.ram && c.ram.totalGb != null){
+    linha('RAM', `<b>${c.ram.totalGb} GB</b>${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}`
+      + (c.ramMedidaEm ? ` <span class="sub">· medido ${escapeHtml(tempoRelativo(c.ramMedidaEm))}</span>` : ''));
+  }
+  if(c.uptimeHoras != null){
+    const quanto = c.uptimeDias >= 1 ? `${c.uptimeDias} dia(s)` : `${Math.round(c.uptimeHoras)}h`;
+    linha('Sem reiniciar', `<b class="${c.precisaReiniciar?'warn':'ok'}">${quanto}</b>`);
+  }
+  if(c.reinicioResumo) linha('Reinício automático', `<b>${escapeHtml(c.reinicioResumo)}</b>${c.reinicioTolerancia?` <span class="sub">· tolerância ${c.reinicioTolerancia} min</span>`:''}`);
+  if(c.agenteVersao || c.agenteNoPulsoPrint){
+    const print = c.agenteNoPulsoPrint || '';
+    const cls = print === 'pronto' ? 'ok' : (print.startsWith('falhou') ? 'bad' : 'sub');
+    linha('NOC-NoPulso', `${c.agenteVersao?`<b>v${escapeHtml(String(c.agenteVersao))}</b>`:'—'}`
+      + (print ? ` <span class="sub">· print:</span> <b class="${cls}">${escapeHtml(print)}</b>` : ''));
+  }
+  if(c.tailscale){
+    const t = c.tailscale;
+    const estado = t.instalado
+      ? (t.estado === 'Running' ? '<b class="ok">conectado</b>' : `<b class="warn">${escapeHtml(t.estado||'desconhecido')}</b>`)
+      : '<span class="sub">não instalado</span>';
+    const extras = [t.ip?`IP ${escapeHtml(t.ip)}`:null, t.nome?escapeHtml(t.nome):null].filter(Boolean).join(' · ');
+    linha('Tailscale', estado + (extras?` <span class="sub">· ${extras}</span>`:''));
+  }
+  if(c.abertoDesde) linha('Aberto', escapeHtml(tempoRelativo(c.abertoDesde)));
+  linha('Última batida', `${escapeHtml(tempoRelativo(c.ultimoHeartbeatEm))}${c.tipo?` <span class="sub">· ${escapeHtml(c.tipo)}</span>`:''}`
+    + (c.ehServidor?' <span class="sub">· servidor</span>':'') + (c.ehNotebook?' <span class="sub">· notebook</span>':''));
+  if(c.aparelhosRede) linha('Rede da loja', `<b>${c.aparelhosRede}</b> aparelho(s)${c.dispositivosEm?` <span class="sub">· varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}</span>`:''}`);
+  const fichaHtml = ficha.length ? `<dl class="ficha">${ficha.join('')}</dl>` : '';
+
+  const detalhe = (discos || outrosVolumes || medidoEm || fichaHtml)
+    ? `<details class="detalhe"><summary>ficha completa do computador</summary>${fichaHtml}${(discos||outrosVolumes||medidoEm)?`<div class="linha-det" style="margin-top:8px;color:var(--muted);">disco</div>${discos}${outrosVolumes}${medidoEm}`:''}</details>` : '';
 
   const semMedicao = !c.temMedicao
     ? `<div class="motivos"><div style="color:var(--muted);">o NOC-NoPulso desse computador ainda não mandou medição — confira se o agente está instalado e atualizado.</div></div>` : '';
+
+  // só Master, e só computador 'interno' - é o único tipo que processa
+  // comando do agente (a rota recusa o resto com motivo, mas oferecer um
+  // botão que sempre falha é pior que não ter botão)
+  const podeComandar = EH_MASTER && c.tipo === 'interno';
+  const chave = chaveDe(c.codigo, c.posto);
+  const idMsg = 'msg-' + chave.replace(/[^a-zA-Z0-9]/g,'_');
+  const enviado = ENVIADOS.get(chave);
+  const acoes = !podeComandar ? '' : `<div class="card-acoes">${
+    enviado
+      ? `<button type="button" class="btn-reiniciar destaque" onclick="abortarReinicio('${escapeJs(c.codigo)}','${escapeJs(c.posto)}')">✋ Abortar reinício</button>`
+      : `<button type="button" class="btn-reiniciar ${c.precisaReiniciar?'destaque':''}" onclick="abrirReiniciar('${escapeJs(c.codigo)}','${escapeJs(c.posto)}','${escapeJs(c.nome)}','${escapeJs(c.unidadeNome||c.codigo)}')">🔁 Reiniciar</button>`
+  }</div>`;
+  const msgEnviado = enviado
+    ? `<div class="card-msg ok" id="${idMsg}">Reinício enfileirado — a máquina executa na próxima batida (até ~25s) e avisa a loja por 2 minutos antes.</div>`
+    : `<div class="card-msg" id="${idMsg}"></div>`;
 
   return `<div class="card ${nivelCard}">
     <div class="card-topo">
@@ -301,7 +523,7 @@ function cardHtml(c){
     </div>
     ${barraDisco(c.volumeCritico)}
     ${chips.length?`<div class="chips">${chips.join('')}</div>`:''}
-    ${motivos}${semMedicao}${detalhe}
+    ${motivos}${semMedicao}${detalhe}${acoes}${podeComandar?msgEnviado:''}
   </div>`;
 }
 
@@ -326,6 +548,7 @@ document.getElementById('busca').addEventListener('input', (e) => {
       document.getElementById('sem-acesso').classList.remove('hidden');
       return;
     }
+    EH_MASTER = me.role === 'master';
     document.getElementById('raiz').classList.remove('hidden');
     await carregar();
     // 2min: os dados por tras mudam a cada ~1h/~6h, recarregar mais rapido

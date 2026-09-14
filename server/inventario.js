@@ -137,7 +137,7 @@ async function obterItemUnidade(id) {
   return snap.exists ? snap.data().unidade : null;
 }
 
-async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoReferencia, quantidadePadrao, pesoEmbalagemG, precoVenda }) {
+async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoReferencia, quantidadePadrao, pesoEmbalagemG, precoVenda, noBalcao }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   nome = String(nome || '').trim();
   if (!nome) throw new Error('Nome do item é obrigatório.');
@@ -171,6 +171,11 @@ async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoRefer
     // (ex: bebida/meia do Saltiverso, ver saltiversoVendas.js) - itens de
     // insumo de cozinha (Domino's) simplesmente nunca preenchem isso
     precoVenda: precoVenda != null && precoVenda !== '' ? num(precoVenda) : null,
+    // "fica disponivel no balcao": o caixa da Estacao da Comida so vende o
+    // que estiver marcado aqui (ver estacaoComida.js). O garcao lanca
+    // qualquer item com preco; o caixa, so a agua/refri que ficam na
+    // geladeira do balcao - senao ele venderia chopp sem passar pelo salao.
+    noBalcao: noBalcao === true,
     ordem: proximaOrdem,
     ativo: true,
     createdAt: new Date().toISOString(),
@@ -202,7 +207,7 @@ async function reordenarItens(unidade, setor, ids) {
   return (await listCatalogo(unidade)).filter((i) => i.setor === setor);
 }
 
-async function atualizarItem(id, { nome, setor, tipo, unidadeMedida, custoReferencia, ativo, quantidadePadrao, pesoEmbalagemG, precoVenda }) {
+async function atualizarItem(id, { nome, setor, tipo, unidadeMedida, custoReferencia, ativo, quantidadePadrao, pesoEmbalagemG, precoVenda, noBalcao }) {
   const ref = CATALOGO.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Item não encontrado.');
@@ -228,6 +233,7 @@ async function atualizarItem(id, { nome, setor, tipo, unidadeMedida, custoRefere
   if (quantidadePadrao !== undefined) patch.quantidadePadrao = quantidadePadrao != null && quantidadePadrao !== '' ? num(quantidadePadrao) : null;
   if (pesoEmbalagemG !== undefined) patch.pesoEmbalagemG = pesoEmbalagemG != null && pesoEmbalagemG !== '' ? num(pesoEmbalagemG) : null;
   if (precoVenda !== undefined) patch.precoVenda = precoVenda != null && precoVenda !== '' ? num(precoVenda) : null;
+  if (noBalcao !== undefined) patch.noBalcao = noBalcao === true;
   await ref.update(patch);
   catalogoCache.invalidar(atual.unidade);
   return (await ref.get()).data();

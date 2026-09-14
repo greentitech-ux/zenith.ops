@@ -1891,6 +1891,42 @@ function comandoResetZebra(impressoras) {
   return [
     `$alvos = @(${lista})`,
     '$log = @()',
+    '# FILA DO WINDOWS. O ~JA/~JR abaixo limpa o buffer DA IMPRESSORA, nao a',
+    '# fila do spooler da maquina - e e ela que o Master viu com 14 "Pulse',
+    '# Label 1" presos, um deles em "Erro - Impressao" (13/09). Enquanto',
+    '# houver trabalho ali, o Windows reenvia tudo assim que a Zebra volta e o',
+    '# reset nao resolve nada. Entao a fila vai junto, e ANTES do reset: limpar',
+    '# depois deixaria a impressora recem-reiniciada receber a enxurrada.',
+    '#',
+    '# So as impressoras cujo PORTA aponta pro IP que estamos resetando - a',
+    '# fila da termica da cozinha e a da fiscal nao podem ser tocadas por',
+    '# tabela.',
+    'function Limpar-FilaDoIp($ip) {',
+    '  try {',
+    '    $portas = @(Get-CimInstance Win32_TCPIpPrinterPort -ErrorAction Stop | Where-Object { $_.HostAddress -eq $ip } | Select-Object -ExpandProperty Name)',
+    '    if (-not $portas) { return "sem fila no Windows" }',
+    '    $impressoras = @(Get-CimInstance Win32_Printer -ErrorAction Stop | Where-Object { $portas -contains $_.PortName })',
+    '    if (-not $impressoras) { return "sem fila no Windows" }',
+    '    $antes = 0; $nomes = @()',
+    '    foreach ($imp in $impressoras) {',
+    '      $nomes += $imp.Name',
+    '      $antes += @(Get-CimInstance Win32_PrintJob -ErrorAction SilentlyContinue | Where-Object { $_.Name -like ($imp.Name + ",*") }).Count',
+    '      try { Invoke-CimMethod -InputObject $imp -MethodName CancelAllJobs -ErrorAction Stop | Out-Null } catch {}',
+    '    }',
+    '    if ($antes -eq 0) { return "fila do Windows ja estava vazia" }',
+    '    Start-Sleep -Milliseconds 800',
+    '    $resta = 0',
+    '    foreach ($imp in $impressoras) { $resta += @(Get-CimInstance Win32_PrintJob -ErrorAction SilentlyContinue | Where-Object { $_.Name -like ($imp.Name + ",*") }).Count }',
+    '    # Trabalho que nao sai nem com CancelAllJobs esta travado no proprio',
+    '    # spooler (o caso do "Erro - Impressao"). Soltar exigiria reiniciar o',
+    '    # servico, e ESTE comando nao mexe em servico da maquina - e a garantia',
+    '    # que o teste do reset da Zebra crava, porque o spooler e compartilhado',
+    '    # com a termica da cozinha e a fiscal. Entao aqui so' + "\u0027" + ' RELATA: quem le o',
+    '    # resultado no NOC ve o numero e decide.',
+    '    if ($resta -gt 0) { return "$antes na fila do Windows, $resta travado(s) no spooler - esses nao saem sem reiniciar o servico de impressao da maquina" }',
+    '    return "$antes trabalho(s) apagado(s) da fila do Windows"',
+    '  } catch { return "fila do Windows nao pode ser lida: $($_.Exception.Message)" }',
+    '}',
     'function Zpl-Enviar($ip, $texto) {',
     '  $cli = New-Object System.Net.Sockets.TcpClient',
     '  try {',
@@ -1906,6 +1942,7 @@ function comandoResetZebra(impressoras) {
     '  } catch { return $_.Exception.Message } finally { try { $cli.Close() } catch {} }',
     '}',
     'foreach ($ip in $alvos) {',
+    '  $log += "${ip}: " + (Limpar-FilaDoIp $ip)',
     '  $erro = Zpl-Enviar $ip "~JA"',
     '  if ($erro) { $log += "${ip}: FALHOU - $erro"; continue }',
     // o ~JR derruba a conexao: nao da pra confirmar aqui, so mais adiante
@@ -2270,17 +2307,28 @@ async function resolverIpImpressora(codigo, posto) {
   if (!macsImpressora.size) {
     throw new Error('Nenhum dispositivo dessa unidade esta marcado como impressora. Abra o Status das Lojas, clique no ✏️ da impressora e marque o tipo antes de rodar essa acao.');
   }
-  // procura primeiro na lista do PROPRIO computador que vai rodar: e a rede
-  // dele que precisa alcancar a impressora. So depois cai pros outros
-  // computadores da mesma unidade (mesma LAN, e a varredura ARP de um pode
-  // ter pego o que a do outro perdeu).
-  const daMaquina = docs.filter((d) => d.codigo === codigo && d.posto === posto);
-  const outros = docs.filter((d) => d.codigo === codigo && d.posto !== posto);
-  for (const d of [...daMaquina, ...outros]) {
-    for (const disp of d.dispositivos || []) {
-      if (macsImpressora.has(disp.mac) && disp.ip) return disp.ip;
-    }
-  }
+  // QUAL endereco, quando ha mais de uma leitura. O caso real (Dom Bessa,
+  // 13/09/2026): a impressora trocou de .54 pra .52 e o reset foi parar no
+  // .54 - "FALHOU - sem resposta na 9100". A regra antiga pegava a PRIMEIRA
+  // leitura da primeira maquina, e leitura velha ganhava da leitura de agora.
+  //
+  // Agora e' por FRESCOR, em duas chaves: quem esta ativo vence quem nao esta,
+  // e entre iguais vence quem foi visto por ultimo. O computador que vai rodar
+  // o comando continua tendo preferencia, mas so' como desempate - a rede dele
+  // e' a que precisa alcancar a impressora, e isso nao vale mais do que estar
+  // olhando pro endereco certo.
+  // mesma tradução MAC -> endereco de agora usada pelo reset (uma regra so').
+  // Entre impressoras diferentes, vence a leitura mais fresca; o computador
+  // que vai rodar o comando so' desempata - a rede dele e' a que precisa
+  // alcancar a impressora, mas isso nao vale mais do que olhar pro endereco
+  // certo.
+  const candidatos = [...macsImpressora]
+    .map((mac) => enderecoAtualDoMac(docs, codigo, mac))
+    .filter(Boolean)
+    .sort((a, b) => (b.ativo ? 1 : 0) - (a.ativo ? 1 : 0)
+      || (b.visto || 0) - (a.visto || 0)
+      || ((b.doc.posto === posto) ? 1 : 0) - ((a.doc.posto === posto) ? 1 : 0));
+  if (candidatos.length) return candidatos[0].ip;
   throw new Error('A impressora dessa unidade esta marcada, mas nenhum computador da loja viu o IP dela na ultima varredura de rede. Confira se ela esta ligada na rede.');
 }
 
@@ -2564,6 +2612,12 @@ async function gravarEEspelhar(codigo, posto, patch) {
   cacheBase.invalidar();
 }
 
+// Quem ja esta em alerta de internet, por unidade (ver o bloco no fim de
+// varrerAlertas). Map(codigo -> { ruim, desde, confirmacoes, ultimoAvisoEm }).
+let estadoInternetUnidade = new Map();
+// pro teste conseguir partir de um estado limpo entre cenarios
+function _resetarEstadoInternet() { estadoInternetUnidade = new Map(); }
+
 async function varrerAlertas() {
   const docs = await listUncached();
   const apelidosTodos = await getApelidos();
@@ -2585,15 +2639,48 @@ async function varrerAlertas() {
         const estado = alarmeAtual[disp.mac] || null;
         const semVerHaMs = Date.now() - (disp.visto || 0);
         if (!disp.ativo && semVerHaMs >= DISPOSITIVO_OFFLINE_LIMIAR_MS && !(estado && estado.avisadoOffline)) {
-          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { avisadoOffline: true, offlineDesde: disp.visto } };
+          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...(estado || {}), avisadoOffline: true, offlineDesde: disp.visto } };
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
             tipo: 'dispositivo-offline', mac: disp.mac,
             apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
             tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
           });
-        } else if (disp.ativo && estado && estado.avisadoOffline) {
-          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { avisadoOffline: false, offlineDesde: null } };
+        }
+        // TROCOU DE IP. Pedido do Master (13/09): "ela perde muito IP, muda
+        // muito de IP, precisa atualizar no Servidor e isso só manualmente -
+        // ao menos ter alerta". O DHCP da loja devolve outro endereço, o
+        // servidor continua apontando pro antigo e a impressão para sem que
+        // nada no NOC pisque: pro monitor a impressora está ativa, só que
+        // noutro lugar.
+        //
+        // Só pra dispositivo MONITORADO (o Master marcou a impressora). Numa
+        // loja o DHCP troca IP de celular o dia inteiro - alertar por tudo
+        // que muda de endereço seria ruído puro.
+        //
+        // ipAvisado guarda o ÚLTIMO endereço que já apareceu num alerta (ou o
+        // primeiro que vimos). Primeira vez não avisa: não há "de" nenhum, e
+        // anunciar o IP inicial de cada impressora marcada seria um alerta
+        // por dispositivo no dia em que isto subir.
+        if (disp.ativo && disp.ip && estado && estado.ipAvisado && estado.ipAvisado !== disp.ip) {
+          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...estado, ipAvisado: disp.ip, ipMudouEm: Date.now() } };
+          transicoes.push({
+            codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+            tipo: 'dispositivo-ip-mudou', mac: disp.mac,
+            de: estado.ipAvisado, para: disp.ip,
+            apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
+            tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
+          });
+        } else if (disp.ativo && disp.ip && (!estado || !estado.ipAvisado)) {
+          // linha de base, em silêncio: a partir daqui qualquer troca aparece
+          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...(estado || {}), ipAvisado: disp.ip } };
+        }
+        if (disp.ativo && estado && estado.avisadoOffline) {
+          // preserva o que ja estava na entrada (ipAvisado, inclusive o que a
+          // checagem de IP acabou de gravar) - antes isto reescrevia a entrada
+          // inteira e a linha de base do IP se perdia a cada volta
+          const base = (alarmePatch || alarmeAtual)[disp.mac] || estado;
+          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...base, avisadoOffline: false, offlineDesde: null } };
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
             tipo: 'dispositivo-online', mac: disp.mac,
@@ -2805,6 +2892,21 @@ async function varrerAlertas() {
     }
   }
   if (transicoes.length) cache.invalidar();
+  // Internet da UNIDADE (ver avaliarInternetUnidades em redeDiagnostico.js).
+  // Entra na MESMA varredura porque os documentos ja estao lidos aqui - avaliar
+  // link nao custa uma leitura a mais no Firestore.
+  //
+  // O estado vive em memoria, de proposito: gravar seria uma escrita por
+  // unidade a cada transicao, e a unica coisa que se perde num deploy e' a
+  // lembranca de "ja avisei". Loja que continuar ruim depois de um deploy
+  // recebe um aviso novo - o que, num deploy manual e raro, e' o lado certo
+  // pra errar: melhor repetir do que calar.
+  try {
+    const dia = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const r = redeDiagnostico.avaliarInternetUnidades(docs, { dia, agora: Date.now(), estado: estadoInternetUnidade });
+    estadoInternetUnidade = r.estado;
+    transicoes.push(...r.transicoes);
+  } catch (e) { console.error('varrerAlertas: falha ao avaliar internet das unidades. %s', e.message); }
   return transicoes;
 }
 
@@ -3008,7 +3110,14 @@ async function relatorioQuedas(opcoes) {
 }
 
 async function saudeMaquinas() {
-  const docs = (await cache.cached()).map(comOnline).map(semSegredo);
+  const docs = (await cache.cached()).map(comOnline).map(semSegredo)
+    // resumo do reinicio automatico ja pronto ("todo dia as 04:00"): a regra
+    // de montar isso a partir de reinicioSemanal/reinicioDiario mora aqui
+    // (resumoDoPlano), e reimplementa-la no navegador seria a segunda copia
+    .map((d) => {
+      const plano = planoSemanalDe(d);
+      return plano ? { ...d, reinicioResumo: resumoDoPlano(plano), reinicioTolerancia: toleranciaDe(d) } : d;
+    });
   return {
     computadores: nocMaquina.panorama(docs),
     discos: nocMaquina.discosComProblema(docs),
@@ -3081,26 +3190,33 @@ async function flushHeartbeatsPendentes() {
 async function estadoImpressorasDaUnidade(codigo) {
   const daUnidade = (await getApelidos())[codigo] || {};
   const espelho = [...(await garantirEspelho()).values()];
-  const vistos = new Set();
-  const out = [];
+  // mesma ideia do enderecoAtualDoMac: a sondagem acontece em cada computador
+  // da loja, e a leitura que vale e' a mais RECENTE daquele MAC - a primeira
+  // que aparecer pode ser de horas atras, e o painel mostraria a impressora
+  // "sem papel" muito depois de alguem ter reposto
+  const melhorPorMac = new Map();
   for (const doc of espelho) {
     if (doc.codigo !== codigo) continue;
     for (const [mac, est] of Object.entries(doc.impressoras || {})) {
-      if (vistos.has(mac)) continue;
       const cad = normalizarEntradaApelido(daUnidade[mac]);
       if (!cad.monitorar || cad.tipo !== 'impressora' || cad.marca !== 'zebra') continue;
-      vistos.add(mac);
-      out.push({
-        mac,
-        ip: (est && est.ip) || null,
-        nome: cad.apelido || null,
-        nivel: (est && est.nivel) || 'desconhecido',
-        motivos: (est && est.motivos) || [],
-        fila: est && est.fila != null ? est.fila : null,
-        em: (est && est.em) || null,
-        computador: { codigo: doc.codigo, posto: doc.posto, nome: doc.nome || null },
-      });
+      const atual = melhorPorMac.get(mac);
+      if (atual && ((atual.est && atual.est.em) || 0) >= ((est && est.em) || 0)) continue;
+      melhorPorMac.set(mac, { est, doc, cad });
     }
+  }
+  const out = [];
+  for (const [mac, { est, doc, cad }] of melhorPorMac) {
+    out.push({
+      mac,
+      ip: (est && est.ip) || null,
+      nome: cad.apelido || null,
+      nivel: (est && est.nivel) || 'desconhecido',
+      motivos: (est && est.motivos) || [],
+      fila: est && est.fila != null ? est.fila : null,
+      em: (est && est.em) || null,
+      computador: { codigo: doc.codigo, posto: doc.posto, nome: doc.nome || null },
+    });
   }
   return out;
 }
@@ -3111,6 +3227,39 @@ async function estadoImpressorasDaUnidade(codigo) {
 const MOTIVOS_QUE_PEDEM_MAO = ['Cabeça aberta', 'Sem papel', 'Sem ribbon'];
 function motivosQuePedemMao(motivos) {
   return (motivos || []).filter((m) => MOTIVOS_QUE_PEDEM_MAO.includes(m));
+}
+
+// O MAC E' A IDENTIDADE; o IP e' so' o endereco de AGORA.
+//
+// Pergunta do Master (13/09/2026): "o IP e' um identificador, porem o MAC
+// acredito que seja mais seguro - ja que temos o MAC, nao seria mais prudente
+// pegar sempre por padrao pelo MAC?". Sim, e e' assim que o cadastro ja
+// funciona: apelido, tipo, marca e o alarme sao gravados POR MAC
+// (definirApelidoDispositivo), pra VMPULSE, VMGCOM, HOST, Bematech fiscal e
+// Zebra igual. O IP nunca foi o cadastro - mas nao da pra mandar ZPL, ping ou
+// impressao pra um MAC: em algum momento ele precisa virar endereco.
+//
+// O furo estava EXATAMENTE nessa tradução. Cada computador da loja mantem a
+// sua propria varredura ARP, e a regra antiga era "pega o primeiro
+// computador que tiver esse MAC" - leitura de 3h atras ganhava da leitura de
+// agora. Foi o que mandou o reset da Zebra pro 10.161.124.54 quando ela ja
+// estava no .52 ("FALHOU - sem resposta na 9100", print do Master).
+//
+// Esta funcao e' a tradução, num lugar so: entre todas as leituras daquele
+// MAC na unidade, vale a mais fresca - ativo vence inativo, visto mais
+// recente vence mais velho.
+function enderecoAtualDoMac(docs, codigo, mac) {
+  const leituras = [];
+  for (const doc of docs) {
+    if (doc.codigo !== codigo) continue;
+    for (const d of doc.dispositivos || []) {
+      if (d.mac !== mac || !d.ip) continue;
+      leituras.push({ ip: d.ip, ativo: d.ativo !== false, visto: d.visto || 0, doc });
+    }
+  }
+  if (!leituras.length) return null;
+  leituras.sort((a, b) => (b.ativo ? 1 : 0) - (a.ativo ? 1 : 0) || (b.visto || 0) - (a.visto || 0));
+  return leituras[0];
 }
 
 async function impressorasPraSondar(codigo) {
@@ -3124,16 +3273,16 @@ async function impressorasPraSondar(codigo) {
   );
   if (!marcados.size) return [];
   const espelho = [...(await garantirEspelho()).values()];
-  const out = new Map();
-  for (const doc of espelho) {
-    if (doc.codigo !== codigo) continue;
-    for (const d of doc.dispositivos || []) {
-      // sem IP nao da pra sondar; o MAC e' so a identidade
-      if (!marcados.has(d.mac) || !d.ip || out.has(d.mac)) continue;
-      out.set(d.mac, { mac: d.mac, ip: d.ip });
-    }
+  // um endereco por MAC, sempre o mais fresco (ver enderecoAtualDoMac). A
+  // regra antiga pegava o primeiro computador que tivesse o MAC, e era por
+  // aqui que o reset da Zebra ia pro IP velho - esta e' a funcao que alimenta
+  // o comandoResetZebra.
+  const out = [];
+  for (const mac of marcados) {
+    const atual = enderecoAtualDoMac(espelho, codigo, mac);
+    if (atual) out.push({ mac, ip: atual.ip });
   }
-  return [...out.values()];
+  return out;
 }
 
 module.exports = {
@@ -3142,6 +3291,9 @@ module.exports = {
   flushHeartbeatsPendentes,
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
+  // alerta de internet por unidade: o estado vive em memoria, e o teste
+  // precisa comecar cada cenario do zero
+  _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
@@ -3155,7 +3307,7 @@ module.exports = {
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,
-  PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
+  PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,

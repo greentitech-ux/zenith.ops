@@ -60,7 +60,9 @@ function fakeQuery(caminho, filtros = [], ordem = null, lim = null) {
       let docs = [...DOCS.entries()].filter(([k]) => k.startsWith(caminho + '/')).map(([k]) => snapDoc(k));
       for (const f of filtros) {
         docs = docs.filter((d) => {
-          const v = (d.data() || {})[f.campo];
+          // caminho pontilhado ("vinculo.chave") como no Firestore de verdade - sem
+          // isto o where() de sincronizarTicket nunca achava as cópias antigas aqui
+          const v = String(f.campo).split('.').reduce((o, k) => (o == null ? undefined : o[k]), d.data() || {});
           if (f.op === '==') return v === f.valor;
           if (f.op === '!=') return v !== f.valor;
           if (f.op === '<') return v < f.valor;
@@ -6995,6 +6997,257 @@ setTimeout(async () => {
   if (!okDispositivoAlarme) ruins += 1;
   console.log(`${okDispositivoAlarme ? '✓' : '✗'} NOC: impressora/VM marcada como monitorada alarma ao perder rede (só depois de ~2 scans ausentes), nunca pra quem não foi marcado`);
 
+  // ------------------------------------------------------------------
+  // A ZEBRA TROCA DE IP. Pedido do Master (13/09/2026): "ela perde muito IP,
+  // muda muito de IP, precisamos ver uma forma de identificar quando mudar de
+  // IP pois precisa atualizar no Servidor (...) mas se não, precisa ao menos
+  // ter alerta".
+  //
+  // É o alerta mais silencioso do NOC: nada cai. A impressora continua ATIVA
+  // na rede, só que noutro endereço - e o servidor da loja segue mandando
+  // trabalho pro antigo. Nenhum alarme existente pega isso, porque todos eles
+  // perguntam "sumiu?" e a resposta aqui é não.
+  //
+  // Só pra dispositivo MONITORADO: numa loja o DHCP troca IP de celular o dia
+  // inteiro, e alertar por tudo que muda de endereço seria ruído puro.
+  let okIpMudou = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCIP';
+    await ls.cadastrarComputador(UNI, 'PDV-IP', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-IP').posto;
+    const idDoc = `lojaStatus/${UNI}__${posto}`;
+    const MAC_ZEBRA = 'a4:2b:b0:99:88:11';
+    const MAC_CELULAR = 'a4:2b:b0:99:88:22';
+    await ls.definirApelidoDispositivo(UNI, MAC_ZEBRA, { apelido: 'Zebra do balcão', tipo: 'impressora', monitorar: true });
+    // celular NÃO monitorado, trocando de IP o tempo todo (é o caso comum na
+    // loja - e é exatamente por isso que ele não pode alarmar)
+    await ls.definirApelidoDispositivo(UNI, MAC_CELULAR, { apelido: 'Celular do gerente', tipo: 'celular' });
+
+    const comDisp = (zebraIp, celularIp) => {
+      const b = DOCS.get(idDoc);
+      DOCS.set(idDoc, {
+        ...b,
+        dispositivos: [
+          { mac: MAC_ZEBRA, ip: zebraIp, nome: 'ZEBRA', desde: Date.now() - 86400000, visto: Date.now(), ativo: true },
+          { mac: MAC_CELULAR, ip: celularIp, nome: 'CEL', desde: Date.now() - 86400000, visto: Date.now(), ativo: true },
+        ],
+      });
+      ls.descartarEspelhoTeste();
+      return ls.varrerAlertas();
+    };
+    const doIp = (ts) => ts.filter((t) => t.codigo === UNI && t.tipo === 'dispositivo-ip-mudou');
+
+    // 1ª varredura: só grava a linha de base, em silêncio
+    const primeira = doIp(await comDisp('10.0.0.50', '10.0.0.90'));
+    // mesmo IP de novo: nada
+    const parada = doIp(await comDisp('10.0.0.50', '10.0.0.90'));
+    // o DHCP mexeu nos dois - só a Zebra (monitorada) alarma
+    const mudou = doIp(await comDisp('10.0.0.77', '10.0.0.91'));
+    const celularAlarmou = mudou.some((t) => t.mac === MAC_CELULAR);
+    // varrer de novo sem mudar nada não repete
+    const naoRepete = doIp(await comDisp('10.0.0.77', '10.0.0.91'));
+    // trocou outra vez: alarma de novo, e o "de" agora é o endereço do meio
+    // (e não o original - senão o texto mandaria trocar de um IP que já não
+    // está em lugar nenhum)
+    const mudouDeNovo = doIp(await comDisp('10.0.0.88', '10.0.0.91'));
+
+    // sumir e voltar NÃO pode apagar a linha de base do IP: era o que o
+    // patch de "voltou" fazia ao reescrever a entrada inteira
+    const bOff = DOCS.get(idDoc);
+    DOCS.set(idDoc, { ...bOff, dispositivos: bOff.dispositivos.map((d) => (d.mac === MAC_ZEBRA ? { ...d, ativo: false, visto: Date.now() - 130 * 60 * 1000 } : d)) });
+    ls.descartarEspelhoTeste();
+    await ls.varrerAlertas();
+    const voltouMesmoIp = doIp(await comDisp('10.0.0.88', '10.0.0.91'));
+    const alarme = (DOCS.get(idDoc) || {}).dispositivosAlarme || {};
+
+    // o comando de reset da Zebra tem que limpar a FILA DO WINDOWS também
+    const cmdZebra = ls.comandoResetZebra([{ ip: '10.0.0.88' }]);
+    const resolverIp = ls.resolverIpImpressora;
+    const srcIdxIp = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const srcPushIp = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const iN = srcPushIp.indexOf('async function notifyDispositivoIpMudou');
+    const corpoN = srcPushIp.slice(iN, srcPushIp.indexOf('\nasync function ', iN + 10));
+
+    const conf = {
+      'a primeira varredura só grava a linha de base, sem alarmar': !primeira.length,
+      'IP igual não alarma': !parada.length,
+      'trocou de IP: alarma uma vez, com os dois endereços':
+        mudou.length === 1 && mudou[0].mac === MAC_ZEBRA && mudou[0].de === '10.0.0.50' && mudou[0].para === '10.0.0.77'
+        && mudou[0].apelido === 'Zebra do balcão',
+      'celular (não monitorado) trocando de IP nunca alarma': !celularAlarmou,
+      'varrer de novo sem mudança não repete': !naoRepete.length,
+      'trocou outra vez: o "de" é o endereço mais recente, não o original':
+        mudouDeNovo.length === 1 && mudouDeNovo[0].de === '10.0.0.77' && mudouDeNovo[0].para === '10.0.0.88',
+      'sumir e voltar no MESMO IP não alarma (a linha de base sobrevive à volta)':
+        !voltouMesmoIp.length && (alarme[MAC_ZEBRA] || {}).ipAvisado === '10.0.0.88',
+      'o reset da Zebra limpa a fila do WINDOWS antes do ~JA/~JR, só das impressoras daquele IP':
+        /function Limpar-FilaDoIp\(\$ip\)/.test(cmdZebra)
+        && /Win32_TCPIpPrinterPort[\s\S]{0,120}HostAddress -eq \$ip/.test(cmdZebra)
+        && /\$portas -contains \$_\.PortName/.test(cmdZebra)
+        && /CancelAllJobs/.test(cmdZebra)
+        && cmdZebra.indexOf('Limpar-FilaDoIp $ip') < cmdZebra.indexOf('Zpl-Enviar $ip "~JA"'),
+      // o spooler e' compartilhado com a termica da cozinha e a fiscal: este
+      // comando RELATA o travado em vez de reiniciar o servico - a garantia
+      // "nao mexe na maquina" do reset da Zebra continua de pe
+      'trabalho travado no spooler é RELATADO, nunca resolvido reiniciando serviço da máquina':
+        /if \(\$resta -gt 0\) \{ return "\$antes na fila do Windows, \$resta travado\(s\) no spooler/.test(cmdZebra)
+        && !/Restart-Service/.test(cmdZebra) && !/Stop-Service/.test(cmdZebra) && !/shutdown/i.test(cmdZebra),
+      // Dom Bessa, 13/09: a impressora foi de .54 pra .52 e o reset caiu no
+      // .54 ("FALHOU - sem resposta na 9100"). A leitura VELHA ganhava da
+      // leitura de agora só por estar antes na lista.
+      // Pergunta do Master (13/09): "já que temos o MAC, não seria mais
+      // prudente pegar sempre por padrão pelo MAC?" - VMPULSE, VMGCOM, HOST,
+      // Bematech fiscal e Zebra. É por MAC desde sempre no CADASTRO; o furo
+      // estava na tradução MAC -> endereço de agora, que pegava o primeiro
+      // computador que tivesse o MAC. Uma regra só (enderecoAtualDoMac), e
+      // os TRÊS caminhos passam por ela.
+      'a tradução MAC → endereço é UMA função, e os dois caminhos que viram comando passam por ela': (() => {
+        const src = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+        const trecho = (de, ate) => { const i = src.indexOf(de); return i < 0 ? '' : src.slice(i, src.indexOf(ate, i + 10)); };
+        // a definição + as duas chamadas (sondagem da Zebra e o placeholder
+        // {{IP_IMPRESSORA}}); nem uma cópia da regra a mais
+        const usos = (src.match(/enderecoAtualDoMac\(/g) || []).length;
+        return /function enderecoAtualDoMac\(docs, codigo, mac\)/.test(src)
+          && usos === 3
+          && /const atual = enderecoAtualDoMac\(espelho, codigo, mac\);/
+            .test(trecho('async function impressorasPraSondar', '\nmodule.exports'))
+          && /\.map\(\(mac\) => enderecoAtualDoMac\(docs, codigo, mac\)\)/
+            .test(trecho('async function resolverIpImpressora', '\nasync function enfileirarComando'))
+          // e ninguém mais decide "o primeiro computador que tiver o MAC"
+          && !/out\.has\(d\.mac\)/.test(src)
+          // o estado das impressoras vem da sondagem mais RECENTE daquele MAC
+          && /if \(atual && \(\(atual\.est && atual\.est\.em\) \|\| 0\) >= \(\(est && est\.em\) \|\| 0\)\) continue;/
+            .test(trecho('async function estadoImpressorasDaUnidade', '\n// motivos que NAO'));
+      })(),
+      'entre leituras do MESMO MAC vence a mais fresca (ativo, depois visto mais recente)': (() => {
+        const agora = Date.now();
+        const docsFake = [
+          { codigo: 'U1', posto: 'A', dispositivos: [{ mac: 'aa', ip: '10.0.0.54', ativo: false, visto: agora - 3 * 3600 * 1000 }] },
+          { codigo: 'U1', posto: 'B', dispositivos: [{ mac: 'aa', ip: '10.0.0.52', ativo: true, visto: agora }] },
+          { codigo: 'U2', posto: 'C', dispositivos: [{ mac: 'aa', ip: '10.9.9.9', ativo: true, visto: agora + 1000 }] },
+        ];
+        const r = ls.enderecoAtualDoMac(docsFake, 'U1', 'aa');
+        // inativo mais NOVO perde pro ativo? não: ativo vence primeiro
+        const soInativos = ls.enderecoAtualDoMac([
+          { codigo: 'U1', posto: 'A', dispositivos: [{ mac: 'aa', ip: '10.0.0.1', ativo: false, visto: agora - 1000 }] },
+          { codigo: 'U1', posto: 'B', dispositivos: [{ mac: 'aa', ip: '10.0.0.2', ativo: false, visto: agora }] },
+        ], 'U1', 'aa');
+        return r && r.ip === '10.0.0.52'          // não pega o .54 velho
+          && !ls.enderecoAtualDoMac(docsFake, 'U1', 'bb')  // MAC que não existe
+          && soInativos && soInativos.ip === '10.0.0.2';   // entre inativos, o mais recente
+      })(),
+      'o comando usa o endereço MAIS FRESCO da impressora, não o primeiro da lista': await (async () => {
+        const outraMaq = 'PDV-IP2';
+        await ls.cadastrarComputador(UNI, outraMaq, 'interno');
+        const posto2 = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === outraMaq).posto;
+        const agora = Date.now();
+        // a máquina que vai rodar o comando tem a leitura VELHA (.54, inativa)
+        const b1 = DOCS.get(idDoc);
+        DOCS.set(idDoc, { ...b1, dispositivos: [{ mac: MAC_ZEBRA, ip: '10.161.124.54', nome: 'ZEBRA', desde: agora - 86400000, visto: agora - 3 * 3600 * 1000, ativo: false }] });
+        // a outra máquina da loja viu o endereço de AGORA (.52, ativo)
+        const b2 = DOCS.get(`lojaStatus/${UNI}__${posto2}`);
+        DOCS.set(`lojaStatus/${UNI}__${posto2}`, { ...b2, dispositivos: [{ mac: MAC_ZEBRA, ip: '10.161.124.52', nome: 'ZEBRA', desde: agora - 86400000, visto: agora, ativo: true }] });
+        ls.descartarEspelhoTeste();
+        const ip = await ls.resolverIpImpressora(UNI, posto);
+        return ip === '10.161.124.52';
+      })(),
+      'index.js despacha o push de IP alterado e deixa a troca no log':
+        /t\.tipo === 'dispositivo-ip-mudou'/.test(srcIdxIp) && /push\.notifyDispositivoIpMudou\(nome, t\.codigo, t\.apelido, t\.tipoRotulo, t\.de, t\.para\)/.test(srcIdxIp)
+        && /trocou de IP: \$\{t\.de\} -> \$\{t\.para\}/.test(srcIdxIp),
+      'o push leva os dois endereços e diz o que fazer, no mesmo gate dos outros alarmes':
+        /passou de \$\{de\} para \$\{para\}/.test(corpoN) && /Atualize no servidor/.test(corpoN)
+        && /podeReceberCritico\(sub\)/.test(corpoN) && !/deu errado|Ops/i.test(corpoN),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okIpMudou = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (primeira=${primeira.length} mudou=${JSON.stringify(mudou)} deNovo=${JSON.stringify(mudouDeNovo)} alarme=${JSON.stringify(alarme[MAC_ZEBRA])})`);
+  } catch (e) { okIpMudou = false; console.log('  erro: ' + e.message); }
+  if (!okIpMudou) ruins += 1;
+  console.log(`${okIpMudou ? '✓' : '✗'} NOC: impressora monitorada que TROCA DE IP vira alerta (e o reset da Zebra zera a fila do Windows)`);
+
+  // ------------------------------------------------------------------
+  // REINICIAR A PARTIR DA SAÚDE DAS MÁQUINAS. Pedido do Master (13/09/2026):
+  // "se aqui é saúde das máquinas, aqui precisa ter também o botão de
+  // reiniciar". O card já diz "ligado há 24 dias sem reiniciar" - sem a ação
+  // junto, quem lê tem que sair, abrir o NOC e achar a máquina de novo.
+  //
+  // O que este teste protege: a tela NOVA não pode afrouxar a trava da tela
+  // ANTIGA. Reiniciar máquina de loja é Master + senha do Master, e a rota é
+  // a MESMA do NOC - nada de rota nova com regra própria.
+  let okReiniciarSaude = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'noc-maquinas.html'), 'utf8');
+    const corpoConfirmar = (html.match(/async function confirmarReiniciar\(\)\{[\s\S]*?\n\}/) || [''])[0];
+    const corpoEnviar = (html.match(/async function enviarTarefa\(alvo, tarefa, senha\)\{[\s\S]*?\n\}/) || [''])[0];
+    const corpoCard = html.slice(html.indexOf('function cardHtml(c){'), html.indexOf('function render(){'));
+
+    // a rota que a tela chama continua exigindo Master E senha - provado pela
+    // porta, não pelo código: um usuário logado que NÃO é master leva 403
+    let tokenGer = null;
+    try { tokenGer = (await auth.login('gerente-teste@teste.local', 'SenhaDeTeste!2026')).token; } catch {}
+    const semMaster = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: 'DOM_19706', posto: 'PC1' }], tarefa: 'reiniciar', password: 'SenhaDeTeste!2026' },
+      tokenGer ? { Authorization: 'Bearer ' + tokenGer } : {});
+    const semSenha = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: 'DOM_19706', posto: 'PC1' }], tarefa: 'reiniciar' },
+      { Authorization: 'Bearer ' + token });
+    const senhaErrada = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: 'DOM_19706', posto: 'PC1' }], tarefa: 'reiniciar', password: 'nao-e-a-senha' },
+      { Authorization: 'Bearer ' + token });
+
+    const conf = {
+      'o botão existe no card e chama a caixa de confirmação':
+        /<button type="button" class="btn-reiniciar \$\{c\.precisaReiniciar\?'destaque':''\}" onclick="abrirReiniciar\(/.test(corpoCard)
+        && /🔁 Reiniciar<\/button>/.test(corpoCard),
+      'só pra MASTER e só pra computador interno (os outros nem veem o botão)':
+        /const podeComandar = EH_MASTER && c\.tipo === 'interno';/.test(corpoCard)
+        && /const acoes = !podeComandar \? '' :/.test(corpoCard)
+        && /EH_MASTER = me\.role === 'master';/.test(html),
+      'usa a MESMA rota do NOC, com a senha do Master em todo envio':
+        /fetch\('\/api\/loja-status\/manutencao\/reiniciar', \{/.test(corpoEnviar)
+        && /body: JSON\.stringify\(\{ alvos: \[\{ codigo: alvo\.codigo, posto: alvo\.posto \}\], tarefa, password: senha \}\)/.test(corpoEnviar)
+        && /if\(!senha\)\{ erro\.textContent = 'Digite sua senha de Master\.'/.test(corpoConfirmar),
+      'a caixa avisa dos 2 minutos antes de mandar': /aviso de <b>2 minutos<\/b> antes de reiniciar/.test(html),
+      'depois de enfileirar, o mesmo card oferece ABORTAR dentro dos 2 minutos':
+        /ENVIADOS\.set\(chaveDe\(alvo\.codigo, alvo\.posto\), \{ em: Date\.now\(\), senha \}\)/.test(corpoConfirmar)
+        && /setTimeout\(\(\) => \{ ENVIADOS\.delete\(chaveDe\(alvo\.codigo, alvo\.posto\)\); render\(\); \}, 2 \* 60 \* 1000\)/.test(corpoConfirmar)
+        && /✋ Abortar reinício<\/button>/.test(corpoCard)
+        && /enviarTarefa\(alvo, 'abortar', guardado\.senha\)/.test(html),
+      'senha e alvo NÃO ficam guardados no navegador (nem localStorage, nem sessionStorage)':
+        !/localStorage\.setItem/.test(html) && !/sessionStorage/.test(html),
+      'recusa e aprovação pendente aparecem no card, não somem num alert':
+        /if\(d\.pendenteAprovacao\)\{/.test(corpoConfirmar) && /if\(!d\.enfileirados\)\{/.test(corpoConfirmar)
+        && /mostrarMsgCard\(alvo, `Não foi enfileirado: \$\{motivo\}`, 'err'\)/.test(corpoConfirmar),
+      // 13/09: "também precisa aparecer todos os dados do computador que já
+      // temos" - estava tudo no documento e só a ficha do NOC mostrava
+      'a ficha traz o resto do que a máquina já reporta (IP, RAM, agente, Tailscale, reinício)': (() => {
+        const nm = require('fs').readFileSync(__dirname + '/nocMaquina.js', 'utf8');
+        const passaNoPayload = ['ram:', 'ipLocal:', 'abertoDesde:', 'agenteVersao:', 'agenteNoPulsoPrint:', 'tailscale:', 'reinicioResumo:', 'anydeskId:']
+          .every((campo) => nm.includes(campo));
+        const mostraNoCard = ["linha('IP local'", "linha('RAM'", "linha('NOC-NoPulso'", "linha('Tailscale'", "linha('Reinício automático'", "linha('Última batida'"]
+          .every((t) => corpoCard.includes(t));
+        // o resumo do plano vem PRONTO do servidor - a regra não pode ter uma
+        // segunda cópia no navegador
+        const semCopiaDaRegra = /resumoDoPlano\(plano\), reinicioTolerancia: toleranciaDe\(d\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+          && !/reinicioSemanal/.test(html);
+        return passaNoPayload && mostraNoCard && semCopiaDaRegra;
+      })(),
+      'a ficha fica dentro do <details> (card curto continua rolável no celular)':
+        /<details class="detalhe"><summary>ficha completa do computador<\/summary>/.test(corpoCard),
+      'nome de computador com aspa não quebra o onclick (escapeJs no atributo)':
+        /const escapeJs = \(s\) =>/.test(html) && /onclick="abrirReiniciar\('\$\{escapeJs\(c\.codigo\)\}','\$\{escapeJs\(c\.posto\)\}','\$\{escapeJs\(c\.nome\)\}'/.test(corpoCard),
+      'pela porta: quem não é Master leva 403 na rota': semMaster.status === 403,
+      'pela porta: Master sem senha é recusado': semSenha.status === 400 || semSenha.status === 401,
+      'pela porta: senha errada é recusada': senhaErrada.status === 400 || senhaErrada.status === 401,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okReiniciarSaude = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (semMaster=${semMaster.status} semSenha=${semSenha.status} senhaErrada=${senhaErrada.status})`);
+  } catch (e) { okReiniciarSaude = false; console.log('  erro: ' + e.message); }
+  if (!okReiniciarSaude) ruins += 1;
+  console.log(`${okReiniciarSaude ? '✓' : '✗'} Saúde das Máquinas: dá pra reiniciar (e abortar) do próprio card, com a MESMA trava de Master + senha do NOC`);
+
   // ---- NOC: tipos de aparelho abertos (Impressora, VM Host, PULSE, GCOM + "+ Novo") ----
   // Pedido do Master: a lista fechada em 2 tipos não cobria o que ele enxerga
   // na loja. O tipo criado numa unidade tem que valer pra rede toda, e um
@@ -7224,6 +7477,27 @@ setTimeout(async () => {
       }),
       'as marcas são desenhadas ANTES da ampliação (escalam junto, não ficam finas)': scripts.every((s) =>
         s.indexOf('Desenhar-Marcas $gMarcas $escolhaPrint.marcas') < s.indexOf('$ladoRecorte = [Math]::Max($recorte.Width, $recorte.Height)')),
+      // ---- v55: escolher Seta/Linha/Caixa fechava a seleção 1 s depois ----
+      // O botão gravava ocioso = [DateTime]::UtcNow; o Tick faz "ocioso += 1"
+      // e "ocioso -ge 60" - DateTime -ge 60 é True (reproduzido no pwsh), e a
+      // janela fechava como "60 s sem interação". Daí "Ctrl+Z não funciona" e
+      // o diálogo do .NET quando o Close caía dentro do Tick.
+      'v55 (sem subir, a seleção continua fechando ao escolher a ferramenta)': vg.VERSAO_VIGIA >= 55,
+      'escolher a ferramenta ZERA o ocioso (contador de segundos), nunca grava DateTime nele': scripts.every((s) =>
+        s.includes('& $janela.Tag.pintarFerramenta $janela; $janela.Tag.ocioso = 0 }')
+        && !/Tag\.ocioso = \[DateTime\]/.test(s)),
+      'há um botão ↶ Desfazer na barra, com a mesma ação do Ctrl+Z, e os dois redesenham a superfície (Invalidate($true))': scripts.every((s) =>
+        s.includes('$btDesfazer = Botao-Print ([char]0x21B6) 30 "Desfazer a ultima marca (Ctrl+Z)"')
+        && s.includes('$btDesfazer.Add_Click({ param($b, $e) $j = $b.Parent.Parent; if ($j.Tag.marcas.Count -gt 0) { $j.Tag.marcas.RemoveAt($j.Tag.marcas.Count-1) }; $j.Invalidate($true); $j.Tag.ocioso = 0 })')
+        && s.includes('AddRange(@($btSeta,$btLinha,$btCaixa,$btDesfazer,$fio1,')
+        && s.includes('foreach ($bt in @($btSeta, $btLinha, $btCaixa, $btDesfazer)) { $bt.Font = $FonteForma }')),
+      'o runspace do print arma a guarda de exceção do WinForms ANTES de qualquer janela (adeus diálogo "pipeline foi interrompido")': scripts.every((s) => {
+        const iGuarda = s.indexOf('[System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)');
+        const iPrint = s.indexOf('function Selecionar-AreaPrint($tela, $captura) {');
+        const iRunspace = s.indexOf('[void]$psPrint.AddScript({');
+        return iRunspace > 0 && iGuarda > iRunspace && iGuarda < iPrint
+          && s.includes('add_ThreadException({ param($origemErro, $argsErro) try { Log-Print "Excecao na janela do print (engolida de proposito)');
+      }),
       // ---- v54: uma instância por papel. Rodar a instalação de novo "como
       // Administrador" (a própria mensagem manda) subia uma SEGUNDA cópia:
       // duas máscaras no Ctrl+Q, névoa ficando depois do print, Esc duas vezes ----
@@ -7234,12 +7508,61 @@ setTimeout(async () => {
         && s.includes('New-Object System.Threading.Mutex($false, $nomeMutex)')
         && s.includes('if (-not $dono) { Escrever-Log "Ja existe uma instancia ($papel) do NOCZenith rodando - esta copia se encerra."; exit }')
         && s.includes('catch [System.Threading.AbandonedMutexException] { $dono = $true }')),
-      'a reinstalação encerra a cópia antiga desta sessão ANTES do Start-Process (e não a de boot)': scripts.every((s) => {
-        const iMata = s.indexOf('$_.CommandLine -match "NOCZenith\\.ps1" -and $_.CommandLine -match "-Loop" -and $_.CommandLine -notmatch "-Servico"');
+      'a reinstalação encerra a cópia antiga do MESMO papel ANTES do Start-Process (Encerrar-OutrasInstancias)': scripts.every((s) => {
+        const iFn = s.indexOf('function Encerrar-OutrasInstancias {');
+        const iChamada = s.indexOf('\n  Encerrar-OutrasInstancias\n  Write-Host "Iniciando agora tambem, nessa sessao..."');
         const iStart = s.indexOf('Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Destino`" -Loop"');
-        return iMata > 0 && iStart > iMata && s.includes('$_.ProcessId -ne $PID') && s.includes('Stop-Process -Id $_.ProcessId -Force');
+        return iFn > 0 && iChamada > iFn && iStart > iChamada
+          && s.includes('$_.CommandLine -match "NOCZenith\\.ps1" -and $_.CommandLine -match "-Loop" -and (($_.CommandLine -match "-Servico") -eq [bool]$Servico)')
+          && s.includes('$_.ProcessId -ne $PID') && s.includes('Stop-Process -Id $_.ProcessId -Force');
       }),
+      // ---- v56: "sempre que tem um deploy ele para de funcionar" ----
+      // A cópia velha subia a nova e dava "exit" - que devolve o controle ao
+      // host, e o host só termina quando as threads acabam: o runspace do
+      // print ficava vivo (duas máscaras a cada deploy). E a tarefa só tinha
+      // AtLogOn: agente morto ficava morto até alguém rodar o comando de novo.
+      'v56 (sem subir, ninguém ganha o reinício limpo nem o gatilho de repetição)': vg.VERSAO_VIGIA >= 56,
+      'no update, a cópia velha encerra print, chat e mutex ANTES de subir a nova, e sai por [Environment]::Exit': scripts.every((s) => {
+        const iArgs = s.indexOf('if ($Servico) { $argsNovo += " -Servico" }');
+        const iPrint = s.indexOf('Encerrar-NoPulsoPrint\n        Encerrar-JanelaChat\n        Soltar-InstanciaUnica\n        Start-Process powershell.exe -ArgumentList $argsNovo\n        Start-Sleep -Seconds 2\n        [Environment]::Exit(0)');
+        return iArgs > 0 && iPrint > iArgs
+          && s.includes('function Encerrar-NoPulsoPrint {') && s.includes('$global:NoPulsoPrintPowerShell.Stop()')
+          && s.includes('function Soltar-InstanciaUnica {') && s.includes('$global:MutexInstancia.ReleaseMutex()');
+      }),
+      'a cópia nova ESPERA o mutex (20 s) em vez de desistir; se a velha travou, encerra a velha e assume': scripts.every((s) =>
+        s.includes('$dono = $global:MutexInstancia.WaitOne(20000)')
+        && !/MutexInstancia\.WaitOne\(0\)/.test(s)
+        && /segura o mutex ha 20s - encerrando a antiga pra esta assumir\."\n      Encerrar-OutrasInstancias\n      try \{ \$dono = \$global:MutexInstancia\.WaitOne\(5000\)/.test(s)),
+      // ---- v57: a barra some enquanto a seleção anda e volta quando para ----
+      'v57 (sem subir, a barra continua parada em cima da seleção que anda)': vg.VERSAO_VIGIA >= 57,
+      'mover/redimensionar/remarcar esconde a barra no MouseDown, e o MouseUp a reposiciona': scripts.every((s) =>
+        s.includes('if($modo -eq "novo"){$s.Tag.area=$null}; if($s.Tag.barra){$s.Tag.barra.Visible=$false}; $s.Capture=$true; $s.Invalidate() })')
+        && (s.match(/& \$s\.Parent\.Tag\.posBarra \$s\.Parent/g) || []).length >= 2),
+      'seta do teclado move a seleção E a barra acompanha': scripts.every((s) =>
+        s.includes('default{return}};$s.Invalidate($true);& $s.Tag.posBarra $s;$e.Handled=$true} })')),
+      'a tarefa de login ganha gatilho de repetição (5 min) na instalação E no próprio agente, sem reinstalar': scripts.every((s) =>
+        s.includes('$gatilhoRepeticao = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)')
+        && s.includes('return @($gatilhoLogon, $gatilhoRepeticao)')
+        && s.includes('$gatilho = Gatilhos-DaTarefa')
+        && s.includes('Set-ScheduledTask -TaskName $NomeTarefa -Trigger (Gatilhos-DaTarefa) | Out-Null')
+        && /Reportar-IpLocal\n  Garantir-GatilhoDeRepeticao\n/.test(s)
+        && s.includes('function Garantir-GatilhoDeRepeticao {\n  if ($Servico) { return }')),
       'NOC: a contagem de servidores tem o MESMO corpo do número principal': /\.kpi-serv\{font-size:1em;font-weight:800;/.test(htmlNoc),
+      // 13/09: "quero que a quantidade seja clicável: 47 mostra as máquinas
+      // daquele grupo, 1 mostra os servidores, 0 não faz nada"
+      'NOC: cada número do card filtra a sua metade (regulares · servidores), zero não faz nada, clicar de novo limpa': (() => {
+        const corpoFiltro = (htmlNoc.match(/function filtrarGrupoKpi\(ev, st, grupo, n\)\{[\s\S]*?\n\}/) || [''])[0];
+        return /let FILTRO_SERVIDOR = '';/.test(htmlNoc)
+          && /ev\.stopPropagation\(\);\n  if\(!n\) return;/.test(corpoFiltro)
+          && /if\(FILTRO_STATUS === st && FILTRO_SERVIDOR === grupo\)\{ FILTRO_STATUS = ''; FILTRO_SERVIDOR = ''; \}/.test(corpoFiltro)
+          && /else \{ FILTRO_STATUS = st; FILTRO_SERVIDOR = grupo; \}/.test(corpoFiltro)
+          && /onclick="filtrarGrupoKpi\(event,'\$\{st\}','\$\{grupo\}',\$\{n\}\)"/.test(htmlNoc)
+          && /\$\{n \? '' : ' kpi-zero'\}/.test(htmlNoc)
+          && /parte\('regular', reg, ''/.test(htmlNoc) && /parte\('servidor', serv, 'kpi-serv'/.test(htmlNoc)
+          && /if\(FILTRO_SERVIDOR\) lista = lista\.filter\(c => \(FILTRO_SERVIDOR === 'servidor'\) === !!c\.ehServidor\);/.test(htmlNoc)
+          && /FILTRO_STATUS = \(FILTRO_STATUS === v\) \? '' : v;\n  FILTRO_SERVIDOR = '';/.test(htmlNoc)
+          && /\.kpi-parte\.kpi-zero\{cursor:default/.test(htmlNoc);
+      })(),
     };
     // ---- "Capturar agora" de ponta a ponta: Master pede -> agente recebe UMA
     // vez (configuracao-agente e heartbeat) -> some ----
@@ -11350,7 +11673,7 @@ setTimeout(async () => {
       'e a tarefa vai pra CONCLUIDA (nao fica em "A fazer" com o ticket encerrado)': !!depois && depois.status === 'CONCLUIDA' && !!depois.concluidaEm,
       'a regra vale tambem no re-sync do historico (aprovado + bloqueio = concluida, mesmo sem FINALIZADO)':
         /function ehTicketDeBloqueio\(ticket\)/.test(srcTfE) && /\(ticket\.execucaoStatus === 'FINALIZADO' \|\| ehTicketDeBloqueio\(ticket\)\) \? 'CONCLUIDA' : 'A_FAZER'/.test(srcTfE)
-        && /const versao = 'tickets-v4';/.test(srcTfE),
+        && /const versao = 'tickets-v[5-9]';/.test(srcTfE),
       'decidir pelo link do e-mail sincroniza a tarefa': /await sincronizarTarefasDoTicket\(atualizado\);\n    res\.json\(\{ ok: true, numeroTicket: atualizado\.numeroTicket/.test(srcIdxE),
       'prestacao de contas (adiantamento FINALIZADO) sincroniza a tarefa': /await sincronizarTarefasDoTicket\(registro\); \/\/ prestacao de contas encerra/.test(srcIdxE),
     };
@@ -12284,6 +12607,21 @@ setTimeout(async () => {
       'o relógio em ms é um só, definido antes de ser usado':
         antigo.every((s) => /function Agora-Ms \{/.test(s) && s.indexOf('function Agora-Ms') < s.indexOf('(Agora-Ms)') && /function Ms-De\(\[DateTime\]\$d\)/.test(s)),
       'a versão antiga continua começando com # NOCZenith (a trava contra arquivo quebrado)': antigo.every((s) => s.startsWith('# NOCZenith')),
+      // Windows 7 / Server 2008 R2 (PowerShell 2.0): o instalador morria no
+      // PRIMEIRO comando com "Invoke-RestMethod não é reconhecido", no meio
+      // de 300 caracteres de linha - 20 minutos de mistério pra um
+      // diagnóstico de 5 segundos (MAKELINE da Dom Bessa, 13/09/2026).
+      // cmdPadrao e cmdAntigo já vêm decodificados aqui (ver decod acima).
+      'o instalador avisa em português no PowerShell 2, ANTES de tentar rede': [cmdPadrao, cmdAntigo].every((t) => {
+        const iGuarda = t.indexOf('$PSVersionTable.PSVersion.Major -lt 3');
+        const iRede = t.indexOf('Invoke-RestMethod');
+        return t.startsWith('if ($PSVersionTable.PSVersion.Major -lt 3) {') && iRede > iGuarda
+          && /instalar o PowerShell novo NAO resolve/i.test(t)
+          && /aparelho monitorado/i.test(t)
+          && /exit \}/.test(t);
+      }),
+      'e a guarda vem antes até do TLS da versão antiga (no PS2 nada mais importa)':
+        cmdAntigo.indexOf('$PSVersionTable.PSVersion.Major -lt 3') < cmdAntigo.indexOf('SecurityProtocol'),
       'a marca na ficha vale pro comando de instalação': marcou.status === 200 && tlsAntesDoRest(cmdRotaDecod),
       'e pra autoatualização (o agente baixa com o token dele e recebe a versão certa)':
         psAuto.status === 200 && tlsAntesDoRest(psAuto.corpo) && /function Agora-Ms/.test(psAuto.corpo),
@@ -12967,7 +13305,16 @@ setTimeout(async () => {
       'Unidade fica congelada e nome longo corta com reticências no celular':
         /\.quedas-tab th:first-child,\.quedas-tab td:first-child\{position:sticky;left:0;/.test(html)
         && /\.quedas-unidade-nome\{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\}/.test(html)
-        && /@media\(max-width:640px\)[\s\S]{0,800}width:132px;min-width:132px/.test(html),
+        // o BLOCO de celular inteiro, não uma janela de N caracteres: com 800
+        // cravados, qualquer regra nova no topo do bloco (as duas colunas do
+        // "Por unidade", 13/09) empurrava o 132px pra fora e o teste
+        // reprovava sem nada ter quebrado
+        && (() => {
+          const i = html.indexOf('@media(max-width:640px){\n    .uni-panel{padding:13px 12px;}');
+          if (i < 0) return false;
+          return /\.quedas-tab th:first-child,\.quedas-tab td:first-child\{width:132px;min-width:132px/
+            .test(html.slice(i, html.indexOf('\n  }', i)));
+        })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okQuedasPeriodo = !falhas.length;
@@ -16913,7 +17260,7 @@ setTimeout(async () => {
       'e a correção não mexe na ordem da lista (atualizadoEm continua sendo movimento)': depois.atualizadoEm !== depois.criadaEm,
       'tarefa manual continua nascendo com a data e hora de agora': manual.dataInicio === hojeIso && String(manual.criadaEm).slice(0, 10) === hojeIso,
       'ticket sem data válida cai no agora, não em undefined': !!semDataDoc.criadaEm && /^\d{4}-\d{2}-\d{2}T/.test(semDataDoc.criadaEm),
-      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v4';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
+      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v5';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okDatas = !falhas.length;
@@ -16921,6 +17268,69 @@ setTimeout(async () => {
   } catch (e) { okDatas = false; console.log('  erro: ' + e.message); }
   if (!okDatas) ruins += 1;
   console.log(`${okDatas ? '✓' : '✗'} Meu Dia: tarefa de ticket carrega a data REAL do ticket, e a tarefa manual a data de agora`);
+
+  // ---- Meu Dia: ticket sem responsável = UMA tarefa, não uma por Master ----
+  // Master (13/09/2026), com a lista na mão: "#11800 manu / #11800 solutions /
+  // #11800 david - o ticket sempre fica repetido, não pode acontecer". A
+  // fila do Master criava uma cópia por Master, e Master enxerga toda tarefa
+  // (podeGerir) - triplicata pura. Agora fica com o Master principal
+  // (MASTER_EMAIL) ou, sem ele, o primeiro por e-mail; as cópias antigas dos
+  // outros Masters somem na sincronização (aberta cancela, concluída arquiva).
+  let okUmaPorTicket = false;
+  try {
+    const tarefasMod = require(__dirname + '/tarefas.js');
+    const masters3 = [
+      { id: 'mst-b', email: 'b-master@teste.local', role: 'master', nome: 'B' },
+      { id: 'mst-a', email: 'a-master@teste.local', role: 'master', nome: 'A' },
+      { id: 'mst-c', email: 'c-master@teste.local', role: 'master', nome: 'C' },
+      { id: 'ger-1', email: 'gerente-x@teste.local', role: 'admin', cargo: 'gerente', permissions: { sections: ['fechamento'] } },
+    ];
+    const docsDoTicket = (chave) => [...DOCS.entries()].filter(([k, v]) => k.startsWith('tarefas/') && v && v.vinculo && v.vinculo.chave === chave).map(([, v]) => v);
+    const masterEmailAntes = process.env.MASTER_EMAIL;
+    process.env.MASTER_EMAIL = 'nao-esta-na-lista@teste.local';
+    // 1) sem responsável: uma tarefa só, do primeiro Master por e-mail
+    const semDono = { id: 'tk-fila-1', numeroTicket: 91001, tipo: 'compra', status: 'PENDENTE', titulo: '155 pares de talheres (garfo e faca)', unidade: 'DOM_19706', criadoEm: '2026-09-13T10:00:00.000Z' };
+    const c1 = await tarefasMod.sincronizarTicket(semDono, masters3, 'solicitacao');
+    const c1b = await tarefasMod.sincronizarTicket(semDono, masters3, 'solicitacao');
+    const doTk1 = docsDoTicket('solicitacao:tk-fila-1');
+    // 2) direcionado a gerente (sem perfil operacional): cai na fila, uma só
+    const paraGerente = { ...semDono, id: 'tk-fila-2', numeroTicket: 91002, direcionadoParaId: 'ger-1', direcionadoParaEmail: 'gerente-x@teste.local' };
+    const c2 = await tarefasMod.sincronizarTicket(paraGerente, masters3, 'solicitacao');
+    // 3) MASTER_EMAIL na lista manda: a fila é dele
+    process.env.MASTER_EMAIL = 'c-master@teste.local';
+    const c3 = await tarefasMod.sincronizarTicket({ ...semDono, id: 'tk-fila-3', numeroTicket: 91003 }, masters3, 'solicitacao');
+    // 4) atribuído explicitamente a dois Masters continua sendo dois (é escolha de quem atribuiu)
+    const c4 = await tarefasMod.sincronizarTicket({ ...semDono, id: 'tk-fila-4', numeroTicket: 91004, atribuidosIds: ['mst-a', 'mst-b'] }, masters3, 'solicitacao');
+    // 5) o estrago antigo: cópias dos outros Masters já gravadas (uma aberta, uma concluída)
+    process.env.MASTER_EMAIL = 'nao-esta-na-lista@teste.local';
+    const velho = { id: 'tk-fila-5', numeroTicket: 91005, tipo: 'compra', status: 'PENDENTE', titulo: 'Cestos de lixo de 50l', criadoEm: '2026-09-12T10:00:00.000Z' };
+    DOCS.set('tarefas/dup-b', { id: 'dup-b', origem: 'ticket', status: 'PENDENTE', responsavelId: 'mst-b', vinculo: { chave: 'solicitacao:tk-fila-5', tipo: 'solicitacao', id: 'tk-fila-5' }, criadaEm: '2026-09-12T10:00:00.000Z', atualizadoEm: '2026-09-12T10:00:00.000Z' });
+    DOCS.set('tarefas/dup-c', { id: 'dup-c', origem: 'ticket', status: 'CONCLUIDA', responsavelId: 'mst-c', vinculo: { chave: 'solicitacao:tk-fila-5', tipo: 'solicitacao', id: 'tk-fila-5' }, criadaEm: '2026-09-12T10:00:00.000Z', atualizadoEm: '2026-09-12T10:00:00.000Z' });
+    // e uma concluída de quem NÃO é Master (gerente que já foi responsável): fica como está
+    DOCS.set('tarefas/dup-g', { id: 'dup-g', origem: 'ticket', status: 'CONCLUIDA', responsavelId: 'ger-1', vinculo: { chave: 'solicitacao:tk-fila-5', tipo: 'solicitacao', id: 'tk-fila-5' }, criadaEm: '2026-09-12T10:00:00.000Z', atualizadoEm: '2026-09-12T10:00:00.000Z' });
+    await tarefasMod.sincronizarTicket(velho, masters3, 'solicitacao');
+    const dupB = DOCS.get('tarefas/dup-b'); const dupC = DOCS.get('tarefas/dup-c'); const dupG = DOCS.get('tarefas/dup-g');
+    const doTk5 = docsDoTicket('solicitacao:tk-fila-5');
+    if (masterEmailAntes === undefined) delete process.env.MASTER_EMAIL; else process.env.MASTER_EMAIL = masterEmailAntes;
+
+    const conf = {
+      'ticket sem responsável cria UMA tarefa, não uma por Master': c1.length === 1 && doTk1.length === 1,
+      'e ela é do primeiro Master por e-mail (determinístico), não do primeiro da lista': c1[0].responsavelId === 'mst-a',
+      'sincronizar de novo não cria outra': c1b.length === 0 && docsDoTicket('solicitacao:tk-fila-1').length === 1,
+      'direcionado a quem não tem perfil operacional cai na fila - uma só': c2.length === 1 && c2[0].responsavelId === 'mst-a',
+      'MASTER_EMAIL presente na lista é o dono da fila': c3.length === 1 && c3[0].responsavelId === 'mst-c',
+      'atribuição explícita a dois Masters continua sendo duas tarefas': c4.length === 2 && c4.map((t) => t.responsavelId).sort().join() === 'mst-a,mst-b',
+      'cópia ABERTA de outro Master é cancelada na sincronização': dupB.status === 'CANCELADA',
+      'cópia CONCLUÍDA de outro Master é arquivada (some da lista, fica no histórico)': dupC.status === 'ARQUIVADA' && /cópia repetida/.test(dupC.arquivadaPorNome || ''),
+      'concluída de quem não é Master não é mexida': dupG.status === 'CONCLUIDA',
+      'sobra exatamente uma tarefa ABERTA pro ticket, do Master da fila': doTk5.filter((t) => ['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO'].includes(t.status)).length === 1 && doTk5.find((t) => t.status === 'PENDENTE').responsavelId === 'mst-a',
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okUmaPorTicket = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (c1=${JSON.stringify(c1.map((t) => t.responsavelId))} c2=${JSON.stringify(c2.map((t) => t.responsavelId))} c3=${JSON.stringify(c3.map((t) => t.responsavelId))} c4=${c4.length} dupB=${dupB && dupB.status} dupC=${dupC && dupC.status} tk5=${JSON.stringify(doTk5.map((t) => [t.responsavelId, t.status]))})`);
+  } catch (e) { okUmaPorTicket = false; console.log('  erro: ' + e.message); }
+  if (!okUmaPorTicket) ruins += 1;
+  console.log(`${okUmaPorTicket ? '✓' : '✗'} Meu Dia: ticket sem responsável vira UMA tarefa (Master da fila), não uma por Master - e as cópias antigas somem`);
 
   // ---- Meu Dia: PDF de ocorrência e relatório consolidado ----
   // Nem toda situação vira solicitação ou formulário: às vezes só aconteceu e
@@ -17426,7 +17836,7 @@ setTimeout(async () => {
       // deu lugar ao X, e os botoes passaram a nascer do helper Botao-Print
       'a barra tem as 3 ferramentas, Copiar, Salvar e o X': /\$copiar = Botao-Print \$\(if \(\$TemIcones\)/.test(psI)
         && /\$salvar = Botao-Print \$\(if \(\$TemIcones\)/.test(psI) && /\$fechar = Botao-Print \$\(if \(\$TemIcones\) \{ \[char\]0xE711 \} else \{ "X" \}\) 30/.test(psI)
-        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(psI)
+        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btDesfazer,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(psI)
         && !/\$cancelar/.test(psI),
       'Copiar NÃO grava arquivo; só Salvar grava': copiaSemGravar,
       'sem arquivo não entra lista de arquivo na área de transferência': dropListGuardada,
@@ -17646,6 +18056,163 @@ setTimeout(async () => {
   if (!okPulsoPrint) ruins += 1;
   console.log(`${okPulsoPrint ? '✓' : '✗'} NoPulsoPrint: o NOC para de dizer "pronto" com o laço travado, e a seleção invisível não mata mais o Ctrl+Q`);
 
+  // ------------------------------------------------------------------
+  // ALERTA DE INTERNET POR UNIDADE. Pedido do Master (13/09/2026, olhando a
+  // tela de rede): "a internet em uma das unidades está com problema, quero
+  // ser notificado quando isso acontecer - Dominos Bessa". Até aqui o NOC só
+  // acordava alguém quando uma MÁQUINA caía; link ruim não derruba ninguém,
+  // então a loja operava lenta o dia inteiro em silêncio.
+  //
+  // O que este teste protege são as quatro decisões que separam alarme útil
+  // de ruído: alvo é a unidade (não o computador), janela é a hora corrente
+  // (não a média do dia), frota lenta é o servidor (não a loja), e nada é
+  // anunciado sem duas leituras seguidas no mesmo sentido.
+  let okInternetUnidade = false;
+  try {
+    const rd = require(__dirname + '/redeDiagnostico.js');
+    const HORA = 60 * 60 * 1000;
+    const T0 = Date.parse('2026-09-13T20:30:00.000Z'); // 17h30 em Brasília
+    const DIA = new Date(T0).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    // um computador com a hora corrente cheia (n amostras) na média pedida
+    const pc = (codigo, posto, mediaMs, agora, { nome = posto, n = 60, wanMedia = null, wanPerda = 0 } = {}) => ({
+      codigo, posto, nome,
+      redeHoras: [{ h: rd.horaDe(agora), n, soma: mediaMs * n, max: mediaMs, lentas: 0, falhas: 0 }],
+      redeDia: { dia: DIA, amostras: n, somaLatencia: mediaMs * n, maxLatencia: mediaMs, lentas: 0, falhas: 0,
+        somaGateway: 12 * n, amostrasGateway: n, somaPerdaGateway: 0,
+        ...(wanMedia === null ? {} : { somaWan: wanMedia * n, amostrasWan: n, somaPerdaWan: wanPerda * n }) },
+    });
+    // frota saudável de fundo: 6 lojas em ~300ms (é ela que prova que o
+    // servidor está bem e o problema é da loja)
+    const frotaBoa = (agora) => Array.from({ length: 6 }, (_, i) => pc('OUTRA' + i, 'PC1', 300, agora));
+    const bessaRuim = (agora) => [pc('BESSA', 'GER', 1900, agora), pc('BESSA', 'ATM02', 1750, agora), pc('BESSA', 'ATM01', 2100, agora)];
+    const bessaBoa = (agora) => [pc('BESSA', 'GER', 320, agora), pc('BESSA', 'ATM02', 280, agora), pc('BESSA', 'ATM01', 300, agora)];
+    const rodar = (docs, agora, estado) => rd.avaliarInternetUnidades(docs, { dia: DIA, agora, estado });
+
+    // 1) duas leituras seguidas ruins = UM aviso, na segunda
+    let est = new Map();
+    const p1 = rodar([...frotaBoa(T0), ...bessaRuim(T0)], T0, est); est = p1.estado;
+    const p2 = rodar([...frotaBoa(T0 + 60000), ...bessaRuim(T0 + 60000)], T0 + 60000, est); est = p2.estado;
+    const p3 = rodar([...frotaBoa(T0 + 120000), ...bessaRuim(T0 + 120000)], T0 + 120000, est); est = p3.estado;
+    const aviso = p2.transicoes.find((t) => t.tipo === 'internet-ruim');
+
+    // 2) volta ao normal: também precisa de duas, e conta quanto durou
+    const p4 = rodar([...frotaBoa(T0 + 180000), ...bessaBoa(T0 + 180000)], T0 + 180000, est); est = p4.estado;
+    const p5 = rodar([...frotaBoa(T0 + 240000), ...bessaBoa(T0 + 240000)], T0 + 240000, est); est = p5.estado;
+    const volta = p5.transicoes.find((t) => t.tipo === 'internet-normalizou');
+
+    // 3) a MESMA loja ruim de novo logo depois: cota de 1h segura o aviso,
+    //    e sem aviso não pode sair "normalizou" depois
+    let est3 = est;
+    const r1 = rodar([...frotaBoa(T0 + 300000), ...bessaRuim(T0 + 300000)], T0 + 300000, est3); est3 = r1.estado;
+    const r2 = rodar([...frotaBoa(T0 + 360000), ...bessaRuim(T0 + 360000)], T0 + 360000, est3); est3 = r2.estado;
+    const v1 = rodar([...frotaBoa(T0 + 420000), ...bessaBoa(T0 + 420000)], T0 + 420000, est3); est3 = v1.estado;
+    const v2 = rodar([...frotaBoa(T0 + 480000), ...bessaBoa(T0 + 480000)], T0 + 480000, est3); est3 = v2.estado;
+    // e passada a cota (1h), volta a avisar
+    const d1 = rodar([...frotaBoa(T0 + 2 * HORA), ...bessaRuim(T0 + 2 * HORA)], T0 + 2 * HORA, est3);
+    const d2 = rodar([...frotaBoa(T0 + 2 * HORA + 60000), ...bessaRuim(T0 + 2 * HORA + 60000)], T0 + 2 * HORA + 60000, d1.estado);
+
+    // 4) FROTA lenta = servidor, não a loja (o NoPulso é o gargalo)
+    const frotaLenta = (agora) => Array.from({ length: 6 }, (_, i) => pc('OUTRA' + i, 'PC1', 1800, agora));
+    let estS = new Map();
+    const s1 = rodar([...frotaLenta(T0), ...bessaRuim(T0)], T0, estS); estS = s1.estado;
+    const s2 = rodar([...frotaLenta(T0 + 60000), ...bessaRuim(T0 + 60000)], T0 + 60000, estS);
+
+    // 5) só UM computador da loja lento: é a máquina, não o link
+    const bessaUmLento = (agora) => [pc('BESSA', 'GER', 1900, agora), pc('BESSA', 'ATM02', 300, agora), pc('BESSA', 'ATM01', 280, agora)];
+    let estU = new Map();
+    const u1 = rodar([...frotaBoa(T0), ...bessaUmLento(T0)], T0, estU); estU = u1.estado;
+    const u2 = rodar([...frotaBoa(T0 + 60000), ...bessaUmLento(T0 + 60000)], T0 + 60000, estU);
+
+    // 6) loja com UM computador só, lento, sem medição de link: não dá pra
+    //    dizer que é a internet da loja
+    const soUm = (agora) => [pc('SOZINHA', 'PC1', 2000, agora)];
+    let estSo = new Map();
+    const o1 = rodar([...frotaBoa(T0), ...soUm(T0)], T0, estSo); estSo = o1.estado;
+    const o2 = rodar([...frotaBoa(T0 + 60000), ...soUm(T0 + 60000)], T0 + 60000, estSo);
+
+    // 7) ping da OPERADORA ruim: avisa mesmo com um computador só, e o texto
+    //    leva o número do chamado
+    const opRuim = (agora) => [pc('OPER', 'PC1', 400, agora, { wanMedia: 380, wanPerda: 7 })];
+    let estOp = new Map();
+    const q1 = rodar([...frotaBoa(T0), ...opRuim(T0)], T0, estOp); estOp = q1.estado;
+    const q2 = rodar([...frotaBoa(T0 + 60000), ...opRuim(T0 + 60000)], T0 + 60000, estOp);
+    const avisoOp = q2.transicoes.find((t) => t.tipo === 'internet-ruim');
+
+    // 8) fantasma (heartbeat de posto nunca cadastrado, sem nome) não fala
+    //    pela loja
+    const fantasmas = (agora) => bessaRuim(agora).map((c) => ({ ...c, nome: null }));
+    let estF = new Map();
+    const f1 = rodar([...frotaBoa(T0), ...fantasmas(T0)], T0, estF); estF = f1.estado;
+    const f2 = rodar([...frotaBoa(T0 + 60000), ...fantasmas(T0 + 60000)], T0 + 60000, estF);
+
+    // 9) medição VELHA (a hora corrente não tem balde): sem opinião, não vira
+    //    alarme nem silêncio falso
+    const velhos = (agora) => bessaRuim(agora - 3 * HORA);
+    let estV = new Map();
+    const w1 = rodar([...frotaBoa(T0), ...velhos(T0)], T0, estV); estV = w1.estado;
+    const w2 = rodar([...frotaBoa(T0 + 60000), ...velhos(T0 + 60000)], T0 + 60000, estV);
+
+    // 10) balde recém-aberto (poucas amostras) soma a hora anterior em vez de
+    //     decidir com 2 medições
+    const recemAberto = [{
+      codigo: 'BESSA', posto: 'GER', nome: 'GER',
+      redeHoras: [
+        { h: rd.horaDe(T0 - HORA), n: 50, soma: 1900 * 50, max: 1900, lentas: 0, falhas: 0 },
+        { h: rd.horaDe(T0), n: 3, soma: 1900 * 3, max: 1900, lentas: 0, falhas: 0 },
+      ],
+    }];
+    const janelaCheia = rd.janelaRecente(recemAberto[0], T0);
+    const janelaCurta = rd.janelaRecente({ codigo: 'X', redeHoras: [{ h: rd.horaDe(T0), n: 3, soma: 900, max: 400, lentas: 0 }] }, T0);
+
+    // 11) o texto do push: número e comparação, nunca "algo deu errado"
+    const pushMod = require(__dirname + '/push.js');
+    const txtLenta = pushMod.textoInternetRuim(aviso || {}, 'Dominos Bessa');
+    const txtOper = pushMod.textoInternetRuim(avisoOp || {}, 'Dominos Bessa');
+
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const srcLs = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+
+    const conf = {
+      'uma leitura ruim não avisa ninguém': !p1.transicoes.length,
+      'a segunda leitura ruim seguida avisa, UMA vez, pela unidade': !!aviso && aviso.codigo === 'BESSA' && p2.transicoes.length === 1,
+      'o aviso leva os números: quantos computadores, o tempo da loja e o da frota':
+        !!aviso && aviso.motivo === 'lenta' && aviso.medindo === 3 && aviso.lentos === 3
+        && aviso.mediaUnidade === 1917 && aviso.baselineFrota === 300,
+      'seguir ruim não repete o aviso': !p3.transicoes.length,
+      'uma leitura boa ainda não diz que voltou': !p4.transicoes.length,
+      'duas boas seguidas dizem que normalizou, com quanto tempo durou':
+        !!volta && volta.codigo === 'BESSA' && volta.duracaoMs === 180000 && volta.mediaUnidade === 300,
+      'a mesma loja ruim de novo dentro de 1h não avisa outra vez (cota)': !r1.transicoes.length && !r2.transicoes.length,
+      'e sem ter avisado, não chega "normalizou" do nada': !v1.transicoes.length && !v2.transicoes.length,
+      'passada a cota de 1h, volta a avisar': !d1.transicoes.length && d2.transicoes.some((t) => t.tipo === 'internet-ruim'),
+      'frota lenta é o SERVIDOR: nenhuma loja é acusada': !s1.transicoes.length && !s2.transicoes.length,
+      'um computador lento entre três não é a internet da loja': !u1.transicoes.length && !u2.transicoes.length,
+      'loja com um computador só e sem medição de link não vira alarme de internet': !o1.transicoes.length && !o2.transicoes.length,
+      'ping da operadora ruim avisa mesmo com um computador, com ms e % de perda':
+        !!avisoOp && avisoOp.motivo === 'operadora' && avisoOp.wanMedia === 380 && avisoOp.wanPerda === 7,
+      'computador fantasma (sem cadastro) não fala pela loja': !f1.transicoes.length && !f2.transicoes.length,
+      'medição de horas atrás não vira opinião': !w1.transicoes.length && !w2.transicoes.length,
+      'balde recém-aberto soma a hora anterior; sem amostra nenhuma, não opina':
+        !!janelaCheia && janelaCheia.amostras === 53 && janelaCheia.media === 1900 && janelaCurta === null,
+      'o texto do push diz o fato e o número (nunca "algo deu errado")':
+        /1917ms/.test(txtLenta.body) && /300ms/.test(txtLenta.body) && /3 computadores/.test(txtLenta.body)
+        && /380ms/.test(txtOper.body) && /7% de perda/.test(txtOper.body) && /operadora/.test(txtOper.body)
+        && !/deu errado|Ops/i.test(txtLenta.body + txtOper.body),
+      'a avaliação roda dentro da varredura que JÁ lê os documentos (zero leitura nova no Firestore)':
+        /redeDiagnostico\.avaliarInternetUnidades\(docs, \{ dia, agora: Date\.now\(\), estado: estadoInternetUnidade \}\)/.test(srcLs)
+        && !/listUncached\(\)[\s\S]{0,200}avaliarInternetUnidades/.test(srcLs),
+      'o NOC dispara os dois pushes e registra a linha de diagnóstico no log':
+        /if \(t\.tipo === 'internet-ruim'\) \{/.test(srcIdx) && /push\.notifyInternetUnidade\(nome, t\)/.test(srcIdx)
+        && /if \(t\.tipo === 'internet-normalizou'\) \{/.test(srcIdx) && /push\.notifyInternetUnidadeNormalizou\(nome, t\)/.test(srcIdx)
+        && /\[NOC\] internet ruim em \$\{nome\}/.test(srcIdx),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okInternetUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (aviso=${JSON.stringify(aviso)} volta=${JSON.stringify(volta)} op=${JSON.stringify(avisoOp)} janela=${JSON.stringify(janelaCheia)})`);
+  } catch (e) { okInternetUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okInternetUnidade) ruins += 1;
+  console.log(`${okInternetUnidade ? '✓' : '✗'} NOC: internet ruim na UNIDADE vira alerta (loja lenta ou link da operadora), com histerese, cota e "normalizou"`);
+
   // A CAUSA de "o NoPulsoPrint não funciona": em New-Object Tipo(a,b) os
   // parênteses NÃO são lista de argumentos de método - são expressão de array, e
   // em PowerShell a vírgula tem precedência MAIOR que + e -. Sem parênteses
@@ -17823,7 +18390,7 @@ setTimeout(async () => {
       'soltar o botão grava a marca na lista': /if \(\$s\.Tag\.marcaAtual\) \{ \[void\]\$s\.Tag\.marcas\.Add\(\$s\.Tag\.marcaAtual\); \$s\.Tag\.marcaAtual = \$null;/.test(psI),
       'a prévia desenha o que já foi marcado e a marca em curso':
         /Desenhar-Marcas \$e\.Graphics \$s\.Tag\.marcas 0 0; if \(\$s\.Tag\.marcaAtual\) \{ Desenhar-Marcas \$e\.Graphics @\(\$s\.Tag\.marcaAtual\) 0 0 \}/.test(psI),
-      'Ctrl+Z desfaz a última marca': /Keys\]::Z\)\{\$e\.SuppressKeyPress=\$true;if\(\$s\.Tag\.marcas\.Count -gt 0\)\{\$s\.Tag\.marcas\.RemoveAt\(\$s\.Tag\.marcas\.Count-1\);\$s\.Invalidate\(\)\};return\}/.test(psI),
+      'Ctrl+Z desfaz a última marca': /Keys\]::Z\)\{\$e\.SuppressKeyPress=\$true;if\(\$s\.Tag\.marcas\.Count -gt 0\)\{\$s\.Tag\.marcas\.RemoveAt\(\$s\.Tag\.marcas\.Count-1\)\};\$s\.Invalidate\(\$true\);return\}/.test(psI),
       'clicar na ferramenta ATIVA volta para a seleção (senão não dá pra reajustar a área)':
         /if \(\$janela\.Tag\.ferramenta -eq \$qual\) \{ \$janela\.Tag\.ferramenta = "selecao" \}/.test(psI),
       // o que a pessoa vê tem de ser o que ela salva
@@ -18363,7 +18930,7 @@ setTimeout(async () => {
 
     const conf = {
       'a barra existe e é montada de uma vez só': barra.length > 1500
-        && /\$acoes\.Controls\.AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(ps),
+        && /\$acoes\.Controls\.AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btDesfazer,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(ps),
       'botão plano, sem borda e sem o cinza do Windows':
         /\$b\.FlatStyle = \[System\.Windows\.Forms\.FlatStyle\]::Flat/.test(barra)
         && /\$b\.FlatAppearance\.BorderSize = 0/.test(barra)
@@ -18908,6 +19475,319 @@ setTimeout(async () => {
   } catch (e) { okFantasmasRecolhido = false; console.log('  erro: ' + e.message); }
   if (!okFantasmasRecolhido) ruins += 1;
   console.log(`${okFantasmasRecolhido ? '✓' : '✗'} NOC: "Não identificados" nasce recolhido (só a contagem), abre num clique e lembra a escolha`);
+
+  // ------------------------------------------------------------------
+  // "Por unidade" em DUAS colunas no celular. Pedido do Master (13/09/2026,
+  // com o print do telefone): com minmax(210px,1fr) o auto-fill só cabia UMA
+  // unidade por linha num telefone - 18 unidades viravam 18 telas de rolagem.
+  let okUnidadesDuasColunas = false;
+  try {
+    const nocU = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    // a regra tem que estar DENTRO do bloco de celular: no desktop o
+    // auto-fill continua aproveitando a largura que existe
+    const iMedia = nocU.indexOf('@media(max-width:640px){\n    .uni-panel{padding:13px 12px;}');
+    const bloco = iMedia > 0 ? nocU.slice(iMedia, nocU.indexOf('\n  }', iMedia)) : '';
+    const conf = {
+      'no celular são duas colunas, não uma': /\.uni-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\);gap:8px;\}/.test(bloco),
+      'e o desktop continua com auto-fill (não vira duas colunas numa tela larga)':
+        /\.uni-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(210px,1fr\)\);gap:10px;\}/.test(nocU),
+      'o nome da unidade ganha duas linhas em vez de reticências':
+        /-webkit-line-clamp:2/.test(bloco) && /white-space:normal/.test(bloco),
+      'os números continuam grandes (é o que se lê de longe)': /\.uni-stat b\{font-size:14px;\}/.test(bloco),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okUnidadesDuasColunas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okUnidadesDuasColunas = false; console.log('  erro: ' + e.message); }
+  if (!okUnidadesDuasColunas) ruins += 1;
+  console.log(`${okUnidadesDuasColunas ? '✓' : '✗'} NOC: "Por unidade" em duas colunas no celular (metade da rolagem, nome inteiro)`);
+
+  // ------------------------------------------------------------------
+  // ALERTA VINDO DE FORA (POST /api/bot/alerta). Pedido do Master
+  // (13/09/2026): o agente que vigia o Gestor de Pedidos precisa avisar o
+  // NoPulso quando detectar "loja fechada fora do horário padrão", e ele
+  // perguntou por onde mandar - o agente dele tinha chutado
+  // "/api/bot/tarefas", que não existe, e tinha pedido o MASTER_API_TOKEN.
+  //
+  // O que este teste protege: o token é PRÓPRIO (não o do Master, que é o
+  // Master inteiro), unidade inventada é recusada, e o mesmo aviso de hora em
+  // hora não vira 15 cards.
+  let okAlertaBot = false;
+  try {
+    const alertasC = require(__dirname + '/alertasCentral.js');
+    const TOKEN_ANTES = process.env.BOT_ALERTA_TOKEN;
+    const corpoBase = { titulo: 'Loja fechada fora do horário', resumo: 'Sem pedidos desde 18:40.', origem: 'gestor-de-pedidos', chave: 'loja-fechada' };
+    const comToken = (corpo, tok) => postarJson('/api/bot/alerta', corpo, tok === null ? {} : { 'x-bot-token': tok });
+
+    // sem a env configurada a rota nem existe - ninguém descobre que ela
+    // está lá batendo com token qualquer
+    delete process.env.BOT_ALERTA_TOKEN;
+    const desligada = await comToken(corpoBase, 'qualquer');
+    process.env.BOT_ALERTA_TOKEN = 'b'.repeat(48);
+
+    const semToken = await comToken(corpoBase, null);
+    const tokenErrado = await comToken(corpoBase, 'c'.repeat(48));
+    // o token do MASTER não abre esta rota (são tokens diferentes de propósito)
+    const comTokenDoMaster = await comToken(corpoBase, process.env.MASTER_API_TOKEN);
+    const semTitulo = await comToken({ ...corpoBase, titulo: '' }, process.env.BOT_ALERTA_TOKEN);
+    const unidadeInventada = await comToken({ ...corpoBase, unidade: 'LOJA-QUE-NAO-EXISTE' }, process.env.BOT_ALERTA_TOKEN);
+
+    const externosAntes = (await alertasC.listar()).filter((a) => a.tipo === 'externo').length;
+    const ok1 = await comToken({ ...corpoBase, unidade: '19855', critico: true }, process.env.BOT_ALERTA_TOKEN);
+    const j1 = JSON.parse(ok1.corpo || '{}');
+    // de novo, na hora seguinte: repetido, sem criar card novo
+    const ok2 = await comToken({ ...corpoBase, unidade: '19855' }, process.env.BOT_ALERTA_TOKEN);
+    const j2 = JSON.parse(ok2.corpo || '{}');
+    // OUTRO assunto na mesma loja passa (o silêncio é por assunto, não por loja)
+    const ok3 = await comToken({ ...corpoBase, unidade: '19855', chave: 'outro-assunto', titulo: 'Outra coisa' }, process.env.BOT_ALERTA_TOKEN);
+    const j3 = JSON.parse(ok3.corpo || '{}');
+    const depois = await alertasC.listar();
+    // conta por TIPO, não pelo tamanho da lista: a Central corta em 300
+    // documentos, e no fim da suíte ela já está no teto - o total não cresce
+    // mais e o teste passaria sem provar nada
+    const criados = depois.filter((a) => a.tipo === 'externo').length - externosAntes;
+    const cardDoAlerta = depois.find((a) => a.id === (j1.alerta && j1.alerta.id));
+
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const doc = require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'BENI_API.md'), 'utf8');
+    const env = require('fs').readFileSync(__dirname + '/.env.example', 'utf8');
+    if (TOKEN_ANTES === undefined) delete process.env.BOT_ALERTA_TOKEN; else process.env.BOT_ALERTA_TOKEN = TOKEN_ANTES;
+
+    const conf = {
+      'sem BOT_ALERTA_TOKEN configurado a rota nem existe (404)': desligada.status === 404,
+      'sem token: 401': semToken.status === 401,
+      'token errado: 401': tokenErrado.status === 401,
+      'o token do MASTER não abre esta rota (é token próprio, de propósito)': comTokenDoMaster.status === 401,
+      'sem título: 400 com o motivo': semTitulo.status === 400 && /titulo/.test(semTitulo.corpo),
+      'unidade que não existe é recusada, e a resposta diz quais existem':
+        unidadeInventada.status === 400 && /não existe no NoPulso/.test(unidadeInventada.corpo) && /"unidades"/.test(unidadeInventada.corpo),
+      'o alerta entra na Central com a unidade no título e o tipo externo':
+        ok1.status === 200 && j1.ok === true && !!cardDoAlerta
+        && cardDoAlerta.tipo === 'externo' && /Loja fechada fora do horário · /.test(cardDoAlerta.titulo)
+        && cardDoAlerta.critico === true && cardDoAlerta.url === '/central-alertas.html',
+      'o MESMO aviso de novo é "repetido" e NÃO cria card novo':
+        ok2.status === 200 && j2.repetido === true && !!j2.silencioAteEm && !j2.alerta,
+      'outro assunto na mesma loja passa (o silêncio é por assunto)': ok3.status === 200 && j3.repetido !== true,
+      'dois cards no total, não três': criados === 2,
+      'a rota NÃO cria tarefa, ticket nem chamado': (() => {
+        const i = srcIdx.indexOf("app.post('/api/bot/alerta'");
+        const corpoRota = srcIdx.slice(i, srcIdx.indexOf("app.post('/api/bot/vendas-registro'", i));
+        return !/tarefas\.|solicitacoes\.create|chamadosTI|chamadosManutencao/.test(corpoRota)
+          // e usa o push próprio, não o notifyRaw (que registraria o alerta
+          // de novo, com tipo 'monitor')
+          && /push\.notifyAlertaExterno\(/.test(corpoRota) && !/push\.notifyRaw\(/.test(corpoRota);
+      })(),
+      'está documentado pro Beni, com o porquê de não ser o token do Master':
+        /POST https:\/\/www\.nopulso\.com\.br\/api\/bot\/alerta/.test(doc)
+        && /x-bot-token: \$BOT_ALERTA_TOKEN/.test(doc)
+        && /o `MASTER_API_TOKEN` é o Master\s*\n?inteiro/.test(doc.replace(/\s+/g, ' ').replace(/o `MASTER_API_TOKEN` é o Master inteiro/, 'o `MASTER_API_TOKEN` é o Master\ninteiro')) || /MASTER_API_TOKEN` é o Master/.test(doc),
+      'e o token está no .env.example': /BOT_ALERTA_TOKEN=/.test(env),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAlertaBot = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (desligada=${desligada.status} semToken=${semToken.status} master=${comTokenDoMaster.status} uni=${unidadeInventada.status} ${unidadeInventada.corpo.slice(0,90)} ok1=${ok1.status} ${ok1.corpo.slice(0,120)} ok2=${ok2.corpo.slice(0,120)} criados=${criados})`);
+  } catch (e) { okAlertaBot = false; console.log('  erro: ' + e.message); }
+  if (!okAlertaBot) ruins += 1;
+  console.log(`${okAlertaBot ? '✓' : '✗'} Alerta de fora: POST /api/bot/alerta com token próprio, unidade validada e silêncio de 1h por assunto`);
+
+  // ------------------------------------------------------------------
+  // ESTAÇÃO DA COMIDA: rodízio com comanda por PESSOA. Desenhado com o Master
+  // em 14/09/2026, dentro do restaurante. A comanda é a unidade atômica e a
+  // mesa é derivada dela - o contrário do PDV comum, e é isso que faz "pagar
+  // a minha parte" ser trivial.
+  //
+  // As três regras que este teste protege são as que, se caírem, viram
+  // dinheiro errado no caixa:
+  //   1. UMA comanda aberta por número (o cartão volta pro maço e a 7541 é
+  //      entregue de novo no mesmo dia);
+  //   2. preço vem do servidor e fica CONGELADO no que foi vendido;
+  //   3. pagar 2 comandas desce da mesa exatamente o que foi pago.
+  let okEstacao = false;
+  try {
+    const est = require(__dirname + '/estacaoComida.js');
+    const inv = require(__dirname + '/inventario.js');
+    const UNI = 'Estacao Comida';
+    est._limparEspelhoTeste();
+
+    // tabela de preços: sábado mais caro que terça (é pra isso que existe o
+    // "programar por dia da semana")
+    await est.salvarPrecos(UNI, {
+      rodizio: { ter: { adulto: 79.9, crianca: 39.9 }, sab: { adulto: 99.9, crianca: 49.9 } },
+      servicoPct: 10,
+    }, 'master@teste.local');
+    const precos = await est.getPrecos(UNI);
+    const TER = '2026-09-15'; // terça
+    const SAB = '2026-09-19'; // sábado
+
+    // catálogo: as bebidas da comanda de papel viram itens com preço de venda
+    const chopp = await inv.criarItem({ unidade: UNI, nome: 'Chopp', setor: 'geladeira', tipo: 'BEBIDA', unidadeMedida: 'un', precoVenda: 14.5 });
+    const agua = await inv.criarItem({ unidade: UNI, nome: 'Água', setor: 'geladeira', tipo: 'BEBIDA', unidadeMedida: 'un', precoVenda: 6 });
+    const semPreco = await inv.criarItem({ unidade: UNI, nome: 'Guardanapo', setor: 'estoque_seco', tipo: 'EMBALAGEM', unidadeMedida: 'un' });
+
+    const emTerca = new Date('2026-09-15T20:00:00-03:00');
+    const abrir = (numero, mesa, tipo = 'adulto') => est.abrirComanda({ unidade: UNI, numero, mesa, tipoRodizio: tipo, porEmail: 'garcom@teste.local', agora: emTerca });
+
+    // 3 pessoas sentam na mesa 74
+    const c1 = await abrir(7541, 74);
+    const c2 = await abrir(7542, 74);
+    const c3 = await abrir(7543, 74, 'crianca');
+    // e uma que pegou o cartão mas ainda não sentou
+    const c4 = await abrir(7544, null);
+
+    // mesmo número de novo, com a primeira ainda aberta: recusa
+    let erroDuplicado = null;
+    try { await abrir(7541, 80); } catch (e) { erroDuplicado = e.message; }
+
+    // sem preço cadastrado pro dia, não abre (em vez de abrir valendo zero)
+    let erroSemPreco = null;
+    try { await est.abrirComanda({ unidade: UNI, numero: 9001, tipoRodizio: 'adulto', porEmail: 'g@t', agora: new Date('2026-09-16T20:00:00-03:00') }); } catch (e) { erroSemPreco = e.message; }
+
+    // lançamentos: 2 chopps e 1 água na 7541
+    await est.lancarItem({ comandaId: c1.id, itemId: chopp.id, quantidade: 2, porEmail: 'garcom@teste.local' });
+    await est.lancarItem({ comandaId: c1.id, itemId: agua.id, quantidade: 1, porEmail: 'garcom@teste.local' });
+    await est.lancarItem({ comandaId: c2.id, itemId: agua.id, quantidade: 1, porEmail: 'garcom@teste.local' });
+    let erroSemPrecoVenda = null;
+    try { await est.lancarItem({ comandaId: c2.id, itemId: semPreco.id, quantidade: 1, porEmail: 'g@t' }); } catch (e) { erroSemPrecoVenda = e.message; }
+
+    const salaoAntes = await est.salao(UNI);
+    const mesa74 = salaoAntes.mesas.find((m) => m.mesa === 74);
+
+    // o preço MUDA no meio do serviço: quem já está na mesa mantém o que foi
+    // combinado (o valor está congelado na comanda, não é recalculado)
+    await est.salvarPrecos(UNI, { rodizio: { ter: { adulto: 120, crianca: 60 } } }, 'master@teste.local');
+    const salaoDepoisDoAumento = await est.salao(UNI);
+    const mesa74Depois = salaoDepoisDoAumento.mesas.find((m) => m.mesa === 74);
+
+    // CAIXA: a 7541 e a 7542 pagam juntas (uma pessoa paga por duas)
+    const conta = await est.contaDe(UNI, [7541, 7542]);
+    // 79,90 + 79,90 de rodízio + (2x14,50 + 6) + 6 de consumo = 194,80 + 10%
+    const totalEsperado = Math.round((79.9 * 2 + 14.5 * 2 + 6 + 6) * 1.1 * 100) / 100;
+
+    let erroSomaPagamento = null;
+    try {
+      await est.receber({ unidade: UNI, numeros: [7541, 7542], caixa: '02', pagamentos: [{ forma: 'pix', valor: 10 }], porEmail: 'caixa@teste.local', agora: emTerca });
+    } catch (e) { erroSomaPagamento = e.message; }
+    let erroCaixa = null;
+    try {
+      await est.receber({ unidade: UNI, numeros: [7541], caixa: '09', pagamentos: [{ forma: 'pix', valor: 1 }], porEmail: 'c@t', agora: emTerca });
+    } catch (e) { erroCaixa = e.message; }
+
+    const pago = await est.receber({
+      unidade: UNI, numeros: [7541, 7542], caixa: '02',
+      // split: metade pix, metade dinheiro
+      pagamentos: [{ forma: 'pix', valor: Math.round(conta.total * 100 / 2) / 100 }, { forma: 'dinheiro', valor: conta.total - Math.round(conta.total * 100 / 2) / 100 }],
+      porEmail: 'caixa@teste.local', agora: emTerca,
+    });
+
+    const salaoPago = await est.salao(UNI);
+    const mesa74Pago = salaoPago.mesas.find((m) => m.mesa === 74);
+
+    // comanda paga não aceita mais lançamento
+    let erroLancarPaga = null;
+    try { await est.lancarItem({ comandaId: c1.id, itemId: agua.id, quantidade: 1, porEmail: 'g@t' }); } catch (e) { erroLancarPaga = e.message; }
+
+    // O CARTÃO VOLTA PRO MAÇO: a 7541 é entregue de novo, no mesmo dia
+    const c1b = await abrir(7541, 81);
+    const salaoReuso = await est.salao(UNI);
+
+    // serviço pode ser tirado no caixa (o cliente não quis os 10%)
+    const contaSemServico = await est.contaDe(UNI, [7543], false);
+
+    // ---- VENDA DE BALCÃO no caixa (Master, 14/09: "o caixa não lança nada
+    // mas pode sim realizar uma venda dos itens que ficarem disponíveis no
+    // balcão... se o cliente quiser uma água, um refri na hora de ir embora")
+    const refri = await inv.criarItem({ unidade: UNI, nome: 'Refrigerante lata', setor: 'geladeira', tipo: 'BEBIDA', unidadeMedida: 'un', precoVenda: 8 });
+    // só o que está MARCADO fica disponível pro caixa
+    await inv.atualizarItem(refri.id, { noBalcao: true });
+    await inv.atualizarItem(agua.id, { noBalcao: true });
+    const balcaoDisponivel = await est.itensDoBalcao(UNI);
+    // o chopp NÃO está marcado: o caixa não pode vendê-lo (sairia sem passar
+    // pelo salão)
+    let erroBalcaoNaoLiberado = null;
+    try { await est.resolverItensBalcao(UNI, [{ itemId: chopp.id, quantidade: 1 }]); } catch (e) { erroBalcaoNaoLiberado = e.message; }
+
+    // a 7543 leva um refri na saída: entra na conta, SEM os 10%
+    const contaComBalcao = await est.contaDe(UNI, [7543], true, [{ itemId: refri.id, quantidade: 2 }]);
+    // e se o navegador mandar um preço junto, ele é IGNORADO - o preço é o do
+    // catálogo, sempre (a sanitização nem deixa o campo passar)
+    const contaComPrecoForjado = await est.contaDe(UNI, [7543], true, [{ itemId: refri.id, quantidade: 2, preco: 0.01, precoUnitario: 0.01, precoVenda: 0.01 }]);
+    // venda de balcão SEM comanda nenhuma (só passou pra comprar uma água)
+    const soBalcao = await est.receber({
+      unidade: UNI, numeros: [], caixa: '03', itensBalcao: [{ itemId: agua.id, quantidade: 1 }],
+      pagamentos: [{ forma: 'dinheiro', valor: 6 }], porEmail: 'caixa@teste.local', agora: emTerca,
+    });
+    let erroPagamentoVazio = null;
+    try {
+      await est.receber({ unidade: UNI, numeros: [], caixa: '03', pagamentos: [{ forma: 'pix', valor: 1 }], porEmail: 'c@t', agora: emTerca });
+    } catch (e) { erroPagamentoVazio = e.message; }
+
+    // e o dia fecha
+    const fech = await est.fechamentoDoDia(UNI, TER);
+    const caixa02 = fech.porCaixa.find((c) => c.caixa === '02');
+
+    // baixa de estoque: os 2 chopps saíram do inventário
+    const saidas = [...DOCS.entries()].filter(([k, v]) => k.startsWith('inventarioSaidas/') && v && v.vendaId === pago.id).map(([, v]) => v);
+
+    const conf = {
+      'preço do rodízio sai da tabela do DIA DA SEMANA':
+        est.precoRodizioDoDia(precos, TER, 'adulto') === 79.9 && est.precoRodizioDoDia(precos, SAB, 'adulto') === 99.9
+        && est.precoRodizioDoDia(precos, TER, 'crianca') === 39.9,
+      'dia sem preço cadastrado não abre comanda (em vez de abrir valendo zero)':
+        !!erroSemPreco && /não tem preço cadastrado/.test(erroSemPreco),
+      'o preço do rodízio é congelado na comanda, não no ato de olhar': c1.precoRodizio === 79.9 && c3.precoRodizio === 39.9,
+      'só UMA comanda aberta por número': !!erroDuplicado && /já está aberta/.test(erroDuplicado) && /mesa 74/.test(erroDuplicado),
+      'a mesa é derivada: 3 comandas na 74 = 3 pessoas': !!mesa74 && mesa74.pessoas === 3,
+      'quem pegou o cartão e não sentou aparece à parte, não numa mesa fantasma':
+        salaoAntes.semMesa.length === 1 && salaoAntes.semMesa[0].numero === 7544 && salaoAntes.mesas.every((m) => m.mesa !== null),
+      'o preço do item vem do CATÁLOGO, não do navegador': mesa74.consumo === 14.5 * 2 + 6 + 6,
+      'item sem preço de venda não pode ser lançado': !!erroSemPrecoVenda && /não tem preço de venda/.test(erroSemPrecoVenda),
+      'a mesa soma rodízio + consumo das comandas dela': mesa74.subtotal === Math.round((79.9 * 2 + 39.9 + 14.5 * 2 + 6 + 6) * 100) / 100,
+      'aumentar a tabela NO MEIO DO SERVIÇO não mexe em quem já está na mesa':
+        !!mesa74Depois && mesa74Depois.subtotal === mesa74.subtotal,
+      'a conta de duas comandas soma as duas, com os 10%': Math.abs(conta.total - totalEsperado) < 0.02 && conta.comandas.length === 2,
+      'pagamento que não fecha com o total é recusado': !!erroSomaPagamento && /precisa bater com o total/.test(erroSomaPagamento),
+      'caixa fora de 01-05 é recusado': !!erroCaixa && /Caixa inválido/.test(erroCaixa),
+      'pagar 2 comandas desce da mesa exatamente o que foi pago, e a 3ª continua lá':
+        !!mesa74Pago && mesa74Pago.pessoas === 1
+        && mesa74Pago.subtotal === Math.round((39.9) * 100) / 100,
+      'comanda paga não aceita mais lançamento': !!erroLancarPaga && /já foi fechada/.test(erroLancarPaga),
+      'o mesmo número pode ser entregue DE NOVO depois de pago (o cartão volta pro maço)':
+        !!c1b && c1b.id !== c1.id && c1b.mesa === 81
+        && salaoReuso.mesas.some((m) => m.mesa === 81 && m.pessoas === 1),
+      'o serviço pode ser tirado no caixa': contaSemServico.servico === 0 && contaSemServico.total === 39.9,
+      'o fechamento separa serviço de venda e conta por caixa':
+        !!caixa02 && caixa02.pagamentos === 1 && caixa02.pessoas === 2
+        && Math.abs(caixa02.total - conta.total) < 0.02 && caixa02.servico > 0
+        && Math.abs(caixa02.total - (caixa02.subtotal + caixa02.servico)) < 0.02,
+      'o fechamento mostra as formas de pagamento (o split de pix + dinheiro)':
+        !!caixa02.formas.pix && !!caixa02.formas.dinheiro
+        && Math.abs(caixa02.formas.pix + caixa02.formas.dinheiro - conta.total) < 0.02,
+      'o que ficou ABERTO entra no fechamento (mesa que sobrou é gente que não pagou)':
+        fech.abertas.length >= 2 && fech.subtotalAberto > 0,
+      'cada bebida paga dá baixa no estoque': saidas.length === 3 && saidas.some((x) => x.quantidade === 2),
+      // ---- venda de balcão pelo caixa ----
+      'o caixa só vê os itens MARCADOS como disponíveis no balcão':
+        balcaoDisponivel.length === 2 && balcaoDisponivel.every((i) => ['Água', 'Refrigerante lata'].includes(i.nome)),
+      'item não marcado não pode ser vendido no balcão (o chopp passa pelo salão)':
+        !!erroBalcaoNaoLiberado && /não está liberado/.test(erroBalcaoNaoLiberado),
+      'preço mandado pelo navegador é ignorado no balcão (vale o do catálogo)':
+        contaComPrecoForjado.balcao === 16 && contaComPrecoForjado.itensBalcao[0].precoUnitario === 8,
+      'o item do balcão entra na conta com preço do catálogo e SEM os 10%':
+        contaComBalcao.balcao === 16 && contaComBalcao.itensBalcao.length === 1
+        && contaComBalcao.total === Math.round((39.9 * 1.1 + 16) * 100) / 100,
+      'venda de balcão SEM comanda é venda válida': soBalcao.total === 6 && soBalcao.pessoas === 0 && soBalcao.balcao === 6,
+      'mas pagamento sem comanda E sem item é recusado':
+        !!erroPagamentoVazio && /pelo menos uma comanda ou um item/.test(erroPagamentoVazio),
+      'o fechamento separa a venda de balcão da venda de mesa':
+        fech.total.balcao === 6 && fech.porCaixa.find((c) => c.caixa === '03').balcao === 6
+        && fech.porCaixa.find((c) => c.caixa === '02').balcao === 0,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okEstacao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (mesa74=${JSON.stringify(mesa74 && { p: mesa74.pessoas, c: mesa74.consumo, s: mesa74.subtotal })} conta=${conta.total} esperado=${totalEsperado} pago=${JSON.stringify(mesa74Pago && { p: mesa74Pago.pessoas, s: mesa74Pago.subtotal })} caixa02=${JSON.stringify(caixa02)} saidas=${saidas.length})`);
+  } catch (e) { okEstacao = false; console.log('  erro: ' + e.message + '\n' + String(e.stack).split('\n').slice(1, 4).join('\n')); }
+  if (!okEstacao) ruins += 1;
+  console.log(`${okEstacao ? '✓' : '✗'} Estação da Comida: comanda por pessoa, mesa derivada, preço congelado e pagamento por número de cartão`);
 
   // ---- NOC: reinício automático programado ----
   //
