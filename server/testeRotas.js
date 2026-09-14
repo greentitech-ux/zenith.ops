@@ -19579,6 +19579,161 @@ setTimeout(async () => {
   if (!okAlertaBot) ruins += 1;
   console.log(`${okAlertaBot ? '✓' : '✗'} Alerta de fora: POST /api/bot/alerta com token próprio, unidade validada e silêncio de 1h por assunto`);
 
+  // ------------------------------------------------------------------
+  // ESTAÇÃO DA COMIDA: rodízio com comanda por PESSOA. Desenhado com o Master
+  // em 14/09/2026, dentro do restaurante. A comanda é a unidade atômica e a
+  // mesa é derivada dela - o contrário do PDV comum, e é isso que faz "pagar
+  // a minha parte" ser trivial.
+  //
+  // As três regras que este teste protege são as que, se caírem, viram
+  // dinheiro errado no caixa:
+  //   1. UMA comanda aberta por número (o cartão volta pro maço e a 7541 é
+  //      entregue de novo no mesmo dia);
+  //   2. preço vem do servidor e fica CONGELADO no que foi vendido;
+  //   3. pagar 2 comandas desce da mesa exatamente o que foi pago.
+  let okEstacao = false;
+  try {
+    const est = require(__dirname + '/estacaoComida.js');
+    const inv = require(__dirname + '/inventario.js');
+    const UNI = 'Estacao Comida';
+    est._limparEspelhoTeste();
+
+    // tabela de preços: sábado mais caro que terça (é pra isso que existe o
+    // "programar por dia da semana")
+    await est.salvarPrecos(UNI, {
+      rodizio: { ter: { adulto: 79.9, crianca: 39.9 }, sab: { adulto: 99.9, crianca: 49.9 } },
+      servicoPct: 10,
+    }, 'master@teste.local');
+    const precos = await est.getPrecos(UNI);
+    const TER = '2026-09-15'; // terça
+    const SAB = '2026-09-19'; // sábado
+
+    // catálogo: as bebidas da comanda de papel viram itens com preço de venda
+    const chopp = await inv.criarItem({ unidade: UNI, nome: 'Chopp', setor: 'geladeira', tipo: 'BEBIDA', unidadeMedida: 'un', precoVenda: 14.5 });
+    const agua = await inv.criarItem({ unidade: UNI, nome: 'Água', setor: 'geladeira', tipo: 'BEBIDA', unidadeMedida: 'un', precoVenda: 6 });
+    const semPreco = await inv.criarItem({ unidade: UNI, nome: 'Guardanapo', setor: 'estoque_seco', tipo: 'EMBALAGEM', unidadeMedida: 'un' });
+
+    const emTerca = new Date('2026-09-15T20:00:00-03:00');
+    const abrir = (numero, mesa, tipo = 'adulto') => est.abrirComanda({ unidade: UNI, numero, mesa, tipoRodizio: tipo, porEmail: 'garcom@teste.local', agora: emTerca });
+
+    // 3 pessoas sentam na mesa 74
+    const c1 = await abrir(7541, 74);
+    const c2 = await abrir(7542, 74);
+    const c3 = await abrir(7543, 74, 'crianca');
+    // e uma que pegou o cartão mas ainda não sentou
+    const c4 = await abrir(7544, null);
+
+    // mesmo número de novo, com a primeira ainda aberta: recusa
+    let erroDuplicado = null;
+    try { await abrir(7541, 80); } catch (e) { erroDuplicado = e.message; }
+
+    // sem preço cadastrado pro dia, não abre (em vez de abrir valendo zero)
+    let erroSemPreco = null;
+    try { await est.abrirComanda({ unidade: UNI, numero: 9001, tipoRodizio: 'adulto', porEmail: 'g@t', agora: new Date('2026-09-16T20:00:00-03:00') }); } catch (e) { erroSemPreco = e.message; }
+
+    // lançamentos: 2 chopps e 1 água na 7541
+    await est.lancarItem({ comandaId: c1.id, itemId: chopp.id, quantidade: 2, porEmail: 'garcom@teste.local' });
+    await est.lancarItem({ comandaId: c1.id, itemId: agua.id, quantidade: 1, porEmail: 'garcom@teste.local' });
+    await est.lancarItem({ comandaId: c2.id, itemId: agua.id, quantidade: 1, porEmail: 'garcom@teste.local' });
+    let erroSemPrecoVenda = null;
+    try { await est.lancarItem({ comandaId: c2.id, itemId: semPreco.id, quantidade: 1, porEmail: 'g@t' }); } catch (e) { erroSemPrecoVenda = e.message; }
+
+    const salaoAntes = await est.salao(UNI);
+    const mesa74 = salaoAntes.mesas.find((m) => m.mesa === 74);
+
+    // o preço MUDA no meio do serviço: quem já está na mesa mantém o que foi
+    // combinado (o valor está congelado na comanda, não é recalculado)
+    await est.salvarPrecos(UNI, { rodizio: { ter: { adulto: 120, crianca: 60 } } }, 'master@teste.local');
+    const salaoDepoisDoAumento = await est.salao(UNI);
+    const mesa74Depois = salaoDepoisDoAumento.mesas.find((m) => m.mesa === 74);
+
+    // CAIXA: a 7541 e a 7542 pagam juntas (uma pessoa paga por duas)
+    const conta = await est.contaDe(UNI, [7541, 7542]);
+    // 79,90 + 79,90 de rodízio + (2x14,50 + 6) + 6 de consumo = 194,80 + 10%
+    const totalEsperado = Math.round((79.9 * 2 + 14.5 * 2 + 6 + 6) * 1.1 * 100) / 100;
+
+    let erroSomaPagamento = null;
+    try {
+      await est.receber({ unidade: UNI, numeros: [7541, 7542], caixa: '02', pagamentos: [{ forma: 'pix', valor: 10 }], porEmail: 'caixa@teste.local', agora: emTerca });
+    } catch (e) { erroSomaPagamento = e.message; }
+    let erroCaixa = null;
+    try {
+      await est.receber({ unidade: UNI, numeros: [7541], caixa: '09', pagamentos: [{ forma: 'pix', valor: 1 }], porEmail: 'c@t', agora: emTerca });
+    } catch (e) { erroCaixa = e.message; }
+
+    const pago = await est.receber({
+      unidade: UNI, numeros: [7541, 7542], caixa: '02',
+      // split: metade pix, metade dinheiro
+      pagamentos: [{ forma: 'pix', valor: Math.round(conta.total * 100 / 2) / 100 }, { forma: 'dinheiro', valor: conta.total - Math.round(conta.total * 100 / 2) / 100 }],
+      porEmail: 'caixa@teste.local', agora: emTerca,
+    });
+
+    const salaoPago = await est.salao(UNI);
+    const mesa74Pago = salaoPago.mesas.find((m) => m.mesa === 74);
+
+    // comanda paga não aceita mais lançamento
+    let erroLancarPaga = null;
+    try { await est.lancarItem({ comandaId: c1.id, itemId: agua.id, quantidade: 1, porEmail: 'g@t' }); } catch (e) { erroLancarPaga = e.message; }
+
+    // O CARTÃO VOLTA PRO MAÇO: a 7541 é entregue de novo, no mesmo dia
+    const c1b = await abrir(7541, 81);
+    const salaoReuso = await est.salao(UNI);
+
+    // serviço pode ser tirado no caixa (o cliente não quis os 10%)
+    const contaSemServico = await est.contaDe(UNI, [7543], false);
+
+    // e o dia fecha
+    const fech = await est.fechamentoDoDia(UNI, TER);
+    const caixa02 = fech.porCaixa.find((c) => c.caixa === '02');
+
+    // baixa de estoque: os 2 chopps saíram do inventário
+    const saidas = [...DOCS.entries()].filter(([k, v]) => k.startsWith('inventarioSaidas/') && v && v.vendaId === pago.id).map(([, v]) => v);
+
+    const conf = {
+      'preço do rodízio sai da tabela do DIA DA SEMANA':
+        est.precoRodizioDoDia(precos, TER, 'adulto') === 79.9 && est.precoRodizioDoDia(precos, SAB, 'adulto') === 99.9
+        && est.precoRodizioDoDia(precos, TER, 'crianca') === 39.9,
+      'dia sem preço cadastrado não abre comanda (em vez de abrir valendo zero)':
+        !!erroSemPreco && /não tem preço cadastrado/.test(erroSemPreco),
+      'o preço do rodízio é congelado na comanda, não no ato de olhar': c1.precoRodizio === 79.9 && c3.precoRodizio === 39.9,
+      'só UMA comanda aberta por número': !!erroDuplicado && /já está aberta/.test(erroDuplicado) && /mesa 74/.test(erroDuplicado),
+      'a mesa é derivada: 3 comandas na 74 = 3 pessoas': !!mesa74 && mesa74.pessoas === 3,
+      'quem pegou o cartão e não sentou aparece à parte, não numa mesa fantasma':
+        salaoAntes.semMesa.length === 1 && salaoAntes.semMesa[0].numero === 7544 && salaoAntes.mesas.every((m) => m.mesa !== null),
+      'o preço do item vem do CATÁLOGO, não do navegador': mesa74.consumo === 14.5 * 2 + 6 + 6,
+      'item sem preço de venda não pode ser lançado': !!erroSemPrecoVenda && /não tem preço de venda/.test(erroSemPrecoVenda),
+      'a mesa soma rodízio + consumo das comandas dela': mesa74.subtotal === Math.round((79.9 * 2 + 39.9 + 14.5 * 2 + 6 + 6) * 100) / 100,
+      'aumentar a tabela NO MEIO DO SERVIÇO não mexe em quem já está na mesa':
+        !!mesa74Depois && mesa74Depois.subtotal === mesa74.subtotal,
+      'a conta de duas comandas soma as duas, com os 10%': Math.abs(conta.total - totalEsperado) < 0.02 && conta.comandas.length === 2,
+      'pagamento que não fecha com o total é recusado': !!erroSomaPagamento && /precisa bater com o total/.test(erroSomaPagamento),
+      'caixa fora de 01-05 é recusado': !!erroCaixa && /Caixa inválido/.test(erroCaixa),
+      'pagar 2 comandas desce da mesa exatamente o que foi pago, e a 3ª continua lá':
+        !!mesa74Pago && mesa74Pago.pessoas === 1
+        && mesa74Pago.subtotal === Math.round((39.9) * 100) / 100,
+      'comanda paga não aceita mais lançamento': !!erroLancarPaga && /já foi fechada/.test(erroLancarPaga),
+      'o mesmo número pode ser entregue DE NOVO depois de pago (o cartão volta pro maço)':
+        !!c1b && c1b.id !== c1.id && c1b.mesa === 81
+        && salaoReuso.mesas.some((m) => m.mesa === 81 && m.pessoas === 1),
+      'o serviço pode ser tirado no caixa': contaSemServico.servico === 0 && contaSemServico.total === 39.9,
+      'o fechamento separa serviço de venda e conta por caixa':
+        !!caixa02 && caixa02.pagamentos === 1 && caixa02.pessoas === 2
+        && Math.abs(caixa02.total - conta.total) < 0.02 && caixa02.servico > 0
+        && Math.abs(caixa02.total - (caixa02.subtotal + caixa02.servico)) < 0.02,
+      'o fechamento mostra as formas de pagamento (o split de pix + dinheiro)':
+        !!caixa02.formas.pix && !!caixa02.formas.dinheiro
+        && Math.abs(caixa02.formas.pix + caixa02.formas.dinheiro - conta.total) < 0.02,
+      'o que ficou ABERTO entra no fechamento (mesa que sobrou é gente que não pagou)':
+        fech.abertas.length >= 2 && fech.subtotalAberto > 0,
+      'cada bebida paga dá baixa no estoque': saidas.length === 3 && saidas.some((x) => x.quantidade === 2),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okEstacao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (mesa74=${JSON.stringify(mesa74 && { p: mesa74.pessoas, c: mesa74.consumo, s: mesa74.subtotal })} conta=${conta.total} esperado=${totalEsperado} pago=${JSON.stringify(mesa74Pago && { p: mesa74Pago.pessoas, s: mesa74Pago.subtotal })} caixa02=${JSON.stringify(caixa02)} saidas=${saidas.length})`);
+  } catch (e) { okEstacao = false; console.log('  erro: ' + e.message + '\n' + String(e.stack).split('\n').slice(1, 4).join('\n')); }
+  if (!okEstacao) ruins += 1;
+  console.log(`${okEstacao ? '✓' : '✗'} Estação da Comida: comanda por pessoa, mesa derivada, preço congelado e pagamento por número de cartão`);
+
   // ---- NOC: reinício automático programado ----
   //
   // Pedido do Master: "escolho qual reinicia todos os dias às 4h" e, depois,

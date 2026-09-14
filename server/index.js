@@ -87,6 +87,7 @@ const mensalistas = require('./mensalistas');
 const termoResponsabilidade = require('./termoResponsabilidade');
 const saltiversoImport = require('./saltiversoImport');
 const saltiversoVendas = require('./saltiversoVendas');
+const estacaoComida = require('./estacaoComida');
 const saltiversoFechamento = require('./saltiversoFechamento');
 const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
@@ -8694,6 +8695,113 @@ app.get('/api/saltiverso/catalogo', requireSection('parque-loja'), async (req, r
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ---------- ESTAÇÃO DA COMIDA: rodízio com comanda por pessoa ----------
+// Ver estacaoComida.js. Três seções porque são três papéis diferentes na
+// casa: quem anda no salão, quem fica no caixa e quem confere o dia. O
+// garçom não fecha conta e o caixa não lança consumo.
+const podeUnidadeEstacao = (req, unidade) => podeUnidadeInventario(req, unidade);
+
+app.get('/api/estacao/precos', requireSection('estacao-fechamento'), async (req, res) => {
+  try {
+    if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.getPrecos(req.query.unidade));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// preço é dinheiro que entra: só o Master mexe na tabela
+app.post('/api/estacao/precos', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const { unidade, rodizio, servicoPct } = req.body || {};
+    res.json(await estacaoComida.salvarPrecos(unidade, { rodizio, servicoPct }, req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// o salão inteiro numa chamada: mesas derivadas das comandas abertas
+app.get('/api/estacao/salao', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.salao(req.query.unidade));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// o que dá pra lançar na comanda: o catálogo da unidade com preço de venda
+app.get('/api/estacao/itens', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const catalogo = await inventario.listCatalogo(unidade);
+    res.json(catalogo.filter((i) => i.ativo !== false && i.precoVenda > 0));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/comandas', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, numero, mesa, tipoRodizio } = req.body || {};
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const c = await estacaoComida.abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.patch('/api/estacao/comandas/:id/mesa', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const c = await estacaoComida.definirMesa(req.params.id, (req.body || {}).mesa, req.user.email);
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/comandas/:id/itens', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const { itemId, quantidade } = req.body || {};
+    const c = await estacaoComida.lancarItem({ comandaId: req.params.id, itemId, quantidade, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.delete('/api/estacao/comandas/:id/itens/:indice', requireSection('estacao-salao'), async (req, res) => {
+  try {
+    const c = await estacaoComida.removerItem({ comandaId: req.params.id, indice: req.params.indice, nome: req.query.nome, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// cancelar é do caixa/gerente, não do salão: é a porta de sair sem pagar
+app.post('/api/estacao/comandas/:id/cancelar', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    const c = await estacaoComida.cancelarComanda({ id: req.params.id, motivo: (req.body || {}).motivo, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// CAIXA: a conta de uma ou várias comandas, pelos NÚMEROS do cartão
+app.get('/api/estacao/conta', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const numeros = String(req.query.numeros || '').split(',').map((x) => x.trim()).filter(Boolean);
+    res.json(await estacaoComida.contaDe(unidade, numeros, req.query.servico !== '0'));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/receber', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, numeros, caixa, pagamentos, comServico } = req.body || {};
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const r = await estacaoComida.receber({
+      unidade, unidadeNome, numeros, caixa, pagamentos,
+      comServico: comServico !== false, porEmail: req.user.email,
+    });
+    estacaoComida.invalidarFechamento();
+    broadcast('estacao-salao-mudou', { unidade }, 'estacao-salao');
+    res.json(r);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/estacao/fechamento', requireSection('estacao-fechamento'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.fechamentoDoDia(unidade, req.query.data));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, res) => {

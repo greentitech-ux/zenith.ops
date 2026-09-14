@@ -97,6 +97,11 @@
       { id: 'nav-saltiverso-vendas', href: '/saltiverso-vendas.html', icone: '🥤', rotulo: 'Bebidas & Meias', secoes: ['parque-loja'] },
       { id: 'nav-saltiverso-fechamento', href: '/saltiverso-fechamento.html', icone: '🧾', rotulo: 'Fechamento do balcão', secoes: ['parque-loja'] },
     ] },
+    { grupo: 'Estação da Comida', itens: [
+      { id: 'nav-estacao-salao', href: '/estacao-salao.html', icone: '🍽️', rotulo: 'Salão', secoes: ['estacao-salao'] },
+      { id: 'nav-estacao-caixa', href: '/estacao-caixa.html', icone: '💳', rotulo: 'Caixa', secoes: ['estacao-caixa'] },
+      { id: 'nav-estacao-fechamento', href: '/estacao-fechamento.html', icone: '🧾', rotulo: 'Fechamento do dia', secoes: ['estacao-fechamento'] },
+    ] },
     { grupo: 'BigBrother', itens: [
       { id: 'nav-rh', href: '/rh.html', icone: '🧑‍💼', rotulo: 'RH', secoes: ['rh'] },
     ] },
