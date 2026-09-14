@@ -1067,6 +1067,37 @@ function rotuloTipoDispositivo(tipoDispositivo, tipoRotulo) {
 // mesma urgencia do alerta de loja offline: pedido explicito do Master pra
 // esse equipamento especifico ("caso esses equipamentos percam rede
 // precisa alarmar").
+// QUEDA DE REDE DA UNIDADE, medida pelo equipamento que o Master marcou como
+// ponto de medicao (normalmente o modem - ver medidorQuedas em lojaStatus.js).
+//
+// Alerta SEPARADO do "sumiu um aparelho" de proposito: o texto diz o fato e o
+// numero, como manda o tom de voz da casa, e a acao muda conforme o caso. UM
+// ciclo por unidade (a tag e' so o codigo): cai e volta no mesmo card, em vez
+// de dois avisos soltos.
+async function notifyRedeUnidade(unidadeNome, codigo, resumo, caiu) {
+  const dados = {
+    title: caiu ? `🔴 Rede caiu · ${unidadeNome || codigo}` : `🟢 Rede voltou · ${unidadeNome || codigo}`,
+    body: resumo,
+    tag: `noc-rede-unidade-${codigo}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: caiu ? 'caiu' : 'voltou', tipo: 'noc-rede-unidade', titulo: dados.title, resumo: dados.body, url: dados.url, critico: caiu });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (caiu && !podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: caiu ? 'high' : 'normal' });
+    } catch (err) {
+      // mesma limpeza dos outros: assinatura morta sai da lista em vez de
+      // acumular erro a cada alerta
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (rede da unidade):', err.message);
+    }
+  }
+}
+
 async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispositivo, mac, tipoRotulo) {
   const nome = apelido || mac;
   const { icone, rotulo } = rotuloTipoDispositivo(tipoDispositivo, tipoRotulo);
@@ -1396,7 +1427,7 @@ module.exports = {
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
-  notifyDispositivoOffline, notifyImpressoraProblema, notifyImpressoraNormalizou,
+  notifyDispositivoOffline, notifyRedeUnidade, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,
   notifyDivergenciaCaixa, notifyDispositivoOnline,

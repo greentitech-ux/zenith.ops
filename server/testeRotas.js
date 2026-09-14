@@ -12163,6 +12163,84 @@ setTimeout(async () => {
   if (!okPapelMarca) ruins += 1;
   console.log(`${okPapelMarca ? '✓' : '✗'} Papel de parede: uma arte por grupo + marca (as duas logos), o nome da máquina escrito nela, e trocar a imagem chega na loja`);
 
+  // ------------------------------------------------------------------
+  // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)
+  // "preciso poder marcar como medidor de quedas da unidade - um equipamento
+  // que nao tem acesso, como um Modem, para ser o ponto de medicao".
+  //
+  // O que isso resolve: o NOC ja sabe quando o AGENTE para de bater, mas o
+  // computador da loja e' desligado ao fechar, cai em atualizacao do Windows,
+  // alguem puxa da tomada - e nada disso e' queda de rede. O modem fica ligado;
+  // e' uma referencia honesta.
+  //
+  // E o que isso NAO mede, que o teste tambem tranca: modem ligado com a
+  // internet do provedor fora continua respondendo na rede local. Por isso a
+  // transicao carrega `agenteVivo` - e' o cruzamento dos dois sinais que separa
+  // "caiu a loja" de "caiu so o modem" de "so o computador desligou".
+  let okMedidor = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabMed = { Authorization: 'Bearer ' + token };
+    const macModem = 'b4:89:01:a8:a3:6a';
+    const macOutro = '24:fd:0d:25:19:e8';
+    const rota = (mac) => `/api/loja-status/MEDE/dispositivos/${mac}/apelido`;
+
+    const marcou = await enviarJson('PUT', rota(macModem), { apelido: 'Modem Huawei', medidorQuedas: true }, cabMed);
+    const cfgModem = marcou.status === 200 ? JSON.parse(marcou.corpo) : {};
+    // marcar OUTRO tem de tirar o primeiro: dois pontos de medicao dariam duas
+    // versoes da mesma queda e ninguem saberia qual e' a da loja
+    const marcouOutro = await enviarJson('PUT', rota(macOutro), { apelido: 'Roteador', medidorQuedas: true }, cabMed);
+    const doc = DOCS.get('lojaStatusConfig/apelidosRede') || {};
+    const daUnidade = (doc.unidades || {}).MEDE || {};
+    const quantosMedidores = Object.values(daUnidade).filter((v) => ls.normalizarEntradaApelido(v).medidorQuedas).length;
+    const primeiroDepois = ls.normalizarEntradaApelido(daUnidade[macModem]);
+
+    // desmarcar devolve o aparelho pro estado comum
+    await enviarJson('PUT', rota(macOutro), { medidorQuedas: false }, cabMed);
+    const docSem = DOCS.get('lojaStatusConfig/apelidosRede') || {};
+    const semNinguem = ls.medidorDaUnidade((docSem.unidades || {}).MEDE || {});
+
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlM = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const pushTx = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const lsTx = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+
+    const conf = {
+      'dá pra marcar um aparelho como medidor da unidade':
+        marcou.status === 200 && cfgModem.medidorQuedas === true,
+      // medir queda de um aparelho que a varredura não acompanha não existe
+      'marcar medidor liga o monitorar junto, no servidor e na tela':
+        cfgModem.monitorar === true && /function aoMarcarMedidor\(\)/.test(htmlM)
+        && /medidorQuedas \|\| !!valor\.monitorar/.test(lsTx),
+      'só um medidor por unidade: marcar outro desmarca o primeiro':
+        marcouOutro.status === 200 && quantosMedidores === 1 && primeiroDepois.medidorQuedas === false,
+      'desmarcar deixa a unidade sem medidor (não fica preso pra sempre)':
+        semNinguem === null,
+      // a queda do medidor NÃO é "sumiu um aparelho" - é a loja
+      'a queda do medidor vira uma transição própria, não a de dispositivo':
+        /tipo: cfg\.medidorQuedas \? 'rede-unidade-offline' : 'dispositivo-offline'/.test(lsTx)
+        && /tipo: cfg\.medidorQuedas \? 'rede-unidade-online' : 'dispositivo-online'/.test(lsTx),
+      // é o CRUZAMENTO dos dois sinais que conta a história certa; um sozinho
+      // não distingue "a loja caiu" de "desligaram o computador"
+      'o alerta diz se o computador caiu junto ou continua de pé':
+        /agenteVivo: Date\.now\(\) - \(candidato\.ultimoHeartbeatEm \|\| 0\) < LIMIAR_OFFLINE_MS/.test(lsTx)
+        && /o computador continua online, então o problema é o equipamento/.test(idx)
+        && /a loja inteira está sem rede ou sem energia/.test(idx),
+      'o alerta de volta diz quanto tempo a loja ficou fora':
+        /foraMs: estado && estado\.offlineDesde \? Date\.now\(\) - estado\.offlineDesde : null/.test(lsTx)
+        && /Ficou \$\{Math\.max\(1, Math\.round\(t\.foraMs \/ 60000\)\)\} min fora/.test(idx),
+      'cai e volta no MESMO card de alerta, um por unidade':
+        /tag: `noc-rede-unidade-\$\{codigo\}`/.test(pushTx),
+      'a tela marca na lista qual aparelho é o ponto de medição':
+        /class="disp-medidor-chip"/.test(htmlM) && /id="disp-medidor"/.test(htmlM),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okMedidor = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (marcou=${marcou.status} ${marcou.corpo.slice(0, 120)})`);
+  } catch (e) { okMedidor = false; console.log('  erro: ' + e.message); }
+  if (!okMedidor) ruins += 1;
+  console.log(`${okMedidor ? '✓' : '✗'} NOC: um aparelho da rede vira o medidor de quedas da unidade (o modem, que ninguém desliga)`);
+
 
   // ------------------------------------------------------------------
   // "INCLUSIVE QUERO TAMBEM SER AVISADO QUANDO DESINSTALADO" (Master,

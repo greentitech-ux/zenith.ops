@@ -300,6 +300,8 @@
   .disp-tipo-chip{flex:none;font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;white-space:nowrap;}
   .disp-monitorar-linha{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0 4px;cursor:pointer;}
   .disp-monitorar-linha input{margin:0;}
+  .disp-medidor-ajuda{display:block;color:var(--muted);font-size:11.5px;line-height:1.45;margin:2px 0 8px 24px;}
+  .disp-medidor-chip{color:var(--accent);font-size:11px;}
   .tile-metricas{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px;}
   /* apertado de propósito: as três métricas precisam caber em UMA linha na
      coluna estreita do celular (~159px), senão o card cresce e a promessa de
@@ -896,6 +898,8 @@
       <option value="outra">Outra marca (só alarme de rede)</option>
     </select>
     <label class="disp-monitorar-linha"><input type="checkbox" id="disp-monitorar"> Monitorar (alarma se esse aparelho perder rede)</label>
+    <label class="disp-monitorar-linha"><input type="checkbox" id="disp-medidor" onchange="aoMarcarMedidor()"> 📡 Medidor de quedas desta unidade</label>
+    <small class="disp-medidor-ajuda">Um aparelho que fica sempre ligado — o modem ou o roteador. Quando ele some da rede, o NOC registra como queda da <b>loja</b>, e não como um aparelho isolado. Só um por unidade: marcar aqui desmarca o anterior.</small>
     <div class="msg hidden" id="disp-modal-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharModalDispositivo()">Cancelar</button>
@@ -1184,6 +1188,11 @@ function dispTipoMudou(){
   document.getElementById('disp-tipo-novo-linha').classList.toggle('hidden', !novo);
   if(novo) document.getElementById('disp-tipo-novo').focus();
 }
+// medir queda de um aparelho que a varredura nao acompanha nao existe - entao
+// marcar medidor liga o monitorar, e o servidor faz o mesmo (normalizarEntrada)
+function aoMarcarMedidor(){
+  if(document.getElementById('disp-medidor').checked) document.getElementById('disp-monitorar').checked = true;
+}
 function abrirModalDispositivo(codigo, mac, d){
   DISP_CODIGO = codigo; DISP_MAC = mac;
   document.getElementById('disp-modal-mac').textContent = mac;
@@ -1192,6 +1201,7 @@ function abrirModalDispositivo(codigo, mac, d){
   document.getElementById('disp-tipo-novo').value = '';
   document.getElementById('disp-tipo-novo-linha').classList.add('hidden');
   document.getElementById('disp-monitorar').checked = !!(d && d.monitorar);
+  document.getElementById('disp-medidor').checked = !!(d && d.medidorQuedas);
   // marca ainda nao escolhida: sugere pelo FABRICANTE do MAC (o painel ja
   // resolve isso - ver ouiFabricantes.js). Evita o Master ter que decidir
   // aparelho por aparelho em 14 lojas, e acerta ate onde o scanner de rede
@@ -1226,6 +1236,7 @@ async function salvarDispositivo(){
       apelido: document.getElementById('disp-apelido').value,
       tipo: escolhido === '__novo__' ? null : (escolhido || null),
       monitorar: document.getElementById('disp-monitorar').checked,
+      medidorQuedas: document.getElementById('disp-medidor').checked,
       marca: document.getElementById('disp-marca').value || null,
     };
     if(tipoNovo) corpo.tipoNovo = tipoNovo;
@@ -1470,6 +1481,11 @@ function atualizarConteudoDetalhe(codigo, c){
             ? `<span class="disp-monitor-chip" title="Monitorado + leitura de status (papel, cabeça, fila) a cada ~100s">🔔🖨️</span>`
             : `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>`)
         : '';
+      // 📡 e' o ponto de medicao da loja: quem bate o olho na lista precisa
+      // saber por qual aparelho a queda da unidade esta sendo contada
+      const medidorChip = d.medidorQuedas
+        ? `<span class="disp-medidor-chip" title="Medidor de quedas desta unidade: quando ele some, o NOC registra queda da loja">📡</span>`
+        : '';
       // o tipo escolhido fica visivel na propria linha: sem isso so da pra
       // saber o que e' cada MAC abrindo aparelho por aparelho
       const tipoChip = d.tipoRotulo ? `<span class="disp-tipo-chip">${escapeHtml(d.tipoRotulo)}</span>` : '';
@@ -1479,13 +1495,13 @@ function atualizarConteudoDetalhe(codigo, c){
           <div class="disp-topo">
             <div class="disp-nome ${temNome?'':'anon'}" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>
             ${tipoChip}
-            ${monitorChip}
+            ${medidorChip}${monitorChip}
             ${quando}
           </div>
           <div class="disp-rede">${escapeHtml(d.ip)} · ${escapeHtml(d.mac)}</div>
         </div>
         <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
-          onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
+          onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,medidorQuedas:!!d.medidorQuedas,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
       </div>`;
     };
     // TODOS os aparelhos, numa janela de ~5 linhas com rolagem interna -
