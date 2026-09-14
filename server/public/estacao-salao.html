@@ -22,7 +22,15 @@
       <h1>Salão</h1>
     </div>
   </div>
-  <button class="back" onclick="logout()">🚪 Sair</button>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <!-- VOLTAR A LANÇAR. O trabalho do garçom é um ciclo: abre comanda, lança,
+         volta, abre a próxima. Sem este botão, voltar significava fechar a
+         ficha, rolar a tela até o topo e achar o campo - três gestos, com uma
+         mão só e a bandeja na outra. Aqui é um toque, e o cursor já cai no
+         número do cartão. -->
+    <button class="back" id="bt-lancar" onclick="voltarALancar()" data-dica="Fecha a comanda aberta e volta pro campo do número do cartão" aria-label="Voltar a lançar">↩ Lançar</button>
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
 </header>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
@@ -187,6 +195,9 @@ function verMesa(mesa){
 // ---------- uma comanda ----------
 function abrirFicha(id){
   COMANDA_ABERTA = id;
+  // comanda recém-aberta cai direto no consumo; se ainda não tem mesa, cai na
+  // mesa - é a única coisa que falta nela
+  MODO_FICHA = (acharComanda(id) || {}).mesa ? 'consumo' : 'mesa';
   pintarComanda(acharComanda(id));
   document.getElementById('modal').classList.add('aberto');
 }
@@ -197,36 +208,88 @@ function pintarComanda(c){
   const t = c.totais || {};
   document.getElementById('mod-eyebrow').textContent = `Comanda · ${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}${c.turno?` · ${ROTULO_TURNO[c.turno]||c.turno}`:''}`;
   document.getElementById('mod-titulo').textContent = 'Nº ' + c.numero;
-  document.getElementById('mod-corpo').innerHTML = `
+  // O NÚMERO DA COMANDA VEM ANTES DA MESA. É por ele que tudo acontece - o
+  // caixa cobra por ele, o garçom acha a pessoa por ele - e no celular o
+  // título da janela sai de vista assim que a lista rola.
+  const cabeca = `<div class="est-comanda" style="cursor:default;margin-bottom:10px;">
+      <span class="est-comanda-num">${c.numero}</span>
+      <span class="est-comanda-corpo">
+        <span class="est-comanda-nome">${marcaTipo(c)} ${c.mesa?`· mesa <b>${c.mesa}</b>`:'<span class="est-tag sem-mesa">sem mesa</span>'}</span>
+        <span class="est-comanda-meta">aberta às ${esc(horaCurta(c.abertaEm))} · ${(c.itens||[]).length} item(ns)</span>
+      </span>
+    </div>`;
+
+  // DUAS AÇÕES, uma de cada vez: trocar a mesa e lançar consumo. Antes a
+  // ficha abria com o campo da mesa e o cardápio inteiro juntos - no celular
+  // isso é uma parede, e quem só queria lançar uma coca passava por cima do
+  // campo da mesa.
+  const abas = `<div class="est-acoes" style="margin-bottom:12px;">
+      <button type="button" class="est-btn${MODO_FICHA==='mesa'?' principal':''}" onclick="modoFicha('mesa')">↔ Trocar mesa</button>
+      <button type="button" class="est-btn${MODO_FICHA==='consumo'?' principal':''}" onclick="modoFicha('consumo')">🍽 Consumo</button>
+    </div>`;
+
+  const painelMesa = `
     <div class="est-barra">
       <label style="flex:1 1 130px;">Mesa<input id="mesa-comanda" type="number" inputmode="numeric" min="1" max="200" value="${c.mesa||''}" placeholder="onde sentou"></label>
-      <button type="button" class="est-btn" style="flex:none;" onclick="salvarMesa('${esc(c.id)}')">Salvar mesa</button>
+      <button type="button" class="est-btn principal" style="flex:none;" onclick="salvarMesa('${esc(c.id)}')">Salvar</button>
     </div>
-    <div class="est-erro" id="erro-comanda"></div>
+    ${(c.historicoMesa||[]).length ? `<div class="est-sub" style="margin-top:4px;">Trocas desta comanda</div>
+      <div class="est-lista">${(c.historicoMesa||[]).slice().reverse().map(h=>`
+        <div class="est-item">
+          <span class="est-item-nome" style="font-family:var(--mono);">${h.de==null?'sem mesa':h.de} <span style="color:var(--accent);">→</span> ${h.para==null?'sem mesa':h.para}</span>
+          <span class="est-comanda-meta">${esc(horaCurta(h.em))}</span>
+        </div>`).join('')}</div>` : ''}`;
 
-    <h2 style="margin-top:14px;">Lançar no consumo</h2>
-    <div class="est-sub">O rodízio já está na conta. Aqui vai o que é cobrado à parte (bebida, sobremesa).</div>
-    <div class="est-grade" id="grade-itens">${
-      CATALOGO.length
-        ? CATALOGO.map(i=>`<button type="button" class="est-btn" onclick="lancar('${esc(c.id)}','${esc(i.id)}')"><span>${esc(i.nome)}</span><small>${fmtReal(i.precoVenda)}</small></button>`).join('')
-        : '<div class="est-vazio">Nenhum item com preço de venda no catálogo desta unidade.</div>'
-    }</div>
+  // O CARDÁPIO SEMPRE NO TOPO, agrupado pelo tipo do item (Refrigerantes,
+  // Cervejas, Sobremesas...). O tipo é o que o estoque já usa - a tela não
+  // inventa categoria.
+  const porTipo = new Map();
+  CATALOGO.forEach(i=>{
+    const g = (i.tipo || 'OUTROS');
+    if(!porTipo.has(g)) porTipo.set(g, []);
+    porTipo.get(g).push(i);
+  });
+  const painelConsumo = `
+    ${CATALOGO.length ? [...porTipo.entries()].map(([grupo, itens])=>`
+      <div class="est-sub" style="margin:0 0 6px;">${esc(grupo)}</div>
+      <div class="est-grade" style="margin-bottom:12px;">${itens.map(i=>`
+        <button type="button" class="est-btn" onclick="lancar('${esc(c.id)}','${esc(i.id)}')"><span>${esc(i.nome)}</span><small>${fmtReal(i.precoVenda)}</small></button>`).join('')}</div>`).join('')
+      : '<div class="est-vazio">Nenhum item com preço de venda no catálogo desta unidade.</div>'}
 
-    <h2 style="margin-top:14px;">Consumo</h2>
+    <h2 style="margin-top:6px;">Lançado</h2>
     ${(c.itens||[]).length ? `<div class="est-lista">${c.itens.map((it,i)=>`
       <div class="est-item">
         <span class="est-item-nome">${esc(it.nome)}${it.quantidade>1?` <span class="est-tag">${it.quantidade}x</span>`:''}</span>
         <span class="est-item-val">${fmtReal(it.quantidade*it.precoUnitario)}</span>
         <button type="button" class="est-btn perigo" style="min-height:36px;padding:6px 10px;" onclick="tirar('${esc(c.id)}',${i},'${esc(it.nome)}')">✕</button>
-      </div>`).join('')}</div>` : '<div class="est-vazio">Nada lançado ainda.</div>'}
+      </div>`).join('')}</div>` : '<div class="est-vazio">Nada lançado ainda.</div>'}`;
 
-    <div class="est-totais">
+  document.getElementById('mod-corpo').innerHTML = cabeca + abas
+    + `<div class="est-erro" id="erro-comanda"></div>`
+    + (MODO_FICHA==='mesa' ? painelMesa : painelConsumo)
+    + `<div class="est-totais">
       <div class="est-linha"><span>Rodízio · ${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}${c.turno?` (${ROTULO_TURNO[c.turno]})`:''}</span><b>${t.rodizio?fmtReal(t.rodizio):'não paga'}</b></div>
       <div class="est-linha"><span>Consumo</span><b>${fmtReal(t.consumo)}</b></div>
       <div class="est-linha"><span>Serviço ${t.servicoPct||0}%</span><b>${fmtReal(t.servico)}</b></div>
       <div class="est-linha total"><span>Total desta pessoa</span><b>${fmtReal(t.total)}</b></div>
     </div>
-    <div class="est-sub" style="margin-top:10px;">Aberta às ${esc(horaCurta(c.abertaEm))}. O pagamento é no caixa, pelo número ${c.numero}.</div>`;
+    <div class="est-sub" style="margin-top:10px;">O pagamento é no caixa, pelo número ${c.numero}.</div>`;
+}
+// qual painel está aberto na ficha. Começa no CONSUMO: é o que o garçom faz
+// dez vezes por mesa; trocar de mesa acontece uma vez, se acontecer.
+let MODO_FICHA = 'consumo';
+function modoFicha(m){ MODO_FICHA = m; pintarComanda(acharComanda(COMANDA_ABERTA)); }
+
+// O ciclo do garçom em um toque: fecha o que estiver aberto, sobe pro começo
+// e deixa o cursor no número do cartão - o próximo gesto já é digitar.
+function voltarALancar(){
+  fecharComanda();
+  const campo = document.getElementById('novo-numero');
+  if(!campo) return;
+  campo.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  // o foco vem DEPOIS do scroll: no celular, focar primeiro abre o teclado e
+  // a rolagem suave termina no lugar errado
+  setTimeout(()=>{ campo.focus(); campo.select(); }, 250);
 }
 
 async function salvarMesa(id){

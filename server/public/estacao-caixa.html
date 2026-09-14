@@ -22,7 +22,12 @@
       <h1>Caixa</h1>
     </div>
   </div>
-  <button class="back" onclick="logout()">🚪 Sair</button>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <!-- mesmo ciclo do Salão, do lado do caixa: fecha a conta que está na tela
+         e volta pro campo do número, pronto pra próxima pessoa da fila -->
+    <button class="back" id="bt-nova" onclick="voltarALancar()" data-dica="Limpa a conta da tela e volta pro campo do número do cartão" aria-label="Nova conta">↩ Nova conta</button>
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
 </header>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
@@ -324,6 +329,15 @@ function mostrarRecibo(r){
   document.getElementById('conta').innerHTML = '<div class="est-vazio">Conta fechada.</div>';
   document.getElementById('escolhidas').innerHTML = '';
   document.getElementById('card-balcao').hidden = true;
+}
+
+// o mesmo ciclo do Salão: um toque e o caixa está pronto pra próxima pessoa
+function voltarALancar(){
+  limparTudo();
+  const campo = document.getElementById('numero');
+  if(!campo) return;
+  campo.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  setTimeout(()=>{ campo.focus(); campo.select(); }, 250);
 }
 
 function limparTudo(){

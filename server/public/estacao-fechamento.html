@@ -64,6 +64,7 @@
     <div id="precos"></div>
     <div class="est-acoes" id="acoes-precos" hidden style="margin-top:12px;">
       <button type="button" class="est-btn principal" onclick="salvarPrecos()">Salvar tabela</button>
+      <button type="button" class="est-btn" onclick="preencherDoCardapio()">Preencher com o cardápio</button>
     </div>
     <div class="est-erro" id="erro-precos"></div>
   </div>
@@ -178,6 +179,46 @@ function renderDia(f){
 // datas de feriado são marcadas à mão: não existe calendário nacional aqui, e
 // feriado de cidade não sairia de calendário nenhum.
 const LINHAS_TABELA = [...DIAS, ['feriado','Feriado']];
+
+// A TABELA DO CARDÁPIO DA CASA, transcrita da foto (14/09). Serve pra
+// PREENCHER O FORMULÁRIO de uma vez - não é o que vale: o que vale é o que
+// estiver salvo. Sem isto, montar a tabela é digitar 28 números à mão, e foi
+// por ela estar vazia que o garçom levou "não tem preço cadastrado" na cara
+// ao abrir a primeira comanda.
+//
+//   ALMOÇO  seg a sex (exceto feriados) 39,90 | sáb, dom e feriados 59,90
+//   JANTAR  dom a qui                   39,90 | sex e sábado        49,90
+//   Criança 6 a 10: 30 / 40 no almoço, 30 / 35 no jantar
+//
+// O jantar de FERIADO fica zerado de propósito: o cardápio não define preço de
+// feriado no jantar, e a regra do servidor só usa a linha "Feriado" no almoço.
+const TABELA_DO_CARDAPIO = {
+  almoco: {
+    seg:{adulto:39.9,crianca:30}, ter:{adulto:39.9,crianca:30}, qua:{adulto:39.9,crianca:30},
+    qui:{adulto:39.9,crianca:30}, sex:{adulto:39.9,crianca:30},
+    sab:{adulto:59.9,crianca:40}, dom:{adulto:59.9,crianca:40}, feriado:{adulto:59.9,crianca:40},
+  },
+  jantar: {
+    dom:{adulto:39.9,crianca:30}, seg:{adulto:39.9,crianca:30}, ter:{adulto:39.9,crianca:30},
+    qua:{adulto:39.9,crianca:30}, qui:{adulto:39.9,crianca:30},
+    sex:{adulto:49.9,crianca:35}, sab:{adulto:49.9,crianca:35}, feriado:{adulto:0,crianca:0},
+  },
+};
+function preencherDoCardapio(){
+  LINHAS_TABELA.forEach(([linha])=>{
+    TURNOS.forEach(([turno])=>{
+      ['adulto','crianca'].forEach(tipo=>{
+        const el = document.getElementById(`pr-${linha}-${turno}-${tipo}`);
+        if(el) el.value = String(TABELA_DO_CARDAPIO[turno][linha][tipo]).replace('.', ',');
+      });
+    });
+  });
+  const servico = document.getElementById('pr-servico');
+  if(servico && !num(servico.value)) servico.value = '10';
+  const erro = document.getElementById('erro-precos');
+  erro.style.color = 'var(--muted)';
+  erro.textContent = 'Campos preenchidos com a tabela do cardápio. Confira e toque em "Salvar tabela" — nada foi gravado ainda.';
+}
 
 async function carregarPrecos(){
   try{

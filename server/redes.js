@@ -15,10 +15,20 @@
 
 const ARCFOOD = 'ARCFOOD';
 const GBE = 'GBE';
+// A Estação da Comida é EMPRESA NOVA, não uma loja a mais do Bravo. O Master
+// foi explícito (14/09): "a estação da comida é a nova empresa, um novo grupo,
+// não se mistura nem com grupo bravo nem com arcfood".
+//
+// Sem esta rede, a regra do arquivo jogaria a Estação no GBE - a rede padrão
+// é "o resto" - e o efeito não seria só de rótulo: o PDF de tarefa sairia com
+// a LOGO DO GRUPO BRAVO em cima (ver tarefaRelatorio.desenharMarca) e o
+// faturamento dela entraria no bloco do Bravo no relatório de fechamentos.
+const ESTACAO = 'ESTACAO';
 
 const REDES = [
   { id: GBE, nome: 'Grupo Bravo (GBE)' },
   { id: ARCFOOD, nome: 'ARCFOOD' },
+  { id: ESTACAO, nome: 'Estação da Comida' },
 ];
 const NOME_DA_REDE = Object.fromEntries(REDES.map((r) => [r.id, r.nome]));
 
@@ -49,13 +59,22 @@ function normalizarUnidade(texto) {
 
 // unidade sem codigo nao tem rede - devolver GBE aqui faria lixo virar
 // linha do Grupo Bravo no relatorio
+// As unidades da Estação. Lista FECHADA, como a da ARCFOOD: é uma empresa
+// específica, e não pode acontecer de uma loja nova do Bravo cair aqui por
+// engano. Conferida ANTES da ARCFOOD por ser a lista mais nova - se um dia um
+// código coincidir, o erro aparece na hora em vez de silenciosamente.
+const CODIGOS_ESTACAO = new Set(['Estacao Comida', 'Estação da Comida']);
+const NOMES_ESTACAO_NORMALIZADOS = new Set([...CODIGOS_ESTACAO].map(normalizarUnidade));
+
 function redeDaUnidade(codigo) {
   const c = String(codigo == null ? '' : codigo).trim();
   if (!c) return null;
+  if (CODIGOS_ESTACAO.has(c) || NOMES_ESTACAO_NORMALIZADOS.has(normalizarUnidade(c))) return ESTACAO;
   return CODIGOS_ARCFOOD.has(c) || NOMES_ARCFOOD_NORMALIZADOS.has(normalizarUnidade(c)) ? ARCFOOD : GBE;
 }
 
 const ehArcfood = (codigo) => redeDaUnidade(codigo) === ARCFOOD;
+const ehEstacao = (codigo) => redeDaUnidade(codigo) === ESTACAO;
 
 // separa uma lista de registros (fechamentos, linhas de comparativo...) nas
 // duas redes, na ordem de REDES. `campo` diz onde esta o codigo da unidade.
@@ -71,4 +90,4 @@ function agruparPorRede(registros, campo = 'unidade') {
     .filter((g) => g.itens.length);
 }
 
-module.exports = { ARCFOOD, GBE, REDES, NOME_DA_REDE, CODIGOS_ARCFOOD, redeDaUnidade, ehArcfood, agruparPorRede };
+module.exports = { ARCFOOD, GBE, ESTACAO, REDES, NOME_DA_REDE, CODIGOS_ARCFOOD, CODIGOS_ESTACAO, redeDaUnidade, ehArcfood, ehEstacao, agruparPorRede };

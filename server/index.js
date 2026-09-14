@@ -2962,6 +2962,12 @@ const INVENTARIO_UNIDADES_NOMES = {
   // saltiversoVendas.js/saltiverso-vendas.html) - mesma chave=valor usada em
   // FECHAMENTO_UNIDADES_NOMES pra essa unidade
   'Saltiverso Patteo': 'Saltiverso Patteo',
+  // Estação da Comida: EMPRESA SEPARADA (rede própria em redes.js, lista
+  // própria em ESTACAO_UNIDADES_NOMES). Está aqui porque o catálogo de itens
+  // - o que o garçom lança na comanda e o que o caixa vende no balcão - mora
+  // no estoque, igual ao Saltiverso. O que não se mistura é GRUPO e TELA: nas
+  // telas da Estação só aparece a Estação, e nas do Bravo ela não aparece.
+  'Estacao Comida': 'Estação da Comida',
 };
 
 // unidades do app de entregas (motoboys) - nomes como aparecem nas planilhas
@@ -3028,6 +3034,9 @@ function classificarUnidade(codigo) {
   if (codigo in FECHAMENTO_UNIDADES_NOMES) return { secao: 'Fechamento', grupo: 'Grupo Bravo (GBE)' };
   if (codigo in ENTREGAS_UNIDADES_NOMES) return { secao: 'Entregas', grupo: 'Grupo Bravo (GBE)' };
   if (codigo in ifoodClient.IFOOD_UNIDADES_NOMES) return { secao: 'iFood', grupo: null };
+  // empresa nova, grupo próprio: sem esta linha ela cairia em "Outras" no
+  // checklist de permissões, como se fosse unidade sem dono
+  if (redes.redeDaUnidade(codigo) === redes.ESTACAO) return { secao: 'Estação da Comida', grupo: 'Estação da Comida' };
   return { secao: 'Monitor / Disputas (Adyen)', grupo: 'Outras' };
 }
 // true so quando o codigo NAO e reconhecido por nenhuma lista fixa acima -
@@ -8761,7 +8770,24 @@ app.get('/api/saltiverso/catalogo', requireSection('parque-loja'), async (req, r
 // Ver estacaoComida.js. Três seções porque são três papéis diferentes na
 // casa: quem anda no salão, quem fica no caixa e quem confere o dia. O
 // garçom não fecha conta e o caixa não lança consumo.
-const podeUnidadeEstacao = (req, unidade) => podeUnidadeInventario(req, unidade);
+// A ESTAÇÃO DA COMIDA É EMPRESA NOVA. O Master (14/09): "a estação da comida é
+// a nova empresa, um novo grupo, não se mistura nem com grupo bravo nem com
+// arcfood". Ela estava herdando a lista de unidades do inventário - e por isso
+// o garçom via "Dom Sao Miguel" no seletor, que é loja do Bravo.
+//
+// A lista é própria e FECHADA (mesma ideia da ARCFOOD em redes.js): loja nova
+// do Bravo não cai aqui por engano, e loja da Estação não aparece nas telas do
+// Bravo. Enquanto houver uma casa só, é uma linha.
+const ESTACAO_UNIDADES_NOMES = {
+  'Estacao Comida': 'Estação da Comida',
+};
+// unidade da Estação só é válida se estiver NA LISTA DELA: sem isto, bastaria
+// mandar o código de uma loja do Bravo na URL pra abrir comanda lá dentro
+const podeUnidadeEstacao = (req, unidade) => {
+  const u = String(unidade || '').trim();
+  if (!ESTACAO_UNIDADES_NOMES[u]) return false;
+  return req.isMaster || (req.permissions.unidades || []).includes(u);
+};
 
 // As unidades que a pessoa pode ver na Estação. Existe separado de
 // /api/inventario/unidades porque o garçom tem "estacao-salao" e NÃO tem
@@ -8771,9 +8797,9 @@ const podeUnidadeEstacao = (req, unidade) => podeUnidadeInventario(req, unidade)
 // pode perguntar.
 app.get('/api/estacao/unidades', requireAnySection('estacao-salao', 'estacao-caixa', 'estacao-fechamento'), (req, res) => {
   const unidades = req.isMaster
-    ? Object.keys(INVENTARIO_UNIDADES_NOMES)
-    : (req.permissions.unidades || []).filter((u) => INVENTARIO_UNIDADES_NOMES[u]);
-  res.json(unidades.map((codigo) => ({ codigo, nome: INVENTARIO_UNIDADES_NOMES[codigo] })));
+    ? Object.keys(ESTACAO_UNIDADES_NOMES)
+    : (req.permissions.unidades || []).filter((u) => ESTACAO_UNIDADES_NOMES[u]);
+  res.json(unidades.map((codigo) => ({ codigo, nome: ESTACAO_UNIDADES_NOMES[codigo] })));
 });
 
 app.get('/api/estacao/precos', requireSection('estacao-fechamento'), async (req, res) => {
