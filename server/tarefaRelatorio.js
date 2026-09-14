@@ -121,41 +121,74 @@ function abrir(res, nomeArquivo, inline = true) {
       doc.moveDown(0.3);
     });
   };
-  // A marca do cliente mora no documento da UNIDADE. Nao usamos uma imagem
-  // enviada em tempo de execucao: PDF precisa continuar abrindo daqui a anos
-  // e a marca institucional esta versionada junto do app.
+  // ---- A MARCA NO CABEÇALHO ----
+  // A marca do cliente mora no documento da UNIDADE. Não usamos uma imagem
+  // enviada em tempo de execução: PDF precisa continuar abrindo daqui a anos
+  // e a marca institucional está versionada junto do app.
+  //
+  // A CAIXA DA MARCA FICA NUM LUGAR SÓ. Antes havia dois números soltos - a
+  // logo desenhada com 94 de largura e o texto reservando 112 - e o topo dela
+  // vinha de um palpite fixo (doc.y + 52). Como a altura do cabeçalho VARIA
+  // (subtítulo, etiqueta, título que quebra em duas linhas), a linha preta,
+  // que é desenhada depois do texto, caía em cima da logo. Agora a mesma
+  // caixa reserva a largura do texto e posiciona o desenho.
+  const CAIXA_MARCA = {
+    [redes.ARCFOOD]: { w: 64, h: 48 },
+    [redes.GBE]: { w: 94, h: 48 },
+  };
+  const FOLGA_MARCA = 18;  // respiro entre o texto e a marca
+  const FOLGA_LINHA = 10;  // respiro entre a marca e a linha preta
+  const caixaDaMarca = (rede) => CAIXA_MARCA[rede] || null;
+
   const desenharMarca = (rede, topo) => {
-    const direita = x + largura;
+    const caixa = caixaDaMarca(rede);
+    if (!caixa) return;
+    const px = x + largura - caixa.w;
     if (rede === redes.ARCFOOD) {
-      const w = 64, h = 48, px = direita - w;
-      doc.roundedRect(px, topo, w, h, 8).fill('#2b2320');
-      doc.font('Helvetica-Bold').fontSize(15).fillColor('#faf7f2').text('ARC', px, topo + 8, { width: w, align: 'center', characterSpacing: 1 });
-      doc.rect(px + 14, topo + 28, w - 28, 2.5).fill('#e8a33d');
-      doc.font('Helvetica').fontSize(8.5).fillColor('#e8a33d').text('F O O D', px, topo + 33, { width: w, align: 'center', characterSpacing: .2 });
+      doc.roundedRect(px, topo, caixa.w, caixa.h, 8).fill('#2b2320');
+      doc.font('Helvetica-Bold').fontSize(15).fillColor('#faf7f2').text('ARC', px, topo + 8, { width: caixa.w, align: 'center', characterSpacing: 1 });
+      doc.rect(px + 14, topo + 28, caixa.w - 28, 2.5).fill('#e8a33d');
+      doc.font('Helvetica').fontSize(8.5).fillColor('#e8a33d').text('F O O D', px, topo + 33, { width: caixa.w, align: 'center', characterSpacing: .2 });
       return;
     }
     if (rede === redes.GBE) {
-      try { doc.image(LOGO_GRUPO_BRAVO, direita - 94, topo, { fit: [94, 48], align: 'right', valign: 'center' }); } catch (e) { /* cabecalho textual continua legivel */ }
+      // fit mantém a proporção do arquivo dentro da caixa; sem align/valign
+      // porque a origem já é o canto da caixa
+      try { doc.image(LOGO_GRUPO_BRAVO, px, topo, { fit: [caixa.w, caixa.h] }); } catch (e) { /* cabecalho textual continua legivel */ }
     }
   };
+
   const cabecalho = (chapeu, tituloGrande, subtitulo, etiqueta, rede) => {
-    // A marca fica dentro da faixa visual do cabeçalho: começa abaixo da
-    // identificação e termina com folga antes da linha preta. Antes ela
-    // encostava no topo da página, desalinhada do bloco que identifica a
-    // tarefa.
-    const topoMarca = doc.y + 52;
-    desenharMarca(rede, topoMarca);
-    // Reserva a faixa da marca. Sem a largura explícita, um título grande
-    // poderia atravessar a logo no canto direito em vez de quebrar antes.
-    const larguraTexto = rede ? largura - 112 : largura;
-    doc.fontSize(8).fillColor('#5b6470').font('Helvetica-Bold').text('NOPULSO · SOLUTIONS TI TECH', x, doc.y, { continued: true, characterSpacing: 0.6 });
+    const caixa = caixaDaMarca(rede);
+    const topoBloco = doc.y;
+    // o texto para onde a marca começa, com folga - sem isso um título grande
+    // atravessa a logo em vez de quebrar antes
+    const larguraTexto = caixa ? largura - caixa.w - FOLGA_MARCA : largura;
+
+    doc.fontSize(8).fillColor('#5b6470').font('Helvetica-Bold').text('NOPULSO · SOLUTIONS TI TECH', x, doc.y, { width: larguraTexto, continued: true, characterSpacing: 0.6 });
     doc.font('Helvetica').text(`  ·  ${chapeu || ''}`, { characterSpacing: 0.6 });
     doc.moveDown(0.4);
     doc.fontSize(18).fillColor('#111').font('Helvetica-Bold').text(tituloGrande, x, doc.y, { width: larguraTexto });
     if (subtitulo) doc.font('Helvetica').fontSize(11).fillColor('#444').text(subtitulo, x, doc.y, { width: larguraTexto });
     doc.moveDown(0.5);
     if (etiqueta) { doc.fontSize(9.5).fillColor('#5b6470').font('Helvetica').text(etiqueta, x, doc.y, { width: larguraTexto }); doc.moveDown(0.5); }
-    doc.rect(x, doc.y, largura, 2).fill('#111');
+
+    // A FAIXA DO CABEÇALHO É MEDIDA, NÃO CHUTADA: ela é o que o texto ocupou,
+    // e cresce se a marca for mais alta que ele. Assim a linha preta nunca
+    // sobe por cima da logo - é a faixa que se abre pra ela caber.
+    const alturaTexto = doc.y - topoBloco;
+    const alturaFaixa = caixa ? Math.max(alturaTexto, caixa.h + FOLGA_LINHA) : alturaTexto;
+    const linhaY = topoBloco + alturaFaixa;
+    if (caixa) {
+      // ANCORADA NA LINHA, não no meio da faixa: a marca assenta em cima da
+      // linha que fecha o cabeçalho, com FOLGA_LINHA de respiro, e encosta na
+      // mesma margem direita do texto. É o que um papel timbrado faz - e
+      // deixa a posição dela DEPENDER da linha, em vez de ser um palpite que
+      // um cabeçalho mais alto ou mais baixo desalinha.
+      desenharMarca(rede, linhaY - FOLGA_LINHA - caixa.h);
+    }
+    doc.rect(x, linhaY, largura, 2).fill('#111');
+    doc.y = linhaY + 2;
     doc.moveDown(0.6);
   };
   // o rodape mora ABAIXO da margem inferior. Sem zerar a margem, o pdfkit

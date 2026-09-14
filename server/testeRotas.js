@@ -21299,6 +21299,153 @@ setTimeout(async () => {
   if (!okReuniaoSai) ruins += 1;
   console.log(`${okReuniaoSai ? '✓' : '✗'} Reunião: sala do Workspace (com queda pra sala própria), virar tarefa e decisões virando trabalho`);
 
+  // ---------------------------------------------------------------------
+  // Cabeçalho dos PDFs: a marca ALINHADA, sem a linha preta por cima dela.
+  // Master (14/09), com a seta no print: "verificar o layout dos formularios,
+  // as logos precisam esta devidamente alinhadas e de forma semantica".
+  // O topo da marca vinha de um palpite fixo (doc.y + 52) enquanto a altura
+  // do cabeçalho VARIA (subtítulo, etiqueta, título que quebra em duas
+  // linhas). A linha preta, desenhada depois do texto, caía em cima da logo.
+  // A conferência aqui é GEOMÉTRICA: lê o content stream do PDF de verdade e
+  // mede onde a imagem e o retângulo preto realmente caíram.
+  // ---------------------------------------------------------------------
+  let okMarcaPdf = false;
+  try {
+    const zlib = require('zlib');
+    const cabM = { Authorization: 'Bearer ' + token };
+    const fluxoDaPagina = (b) => {
+      let i = 0;
+      while ((i = b.indexOf('stream', i)) >= 0) {
+        let ini = i + 6; if (b[ini] === 13) ini += 1; if (b[ini] === 10) ini += 1;
+        const fim = b.indexOf('endstream', ini); if (fim < 0) break;
+        try {
+          const t = zlib.inflateSync(b.subarray(ini, fim)).toString('latin1');
+          if (/\bBT\b/.test(t) && /\bre\b/.test(t)) return t;
+        } catch (e) { /* stream de imagem */ }
+        i = fim;
+      }
+      return '';
+    };
+    // Coordenadas: o pdfkit abre a página com "1 0 0 -1 0 <altura> cm", então
+    // dentro do stream o Y é a DISTÂNCIA DO TOPO (cresce pra baixo) - é o
+    // mesmo sistema em que o código desenha. Sem isso a conta sai invertida.
+    //
+    // imagem: q <larg> 0 0 <-alt> <x> <baseY> cm /Ixx Do Q
+    const imagemDo = (fluxo) => {
+      const m = /q\s+([\d.]+)\s+0\s+0\s+(-?[\d.]+)\s+([\d.]+)\s+([\d.]+)\s+cm\s*\/\w+\s+Do\s*Q/.exec(fluxo);
+      if (!m) return null;
+      const larg = +m[1]; const alt = Math.abs(+m[2]); const esq = +m[3]; const base = +m[4];
+      return { larg, alt, esq, base, topo: base - alt, direita: esq + larg };
+    };
+    // a linha do cabeçalho: o retângulo de largura cheia e 2 de altura que
+    // está mais ALTO na página (menor distância do topo)
+    const linhaDo = (fluxo) => {
+      const re = /([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+re/g;
+      let m; let achada = null;
+      while ((m = re.exec(fluxo))) {
+        const r = { x: +m[1], topo: +m[2], w: +m[3], h: +m[4] };
+        if (r.h === 2 && r.w > 300 && (!achada || r.topo < achada.topo)) achada = r;
+      }
+      return achada;
+    };
+    const medir = async (titulo) => {
+      const t = JSON.parse((await postarJson('/api/tarefas', {
+        titulo, unidade: '19706', dataInicio: '2026-08-13', dataEntrega: '2026-08-20', ehOcorrencia: true,
+      }, cabM)).corpo);
+      const pdf = await pedirBinario(`/api/tarefas/${t.id}/pdf`, cabM);
+      if (pdf.status !== 200) return { erro: pdf.status };
+      const fluxo = fluxoDaPagina(pdf.buffer);
+      const logo = imagemDo(fluxo); const linha = linhaDo(fluxo);
+      if (!logo || !linha) return { erro: 'sem logo ou sem linha', temLogo: !!logo, temLinha: !!linha };
+      return {
+        // a logo termina ACIMA da linha: folga = topo da linha - base da logo
+        folga: +(linha.topo - logo.base).toFixed(2),
+        // e as duas terminam na MESMA margem direita
+        direita: +Math.abs(logo.direita - (linha.x + linha.w)).toFixed(2),
+        larguraLogo: +logo.larg.toFixed(1),
+      };
+    };
+    // o caso do print, e o caso que movia a linha: título que quebra em duas
+    const curto = await medir('Comprar Ribbons e etiqueta zebra');
+    const longo = await medir('Comprar ribbons, etiquetas zebra, cabo de rede e fonte nova para a impressora fiscal da loja do shopping');
+    const fonte = require('fs').readFileSync(__dirname + '/tarefaRelatorio.js', 'utf8');
+
+    // ---- e o PDF do FORMULÁRIO, onde a marca mora numa CAIXA do cabeçalho ----
+    // lá o alinhamento é outro: a logo tem que ficar centrada dentro da caixa
+    // que o papel reserva pra ela, sem vazar por cima da grade.
+    const todosOsRetangulos = (fluxo) => {
+      const out = []; const re = /([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+re/g;
+      let m; while ((m = re.exec(fluxo))) out.push({ x: +m[1], y: +m[2], w: +m[3], h: +m[4] });
+      return out;
+    };
+    const formMod = require(__dirname + '/formularios.js');
+    const form = await formMod.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: { delivery: 100, entradaDinheiro: 100 },
+      linhas: [{ descricao: 'Serviço', valor: '600,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+    let caixaForm = null;
+    if (form && form.id) {
+      const pdfF = await pedirBinario(`/api/formularios/${form.id}/pdf`, cabM);
+      if (pdfF.status === 200) {
+        const fl = fluxoDaPagina(pdfF.buffer);
+        const img = imagemDo(fl);
+        // a caixa da marca: o retângulo que CONTÉM a imagem, o menor deles
+        const dentro = todosOsRetangulos(fl)
+          .filter((r) => img && r.x <= img.esq + 0.5 && r.x + r.w >= img.direita - 0.5
+            && r.y <= img.topo + 0.5 && r.y + r.h >= img.base - 0.5)
+          .sort((a2, b2) => (a2.w * a2.h) - (b2.w * b2.h))[0];
+        if (img && dentro) {
+          caixaForm = {
+            folgaEsq: +(img.esq - dentro.x).toFixed(2),
+            folgaDir: +((dentro.x + dentro.w) - img.direita).toFixed(2),
+            folgaTopo: +(img.topo - dentro.y).toFixed(2),
+            folgaBase: +((dentro.y + dentro.h) - img.base).toFixed(2),
+          };
+        }
+      }
+    }
+
+    const conf = {
+      // no formulário a marca é centrada DENTRO da caixa do papel, sem vazar
+      'no formulário, a marca fica centrada na caixa do cabeçalho e não vaza':
+        !!caixaForm && caixaForm.folgaEsq >= 0 && caixaForm.folgaDir >= 0
+        && caixaForm.folgaTopo >= 0 && caixaForm.folgaBase >= 0
+        && Math.abs(caixaForm.folgaEsq - caixaForm.folgaDir) < 1,
+      'a logo nunca fica embaixo da linha preta - nem com título de duas linhas':
+        !curto.erro && !longo.erro && curto.folga >= 9.5 && longo.folga >= 9.5,
+      'e ela encosta na MESMA margem direita da linha (alinhada, não solta)':
+        !curto.erro && !longo.erro && curto.direita < 1 && longo.direita < 1,
+      // a faixa é MEDIDA: quando o texto é mais curto que a marca, é a faixa
+      // que cresce - nunca a linha que sobe por cima
+      // a prova de que não é chute: a marca só é desenhada DEPOIS que o texto
+      // já foi escrito e a faixa medida. Desenhar antes é o que obrigava a
+      // adivinhar a altura - e era de onde vinha a linha por cima da logo.
+      'a faixa do cabeçalho é medida pelo texto, e a marca só é posicionada depois':
+        /const alturaTexto = doc\.y - topoBloco;/.test(fonte)
+        && /const alturaFaixa = caixa \? Math\.max\(alturaTexto, caixa\.h \+ FOLGA_LINHA\) : alturaTexto;/.test(fonte)
+        && fonte.indexOf('desenharMarca(rede, linhaY - FOLGA_LINHA - caixa.h)') > fonte.indexOf('const alturaTexto = doc.y - topoBloco;')
+        && !/const topoMarca = doc\.y \+/.test(fonte),
+      // um lugar só define a caixa: com dois números soltos (logo 94, reserva
+      // 112) o texto quebrava antes ou depois de onde a marca realmente está
+      'a caixa da marca é declarada UMA vez, e é ela que reserva a largura do texto':
+        /const CAIXA_MARCA = \{/.test(fonte)
+        && /const larguraTexto = caixa \? largura - caixa\.w - FOLGA_MARCA : largura;/.test(fonte)
+        && !/largura - 112/.test(fonte)
+        && (fonte.match(/caixa\.w/g) || []).length >= 5,
+      'as duas marcas (GBE e ARCFOOD) saem da mesma caixa':
+        /\[redes\.ARCFOOD\]: \{ w: 64, h: 48 \}/.test(fonte) && /\[redes\.GBE\]: \{ w: 94, h: 48 \}/.test(fonte)
+        && !/const w = 64, h = 48/.test(fonte),
+      'a logo sai no tamanho da caixa': !curto.erro && Math.abs(curto.larguraLogo - 94) < 0.5,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMarcaPdf = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (curto=${JSON.stringify(curto)} longo=${JSON.stringify(longo)} form=${JSON.stringify(caixaForm)})`);
+  } catch (e) { okMarcaPdf = false; console.log('  erro: ' + e.message); }
+  if (!okMarcaPdf) ruins += 1;
+  console.log(`${okMarcaPdf ? '✓' : '✗'} PDF: a marca do grupo alinhada à margem e acima da linha preta, com a faixa medida`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
