@@ -949,6 +949,16 @@
     '  border-bottom-color:var(--line,#27313b);}',
     '@media (prefers-reduced-motion:reduce){#zenith-dica{transition:none;}}',
     // botão só-ícone: mesma família do ✕ de fechar, quadrado e sem relevo
+    // ESTA LINHA NAO E' ENFEITE. `display:inline-flex` abaixo e' regra de autor
+    // e GANHA do [hidden]{display:none} do navegador, que e' regra de agente de
+    // usuario. Sem isto, todo botao so-icone marcado com o atributo hidden
+    // aparece assim mesmo - e o codigo que o escondeu parece nao funcionar.
+    //
+    // Foi o que o Master viu: "botao de reabrir numa tarefa que ainda nao foi
+    // concluida nao faz sentido". O JS escondia certo; o CSS mostrava. Na mesma
+    // tela havia SETE botoes nessa situacao (reabrir, cancelar, excluir,
+    // converter em solicitacao, criar formulario, reuniao vira tarefa).
+    '.btn-icone[hidden]{display:none;}',
     '.btn-icone{width:34px;height:34px;flex:none;padding:0;border-radius:8px;',
     '  background:var(--panel2,#181d24);border:1px solid var(--line,#27313b);color:var(--text,#e7ecf1);',
     '  font-size:15px;line-height:1;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;',

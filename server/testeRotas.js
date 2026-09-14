@@ -18876,6 +18876,7 @@ setTimeout(async () => {
     const aindaExiste = geradaId ? await tarefasMod.getOne(geradaId) : null;
 
     const htmlT = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tarefas.html'), 'utf8');
+    const temaTx = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
     const conf = {
       // ---- calendário ----
       'semanal cai só nos dias marcados':
@@ -18957,6 +18958,24 @@ setTimeout(async () => {
       'os ícones são SVG de traço, não emoji (o 🗓 não desenha no Windows dele)':
         /const ICONE_DATA = '<svg/.test(htmlT) && /const ICONE_PESSOA = '<svg/.test(htmlT)
         && !/\|\|'🗓'/.test(htmlT),
+      // O JS escondia certo e o CSS mostrava: display:inline-flex e' regra de
+      // AUTOR e ganha do [hidden]{display:none} do navegador. Sete botoes da
+      // ficha da tarefa apareciam quando nao deviam - entre eles o "reabrir"
+      // numa tarefa que nunca foi concluida.
+      'botão só-ícone marcado como hidden fica escondido de verdade':
+        /\.btn-icone\[hidden\]\{display:none;\}/.test(temaTx)
+        && temaTx.indexOf('.btn-icone[hidden]') < temaTx.indexOf('.btn-icone{width:34px'),
+      'a ficha da tarefa depende disso em sete botões':
+        (htmlT.match(/class="btn-icone[^"]*"[^>]*hidden/g) || []).length >= 6,
+      // "muito chamativo, diminuir mais, deixar mais clean"
+      'a opção escolhida se mostra por borda e texto, não por um bloco verde':
+        /\.dec-opcao\.ativa\{border-color:var\(--accent\);background:var\(--panel2\)\}/.test(htmlT)
+        && !/dec-opcao\.ativa\{[^}]*color-mix/.test(htmlT),
+      'Entrar é contorno que preenche no hover, e Criar é só o nome clicável':
+        /\.btn-entrar\{[^}]*background:none[^}]*\}/.test(htmlT)
+        && /\.btn-entrar:hover,\.btn-entrar:focus-visible\{background:var\(--accent\);color:#0b0d10\}/.test(htmlT)
+        && /\.btn-texto\{[^}]*border:0;background:none/.test(htmlT)
+        && !/class="btn primary"[^>]*onclick="decCriar\(\)"/.test(htmlT),
       'o check é o botão redondo do exemplo dele, não uma caixinha quadrada':
         /class="sub-check"/.test(htmlT) && /aria-pressed="\$\{x\.feita\?'true':'false'\}/.test(htmlT)
         && !/<input type="checkbox"[^>]*onchange="marcarSub/.test(htmlT),
@@ -21105,7 +21124,10 @@ setTimeout(async () => {
       'e agora aparece no detalhe, com Entrar, copiar e a URL à vista':
         /<div id="REUNIAODET" class="info reuniao-box" hidden><\/div>/.test(tar)
         && /function pintarReuniao\(\)/.test(tar) && /pintarReuniao\(\);pintarDecisoes\(\);pintarEquipe\(\)/.test(tar)
-        && /▶ Entrar<\/a>/.test(tar) && /data-dica="Copiar link"/.test(tar)
+        // o "▶" virou SVG e o bloco de limao virou contorno (pedido do Master:
+        // "deixe o maximo clean possivel") - o que este teste prova continua
+        // sendo o MESMO: existe um Entrar, e ele leva pro link da sala
+        && /class="btn-entrar" href="\$\{e\(link\)\}"[^>]*>.*?Entrar<\/a>/.test(tar) && /data-dica="Copiar link"/.test(tar)
         && /<code class="reuniao-url">/.test(tar)
         // a marca do topo diz quando a sala é do Workspace, não só "Reunião"
         && /const marca=O\.linkOrigem==='google'\?'📹 Reunião · Google Meet':'📹 Reunião';/.test(tar)
