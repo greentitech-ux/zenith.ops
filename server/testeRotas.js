@@ -22338,6 +22338,22 @@ setTimeout(async () => {
         /new EventSource\('\/api\/stream\?token='/.test(telas.salao)
         && /addEventListener\('estacao-salao-mudou'/.test(telas.salao)
         && /broadcast\('estacao-salao-mudou'/.test(idx2),
+      // ---- a ficha em tela cheia, sem o cabeçalho por cima ----
+      // Master (14/09), print da mesa 93: "parte das informacoes nao aparece".
+      // A primeira comanda da lista saía cortada ao meio. O diálogo abria com
+      // z-index 20 e o cabeçalho é sticky com 40: no celular, onde o diálogo
+      // toma a tela inteira, o cabeçalho ficava POR CIMA dele.
+      // (Testada e descartada a hipótese do body{overflow-y:clip}: as 28 telas
+      // com a mesma regra rolam normalmente no Chromium.)
+      'o diálogo fica acima do cabeçalho, e abaixo da gaveta do menu':
+        (() => {
+          const z = (re) => { const m = re.exec(css); return m ? Number(m[1]) : null; };
+          const zModal = z(/\.est-modal\{[^}]*z-index:(\d+);/);
+          const zCab = z(/header\{[^}]*z-index:(\d+);/);
+          const zGaveta = z(/\.nav-drawer\{[^}]*z-index:(\d+);/);
+          return zModal && zCab && zGaveta && zModal > zCab && zModal < zGaveta;
+        })(),
+
       // ---- voltar a lançar, no topo (Master, 14/09) ----
       // "um botao para voltar a lancar, pois precisa ficar intuitivo,
       // dinamico, didatico e facilitado". O trabalho é um CICLO: abre comanda,
