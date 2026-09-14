@@ -490,17 +490,40 @@ async function updatePodeRhCadastrarEfetivado(id, valor) {
 // Parque, e a tag define a TELA INICIAL da pessoa ao entrar no app (ver
 // index.html): Loja -> Historico de Solicitacoes, Tecnico -> Chamados TI,
 // Manutencao -> Manutencao; sem tag -> Painel.
-const CARGOS_VALIDOS = ['loja', 'gerente', 'assistente-gerente', 'tecnico', 'suporte', 'manutencao', 'operador'];
+// 'coordenador-agregador' é quem pausa item e fecha loja no iFood/99food.
+// Entrou porque o Beniboy precisa saber A QUEM mandar esse pedido: pausar um
+// item no agregador não é coisa que se resolve no chat nem que qualquer
+// atendente faça - tem que chegar em quem tem o painel na mão (Master,
+// 14/09). Sem um cargo, "o time" é todo mundo, e todo mundo é ninguém.
+const CARGOS_VALIDOS = ['loja', 'gerente', 'assistente-gerente', 'tecnico', 'suporte', 'manutencao', 'operador', 'coordenador-agregador'];
 // Ass. Ger (assistente de Gerente) tem as MESMAS permissoes de aprovacao do
 // Gerente (check-out antecipado do Parque, decidir cortesia, alertas de
 // limite do PCD cortesia, etc.) - qualquer checagem de "e gerente" espalhada
 // pelo app deve tratar os dois cargos como equivalentes (ver ehCargoGerente)
+// Os coordenadores de agregador ATIVOS. É pra eles que o Beniboy manda pausa
+// de item e fechamento de loja no iFood/99food - ver push.notifyAgregador.
+async function listarCoordenadoresAgregador() {
+  const snap = await usersRef.where('cargo', '==', 'coordenador-agregador').get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    .filter((u) => u.active !== false)
+    .map((u) => ({
+      id: u.id,
+      nome: u.nome || u.username || u.email,
+      email: u.email || null,
+      username: u.username || null,
+      // quem NAO abre a Central do Beniboy recebe o push sem link pra la -
+      // clicar e cair em "voce nao tem acesso" e pior que nao ter link
+      temSuporte: u.role === 'master' || !!u.isAdmin
+        || (((u.permissions || {}).sections) || []).includes('suporte'),
+    }));
+}
+
 function ehCargoGerente(cargo) {
   return cargo === 'gerente' || cargo === 'assistente-gerente';
 }
 async function updateCargo(id, cargo) {
   const limpo = cargo ? String(cargo).toLowerCase() : null;
-  if (limpo && !CARGOS_VALIDOS.includes(limpo)) throw new Error('Tag inválida. Use "loja", "gerente", "assistente-gerente", "tecnico", "suporte", "manutencao" ou "operador".');
+  if (limpo && !CARGOS_VALIDOS.includes(limpo)) throw new Error('Tag inválida. Use "loja", "gerente", "assistente-gerente", "tecnico", "suporte", "manutencao", "operador" ou "coordenador-agregador".');
   const ref = usersRef.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Acesso não encontrado.');
@@ -729,6 +752,7 @@ async function criarCopiandoDe({ modeloId, email, username, senha }) {
 }
 
 module.exports = {
+  listarCoordenadoresAgregador,
   VALID_SECTIONS,
   SECTION_VERTICAIS,
   secoesDaVertical,

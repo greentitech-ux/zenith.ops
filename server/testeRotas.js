@@ -17363,7 +17363,10 @@ setTimeout(async () => {
         ctx.status === 200 && (resps.length === 0 || resps.every((u) => 'cargo' in u))
         && /cargo: u\.role === 'master' \? null : \(u\.cargo \|\| null\)/.test(idxSrc),
       'Meu Dia: tag de cargo ao lado do nome (vocabulário de /usuarios.html) com o "·" centralizado':
-        /const CARGO_TAG=\{loja:'Loja',gerente:'Gerente','assistente-gerente':'Assistente',tecnico:'Técnico',suporte:'Suporte',manutencao:'Manutenção',operador:'Operador'\}/.test(tarefasHtml)
+        (() => {
+          const mapa = (tarefasHtml.match(/const CARGO_TAG=\{([\s\S]*?)\};/) || [])[1] || '';
+          return require('./users.js').CARGOS_VALIDOS.every((c) => mapa.includes(`'${c}':`) || mapa.includes(`${c}:`));
+        })()
         && /\.cargo-tag::before\{content:"·";margin:0 6px/.test(tarefasHtml)
         // as DUAS listas de participante (criar e "alterar") ganham a tag
         // o nome agora passa por nomeUsuario() (que já escapa e marca como
@@ -22311,6 +22314,89 @@ setTimeout(async () => {
   } catch (e) { okEstacaoTelas = false; console.log('  erro: ' + e.message); }
   if (!okEstacaoTelas) ruins += 1;
   console.log(`${okEstacaoTelas ? '✓' : '✗'} Estação da Comida: as três telas (Salão, Caixa, Fechamento), com a tabela do cardápio`);
+
+  // ------------------------------------------------------------------
+  // PAUSAR ITEM / FECHAR LOJA NO IFOOD / 99FOOD -> COORDENADOR AGREGADOR.
+  // Pedido do Master (14/09): "ao ser solicitado pausar item ou fechar loja
+  // no ifood ou 99food beniboy se comunique com o coordenador agregador que
+  // fará esse bloqueio". Antes isso caía no chamar_atendente: o Beniboy saía
+  // da conversa, tocava o alarme geral do time e o pedido ficava esperando
+  // alguém perceber que quem resolve é outra pessoa. O que se prova aqui:
+  // o aviso vai pro coordenador POR NOME, sem coordenador cadastrado NÃO
+  // some (cai no alarme geral), e o bot pede loja/app/item ANTES de acionar.
+  let okAgregador = false;
+  try {
+    const pushAg = require(__dirname + '/push.js');
+    const src = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const baseU = { role: 'user', active: true, permissions: { sections: [] } };
+    DOCS.set('users/u-coord-agg', { ...baseU, id: 'u-coord-agg', email: 'coord@teste.local', username: 'coordagg', nome: 'Rita Coord', cargo: 'coordenador-agregador', permissions: { sections: ['suporte'] } });
+    DOCS.set('users/u-coord-agg-2', { ...baseU, id: 'u-coord-agg-2', email: 'coord2@teste.local', username: 'coordagg2', nome: 'Tino Coord', cargo: 'coordenador-agregador' });
+    DOCS.set('users/u-coord-agg-off', { ...baseU, id: 'u-coord-agg-off', email: 'coord3@teste.local', username: 'coordagg3', cargo: 'coordenador-agregador', active: false });
+    DOCS.set('users/u-nao-coord', { ...baseU, id: 'u-nao-coord', email: 'outro@teste.local', username: 'outro', cargo: 'gerente' });
+
+    const chatFake = { id: 'chat-agg-1', nome: 'Loja Mooca', lojaContexto: 'Mooca' };
+    const entrega = await pushAg.notifyAgregador(chatFake, {
+      acao: 'pausar-item', canal: 'ifood', unidade: 'Mooca', detalhe: 'Coca 2L · acabou o estoque',
+    });
+    const alertas = [...DOCS.entries()].map(([, v]) => v).filter((v) => v && v.tipo === 'agregador');
+    const alerta = alertas[0] || {};
+
+    // sem NENHUM coordenador cadastrado o pedido não pode evaporar
+    DOCS.delete('users/u-coord-agg');
+    DOCS.delete('users/u-coord-agg-2');
+    DOCS.delete('users/u-coord-agg-off');
+    const semNinguem = await pushAg.notifyAgregador({ id: 'chat-agg-2', nome: 'Loja Bessa' }, {
+      acao: 'fechar-loja', canal: '99food', unidade: 'Dom Bessa',
+    });
+    const caiuNoAlarmeGeral = [...DOCS.entries()].some(([, v]) => v && v.tipo === 'beniboy'
+      && /sem coordenador cadastrado/.test(v.resumo || v.titulo || ''));
+
+    const usersMod = require(__dirname + '/users.js');
+    const conf = {
+      'o aviso vai pros coordenadores ATIVOS, por nome (inativo e não-coordenador ficam de fora)':
+        entrega.entregues === 2
+        && entrega.coordenadores.map((c) => c.id).sort().join(',') === 'u-coord-agg,u-coord-agg-2',
+      'quem não abre a Central do Beniboy recebe o push sem link pra ela':
+        entrega.coordenadores.find((c) => c.id === 'u-coord-agg').temSuporte === true
+        && entrega.coordenadores.find((c) => c.id === 'u-coord-agg-2').temSuporte === false,
+      'fica registrado na Central de Alertas com o app, a loja e o item':
+        !!alerta.titulo && /Pausar item/.test(alerta.titulo)
+        && /ifood/.test(alerta.resumo || '') && /Mooca/.test(alerta.resumo || '')
+        && /Coca 2L/.test(alerta.resumo || '') && alerta.critico === true,
+      'sem coordenador cadastrado o pedido NÃO some - cai no alarme geral do Beniboy':
+        semNinguem.entregues === 0 && caiuNoAlarmeGeral,
+      'o cargo existe de verdade no cadastro (senão nunca haveria coordenador)':
+        typeof usersMod.listarCoordenadoresAgregador === 'function'
+        && require('fs').readFileSync(__dirname + '/users.js', 'utf8').includes("'coordenador-agregador'")
+        && require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8').includes("'coordenador-agregador'"),
+      // a ferramenta tem que EXIGIR onde bloquear - um "pausa o item aí" sem
+      // loja/item chega no coordenador como um pedido que ele não consegue
+      // executar, e ele volta a perguntar pela conversa que o bot já deixou
+      'a ferramenta existe e exige loja, app e (pra pausar) o item':
+        /name: 'chamar_coordenador_agregador'/.test(src)
+        && /required: \['acao', 'canal', 'unidade'\]/.test(src)
+        && /Pergunte de qual loja é antes de chamar/.test(src)
+        && /Pergunte QUAL item deve ser pausado/.test(src),
+      // esse pedido não é "chamar um humano qualquer": se desativasse o bot,
+      // a pessoa ficaria esperando na conversa sem ninguém do outro lado
+      'acionar o coordenador NÃO tira o Beniboy da conversa':
+        !/chamar_coordenador_agregador[\s\S]*?desativarBot/.test(src.slice(src.indexOf("nome === 'chamar_coordenador_agregador'"), src.indexOf("nome === 'desbloquear_login'"))),
+      'o prompt manda usar essa ferramenta em vez de chamar_atendente':
+        /iFood\/99food[\s\S]{0,400}chamar_coordenador_agregador \(nunca chamar_atendente\)/.test(src),
+      'o pedido fica registrado na própria conversa (nota interna PENDENTE)':
+        /registrarNotaInterna\(chat\.id, \{[\s\S]{0,300}situacao: 'PENDENTE'/.test(src),
+      'o index.js chama push.notifyAgregador quando a ferramenta roda':
+        /if \(r\.agregador\) \{/.test(srcIdx) && /push\.notifyAgregador\(r\.chat, \{ acao: a\.acao, canal: a\.canal, unidade: a\.unidade, detalhe \}\)/.test(srcIdx),
+      'a Central de Alertas sabe desenhar esse tipo (senão vira 🔔 sem nome)':
+        require('fs').readFileSync(__dirname + '/public/central-alertas.html', 'utf8').includes("'agregador': {"),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAgregador = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAgregador = false; console.log('  erro: ' + e.message); }
+  if (!okAgregador) ruins += 1;
+  console.log(`${okAgregador ? '✓' : '✗'} Beniboy: pausar item / fechar loja no iFood-99food vai pro COORDENADOR AGREGADOR`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

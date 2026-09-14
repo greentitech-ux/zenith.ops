@@ -945,6 +945,12 @@ function conectarStream(){
     es.addEventListener('suporte-chat', ()=>{
       carregarLista();
     });
+    // pausar item / fechar loja no agregador (ver chamar_coordenador_agregador
+    // em suporteBot.js): o pedido ja esta na conversa como nota interna - so
+    // traz a lista na hora, sem esperar o poll de 60s
+    es.addEventListener('beniboy-agregador', ()=>{
+      carregarLista();
+    });
   }catch(e){ /* sem SSE, so atualiza no reload/poll */ }
 }
 

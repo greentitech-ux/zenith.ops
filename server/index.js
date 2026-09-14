@@ -13328,6 +13328,22 @@ async function acionarBeniboy(chatId) {
       broadcast('solicitacao-criada', t, 'solicitacoes');
       push.notifySolicitacao(`Ticket #${t.numeroTicket} · Nova solicitação (Beniboy · chat)`, `${t.titulo || ''} · ${t.unidadeNome || ''}`, t.id);
     }
+    // PAUSAR ITEM / FECHAR LOJA no iFood/99food (tool chamar_coordenador_agregador):
+    // vai pro coordenador agregador POR NOME, nao pro alarme geral do time -
+    // e ele quem tem o painel do app na mao (ver push.notifyAgregador).
+    if (r.agregador) {
+      const a = r.agregador;
+      const detalhe = [a.item, a.motivo].filter(Boolean).join(' · ');
+      const entrega = await push.notifyAgregador(r.chat, { acao: a.acao, canal: a.canal, unidade: a.unidade, detalhe }).catch((e) => {
+        console.error('[suporteBot] falha ao avisar coordenador agregador:', e.message);
+        return null;
+      });
+      // a Central do Beniboy destaca a conversa na hora, sem esperar push
+      broadcast('beniboy-agregador', {
+        chatId, nome: r.chat?.nome || '', acao: a.acao, canal: a.canal, unidade: a.unidade,
+        item: a.item || '', motivo: a.motivo || '', coordenadores: (entrega && entrega.entregues) || 0,
+      }, 'suporte');
+    }
     if (r.chamouAtendente) {
       push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico.html');
       // se a loja de onde veio essa conversa esta sem conexao, a causa real

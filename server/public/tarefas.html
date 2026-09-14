@@ -216,7 +216,7 @@ function elegiveis(unidade){return((CTX.responsaveis)||[]).filter(u=>!unidade||(
 // de /usuarios.html, sem inventar rótulo. O "·" (via .cargo-tag::before) fica
 // centralizado na altura, entre o nome e a tag. tagCargoTexto é a versão sem
 // HTML pro <option> do responsável, que não aceita <span> dentro.
-const CARGO_TAG={loja:'Loja',gerente:'Gerente','assistente-gerente':'Assistente',tecnico:'Técnico',suporte:'Suporte',manutencao:'Manutenção',operador:'Operador'};
+const CARGO_TAG={loja:'Loja',gerente:'Gerente','assistente-gerente':'Assistente',tecnico:'Técnico',suporte:'Suporte',manutencao:'Manutenção',operador:'Operador','coordenador-agregador':'Coord. Agregador'};
 function tagCargo(u){const c=u&&u.cargo&&CARGO_TAG[u.cargo];return c?`<span class="cargo-tag">${e(c)}</span>`:''}
 function tagCargoTexto(u){const c=u&&u.cargo&&CARGO_TAG[u.cargo];return c?` · ${c}`:''}
 // Buscar nome na lista de participantes. Master (14/09): "um campo para

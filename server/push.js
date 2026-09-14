@@ -3,7 +3,8 @@
 // estorno agendado, chargeback e fraude suspeita.
 const webpush = require('web-push');
 const db = require('./firestore');
-const { ehCargoGerente } = require('./users');
+const users = require('./users');
+const { ehCargoGerente } = users;
 const alertasCentral = require('./alertasCentral');
 
 const COLLECTION = db.collection('push_subscriptions');
@@ -310,6 +311,40 @@ async function notifyBeniboyEscalonamento(chat, motivo, opts) {
       }
     }
   }
+}
+
+// PAUSAR ITEM / FECHAR LOJA no iFood ou 99food. Não é coisa que se resolve no
+// chat, e não é qualquer atendente que faz: quem tem o painel do agregador na
+// mão é o COORDENADOR AGREGADOR (Master, 14/09). Antes isto caía no alarme
+// geral do Beniboy - "chamei um atendente" - e ficava esperando alguém do time
+// perceber que o pedido era de outra pessoa.
+//
+// Vai pro coordenador POR NOME (push por usuário), e também pro registro da
+// Central, pra não depender de alguém estar com o celular na mão. Se não
+// houver nenhum coordenador cadastrado, cai no alarme geral do Beniboy: é
+// melhor acordar o time do que engolir o pedido em silêncio.
+async function notifyAgregador(chat, { acao, detalhe, unidade, canal } = {}) {
+  const chatId = chat && chat.id;
+  if (!chatId) return { entregues: 0, coordenadores: [] };
+  const coordenadores = await users.listarCoordenadoresAgregador().catch(() => []);
+  const oQue = acao === 'fechar-loja' ? 'Fechar loja' : 'Pausar item';
+  const onde = [canal, unidade].filter(Boolean).join(' · ');
+  const titulo = `🛵 ${oQue} no agregador`;
+  const corpo = `${(chat && chat.nome) || 'Visitante'}${onde ? ' · ' + onde : ''}${detalhe ? ' — ' + detalhe : ''}`.slice(0, 150);
+  const url = '/beniboy.html?chat=' + encodeURIComponent(chatId);
+
+  await alertasCentral.registrar({ tipo: 'agregador', titulo, resumo: corpo, url, critico: true });
+  if (!coordenadores.length) {
+    await notifyBeniboyEscalonamento(chat, `${oQue} no agregador (sem coordenador cadastrado)`);
+    return { entregues: 0, coordenadores: [] };
+  }
+  for (const c of coordenadores) {
+    // so manda pra conversa quem consegue abrir a Central do Beniboy; pros
+    // demais o push vale por si - titulo e corpo ja dizem o que bloquear,
+    // em qual app e em qual loja
+    await notifyUsuario(c.id, titulo, corpo, 'agregador-' + chatId, c.temSuporte ? url : '/');
+  }
+  return { entregues: coordenadores.length, coordenadores };
 }
 
 // alerta de seguranca do chat de suporte: texto tipo comando/script, ou
@@ -1423,7 +1458,7 @@ module.exports = {
   notifyProgramaNovo,
   notifyProgramaSumido,
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
+  notifyBeniboyEscalonamento, notifyAgregador, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
