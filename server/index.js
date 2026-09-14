@@ -5687,6 +5687,19 @@ app.get('/api/fechamentos/ajuste-pos-anterior', requireSection('lancamento'), as
   res.json({ ajuste: await fechamentosLive.ajustePosDoDiaAnterior(unidade, data) });
 });
 
+// CAIXA INICIAL DE HOJE = caixa final do ultimo fechamento da unidade. So pra
+// MOSTRAR no lancamento (o servidor aplica de novo no create de qualquer jeito
+// - valor de dinheiro nunca vem do navegador). Devolve null quando e' o
+// primeiro fechamento da unidade: ai nao ha corrente pra puxar e a loja informa.
+app.get('/api/fechamentos/caixa-anterior', requireSection('lancamento'), async (req, res) => {
+  const { unidade, data } = req.query;
+  if (!unidade || !data) return res.status(400).json({ error: 'unidade e data são obrigatórios.' });
+  if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  res.json(await fechamentosLive.caixaFinalAnterior(unidade, data) || { valor: null, de: null });
+});
+
 // registro CRU (sem mesclar com sangria/planilha) de um fechamento - usado
 // pela edicao direta do Master, pra nunca editar em cima de um valor que ja
 // vem somado com a sangria do dia (ver sangrias.js/comoFechamento)
@@ -6185,6 +6198,9 @@ app.post('/api/fechamentos/lancar', requireSection('lancamento'), upload.any(), 
       unidade, unidadeNome, grupo, data, gerente, campos, kpisExtras, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas,
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,
+      // a corrente do caixa (final obrigatorio, inicial herdado) vale AQUI, no
+      // lançamento da loja - nunca na importação da planilha, que traz histórico
+      lancamentoDaLoja: true,
     });
     broadcast('fechamento-lancado', registro, 'lancamento');
     // aviso de rotina de que a loja fechou o dia (pedido do Master: "quero
