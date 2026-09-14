@@ -185,6 +185,47 @@ async function salvarPrecos(unidade, { rodizio, servicoPct, feriados }, porEmail
 // O turno sai da HORA em que a comanda foi aberta, não de uma escolha do
 // garçom: às 19h é jantar, e pedir isso na tela seria um campo a mais pra
 // errar no meio do salão cheio.
+// ---------- QUEM ABRE O TURNO E' O CAIXA, NAO O RELOGIO ----------
+//
+// Decisao do Master (14/09/2026): "quem define a abertura da venda almoco ou
+// fechamento e' o caixa. Se o caixa abrir venda almoco, os precos ficam almoco.
+// Se o caixa fecha e abre janta, tudo vira".
+//
+// POR QUE ISSO IMPORTA: o relogio mentia nos dois sentidos. Almoco que varou
+// das 18h passava a cobrar preco de jantar no meio do servico; jantar que
+// comecou 17h40 cobrava almoco na primeira mesa e jantar na segunda. A casa
+// sabe em que turno esta - o sistema nao precisa adivinhar.
+//
+// UM DOCUMENTO POR UNIDADE E DIA. Nao e' historico de aberturas: e' o estado
+// de hoje, e o de ontem nao interessa a ninguem. Trocar de turno sobrescreve.
+//
+// SEM NINGUEM TER ABERTO, o relogio ainda decide - e de proposito: a casa que
+// esquecer de abrir o turno nao pode ficar impedida de vender. O relogio vira
+// o palpite, nao a regra.
+const TURNO_DIA = db.collection('estacaoTurno');
+function idTurno(unidade, data) { return `${unidade}__${data}`; }
+async function turnoAberto(unidade, data) {
+  const snap = await TURNO_DIA.doc(idTurno(unidade, data)).get();
+  const d = snap.exists ? snap.data() : null;
+  return d && TURNOS.includes(d.turno) ? d : null;
+}
+// o turno que VALE agora: o que o caixa abriu; sem isso, o palpite do relogio
+async function turnoVigente(unidade, data, agora = new Date()) {
+  const aberto = await turnoAberto(unidade, data);
+  if (aberto) return { turno: aberto.turno, porCaixa: true, abertoEm: aberto.abertoEm, abertoPorEmail: aberto.abertoPorEmail };
+  return { turno: turnoDe(agora), porCaixa: false, abertoEm: null, abertoPorEmail: null };
+}
+async function abrirTurno(unidade, turno, porEmail, agora = new Date()) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  if (!TURNOS.includes(turno)) throw new Error('Turno inválido.');
+  const data = hojeBrasiliaISO(agora);
+  const registro = {
+    unidade, data, turno, abertoEm: new Date(agora).toISOString(), abertoPorEmail: texto(porEmail, 120) || null,
+  };
+  await TURNO_DIA.doc(idTurno(unidade, data)).set(registro);
+  return registro;
+}
+
 function turnoDe(agora = new Date()) {
   const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: FUSO_BR, hour: '2-digit', hourCycle: 'h23' }).format(new Date(agora)));
   return h >= HORA_VIRADA_JANTAR ? 'jantar' : 'almoco';
@@ -270,11 +311,16 @@ async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, p
   }
   const data = hojeBrasiliaISO(agora);
   const precos = await getPrecos(unidade);
-  const turno = turnoDe(agora);
+  // o turno vem do CAIXA (ver turnoVigente) - o relogio so opina se ninguem abriu
+  const vigente = await turnoVigente(unidade, data, agora);
+  const turno = vigente.turno;
   const precoRodizio = precoRodizioDoDia(precos, data, tipo, turno);
   // criança até 5 anos custa 0 DE PROPÓSITO - só ela pode passar sem preço
   if (tipo !== TIPO_ISENTO && !(precoRodizio > 0)) {
-    throw new Error(`O rodízio ${ROTULO_TIPO[tipo]} do ${ROTULO_TURNO[turno]} de ${linhaDaTabela(precos, data, turno)} não tem preço cadastrado. Peça pro Master preencher a tabela de preços.`);
+    const porque = vigente.porCaixa
+      ? `o caixa abriu o ${ROTULO_TURNO[turno]}`
+      : `ninguém abriu turno hoje, então vale o horário (${ROTULO_TURNO[turno]})`;
+    throw new Error(`O rodízio ${ROTULO_TIPO[tipo]} do ${ROTULO_TURNO[turno]} de ${linhaDaTabela(precos, data, turno)} não tem preço cadastrado - ${porque}. Preencha essa linha na tabela de preços (Fechamento do dia), ou troque o turno no caixa.`);
   }
   const ref = COMANDAS.doc();
   const comanda = {
@@ -612,6 +658,7 @@ module.exports = {
   STATUS, TIPOS_RODIZIO, CAIXAS, DIAS_SEMANA, SERVICO_PCT_PADRAO,
   hojeBrasiliaISO, diaDaSemanaBR,
   getPrecos, salvarPrecos, precoRodizioDoDia, precosVazios, turnoDe, linhaDaTabela,
+  turnoAberto, turnoVigente, abrirTurno,
   TURNOS, TIPO_ISENTO, ROTULO_TIPO, ROTULO_TURNO, HORA_VIRADA_JANTAR,
   itensDoBalcao, resolverItensBalcao,
   abrirComanda, definirMesa, getComanda, lancarItem, removerItem, cancelarComanda,
