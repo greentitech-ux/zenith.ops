@@ -21552,6 +21552,59 @@ setTimeout(async () => {
   if (!okPainelFlutuante) ruins += 1;
   console.log(`${okPainelFlutuante ? '✓' : '✗'} Celular: o menu de unidades cabe na tela (encosta na borda, abre pra cima e o nome quebra)`);
 
+  // ---------------------------------------------------------------------
+  // Quedas de conexão: o período fica onde a decisão é tomada.
+  // Master (14/09): "botoes de Hoje, Ontem, 7 dias, 30 dias, 90 dias -
+  // colocar ao lado do botao PDF". Eles moravam no RODAPÉ do painel, depois
+  // do texto explicativo: pra trocar de período era preciso rolar a tabela
+  // inteira até o fim e voltar.
+  // ---------------------------------------------------------------------
+  let okPeriodoQuedas = false;
+  try {
+    const noc = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      // os presets entram DENTRO da linha de ações, antes de Aplicar e PDF
+      'os botões de período estão na mesma linha do PDF':
+        noc.includes('<div class="quedas-acoes">${botoesPeriodoQuedas()}<span class="quedas-sep" aria-hidden="true"></span><button type="button" class="btn-secundario" onclick="baixarRelatorioQuedas()">📄 PDF</button></div>'),
+      // e o "Aplicar período" age sobre o DE e o ATÉ, então mora COM eles -
+      // não numa linha solta embaixo (Master, 14/09)
+      'o Aplicar período fica junto do De e do Até':
+        noc.includes('<label>Até<input id="quedas-ate" type="date" value="${escapeHtml(QUEDAS_ATE)}"></label><button type="button" class="btn-secundario quedas-aplicar" onclick="aplicarPeriodoQuedas()">Aplicar período</button></div>')
+        && /\.quedas-intervalo\{display:grid;grid-template-columns:repeat\(2,minmax\(120px,1fr\)\) auto;gap:8px;grid-column:span 2;align-items:end;\}/.test(noc)
+        // no celular três colunas não cabem: o botão desce e ocupa a linha
+        && /\.quedas-aplicar\{grid-column:1\/-1;\}/.test(noc),
+      // e não sobrou nenhuma cópia no rodapé - nos DOIS caminhos (com tabela
+      // e na tela vazia), que é onde estavam
+      // o que o Master reclamou era o RODAPÉ do painel montado: depois da
+      // tabela e depois do texto explicativo. As telas de "carregando" e de
+      // erro continuam com os botões soltos de propósito - lá não existe
+      // linha de ações, e eles são a única saída pra trocar de período.
+      'e não sobrou nenhum bloco de período no rodapé do painel montado':
+        !noc.includes('</div>${botoesPeriodoQuedas()}`')
+        && !noc.includes('+ filtrosQuedas() + botoesPeriodoQuedas()')
+        && noc.includes('Somando o histórico...</div>' + String.fromCharCode(39) + ' + botoesPeriodoQuedas()'),
+      // os cinco continuam lá, com o mesmo vocabulário
+      'os cinco períodos continuam existindo, com os mesmos rótulos':
+        [`onclick="carregarQuedas('hoje')">Hoje<`, `onclick="carregarQuedas('ontem')">Ontem<`,
+          'onclick="carregarQuedas(7)">7 dias<', 'onclick="carregarQuedas(30)">30 dias<',
+          'onclick="carregarQuedas(90)">90 dias<'].every((t) => noc.includes(t)),
+      // a linha é inteira deles: sete botões dividindo espaço com os selects
+      // espremeriam os dois grupos
+      'a linha de ações ocupa a largura toda, e o traço separa período de ação':
+        /\.quedas-acoes\{display:flex;gap:7px;flex-wrap:wrap;align-items:center;grid-column:1\/-1;\}/.test(noc)
+        && /\.quedas-sep\{width:1px;align-self:stretch;/.test(noc),
+      // aninhado, ele perde a faixa própria que tinha como bloco solto
+      'o grupo de períodos perdeu a faixa que tinha quando era bloco de rodapé':
+        /\.quedas-periodos\{display:flex;gap:7px;flex-wrap:wrap;align-items:center;\}/.test(noc)
+        && !/\.quedas-periodos\{[^}]*border-top:1px solid var\(--line\);\}/.test(noc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPeriodoQuedas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPeriodoQuedas = false; console.log('  erro: ' + e.message); }
+  if (!okPeriodoQuedas) ruins += 1;
+  console.log(`${okPeriodoQuedas ? '✓' : '✗'} Quedas: o período sai do rodapé e vai pro lado do PDF, onde a escolha é feita`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
