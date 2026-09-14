@@ -2421,6 +2421,15 @@ const CAMPOS_FIXOS = [
   // (ver colunasValores), então em loja sem Maquininha POS nada muda.
   {campo:'adyenPos', label:'Maquininha POS (pós meia-noite)'},
   {campo:'ajustePosAnterior', label:'Ajuste da Maquininha POS de ontem'},
+  // CAIXA INICIAL / CAIXA FINAL - pedido do Master (14/09/2026). O dado sempre
+  // existiu (a loja lança os dois em lancamento.html e a planilha importa
+  // "Caixa Inicial"), só nunca teve coluna: era gravado e ficava invisível pra
+  // quem confere. naoSoma porque FUNDO DE CAIXA NÃO SE SOMA - é o mesmo valor
+  // que dorme na gaveta todo dia, e somar sete dias daria um "caixa inicial"
+  // de R$ 1.400 que não existe em lugar nenhum. A mesma lista, na mesma ordem,
+  // está em fechamentosReport.js.
+  {campo:'caixaInicial', label:'Caixa inicial', naoSoma:true},
+  {campo:'caixaFinal', label:'Caixa final', naoSoma:true},
 ];
 
 // ---------- colunas de valor unificadas por NOME ----------
@@ -2476,7 +2485,7 @@ function colunasValores(rows, grupo){
   const porNome = new Map();
   const add = (label, fonte) => {
     const k = chaveLabel(label);
-    if(!porNome.has(k)) porNome.set(k, { key: fonte.key, label, fontes: [], usada: false });
+    if(!porNome.has(k)) porNome.set(k, { key: fonte.key, label, fontes: [], usada: false, naoSoma: !!fonte.naoSoma });
     const col = porNome.get(k);
     col.fontes.push(fonte);
     if(fonte.sempreVisivel || rows.some(d => Math.abs(valorColuna(d, {fontes:[fonte]})) > 0.001)) col.usada = true;
@@ -2484,7 +2493,7 @@ function colunasValores(rows, grupo){
   // campo fixo só entra se alguma linha de fato usa (schema antigo, sem
   // grupo pra dizer quais existem); canal/forma vem da definição do grupo,
   // que é a lista completa e ordenada - esses aparecem mesmo zerados
-  CAMPOS_FIXOS.forEach(c => add(c.label, { key:c.campo, tipo:'fixo', campo:c.campo }));
+  CAMPOS_FIXOS.forEach(c => add(c.label, { key:c.campo, tipo:'fixo', campo:c.campo, naoSoma:!!c.naoSoma }));
   colunasExtras(rows, 'canaisVendaExtras', grupo).forEach(c => add(c.label, { key:'canal:'+c.campo, tipo:'extra', origem:'canaisVendaExtras', campo:c.campo, sempreVisivel:!!grupo }));
   colunasExtras(rows, 'formasPagamentoExtras', grupo).forEach(c => add(c.label, { key:'forma:'+c.campo, tipo:'extra', origem:'formasPagamentoExtras', campo:c.campo, sempreVisivel:!!grupo }));
   return [...porNome.values()].filter(c => c.usada);
@@ -2769,7 +2778,10 @@ function tabelaFechamentosHtml(rows){
     { key:'quebra', label:'Quebra', soma:d=>d.quebra, td:d=>`<td class="valor">${fmtMoney(d.quebra)}</td>` },
     { key:'entradaDinheiro', label:'Entrada em dinheiro', soma:d=>d.entradaDinheiro, td:d=>`<td class="valor">${fmtMoney(d.entradaDinheiro)}</td>` },
     { key:'totalSaida', label:'Total de saída', soma:d=>d.totalSaida, td:d=>`<td class="valor">${fmtMoney(d.totalSaida)}</td>` },
-    ...colunasDeValor.map(c=>({ key:c.key, label:c.label, soma:d=>valorColuna(d, c), td:d=>`<td class="valor">${fmtMoney(valorColuna(d, c))}</td>` })),
+    // sem `soma` a coluna fica em branco no rodapé - é o que fundo de caixa
+    // precisa (ver naoSoma em CAMPOS_FIXOS): total de "caixa inicial" de sete
+    // dias é o mesmo valor somado sete vezes, número que não existe
+    ...colunasDeValor.map(c=>({ key:c.key, label:c.label, ...(c.naoSoma?{}:{soma:d=>valorColuna(d, c)}), td:d=>`<td class="valor">${fmtMoney(valorColuna(d, c))}</td>` })),
     { key:'observacao', label:'Observação', ord:d=>d.observacao||d.obsDif||'', td:d=>`<td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>` },
   ]).filter(c=>colVisivel(c.key));
 

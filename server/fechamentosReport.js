@@ -62,6 +62,22 @@ const CAMPOS_FIXOS = [
   { key: 'loja', label: 'Loja' }, { key: 'adyen', label: 'Maquininhas (cartão)' }, { key: 'ifood', label: 'Ifood' },
   { key: 'food99', label: '99Food' }, { key: 'pix', label: 'Pix' }, { key: 'pixCnpj', label: 'Pix CNPJ' },
   { key: 'outros', label: 'Outros' },
+  // CAIXA INICIAL / CAIXA FINAL - pedido do Master (14/09/2026): "preciso que
+  // nesse fechamento mostre caixa inicial e caixa final da loja".
+  //
+  // O dado sempre existiu: a loja lanca os dois no fechamento
+  // (lancamento.html) e a planilha importa "Caixa Inicial" (bravoImport.js).
+  // So nunca tinha coluna no relatorio - o numero era gravado e ficava
+  // invisivel pra quem confere.
+  //
+  // naoSoma: FUNDO DE CAIXA NAO SE SOMA. E' o mesmo valor que dorme na gaveta
+  // todo dia; somar sete dias daria R$ 1.400 de "caixa inicial", que nao
+  // existe em lugar nenhum do mundo real. Pela mesma razao que a linha de
+  // subtotal nao repete data nem unidade: numero sem significado no rodape e'
+  // pior que rodape vazio. O bravoImport ja tratava os dois assim
+  // (CAMPOS_QUE_NAO_SOMAM) - aqui a regra so passa a valer tambem na saida.
+  { key: 'caixaInicial', label: 'Caixa inicial', naoSoma: true },
+  { key: 'caixaFinal', label: 'Caixa final', naoSoma: true },
 ];
 const COLUNA_OBSERVACAO = { key: 'observacao', label: 'Observação', largura: 75 };
 
@@ -197,7 +213,8 @@ function prepararRelatorio(fechamentos, grupos, ocultas, ordem) {
 // fechamento no fim da secao, que e onde a pessoa procura o numero.
 function somar(colunas, linhas) {
   const soma = {};
-  colunas.filter((c) => c.moeda).forEach((c) => {
+  // naoSoma fica de FORA do subtotal (fundo de caixa - ver CAMPOS_FIXOS)
+  colunas.filter((c) => c.moeda && !c.naoSoma).forEach((c) => {
     soma[c.key] = linhas.reduce((s, l) => s + (Number(l[c.key]) || 0), 0);
   });
   return soma;

@@ -12357,6 +12357,59 @@ setTimeout(async () => {
   if (!okProgramasAba) ruins += 1;
   console.log(`${okProgramasAba ? '✓' : '✗'} NOC: programas da máquina em janela própria (o que entrou, o que saiu, e o que está instalado agora)`);
 
+  // ------------------------------------------------------------------
+  // CAIXA INICIAL / CAIXA FINAL NO RELATORIO (pedido do Master, 14/09/2026)
+  // "preciso que nesse fechamento mostre caixa inicial e caixa final da loja".
+  //
+  // O dado sempre existiu - a loja lanca os dois (lancamento.html) e a planilha
+  // importa "Caixa Inicial" (bravoImport.js). So nunca teve coluna: era gravado
+  // e ficava invisivel pra quem confere.
+  //
+  // A decisao que este teste tranca: FUNDO DE CAIXA NAO SE SOMA. E' o mesmo
+  // valor que dorme na gaveta todo dia; somar sete dias daria R$ 1.400 de
+  // "caixa inicial", numero que nao existe em lugar nenhum do mundo real -
+  // pela mesma razao que a linha de subtotal nao repete data nem unidade.
+  let okCaixaRelatorio = false;
+  try {
+    const rel = require(__dirname + '/fechamentosReport.js');
+    const linhas = [
+      { data: '2026-09-03', unidade: 'BESSA', unidadeNome: 'Dom Bessa', caixaInicial: 200, caixaFinal: 200, loja: 1000 },
+      { data: '2026-09-04', unidade: 'BESSA', unidadeNome: 'Dom Bessa', caixaInicial: 200, caixaFinal: 200, loja: 1500 },
+    ];
+    const pronto = rel.prepararRelatorio ? rel.prepararRelatorio(linhas, [], null, null) : null;
+    const colunas = (pronto && pronto.colunas) || [];
+    const colIni = colunas.find((c) => c.key === 'caixaInicial') || null;
+    const soma = pronto && typeof rel.somar === 'function' ? rel.somar(colunas, pronto.linhas || []) : null;
+    const htmlF = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+    const repTx = require('fs').readFileSync(__dirname + '/fechamentosReport.js', 'utf8');
+
+    const conf = {
+      'o relatório ganhou as duas colunas': !!colIni
+        && !!colunas.find((c) => c.key === 'caixaFinal'),
+      'a coluna aparece com o rótulo que a loja já conhece':
+        !!colIni && colIni.label === 'Caixa inicial',
+      // a mesma lista, na mesma ordem, nos dois lugares - o proprio arquivo
+      // avisa que tela e relatorio precisam concordar
+      'a tela e o relatório têm os mesmos dois campos':
+        /\{campo:'caixaInicial', label:'Caixa inicial', naoSoma:true\}/.test(htmlF)
+        && /\{campo:'caixaFinal', label:'Caixa final', naoSoma:true\}/.test(htmlF)
+        && /key: 'caixaInicial', label: 'Caixa inicial', naoSoma: true/.test(repTx),
+      // A DECISAO: fundo de caixa fica FORA do subtotal
+      'o subtotal NÃO soma o fundo de caixa (R$ 200 em 2 dias não são R$ 400)':
+        !!soma && soma.caixaInicial === undefined && soma.caixaFinal === undefined,
+      'as outras colunas continuam somando normalmente':
+        !!soma && soma.loja === 2500,
+      'na tela a coluna de fundo de caixa também fica sem total no rodapé':
+        /\.\.\.\(c\.naoSoma\?\{\}:\{soma:d=>valorColuna\(d, c\)\}\)/.test(htmlF),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okCaixaRelatorio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (colunas=${colunas.map((c) => c.key).join(',')} soma=${JSON.stringify(soma)})`);
+  } catch (e) { okCaixaRelatorio = false; console.log('  erro: ' + e.message); }
+  if (!okCaixaRelatorio) ruins += 1;
+  console.log(`${okCaixaRelatorio ? '✓' : '✗'} Fechamento: caixa inicial e caixa final no relatório, e fora do subtotal (fundo não se soma)`);
+
+
 
 
   // ------------------------------------------------------------------
