@@ -16,6 +16,8 @@
 const PDFDocument = require('pdfkit');
 const path = require('path');
 const storage = require('./storage');
+// nome de pessoa sobe pra maiúsculo no PDF, onde não há CSS pra fazer isso
+const texto = require('./textoExibicao');
 const redes = require('./redes');
 const { nomeArquivoRegistro } = require('./reportUtil');
 
@@ -192,11 +194,11 @@ function desenharOcorrencia(res, tarefa, { fichaCampos = [], fotos, geradoPor, n
 
   p.titulo('Identificação');
   p.campo('Unidade', tarefa.unidadeNome || tarefa.unidade || 'Tarefa pessoal');
-  p.campo('Responsável', tarefa.responsavelNome);
+  p.campo('Responsável', texto.nomePessoa(tarefa.responsavelNome));
   p.campo('Participam', (tarefa.colaboradores || []).map((c) => c.nome).join(', ') || 'ninguém além do responsável');
-  p.campo('Registrada por', `${tarefa.criadoPorNome || 'Usuário'} em ${fmtDataHora(tarefa.criadaEm)}`);
+  p.campo('Registrada por', `${texto.nomePessoa(tarefa.criadoPorNome || 'Usuário')} em ${fmtDataHora(tarefa.criadaEm)}`);
   p.campo('Início / previsão de conclusão', `${fmtData(tarefa.dataInicio)} → ${tarefa.dataEntrega ? fmtData(tarefa.dataEntrega) : 'sem prazo'}`);
-  if (tarefa.concluidaEm) p.campo('Concluída', `${tarefa.concluidaPorNome || 'Usuário'} em ${fmtDataHora(tarefa.concluidaEm)}`);
+  if (tarefa.concluidaEm) p.campo('Concluída', `${texto.nomePessoa(tarefa.concluidaPorNome || 'Usuário')} em ${fmtDataHora(tarefa.concluidaEm)}`);
 
   if (String(tarefa.descricao || '').trim()) { p.titulo('O que aconteceu'); p.paragrafo(tarefa.descricao); }
 
@@ -209,7 +211,7 @@ function desenharOcorrencia(res, tarefa, { fichaCampos = [], fotos, geradoPor, n
     p.titulo('Documentos gerados');
     tarefa.gerou.forEach((g) => p.campo(
       g.tipo === 'formulario' ? 'Formulário' : 'Solicitação',
-      `${g.rotulo || g.tipo}${g.numeroTicket ? ` · Ticket #${g.numeroTicket}` : ''} · registrado por ${g.porNome || '—'} em ${fmtDataHora(g.em)}`,
+      `${g.rotulo || g.tipo}${g.numeroTicket ? ` · Ticket #${g.numeroTicket}` : ''} · registrado por ${texto.nomePessoa(g.porNome || '—')} em ${fmtDataHora(g.em)}`,
     ));
   }
 
@@ -219,7 +221,7 @@ function desenharOcorrencia(res, tarefa, { fichaCampos = [], fotos, geradoPor, n
   else {
     p.tabela(
       [{ titulo: 'Quando', largura: 110 }, { titulo: 'Quem', largura: 95 }, { titulo: 'Registro', largura: largura - 205 }],
-      comentarios.map((c) => [fmtDataHora(c.em), c.porNome || 'Usuário', c.texto]),
+      comentarios.map((c) => [fmtDataHora(c.em), texto.nomePessoa(c.porNome || 'Usuário'), c.texto]),
     );
   }
 
@@ -320,7 +322,7 @@ function desenharConsolidado(res, lista, { filtro = '', geradoPor, nomeArquivo, 
         t.unidadeNome || t.unidade || 'Pessoal',
         `${t.ehOcorrencia ? '[Ocorrência] ' : ''}${t.titulo || '(sem título)'}`,
         t.vinculo && t.vinculo.numeroTicket != null ? `#${t.vinculo.numeroTicket}` : '',
-        t.responsavelNome || '',
+        texto.nomePessoa(t.responsavelNome || ''),
         STATUS_LABEL[t.status] || t.status,
         fmtData(t.criadaEm),
       ]),

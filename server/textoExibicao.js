@@ -19,9 +19,18 @@
 // E transformar na exibição também resolve o passado: os nomes já gravados em
 // minúsculo aparecem maiúsculos sem ninguém migrar nada.
 //
-// TUDO QUE É CONTEÚDO SOBE. O Master foi direto quando eu vim com ressalvas:
-// "eu quero que tudo que seja minúsculo fique maiúsculo". Então e-mail, texto
-// digitado, observação, nome de item, endereço - tudo aparece em maiúsculo.
+// O QUE SOBE - E SÓ ISSO. A primeira versão subiu a tela inteira (uma regra
+// no `body`) e ficou ruim de ler; o Master corrigiu o alvo (14/09): "não
+// gostei de tudo maiúsculo / o que falei pra ser tudo maiúsculo foi NOMES DOS
+// USUÁRIOS e DADOS PREENCHIDOS para formulários e relatórios". Então são dois
+// casos, não a interface:
+//
+//   - nome de pessoa, onde quer que a tela ou o PDF escreva gente;
+//   - o que foi PREENCHIDO: o que a pessoa digitou ou escolheu num campo.
+//
+// Menu, botão, rótulo, título e texto corrido ficam como estão escritos - são
+// interface, não dado. Dentro do que sobe não há exceção de tipo: e-mail,
+// observação, nome de item e endereço preenchidos sobem junto.
 //
 // Na TELA isso é CSS, e é o que torna a decisão barata: o texto gravado não
 // muda, e COPIAR devolve o original (o navegador copia o texto de origem, não

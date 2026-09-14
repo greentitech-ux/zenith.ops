@@ -4,6 +4,7 @@
 // pendência. A tarefa nunca substitui as regras próprias do ticket.
 const crypto = require('crypto');
 const db = require('./firestore');
+const reuniaoGoogle = require('./reuniaoGoogle');
 const ticketCounter = require('./ticketCounter');
 const prioridades = require('./prioridades');
 const auth = require('./auth');
@@ -44,6 +45,29 @@ function camposDaReuniao({ ehReuniao, horaInicio, duracaoMin, linkReuniao, linkO
     linkReuniao: colado ? limparLinkColado(linkReuniao) : gerarLinkReuniao(),
     linkOrigem: colado ? 'colado' : 'gerado',
   };
+}
+
+// Troca a sala do Jitsi pela sala do Meet quando o Workspace está conectado.
+// Devolve SEMPRE um objeto pra mesclar: vazio quando não há nada a trocar.
+// Falhar aqui não pode derrubar a criação da reunião - por isso o catch
+// devolve vazio em vez de propagar; o que se perde é a agenda, não a sala.
+async function salaDoWorkspace(reuniao, { titulo, descricao, dia, pessoas }) {
+  if (!reuniao.ehReuniao || reuniao.linkOrigem !== 'gerado') return {};
+  if (!reuniaoGoogle.configurado()) return {};
+  try {
+    const sala = await reuniaoGoogle.criarSala({
+      titulo,
+      descricao,
+      dia,
+      hora: reuniao.horaInicio,
+      duracaoMin: reuniao.duracaoMin,
+      convidados: (pessoas || []).map((p) => p && p.email).filter(Boolean),
+    });
+    return { linkReuniao: sala.link, linkOrigem: 'google', eventoGoogleId: sala.eventoId };
+  } catch (e) {
+    console.warn('[reuniao] Workspace não criou a sala, seguindo com a sala própria:', e.message);
+    return {};
+  }
 }
 
 const COLLECTION = db.collection('tarefas');
@@ -263,6 +287,16 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
   // valida ANTES de gravar: reunião sem hora não é reunião, e link colado
   // sem https não é link. Falhar aqui é melhor que gravar pela metade.
   const reuniao = camposDaReuniao({ ehReuniao, horaInicio, duracaoMin, linkReuniao, linkOrigem });
+  // Sala do Workspace quando ele está conectado. camposDaReuniao já deixou
+  // uma sala do Jitsi na mão: se o Google responder, ela é trocada pela sala
+  // do Meet (e o evento cai na agenda de quem foi convidado); se não
+  // responder, a reunião nasce com a sala que sempre teve. Reunião sem sala
+  // nenhuma seria o único desfecho inaceitável - alguém marca, avisa a
+  // equipe, e na hora não há onde entrar.
+  Object.assign(reuniao, await salaDoWorkspace(reuniao, {
+    titulo: texto, descricao, dia: entrega,
+    pessoas: [responsavel || usuario, ...(colaboradores || [])],
+  }));
   const tarefa = {
     id: ref.id, origem: origem || (vinculo ? 'ticket-manual' : 'manual'), titulo: texto,
     numeroTicket,
@@ -275,6 +309,9 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
     ehOcorrencia: !!ehOcorrencia,
     ehReuniao: reuniao.ehReuniao, horaInicio: reuniao.horaInicio, duracaoMin: reuniao.duracaoMin,
     linkReuniao: reuniao.linkReuniao, linkOrigem: reuniao.linkOrigem,
+    // guardado pra poder APAGAR o compromisso na agenda quando a reunião for
+    // cancelada aqui - senão fica de pé no calendário de todo mundo
+    eventoGoogleId: reuniao.eventoGoogleId || null,
     responsavelId: (responsavel || usuario).id, responsavelEmail: (responsavel || usuario).email || null, responsavelNome: nomeUsuario(responsavel || usuario),
     criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
     criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [],
@@ -650,7 +687,142 @@ async function cancelar(id, acesso, motivo) {
   if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Só dá pra cancelar tarefa em aberto.');
   const agora = new Date().toISOString();
   await ref.update({ status: 'CANCELADA', canceladaEm: agora, canceladaPorId: acesso.usuario.id, canceladaPorNome: nomeUsuario(acesso.usuario), motivoCancelamento: String(motivo || '').trim().slice(0, 300) || null, atualizadoEm: agora });
+  // reunião cancelada aqui tem que sumir da agenda de quem foi convidado -
+  // senão o compromisso continua de pé e alguém entra numa sala vazia. Não
+  // trava o cancelamento: já está gravado, isto é limpeza.
+  if (tarefa.eventoGoogleId) await reuniaoGoogle.cancelarSala(tarefa.eventoGoogleId);
   return getOne(id);
+}
+
+// ---- REUNIÃO VIRA TAREFA ----
+// Reunião e tarefa moram na mesma ficha, mas a reunião não se comporta como
+// trabalho: ela tem hora e sala, e o que sobra dela é o que foi combinado.
+// Quando o combinado é "alguém faz isso", a reunião precisa virar tarefa sem
+// perder o rastro - mesmo protocolo, mesma gente, mesmo contexto.
+//
+// A reunião não é apagada NEM duplicada: ela deixa de ser reunião e passa a
+// ser a tarefa. Duplicar criaria dois protocolos pro mesmo assunto, e o
+// histórico da reunião (comentários, anexos) ficaria no lado errado.
+async function virarTarefa(id, acesso, { dataEntrega, prioridade } = {}) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Só quem gerencia esta reunião pode transformá-la em tarefa.');
+  if (!tarefa.ehReuniao) throw new Error('Isto já é uma tarefa.');
+  const agora = new Date().toISOString();
+  const entrega = /^\d{4}-\d{2}-\d{2}$/.test(String(dataEntrega || '')) ? dataEntrega : (tarefa.dataEntrega || null);
+  const prio = prioridades.sanitizarPrioridade(prioridade || tarefa.prioridade);
+  // O SLA é recontado a partir de AGORA. Herdar o SLA da reunião faria a
+  // tarefa nascer atrasada pelo tempo que a reunião esperou pra acontecer.
+  const patch = {
+    ehReuniao: false, horaInicio: null, duracaoMin: null,
+    // a sala fica gravada no histórico da ficha (virouTarefaDe), mas sai da
+    // ficha viva: tarefa não tem sala, e um link de reunião velho no meio de
+    // uma tarefa é convite pra alguém entrar numa sala que já acabou
+    linkReuniao: null, linkOrigem: null, eventoGoogleId: null,
+    prioridade: prio, slaPrazo: prioridades.slaPrazo(prio, agora),
+    dataEntrega: entrega,
+    veioDeReuniao: {
+      em: agora, porId: acesso.usuario.id, porNome: nomeUsuario(acesso.usuario),
+      quando: tarefa.dataEntrega || null, hora: tarefa.horaInicio || null,
+    },
+    atualizadoEm: agora,
+  };
+  await ref.update(patch);
+  // o compromisso sai da agenda junto: a reunião não vai mais acontecer como
+  // reunião, e quem foi convidado não precisa do horário bloqueado
+  if (tarefa.eventoGoogleId) await reuniaoGoogle.cancelarSala(tarefa.eventoGoogleId);
+  return getOne(id);
+}
+
+// ---- DECISÕES DA REUNIÃO VIRAM TRABALHO ----
+// Reunião que não vira tarefa vira esquecimento: o que foi combinado fica no
+// comentário e ninguém é dono de nada. Aqui o que foi decidido sai da reunião
+// já com responsável e prazo, de um jeito ou de outro:
+//
+//   'uma'    - UMA tarefa com as decisões como subtarefas. É o caso de um
+//              assunto só que se desdobra em passos ("virada da Bessa":
+//              trocar o roteador, refazer o cabo, testar a Zebra).
+//   'varias' - UMA TAREFA POR DECISÃO. É o caso de assuntos independentes,
+//              que vão ter donos e prazos diferentes.
+//
+// As duas nascem da MESMA lista - quem está na reunião escreve o que foi
+// decidido e só então escolhe a forma. Escolher antes obrigaria a redigitar.
+const DECISOES_MAX = 20;
+
+function decisoesLimpas(itens) {
+  return (Array.isArray(itens) ? itens : [])
+    .map((x) => String((x && x.texto) || x || '').trim().slice(0, 200))
+    .filter(Boolean)
+    .slice(0, DECISOES_MAX);
+}
+
+// `responsavel` chega JÁ RESOLVIDO pela rota, que é quem sabe validar acesso
+// a unidade (mesma regra dos participantes). O módulo não busca usuário.
+async function decisoesEmTarefas(id, acesso, { modo, titulo, itens, responsavel, dataEntrega, prioridade } = {}) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Reunião não encontrada.');
+  const reuniao = snap.data();
+  if (!podeGerir(reuniao, acesso)) throw new Error('Só quem gerencia esta reunião pode registrar as decisões como tarefa.');
+  const lista = decisoesLimpas(itens);
+  if (!lista.length) throw new Error('Escreva pelo menos uma decisão.');
+  const forma = modo === 'varias' ? 'varias' : 'uma';
+  if (forma === 'uma' && lista.length > SUBTAREFA_MAX) {
+    throw new Error(`Uma tarefa aceita no máximo ${SUBTAREFA_MAX} subtarefas. Com ${lista.length} decisões, use "uma tarefa por decisão".`);
+  }
+
+  // quem estava na reunião continua vendo o que saiu dela. O responsável é
+  // escolhido na hora; sem escolha, fica com quem já era dono da reunião.
+  const dono = (responsavel && responsavel.id)
+    ? responsavel
+    : { id: reuniao.responsavelId, nome: reuniao.responsavelNome, email: reuniao.responsavelEmail };
+  const equipe = (reuniao.colaboradores || []).filter((p) => p && p.id !== dono.id);
+  const deOnde = `Decidido na reunião "${reuniao.titulo}"`
+    + (reuniao.dataEntrega ? ` de ${reuniao.dataEntrega.split('-').reverse().join('/')}` : '');
+
+  const base = {
+    dataInicio: new Date().toISOString().slice(0, 10),
+    dataEntrega: /^\d{4}-\d{2}-\d{2}$/.test(String(dataEntrega || '')) ? dataEntrega : null,
+    unidade: reuniao.unidade || null, unidadeNome: reuniao.unidadeNome || null,
+    usuario: acesso.usuario, responsavel: dono, colaboradores: equipe,
+    prioridade, origem: 'reuniao',
+  };
+
+  const criadas = [];
+  if (forma === 'uma') {
+    criadas.push(await criar({
+      ...base,
+      titulo: String(titulo || reuniao.titulo || 'Decisões da reunião').trim().slice(0, 200),
+      descricao: deOnde,
+      subtarefas: lista,
+    }));
+  } else {
+    // uma por vez, em ordem: cada uma tira o seu número de protocolo, e o
+    // contador de ticket não é feito pra ser chamado em paralelo
+    for (const texto of lista) {
+      criadas.push(await criar({ ...base, titulo: texto, descricao: deOnde }));
+    }
+  }
+
+  // o rastro fica nos DOIS lados: a reunião diz o que gerou (pra quem abrir
+  // depois achar), e cada tarefa diz de onde veio (na descrição)
+  const agora = new Date().toISOString();
+  const resumo = forma === 'uma'
+    ? `Decisões viraram 1 tarefa com ${lista.length} subtarefa${lista.length > 1 ? 's' : ''}: #${criadas[0].numeroTicket}.`
+    : `Decisões viraram ${criadas.length} tarefa${criadas.length > 1 ? 's' : ''}: ${criadas.map((t) => '#' + t.numeroTicket).join(', ')}.`;
+  const comentario = {
+    id: crypto.randomBytes(8).toString('hex'), texto: resumo,
+    porId: acesso.usuario.id, porNome: nomeUsuario(acesso.usuario), em: agora,
+  };
+  await ref.update({
+    comentarios: [...(reuniao.comentarios || []), comentario].slice(-100),
+    decisoes: [
+      ...((reuniao.decisoes || []).slice(-40)),
+      ...criadas.map((t) => ({ tarefaId: t.id, numeroTicket: t.numeroTicket, titulo: t.titulo, em: agora })),
+    ].slice(-60),
+    atualizadoEm: agora,
+  });
+  return { reuniao: await getOne(id), criadas };
 }
 
 // PEDIR EXCLUSÃO: quem não é Master não apaga direto - deixa um pedido pro
@@ -720,4 +892,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, gerarLinkReuniao, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, gerarLinkReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

@@ -12,15 +12,14 @@
 // so as pecas que o importador reaproveita pra LER a planilha uma unica vez:
 // SHEET_ID_BRAVO, BRAVO_UNIDADES, parseDataBravo e parseMoneyBR.
 
-const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { resolverBucket } = require('./storageBucket');
+const googleAuth = require('./googleAuth');
 
 // escopo de leitura E escrita - a escrita e usada pelo caminho inverso
 // (enviarFechamentoArcfood), que manda o fechamento lançado ao vivo no app
 // de volta pra planilha
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
-const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 // planilha ARCFOOD "viva": aba "BD", onde o app grava os fechamentos
 // lançados ao vivo (enviarFechamentoArcfood) e de onde ele le pra exibir no
@@ -160,38 +159,11 @@ function parseDataBravo(dataStr) {
   return `${ano}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
 }
 
-let cachedToken = null; // { token, expiraEm }
-async function getAccessToken() {
-  if (cachedToken && cachedToken.expiraEm > Date.now() + 30000) return cachedToken.token;
-
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
-  if (!clientEmail || !privateKey) {
-    throw new Error('FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY não configurados (mesma conta de serviço do Firestore, precisa ter acesso às planilhas).');
-  }
-
-  const agora = Math.floor(Date.now() / 1000);
-  const assertion = jwt.sign(
-    { iss: clientEmail, scope: SHEETS_SCOPE, aud: TOKEN_URL, iat: agora, exp: agora + 3600 },
-    privateKey,
-    { algorithm: 'RS256' }
-  );
-
-  const resp = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion,
-    }),
-  });
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(`Erro ao autenticar com o Google (confira se a API do Sheets está habilitada no projeto): ${data.error_description || data.error || resp.status}`);
-  }
-
-  cachedToken = { token: data.access_token, expiraEm: Date.now() + (data.expires_in || 3600) * 1000 };
-  return cachedToken.token;
+// A troca de JWT por access_token mora no googleAuth.js - a agenda do
+// Workspace (sala do Meet) usa a MESMA credencial, e duas cópias da mesma
+// autenticação envelhecem separado. Aqui fica só o escopo desta integração.
+function getAccessToken() {
+  return googleAuth.tokenDeAcesso(SHEETS_SCOPE, { ondeHabilitar: 'Google Sheets' });
 }
 
 async function buscarValoresAba(spreadsheetId, aba, token) {

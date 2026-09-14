@@ -17,6 +17,9 @@
 const crypto = require('crypto');
 const path = require('path');
 const PDFDocument = require('pdfkit');
+// como o NoPulso MOSTRA o que foi preenchido (maiúsculo no PDF, onde não há
+// CSS pra fazer isso) - ver textoExibicao.js
+const texto = require('./textoExibicao');
 // mesmo arquivo que o login e o relatório de tarefa já usam - uma marca só
 const LOGO_GRUPO_BRAVO = path.join(__dirname, 'public', 'grupo-bravo.png');
 const db = require('./firestore');
@@ -1427,15 +1430,17 @@ async function gerarPdf(r, res, opcoes) {
       linhasCabecalho.push({
         label: 'DADOS BANCÁRIOS', h: ROW_H_COMBO,
         combo: [
-          { label: 'Banco:', valor: r.campos.banco },
-          { label: 'Agência:', valor: r.campos.agencia },
-          { label: 'Conta com dígito:', valor: r.campos.conta },
+          { label: 'Banco:', valor: texto.valorPreenchido(r.campos.banco) },
+          // agência e conta são NÚMERO de documento: sobem porque já são
+          // dígitos, mas passam pela mesma função pra não virar exceção solta
+          { label: 'Agência:', valor: texto.valorPreenchido(r.campos.agencia) },
+          { label: 'Conta com dígito:', valor: texto.valorPreenchido(r.campos.conta) },
         ],
       });
       i += 2;
       continue;
     }
-    linhasCabecalho.push({ label: c.label, valor: r.campos[c.key], h: ROW_H });
+    linhasCabecalho.push({ label: c.label, valor: texto.valorPreenchido(r.campos[c.key]), h: ROW_H });
   }
 
   let ry = y;
@@ -1588,7 +1593,7 @@ async function gerarPdf(r, res, opcoes) {
         const buf = ass && ass.imagem ? imagemBuffer(ass.imagem) : null;
         if (buf) { try { doc.image(buf, x + 4, y + 3, { fit: [larguras[i] - 8, alturaLinha - 6], align: 'center', valign: 'center' }); } catch (e) { /* imagem corrompida não derruba o PDF */ } }
       } else {
-        celula(c.valor ? fmtMoney(l[c.key]) : l[c.key], x, y, larguras[i], alturaLinha, { meio: true, quebrar: true, align: c.valor ? 'right' : 'left' });
+        celula(c.valor ? fmtMoney(l[c.key]) : texto.valorPreenchido(l[c.key]), x, y, larguras[i], alturaLinha, { meio: true, quebrar: true, align: c.valor ? 'right' : 'left' });
       }
       x += larguras[i];
     });
