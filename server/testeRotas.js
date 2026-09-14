@@ -22160,6 +22160,30 @@ setTimeout(async () => {
         /new EventSource\('\/api\/stream\?token='/.test(telas.salao)
         && /addEventListener\('estacao-salao-mudou'/.test(telas.salao)
         && /broadcast\('estacao-salao-mudou'/.test(idx2),
+      // ---- voltar a lançar, no topo (Master, 14/09) ----
+      // "um botao para voltar a lancar, pois precisa ficar intuitivo,
+      // dinamico, didatico e facilitado". O trabalho é um CICLO: abre comanda,
+      // lança, volta, abre a próxima. Sem o botão, voltar era fechar a ficha,
+      // rolar até o topo e achar o campo - três gestos, com uma mão só e a
+      // bandeja na outra.
+      'o topo tem o botão de voltar a lançar, ao lado do Sair':
+        telas.salao.includes('id="bt-lancar" onclick="voltarALancar()"')
+        && telas.salao.includes('>↩ Lançar</button>')
+        && telas.caixa.includes('id="bt-nova" onclick="voltarALancar()"')
+        && telas.caixa.includes('>↩ Nova conta</button>')
+        // o Fechamento não lança nada: botão ali seria enfeite
+        && !telas.fechamento.includes('voltarALancar'),
+      'ele fecha o que estiver aberto e devolve o cursor pro campo':
+        telas.salao.includes("function voltarALancar(){\n  fecharComanda();")
+        && telas.caixa.includes("function voltarALancar(){\n  limparTudo();")
+        && [telas.salao, telas.caixa].every((t) => t.includes("campo.scrollIntoView({ block: 'center', behavior: 'smooth' });")
+          && t.includes('setTimeout(()=>{ campo.focus(); campo.select(); }, 250);')),
+      // o rótulo curto cabe no topo do celular; a explicação inteira vai no
+      // balão, que o tema.js já desenha
+      'o balão explica o que o botão faz, sem lotar o topo':
+        /data-dica="Fecha a comanda aberta e volta pro campo do número do cartão"/.test(telas.salao)
+        && /data-dica="Limpa a conta da tela e volta pro campo do número do cartão"/.test(telas.caixa),
+
       // ---- a ficha da comanda (Master, 14/09) ----
       // "Numero da comanda antes da caixa de inserir a mesa" - é por ele que
       // tudo acontece, e no celular o título da janela sai de vista assim que

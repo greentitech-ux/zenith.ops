@@ -22,7 +22,15 @@
       <h1>Salão</h1>
     </div>
   </div>
-  <button class="back" onclick="logout()">🚪 Sair</button>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <!-- VOLTAR A LANÇAR. O trabalho do garçom é um ciclo: abre comanda, lança,
+         volta, abre a próxima. Sem este botão, voltar significava fechar a
+         ficha, rolar a tela até o topo e achar o campo - três gestos, com uma
+         mão só e a bandeja na outra. Aqui é um toque, e o cursor já cai no
+         número do cartão. -->
+    <button class="back" id="bt-lancar" onclick="voltarALancar()" data-dica="Fecha a comanda aberta e volta pro campo do número do cartão" aria-label="Voltar a lançar">↩ Lançar</button>
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
 </header>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
@@ -271,6 +279,18 @@ function pintarComanda(c){
 // dez vezes por mesa; trocar de mesa acontece uma vez, se acontecer.
 let MODO_FICHA = 'consumo';
 function modoFicha(m){ MODO_FICHA = m; pintarComanda(acharComanda(COMANDA_ABERTA)); }
+
+// O ciclo do garçom em um toque: fecha o que estiver aberto, sobe pro começo
+// e deixa o cursor no número do cartão - o próximo gesto já é digitar.
+function voltarALancar(){
+  fecharComanda();
+  const campo = document.getElementById('novo-numero');
+  if(!campo) return;
+  campo.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  // o foco vem DEPOIS do scroll: no celular, focar primeiro abre o teclado e
+  // a rolagem suave termina no lugar errado
+  setTimeout(()=>{ campo.focus(); campo.select(); }, 250);
+}
 
 async function salvarMesa(id){
   const mesa = document.getElementById('mesa-comanda').value;
