@@ -37,6 +37,20 @@
     <label style="flex:0 1 130px;">Caixa<select id="caixa"></select></label>
   </div>
 
+  <!-- TURNO: quem abre é o caixa, não o relógio (decisão do Master, 14/09).
+       Almoço que vara das 18h continua cobrando almoço; jantar que começa
+       17h40 já cobra jantar. Enquanto ninguém abre, o horário é só palpite -
+       e a tela diz isso, pra ninguém achar que alguém decidiu. -->
+  <div class="est-card" id="card-turno">
+    <h2>Turno da venda</h2>
+    <div class="est-sub" id="turno-sub">—</div>
+    <div class="est-barra" style="margin-top:8px;">
+      <button type="button" class="est-btn" id="btn-almoco" onclick="abrirTurno('almoco')">Abrir almoço</button>
+      <button type="button" class="est-btn" id="btn-jantar" onclick="abrirTurno('jantar')">Abrir jantar</button>
+    </div>
+    <div class="est-erro" id="erro-turno"></div>
+  </div>
+
   <!-- QUEM ESTÁ PAGANDO. O Master: "se alguém quiser pagar 2, 3 pessoas é só
        informar os números das comandas". Por isso é uma LISTA, não um campo. -->
   <div class="est-card">
@@ -115,6 +129,36 @@ function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]
 
 let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGOS = {};
 
+// ---- TURNO DA VENDA ----
+// O preço do rodízio sai do turno; por isso o caixa precisa ver, em letras
+// grandes, qual está valendo antes de abrir a primeira comanda do serviço.
+let TURNO = null;
+async function carregarTurno(){
+  const sub = document.getElementById('turno-sub');
+  try{
+    TURNO = await pedir(`/api/estacao/turno?unidade=${encodeURIComponent(unidadeAtual())}`);
+  }catch(e){ TURNO = null; sub.textContent = e.message; return; }
+  const rot = TURNO.turno === 'jantar' ? 'JANTAR' : 'ALMOÇO';
+  sub.innerHTML = TURNO.porCaixa
+    ? `Valendo: <b>${rot}</b> — aberto no caixa. Todo rodízio lançado agora usa o preço de ${rot.toLowerCase()}.`
+    : `Valendo: <b>${rot}</b> — <b>ninguém abriu turno hoje</b>, então está valendo o horário. Abra o turno pra travar o preço.`;
+  document.getElementById('btn-almoco').classList.toggle('principal', TURNO.turno === 'almoco');
+  document.getElementById('btn-jantar').classList.toggle('principal', TURNO.turno === 'jantar');
+}
+async function abrirTurno(turno){
+  const erro = document.getElementById('erro-turno');
+  erro.textContent = '';
+  // trocar o turno muda o preço das PRÓXIMAS comandas; as já abertas ficam com
+  // o que foi cobrado (o preço congela na abertura) - dizer isso evita a
+  // pergunta "e as mesas que já estão lá?"
+  if(!confirm(`Abrir o ${turno === 'jantar' ? 'jantar' : 'almoço'}?
+
+As próximas comandas passam a usar o preço de ${turno === 'jantar' ? 'jantar' : 'almoço'}. As comandas já abertas continuam com o valor que foi cobrado nelas.`)) return;
+  try{
+    await pedir('/api/estacao/turno', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unidade: unidadeAtual(), turno }) });
+    await carregarTurno();
+  }catch(e){ erro.textContent = e.message; }
+}
 function unidadeAtual(){ return document.getElementById('unidade').value; }
 function unidadeNomeAtual(){ const u = UNIDADES.find(x=>x.codigo===unidadeAtual()); return u ? u.nome : unidadeAtual(); }
 function comServico(){ return document.getElementById('com-servico').checked; }
@@ -298,6 +342,7 @@ async function trocarUnidade(){
   NUMEROS = []; CARRINHO = new Map();
   BALCAO = await fetch(`/api/estacao/itens-balcao?unidade=${encodeURIComponent(unidade)}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
   renderBalcao();
+  await carregarTurno();
   await recarregarConta();
 }
 

@@ -8791,6 +8791,22 @@ app.post('/api/estacao/precos', auth.requireAuth, auth.requireMaster, async (req
 });
 
 // o salão inteiro numa chamada: mesas derivadas das comandas abertas
+// TURNO DO DIA: quem abre e' o caixa (ver turnoVigente em estacaoComida.js).
+// GET diz qual vale agora e se foi o caixa ou o relogio que decidiu.
+app.get('/api/estacao/turno', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.turnoVigente(req.query.unidade, estacaoComida.hojeBrasiliaISO()));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/turno', requireSection('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = String(req.body?.unidade || '');
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.abrirTurno(unidade, req.body?.turno, req.user?.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.get('/api/estacao/salao', requireSection('estacao-salao'), async (req, res) => {
   try {
     if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });

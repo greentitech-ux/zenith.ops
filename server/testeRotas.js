@@ -12482,6 +12482,76 @@ setTimeout(async () => {
   if (!okCaixaCorrente) ruins += 1;
   console.log(`${okCaixaCorrente ? '✓' : '✗'} Fechamento: caixa final obrigatório, e o inicial vem sozinho do último fechamento`);
 
+  // ------------------------------------------------------------------
+  // ESTACAO: QUEM ABRE O TURNO E' O CAIXA, NAO O RELOGIO
+  // Decisao do Master (14/09/2026): "quem define a abertura da venda almoco ou
+  // fechamento e' o caixa. Se o caixa abrir venda almoco, os precos ficam
+  // almoco. Se o caixa fecha e abre janta, tudo vira".
+  //
+  // O relogio mentia nos dois sentidos: almoco que varava das 18h passava a
+  // cobrar jantar no meio do servico, e jantar que comecava 17h40 cobrava
+  // almoco na primeira mesa. A casa sabe em que turno esta.
+  //
+  // E' TAMBEM a raiz do "nao deixa lancar adulto, sem preco cadastrado": o
+  // sistema escolhia o turno sozinho e ia buscar a metade da tabela que ainda
+  // estava zerada.
+  let okTurnoEstacao = false;
+  try {
+    const ec = require(__dirname + '/estacaoComida.js');
+    const hoje = ec.hojeBrasiliaISO();
+    const meioDia = new Date('2026-09-14T15:00:00Z'); // 12h em Brasília
+    const noite = new Date('2026-09-14T23:00:00Z');   // 20h em Brasília
+
+    // sem ninguem abrir, o relogio ainda opina - a casa que esquecer de abrir
+    // nao pode ficar impedida de vender
+    const semAbrir = await ec.turnoVigente('TURNO_T', hoje, meioDia);
+    const semAbrirNoite = await ec.turnoVigente('TURNO_T', hoje, noite);
+
+    // o caixa abre o ALMOCO e o relogio para de mandar - mesmo as 20h
+    await ec.abrirTurno('TURNO_T', 'almoco', 'caixa@teste.local', meioDia);
+    const almocoNaNoite = await ec.turnoVigente('TURNO_T', hoje, noite);
+    // e quando o caixa vira pro jantar, tudo vira
+    await ec.abrirTurno('TURNO_T', 'jantar', 'caixa@teste.local', noite);
+    const jantarDepois = await ec.turnoVigente('TURNO_T', hoje, meioDia);
+
+    let recusouTurnoInvalido = false;
+    try { await ec.abrirTurno('TURNO_T', 'madrugada', 'x@y.z'); } catch (e2) { recusouTurnoInvalido = true; }
+
+    const idxT = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlC = require('fs').readFileSync(__dirname + '/public/estacao-caixa.html', 'utf8');
+    const modT = require('fs').readFileSync(__dirname + '/estacaoComida.js', 'utf8');
+    const conf = {
+      'sem ninguém abrir, o horário ainda decide (a casa não fica impedida de vender)':
+        semAbrir.turno === 'almoco' && semAbrir.porCaixa === false
+        && semAbrirNoite.turno === 'jantar' && semAbrirNoite.porCaixa === false,
+      // O PEDIDO: almoço que vara das 18h continua almoço
+      'turno aberto pelo caixa manda, mesmo contra o relógio':
+        almocoNaNoite.turno === 'almoco' && almocoNaNoite.porCaixa === true,
+      'virar pro jantar troca tudo, na hora':
+        jantarDepois.turno === 'jantar' && jantarDepois.porCaixa === true,
+      'a tela sabe dizer se quem decidiu foi o caixa ou o horário':
+        /porCaixa/.test(htmlC) && /ninguém abriu turno hoje/.test(htmlC),
+      'turno inválido é recusado': recusouTurnoInvalido,
+      // a comanda tem de usar o turno VIGENTE, nao chamar o relogio direto
+      'a comanda usa o turno vigente, não o relógio':
+        /const vigente = await turnoVigente\(unidade, data, agora\);/.test(modT)
+        && !/const turno = turnoDe\(agora\);/.test(modT),
+      // sem isso o Master preenche a metade errada da tabela de novo
+      'o erro de preço diz QUAL turno faltou e por que ele foi escolhido':
+        /o caixa abriu o \$\{ROTULO_TURNO\[turno\]\}/.test(modT)
+        && /ninguém abriu turno hoje, então vale o horário/.test(modT),
+      'as rotas do turno passam pelo gate da seção do caixa':
+        /app\.get\('\/api\/estacao\/turno', requireSection\('estacao-caixa'\)/.test(idxT)
+        && /app\.post\('\/api\/estacao\/turno', requireSection\('estacao-caixa'\)/.test(idxT),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okTurnoEstacao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem=${JSON.stringify(semAbrir)} almocoNoite=${JSON.stringify(almocoNaNoite)})`);
+  } catch (e) { okTurnoEstacao = false; console.log('  erro: ' + e.message); }
+  if (!okTurnoEstacao) ruins += 1;
+  console.log(`${okTurnoEstacao ? '✓' : '✗'} Estação: quem abre o turno é o caixa, e o preço do rodízio segue ele (não o relógio)`);
+
+
 
 
 
