@@ -356,29 +356,90 @@ async function adicionarSubtarefa(id, acesso, titulo) {
   const item = {
     id: crypto.randomBytes(8).toString('hex'), titulo: texto, feita: false,
     feitaEm: null, feitaPorId: null, feitaPorNome: null,
+    // passo tem data e dono PRÓPRIOS (pedido do Master): "identificar" vence
+    // amanhã com o técnico, "solução" na sexta com outra pessoa. Continua sem
+    // SLA, sem PDF e sem número de ticket - isso é o que separa passo de tarefa.
+    dataInicio: null, dataEntrega: null, responsavelId: null, responsavelNome: null,
     criadaEm: agora, criadaPorId: acesso.usuario.id, criadaPorNome: nomeUsuario(acesso.usuario),
   };
   await ref.update({ subtarefas: [...lista, item], atualizadoEm: agora });
   return getOne(id);
 }
-async function alternarSubtarefa(id, acesso, subId, feita) {
+const DATA_ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Quem pode ser dono de um passo: SÓ quem já está na tarefa (o responsável e
+// os participantes). Não é rigor à toa - é a mesma regra que impede alguém de
+// se auto-adicionar numa tarefa de outra unidade (ver definirColaboradores).
+// Um passo atribuído a quem não participa seria trabalho distribuído por uma
+// porta lateral.
+function gentePermitida(tarefa) {
+  const mapa = new Map();
+  if (tarefa.responsavelId) mapa.set(tarefa.responsavelId, tarefa.responsavelNome || 'Usuário');
+  (tarefa.colaboradores || []).forEach((p) => { if (p && p.id) mapa.set(p.id, p.nome || 'Usuário'); });
+  return mapa;
+}
+// UM patch para tudo que se muda num passo (marcar, datar, atribuir, renomear).
+// Rotas separadas por campo dariam quatro caminhos com quatro checagens de
+// permissão para escrever no MESMO array - e um dia uma delas ficaria para trás.
+async function atualizarSubtarefa(id, acesso, subId, patch) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  // marcar passo e' andamento, mesma regua do status: quem so acompanha nao
-  // move a tarefa, e marcar subtarefa e' mover
-  if (!podeMoverStatus(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não marcar subtarefa.');
+  // mexer no passo e' andamento, mesma regua do status: quem so acompanha nao
+  // move a tarefa, e mexer em subtarefa e' mover
+  if (!podeMoverStatus(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não mexer nas subtarefas.');
   const lista = tarefa.subtarefas || [];
   // pelo ID, nunca pelo indice: entre desenhar a tela e o clique alguem pode
-  // ter criado outra subtarefa, e por posicao o clique marcaria a errada
-  if (!lista.some((x) => x && x.id === String(subId))) throw new Error('Subtarefa não encontrada.');
+  // ter criado outra subtarefa, e por posicao o clique mexeria na errada
+  const alvo = lista.find((x) => x && x.id === String(subId));
+  if (!alvo) throw new Error('Subtarefa não encontrada.');
   const agora = new Date().toISOString();
-  const nova = lista.map((x) => (x && x.id === String(subId)
-    ? { ...x, feita: !!feita, feitaEm: feita ? agora : null, feitaPorId: feita ? acesso.usuario.id : null, feitaPorNome: feita ? nomeUsuario(acesso.usuario) : null }
-    : x));
+  const mudanca = {};
+
+  if (patch.titulo !== undefined) {
+    const t = String(patch.titulo || '').trim().slice(0, 200);
+    if (!t) throw new Error('A subtarefa precisa de um nome.');
+    mudanca.titulo = t;
+  }
+  if (patch.feita !== undefined) {
+    const feita = !!patch.feita;
+    Object.assign(mudanca, {
+      feita,
+      feitaEm: feita ? agora : null,
+      feitaPorId: feita ? acesso.usuario.id : null,
+      feitaPorNome: feita ? nomeUsuario(acesso.usuario) : null,
+    });
+  }
+  // string vazia = LIMPAR o campo; undefined = nao mexer. Sem essa diferenca
+  // nao haveria como tirar uma data que foi posta por engano.
+  if (patch.dataInicio !== undefined) {
+    const v = String(patch.dataInicio || '');
+    if (v && !DATA_ISO_RE.test(v)) throw new Error('Data de início da subtarefa inválida.');
+    mudanca.dataInicio = v || null;
+  }
+  if (patch.dataEntrega !== undefined) {
+    const v = String(patch.dataEntrega || '');
+    if (v && !DATA_ISO_RE.test(v)) throw new Error('Previsão da subtarefa inválida.');
+    mudanca.dataEntrega = v || null;
+  }
+  const inicioFinal = mudanca.dataInicio !== undefined ? mudanca.dataInicio : alvo.dataInicio;
+  const entregaFinal = mudanca.dataEntrega !== undefined ? mudanca.dataEntrega : alvo.dataEntrega;
+  if (inicioFinal && entregaFinal && entregaFinal < inicioFinal) throw new Error('A previsão da subtarefa é anterior ao início dela.');
+  if (patch.responsavelId !== undefined) {
+    const quem = String(patch.responsavelId || '');
+    if (!quem) { mudanca.responsavelId = null; mudanca.responsavelNome = null; } else {
+      const permitidos = gentePermitida(tarefa);
+      if (!permitidos.has(quem)) throw new Error('Só quem já está na tarefa (responsável ou participante) pode ficar com uma subtarefa.');
+      mudanca.responsavelId = quem;
+      mudanca.responsavelNome = permitidos.get(quem);
+    }
+  }
+  if (!Object.keys(mudanca).length) return getOne(id);
+  const nova = lista.map((x) => (x && x.id === String(subId) ? { ...x, ...mudanca } : x));
   await ref.update({ subtarefas: nova, atualizadoEm: agora });
   return getOne(id);
 }
+// nome antigo mantido: era o que a rota chamava quando so existia marcar
+const alternarSubtarefa = (id, acesso, subId, feita) => atualizarSubtarefa(id, acesso, subId, { feita });
 async function removerSubtarefa(id, acesso, subId) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
@@ -819,4 +880,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, gerarLinkReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, removerSubtarefa, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, gerarLinkReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
