@@ -14990,6 +14990,27 @@ function aquecerBoot(promessa, ms) {
         // dispositivo de rede marcado (impressora/VM) sumiu/voltou (ver
         // varrerAlertas em lojaStatus.js) - pedido do Master, alarme por
         // equipamento específico, não pelo computador que o enxergou
+        // O MEDIDOR DA UNIDADE caiu: isso nao e' "sumiu um aparelho", e' a rede
+        // da loja. O texto diz qual dos dois casos e', porque a acao muda: se o
+        // agente ainda esta vivo, quem morreu foi o modem/roteador e da pra
+        // resolver remoto; se ele parou junto, a loja inteira ficou sem.
+        if (t.tipo === 'rede-unidade-offline') {
+          const quem = t.apelido || t.tipoRotulo || 'o medidor';
+          const caso = t.agenteVivo
+            ? `${quem} parou de responder na rede da loja - o computador continua online, então o problema é o equipamento.`
+            : `${quem} parou de responder e o computador também caiu - a loja inteira está sem rede ou sem energia.`;
+          console.log(`[NOC] queda de rede em ${nome} (${t.codigo}): ${caso}`);
+          push.notifyRedeUnidade(nome, t.codigo, caso, true)
+            .catch((err) => console.error('Erro no push de queda de rede da unidade:', err.message));
+          continue;
+        }
+        if (t.tipo === 'rede-unidade-online') {
+          const quem = t.apelido || t.tipoRotulo || 'o medidor';
+          const quanto = t.foraMs ? ` Ficou ${Math.max(1, Math.round(t.foraMs / 60000))} min fora.` : '';
+          push.notifyRedeUnidade(nome, t.codigo, `${quem} voltou a responder na rede da loja.${quanto}`, false)
+            .catch((err) => console.error('Erro no push de rede da unidade restabelecida:', err.message));
+          continue;
+        }
         if (t.tipo === 'dispositivo-offline') {
           push.notifyDispositivoOffline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac, t.tipoRotulo)
             .catch((err) => console.error('Erro no push de dispositivo offline:', err.message));

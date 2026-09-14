@@ -230,17 +230,45 @@ function idDaMarca(v) {
   return MARCAS_IMPRESSORA.has(m) ? m : null;
 }
 
+// MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026):
+// "preciso poder marcar como medidor de quedas da unidade - um equipamento que
+// nao tem acesso, como um Modem, para ser o ponto de medicao".
+//
+// POR QUE ISSO E' MELHOR QUE MEDIR PELO COMPUTADOR
+// O NOC ja sabe quando o AGENTE para de bater. So que o computador da loja e'
+// desligado ao fechar, cai em atualizacao do Windows, o funcionario puxa da
+// tomada - e nada disso e' queda de rede. O modem, nao: ele fica ligado. Um
+// equipamento que ninguem mexe e' uma referencia honesta.
+//
+// O QUE ISSO MEDE, COM PRECISAO (§6 - nao prometer o que o dado nao da)
+// Mede o EQUIPAMENTO sumir da rede da loja, nao o link de internet cair. Se o
+// modem continua ligado e so a internet do provedor some, ele segue
+// respondendo na rede - quem denuncia esse caso e' o heartbeat do agente
+// parando de chegar no servidor, que ja existe. Os dois juntos e' que separam:
+//   agente parou + medidor sumiu   -> a loja inteira caiu (energia/link)
+//   agente parou + medidor de pe   -> foi o computador
+//   agente de pe  + medidor sumiu  -> o modem/roteador morreu
+// Um so dos dois nunca conta essa historia.
 function normalizarEntradaApelido(valor) {
-  if (typeof valor === 'string') return { apelido: valor || null, tipo: null, monitorar: false, marca: null };
+  if (typeof valor === 'string') return { apelido: valor || null, tipo: null, monitorar: false, marca: null, medidorQuedas: false };
   if (valor && typeof valor === 'object') {
+    const medidorQuedas = !!valor.medidorQuedas;
     return {
       apelido: typeof valor.apelido === 'string' && valor.apelido ? valor.apelido : null,
       tipo: idDoTipoDispositivo(valor.tipo) || null,
-      monitorar: !!valor.monitorar,
+      // medidor SEMPRE monitorado: nao da pra medir queda de um equipamento que
+      // a varredura nao esta acompanhando
+      monitorar: medidorQuedas || !!valor.monitorar,
       marca: idDaMarca(valor.marca),
+      medidorQuedas,
     };
   }
-  return { apelido: null, tipo: null, monitorar: false, marca: null };
+  return { apelido: null, tipo: null, monitorar: false, marca: null, medidorQuedas: false };
+}
+// quem e' o medidor daquela unidade (ou null)
+function medidorDaUnidade(daUnidade) {
+  const achado = Object.entries(daUnidade || {}).find(([, v]) => normalizarEntradaApelido(v).medidorQuedas);
+  return achado ? achado[0] : null;
 }
 
 // o nome que a pessoa dá vence o que o DNS respondeu: quem batizou de
@@ -276,13 +304,23 @@ async function definirApelidoDispositivo(codigo, mac, entrada) {
   } else {
     tipo = anterior.tipo;
   }
-  const monitorar = corpo.monitorar !== undefined ? !!corpo.monitorar : anterior.monitorar;
+  const medidorQuedas = corpo.medidorQuedas !== undefined ? !!corpo.medidorQuedas : anterior.medidorQuedas;
+  // medidor e' UM por unidade. Dois pontos de medicao dariam duas versoes da
+  // mesma queda, e ninguem saberia qual e' a da loja.
+  if (medidorQuedas) {
+    Object.keys(daUnidade).forEach((outro) => {
+      if (outro === macOk) return;
+      const cfg = normalizarEntradaApelido(daUnidade[outro]);
+      if (cfg.medidorQuedas) daUnidade[outro] = { ...cfg, medidorQuedas: false };
+    });
+  }
+  const monitorar = medidorQuedas || (corpo.monitorar !== undefined ? !!corpo.monitorar : anterior.monitorar);
   const marca = corpo.marca !== undefined ? idDaMarca(corpo.marca) : anterior.marca;
-  if (!limpo && !tipo && !monitorar) delete daUnidade[macOk];
-  else daUnidade[macOk] = { apelido: limpo || null, tipo, monitorar, marca };
+  if (!limpo && !tipo && !monitorar && !medidorQuedas) delete daUnidade[macOk];
+  else daUnidade[macOk] = { apelido: limpo || null, tipo, monitorar, marca, medidorQuedas };
   await APELIDOS_DOC.set({ unidades: { ...atuais, [codigo]: daUnidade }, tipos: extrasNovos }, { merge: false });
   apelidosCache = null;
-  return { codigo, mac: macOk, apelido: limpo || null, tipo, monitorar, marca };
+  return { codigo, mac: macOk, apelido: limpo || null, tipo, monitorar, marca, medidorQuedas };
 }
 
 const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
@@ -985,7 +1023,7 @@ async function listar() {
         return {
           ...x,
           apelido: cfg.apelido, tipo: cfg.tipo, tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tipos),
-          monitorar: cfg.monitorar, marca: cfg.marca, fabricante: ouiFabricantes.fabricanteDe(x.mac),
+          monitorar: cfg.monitorar, medidorQuedas: cfg.medidorQuedas, marca: cfg.marca, fabricante: ouiFabricantes.fabricanteDe(x.mac),
         };
       }),
     };
@@ -1105,6 +1143,9 @@ function leituraSuspeita(anteriores, sumidos) {
   return fora >= SUMICO_SUSPEITO_MIN && fora * 2 > antes;
 }
 
+// 60 entradas: historico de sobra pra responder "o que entrou nessa maquina e
+// quando", sem inchar um documento que e' lido a cada abertura de ficha.
+const PROGRAMAS_HISTORICO_MAX = 60;
 async function registrarProgramas(codigo, posto, lista, token) {
   const ref = COLLECTION.doc(docIdFor(codigo, posto));
   const snap = await ref.get();
@@ -1132,24 +1173,39 @@ async function registrarProgramas(codigo, posto, lista, token) {
   }
   const agora = Date.now();
   const patch = { programas: limpa, programasEm: agora };
-  const eventos = [...(atual.eventos || [])];
-  if (novos.length) {
-    const evento = { tipo: 'programa-novo', em: agora, detalhe: novos.slice(0, 10).join(' · ') };
-    eventos.push(evento);
-    patch.ultimoProgramaNovoEm = agora;
-    patch.ultimoProgramaNovoDetalhe = evento.detalhe;
-  }
-  // desinstalacao entra na MESMA linha do tempo e so avisa com a chave
-  // ligada, igual a instalacao: pra quem olha o Registro de atividades, "o
-  // que saiu" conta tanto quanto "o que entrou"
+  // ---- HISTORICO DE PROGRAMAS, EM LISTA PROPRIA ----
+  //
+  // Pedido do Master (14/09): "quando um programa novo instalado, quando um
+  // programa e desinstalado, ter um icone ao clicar abrir uma aba mostrando -
+  // para nao poluir nem ficar baguncado os registros".
+  //
+  // Antes isto ia pro array `eventos`, que e' o Registro de atividades - o
+  // mesmo lugar de online/offline, comando, acesso remoto. Uma maquina que
+  // atualiza Chrome toda semana empurrava queda de rede pra fora da tela, e a
+  // linha do tempo que serve pra investigar incidente virava lista de
+  // instalador. Agora e' um array separado, com aba propria na ficha.
+  //
+  // Cabe no MESMO documento e na MESMA escrita que ja acontece: nao custa
+  // leitura nem escrita a mais (§3). 60 entradas e' historico de sobra pra
+  // responder "quem instalou isso e quando", e cada entrada e' pequena.
   const sumidosAlerta = alerta ? sumidos : [];
-  if (sumidosAlerta.length) {
-    const evento = { tipo: 'programa-sumido', em: agora, detalhe: sumidosAlerta.slice(0, 10).join(' · ') };
-    eventos.push(evento);
-    patch.ultimoProgramaSumidoEm = agora;
-    patch.ultimoProgramaSumidoDetalhe = evento.detalhe;
+  if (novos.length) {
+    patch.ultimoProgramaNovoEm = agora;
+    patch.ultimoProgramaNovoDetalhe = novos.slice(0, 10).join(' · ');
   }
-  if (novos.length || sumidosAlerta.length) patch.eventos = eventos.slice(-EVENTOS_MAX);
+  if (sumidosAlerta.length) {
+    patch.ultimoProgramaSumidoEm = agora;
+    patch.ultimoProgramaSumidoDetalhe = sumidosAlerta.slice(0, 10).join(' · ');
+  }
+  if (novos.length || sumidosAlerta.length) {
+    // entrou e saiu na MESMA entrada quando acontecem na mesma leitura: uma
+    // atualizacao de programa e' isso - o nome velho sai e o novo entra, e
+    // separar em duas linhas faria parecer que sao dois acontecimentos
+    patch.programasHistorico = [
+      ...(Array.isArray(atual.programasHistorico) ? atual.programasHistorico : []),
+      { em: agora, entrou: novos.slice(0, 20), saiu: sumidosAlerta.slice(0, 20) },
+    ].slice(-PROGRAMAS_HISTORICO_MAX);
+  }
   await gravarEEspelhar(codigo, posto, patch);
   return { novos, sumidos: sumidosAlerta, nome, primeira };
 }
@@ -2642,8 +2698,13 @@ async function varrerAlertas() {
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...(estado || {}), avisadoOffline: true, offlineDesde: disp.visto } };
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
-            tipo: 'dispositivo-offline', mac: disp.mac,
-            apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
+            // o medidor caindo e' a QUEDA DA LOJA, nao "sumiu um aparelho":
+            // quem le o alerta precisa saber qual dos dois aconteceu
+            tipo: cfg.medidorQuedas ? 'rede-unidade-offline' : 'dispositivo-offline', mac: disp.mac,
+            apelido: cfg.apelido, tipoDispositivo: cfg.tipo, medidorQuedas: cfg.medidorQuedas,
+            // o agente estar vivo ou nao e' o que separa "caiu a loja" de "caiu
+            // so o modem" - vai junto pra quem le nao ter que adivinhar
+            agenteVivo: Date.now() - (candidato.ultimoHeartbeatEm || 0) < LIMIAR_OFFLINE_MS,
             tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
           });
         }
@@ -2683,8 +2744,11 @@ async function varrerAlertas() {
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...base, avisadoOffline: false, offlineDesde: null } };
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
-            tipo: 'dispositivo-online', mac: disp.mac,
-            apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
+            tipo: cfg.medidorQuedas ? 'rede-unidade-online' : 'dispositivo-online', mac: disp.mac,
+            apelido: cfg.apelido, tipoDispositivo: cfg.tipo, medidorQuedas: cfg.medidorQuedas,
+            // quanto tempo a loja passou fora: o alerta de volta so serve se
+            // disser o tamanho da queda
+            foraMs: estado && estado.offlineDesde ? Date.now() - estado.offlineDesde : null,
             tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
           });
         }
@@ -3307,7 +3371,7 @@ module.exports = {
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,
-  PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, enderecoAtualDoMac,
+  PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,

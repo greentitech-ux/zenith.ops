@@ -11956,7 +11956,11 @@ setTimeout(async () => {
       'programa novo é detectado pelo SERVIDOR e vira evento na máquina':
         prog2.status === 200 && JSON.parse(prog2.corpo).novos === 1
         && docPol.ultimoProgramaNovoDetalhe === 'uTorrent'
-        && (docPol.eventos || []).some((e) => e.tipo === 'programa-novo'),
+        // AGORA em lista propria, nao no Registro de atividades: uma maquina que
+        // atualiza Chrome toda semana empurrava queda de rede pra fora da tela
+        // (pedido do Master: "para nao poluir nem ficar baguncado os registros")
+        && (docPol.programasHistorico || []).some((h) => (h.entrou || []).includes('uTorrent'))
+        && !(docPol.eventos || []).some((e) => e.tipo === 'programa-novo'),
       'a comparação é do servidor (a máquina só manda a lista crua)':
         /function programasNovos\(anteriores, atuais\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
         && !/programasNovos/.test(psPol),
@@ -12163,6 +12167,161 @@ setTimeout(async () => {
   if (!okPapelMarca) ruins += 1;
   console.log(`${okPapelMarca ? '✓' : '✗'} Papel de parede: uma arte por grupo + marca (as duas logos), o nome da máquina escrito nela, e trocar a imagem chega na loja`);
 
+  // ------------------------------------------------------------------
+  // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)
+  // "preciso poder marcar como medidor de quedas da unidade - um equipamento
+  // que nao tem acesso, como um Modem, para ser o ponto de medicao".
+  //
+  // O que isso resolve: o NOC ja sabe quando o AGENTE para de bater, mas o
+  // computador da loja e' desligado ao fechar, cai em atualizacao do Windows,
+  // alguem puxa da tomada - e nada disso e' queda de rede. O modem fica ligado;
+  // e' uma referencia honesta.
+  //
+  // E o que isso NAO mede, que o teste tambem tranca: modem ligado com a
+  // internet do provedor fora continua respondendo na rede local. Por isso a
+  // transicao carrega `agenteVivo` - e' o cruzamento dos dois sinais que separa
+  // "caiu a loja" de "caiu so o modem" de "so o computador desligou".
+  let okMedidor = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabMed = { Authorization: 'Bearer ' + token };
+    const macModem = 'b4:89:01:a8:a3:6a';
+    const macOutro = '24:fd:0d:25:19:e8';
+    const rota = (mac) => `/api/loja-status/MEDE/dispositivos/${mac}/apelido`;
+
+    const marcou = await enviarJson('PUT', rota(macModem), { apelido: 'Modem Huawei', medidorQuedas: true }, cabMed);
+    const cfgModem = marcou.status === 200 ? JSON.parse(marcou.corpo) : {};
+    // marcar OUTRO tem de tirar o primeiro: dois pontos de medicao dariam duas
+    // versoes da mesma queda e ninguem saberia qual e' a da loja
+    const marcouOutro = await enviarJson('PUT', rota(macOutro), { apelido: 'Roteador', medidorQuedas: true }, cabMed);
+    const doc = DOCS.get('lojaStatusConfig/apelidosRede') || {};
+    const daUnidade = (doc.unidades || {}).MEDE || {};
+    const quantosMedidores = Object.values(daUnidade).filter((v) => ls.normalizarEntradaApelido(v).medidorQuedas).length;
+    const primeiroDepois = ls.normalizarEntradaApelido(daUnidade[macModem]);
+
+    // desmarcar devolve o aparelho pro estado comum
+    await enviarJson('PUT', rota(macOutro), { medidorQuedas: false }, cabMed);
+    const docSem = DOCS.get('lojaStatusConfig/apelidosRede') || {};
+    const semNinguem = ls.medidorDaUnidade((docSem.unidades || {}).MEDE || {});
+
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlM = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const pushTx = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const lsTx = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+
+    const conf = {
+      'dá pra marcar um aparelho como medidor da unidade':
+        marcou.status === 200 && cfgModem.medidorQuedas === true,
+      // medir queda de um aparelho que a varredura não acompanha não existe
+      'marcar medidor liga o monitorar junto, no servidor e na tela':
+        cfgModem.monitorar === true && /function aoMarcarMedidor\(\)/.test(htmlM)
+        && /medidorQuedas \|\| !!valor\.monitorar/.test(lsTx),
+      'só um medidor por unidade: marcar outro desmarca o primeiro':
+        marcouOutro.status === 200 && quantosMedidores === 1 && primeiroDepois.medidorQuedas === false,
+      'desmarcar deixa a unidade sem medidor (não fica preso pra sempre)':
+        semNinguem === null,
+      // a queda do medidor NÃO é "sumiu um aparelho" - é a loja
+      'a queda do medidor vira uma transição própria, não a de dispositivo':
+        /tipo: cfg\.medidorQuedas \? 'rede-unidade-offline' : 'dispositivo-offline'/.test(lsTx)
+        && /tipo: cfg\.medidorQuedas \? 'rede-unidade-online' : 'dispositivo-online'/.test(lsTx),
+      // é o CRUZAMENTO dos dois sinais que conta a história certa; um sozinho
+      // não distingue "a loja caiu" de "desligaram o computador"
+      'o alerta diz se o computador caiu junto ou continua de pé':
+        /agenteVivo: Date\.now\(\) - \(candidato\.ultimoHeartbeatEm \|\| 0\) < LIMIAR_OFFLINE_MS/.test(lsTx)
+        && /o computador continua online, então o problema é o equipamento/.test(idx)
+        && /a loja inteira está sem rede ou sem energia/.test(idx),
+      'o alerta de volta diz quanto tempo a loja ficou fora':
+        /foraMs: estado && estado\.offlineDesde \? Date\.now\(\) - estado\.offlineDesde : null/.test(lsTx)
+        && /Ficou \$\{Math\.max\(1, Math\.round\(t\.foraMs \/ 60000\)\)\} min fora/.test(idx),
+      'cai e volta no MESMO card de alerta, um por unidade':
+        /tag: `noc-rede-unidade-\$\{codigo\}`/.test(pushTx),
+      'a tela marca na lista qual aparelho é o ponto de medição':
+        /class="disp-medidor-chip"/.test(htmlM) && /id="disp-medidor"/.test(htmlM),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okMedidor = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (marcou=${marcou.status} ${marcou.corpo.slice(0, 120)})`);
+  } catch (e) { okMedidor = false; console.log('  erro: ' + e.message); }
+  if (!okMedidor) ruins += 1;
+  console.log(`${okMedidor ? '✓' : '✗'} NOC: um aparelho da rede vira o medidor de quedas da unidade (o modem, que ninguém desliga)`);
+
+  // ------------------------------------------------------------------
+  // PROGRAMAS DA MAQUINA EM JANELA PROPRIA (pedido do Master, 14/09/2026)
+  // "quando um programa novo instalado, quando um programa e desinstalado, ter
+  // um icone ao clicar abrir uma aba mostrando - para nao poluir nem ficar
+  // baguncado os registros. E 1 aba com os programas atuais na maquina".
+  //
+  // A decisao que este teste tranca: instalacao/desinstalacao SAI do array
+  // `eventos`. Aquele array e' o Registro de atividades - o mesmo lugar de
+  // queda, comando e acesso remoto, que e' o que se olha pra investigar
+  // incidente. Uma maquina que atualiza Chrome toda semana empurrava a queda de
+  // rede pra fora da tela.
+  //
+  // A aba "instalados agora" nao custa nada: a lista JA era guardada pra servir
+  // de base de comparacao. So nunca tinha sido mostrada.
+  let okProgramasAba = false;
+  try {
+    const cabPr = { Authorization: 'Bearer ' + token };
+    const rotaPr = '/api/loja-status/PROG/computadores/PC1/programas';
+    DOCS.set('lojaStatus/PROG__PC1', {
+      codigo: 'PROG', posto: 'PC1', nome: 'PDV Programas', tipo: 'interno', agentToken: 'tokprog',
+      ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: true },
+    });
+    const cabTokPr = { 'x-noc-token': 'tokprog' };
+    // 1a coleta = foto inicial (nao vira historico); a 2a troca um programa
+    await postarJson(rotaPr, { programas: ['Google Chrome', 'Adobe Reader', 'WinRAR'] }, cabTokPr);
+    await postarJson(rotaPr, { programas: ['Google Chrome', 'Adobe Reader', 'AnyDesk'] }, cabTokPr);
+    const doc1 = DOCS.get('lojaStatus/PROG__PC1') || {};
+    const hist = doc1.programasHistorico || [];
+    // uma terceira leitura, so instalacao
+    await postarJson(rotaPr, { programas: ['Google Chrome', 'Adobe Reader', 'AnyDesk', 'Notepad++'] }, cabTokPr);
+    const doc2 = DOCS.get('lojaStatus/PROG__PC1') || {};
+    const detalhe = await pedir('/api/loja-status/PROG/computadores/PC1/detalhe', cabPr);
+    const dJson = detalhe.status === 200 ? JSON.parse(detalhe.corpo) : {};
+    const htmlP = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    const conf = {
+      'a 1ª coleta não vira histórico (80 programas não são 80 mudanças)':
+        hist.length === 1,
+      // trocar um programa por outro e' UMA mudanca, nao duas: separar faria
+      // uma atualizacao parecer dois acontecimentos
+      'entrou e saiu na mesma leitura ficam na MESMA entrada':
+        (hist[0].entrou || []).includes('AnyDesk') && (hist[0].saiu || []).includes('WinRAR'),
+      'cada mudança nova é uma entrada a mais, com a hora':
+        (doc2.programasHistorico || []).length === 2
+        && (doc2.programasHistorico[1].entrou || []).includes('Notepad++')
+        && !(doc2.programasHistorico[1].saiu || []).length
+        && doc2.programasHistorico[1].em > 0,
+      // O PEDIDO: sai do Registro de atividades, que e' pra investigar incidente
+      'instalação e desinstalação NÃO poluem mais o Registro de atividades':
+        !(doc2.eventos || []).some((e) => e.tipo === 'programa-novo' || e.tipo === 'programa-sumido'),
+      'o card continua mostrando a última mudança (sem precisar abrir a janela)':
+        doc2.ultimoProgramaNovoDetalhe === 'Notepad++' && !!doc2.ultimoProgramaNovoEm,
+      // a lista inteira ja era guardada como base de comparacao: mostrar nao
+      // custa leitura nenhuma
+      'a ficha já traz a lista atual e o histórico, sem rota nem leitura nova':
+        detalhe.status === 200 && (dJson.programas || []).includes('Notepad++')
+        && (dJson.programasHistorico || []).length === 2 && dJson.programasEm > 0,
+      'o histórico tem teto (não incha o documento que a ficha lê toda vez)':
+        /PROGRAMAS_HISTORICO_MAX = \d+/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+        && /\.slice\(-PROGRAMAS_HISTORICO_MAX\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
+      'a tela tem o ícone e as duas abas que ele pediu':
+        /onclick="abrirProgramas\('/.test(htmlP) && /id="prog-aba-mudancas"/.test(htmlP)
+        && /id="prog-aba-atuais"/.test(htmlP) && /function pintarProgramas\(\)/.test(htmlP),
+      'a lista de instalados é ordenada e dá pra buscar (uma máquina tem ~100)':
+        /sort\(\(a,b\)=>a\.localeCompare\(b,'pt-BR'\)\)/.test(htmlP) && /id="prog-busca"/.test(htmlP),
+      // sem essa explicacao, uma janela vazia parece defeito
+      'janela vazia explica que o aviso depende da chave da política':
+        /Nenhuma mudança registrada ainda/.test(htmlP) && /Avisar quando instalarem/.test(htmlP),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okProgramasAba = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (hist=${JSON.stringify(hist).slice(0, 200)})`);
+  } catch (e) { okProgramasAba = false; console.log('  erro: ' + e.message); }
+  if (!okProgramasAba) ruins += 1;
+  console.log(`${okProgramasAba ? '✓' : '✗'} NOC: programas da máquina em janela própria (o que entrou, o que saiu, e o que está instalado agora)`);
+
+
 
   // ------------------------------------------------------------------
   // "INCLUSIVE QUERO TAMBEM SER AVISADO QUANDO DESINSTALADO" (Master,
@@ -12217,7 +12376,8 @@ setTimeout(async () => {
       'desinstalação é detectada e vira alerta, campo e evento na máquina':
         some.status === 200 && JSON.parse(some.corpo).sumidos === 3
         && docDes.ultimoProgramaSumidoDetalhe === 'Avast Antivirus · NOCZenith · 7-Zip'
-        && (docDes.eventos || []).some((e) => e.tipo === 'programa-sumido')
+        && (docDes.programasHistorico || []).some((h) => (h.saiu || []).length)
+        && !(docDes.eventos || []).some((e) => e.tipo === 'programa-sumido')
         && docDes.programas.length === 3,
       'leitura truncada NÃO vira alerta de desinstalação em massa':
         truncada.status === 200 && JSON.parse(truncada.corpo).sumidos === 0
