@@ -233,7 +233,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -268,9 +268,93 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
     criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [],
     colaboradores: equipe, colaboradoresIds: equipe.map((p) => p.id), participantesApenasAcompanham: !!participantesApenasAcompanham,
     unidade: unidade || null, unidadeNome: unidadeNome || unidade || null,
+    // passos ja nascem desmarcados: a serie recorrente repete a CHECKLIST, nao
+    // o que a ocorrencia passada conseguiu fazer
+    subtarefas: (Array.isArray(subtarefas) ? subtarefas : []).slice(0, SUBTAREFA_MAX)
+      .map((x) => String((x && x.titulo) || x || '').trim().slice(0, 200)).filter(Boolean)
+      .map((t) => ({
+        id: crypto.randomBytes(8).toString('hex'), titulo: t, feita: false,
+        feitaEm: null, feitaPorId: null, feitaPorNome: null,
+        criadaEm: agora, criadaPorId: usuario.id, criadaPorNome: nomeUsuario(usuario),
+      })),
+    // de qual serie recorrente esta ocorrencia saiu (null = tarefa avulsa)
+    serieId: (serie && serie.id) || null, serieData: (serie && serie.data) || null,
   };
   await ref.set(tarefa);
   return tarefa;
+}
+
+// ---------- SUBTAREFAS: a lista de passos DENTRO da tarefa ----------
+//
+// Checklist, nao tarefa-filha. A diferenca importa: subtarefa nao tem
+// responsavel proprio, nem prazo, nem SLA, nem PDF - se tivesse, seria uma
+// tarefa, e ai o certo e' criar uma tarefa e vincular. O que ela resolve e'
+// "essa entrega tem 3 passos e eu quero ver quais ja sairam", que hoje so
+// cabia no texto da descricao e ninguem conseguia marcar.
+//
+// Mora DENTRO do documento da tarefa (como anexos e comentarios), nao em
+// colecao propria: abrir a ficha ja traz tudo em 1 leitura. Colecao separada
+// custaria uma consulta por tarefa em toda lista (§3).
+//
+// NAO conclui a tarefa sozinha quando o ultimo item e' marcado, e e' de
+// proposito - e o que Asana, Todoist e ClickUp fazem. Terminar os passos que
+// alguem escreveu nao e' a mesma coisa que entregar; quem entrega diz que
+// entregou.
+const SUBTAREFA_MAX = 50;
+function progressoSubtarefas(tarefa) {
+  const lista = (tarefa && tarefa.subtarefas) || [];
+  return { total: lista.length, feitas: lista.filter((x) => x && x.feita).length };
+}
+async function adicionarSubtarefa(id, acesso, titulo) {
+  const texto = String(titulo || '').trim().slice(0, 200);
+  if (!texto) throw new Error('Escreva o que é a subtarefa.');
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  // mesma regua do comentario e do anexo: quem participa faz a tarefa ANDAR
+  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode criar subtarefa nesta tarefa.');
+  const lista = tarefa.subtarefas || [];
+  if (lista.length >= SUBTAREFA_MAX) throw new Error(`Uma tarefa aceita no máximo ${SUBTAREFA_MAX} subtarefas. Se precisa de mais, provavelmente são duas tarefas.`);
+  const agora = new Date().toISOString();
+  const item = {
+    id: crypto.randomBytes(8).toString('hex'), titulo: texto, feita: false,
+    feitaEm: null, feitaPorId: null, feitaPorNome: null,
+    criadaEm: agora, criadaPorId: acesso.usuario.id, criadaPorNome: nomeUsuario(acesso.usuario),
+  };
+  await ref.update({ subtarefas: [...lista, item], atualizadoEm: agora });
+  return getOne(id);
+}
+async function alternarSubtarefa(id, acesso, subId, feita) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  // marcar passo e' andamento, mesma regua do status: quem so acompanha nao
+  // move a tarefa, e marcar subtarefa e' mover
+  if (!podeMoverStatus(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não marcar subtarefa.');
+  const lista = tarefa.subtarefas || [];
+  // pelo ID, nunca pelo indice: entre desenhar a tela e o clique alguem pode
+  // ter criado outra subtarefa, e por posicao o clique marcaria a errada
+  if (!lista.some((x) => x && x.id === String(subId))) throw new Error('Subtarefa não encontrada.');
+  const agora = new Date().toISOString();
+  const nova = lista.map((x) => (x && x.id === String(subId)
+    ? { ...x, feita: !!feita, feitaEm: feita ? agora : null, feitaPorId: feita ? acesso.usuario.id : null, feitaPorNome: feita ? nomeUsuario(acesso.usuario) : null }
+    : x));
+  await ref.update({ subtarefas: nova, atualizadoEm: agora });
+  return getOne(id);
+}
+async function removerSubtarefa(id, acesso, subId) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  const lista = tarefa.subtarefas || [];
+  const alvo = lista.find((x) => x && x.id === String(subId));
+  if (!alvo) throw new Error('Subtarefa não encontrada.');
+  // mesma regra do anexo: cada um tira o que pos, e o dono tira qualquer um.
+  // Apagar passo alheio e' apagar combinado de outra pessoa.
+  if (!podeGerir(tarefa, acesso) && alvo.criadaPorId !== acesso.usuario.id) throw new Error('Só quem criou a subtarefa (ou o dono da tarefa) pode removê-la.');
+  const agora = new Date().toISOString();
+  await ref.update({ subtarefas: lista.filter((x) => x && x.id !== String(subId)), atualizadoEm: agora });
+  return getOne(id);
 }
 
 async function adicionarAnexo(id, acesso, anexo) {
@@ -563,4 +647,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, gerarLinkReuniao, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, gerarLinkReuniao, adicionarSubtarefa, alternarSubtarefa, removerSubtarefa, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

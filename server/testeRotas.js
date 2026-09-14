@@ -18774,6 +18774,150 @@ setTimeout(async () => {
   if (!okCalendario) ruins += 1;
   console.log(`${okCalendario ? '✓' : '✗'} Meu Dia: calendário em Dia/Semana/Mês, sem leitura nova e sem rota nova`);
 
+  // ------------------------------------------------------------------
+  // SUBTAREFAS E TAREFAS QUE SE REPETEM (pedido do Master, 14/09/2026)
+  //
+  // "criar sub-tarefas dentro da tarefa"; "ícone de + para adicionar e abaixo
+  // das sub tarefas que estão sendo criadas, um clicável também"; "ter a opção
+  // de criar tarefas recorrentes - Pedido da MB toda segunda, escolher entre
+  // dia da semana, 15 em 15 dias".
+  //
+  // As duas decisões que este teste tranca:
+  //
+  // 1. Subtarefa é CHECKLIST, não tarefa-filha: mora dentro do documento da
+  //    tarefa (1 leitura abre a ficha inteira) e não tem responsável, prazo
+  //    nem SLA próprios. E terminar todos os passos NÃO conclui a tarefa - é
+  //    o que Asana, Todoist e ClickUp fazem, e a razão é boa: cumprir os
+  //    passos que alguém escreveu não é a mesma coisa que entregar.
+  //
+  // 2. Recorrência é uma SÉRIE + um relógio, não uma tarefa que se clona ao
+  //    ser concluída. Se ninguém concluir o pedido da segunda, o da segunda
+  //    seguinte tem de nascer assim mesmo - e é justamente o pedido que não
+  //    pode ser esquecido.
+  let okSubRecorrente = false;
+  try {
+    const cabSR = { Authorization: 'Bearer ' + token };
+    const rec = require(__dirname + '/tarefasRecorrentes.js');
+
+    // ---- calendário: a única regra que decide "hoje tem ou não tem" ----
+    const semanal = rec.sanitizarRegra({ tipo: 'semanal', inicio: '2026-09-14', diasSemana: [1, 4] });
+    const quinzenal = rec.sanitizarRegra({ tipo: 'quinzenal', inicio: '2026-09-14' });
+    const mensal31 = rec.sanitizarRegra({ tipo: 'mensal', inicio: '2026-01-31' });
+    const comFim = rec.sanitizarRegra({ tipo: 'semanal', inicio: '2026-09-14', diasSemana: [1], ate: '2026-09-20' });
+    let recusouSemDia = false;
+    try { rec.sanitizarRegra({ tipo: 'semanal', inicio: '2026-09-14', diasSemana: [] }); } catch (e2) { recusouSemDia = true; }
+
+    // ---- subtarefas, pela rota ----
+    const nasceSR = await postarJson('/api/tarefas', { titulo: 'Pedido da MB', subtarefas: ['Conferir estoque', 'Montar o pedido', 'Enviar'] }, cabSR);
+    const tSR = nasceSR.status === 200 ? JSON.parse(nasceSR.corpo) : {};
+    const add = await postarJson(`/api/tarefas/${tSR.id}/subtarefas`, { titulo: 'Confirmar recebimento' }, cabSR);
+    const comQuatro = add.status === 200 ? JSON.parse(add.corpo) : {};
+    const alvoSub = (comQuatro.subtarefas || [])[0] || {};
+    const marca = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/${alvoSub.id}`, { feita: true }, cabSR);
+    const marcada = marca.status === 200 ? JSON.parse(marca.corpo) : {};
+    const umaFeita = (marcada.subtarefas || []).find((x) => x.id === alvoSub.id) || {};
+    const desmarca = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/${alvoSub.id}`, { feita: false }, cabSR);
+    const desmarcada = desmarca.status === 200 ? JSON.parse(desmarca.corpo) : {};
+    const some = await pedirJsonDelete(`/api/tarefas/${tSR.id}/subtarefas/${alvoSub.id}`, cabSR);
+    const semEla = some.status === 200 ? JSON.parse(some.corpo) : {};
+    const fantasma = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/naoexiste`, { feita: true }, cabSR);
+
+    // marcar TODAS não pode concluir a tarefa sozinha
+    const todas = await postarJson('/api/tarefas', { titulo: 'Fechar o mês', subtarefas: ['Passo único'] }, cabSR);
+    const tTodas = todas.status === 200 ? JSON.parse(todas.corpo) : {};
+    const marcouUnica = await enviarJson('PUT', `/api/tarefas/${tTodas.id}/subtarefas/${(tTodas.subtarefas || [{}])[0].id}`, { feita: true }, cabSR);
+    const depoisDeTudo = marcouUnica.status === 200 ? JSON.parse(marcouUnica.corpo) : {};
+
+    // ---- a série, pela rota de criação ----
+    const comRep = await postarJson('/api/tarefas', {
+      titulo: 'Pedido da MB (semanal)', subtarefas: ['Conferir estoque', 'Enviar'],
+      dataInicio: '2026-09-14', dataEntrega: '2026-09-16',
+      repetir: true, regra: { tipo: 'semanal', diasSemana: [1] }, prazoDias: 2,
+    }, cabSR);
+    const tRep = comRep.status === 200 ? JSON.parse(comRep.corpo) : {};
+    const listaSeries = await pedir('/api/tarefas-recorrentes', cabSR);
+    const series = listaSeries.status === 200 ? JSON.parse(listaSeries.corpo) : [];
+    const serie = series.find((x) => x.titulo === 'Pedido da MB (semanal)') || {};
+
+    // o relógio: hoje já foi gerado na criação, então não pode nascer de novo;
+    // na segunda seguinte, nasce uma
+    const tarefasMod = require(__dirname + '/tarefas.js');
+    const hojeDeNovo = await rec.materializar('2026-09-14', (d) => tarefasMod.criar(d));
+    const proximaSegunda = await rec.materializar('2026-09-21', (d) => tarefasMod.criar(d));
+    const denovoNaMesmaSegunda = await rec.materializar('2026-09-21', (d) => tarefasMod.criar(d));
+    const geradaId = (proximaSegunda[0] || {}).tarefaId;
+    const gerada = geradaId ? await tarefasMod.getOne(geradaId) : {};
+
+    // parar de repetir não apaga o que já nasceu
+    await enviarJson('PUT', `/api/tarefas-recorrentes/${serie.id}`, { ativa: false }, cabSR);
+    const depoisDeParar = await rec.materializar('2026-09-28', (d) => tarefasMod.criar(d));
+    const aindaExiste = geradaId ? await tarefasMod.getOne(geradaId) : null;
+
+    const htmlT = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tarefas.html'), 'utf8');
+    const conf = {
+      // ---- calendário ----
+      'semanal cai só nos dias marcados':
+        rec.ocorreEm(semanal, '2026-09-14') && rec.ocorreEm(semanal, '2026-09-17')
+        && !rec.ocorreEm(semanal, '2026-09-15') && !rec.ocorreEm(semanal, '2026-09-13'),
+      'quinzenal é de 14 em 14 dias a partir do início':
+        rec.ocorreEm(quinzenal, '2026-09-28') && !rec.ocorreEm(quinzenal, '2026-09-21'),
+      // o mesmo estouro de mês que mordeu o filtro de período: dia 31 em mês de
+      // 28 tem de cair no ÚLTIMO dia, não sumir e não vazar pro dia 1º
+      'mensal no dia 31 cai no último dia do mês curto (e não pula o mês)':
+        rec.ocorreEm(mensal31, '2026-02-28') && !rec.ocorreEm(mensal31, '2026-02-27')
+        && !rec.ocorreEm(mensal31, '2026-03-01') && rec.ocorreEm(mensal31, '2026-03-31'),
+      'a data final encerra a repetição': rec.ocorreEm(comFim, '2026-09-14') && !rec.ocorreEm(comFim, '2026-09-21'),
+      'semanal sem nenhum dia marcado é recusada na hora de salvar': recusouSemDia,
+      // ---- subtarefas ----
+      'a tarefa nasce com a checklist que foi digitada':
+        nasceSR.status === 200 && (tSR.subtarefas || []).length === 3
+        && tSR.subtarefas.every((x) => x.feita === false && x.id),
+      'dá pra somar uma subtarefa depois': add.status === 200 && (comQuatro.subtarefas || []).length === 4,
+      'marcar registra QUEM marcou (o histórico é o que vale numa cobrança)':
+        umaFeita.feita === true && !!umaFeita.feitaPorNome && !!umaFeita.feitaEm,
+      'desmarcar limpa o registro em vez de deixar o nome de antes':
+        ((desmarcada.subtarefas || []).find((x) => x.id === alvoSub.id) || {}).feitaPorNome === null,
+      'remover tira só aquela, pelo id': some.status === 200 && (semEla.subtarefas || []).length === 3
+        && !(semEla.subtarefas || []).some((x) => x.id === alvoSub.id),
+      'id que não existe é recusado (não marca a subtarefa errada)': fantasma.status === 400,
+      // A decisão de produto, e a que mais custa se alguém "melhorar" depois:
+      'marcar todos os passos NÃO conclui a tarefa sozinha':
+        depoisDeTudo.status !== 'CONCLUIDA' && (depoisDeTudo.subtarefas || []).every((x) => x.feita),
+      // ---- série ----
+      'criar com "repetir" grava a tarefa de hoje E a série':
+        comRep.status === 200 && !!tRep.id && !!serie.id && serie.ativa === true,
+      'a série guarda o roteiro (a checklist volta a cada ocorrência)':
+        (serie.subtarefas || []).length === 2,
+      'o relógio não cria de novo a ocorrência que já nasceu na criação':
+        hojeDeNovo.length === 0,
+      'na data seguinte nasce uma ocorrência': proximaSegunda.length === 1 && !!geradaId,
+      'a ocorrência nova vem com a checklist DESMARCADA e o mesmo fôlego de prazo':
+        (gerada.subtarefas || []).length === 2 && (gerada.subtarefas || []).every((x) => !x.feita)
+        && gerada.dataInicio === '2026-09-21' && gerada.dataEntrega === '2026-09-23'
+        && gerada.serieId === serie.id,
+      // 4 passagens por dia: sem essa trava, 4 "Pedido da MB" na segunda
+      'passar de novo no mesmo dia não duplica a tarefa': denovoNaMesmaSegunda.length === 0,
+      'parar de repetir não cria mais nada, e não apaga o que já nasceu':
+        depoisDeParar.length === 0 && !!aindaExiste && aindaExiste.id === geradaId,
+      // ---- tela ----
+      'a tela tem os DOIS caminhos que ele desenhou: o + no cabeçalho e o clicável abaixo':
+        (htmlT.match(/onclick="novaSubtarefa\(\)"/g) || []).length === 2
+        && /class="sub-mais"/.test(htmlT) && /class="sub-link"/.test(htmlT),
+      'a tela oferece semana com dias, 15 em 15 dias e mensal':
+        /value="semanal"/.test(htmlT) && /value="quinzenal"/.test(htmlT) && /value="mensal"/.test(htmlT)
+        && /function alternarDia\(i\)/.test(htmlT),
+      // era o <small> do SLA colado no rótulo seguinte, no print dele
+      'o texto de ajuda do SLA não fica colado no rótulo de baixo':
+        /\.dialog label\.meta\{display:block\}/.test(htmlT),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okSubRecorrente = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (nasce=${nasceSR.status} rep=${comRep.status} ${String(comRep.corpo).slice(0, 160)})`);
+  } catch (e) { okSubRecorrente = false; console.log('  erro: ' + e.message); }
+  if (!okSubRecorrente) ruins += 1;
+  console.log(`${okSubRecorrente ? '✓' : '✗'} Meu Dia: subtarefas dentro da tarefa, e tarefa que se repete (semana/15 dias/mês)`);
+
+
   // Barra de rolagem igual em todas as telas. O padrão do Chrome é larga,
   // clara e com setas nas pontas - sobre o fundo escuro vira uma faixa branca.
   // O desenho do Meu Dia (fina, arredondada, invisível até o mouse entrar)

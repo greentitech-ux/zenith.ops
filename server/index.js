@@ -48,6 +48,7 @@ const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
 const tarefas = require('./tarefas');
+const tarefasRecorrentes = require('./tarefasRecorrentes');
 const fornecedores = require('./fornecedores');
 const tarefaRelatorio = require('./tarefaRelatorio');
 const acessosPessoa = require('./acessosPessoa');
@@ -9940,9 +9941,32 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
       // validação mora no módulo, não aqui, pra valer em qualquer chamador
       ehReuniao: req.body?.ehReuniao === true, horaInicio: req.body?.horaInicio,
       duracaoMin: req.body?.duracaoMin, linkReuniao: req.body?.linkReuniao, linkOrigem: req.body?.linkOrigem,
+      subtarefas: req.body?.subtarefas,
     });
+    // "repetir" cria a SERIE junto, com o mesmo conteudo da tarefa: quem monta
+    // o pedido da MB monta uma vez. A tarefa de hoje ja e' esta - a serie
+    // comeca a valer da PROXIMA data em diante (ultimaGeradaData = hoje).
+    let repeticao = null;
+    if (req.body?.repetir && req.body?.regra) {
+      try {
+        repeticao = await tarefasRecorrentes.criar({
+          titulo: criada.titulo, descricao: criada.descricao, prioridade: criada.prioridade,
+          unidade: criada.unidade, unidadeNome: criada.unidadeNome,
+          responsavelId: criada.responsavelId, responsavelNome: criada.responsavelNome,
+          colaboradores: criada.colaboradores, participantesApenasAcompanham: criada.participantesApenasAcompanham,
+          subtarefas: (criada.subtarefas || []).map((x) => x.titulo),
+          prazoDias: req.body?.prazoDias,
+          regra: { ...req.body.regra, inicio: criada.dataInicio },
+        }, acesso);
+        await tarefasRecorrentes.marcarGeradaHoje(repeticao.id, criada.dataInicio, criada.id);
+      } catch (err) {
+        // a tarefa de hoje JA existe: falhar a resposta inteira apagaria da
+        // tela um trabalho que foi gravado. Avisa e segue.
+        repeticao = { erro: err.message };
+      }
+    }
     broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
-    res.json(criada);
+    res.json({ ...criada, repeticao });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -10260,6 +10284,48 @@ app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ---- SUBTAREFAS: os passos dentro da tarefa ----
+// Tres rotas granulares em vez de um PUT que troca a lista inteira: dois
+// navegadores abertos na mesma tarefa nao apagam o passo que o outro acabou de
+// criar (o mesmo motivo de anexo ser por id, e nao por posicao).
+app.post('/api/tarefas/:id/subtarefas', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.adicionarSubtarefa(req.params.id, acessoDasTarefas(req), req.body?.titulo);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.put('/api/tarefas/:id/subtarefas/:subId', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.alternarSubtarefa(req.params.id, acessoDasTarefas(req), req.params.subId, req.body?.feita === true);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.delete('/api/tarefas/:id/subtarefas/:subId', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.removerSubtarefa(req.params.id, acessoDasTarefas(req), req.params.subId);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// ---- REPETIÇÕES (séries) ----
+app.get('/api/tarefas-recorrentes', auth.requireAuth, async (req, res) => {
+  try {
+    const lista = await tarefasRecorrentes.listarDoUsuario(acessoDasTarefas(req));
+    res.json(lista.map((s) => ({ ...s, resumo: tarefasRecorrentes.resumoDaRegra(s.regra) })));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.put('/api/tarefas-recorrentes/:id', auth.requireAuth, async (req, res) => {
+  try { res.json(await tarefasRecorrentes.definirAtiva(req.params.id, acessoDasTarefas(req), req.body?.ativa === true)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.delete('/api/tarefas-recorrentes/:id', auth.requireAuth, async (req, res) => {
+  try { res.json(await tarefasRecorrentes.remover(req.params.id, acessoDasTarefas(req))); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/tarefas/:id/comentarios', auth.requireAuth, async (req, res) => {
@@ -14703,6 +14769,23 @@ function aquecerBoot(promessa, ms) {
       .catch((err) => console.error('Erro na retenção do Abastecimento:', err.message));
     rodarRetencaoAbastecimento();
     setInterval(rodarRetencaoAbastecimento, 24 * 60 * 60 * 1000);
+
+    // TAREFAS QUE SE REPETEM: materializa a ocorrencia de hoje (ver
+    // tarefasRecorrentes.js). De 6 em 6 horas, e nao 1x/dia, porque o Render
+    // reinicia o servico quando quer: uma passagem so, presa a hora do boot,
+    // poderia cair sempre as 23h e o "pedido de segunda" nasceria no fim da
+    // segunda. Repetir e' barato - a serie guarda o dia que ja gerou, entao a
+    // 2a, 3a e 4a passagem do mesmo dia nao criam nada.
+    const rodarTarefasRecorrentes = () => tarefasRecorrentes
+      .materializar(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }), (dados) => tarefas.criar(dados))
+      .then((criadas) => {
+        if (!criadas.length) return;
+        console.log(`[tarefas] ${criadas.length} tarefa(s) recorrente(s) criada(s): ${criadas.map((c) => c.titulo).join(' · ')}`);
+        criadas.forEach((c) => broadcast('tarefas-atualizada', { id: c.tarefaId }, 'tarefas'));
+      })
+      .catch((err) => console.error('Erro ao materializar tarefas recorrentes:', err.message));
+    rodarTarefasRecorrentes();
+    setInterval(rodarTarefasRecorrentes, 6 * 60 * 60 * 1000);
 
     // planilhas do Google Sheets (fechamentos + entregas): SEM sincronizacao
     // automatica - decisao do Master em 2026-08-09 (antes havia janelas fixas
