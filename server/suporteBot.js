@@ -49,11 +49,13 @@ const ESCALACAO_ALVO_RE = /\b(atendente|humano|suporte|time)\b/i;
 
 // tipos que o bot pode abrir na Central (mesma lista do formulario publico -
 // estorno e ajuste de fechamento ficam de fora, tem fluxo proprio com login)
-// PAUSAR ITEM / FECHAR LOJA no iFood / 99food: quem executa e o COORDENADOR
-// AGREGADOR (cargo proprio em users.js), nao "um atendente" qualquer - o
-// painel do agregador esta na mao dele. O bot nao bloqueia nada sozinho: ele
-// leva o pedido a pessoa certa (ver chamar_coordenador_agregador abaixo e
-// push.notifyAgregador) e continua na conversa pra dar o retorno.
+// PAUSAR ITEM / FECHAR LOJA no iFood / 99food: quem executa e o COWORK
+// AGREGADOR, o robo do Master que opera os paineis dos agregadores. O bot nao
+// bloqueia nada sozinho e nao chama "um atendente": ele poe o pedido na fila
+// do Cowork (ver bloquear_no_agregador abaixo, agregadorFila.js e
+// acionarBeniboy em index.js) e continua na conversa - o retorno do Cowork
+// volta pra ela sozinho. Se o Cowork nao executar, o coordenador agregador
+// humano e chamado atras (push.notifyAgregador).
 const ACOES_AGREGADOR = ['pausar-item', 'fechar-loja'];
 const CANAIS_AGREGADOR = ['ifood', '99food', 'ambos'];
 
@@ -129,7 +131,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 ## O que você sabe do NoPulso
 - Login bloqueado (3 senhas erradas seguidas): SEMPRE use desbloquear_login pra resolver na hora, nunca chame um atendente pra isso - vale tanto pro login principal do NoPulso quanto pro login de operador do Abastecimento do Carrinho (balcão, 4 letras + 4 números). A pessoa volta a entrar com a MESMA senha de sempre; só se o mesmo acesso travar de novo é que entra uma senha nova (ver ferramenta abaixo).
 - Estorno: NÃO dá pra você abrir esse ticket direto (exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja foi a compra (pule essa pergunta se já souber pela "loja" do início da conversa) e use gerar_link_estorno_cliente. Se quem fala com você É o cliente (o mais comum), mande o link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo - não precisa de WhatsApp nem de mais ninguém no meio. Se for um funcionário pedindo em nome de um cliente que não está no chat, aí sim ele repassa o link pro cliente por onde for mais fácil (WhatsApp é uma opção, não a única).
-- Pausar item ou fechar a loja no iFood/99food: você NÃO faz isso, e não é com um atendente qualquer - quem tem o painel do agregador na mão é o COORDENADOR AGREGADOR. Use chamar_coordenador_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item.
+- Pausar item ou fechar a loja no iFood/99food: quem faz é o COWORK AGREGADOR, o robô que opera os painéis - não é com um atendente. Use bloquear_no_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item. Depois é só avisar que está sendo feito; a confirmação cai na conversa sozinha - nunca prometa prazo nem diga que já está feito antes da confirmação chegar.
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
 - Fechamento de caixa: lançado em Lançar fechamento; erro em fechamento já enviado se corrige pelo botão "Pedir correção" no Histórico da Central (só 1 correção pendente por lançamento).
@@ -141,7 +143,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
 - consultar_ticket: andamento de um ticket pelo número.
 - chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. ANTES de chamar, use registrar_nota_interna com um resumo (situacao PENDENTE) pra o humano já chegar sabendo. Avise que o time já foi chamado e responde ali mesmo na conversa.
-- chamar_coordenador_agregador: manda pro coordenador agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel do app; você continua na conversa (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que o coordenador já foi acionado. Só chame com loja, app e - pra pausar item - o item em mãos.
+- bloquear_no_agregador: põe na fila do Cowork Agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel e confirma nessa conversa sozinho; você continua nela (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que já está sendo feito. Só chame com loja, app e - pra pausar item - o item em mãos.
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
 - desbloquear_login: destrava um acesso bloqueado (3 senhas erradas) - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se travar de novo: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
@@ -193,8 +195,8 @@ const TOOLS_BASE = [
     },
   },
   {
-    name: 'chamar_coordenador_agregador',
-    description: 'Leva ao COORDENADOR AGREGADOR um pedido de PAUSAR ITEM ou FECHAR A LOJA no iFood ou no 99food - é ele quem tem o painel do agregador e faz o bloqueio. Use SEMPRE que o pedido for esse, em vez de chamar_atendente. Colete ANTES de chamar: a unidade/loja, o canal (iFood, 99food ou os dois) e, quando for pausar item, QUAL item. Não bloqueia nada sozinho e não encerra a conversa - você continua nela e dá o retorno.',
+    name: 'bloquear_no_agregador',
+    description: 'Manda PAUSAR ITEM ou FECHAR A LOJA no iFood ou no 99food. O pedido entra na fila do Cowork Agregador (o robô que opera os painéis), que faz o bloqueio e confirma sozinho na conversa. Use SEMPRE que o pedido for esse, em vez de chamar_atendente. Colete ANTES de chamar: a unidade/loja, o canal (iFood, 99food ou os dois) e, quando for pausar item, QUAL item. Não encerra a conversa - você continua nela.',
     input_schema: {
       type: 'object',
       properties: {
@@ -428,7 +430,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     resultado.motivoAtendente = String(input.motivo || '').trim();
     return 'Atendente humano chamado — o time foi notificado e vai responder nessa mesma conversa. Avise a pessoa e se despeça.';
   }
-  if (nome === 'chamar_coordenador_agregador') {
+  if (nome === 'bloquear_no_agregador') {
     const acao = ACOES_AGREGADOR.includes(input.acao) ? input.acao : null;
     if (!acao) return 'Diga se é pausar-item ou fechar-loja.';
     const canal = CANAIS_AGREGADOR.includes(input.canal) ? input.canal : null;
@@ -446,9 +448,9 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     await suporteChat.registrarNotaInterna(chat.id, {
       resumo: `${oQue} · ${canal === 'ambos' ? 'iFood e 99food' : canal} · ${unidade}${motivo ? ` — ${motivo}` : ''}`,
       situacao: 'PENDENTE',
-      pendencia: 'Coordenador agregador precisa fazer o bloqueio no painel do app.',
+      pendencia: 'Na fila do Cowork Agregador. Se ele não executar, o coordenador agregador é chamado.',
     }).catch(() => {});
-    return 'Coordenador agregador avisado — ele faz o bloqueio no painel do app. Confirme isso pra pessoa em 1 frase e continue na conversa (você NÃO saiu dela).';
+    return 'Pedido na fila do Cowork Agregador — ele faz o bloqueio no painel e a confirmação cai nessa conversa sozinha, em alguns minutos. Diga isso pra pessoa em 1 frase (sem prometer horário) e continue na conversa: você NÃO saiu dela, e NÃO precisa chamar atendente.';
   }
   if (nome === 'desbloquear_login') {
     const usuarioAlvo = String(input.username || '').trim();

@@ -22424,87 +22424,161 @@ setTimeout(async () => {
   console.log(`${okEstacaoTelas ? '✓' : '✗'} Estação da Comida: as três telas (Salão, Caixa, Fechamento), com a tabela do cardápio`);
 
   // ------------------------------------------------------------------
-  // PAUSAR ITEM / FECHAR LOJA NO IFOOD / 99FOOD -> COORDENADOR AGREGADOR.
-  // Pedido do Master (14/09): "ao ser solicitado pausar item ou fechar loja
-  // no ifood ou 99food beniboy se comunique com o coordenador agregador que
-  // fará esse bloqueio". Antes isso caía no chamar_atendente: o Beniboy saía
-  // da conversa, tocava o alarme geral do time e o pedido ficava esperando
-  // alguém perceber que quem resolve é outra pessoa. O que se prova aqui:
-  // o aviso vai pro coordenador POR NOME, sem coordenador cadastrado NÃO
-  // some (cai no alarme geral), e o bot pede loja/app/item ANTES de acionar.
+  // PAUSAR ITEM / FECHAR LOJA NO IFOOD / 99FOOD -> COWORK AGREGADOR.
+  // Pedido do Master (14/09/2026): "agregador é um Cowork que criei,
+  // precisamos fazer essa integração com o NoPulso". O NoPulso não opera
+  // painel de agregador: ele ENFILEIRA, o Cowork PUXA com o token dele,
+  // executa e CONFIRMA de volta (mesma forma de /api/bot/vendas-registro).
+  //
+  // O que este teste protege, que é onde dinheiro se perde: o pedido não
+  // pode sumir (Cowork calado vira cobrança no coordenador humano), não pode
+  // ser executado duas vezes (duas sessões do Cowork puxando junto), e quem
+  // pediu tem que receber o retorno NA CONVERSA - o Beniboy prometeu isso.
   let okAgregador = false;
   try {
+    const fila = require(__dirname + '/agregadorFila.js');
+    const cowork = require(__dirname + '/agregadorCowork.js');
     const pushAg = require(__dirname + '/push.js');
     const src = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
     const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
-    const baseU = { role: 'user', active: true, permissions: { sections: [] } };
-    DOCS.set('users/u-coord-agg', { ...baseU, id: 'u-coord-agg', email: 'coord@teste.local', username: 'coordagg', nome: 'Rita Coord', cargo: 'coordenador-agregador', permissions: { sections: ['suporte'] } });
-    DOCS.set('users/u-coord-agg-2', { ...baseU, id: 'u-coord-agg-2', email: 'coord2@teste.local', username: 'coordagg2', nome: 'Tino Coord', cargo: 'coordenador-agregador' });
-    DOCS.set('users/u-coord-agg-off', { ...baseU, id: 'u-coord-agg-off', email: 'coord3@teste.local', username: 'coordagg3', cargo: 'coordenador-agregador', active: false });
-    DOCS.set('users/u-nao-coord', { ...baseU, id: 'u-nao-coord', email: 'outro@teste.local', username: 'outro', cargo: 'gerente' });
+    const TOKEN_ANTES = process.env.BOT_AGREGADOR_TOKEN;
+    const URL_ANTES = process.env.AGREGADOR_WEBHOOK_URL;
+    delete process.env.AGREGADOR_WEBHOOK_URL;
 
-    const chatFake = { id: 'chat-agg-1', nome: 'Loja Mooca', lojaContexto: 'Mooca' };
-    const entrega = await pushAg.notifyAgregador(chatFake, {
-      acao: 'pausar-item', canal: 'ifood', unidade: 'Mooca', detalhe: 'Coca 2L · acabou o estoque',
+    // --- a fila em si -------------------------------------------------
+    const { pedido: p1 } = await fila.criar({
+      acao: 'pausar-item', canal: 'ifood', unidade: '19855', unidadeNome: 'Dom Bessa',
+      item: 'Coca 2L', motivo: 'acabou o estoque', origem: 'beniboy', chatId: 'chat-agg-1',
     });
-    const alertas = [...DOCS.entries()].map(([, v]) => v).filter((v) => v && v.tipo === 'agregador');
-    const alerta = alertas[0] || {};
-
-    // sem NENHUM coordenador cadastrado o pedido não pode evaporar
-    DOCS.delete('users/u-coord-agg');
-    DOCS.delete('users/u-coord-agg-2');
-    DOCS.delete('users/u-coord-agg-off');
-    const semNinguem = await pushAg.notifyAgregador({ id: 'chat-agg-2', nome: 'Loja Bessa' }, {
-      acao: 'fechar-loja', canal: '99food', unidade: 'Dom Bessa',
+    // a MESMA coca pedida de novo (outra pessoa avisou) não vira 2 bloqueios
+    const repetido = await fila.criar({
+      acao: 'pausar-item', canal: 'ifood', unidade: '19855', item: '  coca 2l  ', chatId: 'chat-agg-9',
     });
-    const caiuNoAlarmeGeral = [...DOCS.entries()].some(([, v]) => v && v.tipo === 'beniboy'
-      && /sem coordenador cadastrado/.test(v.resumo || v.titulo || ''));
+    let semItem = null;
+    try { await fila.criar({ acao: 'pausar-item', canal: 'ifood', unidade: '19855' }); } catch (e) { semItem = e.message; }
 
-    const usersMod = require(__dirname + '/users.js');
+    // o Cowork puxa: sai da fila marcado como entregue, e um SEGUNDO Cowork
+    // puxando na sequência não recebe o mesmo pedido de novo
+    const puxada1 = await fila.puxar();
+    const puxada2 = await fila.puxar();
+
+    // erro do Cowork com tentativa sobrando volta pra fila (painel fora do ar)
+    await fila.concluir(p1.id, { ok: false, erro: 'painel fora do ar' });
+    const voltouPraFila = (await fila.getOne(p1.id)).status;
+    const puxadaDepoisDoErro = await fila.puxar();
+    // e quando dá certo, fecha e some da fila
+    await fila.concluir(p1.id, { ok: true, resultado: 'item pausado' });
+    const depoisDoOk = await fila.getOne(p1.id);
+    // confirmação duplicada do Cowork não reabre nem reescreve nada
+    const duplicada = await fila.concluir(p1.id, { ok: false, erro: 'chegou atrasado' });
+    const aindaExecutado = (await fila.getOne(p1.id)).status;
+
+    // --- as rotas que o Cowork usa ------------------------------------
+    delete process.env.BOT_AGREGADOR_TOKEN;
+    const filaDesligada = await pedir('/api/bot/agregador/fila', { 'x-bot-token': 'qualquer' });
+    process.env.BOT_AGREGADOR_TOKEN = 'g'.repeat(48);
+    const filaSemToken = await pedir('/api/bot/agregador/fila');
+    const filaTokenDoMaster = await pedir('/api/bot/agregador/fila', { 'x-bot-token': process.env.MASTER_API_TOKEN });
+
+    // um pedido de verdade, ligado a uma conversa, pra conferir o retorno
+    DOCS.set('suporteChats/chat-agg-real', {
+      id: 'chat-agg-real', nome: 'Loja Bessa', status: 'ABERTO', criadoEm: new Date().toISOString(),
+      mensagens: [{ de: 'visitante', texto: 'pausa a coca', em: new Date().toISOString() }],
+    });
+    const { pedido: p2 } = await fila.criar({
+      acao: 'fechar-loja', canal: '99food', unidade: '19855', unidadeNome: 'Dom Bessa',
+      motivo: 'cozinha parada', chatId: 'chat-agg-real',
+    });
+    const filaComToken = await pedir('/api/bot/agregador/fila', { 'x-bot-token': process.env.BOT_AGREGADOR_TOKEN });
+    const jFila = JSON.parse(filaComToken.corpo || '{}');
+    const retornoSemId = await postarJson('/api/bot/agregador/retorno', { ok: true }, { 'x-bot-token': process.env.BOT_AGREGADOR_TOKEN });
+    const retorno = await postarJson('/api/bot/agregador/retorno', { id: p2.id, ok: true, resultado: 'loja fechada no app' }, { 'x-bot-token': process.env.BOT_AGREGADOR_TOKEN });
+    const chatDepois = DOCS.get('suporteChats/chat-agg-real') || {};
+    const ultima = (chatDepois.mensagens || [])[(chatDepois.mensagens || []).length - 1] || {};
+
+    // --- a rede de segurança: Cowork calado acorda gente ---------------
+    const { pedido: p3 } = await fila.criar({
+      acao: 'pausar-item', canal: 'ambos', unidade: '19855', unidadeNome: 'Dom Bessa', item: 'Pizza G',
+    });
+    // esse nasceu agora: ainda NÃO é atraso
+    const agora = await fila.varrerAtrasados();
+    // envelhece o pedido pra além da tolerância
+    DOCS.set('agregadorPedidos/' + p3.id, {
+      ...DOCS.get('agregadorPedidos/' + p3.id),
+      criadoEm: new Date(Date.now() - (fila.MINUTOS_ATE_ATRASO + 5) * 60 * 1000).toISOString(),
+    });
+    const velho = await fila.varrerAtrasados();
+    await fila.marcarCoordenadorAvisado(p3.id);
+    // avisado uma vez, não vira push a cada tick
+    const depoisDeAvisar = await fila.varrerAtrasados();
+
+    // --- o aviso imediato é descartável -------------------------------
+    const semWebhook = await cowork.avisarPedidoNovo(p3);
+
+    if (TOKEN_ANTES === undefined) delete process.env.BOT_AGREGADOR_TOKEN; else process.env.BOT_AGREGADOR_TOKEN = TOKEN_ANTES;
+    if (URL_ANTES !== undefined) process.env.AGREGADOR_WEBHOOK_URL = URL_ANTES;
+
     const conf = {
-      'o aviso vai pros coordenadores ATIVOS, por nome (inativo e não-coordenador ficam de fora)':
-        entrega.entregues === 2
-        && entrega.coordenadores.map((c) => c.id).sort().join(',') === 'u-coord-agg,u-coord-agg-2',
-      'quem não abre a Central do Beniboy recebe o push sem link pra ela':
-        entrega.coordenadores.find((c) => c.id === 'u-coord-agg').temSuporte === true
-        && entrega.coordenadores.find((c) => c.id === 'u-coord-agg-2').temSuporte === false,
-      'fica registrado na Central de Alertas com o app, a loja e o item':
-        !!alerta.titulo && /Pausar item/.test(alerta.titulo)
-        && /ifood/.test(alerta.resumo || '') && /Mooca/.test(alerta.resumo || '')
-        && /Coca 2L/.test(alerta.resumo || '') && alerta.critico === true,
-      'sem coordenador cadastrado o pedido NÃO some - cai no alarme geral do Beniboy':
-        semNinguem.entregues === 0 && caiuNoAlarmeGeral,
-      'o cargo existe de verdade no cadastro (senão nunca haveria coordenador)':
-        typeof usersMod.listarCoordenadoresAgregador === 'function'
-        && require('fs').readFileSync(__dirname + '/users.js', 'utf8').includes("'coordenador-agregador'")
-        && require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8').includes("'coordenador-agregador'"),
-      // a ferramenta tem que EXIGIR onde bloquear - um "pausa o item aí" sem
-      // loja/item chega no coordenador como um pedido que ele não consegue
-      // executar, e ele volta a perguntar pela conversa que o bot já deixou
-      'a ferramenta existe e exige loja, app e (pra pausar) o item':
-        /name: 'chamar_coordenador_agregador'/.test(src)
+      'o pedido entra na fila pendente e aberto': p1.status === 'pendente' && p1.aberto === true && p1.unidadeNome === 'Dom Bessa',
+      'o MESMO item pedido de novo não vira segundo bloqueio': repetido.repetido === true && repetido.pedido.id === p1.id,
+      'pausar item sem dizer QUAL item é recusado': /exige qual item/i.test(semItem || ''),
+      'o Cowork puxa o pedido e ele sai da fila marcado como entregue':
+        puxada1.length === 1 && puxada1[0].id === p1.id && puxada2.length === 0,
+      'erro com tentativa sobrando devolve o pedido pra fila (não morre no log)':
+        voltouPraFila === 'pendente' && puxadaDepoisDoErro.length === 1,
+      'confirmado com sucesso, fecha e sai da fila':
+        depoisDoOk.status === 'executado' && !depoisDoOk.aberto && depoisDoOk.resultado === 'item pausado',
+      'confirmação duplicada do Cowork não reabre o pedido':
+        duplicada.repetido === true && aindaExecutado === 'executado',
+      'sem BOT_AGREGADOR_TOKEN a rota da fila nem existe (404)': filaDesligada.status === 404,
+      'sem token: 401 · e o token do MASTER não abre (é token próprio)':
+        filaSemToken.status === 401 && filaTokenDoMaster.status === 401,
+      'a fila devolve o pedido com o que o Cowork precisa pra agir':
+        filaComToken.status === 200 && (jFila.pedidos || []).some((x) => x.id === p2.id && x.acao === 'fechar-loja' && x.canal === '99food' && x.unidadeNome === 'Dom Bessa'),
+      'retorno sem id é recusado com o motivo': retornoSemId.status === 400 && /id/.test(retornoSemId.corpo),
+      'o retorno do Cowork cai NA CONVERSA de quem pediu':
+        retorno.status === 200 && ultima.bot === true && /Fechar loja/.test(ultima.texto || '') && /feito agora/.test(ultima.texto || ''),
+      'pedido recém-criado NÃO é atraso': agora.atrasados.every((x) => x.id !== p3.id) && agora.abertos >= 1,
+      'Cowork calado além da tolerância vira cobrança no coordenador':
+        velho.atrasados.some((x) => x.id === p3.id),
+      'o coordenador é chamado UMA vez por pedido, não a cada tick':
+        depoisDeAvisar.atrasados.every((x) => x.id !== p3.id),
+      'sem webhook configurado o aviso não quebra nada - a fila resolve sozinha':
+        semWebhook.avisado === false && /não configurado/.test(semWebhook.motivo || ''),
+      // --- o que o Beniboy faz com isso ---
+      'a ferramenta do Beniboy exige loja, app e (pra pausar) o item':
+        /name: 'bloquear_no_agregador'/.test(src)
         && /required: \['acao', 'canal', 'unidade'\]/.test(src)
         && /Pergunte de qual loja é antes de chamar/.test(src)
         && /Pergunte QUAL item deve ser pausado/.test(src),
-      // esse pedido não é "chamar um humano qualquer": se desativasse o bot,
-      // a pessoa ficaria esperando na conversa sem ninguém do outro lado
-      'acionar o coordenador NÃO tira o Beniboy da conversa':
-        !/chamar_coordenador_agregador[\s\S]*?desativarBot/.test(src.slice(src.indexOf("nome === 'chamar_coordenador_agregador'"), src.indexOf("nome === 'desbloquear_login'"))),
+      'acionar o agregador NÃO tira o Beniboy da conversa':
+        !/desativarBot/.test(src.slice(src.indexOf("nome === 'bloquear_no_agregador'"), src.indexOf("nome === 'desbloquear_login'"))),
       'o prompt manda usar essa ferramenta em vez de chamar_atendente':
-        /iFood\/99food[\s\S]{0,400}chamar_coordenador_agregador \(nunca chamar_atendente\)/.test(src),
-      'o pedido fica registrado na própria conversa (nota interna PENDENTE)':
-        /registrarNotaInterna\(chat\.id, \{[\s\S]{0,300}situacao: 'PENDENTE'/.test(src),
-      'o index.js chama push.notifyAgregador quando a ferramenta roda':
-        /if \(r\.agregador\) \{/.test(srcIdx) && /push\.notifyAgregador\(r\.chat, \{ acao: a\.acao, canal: a\.canal, unidade: a\.unidade, detalhe \}\)/.test(srcIdx),
-      'a Central de Alertas sabe desenhar esse tipo (senão vira 🔔 sem nome)':
-        require('fs').readFileSync(__dirname + '/public/central-alertas.html', 'utf8').includes("'agregador': {"),
+        /iFood\/99food[\s\S]{0,400}bloquear_no_agregador \(nunca chamar_atendente\)/.test(src),
+      'o index.js enfileira pro Cowork (não manda mais direto pro humano)':
+        /agregadorFila\.criar\(\{/.test(srcIdx) && /agregadorCowork\.avisarPedidoNovo\(pedido\)/.test(srcIdx),
+      'se a fila falhar, o pedido cai no coordenador humano na hora':
+        /não entrou na fila do Cowork/.test(srcIdx),
+      'a varredura cobra o Cowork atrasado': /cobrarAgregadorAtrasado/.test(srcIdx)
+        && /agregadorFila\.marcarCoordenadorAvisado\(p\.id\)/.test(srcIdx),
+      // o Cowork é de fora: se a rota não estiver escrita onde ele lê, ela
+      // não existe pra ele - e o Master não saberia qual env var criar
+      'a rota está documentada pro Cowork e o token está no .env.example': (() => {
+        const doc = require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'BENI_API.md'), 'utf8');
+        const env = require('fs').readFileSync(__dirname + '/.env.example', 'utf8');
+        return doc.includes('/api/bot/agregador/fila') && doc.includes('/api/bot/agregador/retorno')
+          && /BOT_AGREGADOR_TOKEN/.test(doc) && /BOT_AGREGADOR_TOKEN=/.test(env);
+      })(),
+      'o cargo de coordenador existe pra receber a cobrança':
+        typeof require(__dirname + '/users.js').listarCoordenadoresAgregador === 'function'
+        && typeof pushAg.notifyAgregador === 'function',
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAgregador = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okAgregador = false; console.log('  erro: ' + e.message); }
   if (!okAgregador) ruins += 1;
-  console.log(`${okAgregador ? '✓' : '✗'} Beniboy: pausar item / fechar loja no iFood-99food vai pro COORDENADOR AGREGADOR`);
+  console.log(`${okAgregador ? '✓' : '✗'} Cowork Agregador: pausar item / fechar loja entra na fila, volta na conversa e cobra quem não executou`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
