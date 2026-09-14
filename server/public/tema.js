@@ -442,43 +442,55 @@
     var st = document.createElement('style');
     st.id = 'zmz-maiusc';
     st.textContent = ''
-      // TUDO. O Master foi explícito: "eu quero que tudo que seja minúsculo
-      // fique maiúsculo". Uma regra no body alcança as 59 telas de uma vez -
-      // e as que vierem depois - em vez de virar uma caçada de classe por
-      // tela, que sempre esquece alguma.
+      // DOIS CASOS, não a tela inteira. A primeira versão subiu o `body`
+      // inteiro e ficou ruim de ler: menu, botão, título e texto corrido não
+      // são dado, são interface. Master (14/09): "não gostei de tudo
+      // maiúsculo / o que falei pra ser tudo maiúsculo foi nomes dos usuários
+      // e dados preenchidos para formulários e relatórios".
       //
-      // É seguro porque é CSS: o texto gravado não muda, o valor do input
-      // não muda, e COPIAR devolve o original (o navegador copia o texto de
-      // origem, não o transformado). Desfazer é apagar esta linha.
-      + 'body{text-transform:uppercase;}'
-      // O body sozinho NAO alcanca campo de formulario: o Chromium traz
-      // text-transform:none na folha de estilo do proprio navegador pra
-      // select, input, textarea e button. Era por isso que o rotulo
-      // "RESPONSAVEL" subia e o nome dentro do campo continuava "joel"
-      // (Master, 14/09: "nao ainda tem nome de usuario MINUSCULO"). Precisa
-      // nomear os quatro - e o <option>, que e o nome que a lista mostra.
-      + 'select,optgroup,option,input,textarea,button{text-transform:uppercase;}'
+      // 1) DADO PREENCHIDO: o que a pessoa digitou ou escolheu num campo - e
+      // só isso. O rótulo ao lado continua como está escrito, e o botão
+      // também. O Chromium traz text-transform:none pra campo na folha do
+      // próprio navegador, então os quatro precisam ser nomeados.
+      + 'input,textarea,select,optgroup,option{text-transform:uppercase;}'
+      // o placeholder NÃO é dado preenchido: é a dica de como preencher, e
+      // em maiúsculo ela vira grito na tela vazia
+      + 'input::placeholder,textarea::placeholder{text-transform:none;}'
+      // 2) NOME DE USUÁRIO, onde a tela escreve o nome de uma pessoa. Vem
+      // por classe porque nome não tem tag própria: é o código que sabe que
+      // aquele pedaço é gente - o mesmo critério do nomePessoa() que o
+      // servidor usa nos relatórios.
+      + '.maiusc,.maiusc *{text-transform:uppercase;}'
       // ESCAPES - só o que quebra se for redigitado à mão, não o que é feio:
       // bloco de código/comando (o comando de instalação do NOCZenith é
       // colado no PowerShell, e maiúsculo no Base64 não roda) e o que o
       // código marcar como valor exato (token, MAC, IP, chave).
       + 'code,kbd,pre,samp,.nao-maiusc,.nao-maiusc *{text-transform:none;}'
-      // valor que alguem RELE e redigita em outro lugar tem que sair como
-      // esta: chave Pix aleatoria e senha gerada. Aqui nao e feio x bonito -
-      // e o pagamento cair na conta errada ou a pessoa nao conseguir entrar.
+      // valor que alguém RELÊ e redigita em outro lugar tem que sair como
+      // está: chave Pix aleatória e senha gerada. Aqui não é feio x bonito -
+      // é o pagamento cair na conta errada ou a pessoa não conseguir entrar.
       + '.valor-exato,.valor-exato *{text-transform:none;}'
       // senha: o campo mostra pontos, mas quando a tela deixa "ver a senha"
       // o que aparece tem que ser o que foi digitado
-      + 'input[type=password]{text-transform:none;}'
-      // a classe continua existindo pra quem quiser subir um trecho dentro
-      // de uma área escapada
-      + '.maiusc,.maiusc *{text-transform:uppercase;}';
+      + 'input[type=password]{text-transform:none;}';
     document.head.appendChild(st);
   }
   estiloMaiusculo();
   // pra quem monta texto em JS (título de PDF na tela, alert, título da aba)
   window.maiusc = function (t) {
     return t === null || t === undefined ? t : String(t).toLocaleUpperCase('pt-BR');
+  };
+  // NOME DE PESSOA na tela. Sai como <span class="maiusc">, não em maiúsculo
+  // de verdade: o texto continua o que está gravado (copiar devolve o
+  // original) e um dia dá pra desfazer apagando uma regra de CSS. Escapa o
+  // HTML aqui dentro porque ele entra via innerHTML - quem chama passa o nome
+  // cru, sem pensar em escape.
+  window.nomeUsuario = function (n) {
+    var t = n === null || n === undefined ? '' : String(n);
+    var d = document.createElement('span');
+    d.className = 'maiusc';
+    d.textContent = t;
+    return d.outerHTML;
   };
 
   function estiloPrevia() {

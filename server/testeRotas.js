@@ -3108,11 +3108,18 @@ setTimeout(async () => {
       // frase contígua não existe no stream nem quando o texto está todo lá.
       // O que prova o corte é a ausência das palavras do FIM - com ellipsis
       // só a primeira linha caberia, e "crimpagem" pra frente sumiria.
+      // a comparação é SEM CAIXA porque o valor preenchido sai em maiúsculo no
+      // papel (ver textoExibicao.js) - o que se prova aqui é que nada foi
+      // CORTADO, não a caixa das letras; a caixa tem asserção própria abaixo.
       'a descrição inteira aparece no PDF, não cortada':
         ['cabeamento', 'crimpagem', 'patch', 'panels', 'danificados', 'certificação', 'entregues']
-          .every((palavra) => txtLongo.includes(palavra)),
+          .every((palavra) => txtLongo.toLocaleLowerCase('pt-BR').includes(palavra)),
+      // o que foi PREENCHIDO sobe no papel: no PDF não há CSS pra fazer isso,
+      // então a string sobe de verdade (o gravado continua como foi digitado)
+      'e o que foi preenchido sai em MAIÚSCULO no papel':
+        txtLongo.includes('CABEAMENTO') && !txtLongo.includes('cabeamento'),
       'e não sobrou reticência de corte no meio da descrição':
-        !/cabeamento[^A-Za-z]{0,4}(\.\.\.|…)/.test(txtLongo),
+        !/cabeamento[^A-Za-z]{0,4}(\.\.\.|…)/i.test(txtLongo),
       // a linha cresceu: o mesmo formulário com descrição curta é menor
       'a linha cresce com o texto (o PDF longo é maior que o curto)':
         pdfLongo.buffer.length > pdfCurto.buffer.length,
@@ -16966,7 +16973,9 @@ setTimeout(async () => {
         /const CARGO_TAG=\{loja:'Loja',gerente:'Gerente','assistente-gerente':'Assistente',tecnico:'Técnico',suporte:'Suporte',manutencao:'Manutenção',operador:'Operador'\}/.test(tarefasHtml)
         && /\.cargo-tag::before\{content:"·";margin:0 6px/.test(tarefasHtml)
         // as DUAS listas de participante (criar e "alterar") ganham a tag
-        && (tarefasHtml.match(/<span>\$\{e\(u\.nome\)\}\$\{tagCargo\(u\)\}<\/span>/g) || []).length >= 2
+        // o nome agora passa por nomeUsuario() (que já escapa e marca como
+        // gente); a tag de cargo continua ao lado, nas DUAS listas
+        && (tarefasHtml.match(/<span>\$\{nomeUsuario\(u\.nome\)\}\$\{tagCargo\(u\)\}<\/span>/g) || []).length >= 2
         && /\$\{tagCargoTexto\(u\)\}<\/option>/.test(tarefasHtml),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -17289,7 +17298,7 @@ setTimeout(async () => {
       'e o Solicitante vem antes do resto da ficha': (campos2[0] || {}).rotulo === 'Solicitante',
       // o que importa é o USO no template: só a definição do botão não prova
       // que ele é desenhado ao lado do responsável
-      'a tela mostra "trocar" ao lado do responsável, não só "alterar" nos participantes': /onclick="abrirResponsavel\(\)">trocar</.test(html) && /\$\{e\(O\.responsavelNome\|\|'Usuário'\)\}\$\{trocar\}/.test(html) && /const podeDistribuir=\(\)=>!!CTX\.podeAtribuir\|\|\(!!O&&O\.responsavelId===\(CTX\.eu\|\|''\)\)/.test(html),
+      'a tela mostra "trocar" ao lado do responsável, não só "alterar" nos participantes': /onclick="abrirResponsavel\(\)">trocar</.test(html) && /\$\{nomeUsuario\(O\.responsavelNome\|\|'Usuário'\)\}\$\{trocar\}/.test(html) && /const podeDistribuir=\(\)=>!!CTX\.podeAtribuir\|\|\(!!O&&O\.responsavelId===\(CTX\.eu\|\|''\)\)/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okDistribuir = !falhas.length;
@@ -20134,6 +20143,7 @@ setTimeout(async () => {
     const tx = require(__dirname + '/textoExibicao.js');
     const temaSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
     const navSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'nav-menu.js'), 'utf8');
+    const tarefasSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tarefas.html'), 'utf8');
 
     const conf = {
       'nome de pessoa sai em maiúsculo, venha como vier':
@@ -20165,20 +20175,45 @@ setTimeout(async () => {
       // e o copiar/colar devolve o original
       // uma regra no body alcança as 59 telas (e as que vierem), em vez de
       // uma caçada de classe por tela que sempre esquece alguma
-      'a tela inteira sobe por CSS, num lugar só':
-        /body\{text-transform:uppercase;\}/.test(temaSrc) && /window\.maiusc = function/.test(temaSrc),
+      // A PRIMEIRA VERSÃO ERROU O ALVO. Uma regra no `body` subia a tela
+      // inteira - menu, botão, título, texto corrido - e ficou ruim de ler.
+      // Master (14/09): "não gostei de tudo maiúsculo / o que falei pra ser
+      // tudo maiúsculo foi NOMES DOS USUÁRIOS e DADOS PREENCHIDOS para
+      // formulários e relatórios". São dois casos, não a interface.
+      'a interface NÃO sobe (nada de regra no body nem em botão)':
+        !/body\{text-transform:uppercase/.test(temaSrc)
+        && !/button\{text-transform:uppercase/.test(temaSrc)
+        && !/,button\{text-transform:uppercase/.test(temaSrc),
+      'sobe o DADO PREENCHIDO: o que foi digitado ou escolhido num campo':
+        /input,textarea,select,optgroup,option\{text-transform:uppercase;\}/.test(temaSrc),
+      // placeholder não é dado preenchido: é a dica de como preencher, e em
+      // maiúsculo vira grito na tela vazia
+      'o placeholder fica como está escrito':
+        /input::placeholder,textarea::placeholder\{text-transform:none;\}/.test(temaSrc),
+      'e sobe NOME DE PESSOA, por classe - é o código que sabe que aquilo é gente':
+        /\.maiusc,\.maiusc \*\{text-transform:uppercase;\}/.test(temaSrc)
+        && /window\.nomeUsuario = function/.test(temaSrc)
+        && /d\.className = 'maiusc';/.test(temaSrc) && /d\.textContent = t;/.test(temaSrc)
+        && /window\.maiusc = function/.test(temaSrc),
+      // onde a tela escreve gente, passa por nomeUsuario(): responsável,
+      // participantes, quem criou, quem concluiu, autor do comentário
+      'a tela de tarefas usa nomeUsuario em todo lugar que escreve gente':
+        (tarefasSrc.match(/nomeUsuario\(/g) || []).length >= 9
+        && /Criada por \$\{nomeUsuario\(x\.criadoPorNome/.test(tarefasSrc)
+        && /<b>\$\{nomeUsuario\(x\.porNome\|\|'Usuário'\)\}<\/b> · \$\{fmt\(x\.em\)\}/.test(tarefasSrc),
+      // no PDF não existe CSS: ali a string sobe de verdade
+      'no papel, o preenchido e o nome sobem de verdade (não há CSS num PDF)':
+        (() => {
+          const form = require('fs').readFileSync(__dirname + '/formularios.js', 'utf8');
+          const tarefaPdf = require('fs').readFileSync(__dirname + '/tarefaRelatorio.js', 'utf8');
+          return /valor: texto\.valorPreenchido\(r\.campos\[c\.key\]\)/.test(form)
+            && /celula\(c\.valor \? fmtMoney\(l\[c\.key\]\) : texto\.valorPreenchido\(l\[c\.key\]\)/.test(form)
+            && /p\.campo\('Responsável', texto\.nomePessoa\(tarefa\.responsavelNome\)\)/.test(tarefaPdf)
+            && (tarefaPdf.match(/texto\.nomePessoa\(/g) || []).length >= 6;
+        })(),
       'e os escapes são só o que quebra redigitado: código, comando e senha':
         /code,kbd,pre,samp,\.nao-maiusc,\.nao-maiusc \*\{text-transform:none;\}/.test(temaSrc)
         && /input\[type=password\]\{text-transform:none;\}/.test(temaSrc),
-      // Master (14/09): "nao ainda tem nome de usuario MINUSCULO, fazer uma
-      // varredura em todos os nomes de usuario e deixar Maiusculos". A varredura
-      // achou UMA causa pra todos os casos: o body sozinho não alcança campo de
-      // formulário, porque o Chromium traz text-transform:none pra select,
-      // input, textarea e button na folha do próprio navegador. Era por isso
-      // que o rótulo "RESPONSÁVEL" subia e o nome dentro do campo continuava
-      // "joel" - e valia pro app inteiro, não só pra essa tela.
-      'campo de formulário também sobe (é onde o nome de usuário aparece)':
-        /select,optgroup,option,input,textarea,button\{text-transform:uppercase;\}/.test(temaSrc),
       // o que alguém RELÊ e redigita em outro lugar continua exato: chave Pix
       // aleatória e senha gerada. Aqui não é feio x bonito - é o pagamento cair
       // na conta errada ou a pessoa não conseguir entrar.
