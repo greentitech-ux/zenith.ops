@@ -19871,6 +19871,141 @@ setTimeout(async () => {
   if (!okEstacao) ruins += 1;
   console.log(`${okEstacao ? '✓' : '✗'} Estação da Comida: comanda por pessoa, mesa derivada, preço congelado e pagamento por número de cartão`);
 
+  // ------------------------------------------------------------------
+  // NOME DE PESSOA E PREENCHIMENTO EM MAIÚSCULO. Pedido do Master
+  // (14/09/2026), vendo o próprio usuário no menu: "em todo lugar que
+  // aparecer o usuário, sempre com letras maiúsculas - assim fica feio.
+  // 100% dos locais, mesmo que seja escrito minúsculo. Quero levar isso
+  // também pra tudo: formulários, PDF, relatórios, preenchimentos".
+  //
+  // O que este teste protege NÃO é o maiúsculo (isso é fácil) - é o que
+  // NÃO pode virar maiúsculo. E-mail que a pessoa copia, link que vira
+  // 404, código e token que são valor exato: transformar esses não é
+  // estilo, é corromper o dado.
+  let okMaiusculo = false;
+  try {
+    const tx = require(__dirname + '/textoExibicao.js');
+    const temaSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    const navSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'nav-menu.js'), 'utf8');
+
+    const conf = {
+      'nome de pessoa sai em maiúsculo, venha como vier':
+        tx.nomePessoa('flawber') === 'FLAWBER'
+        && tx.nomePessoa({ nome: 'maria silva' }) === 'MARIA SILVA'
+        && tx.nomePessoa({ username: 'joao' }) === 'JOAO'
+        && tx.nomePessoa({ nomeCompleto: 'ana paula', nome: 'ana' }) === 'ANA PAULA',
+      'acento e apóstrofo sobrevivem': tx.nomePessoa("maria d'ávila") === "MARIA D'ÁVILA",
+      // "eu quero que tudo que seja minúsculo fique maiúsculo" - e-mail
+      // incluído. Na tela isso é CSS, então copiar ainda devolve o original
+      'TUDO sobe, e-mail e link incluídos':
+        tx.nomePessoa('greentitech@gmail.com') === 'GREENTITECH@GMAIL.COM'
+        && tx.valorPreenchido('fulano@empresa.com.br') === 'FULANO@EMPRESA.COM.BR'
+        && tx.valorPreenchido('https://www.nopulso.com.br/central') === 'HTTPS://WWW.NOPULSO.COM.BR/CENTRAL',
+      // a única exceção que fica: valor que alguém LÊ da tela e DIGITA em
+      // outro lugar (token, senha, MAC, IP, código) - ali maiúsculo é erro,
+      // não estilo
+      'valorExato devolve intacto o que vai ser redigitado à mão':
+        tx.valorExato('17f080c6fcd5') === '17f080c6fcd5'
+        && tx.valorExato('fc:aa:14:fc:ed:5c') === 'fc:aa:14:fc:ed:5c'
+        && /function valorExato/.test(require('fs').readFileSync(__dirname + '/textoExibicao.js', 'utf8')),
+      'valor preenchido vira maiúsculo': tx.valorPreenchido('rua das flores, 10') === 'RUA DAS FLORES, 10',
+      'número e booleano voltam do mesmo TIPO (devolver string aqui quebraria quem soma)':
+        tx.valorPreenchido(42) === 42 && tx.valorPreenchido(true) === true
+        && tx.valorPreenchido('123,45') === '123,45',
+      'nulo e vazio não viram "NULL"':
+        tx.valorPreenchido(null) === null && tx.valorPreenchido('') === '' && tx.nomePessoa(null) === '' && tx.maiusc(undefined) === undefined,
+      // o navegador faz por CSS: o texto gravado continua como foi digitado,
+      // e o copiar/colar devolve o original
+      // uma regra no body alcança as 59 telas (e as que vierem), em vez de
+      // uma caçada de classe por tela que sempre esquece alguma
+      'a tela inteira sobe por CSS, num lugar só':
+        /body\{text-transform:uppercase;\}/.test(temaSrc) && /window\.maiusc = function/.test(temaSrc),
+      'e os escapes são só o que quebra redigitado: código, comando e senha':
+        /code,kbd,pre,samp,\.nao-maiusc,\.nao-maiusc \*\{text-transform:none;\}/.test(temaSrc)
+        && /input\[type=password\]\{text-transform:none;\}/.test(temaSrc),
+      'o nome no menu sobe pra maiúsculo': /classList\.add\('maiusc'\)/.test(navSrc) || /'maiusc'/.test(navSrc),
+      'nada disso reescreve o que está gravado (é exibição, não migração)':
+        !/toLocaleUpperCase/.test(require('fs').readFileSync(__dirname + '/users.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMaiusculo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okMaiusculo = false; console.log('  erro: ' + e.message); }
+  if (!okMaiusculo) ruins += 1;
+  console.log(`${okMaiusculo ? '✓' : '✗'} Maiúsculo: nome de pessoa e preenchimento sobem; e-mail, link e código NÃO (e nada é reescrito no banco)`);
+
+  // ------------------------------------------------------------------
+  // HISTÓRICO DE CONTAGENS: saída e entrada SEPARADAS. Master (14/09/2026,
+  // olhando a tabela): "não é para fazer um pelo outro, preciso do total de
+  // saída e o total de entrada".
+  //
+  // A coluna única somava os dois deltas e devolvia um número que não
+  // responde nada: a LATA UVA saiu 9 e entrou 11, e o total aparecia como
+  // -2 - nem consumo, nem recebimento, nem saldo de nada.
+  let okSaidaEntrada = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'estoque.html'), 'utf8');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const corpo = html.slice(html.indexOf('function renderHistorico(){'), html.indexOf('function baixarRelatorioHistorico'));
+    const rota = idx.slice(idx.indexOf("app.get('/api/inventario/historico-contagens/relatorio"), idx.indexOf('const nomeArquivo = reportUtil.nomeArquivoComData(`inventario-historico'));
+
+    // a conta em si, reproduzida: os deltas da LATA UVA do print do Master
+    const deltas = [1, 2, 2, -11, 0, 3, 1];
+    const saida = deltas.filter((d) => d > 0).reduce((a, b) => a + b, 0);
+    const entrada = deltas.filter((d) => d < 0).reduce((a, b) => a - b, 0);
+
+    const conf = {
+      'a conta separada bate com o caso real do print (saiu 9, entrou 11 - não "-2")':
+        saida === 9 && entrada === 11 && (saida - entrada) === -2,
+      'a tela tem DUAS colunas, saída e entrada':
+        /<th style="text-align:center;">Saída total<\/th><th style="text-align:center;">Entrada total<\/th>/.test(corpo),
+      'e uma NUNCA desconta a outra (positivo numa, negativo na outra, sem somar junto)':
+        /if\(v\.saida > 0\) saidaTotal \+= v\.saida;\s*\n\s*else if\(v\.saida < 0\) entradaTotal \+= -v\.saida;/.test(corpo)
+        && !/saidaTotal \+= v\.saida;\s*\n/.test(corpo.replace(/if\(v\.saida > 0\) saidaTotal \+= v\.saida;/, '')),
+      // a REGRA, não a expressão: duas colunas declaradas, os deltas somados
+      // em baldes separados, e as duas linhas preenchidas (o formato de cada
+      // uma é conferido na asserção do quilo)
+      'CSV e PDF levam as mesmas duas colunas':
+        /\{ key: 'saidaTotal', label: 'Saída total' \},\s*\n\s*\{ key: 'entradaTotal', label: 'Entrada total' \},/.test(rota)
+        && /if \(v\.saida > 0\) saidaTotal \+= v\.saida;\s*\n\s*else if \(v\.saida < 0\) entradaTotal \+= -v\.saida;/.test(rota)
+        && /linha\.saidaTotal = temMovimento \?/.test(rota)
+        && /linha\.entradaTotal = temMovimento \?/.test(rota),
+      'item sem nenhuma contagem continua mostrando "—" nas duas, não zero':
+        (corpo.match(/temMovimento\?fmtQtd\([\s\S]*?, item\.unidadeMedida\):'—'/g) || []).length === 2,
+      'o texto da tela para de prometer um número só': /somam cada ponta <b>separadamente<\/b>/.test(html),
+      // Master (14/09): "o que é kilo tem que ser tratado como 1,500 /
+      // 10,450". Em peso a casa decimal é GRAMA - "1,5" parece arredondado,
+      // "1,500" é a medida. Unidade contada inteira continua inteira.
+      'quilo sai com TRÊS casas e vírgula; o resto não vira 18,000': (() => {
+        const ehQuilo = (u) => /^KG/.test(String(u || '').trim().toUpperCase());
+        const fmtNum = (v) => { const n = Number(v); return (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, '')).replace('.', ','); };
+        const fmtQtd = (v, u) => { const n = Number(v); if (!Number.isFinite(n)) return '—'; return ehQuilo(u) ? n.toFixed(3).replace('.', ',') : fmtNum(n); };
+        return fmtQtd(1.5, 'KG') === '1,500' && fmtQtd(10.45, 'KG') === '10,450'
+          && fmtQtd(18.8, 'KG') === '18,800' && fmtQtd(76, 'KG') === '76,000'
+          && fmtQtd(18, 'UN') === '18' && fmtQtd(18, 'UND') === '18'
+          // e a função de verdade está nos dois lados, com a mesma regra
+          && /function fmtQtd\(v, unidadeMedida\)\{/.test(html)
+          && /return n\.toFixed\(3\)\.replace\('\.', ','\);/.test(html)
+          && /const fmtQtd = \(v, u\) => \{/.test(idx)
+          && /if \(ehQuilo\(u\)\) return n\.toFixed\(3\)\.replace\('\.', ','\);/.test(idx);
+      })(),
+      'a contagem, o movimento do dia e os dois totais passam TODOS pelo formato do quilo':
+        /fmtQtd\(v\.contagem, item\.unidadeMedida\)/.test(corpo)
+        && /fmtQtd\(Math\.abs\(v\.saida\), item\.unidadeMedida\)/.test(corpo)
+        && /fmtQtd\(Math\.round\(saidaTotal\*1000\)\/1000, item\.unidadeMedida\)/.test(corpo)
+        && /fmtQtd\(Math\.round\(entradaTotal\*1000\)\/1000, item\.unidadeMedida\)/.test(corpo),
+      'e o CSV/PDF leva o mesmo formato (o papel da conferência tem que bater com a tela)':
+        /linha\[`d_\$\{d\}`\] = v \? fmtQtd\(v\.contagem, item\.unidadeMedida\) : '—';/.test(rota)
+        && /linha\.saidaTotal = temMovimento \? fmtQtd\(/.test(rota)
+        && /linha\.entradaTotal = temMovimento \? fmtQtd\(/.test(rota),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSaidaEntrada = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSaidaEntrada = false; console.log('  erro: ' + e.message); }
+  if (!okSaidaEntrada) ruins += 1;
+  console.log(`${okSaidaEntrada ? '✓' : '✗'} Histórico de contagens: saída e entrada em colunas separadas, uma nunca descontando a outra`);
+
   // ---- NOC: reinício automático programado ----
   //
   // Pedido do Master: "escolho qual reinicia todos os dias às 4h" e, depois,

@@ -7048,17 +7048,36 @@ app.get('/api/inventario/historico-contagens/relatorio.:formato(csv|pdf)', requi
     const colunas = [
       { key: 'item', label: 'Item' }, { key: 'setor', label: 'Setor' },
       ...datas.map((d) => ({ key: `d_${d}`, label: reportUtil.fmtDataBR(d) })),
+      // saída e entrada em colunas SEPARADAS, como na tela: somar as duas
+      // numa só devolvia um número que não responde nem "quanto consumiu"
+      // nem "quanto chegou" (ver renderHistorico em estoque.html)
       { key: 'saidaTotal', label: 'Saída total' },
+      { key: 'entradaTotal', label: 'Entrada total' },
     ];
+    // quilo com TRÊS casas (ver fmtQtd em estoque.html): em peso a casa
+    // decimal é grama, e o relatório que a pessoa leva pra conferência tem
+    // que dizer a mesma coisa que a tela
+    const ehQuilo = (u) => /^KG/.test(String(u || '').trim().toUpperCase());
+    const fmtQtd = (v, u) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return '—';
+      if (ehQuilo(u)) return n.toFixed(3).replace('.', ',');
+      return (Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000)).replace('.', ',');
+    };
     const linhas = itens.map((item) => {
       const linha = { item: item.nome, setor: inventario.SETORES[item.setor] || item.setor || '' };
-      let saidaTotal = 0, temSaida = false;
+      let saidaTotal = 0, entradaTotal = 0, temMovimento = false;
       datas.forEach((d) => {
         const v = item.valores[d];
-        linha[`d_${d}`] = v ? String(v.contagem) : '—';
-        if (v && v.saida != null) { temSaida = true; saidaTotal += v.saida; }
+        linha[`d_${d}`] = v ? fmtQtd(v.contagem, item.unidadeMedida) : '—';
+        if (v && v.saida != null) {
+          temMovimento = true;
+          if (v.saida > 0) saidaTotal += v.saida;
+          else if (v.saida < 0) entradaTotal += -v.saida;
+        }
       });
-      linha.saidaTotal = temSaida ? String(Math.round(saidaTotal * 1000) / 1000) : '—';
+      linha.saidaTotal = temMovimento ? fmtQtd(Math.round(saidaTotal * 1000) / 1000, item.unidadeMedida) : '—';
+      linha.entradaTotal = temMovimento ? fmtQtd(Math.round(entradaTotal * 1000) / 1000, item.unidadeMedida) : '—';
       return linha;
     });
     const nomeArquivo = reportUtil.nomeArquivoComData(`inventario-historico-${unidade}`);

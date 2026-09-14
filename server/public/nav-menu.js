@@ -427,10 +427,13 @@
     if (VOLTAR_EL && VOLTAR_PAI) VOLTAR_EL.classList.toggle('hidden', !podeVer(VOLTAR_PAI, ME));
     const quem = document.getElementById('nmz-quem');
     if (quem) {
+      // MAIÚSCULO, e-mail incluído (ver estiloMaiusculo em tema.js). É CSS:
+      // o texto continua como está gravado e copiar devolve o original
       const nome = ME.username || ME.nome || ME.email || '';
       const papel = ME.role === 'master' ? 'Master' : (ME.isAdmin ? 'Admin' : '');
       quem.textContent = papel ? `${nome} · ${papel}` : nome;
       quem.title = nome;
+      quem.classList.add('maiusc');
     }
   }
 
