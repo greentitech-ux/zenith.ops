@@ -63,6 +63,7 @@ const suporteChatPDF = require('./suporteChatPDF');
 const segurancaChat = require('./segurancaChat');
 const suporteBot = require('./suporteBot');
 const agregadorFila = require('./agregadorFila');
+const roteamentoTags = require('./roteamentoTags');
 const agregadorCowork = require('./agregadorCowork');
 const pedidoWatch = require('./pedidoWatch');
 const preferencias = require('./preferencias');
@@ -5550,6 +5551,19 @@ app.put('/api/users/:id/cargo', auth.requireMaster, async (req, res) => {
   }
 });
 
+// O CONJUNTO de tags (mais de uma por pessoa - "designo alguém de suporte
+// para cuidar de Agregador", Master 14/09). A rota de cima continua existindo
+// e vale pra trocar só a principal, sem apagar as outras (ver updateCargo).
+app.put('/api/users/:id/cargos', auth.requireMaster, async (req, res) => {
+  try {
+    const cargos = Array.isArray(req.body.cargos) ? req.body.cargos : [];
+    if (await desviarSeQaMaster(req, res, 'usuarios.cargo', `Editar tags do acesso ${req.params.id}`, { id: req.params.id, cargos })) return;
+    res.json(await users.updateCargos(req.params.id, cargos));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/users/:id/reset-password', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.resetSenha', `Resetar senha do acesso ${req.params.id}`, { id: req.params.id, password: req.body.password })) return;
@@ -10052,7 +10066,7 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       redes: redes.REDES,
       // cargo vai junto pra tela marcar a tag ao lado do nome (nome · Suporte/
       // Gerente/...): mesma tag de /usuarios.html, sem inventar rótulo novo
-      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', cargo: u.role === 'master' ? null : (u.cargo || null), unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', cargo: u.role === 'master' ? null : (u.cargo || null), cargos: u.role === 'master' ? [] : users.tagsDe(u), unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
       // a tela precisa saber QUEM é você pra liberar "trocar"/"alterar" na
       // tarefa de que você é responsável, sem reimplementar a regra no navegador
       eu: req.user.id,
@@ -13389,6 +13403,24 @@ async function acionarBeniboy(chatId) {
     for (const t of r.tickets || []) {
       broadcast('solicitacao-criada', t, 'solicitacoes');
       push.notifySolicitacao(`Ticket #${t.numeroTicket} · Nova solicitação (Beniboy · chat)`, `${t.titulo || ''} · ${t.unidadeNome || ''}`, t.id);
+    }
+    // DIRECIONADO POR TAG (roteamentoTags.js): além do push geral acima, quem
+    // tem a tag do assunto recebe no nome dela. É a diferença entre "chegou
+    // um ticket na Central" e "esse é seu" - sem isso o chamado esperava
+    // alguém passar pela tela por acaso.
+    for (const d of r.direcionados || []) {
+      const destino = d.destino || {};
+      if (!destino.tag || !(destino.pessoas || []).length) continue;
+      await push.notifyPorTag(destino, {
+        titulo: `🏷️ ${destino.rotulo} · ticket #${d.numeroTicket}`,
+        corpo: `${d.titulo || ''}${d.unidadeNome ? ' · ' + d.unidadeNome : ''}`.slice(0, 150),
+        tagPush: 'tag-' + d.ticketId,
+        // o ticket ainda espera a decisão do Master: quem tem a tag vê ele no
+        // Histórico da Central, não na tela de execução (que só recebe depois
+        // de aprovado). Mandar pra tela errada é mandar pra tela vazia.
+        url: '/central-historico.html',
+      }).catch((e) => console.error('[roteamento] falha ao avisar quem tem a tag:', e.message));
+      console.log(`[roteamento] ticket #${d.numeroTicket} (${d.tipo}) -> ${roteamentoTags.descreverDestino(destino)}`);
     }
     // PAUSAR ITEM / FECHAR LOJA no iFood/99food (tool bloquear_no_agregador):
     // quem executa é o COWORK AGREGADOR. O pedido entra na fila dele

@@ -313,6 +313,43 @@ async function notifyBeniboyEscalonamento(chat, motivo, opts) {
   }
 }
 
+// AVISAR QUEM TEM A TAG. É o fim de toda rota de "isso não é comigo": o
+// assunto tem uma tag (roteamentoTags.js), a tag tem pessoas, e cada uma
+// recebe no aparelho dela - não um push genérico pra "o time", que é o
+// mesmo que push pra ninguém.
+//
+// `destino` é o que roteamentoTags.destinoDe() devolve. Quando não há
+// ninguém com a tag, devolve entregues:0 e quem chamou decide o que fazer
+// (o padrão, em toda chamada deste app, é acordar o alarme geral em vez de
+// engolir o pedido em silêncio).
+async function notifyPorTag(destino, { titulo, corpo, tagPush, url, critico } = {}) {
+  const pessoas = (destino && destino.pessoas) || [];
+  const alvo = url || (destino && destino.url) || '/';
+  if (critico) {
+    await alertasCentral.registrar({ tipo: 'tag', titulo, resumo: corpo, url: alvo, critico: true });
+  }
+  for (const p of pessoas) {
+    // quem não abre a tela de destino recebe o push sem link pra ela: clicar
+    // e cair em "você não tem acesso" é pior que não ter link
+    const podeAbrir = p.ehTime || podeAbrirUrl(p, alvo);
+    await notifyUsuario(p.id, titulo, corpo, tagPush, podeAbrir ? alvo : '/');
+  }
+  return { entregues: pessoas.length, pessoas };
+}
+
+// a seção que cada tela pede - o suficiente pra não mandar alguém pra uma
+// porta fechada. Tela fora desta lista não restringe (o push leva o link).
+const SECAO_DA_TELA = {
+  '/tecnico.html': 'tecnico',
+  '/manutencao.html': 'manutencao',
+  '/beniboy.html': 'suporte',
+};
+function podeAbrirUrl(pessoa, url) {
+  const secao = SECAO_DA_TELA[String(url || '').split('?')[0]];
+  if (!secao) return true;
+  return (pessoa.secoes || []).includes(secao);
+}
+
 // PAUSAR ITEM / FECHAR LOJA no iFood ou 99food. Não é coisa que se resolve no
 // chat, e não é qualquer atendente que faz: quem tem o painel do agregador na
 // mão é o COORDENADOR AGREGADOR (Master, 14/09). Antes isto caía no alarme
@@ -1458,7 +1495,7 @@ module.exports = {
   notifyProgramaNovo,
   notifyProgramaSumido,
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyAgregador, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
+  notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,

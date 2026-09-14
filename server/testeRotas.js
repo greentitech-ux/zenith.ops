@@ -22580,6 +22580,123 @@ setTimeout(async () => {
   if (!okAgregador) ruins += 1;
   console.log(`${okAgregador ? '✓' : '✗'} Cowork Agregador: pausar item / fechar loja entra na fila, volta na conversa e cobra quem não executou`);
 
+  // ------------------------------------------------------------------
+  // MAIS DE UMA TAG POR PESSOA, E O QUE CAI PRA QUEM TEM A TAG.
+  //
+  // Pedido do Master (14/09/2026): "precisamos poder marcar mais de 1 tag,
+  // assim eu designo alguém de suporte para cuidar de Agregador, assim os
+  // chamados de agregador acionam quem tiver essa TAG" e "as solicitações
+  // pelo beniboy... caso não dê, ela é direcionada para quem tem a tag dela".
+  //
+  // O risco que isto cobre não é a tela: é o dado. `cargo` (string) está em
+  // todo acesso já cadastrado e é lido pela tela inicial, pelo menu, pelo
+  // Parque e pela conciliação. O conjunto novo (`cargos`) não pode reescrever
+  // nem apagar isso - quem só tem o campo antigo tem que continuar sendo
+  // encontrado por listarPorTag, senão o chamado cai no vazio.
+  let okTags = false;
+  try {
+    const usersMod = require(__dirname + '/users.js');
+    const roteamento = require(__dirname + '/roteamentoTags.js');
+    const base = { role: 'user', active: true, permissions: { sections: [] } };
+    // (a) acesso ANTIGO: só `cargo`, nunca passou por esta tela
+    DOCS.set('users/u-tag-antigo', { ...base, id: 'u-tag-antigo', email: 'antigo@teste.local', nome: 'Ana Antiga', cargo: 'coordenador-agregador' });
+    // (b) acesso NOVO: Suporte que também cuida do Agregador - o caso do pedido
+    DOCS.set('users/u-tag-duplo', {
+      ...base, id: 'u-tag-duplo', email: 'duplo@teste.local', nome: 'Beto Duplo',
+      cargo: 'suporte', cargos: ['suporte', 'coordenador-agregador'],
+      permissions: { sections: ['suporte'] },
+    });
+    // (c) tem a tag mas está INATIVO - não pode receber chamado
+    DOCS.set('users/u-tag-off', { ...base, id: 'u-tag-off', email: 'off@teste.local', cargos: ['coordenador-agregador'], active: false });
+    // (d) só técnico: é quem deve receber o ticket de suporte-ti
+    DOCS.set('users/u-tag-tec', { ...base, id: 'u-tag-tec', email: 'tec@teste.local', nome: 'Caio Técnico', cargos: ['tecnico'], permissions: { sections: ['tecnico'] } });
+
+    const daTagAgg = await usersMod.listarPorTag('coordenador-agregador');
+    const daTagSuporte = await usersMod.listarPorTag('suporte');
+    const tagInventada = await usersMod.listarPorTag('chefe-supremo');
+
+    // tagsDe: o conjunto sai em ordem canônica, sem repetir, e o campo antigo
+    // sozinho continua valendo como tag
+    const tagsDuplo = usersMod.tagsDe(DOCS.get('users/u-tag-duplo'));
+    const tagsAntigo = usersMod.tagsDe(DOCS.get('users/u-tag-antigo'));
+    const tagsLixo = usersMod.tagsDe({ cargos: ['tecnico', 'tecnico', 'inventado'], cargo: 'gerente' });
+    const principal = usersMod.tagPrincipal(['coordenador-agregador', 'gerente']);
+
+    // gravar o conjunto mantém `cargo` (o que o resto do app lê) coerente
+    await usersMod.updateCargos('u-tag-tec', ['coordenador-agregador', 'tecnico']);
+    const depoisDoUpdate = DOCS.get('users/u-tag-tec');
+    // e trocar só a principal (rota antiga) NÃO apaga as outras
+    await usersMod.updateCargo('u-tag-tec', 'suporte');
+    const depoisDaRotaAntiga = DOCS.get('users/u-tag-tec');
+    let tagInvalida = null;
+    try { await usersMod.updateCargos('u-tag-tec', ['tecnico', 'inventado']); } catch (e) { tagInvalida = e.message; }
+
+    // --- roteamento: assunto -> tag -> pessoas -------------------------
+    DOCS.delete('users/u-tag-tec'); // sobra 1 técnico? não: zera e recria limpo
+    DOCS.set('users/u-tec-unico', { ...base, id: 'u-tec-unico', email: 'unico@teste.local', nome: 'Dani Técnica', cargos: ['tecnico'], permissions: { sections: ['tecnico'] } });
+    const destinoTi = await roteamento.destinoDe('suporte-ti');
+    // com DOIS técnicos o ticket não pode nascer no colo de um deles
+    DOCS.set('users/u-tec-dois', { ...base, id: 'u-tec-dois', email: 'dois@teste.local', nome: 'Edu Técnico', cargos: ['tecnico'] });
+    const destinoTiDois = await roteamento.destinoDe('suporte-ti');
+    const destinoCompra = await roteamento.destinoDe('compra');
+    const destinoAgg = await roteamento.destinoDe('agregador');
+
+    const srcBot = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlUsuarios = require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8');
+
+    const conf = {
+      'quem só tem o campo ANTIGO continua sendo encontrado pela tag':
+        daTagAgg.some((u) => u.id === 'u-tag-antigo'),
+      'quem tem DUAS tags é achado pelas duas (o pedido do Master)':
+        daTagAgg.some((u) => u.id === 'u-tag-duplo') && daTagSuporte.some((u) => u.id === 'u-tag-duplo'),
+      'inativo com a tag NÃO recebe chamado': daTagAgg.every((u) => u.id !== 'u-tag-off'),
+      'a mesma pessoa não vem duplicada nas duas consultas':
+        daTagAgg.filter((u) => u.id === 'u-tag-duplo').length === 1,
+      'tag que não existe devolve lista vazia, não erro': Array.isArray(tagInventada) && tagInventada.length === 0,
+      'o conjunto sai em ordem canônica, sem repetido e sem tag inventada':
+        tagsDuplo.join(',') === 'suporte,coordenador-agregador'
+        && tagsAntigo.join(',') === 'coordenador-agregador'
+        && tagsLixo.join(',') === 'gerente,tecnico',
+      'a principal é a primeira da ordem canônica, não a ordem do clique':
+        principal === 'gerente',
+      'gravar o conjunto mantém `cargo` (o que a tela inicial lê) coerente':
+        depoisDoUpdate.cargo === 'tecnico' && depoisDoUpdate.cargos.join(',') === 'tecnico,coordenador-agregador',
+      'trocar só a principal NÃO apaga as outras tags da pessoa':
+        depoisDaRotaAntiga.cargo === 'suporte'
+        && depoisDaRotaAntiga.cargos.includes('coordenador-agregador'),
+      'tag inventada é recusada com o nome dela': /inventado/.test(tagInvalida || ''),
+      'com UMA pessoa na tag, o ticket já nasce no nome dela':
+        destinoTi.tag === 'tecnico' && !!destinoTi.dono && destinoTi.dono.id === 'u-tec-unico',
+      'com DUAS, fica sem dono e as duas são avisadas (ninguém escolhido no par ou ímpar)':
+        destinoTiDois.dono === null && destinoTiDois.pessoas.length === 2,
+      'assunto sem tag (compra/pagamento) continua indo pra Central':
+        destinoCompra.tag === null && destinoCompra.pessoas.length === 0 && destinoCompra.dono === null,
+      'o agregador usa a MESMA tabela de tags': destinoAgg.tag === 'coordenador-agregador'
+        && destinoAgg.pessoas.some((u) => u.id === 'u-tag-duplo'),
+      'o ticket do Beniboy nasce direcionado por tag':
+        /roteamentoTags\.destinoDe\(tipo\)/.test(srcBot)
+        && /direcionadoParaId: destino\.dono \? destino\.dono\.id : null/.test(srcBot),
+      'quem tem a tag é avisado no nome dela quando o ticket nasce':
+        /push\.notifyPorTag\(destino, \{/.test(srcIdx) && /for \(const d of r\.direcionados \|\| \[\]\)/.test(srcIdx),
+      'a tela deixa marcar MAIS DE UMA tag (era rádio, exclusivo)':
+        /type="checkbox" name="\$\{prefixo\}-cargo"/.test(htmlUsuarios)
+        && !/type="radio" name="\$\{prefixo\}-cargo"/.test(htmlUsuarios)
+        && /querySelectorAll\(`input\[name="\$\{prefixo\}-cargo"\]:checked`\)/.test(htmlUsuarios),
+      'a lista mostra TODAS as tags, não só a principal':
+        /cargosDaPessoa\.forEach/.test(htmlUsuarios),
+      // o Beniboy responde toda conversa do widget: o modelo não pode estar
+      // cravado onde só um deploy muda
+      'o modelo do Beniboy sai de env var (custo é decisão do Master)':
+        /process\.env\.SUPORTE_BOT_MODELO \|\| 'claude-opus-5'/.test(srcBot),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTags = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTags = false; console.log('  erro: ' + e.message); }
+  if (!okTags) ruins += 1;
+  console.log(`${okTags ? '✓' : '✗'} Tags: mais de uma por pessoa, e o chamado cai em quem tem a tag do assunto`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
