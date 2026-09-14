@@ -385,10 +385,15 @@ function iniciarTransicao(id, statusAlvo){
     document.getElementById('acao-titulo').textContent = 'Transferir conversa';
     document.getElementById('acao-corpo').innerHTML = `
       <div class="sub" style="margin-bottom:8px;">Pra qual nível vai essa conversa?</div>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="1" style="width:auto;"> N1 · voltar para o Beniboy (bot)</label>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="2" checked style="width:auto;"> N2 · outro agente (time de Suporte)</label>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="3" style="width:auto;"> N3 · Master</label>`;
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="1" style="width:auto;" onchange="aoTrocarNivelTransf()"> N1 · voltar para o Beniboy (bot)</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="2" checked style="width:auto;" onchange="aoTrocarNivelTransf()"> N2 · outro agente (time de Suporte)</label>
+      <div id="transf-agente-wrap" style="margin:0 0 10px 26px;">
+        <div class="sub" style="margin-bottom:4px;">Pra quem?</div>
+        <select id="transf-agente"><option value="">carregando…</option></select>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="3" style="width:auto;" onchange="aoTrocarNivelTransf()"> N3 · Master</label>`;
     document.getElementById('overlay-acao').classList.remove('hidden');
+    carregarAgentesSuporte();
     return;
   }
   if(statusAlvo==='SEM_SOLUCAO'){
@@ -401,6 +406,43 @@ function iniciarTransicao(id, statusAlvo){
     return;
   }
   moverPara(id, statusAlvo, {});
+}
+// ---------- pra QUEM transferir (N2) ----------
+// Pedido do Master (14/09/2026): "em transferir aparecer o usuário de quem
+// tiver a tag suporte". Antes o N2 era "o time" - a conversa mudava de nível
+// e continuava sem dono, esperando alguém notar. A lista vem da tag
+// (users.listarPorTag em /api/suporte/agentes), então quem é de outra área e
+// foi designado pro Suporte aparece aqui junto.
+let AGENTES_SUPORTE = null; // cacheado enquanto a página está aberta
+function aoTrocarNivelTransf(){
+  const sel = document.querySelector('input[name="nivel-transf"]:checked');
+  const wrap = document.getElementById('transf-agente-wrap');
+  if(wrap) wrap.style.display = (sel && sel.value==='2') ? '' : 'none';
+}
+async function carregarAgentesSuporte(){
+  const sel = document.getElementById('transf-agente');
+  if(!sel) return;
+  try{
+    if(!AGENTES_SUPORTE){
+      const r = await fetch('/api/suporte/agentes');
+      if(!r.ok) throw new Error('erro '+r.status);
+      AGENTES_SUPORTE = await r.json();
+    }
+    // quem NÃO abre a Central do Beniboy fica visível mas desabilitado: é o
+    // que mostra ao Master que falta liberar a seção Suporte pra essa pessoa,
+    // em vez de a conversa sumir no colo de alguém que não consegue abrir
+    const podem = AGENTES_SUPORTE.filter(a=>a.podeAtender);
+    const naoPodem = AGENTES_SUPORTE.filter(a=>!a.podeAtender);
+    if(!AGENTES_SUPORTE.length){
+      sel.innerHTML = '<option value="">ninguém com a tag Suporte ainda</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">— sem destinatário (fica pro time) —</option>'
+      + podem.map(a=>`<option value="${a.id}">${escapeHtml(a.nome||a.email||"")}</option>`).join('')
+      + naoPodem.map(a=>`<option value="${a.id}" disabled>${escapeHtml(a.nome||a.email||"")} — sem acesso à Central</option>`).join('');
+  }catch(e){
+    sel.innerHTML = '<option value="">não consegui carregar a lista</option>';
+  }
 }
 function fecharModalAcao(){ document.getElementById('overlay-acao').classList.add('hidden'); ACAO_PENDENTE = null; }
 
@@ -510,13 +552,18 @@ function confirmarModalAcao(){
   if(statusAlvo==='TRANSFERIDO'){
     const sel = document.querySelector('input[name="nivel-transf"]:checked');
     const nivelEscolhido = sel ? Number(sel.value) : 2;
+    // lê o destinatário ANTES de fechar o modal (fecharModalAcao limpa o corpo)
+    const selAgente = document.getElementById('transf-agente');
+    const escolhido = selAgente && selAgente.value
+      ? (AGENTES_SUPORTE||[]).find(a=>a.id===selAgente.value) : null;
+    const destinatario = escolhido ? { id: escolhido.id, nome: escolhido.nome, email: escolhido.email } : null;
     fecharModalAcao();
     // N1 nao e uma "transferencia" de verdade (nao tem outro humano
     // assumindo) - devolver a conversa pro Beniboy e voltar pro PENDENTE,
     // que ja zera nivel/responsavel e reativa o bot (ver
     // atualizarStatusAtendimento em suporteChat.js)
     if(nivelEscolhido===1) return moverPara(id, 'PENDENTE', {});
-    return moverPara(id, 'TRANSFERIDO', { nivelDestino: nivelEscolhido });
+    return moverPara(id, 'TRANSFERIDO', { nivelDestino: nivelEscolhido, transferidoPara: nivelEscolhido===2 ? destinatario : null });
   }
   if(statusAlvo==='SEM_SOLUCAO'){
     const motivo = (document.getElementById('acao-motivo').value||'').trim();
@@ -530,6 +577,7 @@ async function moverPara(id, statusAlvo, extra){
   try{
     const body = { statusAtendimento: statusAlvo };
     if(extra.nivelDestino) body.nivelDestino = extra.nivelDestino;
+    if(extra.transferidoPara) body.transferidoPara = extra.transferidoPara;
     if(extra.motivo) body.motivoSemSolucao = extra.motivo;
     const resp = await fetch(`/api/suporte-chats/${id}/status`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await resp.json();

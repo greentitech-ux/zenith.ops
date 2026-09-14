@@ -13853,6 +13853,27 @@ app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, re
 // e botoes de acao rapida chamam essa mesma rota. nivelDestino so e exigido
 // pro status TRANSFERIDO (2=agente humano, 3=Master); motivoSemSolucao so
 // pro status SEM_SOLUCAO. Mesmo guard de acesso do resto do atendimento.
+// Quem pode RECEBER uma conversa transferida: as pessoas com a tag Suporte
+// (users.listarPorTag, que acha tanto o cadastro antigo quanto quem tem mais
+// de uma tag). Vai marcado quem consegue mesmo ABRIR a Central do Beniboy -
+// transferir pra quem não tem a seção é entregar pro vazio, e o Master
+// precisa enxergar isso na hora de escolher, não depois.
+app.get('/api/suporte/agentes', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    const lista = await users.listarPorTag('suporte');
+    res.json(lista.map((u) => ({
+      id: u.id,
+      nome: u.nome,
+      email: u.email,
+      tags: u.tags,
+      podeAtender: u.ehTime || (u.secoes || []).includes('suporte'),
+    })));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => {
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
@@ -13862,8 +13883,21 @@ app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => 
       nivelDestino: req.body.nivelDestino,
       motivoSemSolucao: req.body.motivoSemSolucao,
       autor,
+      transferidoPara: req.body.transferidoPara || null,
     });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    // quem recebeu a conversa é avisado no nome dele - senão a transferência
+    // depende de a pessoa estar com a Central aberta na hora
+    const para = req.body.transferidoPara;
+    if (req.body.statusAtendimento === 'TRANSFERIDO' && para && para.id) {
+      push.notifyUsuario(
+        para.id,
+        '💬 Conversa transferida pra você',
+        `${chat.nome || 'Visitante'}${autor.nome ? ' · de ' + autor.nome : ''}`.slice(0, 150),
+        'suporte-transf-' + chat.id,
+        '/beniboy.html?chat=' + encodeURIComponent(chat.id),
+      ).catch((e) => console.error('[suporte] falha ao avisar quem recebeu a conversa:', e.message));
+    }
     const { token, ...resto } = chat;
     res.json(resto);
   } catch (err) {

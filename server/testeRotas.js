@@ -22697,6 +22697,81 @@ setTimeout(async () => {
   if (!okTags) ruins += 1;
   console.log(`${okTags ? '✓' : '✗'} Tags: mais de uma por pessoa, e o chamado cai em quem tem a tag do assunto`);
 
+  // ------------------------------------------------------------------
+  // TRANSFERIR CONVERSA: PRA QUEM, NÃO SÓ PRA QUAL NÍVEL.
+  //
+  // Pedido do Master (14/09/2026), olhando o modal da Central do Beniboy:
+  // "em transferir aparecer o usuário de quem tiver a tag suporte". O N2 era
+  // "outro agente (time de Suporte)" e mais nada: a conversa mudava de nível
+  // e o responsável continuava sendo QUEM CLICOU. Na prática ninguém virava
+  // dono, e a pessoa do outro lado esperava alguém do time notar sozinho.
+  let okTransferir = false;
+  try {
+    const sc = require(__dirname + '/suporteChat.js');
+    const base = { role: 'user', active: true };
+    // um do Suporte que atende, um que tem a tag mas não abre a Central, e
+    // um Suporte "de segunda tag" (o caso que o Master pediu: alguém de
+    // outra área designado pro Suporte)
+    DOCS.set('users/u-sup-1', { ...base, id: 'u-sup-1', email: 'sup1@teste.local', nome: 'Fábio Suporte', cargos: ['suporte'], permissions: { sections: ['suporte'] } });
+    DOCS.set('users/u-sup-sem-tela', { ...base, id: 'u-sup-sem-tela', email: 'sup2@teste.local', nome: 'Gabi SemTela', cargo: 'suporte', permissions: { sections: [] } });
+    DOCS.set('users/u-sup-extra', { ...base, id: 'u-sup-extra', email: 'sup3@teste.local', nome: 'Hugo Duplo', cargo: 'tecnico', cargos: ['tecnico', 'suporte'], permissions: { sections: ['suporte', 'tecnico'] } });
+    DOCS.set('users/u-sup-nao', { ...base, id: 'u-sup-nao', email: 'sup4@teste.local', nome: 'Ivo Fora', cargos: ['manutencao'], permissions: { sections: ['suporte'] } });
+
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const semAuth = await pedir('/api/suporte/agentes');
+    const comAuth = await pedir('/api/suporte/agentes', cab);
+    const agentes = comAuth.status === 200 ? JSON.parse(comAuth.corpo) : [];
+    const porId = Object.fromEntries(agentes.map((a) => [a.id, a]));
+
+    // a transferência de verdade, pela rota
+    DOCS.set('suporteChats/chat-transf', {
+      id: 'chat-transf', nome: 'Samuel', status: 'ABERTO', statusAtendimento: 'EM_ATENDIMENTO',
+      nivel: 2, responsavel: { id: 'u-quem-clicou', nome: 'Quem Clicou', email: 'clicou@teste.local' },
+      criadoEm: new Date().toISOString(), mensagens: [],
+    });
+    const transf = await postarJson('/api/suporte-chats/chat-transf/status', {
+      statusAtendimento: 'TRANSFERIDO', nivelDestino: 2,
+      transferidoPara: { id: 'u-sup-1', nome: 'Fábio Suporte', email: 'sup1@teste.local' },
+    }, cab);
+    const depois = await sc.getOne('chat-transf');
+    const ultimoHist = (depois.historicoStatus || [])[(depois.historicoStatus || []).length - 1] || {};
+
+    // N3 · Master: sem destinatário, a conversa fica sem dono esperando quem
+    // daquele nível assumir - o Master não é uma pessoa da fila
+    const paraMaster = await postarJson('/api/suporte-chats/chat-transf/status', {
+      statusAtendimento: 'TRANSFERIDO', nivelDestino: 3,
+    }, cab);
+    const depoisN3 = await sc.getOne('chat-transf');
+
+    const html = require('fs').readFileSync(__dirname + '/public/beniboy.html', 'utf8');
+
+    const conf = {
+      'a lista de destinatários exige estar no time de suporte': semAuth.status === 401 || semAuth.status === 403,
+      'aparece quem tem a tag Suporte': comAuth.status === 200 && !!porId['u-sup-1'],
+      'inclusive quem tem a tag como SEGUNDA tag (o pedido do Master)': !!porId['u-sup-extra'],
+      'quem NÃO tem a tag fica de fora, mesmo tendo a seção Suporte': !porId['u-sup-nao'],
+      'quem tem a tag mas não abre a Central aparece MARCADO, não some':
+        !!porId['u-sup-sem-tela'] && porId['u-sup-sem-tela'].podeAtender === false
+        && porId['u-sup-1'].podeAtender === true,
+      'transferir ENTREGA a conversa: o dono passa a ser quem recebeu, não quem clicou':
+        transf.status === 200 && depois.responsavel && depois.responsavel.id === 'u-sup-1'
+        && depois.statusAtendimento === 'TRANSFERIDO' && depois.nivel === 2,
+      'o histórico guarda de quem PRA QUEM': ultimoHist.para === 'Fábio Suporte' && !!ultimoHist.por,
+      'N3 · Master fica sem dono (ninguém "recebe" no lugar do Master)':
+        paraMaster.status === 200 && depoisN3.nivel === 3 && depoisN3.responsavel === null,
+      'o modal pergunta pra quem, e só no N2':
+        /id="transf-agente"/.test(html) && /carregarAgentesSuporte\(\)/.test(html)
+        && /sel\.value==='2'\) \? '' : 'none'/.test(html),
+      'quem recebeu é avisado no nome dele (não depende de estar com a tela aberta)':
+        /Conversa transferida pra você/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTransferir = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTransferir = false; console.log('  erro: ' + e.message); }
+  if (!okTransferir) ruins += 1;
+  console.log(`${okTransferir ? '✓' : '✗'} Transferir conversa: escolhe a PESSOA com a tag Suporte, e ela vira a dona`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

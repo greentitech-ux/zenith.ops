@@ -271,7 +271,13 @@ function mensagemNumeroTicket(numeroTicket, assunto) {
   return `${orientacao} Seu protocolo é #${numeroTicket}. Guarde este número para acompanhamento.`;
 }
 
-async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino, motivoSemSolucao, autor } = {}) {
+// `transferidoPara` ({id, nome, email}) é PRA QUEM vai a conversa - pedido do
+// Master (14/09/2026): "em transferir aparecer o usuário de quem tiver a tag
+// suporte". Sem ele, transferir pro N2 deixava a conversa com o responsável
+// antigo (quem clicou) e nível 2: na prática ninguém era dono, e a conversa
+// esperava alguém do time notar sozinho. Quando não vem (N3 · Master, ou o
+// arrasto no kanban), o comportamento é o de antes.
+async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino, motivoSemSolucao, autor, transferidoPara } = {}) {
   if (!STATUS_ATENDIMENTO.includes(statusAtendimento)) throw new Error('Status de atendimento inválido.');
   const chat = await getOne(id);
   if (!chat) throw new Error('Conversa não encontrada.');
@@ -287,6 +293,17 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
   if (statusAtendimento === 'PENDENTE') {
     nivel = 1;
     responsavel = null;
+  } else if (statusAtendimento === 'TRANSFERIDO') {
+    nivel = nivelValido(nivelDestino) ? Number(nivelDestino) : Math.max(nivel, 2);
+    // transferir é ENTREGAR a conversa: o dono passa a ser quem recebeu, não
+    // quem clicou no botão. Sem destinatário (N3 · Master) a conversa fica
+    // sem dono, esperando quem daquele nível assumir - que é o certo: o
+    // Master não é uma pessoa da fila.
+    responsavel = transferidoPara ? {
+      id: transferidoPara.id || null,
+      nome: transferidoPara.nome || transferidoPara.email || null,
+      email: transferidoPara.email || null,
+    } : null;
   } else {
     nivel = nivelValido(nivelDestino) ? Number(nivelDestino) : Math.max(nivel, 2);
     responsavel = autor || responsavel;
@@ -299,7 +316,14 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
     responsavel,
     motivoSemSolucao: statusAtendimento === 'SEM_SOLUCAO' ? String(motivoSemSolucao).trim() : (statusAtendimento === chat.statusAtendimento ? chat.motivoSemSolucao : null),
     atualizadoEm: agora,
-    historicoStatus: [...(chat.historicoStatus || []), { statusAtendimento, nivel, por: autor ? (autor.nome || autor.email || autor.id) : null, em: agora }].slice(-50),
+    // o histórico guarda QUEM entregou e PRA QUEM - sem o "para", uma
+    // conversa que passou por três pessoas vira três linhas iguais
+    historicoStatus: [...(chat.historicoStatus || []), {
+      statusAtendimento, nivel,
+      por: autor ? (autor.nome || autor.email || autor.id) : null,
+      para: transferidoPara ? (transferidoPara.nome || transferidoPara.email || null) : null,
+      em: agora,
+    }].slice(-50),
   };
   // assumiu DE VERDADE (EM_ATENDIMENTO com responsável novo, conversa ainda
   // aberta): o visitante recebe a apresentação automática na mesma escrita.
