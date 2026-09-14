@@ -10299,7 +10299,15 @@ app.post('/api/tarefas/:id/subtarefas', auth.requireAuth, async (req, res) => {
 });
 app.put('/api/tarefas/:id/subtarefas/:subId', auth.requireAuth, async (req, res) => {
   try {
-    const atualizada = await tarefas.alternarSubtarefa(req.params.id, acessoDasTarefas(req), req.params.subId, req.body?.feita === true);
+    // um PUT que aceita QUALQUER campo do passo: marcar, datar, atribuir,
+    // renomear. Só entra no patch o que veio no corpo - campo ausente não é
+    // campo apagado (é assim que dá pra marcar sem zerar a data).
+    const corpo = req.body || {};
+    const patch = {};
+    ['titulo', 'feita', 'dataInicio', 'dataEntrega', 'responsavelId'].forEach((k) => {
+      if (corpo[k] !== undefined) patch[k] = k === 'feita' ? corpo[k] === true : corpo[k];
+    });
+    const atualizada = await tarefas.atualizarSubtarefa(req.params.id, acessoDasTarefas(req), req.params.subId, patch);
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
   } catch (err) { res.status(400).json({ error: err.message }); }

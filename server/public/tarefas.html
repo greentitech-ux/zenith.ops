@@ -13,12 +13,30 @@
 .sub-cont{font:11px var(--mono);color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
 .sub-mais{border:1px solid var(--line);background:var(--panel2);color:var(--text);width:26px;height:26px;border-radius:50%;cursor:pointer;font:16px/1 var(--sans);display:inline-flex;align-items:center;justify-content:center;flex:none}
 .sub-mais:hover{border-color:var(--accent);color:var(--accent)}
-.sub-item{display:flex;gap:9px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line)}
-.sub-item input[type=checkbox]{width:auto;margin:0;flex:none;accent-color:var(--accent)}
-.sub-item span{flex:1;line-height:1.35;overflow-wrap:anywhere}
-.sub-item.feita span{color:var(--muted);text-decoration:line-through}
+/* A LINHA DA SUBTAREFA, no desenho que ele mandou (Asana):
+   [ ⊙ ]  título .......................  [ data ]  [ pessoa ]  [ ✕ ]
+   Os dois chips da direita ficam APAGADOS enquanto vazios e só ganham cor
+   quando têm conteúdo - a linha não fica poluída de campo em branco. */
+.sub-item{display:flex;gap:10px;align-items:center;padding:9px 2px;border-bottom:1px solid var(--line)}
+.sub-item:hover{background:rgba(255,255,255,.02)}
+.sub-check{flex:none;width:21px;height:21px;border-radius:50%;border:1.5px solid var(--line);background:none;color:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font:12px/1 var(--sans);padding:0;transition:border-color .12s,background .12s}
+.sub-check:hover{border-color:var(--ok);color:var(--ok)}
+.sub-check[aria-pressed="true"]{background:var(--ok);border-color:var(--ok);color:#0b0d10;font-weight:900}
+.sub-check:disabled{cursor:default;opacity:.5}
+.sub-item span.sub-nome{flex:1;min-width:0;line-height:1.35;overflow-wrap:anywhere}
+.sub-item.feita span.sub-nome{color:var(--muted);text-decoration:line-through}
+.sub-chip{flex:none;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:999px;padding:3px 9px;font:11px var(--mono);cursor:pointer;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.sub-chip:hover{border-color:var(--accent);color:var(--accent)}
+.sub-chip.tem{border-style:solid;border-color:var(--line);color:var(--text)}
+.sub-chip.tem.atrasada{color:var(--bad);border-color:var(--bad)}
+.sub-chip.pessoa.tem{background:var(--panel2)}
 .sub-x{border:0;background:none;color:var(--muted);cursor:pointer;font:15px/1 var(--sans);padding:3px 5px;flex:none}
 .sub-x:hover{color:var(--bad)}
+/* a gaveta que abre embaixo da linha quando se clica num chip */
+.sub-edita{display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:10px 2px 12px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+.sub-edita label{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:grid;gap:4px}
+.sub-edita input,.sub-edita select{margin:0;height:36px;min-width:150px}
+@media(max-width:700px){.sub-chip{max-width:96px}.sub-edita input,.sub-edita select{min-width:0;width:100%}.sub-edita label{flex:1 1 100%}}
 .sub-link{display:block;width:100%;text-align:left;border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;padding:9px 2px}
 .sub-link:hover{color:var(--accent)}
 .sub-novo{display:flex;gap:8px;align-items:center;padding:4px 0}.sub-novo input{margin:0}
@@ -506,7 +524,7 @@ function fechar(){$('M').classList.remove('show');O=null}
 // tinha escrito. So zera quando a tarefa aberta e' OUTRA; o envio do
 // comentario (coment) continua zerando por conta propria.
 let TXT_DE=null;
-function openT(id){O=L.find(x=>x.id===id);if(!O)return;$('MH').textContent=(O.ehOcorrencia?'📌 ':'')+tituloVisivel(O);$('NEW').hidden=true;$('DET').hidden=false;const ticket=protocoloDaTarefa(O)?protocoloDaTarefa(O)+' · ':'';const tipoT=rotuloTicket(O.vinculo);const feito=O.concluidaEm?'<br>Concluída por <b>'+e(O.concluidaPorNome||'Usuário')+'</b> em '+fmt(O.concluidaEm):'';const reaberta=O.reabertaEm?'<br>Reaberta por <b>'+e(O.reabertaPorNome||'Usuário')+'</b> em '+fmt(O.reabertaEm):'';const sla=O.slaPrazo?`<br><b>SLA:</b> ${fmt(O.slaPrazo)} · ${new Date(O.slaPrazo)<new Date()&&O.status!=='CONCLUIDA'?'<span class="late">atrasado</span>':'em prazo'}`:'';const descricao=O.descricao?'<div class="descricao"><b>Descrição / contexto</b>'+e(O.descricao)+'</div>':'';$('INFO').innerHTML=ticket+(tipoT?'<b>'+e(tipoT)+'</b> · ':'')+'<span class="nome-unidade">'+e(O.unidadeNome||'Tarefa pessoal')+'</span><br>Criada por <b>'+e(O.criadoPorNome||'Usuário')+'</b> em '+fmt(O.criadaEm)+sla+feito+reaberta+descricao;$('DINI').value=O.dataInicio||'';$('DFIM').value=O.dataEntrega||'';$('DINI').disabled=$('DFIM').disabled=O.status==='CONCLUIDA'||!O.podeGerir;const unidadeDetalhe=$('UNITDETROW');unidadeDetalhe.hidden=!CTX.isMaster;if(CTX.isMaster){$('UNITDET').innerHTML='<option value="">Sem unidade</option>'+((CTX.unidades)||[]).map(u=>`<option value="${e(u.codigo)}">${e(u.nome)}</option>`).join('');$('UNITDET').value=O.unidade||''}pintarReuniao();pintarEquipe();const acompanha=!!O.participantesApenasAcompanham&&!O.podeGerir;$('STATUS').value=O.status;$('STATUS').disabled=acompanha||!TAREFA_ABERTA.has(O.status)&&O.status!=='CONCLUIDA';$('BTNCON').hidden=!TAREFA_ABERTA.has(O.status)||acompanha;$('BTNREABRIR').hidden=O.status!=='CONCLUIDA'||acompanha;$('BTNSOL').hidden=!CTX.podeSolicitacao||O.status==='CONCLUIDA'||!!O.solicitacaoId||!!O.vinculo?.id;$('BTNFOR').hidden=!CTX.podeFormulario||O.status==='CONCLUIDA';const emAberto=!['CONCLUIDA','CANCELADA','ARQUIVADA'].includes(O.status);$('BTNCANCEL').hidden=!(emAberto&&!acompanha);$('BTNDEL').hidden=acompanha;rotuloIcone('BTNDEL',CTX.isMaster?'Excluir':'Pedir exclusão');const dr=$('DELREQ');if(O.delecaoSolicitada){dr.hidden=false;dr.innerHTML=CTX.isMaster?('Exclusão pedida por <b>'+e(O.delecaoSolicitada.porNome||'Usuário')+'</b>'+(O.delecaoSolicitada.motivo?' · '+e(O.delecaoSolicitada.motivo):'')+' <button class="btn primary" onclick="resolverDel(true)">Aprovar exclusão</button> <button class="btn" onclick="resolverDel(false)">Recusar</button>'):'Exclusão pedida, aguardando o Master.'}else{dr.hidden=true;dr.innerHTML=''}pintarGerou();pintarSubtarefas();fecharNovaSubtarefa();pintarRepeticaoDaTarefa();$('ANX').innerHTML=(O.anexos||[]).map(botaoAnexo).join('')||'<span class="empty">Sem anexos.</span>';$('COM').innerHTML=(O.comentarios||[]).map(x=>`<div class="comment"><b>${e(x.porNome||'Usuário')}</b> · ${fmt(x.em)}<br>${e(x.texto)}</div>`).join('')||'<div class="empty">Sem comentários.</div>';if(TXT_DE!==id){$('TXT').value='';TXT_DE=id};$('M').classList.add('show');carregarFicha(O.id)}
+function openT(id){O=L.find(x=>x.id===id);if(!O)return;$('MH').textContent=(O.ehOcorrencia?'📌 ':'')+tituloVisivel(O);$('NEW').hidden=true;$('DET').hidden=false;const ticket=protocoloDaTarefa(O)?protocoloDaTarefa(O)+' · ':'';const tipoT=rotuloTicket(O.vinculo);const feito=O.concluidaEm?'<br>Concluída por <b>'+e(O.concluidaPorNome||'Usuário')+'</b> em '+fmt(O.concluidaEm):'';const reaberta=O.reabertaEm?'<br>Reaberta por <b>'+e(O.reabertaPorNome||'Usuário')+'</b> em '+fmt(O.reabertaEm):'';const sla=O.slaPrazo?`<br><b>SLA:</b> ${fmt(O.slaPrazo)} · ${new Date(O.slaPrazo)<new Date()&&O.status!=='CONCLUIDA'?'<span class="late">atrasado</span>':'em prazo'}`:'';const descricao=O.descricao?'<div class="descricao"><b>Descrição / contexto</b>'+e(O.descricao)+'</div>':'';$('INFO').innerHTML=ticket+(tipoT?'<b>'+e(tipoT)+'</b> · ':'')+'<span class="nome-unidade">'+e(O.unidadeNome||'Tarefa pessoal')+'</span><br>Criada por <b>'+e(O.criadoPorNome||'Usuário')+'</b> em '+fmt(O.criadaEm)+sla+feito+reaberta+descricao;$('DINI').value=O.dataInicio||'';$('DFIM').value=O.dataEntrega||'';$('DINI').disabled=$('DFIM').disabled=O.status==='CONCLUIDA'||!O.podeGerir;const unidadeDetalhe=$('UNITDETROW');unidadeDetalhe.hidden=!CTX.isMaster;if(CTX.isMaster){$('UNITDET').innerHTML='<option value="">Sem unidade</option>'+((CTX.unidades)||[]).map(u=>`<option value="${e(u.codigo)}">${e(u.nome)}</option>`).join('');$('UNITDET').value=O.unidade||''}pintarReuniao();pintarEquipe();const acompanha=!!O.participantesApenasAcompanham&&!O.podeGerir;$('STATUS').value=O.status;$('STATUS').disabled=acompanha||!TAREFA_ABERTA.has(O.status)&&O.status!=='CONCLUIDA';$('BTNCON').hidden=!TAREFA_ABERTA.has(O.status)||acompanha;$('BTNREABRIR').hidden=O.status!=='CONCLUIDA'||acompanha;$('BTNSOL').hidden=!CTX.podeSolicitacao||O.status==='CONCLUIDA'||!!O.solicitacaoId||!!O.vinculo?.id;$('BTNFOR').hidden=!CTX.podeFormulario||O.status==='CONCLUIDA';const emAberto=!['CONCLUIDA','CANCELADA','ARQUIVADA'].includes(O.status);$('BTNCANCEL').hidden=!(emAberto&&!acompanha);$('BTNDEL').hidden=acompanha;rotuloIcone('BTNDEL',CTX.isMaster?'Excluir':'Pedir exclusão');const dr=$('DELREQ');if(O.delecaoSolicitada){dr.hidden=false;dr.innerHTML=CTX.isMaster?('Exclusão pedida por <b>'+e(O.delecaoSolicitada.porNome||'Usuário')+'</b>'+(O.delecaoSolicitada.motivo?' · '+e(O.delecaoSolicitada.motivo):'')+' <button class="btn primary" onclick="resolverDel(true)">Aprovar exclusão</button> <button class="btn" onclick="resolverDel(false)">Recusar</button>'):'Exclusão pedida, aguardando o Master.'}else{dr.hidden=true;dr.innerHTML=''}pintarGerou();SUB_ABERTA=null;pintarSubtarefas();fecharNovaSubtarefa();pintarRepeticaoDaTarefa();$('ANX').innerHTML=(O.anexos||[]).map(botaoAnexo).join('')||'<span class="empty">Sem anexos.</span>';$('COM').innerHTML=(O.comentarios||[]).map(x=>`<div class="comment"><b>${e(x.porNome||'Usuário')}</b> · ${fmt(x.em)}<br>${e(x.texto)}</div>`).join('')||'<div class="empty">Sem comentários.</div>';if(TXT_DE!==id){$('TXT').value='';TXT_DE=id};$('M').classList.add('show');carregarFicha(O.id)}
 // O dado do ticket (cliente, valor, forma de pagamento) NÃO é copiado pra
 // dentro da tarefa: é lido do ticket quando o detalhe abre - 1 documento, só
 // quando alguém abre. Cópia criaria uma segunda versão que envelhece assim que
@@ -524,16 +542,68 @@ async function criar(){let regra;try{regra=regraDaTela()}catch(x){return alert(x
 // escreve três ou quatro seguidos, e reabrir a cada linha é o tipo de atrito
 // que faz a pessoa desistir e escrever tudo na descrição de novo (é o que
 // Asana e Todoist fazem). Esc fecha; campo vazio + Enter também.
+// Só quem já está na tarefa pode ficar com um passo - a mesma lista que o
+// servidor valida (gentePermitida), montada aqui pra não ter dois critérios.
+function genteDaTarefa(){
+  const m = new Map();
+  if(O && O.responsavelId) m.set(O.responsavelId, O.responsavelNome||'Usuário');
+  ((O&&O.colaboradores)||[]).forEach(p=>{ if(p&&p.id) m.set(p.id, p.nome||'Usuário'); });
+  return m;
+}
+// "14 set", "Hoje", "Amanhã" - data curta como no Asana, porque a linha é
+// estreita e o ano quase nunca importa num passo de checklist.
+function dataCurta(iso){
+  if(!iso) return '';
+  const h = hoje();
+  if(iso===h) return 'Hoje';
+  const amanha = new Date(new Date(h+'T12:00:00').getTime()+86400000).toISOString().slice(0,10);
+  if(iso===amanha) return 'Amanhã';
+  const [,m,d] = iso.split('-');
+  return `${d} ${['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m)-1]}`;
+}
+function iniciais(nome){
+  const p = String(nome||'').trim().split(/\s+/).filter(Boolean);
+  return ((p[0]||'?')[0] + (p.length>1 ? p[p.length-1][0] : '')).toUpperCase();
+}
+let SUB_ABERTA = null; // id do passo com a gaveta de edição aberta
 function pintarSubtarefas(){
   const lista = (O && O.subtarefas) || [];
   const feitas = lista.filter(x=>x.feita).length;
   $('SUBCONT').textContent = `${feitas}/${lista.length}`;
-  const podeMarcar = O && !(O.participantesApenasAcompanham && !O.podeGerir) && O.status!=='CONCLUIDA';
-  $('SUB').innerHTML = lista.length ? lista.map(x=>`<div class="sub-item${x.feita?' feita':''}">
-    <input type="checkbox" ${x.feita?'checked':''} ${podeMarcar?'':'disabled'} onchange="marcarSub('${e(x.id)}',this.checked)" aria-label="${e(x.titulo)}">
-    <span title="${x.feita&&x.feitaPorNome?('Feita por '+e(x.feitaPorNome)):''}">${e(x.titulo)}</span>
-    <button type="button" class="sub-x" onclick="removerSub('${e(x.id)}')" aria-label="Remover subtarefa" data-dica="Remover subtarefa">✕</button>
-  </div>`).join('') : '<div class="empty">Sem subtarefas. Quebre a tarefa nos passos que ela realmente tem.</div>';
+  const pode = O && !(O.participantesApenasAcompanham && !O.podeGerir) && O.status!=='CONCLUIDA';
+  const h = hoje();
+  const gente = genteDaTarefa();
+  $('SUB').innerHTML = lista.length ? lista.map(x=>{
+    // atrasado só conta enquanto o passo está aberto: passo feito ontem com
+    // previsão de anteontem não é dívida, é história
+    const atrasada = !x.feita && x.dataEntrega && x.dataEntrega < h;
+    const rotuloData = x.dataEntrega ? dataCurta(x.dataEntrega) : (x.dataInicio ? 'início '+dataCurta(x.dataInicio) : '');
+    const dica = [x.dataInicio?('Início '+x.dataInicio.split('-').reverse().join('/')):'', x.dataEntrega?('Previsão '+x.dataEntrega.split('-').reverse().join('/')):''].filter(Boolean).join(' · ') || 'Definir datas';
+    const linha = `<div class="sub-item${x.feita?' feita':''}">
+      <button type="button" class="sub-check" aria-pressed="${x.feita?'true':'false'}" ${pode?'':'disabled'} onclick="marcarSub('${e(x.id)}',${x.feita?'false':'true'})" aria-label="${x.feita?'Desmarcar':'Concluir'} ${e(x.titulo)}" data-dica="${x.feita&&x.feitaPorNome?('Feita por '+e(x.feitaPorNome)):(x.feita?'Feita':'Marcar como feita')}">✓</button>
+      <span class="sub-nome">${e(x.titulo)}</span>
+      <button type="button" class="sub-chip${rotuloData?' tem':''}${atrasada?' atrasada':''}" onclick="abrirEdicaoSub('${e(x.id)}')" data-dica="${e(dica)}" aria-label="Datas da subtarefa">${rotuloData||'🗓'}</button>
+      <button type="button" class="sub-chip pessoa${x.responsavelNome?' tem':''}" onclick="abrirEdicaoSub('${e(x.id)}')" data-dica="${x.responsavelNome?('Com '+e(x.responsavelNome)):'Definir responsável'}" aria-label="Responsável pela subtarefa">${x.responsavelNome?e(iniciais(x.responsavelNome)):'👤'}</button>
+      <button type="button" class="sub-x" onclick="removerSub('${e(x.id)}')" aria-label="Remover subtarefa" data-dica="Remover subtarefa">✕</button>
+    </div>`;
+    if(SUB_ABERTA!==x.id) return linha;
+    return linha + `<div class="sub-edita">
+      <label>Início<input type="date" value="${e(x.dataInicio||'')}" ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','dataInicio',this.value)"></label>
+      <label>Previsão<input type="date" value="${e(x.dataEntrega||'')}" ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','dataEntrega',this.value)"></label>
+      <label>Responsável<select ${pode?'':'disabled'} onchange="salvarCampoSub('${e(x.id)}','responsavelId',this.value)"><option value="">Ninguém ainda</option>${[...gente].map(([id,nome])=>`<option value="${e(id)}"${id===x.responsavelId?' selected':''}>${e(nome)}</option>`).join('')}</select></label>
+      <button type="button" class="btn" onclick="abrirEdicaoSub(null)">Fechar</button>
+    </div>`;
+  }).join('') : '<div class="empty">Sem subtarefas. Quebre a tarefa nos passos que ela realmente tem.</div>';
+}
+// abre UMA gaveta por vez: duas abertas fariam a lista pular na tela a cada
+// clique, e o passo que interessa sumiria pra baixo
+function abrirEdicaoSub(id){ SUB_ABERTA = (SUB_ABERTA===id ? null : id); pintarSubtarefas(); }
+async function salvarCampoSub(subId, campo, valor){
+  try{
+    O = await req('/api/tarefas/'+O.id+'/subtarefas/'+encodeURIComponent(subId),{[campo]:valor},'PUT');
+    const i = L.findIndex(x=>x.id===O.id); if(i>=0) L[i]=O;
+    pintarSubtarefas(); render();
+  }catch(x){ alert(x.message); pintarSubtarefas(); }
 }
 function novaSubtarefa(){
   const caixa = $('SUBNOVO');
@@ -564,7 +634,7 @@ async function salvarSubtarefa(titulo){
 }
 async function marcarSub(subId, feita){
   try{
-    O = await req('/api/tarefas/'+O.id+'/subtarefas/'+encodeURIComponent(subId),{feita},'PUT');
+    O = await req('/api/tarefas/'+O.id+'/subtarefas/'+encodeURIComponent(subId),{feita:!!feita},'PUT');
     const i = L.findIndex(x=>x.id===O.id); if(i>=0) L[i]=O;
     pintarSubtarefas(); render();
   }catch(x){ alert(x.message); pintarSubtarefas(); }

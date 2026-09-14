@@ -18764,6 +18764,19 @@ setTimeout(async () => {
     const semEla = some.status === 200 ? JSON.parse(some.corpo) : {};
     const fantasma = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/naoexiste`, { feita: true }, cabSR);
 
+    // ---- data, previsão e responsável no passo ----
+    const passoId = ((semEla.subtarefas || [])[0] || {}).id;
+    const datou = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/${passoId}`,
+      { dataInicio: '2026-09-15', dataEntrega: '2026-09-18', responsavelId: tSR.responsavelId }, cabSR);
+    const passoDatado = (datou.status === 200 ? (JSON.parse(datou.corpo).subtarefas || []) : []).find((x) => x.id === passoId) || {};
+    const marcouDatado = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/${passoId}`, { feita: true }, cabSR);
+    const passoMarcado = (marcouDatado.status === 200 ? (JSON.parse(marcouDatado.corpo).subtarefas || []) : []).find((x) => x.id === passoId) || {};
+    const aoContrario = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/${passoId}`, { dataEntrega: '2026-09-01' }, cabSR);
+    const dataTorta = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/${passoId}`, { dataEntrega: '18/09/2026' }, cabSR);
+    const foraDaTarefa = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/${passoId}`, { responsavelId: 'u-nao-esta-nessa-tarefa' }, cabSR);
+    const limpou = await enviarJson('PUT', `/api/tarefas/${tSR.id}/subtarefas/${passoId}`, { dataEntrega: '', responsavelId: '' }, cabSR);
+    const passoLimpo = (limpou.status === 200 ? (JSON.parse(limpou.corpo).subtarefas || []) : []).find((x) => x.id === passoId) || {};
+
     // marcar TODAS não pode concluir a tarefa sozinha
     const todas = await postarJson('/api/tarefas', { titulo: 'Fechar o mês', subtarefas: ['Passo único'] }, cabSR);
     const tTodas = todas.status === 200 ? JSON.parse(todas.corpo) : {};
@@ -18841,7 +18854,29 @@ setTimeout(async () => {
       'passar de novo no mesmo dia não duplica a tarefa': denovoNaMesmaSegunda.length === 0,
       'parar de repetir não cria mais nada, e não apaga o que já nasceu':
         depoisDeParar.length === 0 && !!aindaExiste && aindaExiste.id === geradaId,
+      // ---- passo com data e dono próprios (pedido de 14/09) ----
+      'a subtarefa aceita início, previsão e responsável':
+        datou.status === 200 && passoDatado.dataInicio === '2026-09-15'
+        && passoDatado.dataEntrega === '2026-09-18' && passoDatado.responsavelId === tSR.responsavelId
+        && !!passoDatado.responsavelNome,
+      // campo ausente NAO e' campo apagado - senao marcar o passo zeraria a
+      // data que alguem acabou de por
+      'marcar o passo não apaga a data nem o responsável que ele já tinha':
+        passoMarcado.feita === true && passoMarcado.dataEntrega === '2026-09-18' && !!passoMarcado.responsavelNome,
+      'string vazia limpa o campo (dá pra tirar uma data posta por engano)':
+        passoLimpo.dataEntrega === null && passoLimpo.responsavelId === null,
+      // atribuir passo a quem nao esta na tarefa seria distribuir trabalho por
+      // uma porta lateral, sem o dono aprovar
+      'não dá pra atribuir a subtarefa a quem não está na tarefa': foraDaTarefa.status === 400,
+      'previsão antes do início é recusada': aoContrario.status === 400,
+      'data em formato inválido é recusada': dataTorta.status === 400,
       // ---- tela ----
+      'o check é o botão redondo do exemplo dele, não uma caixinha quadrada':
+        /class="sub-check"/.test(htmlT) && /aria-pressed="\$\{x\.feita\?'true':'false'\}/.test(htmlT)
+        && !/<input type="checkbox"[^>]*onchange="marcarSub/.test(htmlT),
+      'a linha mostra data e pessoa como chips, apagados enquanto vazios':
+        /class="sub-chip\$\{rotuloData\?' tem':''\}/.test(htmlT) && /class="sub-chip pessoa/.test(htmlT)
+        && /\.sub-chip\{[^}]*border:1px dashed/.test(htmlT),
       'a tela tem os DOIS caminhos que ele desenhou: o + no cabeçalho e o clicável abaixo':
         (htmlT.match(/onclick="novaSubtarefa\(\)"/g) || []).length === 2
         && /class="sub-mais"/.test(htmlT) && /class="sub-link"/.test(htmlT),
