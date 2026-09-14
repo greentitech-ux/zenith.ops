@@ -19778,6 +19778,69 @@ setTimeout(async () => {
   if (!okEstacao) ruins += 1;
   console.log(`${okEstacao ? '✓' : '✗'} Estação da Comida: comanda por pessoa, mesa derivada, preço congelado e pagamento por número de cartão`);
 
+  // ------------------------------------------------------------------
+  // NOME DE PESSOA E PREENCHIMENTO EM MAIÚSCULO. Pedido do Master
+  // (14/09/2026), vendo o próprio usuário no menu: "em todo lugar que
+  // aparecer o usuário, sempre com letras maiúsculas - assim fica feio.
+  // 100% dos locais, mesmo que seja escrito minúsculo. Quero levar isso
+  // também pra tudo: formulários, PDF, relatórios, preenchimentos".
+  //
+  // O que este teste protege NÃO é o maiúsculo (isso é fácil) - é o que
+  // NÃO pode virar maiúsculo. E-mail que a pessoa copia, link que vira
+  // 404, código e token que são valor exato: transformar esses não é
+  // estilo, é corromper o dado.
+  let okMaiusculo = false;
+  try {
+    const tx = require(__dirname + '/textoExibicao.js');
+    const temaSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    const navSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'nav-menu.js'), 'utf8');
+
+    const conf = {
+      'nome de pessoa sai em maiúsculo, venha como vier':
+        tx.nomePessoa('flawber') === 'FLAWBER'
+        && tx.nomePessoa({ nome: 'maria silva' }) === 'MARIA SILVA'
+        && tx.nomePessoa({ username: 'joao' }) === 'JOAO'
+        && tx.nomePessoa({ nomeCompleto: 'ana paula', nome: 'ana' }) === 'ANA PAULA',
+      'acento e apóstrofo sobrevivem': tx.nomePessoa("maria d'ávila") === "MARIA D'ÁVILA",
+      // "eu quero que tudo que seja minúsculo fique maiúsculo" - e-mail
+      // incluído. Na tela isso é CSS, então copiar ainda devolve o original
+      'TUDO sobe, e-mail e link incluídos':
+        tx.nomePessoa('greentitech@gmail.com') === 'GREENTITECH@GMAIL.COM'
+        && tx.valorPreenchido('fulano@empresa.com.br') === 'FULANO@EMPRESA.COM.BR'
+        && tx.valorPreenchido('https://www.nopulso.com.br/central') === 'HTTPS://WWW.NOPULSO.COM.BR/CENTRAL',
+      // a única exceção que fica: valor que alguém LÊ da tela e DIGITA em
+      // outro lugar (token, senha, MAC, IP, código) - ali maiúsculo é erro,
+      // não estilo
+      'valorExato devolve intacto o que vai ser redigitado à mão':
+        tx.valorExato('17f080c6fcd5') === '17f080c6fcd5'
+        && tx.valorExato('fc:aa:14:fc:ed:5c') === 'fc:aa:14:fc:ed:5c'
+        && /function valorExato/.test(require('fs').readFileSync(__dirname + '/textoExibicao.js', 'utf8')),
+      'valor preenchido vira maiúsculo': tx.valorPreenchido('rua das flores, 10') === 'RUA DAS FLORES, 10',
+      'número e booleano voltam do mesmo TIPO (devolver string aqui quebraria quem soma)':
+        tx.valorPreenchido(42) === 42 && tx.valorPreenchido(true) === true
+        && tx.valorPreenchido('123,45') === '123,45',
+      'nulo e vazio não viram "NULL"':
+        tx.valorPreenchido(null) === null && tx.valorPreenchido('') === '' && tx.nomePessoa(null) === '' && tx.maiusc(undefined) === undefined,
+      // o navegador faz por CSS: o texto gravado continua como foi digitado,
+      // e o copiar/colar devolve o original
+      // uma regra no body alcança as 59 telas (e as que vierem), em vez de
+      // uma caçada de classe por tela que sempre esquece alguma
+      'a tela inteira sobe por CSS, num lugar só':
+        /body\{text-transform:uppercase;\}/.test(temaSrc) && /window\.maiusc = function/.test(temaSrc),
+      'e os escapes são só o que quebra redigitado: código, comando e senha':
+        /code,kbd,pre,samp,\.nao-maiusc,\.nao-maiusc \*\{text-transform:none;\}/.test(temaSrc)
+        && /input\[type=password\]\{text-transform:none;\}/.test(temaSrc),
+      'o nome no menu sobe pra maiúsculo': /classList\.add\('maiusc'\)/.test(navSrc) || /'maiusc'/.test(navSrc),
+      'nada disso reescreve o que está gravado (é exibição, não migração)':
+        !/toLocaleUpperCase/.test(require('fs').readFileSync(__dirname + '/users.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMaiusculo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okMaiusculo = false; console.log('  erro: ' + e.message); }
+  if (!okMaiusculo) ruins += 1;
+  console.log(`${okMaiusculo ? '✓' : '✗'} Maiúsculo: nome de pessoa e preenchimento sobem; e-mail, link e código NÃO (e nada é reescrito no banco)`);
+
   // ---- NOC: reinício automático programado ----
   //
   // Pedido do Master: "escolho qual reinicia todos os dias às 4h" e, depois,

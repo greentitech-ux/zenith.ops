@@ -422,6 +422,54 @@
     return null;
   }
 
+  // ---- NOME DE PESSOA E PREENCHIMENTO: sempre MAIÚSCULO na tela ----
+  //
+  // Pedido do Master (14/09/2026), vendo o próprio usuário no menu em
+  // minúsculo: "em todo lugar que aparecer o usuário, sempre com letras
+  // maiúsculas - assim fica feio". Vale pro que a pessoa preenche também.
+  //
+  // Por CSS, não mexendo no texto: o que está gravado continua como foi
+  // digitado (maiúsculo perde "d'Ávila" e não tem volta), o copiar/colar
+  // devolve o original, e os nomes que JÁ estão em minúsculo no banco
+  // aparecem maiúsculos sem migrar nada.
+  //
+  // É classe, não regra global: e-mail, link, código, senha, MAC e IP NÃO
+  // podem virar maiúsculo - num caso muda o valor, no outro leva a 404.
+  // Ver textoExibicao.js no servidor, que aplica a mesma regra em PDF e
+  // e-mail, onde não existe CSS.
+  function estiloMaiusculo() {
+    if (document.getElementById('zmz-maiusc')) return;
+    var st = document.createElement('style');
+    st.id = 'zmz-maiusc';
+    st.textContent = ''
+      // TUDO. O Master foi explícito: "eu quero que tudo que seja minúsculo
+      // fique maiúsculo". Uma regra no body alcança as 59 telas de uma vez -
+      // e as que vierem depois - em vez de virar uma caçada de classe por
+      // tela, que sempre esquece alguma.
+      //
+      // É seguro porque é CSS: o texto gravado não muda, o valor do input
+      // não muda, e COPIAR devolve o original (o navegador copia o texto de
+      // origem, não o transformado). Desfazer é apagar esta linha.
+      + 'body{text-transform:uppercase;}'
+      // ESCAPES - só o que quebra se for redigitado à mão, não o que é feio:
+      // bloco de código/comando (o comando de instalação do NOCZenith é
+      // colado no PowerShell, e maiúsculo no Base64 não roda) e o que o
+      // código marcar como valor exato (token, MAC, IP, chave).
+      + 'code,kbd,pre,samp,.nao-maiusc,.nao-maiusc *{text-transform:none;}'
+      // senha: o campo mostra pontos, mas quando a tela deixa "ver a senha"
+      // o que aparece tem que ser o que foi digitado
+      + 'input[type=password]{text-transform:none;}'
+      // a classe continua existindo pra quem quiser subir um trecho dentro
+      // de uma área escapada
+      + '.maiusc,.maiusc *{text-transform:uppercase;}';
+    document.head.appendChild(st);
+  }
+  estiloMaiusculo();
+  // pra quem monta texto em JS (título de PDF na tela, alert, título da aba)
+  window.maiusc = function (t) {
+    return t === null || t === undefined ? t : String(t).toLocaleUpperCase('pt-BR');
+  };
+
   function estiloPrevia() {
     if (document.getElementById('zpv-estilo')) return;
     var st = document.createElement('style');
