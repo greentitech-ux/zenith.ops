@@ -111,7 +111,11 @@
 
 /* modal da comanda — no celular ele toma a tela inteira, que é o certo:
    o garçom está dentro de UMA comanda, não navegando */
-.est-modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:14px;z-index:20;}
+/* z-index ACIMA do cabeçalho (40). Com 20, o cabeçalho sticky ficava por cima
+   do diálogo e comia a primeira linha da lista - era o "6432 ... R$ 0,00"
+   cortado ao meio no print. Abaixo da gaveta do menu (998), que continua
+   tendo a última palavra. */
+.est-modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:14px;z-index:60;}
 .est-modal.aberto{display:flex;}
 .est-dialogo{width:min(560px,100%);max-height:92vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;}
 .est-dialogo-topo{display:flex;justify-content:space-between;align-items:start;gap:12px;margin-bottom:12px;}
