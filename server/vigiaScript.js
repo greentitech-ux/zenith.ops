@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 66;
+const VERSAO_VIGIA = 67;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -106,7 +106,7 @@ function adaptarParaWindowsAntigo(texto) {
   return out;
 }
 
-function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
   // segredo desse computador (ver lojaStatus.js) - vai assado no script e
@@ -126,6 +126,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   // URLs continuam usando encodeURIComponent(codigo real), cuja saida ja nao
   // tem ", $ nem crase (fica segura nas aspas duplas por conta propria).
   const codigoTextoPS = String(codigo).replace(/[`"$\r\n]/g, '');
+  const unidadeNomePS = String(unidadeNome || codigo).replace(/[`"$\r\n]/g, '');
   const urlMonitorar = `${APP_BASE_URL}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlReportarIp = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
   const urlHeartbeat = `${APP_BASE_URL}/api/loja-status/heartbeat`;
@@ -333,6 +334,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // texto da segunda linha do carimbo: identifica a LOJA, que o hostname
     // sozinho nem sempre diz (o tecnico ve "D1-OPE-PDV01" e nao sabe qual Dom)
     '$UnidadePosto = "' + codigoTextoPS + ' / ' + posto + '"',
+    // carimbo do papel de parede (canto superior direito): nome da LOJA e da
+    // MAQUINA. Nome da loja vem canonico do servidor (nomeCanonicoUnidade);
+    // nome da maquina e o posto (ATM01, Makeline, Dispatch...).
+    '$NomeLojaArte = "' + unidadeNomePS + '"',
+    '$NomeMaquinaArte = "' + posto + '"',
     '$CaminhoPolitica = Join-Path (Split-Path -Parent $PSCommandPath) "politica-aplicada.txt"',
     'function Marcar-UiAtiva {',
     '  try { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() | Set-Content -Path $CaminhoFlagUi -Force } catch {}',
@@ -1565,6 +1571,29 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '#',
     '# Se qualquer parte disso falhar a funcao devolve a imagem CRUA em vez de',
     '# $null: melhor papel de parede sem nome do que maquina sem papel de parede.',
+    '# ---- carimbo do papel de parede (ver CARIMBO.md) -------------------',
+    '# Duas bases genericas com a area do carimbo reservada e vazia: horizontal',
+    '# (ATM/Dispatch/Gerencia) e vertical (Makeline). Aqui a maquina escreve o',
+    '# nome da LOJA e o codigo dela (posto). Fiel ao CARIMBO.md: regua ambar, nome',
+    '# em maiusculas, etiqueta arredondada com o codigo. Salva em PNG (JPEG sujava',
+    '# a arte de cor chapada - era a "pessima qualidade"). Fonte: Barlow no design;',
+    '# como nao existe nas maquinas, cai no condensado mais proximo do Windows.',
+    'function Nova-FonteCarimbo($familias, $tam, $estilo) {',
+    '  foreach ($nomeFonte in $familias) {',
+    '    try { $ff = New-Object System.Drawing.FontFamily($nomeFonte); return (New-Object System.Drawing.Font($ff, [single]$tam, $estilo, [System.Drawing.GraphicsUnit]::Pixel)) } catch {}',
+    '  }',
+    '  return (New-Object System.Drawing.Font("Arial", [single]$tam, $estilo, [System.Drawing.GraphicsUnit]::Pixel))',
+    '}',
+    'function Retangulo-RedondoCarimbo($x, $y, $w, $h, $r) {',
+    '  $d = $r * 2',
+    '  $path = New-Object System.Drawing.Drawing2D.GraphicsPath',
+    '  $path.AddArc($x, $y, $d, $d, 180, 90)',
+    '  $path.AddArc(($x + $w - $d), $y, $d, $d, 270, 90)',
+    '  $path.AddArc(($x + $w - $d), ($y + $h - $d), $d, $d, 0, 90)',
+    '  $path.AddArc($x, ($y + $h - $d), $d, $d, 90, 90)',
+    '  $path.CloseFigure()',
+    '  return $path',
+    '}',
     'function Carimbar-NomeNaArte($origem, $destino) {',
     '  try {',
     '    Add-Type -AssemblyName System.Drawing -ErrorAction Stop',
@@ -1575,49 +1604,75 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '        $g = [System.Drawing.Graphics]::FromImage($bmp)',
     '        try {',
     '          $g.DrawImage($img, 0, 0, $img.Width, $img.Height)',
-    '          $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit',
-    '          $alturaFonte = [Math]::Max(14, [int]($img.Height / 26))',
-    '          $fonteNome = New-Object System.Drawing.Font("Segoe UI Semibold", $alturaFonte, [System.Drawing.GraphicsUnit]::Pixel)',
-    '          $fonteSub = New-Object System.Drawing.Font("Segoe UI", [int]($alturaFonte * 0.55), [System.Drawing.GraphicsUnit]::Pixel)',
+    '          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+    '          $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit',
+    '          $vertical = $img.Height -gt $img.Width',
+    '          if ($vertical) { $esc = $img.Width / 1080.0 } else { $esc = $img.Width / 1920.0 }',
+    '          $loja = ([string]$NomeLojaArte).ToUpper()',
+    '          $maq = [string]$NomeMaquinaArte',
+    '          $tamFonteLoja = 50; if ($vertical) { $tamFonteLoja = 46 }',
+    '          $gapBase = 10; if ($vertical) { $gapBase = 18 }',
+    '          $padXBase = 16; if ($vertical) { $padXBase = 18 }',
+    '          $corRegua = [System.Drawing.ColorTranslator]::FromHtml("#e0a33e")',
+    '          $corEtiqTxt = [System.Drawing.ColorTranslator]::FromHtml("#0a4f79")',
+    '          $fLoja = Nova-FonteCarimbo @("Barlow Condensed SemiBold","Barlow Condensed","Oswald","Segoe UI Semibold","Arial Narrow") ($tamFonteLoja * $esc) ([System.Drawing.FontStyle]::Bold)',
+    '          $fEtiq = Nova-FonteCarimbo @("Barlow SemiBold","Barlow","Segoe UI Semibold","Arial") (26 * $esc) ([System.Drawing.FontStyle]::Bold)',
     '          try {',
-    '            $nome = $env:COMPUTERNAME',
-    '            $sub = $UnidadePosto',
-    '            $tamNome = $g.MeasureString($nome, $fonteNome)',
-    '            $tamSub = $g.MeasureString($sub, $fonteSub)',
-    // CENTRALIZADO, LOGO ABAIXO DA MARCA (decisao do Master, 14/09/2026).
-    //
-    // O agente nao enxerga a arte: nao tem como saber onde a logo da marca
-    // termina. Entao a posicao e' uma CONVENCAO - 60% da altura, que e' onde o
-    // nome cai no modelo que ele mandou, logo abaixo do bloco da logo. A arte
-    // tem de deixar essa faixa livre, e a tela do NOC avisa isso.
-    //
-    // Cada linha centrada por si (e nao o bloco): nome e unidade tem larguras
-    // diferentes, e alinhar pelo bloco deixaria as duas tortas em relacao ao
-    // eixo da arte - que e' justamente o que se ve num papel de parede.
-    '            $y = [int]($img.Height * 0.60)',
-    '            $x = ($img.Width - $tamNome.Width) / 2',
-    '            $xSub = ($img.Width - $tamSub.Width) / 2',
-    '            $sombra = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(170, 0, 0, 0))',
-    '            $claro = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(240, 255, 255, 255))',
-    '            try {',
-    '              $g.DrawString($nome, $fonteNome, $sombra, ($x + 2), ($y + 2))',
-    '              $g.DrawString($nome, $fonteNome, $claro, $x, $y)',
-    '              $g.DrawString($sub, $fonteSub, $sombra, ($xSub + 1), ($y + $tamNome.Height + 1))',
-    '              $g.DrawString($sub, $fonteSub, $claro, $xSub, ($y + $tamNome.Height))',
-    '            } finally { $sombra.Dispose(); $claro.Dispose() }',
-    '          } finally { $fonteNome.Dispose(); $fonteSub.Dispose() }',
+    '            $tamLoja = $g.MeasureString($loja, $fLoja)',
+    '            $tamEtiq = $g.MeasureString($maq, $fEtiq)',
+    '            $reguaW = 88 * $esc',
+    '            $reguaH = [Math]::Max(2, 3 * $esc)',
+    '            $gap = $gapBase * $esc',
+    '            $padX = $padXBase * $esc',
+    '            $padY = 8 * $esc',
+    '            $etiqW = $tamEtiq.Width + 2 * $padX',
+    '            $etiqH = $tamEtiq.Height + 2 * $padY',
+    '            if ($vertical) {',
+    '              $cx = $img.Width / 2.0',
+    '              $topo = $img.Height * (1518.0 / 1920.0)',
+    '              $xRegua = $cx - $reguaW / 2',
+    '              $xLoja = $cx - $tamLoja.Width / 2',
+    '              $xEtiq = $cx - $etiqW / 2',
+    '            } else {',
+    '              $dir = $img.Width - (84 * $esc)',
+    '              $topo = 70 * $esc',
+    '              $xRegua = $dir - $reguaW',
+    '              $xLoja = $dir - $tamLoja.Width',
+    '              $xEtiq = $dir - $etiqW',
+    '            }',
+    '            $y = $topo',
+    '            $brRegua = New-Object System.Drawing.SolidBrush($corRegua)',
+    '            $g.FillRectangle($brRegua, [single]$xRegua, [single]$y, [single]$reguaW, [single]$reguaH)',
+    '            $brRegua.Dispose()',
+    '            $y = $y + $reguaH + $gap',
+    '            $brSombra = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(90, 0, 0, 0))',
+    '            $brLoja = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)',
+    '            $desl = [Math]::Max(1, $esc)',
+    '            $g.DrawString($loja, $fLoja, $brSombra, [single]($xLoja + $desl), [single]($y + $desl))',
+    '            $g.DrawString($loja, $fLoja, $brLoja, [single]$xLoja, [single]$y)',
+    '            $brSombra.Dispose(); $brLoja.Dispose()',
+    '            $y = $y + $tamLoja.Height + $gap',
+    '            $raio = 8 * $esc',
+    '            $path = Retangulo-RedondoCarimbo ([single]$xEtiq) ([single]$y) ([single]$etiqW) ([single]$etiqH) ([single]$raio)',
+    '            $brBg = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)',
+    '            $g.FillPath($brBg, $path)',
+    '            $brBg.Dispose(); $path.Dispose()',
+    '            $brTxt = New-Object System.Drawing.SolidBrush($corEtiqTxt)',
+    '            $g.DrawString($maq, $fEtiq, $brTxt, [single]($xEtiq + $padX), [single]($y + $padY))',
+    '            $brTxt.Dispose()',
+    '          } finally { $fLoja.Dispose(); $fEtiq.Dispose() }',
     '        } finally { $g.Dispose() }',
-    '        $bmp.Save($destino, [System.Drawing.Imaging.ImageFormat]::Jpeg)',
+    '        $bmp.Save($destino, [System.Drawing.Imaging.ImageFormat]::Png)',
     '      } finally { $bmp.Dispose() }',
     '    } finally { $img.Dispose() }',
     '    return $destino',
-    '  } catch { Escrever-Log "Papel de parede: nao carimbou o nome ($($_.Exception.Message)) - aplicando a arte sem nome."; return $origem }',
+    '  } catch { Escrever-Log "Papel de parede: nao carimbou ($($_.Exception.Message)) - aplicando a arte sem carimbo."; return $origem }',
     '}',
     '',
     'function Aplicar-PapelDeParede($ligado) {',
     '  if ($Servico) { return }   # SYSTEM nao tem area de trabalho',
     '  $bruto = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede.jpg"',
-    '  $destino = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-nome.jpg"',
+    '  $destino = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-nome.png"',
     '  $chave = "HKCU:\\Control Panel\\Desktop"',
     '  if ($ligado) {',
     '    $semCarimbo = $false',
