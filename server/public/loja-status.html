@@ -1549,6 +1549,10 @@ function atualizarConteudoDetalhe(codigo, c){
       // o tipo escolhido fica visivel na propria linha: sem isso so da pra
       // saber o que e' cada MAC abrindo aparelho por aparelho
       const tipoChip = d.tipoRotulo ? `<span class="disp-tipo-chip">${escapeHtml(d.tipoRotulo)}</span>` : '';
+      const ultimaTrocaIp = (d.ipHistorico||[]).slice(-1)[0];
+      const trocaIp = ultimaTrocaIp
+        ? `<span class="disp-visto" title="IP mudou de ${escapeHtml(ultimaTrocaIp.de)} para ${escapeHtml(ultimaTrocaIp.para)}">IP alterado ${escapeHtml(tempoRelativo(ultimaTrocaIp.em))}</span>`
+        : '';
       return `<div class="disp-linha">
         <span class="disp-dot ${d.ativo === false ? 'off' : 'on'}"></span>
         <div style="flex:1;min-width:0;">
@@ -1558,7 +1562,12 @@ function atualizarConteudoDetalhe(codigo, c){
             ${medidorChip}${monitorChip}
             ${quando}
           </div>
-          <div class="disp-rede">${escapeHtml(d.ip)} · ${escapeHtml(d.mac)}</div>
+          <div class="disp-rede"><a href="http://${escapeHtml(d.ip)}" target="_blank" rel="noopener" title="Abrir ${escapeHtml(d.ip)} no navegador">${escapeHtml(d.ip)}</a> · ${escapeHtml(d.mac)} ${trocaIp}</div>
+        </div>
+        <div style="display:flex;gap:3px;align-items:center;">
+          <button type="button" class="disp-editar" title="Copiar IP" aria-label="Copiar IP" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.ip)},"IP")'>⧉</button>
+          <button type="button" class="disp-editar" title="Copiar MAC" aria-label="Copiar MAC" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.mac)},"MAC")'>⧉</button>
+          <button type="button" class="disp-editar" title="Fazer ping por este NOCZenith" aria-label="Fazer ping" onclick='event.stopPropagation();pingDispositivo(${JSON.stringify(codigo)},${JSON.stringify(c.posto)},${JSON.stringify(d.mac)},${JSON.stringify(d.ip)})'>◉</button>
         </div>
         <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
           onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,medidorQuedas:!!d.medidorQuedas,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
@@ -1615,6 +1624,22 @@ function atualizarConteudoDetalhe(codigo, c){
     fecharDetalheComputador();
     abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo);
   };
+}
+function copiarDadoRede(valor, rotulo){
+  const texto = String(valor||'');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(texto).then(()=>alert(`${rotulo} copiado: ${texto}`)).catch(()=>prompt(`Copie o ${rotulo}:`, texto));
+  } else prompt(`Copie o ${rotulo}:`, texto);
+}
+async function pingDispositivo(codigo, posto, mac, ip){
+  if(!confirm(`Fazer ping em ${ip}?\n\nO teste será feito pelo NOCZenith desta loja; o resultado aparecerá em “último comando” na ficha do computador.`)) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/dispositivos/${encodeURIComponent(mac)}/ping`, {method:'POST'});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não consegui enfileirar o ping.');
+    alert(d.mensagem || 'Ping enfileirado.');
+    await carregar();
+  }catch(e){ alert(e.message); }
 }
 
 // ================= PROGRAMAS DA MÁQUINA =================

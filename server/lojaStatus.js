@@ -1663,6 +1663,14 @@ async function registrarTelemetria(codigo, posto, dados, token) {
       eventos = [...eventos, { tipo: 'dispositivo-novo', em: agora, detalhe: `${merge.novos.length} novo(s) na rede: ${resumo}`.slice(0, 200) }];
       patch.eventos = eventos.slice(-EVENTOS_MAX);
     }
+    // O MAC e' a identidade do aparelho. Se ele reaparece com outro IP, nao
+    // tratamos como equipamento novo: registramos a troca para a operacao
+    // conseguir seguir impressora, PDV ou roteador depois de um DHCP.
+    if (merge.mudaramIp && merge.mudaramIp.length) {
+      const resumo = merge.mudaramIp.slice(0, 5).map((d) => `${d.nome || d.mac}: ${d.ipHistorico[d.ipHistorico.length - 1].de} → ${d.ip}`).join(', ');
+      eventos = [...eventos, { tipo: 'dispositivo-ip-mudou', em: agora, detalhe: `${merge.mudaramIp.length} IP(s) alterado(s): ${resumo}`.slice(0, 200) }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+    }
   }
 
   // ESTADO DAS VMs (so o HOST Hyper-V reporta - ver Medir-VMs no agente).

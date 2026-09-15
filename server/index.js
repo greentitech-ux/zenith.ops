@@ -5254,6 +5254,31 @@ app.put('/api/loja-status/:codigo/computadores/:posto/politica', auth.requireMas
   }
 });
 
+// Ping de um aparelho da LAN. O Render nao enxerga a rede privada da loja;
+// quem faz a verificacao e o NOCZenith do computador que viu aquele MAC na
+// propria tabela ARP. IP e MAC NAO vem do navegador: sao relidos da ultima
+// telemetria salva, evitando transformar o endpoint numa caixa de comando.
+app.post('/api/loja-status/:codigo/computadores/:posto/dispositivos/:mac/ping', auth.requireMaster, async (req, res) => {
+  try {
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador || computador.tipo !== 'interno') return res.status(404).json({ error: 'Computador interno com NOCZenith não encontrado.' });
+    const mac = String(req.params.mac || '').trim().toLowerCase().replace(/-/g, ':');
+    const dispositivo = (computador.dispositivos || []).find((d) => d.mac === mac);
+    if (!dispositivo || !dispositivo.ip) return res.status(404).json({ error: 'Esse aparelho não está na última varredura de rede.' });
+    const ip = String(dispositivo.ip);
+    // IP foi sanitizado na telemetria (IPv4); ainda assim ele nunca sai do
+    // corpo da requisição. O comando só testa duas vezes e devolve latência.
+    const comando = [
+      `$r = Test-Connection -ComputerName '${ip}' -Count 2 -ErrorAction SilentlyContinue`,
+      `if ($r) { "PING OK · ${ip} · $([Math]::Round((($r | Measure-Object ResponseTime -Average).Average), 0)) ms" } else { "PING FALHOU · ${ip}" }`,
+    ].join('\n');
+    await lojaStatus.enfileirarComando(computador.codigo, computador.posto, comando, { origem: 'noc-ping-dispositivo' });
+    res.json({ ok: true, ip, mac, mensagem: `Ping de ${ip} enfileirado. O resultado aparecerá no último comando desta máquina.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // papel de parede do parque: UMA imagem pra rede toda; cada computador decide
 // se aplica (politica.papelDeParedeAtivo). Servida sem sessao porque quem
 // baixa e a maquina - o caminho e opaco e a imagem e do proprio grupo.
