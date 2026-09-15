@@ -6775,6 +6775,111 @@ setTimeout(async () => {
   if (!okIpImpressora) ruins += 1;
   console.log(`${okIpImpressora ? '✓' : '✗'} NOC: o IP da impressora sai do painel (uma ação serve as 14 lojas) e loja sem Zebra é recusada`);
 
+  // ------------------------------------------------------------------
+  // "QUERO SABER QUANDO E UMA VM DESLIGADA" (Master, 15/09/2026)
+  //
+  // So o HOST Hyper-V reporta as VMs (o agente devolve $null onde Get-VM nao
+  // existe). E' o unico jeito honesto de saber que uma VM caiu: VM desligada
+  // nao fala de si mesma. Decisao do Master: so avisar quando uma VM que
+  // estava EXECUTANDO cai - VM deixada desligada de proposito nao alarma.
+  let okVm = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const nm = require('/home/user/adyen-monitor/server/nocMaquina.js');
+    const UNI = 'NOCVM';
+    await ls.cadastrarComputador(UNI, 'HOST1', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'HOST1').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+
+    // 1a telemetria: duas VMs executando, uma ja desligada de proposito
+    await ls.registrarTelemetria(UNI, posto, { vms: [
+      { nome: 'PULSEBOS19940', estado: 'Running' },
+      { nome: 'GCOM19940', estado: 'Running' },
+      { nome: 'BACKUP', estado: 'Off' },
+    ] }, tk);
+    const dep1 = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    // nada caiu ainda (as duas que rodavam continuam) - varredura nao alarma
+    const semAlerta1 = (await ls.varrerAlertas()).filter((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+
+    // 2a: a PULSEBOS caiu. GCOM segue. BACKUP continua desligada (de proposito)
+    await ls.registrarTelemetria(UNI, posto, { vms: [
+      { nome: 'PULSEBOS19940', estado: 'Off' },
+      { nome: 'GCOM19940', estado: 'Running' },
+      { nome: 'BACKUP', estado: 'Off' },
+    ] }, tk);
+    const dep2 = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    const alerta = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+    // varreu uma vez: o pendente foi limpo, nao repete no proximo giro
+    const naoRepete = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+
+    // maquina COMUM (sem Hyper-V): telemetria sem vms nao inventa lista vazia
+    const UNI2 = 'NOCSEMVM';
+    await ls.cadastrarComputador(UNI2, 'PDV', 'atendimento');
+    const p2 = (await ls.listar()).find((c) => c.codigo === UNI2 && c.nome === 'PDV').posto;
+    const tk2 = await ls.garantirAgentToken(UNI2, p2);
+    await ls.registrarTelemetria(UNI2, p2, { disco: { volumes: [{ letra: 'C:', totalGb: 100, livreGb: 50 }] } }, tk2);
+    const semVm = (await ls.listar()).find((c) => c.codigo === UNI2 && c.posto === p2);
+
+    const src = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      // o estado das VMs fica gravado no host, normalizado pro portugues
+      'o host guarda o estado de cada VM (normalizado)':
+        Array.isArray(dep1.vms) && dep1.vms.length === 3
+        && dep1.vms.find((v) => v.nome === 'PULSEBOS19940').estado === 'Executando'
+        && dep1.vms.find((v) => v.nome === 'BACKUP').estado === 'Desligada',
+      // VM deixada desligada de proposito NAO gera alarme
+      'VM que ja estava desligada não alarma (sem transição a partir de Executando)':
+        semAlerta1.length === 0,
+      // a que CAIU (Executando -> Desligada) alarma, nomeando a VM
+      'VM que estava rodando e caiu gera alerta, nomeando a VM e o estado':
+        !!alerta && Array.isArray(alerta.vms) && alerta.vms.length === 1
+        && alerta.vms[0].nome === 'PULSEBOS19940' && alerta.vms[0].estado === 'Desligada',
+      'o alerta some depois de disparado (não repete a cada varredura)': !naoRepete,
+      'a queda vira evento na linha do tempo do host':
+        (dep2.eventos || []).some((e) => e.tipo === 'vm' && /PULSEBOS19940/.test(e.detalhe || '')),
+      // maquina sem Hyper-V: nada de VMs (null != [])
+      'máquina comum, sem Hyper-V, não ganha lista de VMs': !semVm.vms,
+      // helpers puros
+      'sanitizarVms: array ausente = null (não reportou); presente = lista ordenada':
+        nm.sanitizarVms(undefined) === null
+        && JSON.stringify(nm.sanitizarVms([{ nome: 'B', estado: 'Off' }, { nome: 'A', estado: 'Running' }]).map((v) => v.nome)) === '["A","B"]',
+      'quedasDeVm só conta transição a partir de Executando':
+        nm.quedasDeVm([{ nome: 'X', estado: 'Executando' }], [{ nome: 'X', estado: 'Desligada' }]).length === 1
+        && nm.quedasDeVm([{ nome: 'X', estado: 'Desligada' }], [{ nome: 'X', estado: 'Desligada' }]).length === 0,
+      // AGENTE: so o host reporta (Get-VM guardado), e o dado viaja na telemetria
+      'o agente mede VMs só onde há Hyper-V (Get-VM guardado) e manda na telemetria':
+        /function Medir-VMs \{/.test(src)
+        && /if \(-not \(Get-Command Get-VM -ErrorAction SilentlyContinue\)\) \{ return \$null \}/.test(src)
+        && /if \(\$vms -ne \$null\) \{ \$corpo\.vms = @\(\$vms\) \}/.test(src)
+        // nos DOIS loops (interno e o de atendimento): o host pode estar
+        // classificado como qualquer um dos dois, e tirar de um so era o que
+        // a sabotagem W3 passava batido
+        && (src.match(/\$vmsAgora = Medir-VMs/g) || []).length >= 2,
+      'VERSAO_VIGIA subiu (senão nenhuma das 52 máquinas passa a reportar VM)':
+        require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 64,
+      // no Windows antigo (o BOS/host 2012 R2) tem que sair igual, sem cair no
+      // guard de API do PowerShell 5
+      'no Windows antigo o Medir-VMs sai igual, sem API de PowerShell 5':
+        (() => {
+          const sa = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'HOST', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true });
+          return sa.includes('function Medir-VMs {') && !/::new\(|ToUnixTimeMilliseconds/.test(sa);
+        })(),
+      // a ficha do NOC mostra o estado das VMs, verde/vermelho
+      'a ficha do host mostra as VMs (verde executando, vermelho o resto)':
+        /Array\.isArray\(c\.vms\) && c\.vms\.length/.test(html)
+        && /v\.estado === 'Executando'/.test(html)
+        && /no ar<\/b>/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okVm = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (dep1.vms=${JSON.stringify(dep1.vms)} alerta=${JSON.stringify(alerta && alerta.vms)})`);
+  } catch (e) { okVm = false; console.log('  erro: ' + e.message + '\n' + e.stack); }
+  if (!okVm) ruins += 1;
+  console.log(`${okVm ? '✓' : '✗'} NOC: VM desligada - o host reporta cada VM e alerta quando uma que rodava cai (não as deixadas off)`);
+
+
   let okReinicioAlerta = false;
   try {
     const cab = { Authorization: 'Bearer ' + token };

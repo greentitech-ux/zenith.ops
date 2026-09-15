@@ -1621,6 +1621,25 @@ async function registrarTelemetria(codigo, posto, dados, token) {
     }
   }
 
+  // ESTADO DAS VMs (so o HOST Hyper-V reporta - ver Medir-VMs no agente).
+  // E' o unico jeito honesto de saber que uma VM caiu: VM desligada nao
+  // reporta nada de si mesma, entao quem enxerga e' o host, sempre ligado.
+  // So grava quando MUDA: a telemetria chega a cada ~5min, mas o disco do
+  // Firestore nao pode levar uma escrita a cada 5min por host sem motivo.
+  const vms = nocMaquina.sanitizarVms(dados && dados.vms);
+  if (vms && JSON.stringify(vms) !== JSON.stringify(atual.vms || null)) {
+    const caidas = nocMaquina.quedasDeVm(atual.vms, vms);
+    patch.vms = vms;
+    patch.vmsEm = agora;
+    if (caidas.length) {
+      eventos = [...eventos, { tipo: 'vm', em: agora, detalhe: `VM caiu: ${caidas.map((c) => `${c.nome} (${c.estado})`).join(', ')}`.slice(0, 200) }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+      // igual disco/link: o agente marca, a varredura periodica notifica - uma
+      // falha de push nunca pode derrubar o caminho do agente
+      patch.vmAlertaPendente = caidas;
+    }
+  }
+
   if (!Object.keys(patch).length) return { ok: false, motivo: 'nada útil na telemetria' };
   await COLLECTION.doc(id).set(patch, { merge: true });
   espelharEscrita(id, patch);
@@ -2777,6 +2796,17 @@ async function varrerAlertas() {
         codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
         tipo: 'disco', nivel: candidato.discoAlertaPendente,
         motivos: candidato.discoMotivos || [],
+      });
+    }
+    // VM DO HOST caiu (Executando -> Desligada/Salva). Quem detecta e' a
+    // telemetria do host (registrarTelemetria); aqui e' so o aviso, de um
+    // lugar so, junto com o resto.
+    if (Array.isArray(candidato.vmAlertaPendente) && candidato.vmAlertaPendente.length) {
+      const caidas = candidato.vmAlertaPendente;
+      await gravarEEspelhar(candidato.codigo, candidato.posto, { vmAlertaPendente: null });
+      transicoes.push({
+        codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+        tipo: 'vm-caiu', vms: caidas,
       });
     }
     // máquina reiniciou/desligou (pedido do Master: "se ele foi reiniciado

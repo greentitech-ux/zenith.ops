@@ -15252,6 +15252,11 @@ function aquecerBoot(promessa, ms) {
             .catch((err) => console.error('Erro no push de alerta de disco:', err.message));
           continue;
         }
+        if (t.tipo === 'vm-caiu') {
+          push.notifyVmCaiu(nome, t.codigo, t.nome, t.posto, t.vms)
+            .catch((err) => console.error('Erro no push de VM caiu:', err.message));
+          continue;
+        }
         // dispositivo de rede marcado (impressora/VM) sumiu/voltou (ver
         // varrerAlertas em lojaStatus.js) - pedido do Master, alarme por
         // equipamento específico, não pelo computador que o enxergou

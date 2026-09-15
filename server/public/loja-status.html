@@ -1483,6 +1483,21 @@ function atualizarConteudoDetalhe(codigo, c){
     infoBits.push(`💽 disco: <b style="color:${cor};">${rotulo}</b> · medido ${escapeHtml(tempoRelativo(c.disco.em))}`
       + (discos?`<br>${discos}`:'') + (volumes?`<br>${volumes}`:'') + motivos);
   }
+  // VMs do host (so aparece em host Hyper-V - ver Medir-VMs no agente). Estado
+  // ao vivo de cada VM: Executando em verde, o resto em vermelho, que e' o que
+  // o Master quer bater o olho e ver "PULSEBOS caiu".
+  if(Array.isArray(c.vms) && c.vms.length){
+    const linhasVm = c.vms.map(v=>{
+      const ok = v.estado === 'Executando';
+      const cvm = ok ? 'var(--ok)' : 'var(--bad)';
+      const ico = ok ? '🟢' : '🔴';
+      return `<span style="font-size:11px;">${ico} ${escapeHtml(v.nome)} — <b style="color:${cvm};">${escapeHtml(v.estado)}</b></span>`;
+    }).join('<br>');
+    const caidas = c.vms.filter(v=>v.estado!=='Executando').length;
+    const corVm = caidas ? 'var(--bad)' : 'var(--ok)';
+    infoBits.push(`🖥️ VMs: <b style="color:${corVm};">${c.vms.length - caidas}/${c.vms.length} no ar</b>`
+      + (c.vmsEm?` · medido ${escapeHtml(tempoRelativo(c.vmsEm))}`:'') + `<br>${linhasVm}`);
+  }
   // infoBits, e NAO `linhas`: `linhas` nao existe nesta funcao. A chamada
   // estourava ReferenceError ANTES do classList.remove('hidden') la embaixo,
   // e a ficha simplesmente nao abria - so nas maquinas que JA tinham a RAM
@@ -1779,6 +1794,9 @@ function linhaEvento(ev){
   }
   if(ev.tipo==='disco'){
     return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  if(ev.tipo==='vm'){
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>VM caiu</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
   if(ev.tipo==='reiniciar'){
     return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Precisa reiniciar</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;

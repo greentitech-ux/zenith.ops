@@ -363,11 +363,54 @@ function discosComProblema(docs) {
     .sort((a, b) => NIVEIS.indexOf(b.nivel) - NIVEIS.indexOf(a.nivel));
 }
 
+// ------------------------------------------------------------------ VMs
+//
+// So o HOST Hyper-V reporta isto (o agente devolve $null onde Get-VM nao
+// existe). E' assim que se sabe que uma VM caiu: VM desligada nao consegue
+// falar de si mesma - quem enxerga o estado real e' o host, que esta sempre
+// ligado. Estados normalizados pra portugues, pra tela e pro alerta lerem
+// igual (o Windows devolve Running/Off/Saved/Paused).
+function normalizarEstadoVm(e) {
+  const t = String(e == null ? '' : e).toLowerCase();
+  if (/run|execu/.test(t)) return 'Executando';
+  if (/off|deslig/.test(t)) return 'Desligada';
+  if (/save|salv/.test(t)) return 'Salva';
+  if (/paus/.test(t)) return 'Pausada';
+  return texto(e, 20) || 'Desconhecido';
+}
+// null = o agente NAO reportou VMs (maquina comum, sem Hyper-V) -> nao mexe em
+// nada. [] = host Hyper-V que hoje nao tem VM nenhuma. Ordenado por nome pra
+// comparacao estavel (senao a ordem do Get-VM faria parecer "mudou" sem mudar).
+function sanitizarVms(vms) {
+  if (!Array.isArray(vms)) return null;
+  const out = vms
+    .map((v) => ({ nome: texto(v && v.nome, 80), estado: normalizarEstadoVm(v && v.estado) }))
+    .filter((v) => v.nome)
+    .slice(0, 200)
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+  return out;
+}
+// VM que estava Executando e agora NAO esta = queda inesperada. VM que ja
+// estava desligada (voce a deixou assim de proposito) nao gera nada: sem
+// transicao a partir de Executando, sem alarme - foi a decisao do Master
+// ("so avisar quando cair").
+function quedasDeVm(antesArr, depoisArr) {
+  const antes = {};
+  (Array.isArray(antesArr) ? antesArr : []).forEach((v) => { if (v && v.nome) antes[v.nome] = v.estado; });
+  const caidas = [];
+  for (const v of (Array.isArray(depoisArr) ? depoisArr : [])) {
+    if (antes[v.nome] === 'Executando' && v.estado !== 'Executando') {
+      caidas.push({ nome: v.nome, estado: v.estado });
+    }
+  }
+  return caidas;
+}
+
 module.exports = {
   sanitizarRam,
   LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
   UPTIME_REINICIAR_DIAS,
-  sanitizarDisco, avaliarDisco, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
+  sanitizarDisco, avaliarDisco, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
   sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
   resumoDispositivos, discosComProblema, panorama,
 };
