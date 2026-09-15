@@ -23444,6 +23444,59 @@ setTimeout(async () => {
   if (!okPilhaOverlay) ruins += 1;
   console.log(`${okPilhaOverlay ? '✓' : '✗'} NOC: painel aberto de dentro da ficha vem PRA FRENTE (era o 📦 Programas nascendo atrás)`);
 
+  // ------------------------------------------------------------------
+  // ARQUIVO SERVIDO TEM QUE SER JS VÁLIDO.
+  //
+  // 15/09/2026: um merge deixou os marcadores de conflito (<<<<<<< / =======
+  // / >>>>>>>) dentro de public/tema.js - EM COMENTÁRIO, o que enganou toda
+  // a rede: a suíte passou (ela não abre .js de tela), o `node --check` só
+  // tinha rodado ANTES do merge, e a varredura visual também. O tema.js
+  // carrega nas 59 telas: o navegador parava no "Unexpected token '<<'" e
+  // NADA respondia a clique. Foi assim que o app inteiro ficou travado em
+  // produção com todos os testes verdes.
+  //
+  // Esta checagem é burra de propósito e roda sobre TODO arquivo que vai pro
+  // ar - o defeito não estava na lógica de ninguém, estava no texto do
+  // arquivo.
+  let okArquivosServidos = false;
+  try {
+    const fsJs = require('fs');
+    const pathJs = require('path');
+    const vm = require('vm');
+    const raizes = [__dirname, pathJs.join(__dirname, 'public')];
+    const quebrados = [];
+    const comConflito = [];
+    for (const raiz of raizes) {
+      for (const nome of fsJs.readdirSync(raiz)) {
+        if (!nome.endsWith('.js') && !nome.endsWith('.html')) continue;
+        const completo = pathJs.join(raiz, nome);
+        if (!fsJs.statSync(completo).isFile()) continue;
+        const src = fsJs.readFileSync(completo, 'utf8');
+        // marcador de conflito em QUALQUER arquivo (html incluído): mesmo em
+        // comentário ele quebra o parse do navegador
+        if (/^<<<<<<< |^>>>>>>> |^={7}$/m.test(src)) comConflito.push(nome);
+        if (!nome.endsWith('.js')) continue;
+        try {
+          // mesmo parse do navegador, sem executar nada
+          new vm.Script(src, { filename: completo });
+        } catch (e) {
+          quebrados.push(`${nome}: ${e.message.split('\n')[0]}`);
+        }
+      }
+    }
+    const conf = {
+      [`nenhum .js servido tem erro de sintaxe${quebrados.length ? ' — ' + quebrados.join(' · ') : ''}`]:
+        quebrados.length === 0,
+      [`nenhum arquivo carrega marcador de conflito de merge${comConflito.length ? ' — ' + comConflito.join(' · ') : ''}`]:
+        comConflito.length === 0,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okArquivosServidos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okArquivosServidos = false; console.log('  erro: ' + e.message); }
+  if (!okArquivosServidos) ruins += 1;
+  console.log(`${okArquivosServidos ? '✓' : '✗'} Arquivos servidos: JS válido e sem marcador de conflito (o que travou o app com a suíte verde)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
