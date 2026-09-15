@@ -826,6 +826,32 @@ async function notifyDiscoAlerta(unidadeNome, codigo, computadorNome, posto, niv
   }
 }
 
+async function notifyComandoSemAdmin(unidadeNome, codigo, computadorNome, posto, motivo) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const dados = {
+    title: '⚙️ Comando não rodou (sem Administrador)',
+    body: `${prefixo}${unidadeNome || codigo}: ${motivo || 'reinstale o NOCZenith como Administrador'}`,
+    tag: `noc-cmd-admin-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-comando-admin', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (comando sem admin):', err.message);
+      }
+    }
+  }
+}
+
 async function notifyVmCaiu(unidadeNome, codigo, computadorNome, posto, vms) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const quais = (vms || []).slice(0, 4).map((v) => `${v.nome} (${v.estado})`).join(', ') || 'uma VM';
@@ -1526,7 +1552,7 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyVmCaiu, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyDispositivoOffline, notifyRedeUnidade, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,

@@ -15257,6 +15257,11 @@ function aquecerBoot(promessa, ms) {
             .catch((err) => console.error('Erro no push de VM caiu:', err.message));
           continue;
         }
+        if (t.tipo === 'comando-sem-admin') {
+          push.notifyComandoSemAdmin(nome, t.codigo, t.nome, t.posto, t.motivo)
+            .catch((err) => console.error('Erro no push de comando sem admin:', err.message));
+          continue;
+        }
         // dispositivo de rede marcado (impressora/VM) sumiu/voltou (ver
         // varrerAlertas em lojaStatus.js) - pedido do Master, alarme por
         // equipamento específico, não pelo computador que o enxergou

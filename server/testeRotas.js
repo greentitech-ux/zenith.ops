@@ -6879,6 +6879,113 @@ setTimeout(async () => {
   if (!okVm) ruins += 1;
   console.log(`${okVm ? '✓' : '✗'} NOC: VM desligada - o host reporta cada VM e alerta quando uma que rodava cai (não as deixadas off)`);
 
+  // ------------------------------------------------------------------
+  // "INSTALAR/DESINSTALAR PELO NOC SEM ACESSAR O COMPUTADOR" - Entrega 2:
+  // ELEVACAO. Instalar/desinstalar exige Administrador. A instancia de LOGIN
+  // roda como usuario comum; se ela pegasse o comando, ele "pulava". Agora:
+  // comando marcado requerAdmin so vai pra um heartbeat que provou ser admin
+  // (a instancia SYSTEM), e o resto continua com a de login.
+  let okElevacao = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const dbA = require('./firestore');
+    const UNI = 'NOCADM';
+    await ls.cadastrarComputador(UNI, 'PC-ADM', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PC-ADM').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    const bater = (extra) => ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0', ...extra }, tk);
+    const idDoc = `${UNI}__${posto}`;
+
+    // COMANDO QUE EXIGE ADMIN
+    const cmdAdmin = await ls.enfileirarComando(UNI, posto, 'echo instalar', { origem: 'agente', requerAdmin: true });
+    // heartbeat da instancia de LOGIN (usuario comum): NAO recebe o comando
+    const login1 = await bater({ souAdmin: false });
+    ls.descartarEspelhoTeste(); // a marca de espera vai ao banco na transacao; o espelho so reflete no proximo refresh
+    const depoisLogin = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    // heartbeat da instancia SYSTEM (admin): recebe
+    const sys1 = await bater({ souAdmin: true });
+    // ja entregue: nao reentrega
+    const sys2 = await bater({ souAdmin: true });
+    await ls.marcarComandoExecutado(cmdAdmin.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
+
+    // COMANDO COMUM (sem admin): a instancia de login recebe normalmente
+    const cmdComum = await ls.enfileirarComando(UNI, posto, 'echo comum', { origem: 'agente' });
+    const login2 = await bater({ souAdmin: false });
+    await ls.marcarComandoExecutado(cmdComum.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
+
+    // SONDAGEM da SYSTEM (soComandoAdmin) NAO pega comando comum: deixa pro login
+    const cmdComum2 = await ls.enfileirarComando(UNI, posto, 'echo comum2', { origem: 'agente' });
+    const sondaSoAdmin = await bater({ souAdmin: true, soComandoAdmin: true });
+    const login3 = await bater({ souAdmin: false }); // login pega
+    await ls.marcarComandoExecutado(cmdComum2.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
+
+    // EXPIRACAO: comando-admin numa maquina sem executor elevado (instalada sem
+    // Administrador). Envelhece a espera e a varredura desiste, liberando a vaga.
+    const UNI2 = 'NOCADM2';
+    await ls.cadastrarComputador(UNI2, 'PC-SEMADM', 'interno');
+    const p2 = (await ls.listar()).find((c) => c.codigo === UNI2 && c.nome === 'PC-SEMADM').posto;
+    const tk2 = await ls.garantirAgentToken(UNI2, p2);
+    const cmdExp = await ls.enfileirarComando(UNI2, p2, 'echo instalar', { origem: 'agente', requerAdmin: true });
+    await ls.heartbeat(UNI2, p2, { userAgent: 'NOCZenith/1.0', souAdmin: false }, tk2); // marca a espera
+    // envelhece a espera pra 16min atras, direto no banco falso
+    const idDoc2 = `${UNI2}__${p2}`;
+    dbA.collection('lojaStatus').doc(idDoc2).set({ comandoAguardandoElevacaoDesde: new Date(Date.now() - 16 * 60 * 1000).toISOString() }, { merge: true });
+    ls.descartarEspelhoTeste();
+    const transExp = (await ls.varrerAlertas()).filter((t) => t.codigo === UNI2 && t.tipo === 'comando-sem-admin');
+    const cmdExpDoc = dbA.collection('lojaStatusComandos').doc(cmdExp.id);
+    const cmdExpData = (await cmdExpDoc.get()).data();
+    const depoisExp = (await ls.listar()).find((c) => c.codigo === UNI2 && c.posto === p2);
+
+    const srcLS = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+    const srcVG = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
+    const srcAA = require('fs').readFileSync(__dirname + '/agenteAcoes.js', 'utf8');
+    const conf = {
+      'comando marcado guarda requerAdmin': cmdAdmin.requerAdmin === true,
+      // O CERNE: usuario comum NAO recebe comando-admin
+      'a instância de login (usuário comum) não recebe comando que exige admin':
+        !login1.comandoPendente,
+      'e fica registrado desde quando espera elevação':
+        !!depoisLogin.comandoAguardandoElevacaoDesde,
+      'a instância SYSTEM (admin) recebe o comando': !!sys1.comandoPendente && /instalar/.test(sys1.comandoPendente.comando),
+      'entregue uma vez só (não reentrega no próximo beat)': !sys2.comandoPendente,
+      // comando comum não muda de dono
+      'comando comum continua indo pra instância de login': !!login2.comandoPendente && /comum/.test(login2.comandoPendente.comando),
+      'a sondagem só-admin da SYSTEM não rouba comando comum': !sondaSoAdmin.comandoPendente,
+      'o comando comum sobra pra login pegar': !!login3.comandoPendente && /comum2/.test(login3.comandoPendente.comando),
+      // expiração
+      'comando-admin sem executor elevado expira e libera a vaga':
+        transExp.length === 1 && !depoisExp.comandoPendenteId
+        && cmdExpData.status === 'erro' && /sem o NOCZenith elevado|reinstale como administrador/i.test(cmdExpData.erro),
+      // produtor: agenteAcoes marca as ações que precisam de admin
+      'a limpeza e a senha do AnyDesk exigem admin (requerAdmin no catálogo)':
+        /requerAprovacao: true,\s*requerAdmin: true,\s*comando: MODELO_LIMPEZA/.test(srcAA)
+        && /requerAprovacao: true,\s*requerAdmin: true,\s*comando: MODELO_ANYDESK_SENHA/.test(srcAA)
+        && /requerAdmin: !!acao\.requerAdmin/.test(srcAA),
+      // servidor: gating por souAdmin e soComandoAdmin
+      'o servidor gateia a entrega por souAdmin/soComandoAdmin':
+        /if \(comando\.requerAdmin && !opts\.souAdmin\)/.test(srcLS)
+        && /if \(opts\.soComandoAdmin && !comando\.requerAdmin\) return null;/.test(srcLS),
+      // agente: manda souAdmin, tem a sondagem elevada e a cedência a chama
+      'o agente informa souAdmin, sonda comando-admin cedendo a vez, e executa por uma função só':
+        /\$corpo\.souAdmin = \(Sou-Admin\)/.test(srcVG)
+        && /function Sondar-ComandoAdmin \{/.test(srcVG)
+        && /soComandoAdmin = \$true/.test(srcVG)
+        && /if \(\$Servico\) \{ Sondar-ComandoAdmin \}/.test(srcVG)
+        && /function Executar-ComandoPendente\(\$cmd\) \{/.test(srcVG),
+      'VERSAO_VIGIA subiu (senão nenhuma das 52 máquinas ganha a elevação)':
+        require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 65,
+      // Windows antigo (BOS) idem, sem API de PowerShell 5
+      'no Windows antigo a sondagem sai sem API de PowerShell 5':
+        (() => { const sa = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'HOST', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true }); return /function Sondar-ComandoAdmin \{/.test(sa) && !/::new\(|ToUnixTimeMilliseconds/.test(sa); })(),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okElevacao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (login1=${JSON.stringify(login1.comandoPendente)} sys1=${JSON.stringify(sys1.comandoPendente && sys1.comandoPendente.comando)} exp=${JSON.stringify(cmdExpData)})`);
+  } catch (e) { okElevacao = false; console.log('  erro: ' + e.message + '\n' + e.stack); }
+  if (!okElevacao) ruins += 1;
+  console.log(`${okElevacao ? '✓' : '✗'} NOC: instalar/desinstalar - comando que exige admin só roda na instância elevada (SYSTEM), o resto na de login`);
+
+
 
   let okReinicioAlerta = false;
   try {
@@ -13660,7 +13767,7 @@ setTimeout(async () => {
     const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
     const ag = require('/home/user/adyen-monitor/server/agenteAcoes.js');
     const srcLS = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
-    const fnEntrega = /async function entregarComandoPendente\(codigo, posto\) \{[\s\S]*?\n\}/.exec(srcLS);
+    const fnEntrega = /async function entregarComandoPendente\(codigo, posto, opcoes\) \{[\s\S]*?\n\}/.exec(srcLS);
     const fnEnfileira = /async function enfileirarComando\(codigo, posto, comando, opcoes\) \{[\s\S]*?\n\}/.exec(srcLS);
     const modelo = ag.MODELOS_COMANDO.find((m) => m.id === 'anydesk-senha-acesso') || {};
     const cmd = String(modelo.comando || '');
