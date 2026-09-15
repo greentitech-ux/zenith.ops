@@ -41,6 +41,10 @@ const VOLUMES_MAX = 8;
 // documento sem informar mais nada.
 const DISPOSITIVOS_MAX = 60;
 const MACS_CONHECIDOS_MAX = 250;
+// IP muda (DHCP, troca de porta, roteador reiniciado); MAC e' a identidade.
+// Guardamos poucas trocas por aparelho para responder "qual era o IP antes?"
+// sem transformar o documento de telemetria em um log sem fim.
+const IP_HISTORICO_MAX = 12;
 
 const SAUDE_VALIDA = ['saudavel', 'atencao', 'ruim', 'desconhecida'];
 const NIVEIS = ['ok', 'atencao', 'critico'];
@@ -238,6 +242,7 @@ function mesclarDispositivos(anteriores, atuais, agora) {
   const primeiraVez = !Array.isArray(anteriores) || !anteriores.length;
   const porMac = new Map(lista.filter((d) => d && d.mac).map((d) => [d.mac, { ...d, ativo: false }]));
   const novos = [];
+  const mudaramIp = [];
   atuais.forEach((d) => {
     const antes = porMac.get(d.mac);
     if (!antes) {
@@ -246,7 +251,12 @@ function mesclarDispositivos(anteriores, atuais, agora) {
       if (!primeiraVez) novos.push(registro);
       return;
     }
-    porMac.set(d.mac, {
+    const ipAntes = antes.ip || null;
+    const mudouIp = !!ipAntes && ipAntes !== d.ip;
+    const ipHistorico = mudouIp
+      ? [...(Array.isArray(antes.ipHistorico) ? antes.ipHistorico : []), { de: ipAntes, para: d.ip, em: agora }].slice(-IP_HISTORICO_MAX)
+      : (Array.isArray(antes.ipHistorico) ? antes.ipHistorico : []);
+    const atualizado = {
       ...antes,
       ip: d.ip,
       // nome só é sobrescrito quando a resolução DEU certo - senão um DNS
@@ -255,11 +265,14 @@ function mesclarDispositivos(anteriores, atuais, agora) {
       visto: agora,
       ativo: true,
       desde: antes.desde || agora,
-    });
+      ipHistorico,
+    };
+    porMac.set(d.mac, atualizado);
+    if (mudouIp) mudaramIp.push(atualizado);
   });
   // ativos primeiro, e dentro de cada grupo o visto mais recente na frente
   const todos = [...porMac.values()].sort((a, b) => (b.ativo ? 1 : 0) - (a.ativo ? 1 : 0) || (b.visto || 0) - (a.visto || 0));
-  return { dispositivos: todos.slice(0, MACS_CONHECIDOS_MAX), novos, primeiraVez };
+  return { dispositivos: todos.slice(0, MACS_CONHECIDOS_MAX), novos, mudaramIp, primeiraVez };
 }
 
 // resumo por unidade pro painel: quantos aparelhos a loja enxerga e quantos
