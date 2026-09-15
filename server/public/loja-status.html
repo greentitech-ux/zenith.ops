@@ -363,15 +363,12 @@
   .prog-vazio{color:var(--muted);font-size:12.5px;padding:16px 2px;line-height:1.5;}
   .prog-rodape{color:var(--muted);font:11px var(--mono);margin-top:12px;}
   .overlay.hidden{display:none!important;}
-  /* Mensagem, apelido de dispositivo e editar computador sao abertos DE
-     DENTRO do modal de detalhe. Como todos sao .overlay com o mesmo
-     z-index e o de detalhe e' o ultimo no DOM, eles abriam ATRAS dele */
-  #msg-overlay,#editar-comp-overlay{z-index:60;}
-  /* o modal do aparelho e' aberto DE DENTRO do modal de detalhe do computador
-     (o lapis fica na lista de aparelhos). Com o mesmo z-index dos outros, ele
-     ficava ATRAS de quem o chamou - so a ordem no HTML decidia, e o detalhe
-     vem depois. */
-  #disp-overlay{z-index:60;}
+  /* Painel aberto DE DENTRO de outro (Programas, Mensagem, Editar, Aparelho...)
+     ficava ATRÁS de quem o chamou: todos são .overlay com o MESMO z-index, e
+     aí quem decide é a ordem no HTML - onde o detalhe do computador é o
+     último. Isso já tinha sido remendado três vezes com z-index fixo, e o
+     painel seguinte (Programas) nasceu com o mesmo defeito. Agora quem abre
+     por último fica por cima, por construção: ver abrirOverlay/fecharOverlay. */
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;}
   /* O ✕ redondo flutuante (desenho no tema.js) precisa de uma caixa que NÃO
      role: o .modal tem overflow-y:auto e cortaria um filho em top:-14px,
@@ -1263,10 +1260,10 @@ function abrirModalDispositivo(codigo, mac, d){
   })();
   document.getElementById('disp-marca').value = marcaSugerida;
   document.getElementById('disp-modal-status').classList.add('hidden');
-  document.getElementById('disp-overlay').classList.remove('hidden');
+  abrirOverlay('disp-overlay');
 }
 function fecharModalDispositivo(){
-  document.getElementById('disp-overlay').classList.add('hidden');
+  fecharOverlay('disp-overlay');
   DISP_CODIGO = null; DISP_MAC = null;
 }
 async function salvarDispositivo(){
@@ -1486,6 +1483,21 @@ function atualizarConteudoDetalhe(codigo, c){
     infoBits.push(`💽 disco: <b style="color:${cor};">${rotulo}</b> · medido ${escapeHtml(tempoRelativo(c.disco.em))}`
       + (discos?`<br>${discos}`:'') + (volumes?`<br>${volumes}`:'') + motivos);
   }
+  // VMs do host (so aparece em host Hyper-V - ver Medir-VMs no agente). Estado
+  // ao vivo de cada VM: Executando em verde, o resto em vermelho, que e' o que
+  // o Master quer bater o olho e ver "PULSEBOS caiu".
+  if(Array.isArray(c.vms) && c.vms.length){
+    const linhasVm = c.vms.map(v=>{
+      const ok = v.estado === 'Executando';
+      const cvm = ok ? 'var(--ok)' : 'var(--bad)';
+      const ico = ok ? '🟢' : '🔴';
+      return `<span style="font-size:11px;">${ico} ${escapeHtml(v.nome)} — <b style="color:${cvm};">${escapeHtml(v.estado)}</b></span>`;
+    }).join('<br>');
+    const caidas = c.vms.filter(v=>v.estado!=='Executando').length;
+    const corVm = caidas ? 'var(--bad)' : 'var(--ok)';
+    infoBits.push(`🖥️ VMs: <b style="color:${corVm};">${c.vms.length - caidas}/${c.vms.length} no ar</b>`
+      + (c.vmsEm?` · medido ${escapeHtml(tempoRelativo(c.vmsEm))}`:'') + `<br>${linhasVm}`);
+  }
   // infoBits, e NAO `linhas`: `linhas` nao existe nesta funcao. A chamada
   // estourava ReferenceError ANTES do classList.remove('hidden') la embaixo,
   // e a ficha simplesmente nao abria - so nas maquinas que JA tinham a RAM
@@ -1613,6 +1625,39 @@ function atualizarConteudoDetalhe(codigo, c){
 // a guarda, e a ficha da máquina já trouxe tudo (ver detalhar/listar).
 let PROG_ATUAL = null;
 let PROG_ABA = 'mudancas';
+// ---------- pilha de painéis (quem abre por último fica por cima) ----------
+// Os .overlay desta tela dividem o mesmo z-index do CSS. Com empate, o
+// navegador pinta por ordem de HTML - então um painel aberto de dentro de
+// outro só aparecia na frente se por acaso estivesse depois no arquivo. Aqui
+// a ordem passa a ser a de ABERTURA, que é a que a pessoa enxerga: o painel
+// que ela acabou de abrir é o que está na mão dela.
+// Fechar devolve o z-index pro CSS (style vazio), pra pilha não crescer sem
+// fim numa tela que fica aberta o dia inteiro no NOC.
+const Z_OVERLAY_BASE = 50;
+let PILHA_OVERLAYS = [];
+// reindexa TODOS a cada mudança: só empurrar o novo pra cima empata quando a
+// pilha não cresce (reabrir o de baixo com outro já aberto), e empate volta a
+// ser decidido pela ordem no HTML - o bug de novo.
+function reindexarOverlays(){
+  PILHA_OVERLAYS.forEach((x, i) => {
+    const e = document.getElementById(x);
+    if(e) e.style.zIndex = Z_OVERLAY_BASE + i + 1;
+  });
+}
+function abrirOverlay(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  PILHA_OVERLAYS = PILHA_OVERLAYS.filter(x => x !== id);
+  PILHA_OVERLAYS.push(id);
+  reindexarOverlays();
+  el.classList.remove('hidden');
+}
+function fecharOverlay(id){
+  PILHA_OVERLAYS = PILHA_OVERLAYS.filter(x => x !== id);
+  const el = document.getElementById(id);
+  if(el){ el.classList.add('hidden'); el.style.zIndex = ''; }
+  reindexarOverlays();
+}
 function abrirProgramas(codigo, posto){
   const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
   const extra = DETALHE_EXTRA[chaveComp(codigo, posto)] || {};
@@ -1621,9 +1666,9 @@ function abrirProgramas(codigo, posto){
   document.getElementById('prog-titulo').textContent = `📦 Programas · ${PROG_ATUAL.nome || posto}`;
   document.getElementById('prog-busca').value = '';
   trocarAbaProgramas('mudancas');
-  document.getElementById('prog-overlay').classList.remove('hidden');
+  abrirOverlay('prog-overlay');
 }
-function fecharProgramas(){ document.getElementById('prog-overlay').classList.add('hidden'); PROG_ATUAL = null; }
+function fecharProgramas(){ fecharOverlay('prog-overlay'); PROG_ATUAL = null; }
 function trocarAbaProgramas(aba){
   PROG_ABA = aba;
   document.getElementById('prog-aba-mudancas').classList.toggle('ativa', aba==='mudancas');
@@ -1750,6 +1795,9 @@ function linhaEvento(ev){
   if(ev.tipo==='disco'){
     return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
+  if(ev.tipo==='vm'){
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>VM caiu</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
   if(ev.tipo==='reiniciar'){
     return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Precisa reiniciar</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
@@ -1831,7 +1879,7 @@ function abrirDetalheComputador(codigo, posto){
   // anterior) e busca o detalhe pesado em paralelo - quando chegar, o modal
   // se re-renderiza sozinho
   atualizarConteudoDetalhe(codigo, compComDetalhe(c));
-  document.getElementById('detalhe-comp-overlay').classList.remove('hidden');
+  abrirOverlay('detalhe-comp-overlay');
   buscarDetalheComp(codigo, posto).then(d => {
     if(d && DETALHE_ATUAL && DETALHE_ATUAL.codigo===codigo && DETALHE_ATUAL.posto===posto) atualizarDetalheSeAberto();
   });
@@ -1850,7 +1898,7 @@ function irParaPapelDeParede(){
   setTimeout(()=>{ campo.style.outline = ''; campo.style.outlineOffset = ''; }, 2000);
 }
 function fecharDetalheComputador(){
-  document.getElementById('detalhe-comp-overlay').classList.add('hidden');
+  fecharOverlay('detalhe-comp-overlay');
   DETALHE_ATUAL = null;
 }
 // chamado no fim de render() - se o modal de detalhe estiver aberto quando
@@ -2336,9 +2384,9 @@ function abrirManutencao(){
   document.getElementById('manut-status').classList.add('hidden');
   renderManutLista();
   renderManutDias();
-  document.getElementById('manut-overlay').classList.remove('hidden');
+  abrirOverlay('manut-overlay');
 }
-function fecharManutencao(){ document.getElementById('manut-overlay').classList.add('hidden'); }
+function fecharManutencao(){ fecharOverlay('manut-overlay'); }
 
 // Reiniciar de dentro do detalhe abre a MESMA janela de manutenção, já com
 // essa máquina marcada e a busca preenchida pra ela aparecer sozinha na lista.
@@ -2780,9 +2828,9 @@ function abrirModalNovoComputador(){
   document.getElementById('novo-comp-nopulso-print').checked = false;
   document.querySelectorAll('input[name="novo-comp-tipo"]').forEach(r => { r.checked = (r.value === 'atendimento'); });
   document.getElementById('novo-comp-status').classList.add('hidden');
-  document.getElementById('novo-comp-overlay').classList.remove('hidden');
+  abrirOverlay('novo-comp-overlay');
 }
-function fecharModalNovoComputador(){ document.getElementById('novo-comp-overlay').classList.add('hidden'); }
+function fecharModalNovoComputador(){ fecharOverlay('novo-comp-overlay'); }
 async function salvarNovoComputador(){
   const codigo = document.getElementById('novo-comp-unidade-select').value;
   const nome = document.getElementById('novo-comp-nome').value.trim();
@@ -2840,12 +2888,22 @@ async function copiarComandoVigia(codigo, posto, tipo, prefixo){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
     if(!resp.ok) throw new Error('Erro ao gerar o comando.');
-    const { comando } = await resp.json();
+    const { comando, windowsAntigo } = await resp.json();
+    // COMO COLAR MUDA POR MAQUINA. O console do Server 2012 R2 / Windows 8.1
+    // (o BOS do Pulse) NAO tem Ctrl+V - isso so chegou no Windows 10. Quem
+    // segue "cole com Ctrl+V" ali aperta e nao acontece NADA: sem erro, sem
+    // texto, sem nada pra investigar. Ali se cola com o botao direito.
+    const comoColar = windowsAntigo
+      ? '2) Cole com o BOTÃO DIREITO do mouse (esse Windows não tem Ctrl+V no PowerShell - apertar Ctrl+V ali não faz nada)\n'
+        + '   Se o botão direito não colar: clique na barra de título da janela > Editar > Colar.\n'
+        + '   Se você está entrando por AnyDesk/Área de Trabalho Remota, a área de transferência precisa estar compartilhada - senão não vai nada.\n'
+        + '3) Aperte Enter'
+      : '2) Cole (Ctrl+V) e aperte Enter';
     // o passo-a-passo e o mesmo com ou sem area de transferencia - o que muda
     // e so de onde a pessoa copia. Antes o caminho do fallback perdia a
     // instrucao inteira e sobrava um comando solto sem explicacao
     const passos = 'No computador da loja:\n1) Abra o PowerShell (menu Iniciar > digite PowerShell)\n'
-      + '2) Cole (Ctrl+V) e aperte Enter\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. '
+      + comoColar + '\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. '
       + 'Não precisa clicar em nada nem baixar arquivo, e nada fica "solto" pra apagar depois.\n\n'
       + 'Computador tipo servidor/escritório: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão '
       + 'bloqueada/desconectada (nunca "Sair").';
@@ -2874,6 +2932,30 @@ async function baixarVigia(codigo, posto, tipo){
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
+    // MAQUINA SEM AREA DE TRANSFERENCIA (VM pelo console do hipervisor, o caso
+    // do BOS) - o comando de uma linha tem ~3.500 caracteres e nao ha como
+    // colar nem digitar. O arquivo resolve: ele ja sai com o token desta
+    // maquina assado dentro, entao basta chegar la por rede/pendrive e o
+    // comando que roda ele cabe numa linha digitada a mao.
+    //
+    // Quem diz que e' Windows antigo e' o PROPRIO conteudo baixado (o servidor
+    // marca o bloco), nao um flag repetido aqui - assim nao tem como a tela
+    // discordar da ficha.
+    const ehWindowsAntigo = conteudo.includes('VERSAO PRA WINDOWS ANTIGO');
+    if(ehWindowsAntigo){
+      alert(`Script "NOCZenith-${posto}.ps1" baixado (versão pra Windows antigo - Server 2012 R2 / 7 / 8). ✅\n\n`
+        + `ESSA MÁQUINA NÃO PRECISA COLAR NADA. O token dela já está dentro do arquivo.\n\n`
+        + `1) Leve o arquivo até ela: pasta de rede, pendrive ou a pasta compartilhada da VM.\n`
+        + `2) No PowerShell DELA, aberto COMO ADMINISTRADOR, digite (é curto, dá pra digitar à mão):\n`
+        + `     powershell -ExecutionPolicy Bypass -File "\\\\servidor\\pasta\\NOCZenith-${posto}.ps1"\n`
+        + `   (troque pelo caminho onde o arquivo ficou)\n\n`
+        + `Ele se copia pra uma pasta fixa e passa a rodar de lá - depois disso pode apagar esse arquivo. `
+        + `Dali pra frente se atualiza sozinho.\n\n`
+        + `Por que não dá pra colar: o console do Server 2012 R2 não tem Ctrl+V, e VM aberta pelo console do `
+        + `hipervisor não compartilha área de transferência. Se preferir colar, entre por Área de Trabalho `
+        + `Remota (mstsc) ou AnyDesk - aí a área de transferência funciona e o botão "📋 Copiar comando" serve.`);
+      return;
+    }
     alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\n⚠️ O Windows 11 bloqueia .ps1 baixado (Controle de Aplicativo Inteligente). Se o clique-direito "Executar com o PowerShell" der o aviso de bloqueio, o jeito mais fácil é usar o botão "📋 Copiar comando".\n\nComo instalar por aqui mesmo:\n1) Salve numa pasta qualquer.\n2) Abra o PowerShell e rode (troque pelo caminho onde salvou, com aspas):\n     Unblock-File "C:\\...\\NOCZenith-${posto}.ps1"\n   (tira o selo de "veio da internet" que causa o bloqueio)\n3) Rode:\n     powershell -ExecutionPolicy Bypass -File "C:\\...\\NOCZenith-${posto}.ps1"\n\nEle se instala numa pasta fixa protegida e passa a rodar de lá - então DEPOIS de instalar você PODE APAGAR o arquivo que baixou. Dali pra frente ele se atualiza sozinho.\n\nIMPORTANTE: instale num PowerShell aberto COMO ADMINISTRADOR - assim o NOCZenith também cria a tarefa de BOOT e volta sozinho depois de qualquer reinício, mesmo sem ninguém logar. Sem Administrador, ele só volta no próximo login do usuário.`);
   }catch(e){
     alert(e.message);
@@ -2899,9 +2981,9 @@ function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydesk
   document.getElementById('editar-comp-anydesk').value = anydeskAtual || '';
   document.querySelectorAll('input[name="editar-comp-tipo"]').forEach(r => { r.checked = (r.value === (tipoAtual || 'atendimento')); });
   document.getElementById('editar-comp-status').classList.add('hidden');
-  document.getElementById('editar-comp-overlay').classList.remove('hidden');
+  abrirOverlay('editar-comp-overlay');
 }
-function fecharModalEditarComputador(){ document.getElementById('editar-comp-overlay').classList.add('hidden'); EDITAR_COMP_CODIGO = null; EDITAR_COMP_POSTO = null; }
+function fecharModalEditarComputador(){ fecharOverlay('editar-comp-overlay'); EDITAR_COMP_CODIGO = null; EDITAR_COMP_POSTO = null; }
 async function salvarEdicaoComputador(){
   const nome = document.getElementById('editar-comp-nome').value.trim();
   const tipo = document.querySelector('input[name="editar-comp-tipo"]:checked').value;
@@ -3339,14 +3421,14 @@ function abrirModalMensagem(codigo, posto, nomeComputador){
   document.getElementById('msg-modal-status').classList.add('hidden');
   atualizarContadorMensagem();
   atualizarAreaMensagem();
-  document.getElementById('msg-overlay').classList.remove('hidden');
+  abrirOverlay('msg-overlay');
   document.getElementById('msg-texto').focus();
   // a thread (chatMensagens) e' campo pesado que nao vem mais na lista - a
   // linha acima abre com o que houver em cache, isto busca o detalhe fresco
   if(codigo && posto) buscarDetalheComp(codigo, posto).then(d => { if(d) atualizarChatModalSeAberto(); });
 }
 function fecharModalMensagem(){
-  document.getElementById('msg-overlay').classList.add('hidden');
+  fecharOverlay('msg-overlay');
   MSG_DESTINOS = [];
   MSG_PICKER_ABERTO = false;
 }
@@ -3477,7 +3559,7 @@ function abrirRodarAcao(id, nome){
   onMudaUnidadeRodar(); // 2) preenche os computadores da primeira unidade
   const st = document.getElementById('rodar-acao-status'); st.classList.add('hidden');
   document.getElementById('rodar-acao-btn').disabled = !codigos.length;
-  document.getElementById('rodar-acao-overlay').classList.remove('hidden');
+  abrirOverlay('rodar-acao-overlay');
 }
 function onMudaUnidadeRodar(){
   const cod = document.getElementById('rodar-acao-unidade').value;
@@ -3488,7 +3570,7 @@ function onMudaUnidadeRodar(){
     ? doUni.map(c=>`<option value="${escapeHtml(c.codigo)}|${escapeHtml(c.posto)}">${escapeHtml(c.nome||'(sem nome)')} ${statusDe(c)==='online'?'🟢 online':'🔴 offline'}</option>`).join('')
     : '<option value="" disabled selected>nenhum computador nessa unidade</option>';
 }
-function fecharRodarAcao(){ document.getElementById('rodar-acao-overlay').classList.add('hidden'); RODAR_ACAO_ID = null; }
+function fecharRodarAcao(){ fecharOverlay('rodar-acao-overlay'); RODAR_ACAO_ID = null; }
 async function rodarAcaoMassa(escopo){
   if(!RODAR_ACAO_ID) return;
   const cod = document.getElementById('rodar-acao-unidade').value;
@@ -3586,7 +3668,7 @@ function abrirModalNovaAcao(){
   document.getElementById('acao-ativo-wrap').classList.add('hidden');
   document.getElementById('acao-modal-status').classList.add('hidden');
   onMudaTipoAcao();
-  document.getElementById('acao-overlay').classList.remove('hidden');
+  abrirOverlay('acao-overlay');
 }
 function abrirModalEditarAcao(id){
   const a = AGENTE_ACOES.find(x => x.id === id);
@@ -3604,9 +3686,9 @@ function abrirModalEditarAcao(id){
   document.getElementById('acao-ativo-wrap').classList.remove('hidden');
   document.getElementById('acao-modal-status').classList.add('hidden');
   onMudaTipoAcao();
-  document.getElementById('acao-overlay').classList.remove('hidden');
+  abrirOverlay('acao-overlay');
 }
-function fecharModalAcao(){ document.getElementById('acao-overlay').classList.add('hidden'); }
+function fecharModalAcao(){ fecharOverlay('acao-overlay'); }
 async function salvarAcao(){
   const statusEl = document.getElementById('acao-modal-status');
   statusEl.classList.add('hidden');

@@ -25,6 +25,7 @@ const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const agenteAcoes = require('./agenteAcoes');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
+const roteamentoTags = require('./roteamentoTags');
 
 // senha padrao que o Beniboy define quando a pessoa NAO lembra a senha atual
 // (2a vez que o mesmo acesso trava depois de ja ter sido desbloqueado por
@@ -32,7 +33,14 @@ const qaAprovacoes = require('./qaAprovacoes');
 // obriga trocar por uma propria no primeiro login (ver users.resetPassword)
 const SENHA_PADRAO_BOT = '12345678';
 
-const MODELO = 'claude-opus-5';
+// O MODELO DO BENIBOY, e por que ele é uma env var.
+//
+// Ele roda em Opus 5, não em Haiku - vale conferir antes de decidir soltar a
+// mão no tamanho do prompt: a diferença de preço por token entre os dois é de
+// mais de uma ordem de grandeza, e o Beniboy responde TODA conversa do widget,
+// em 59 telas. Trocar pra Haiku 4.5 é preencher SUPORTE_BOT_MODELO no Render
+// com 'claude-haiku-4-5-20251001'; sem a variável, nada muda.
+const MODELO = process.env.SUPORTE_BOT_MODELO || 'claude-opus-5';
 const MAX_TOKENS = 700;
 const MAX_RODADAS_TOOLS = 5; // seguranca do loop de tool use
 // baixa interacao: depois disso o bot para de responder e o humano continua
@@ -388,6 +396,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     const titulo = tipo === 'acesso-pessoa'
       ? `${input.motivoAcesso === 'ferias' ? 'Férias' : 'Desligamento'} — ${String(input.nomePessoa).trim()}`
       : String(input.titulo || '').trim();
+    const destino = await roteamentoTags.destinoDe(tipo).catch(() => ({ pessoas: [], dono: null, tag: null }));
     const registro = await solicitacoes.create({
       tipo,
       unidade: String(input.unidade || '').trim(),
@@ -398,7 +407,13 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       prioridade: input.prioridade,
       criadoPorId: dono ? dono.id : null,
       criadoPorEmail: dono ? (dono.email || dono.username) : `Beniboy (chat de suporte)${quem ? ' — ' + quem : ''}`,
-      direcionadoParaId: null, direcionadoParaEmail: null,
+      // DIRECIONAMENTO POR TAG (roteamentoTags.js). Pedido do Master: o que o
+      // Beniboy não resolve sozinho "é direcionada para quem tem a tag dela".
+      // Com UMA pessoa na tag o ticket já nasce no nome dela; com mais de
+      // uma fica sem dono e todas são avisadas (ver destinoDe) - e quando
+      // ninguém tem a tag, segue pra Central, como sempre foi.
+      direcionadoParaId: destino.dono ? destino.dono.id : null,
+      direcionadoParaEmail: destino.dono ? (destino.dono.email || destino.dono.username) : null,
       nomePessoa: tipo === 'acesso-pessoa' ? String(input.nomePessoa).trim() : undefined,
       motivoAcesso: tipo === 'acesso-pessoa' ? input.motivoAcesso : undefined,
       dataEfetiva: tipo === 'acesso-pessoa' ? input.dataEfetiva : undefined,
@@ -410,8 +425,14 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       numeroTicket: chat.numeroTicket,
     });
     resultado.tickets.push(registro);
+    // o index.js avisa quem tem a tag depois da resposta ser entregue (mesmo
+    // caminho do agregador) - aqui só viaja o destino já resolvido, pra não
+    // pagar a consulta de novo
+    resultado.direcionados.push({ ticketId: registro.id, numeroTicket: registro.numeroTicket, titulo, tipo, unidadeNome: registro.unidadeNome, destino });
     await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'solicitacao', ticketId: registro.id, numero: registro.numeroTicket });
-    return `Ticket #${registro.numeroTicket} criado com sucesso (tipo ${tipo}, unidade ${registro.unidadeNome}). Informe esse número à pessoa.`;
+    const paraQuem = destino.dono ? ` Já está no nome de ${destino.dono.nome}.`
+      : (destino.pessoas || []).length ? ` A equipe de ${destino.rotulo} já foi avisada.` : '';
+    return `Ticket #${registro.numeroTicket} criado com sucesso (tipo ${tipo}, unidade ${registro.unidadeNome}).${paraQuem} Informe esse número à pessoa${paraQuem ? ' e diga que já foi direcionado' : ''}.`;
   }
   if (nome === 'consultar_ticket') {
     const numero = Number(input.numero);
@@ -701,7 +722,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
     if (msgs.filter((m) => m.bot).length >= MAX_RESPOSTAS_BOT) return null; // baixa interacao: passou do limite, fica pro humano
 
-    const resultado = { tickets: [], chamouAtendente: false, motivoAtendente: '', encerrar: null, agregador: null };
+    const resultado = { tickets: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', encerrar: null, agregador: null };
     const mensagens = montarMensagens(chat);
     const system = await montarSystem(unidades, chat.logado);
     const tools = montarTools(chat.logado);

@@ -6775,6 +6775,111 @@ setTimeout(async () => {
   if (!okIpImpressora) ruins += 1;
   console.log(`${okIpImpressora ? '✓' : '✗'} NOC: o IP da impressora sai do painel (uma ação serve as 14 lojas) e loja sem Zebra é recusada`);
 
+  // ------------------------------------------------------------------
+  // "QUERO SABER QUANDO E UMA VM DESLIGADA" (Master, 15/09/2026)
+  //
+  // So o HOST Hyper-V reporta as VMs (o agente devolve $null onde Get-VM nao
+  // existe). E' o unico jeito honesto de saber que uma VM caiu: VM desligada
+  // nao fala de si mesma. Decisao do Master: so avisar quando uma VM que
+  // estava EXECUTANDO cai - VM deixada desligada de proposito nao alarma.
+  let okVm = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const nm = require('/home/user/adyen-monitor/server/nocMaquina.js');
+    const UNI = 'NOCVM';
+    await ls.cadastrarComputador(UNI, 'HOST1', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'HOST1').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+
+    // 1a telemetria: duas VMs executando, uma ja desligada de proposito
+    await ls.registrarTelemetria(UNI, posto, { vms: [
+      { nome: 'PULSEBOS19940', estado: 'Running' },
+      { nome: 'GCOM19940', estado: 'Running' },
+      { nome: 'BACKUP', estado: 'Off' },
+    ] }, tk);
+    const dep1 = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    // nada caiu ainda (as duas que rodavam continuam) - varredura nao alarma
+    const semAlerta1 = (await ls.varrerAlertas()).filter((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+
+    // 2a: a PULSEBOS caiu. GCOM segue. BACKUP continua desligada (de proposito)
+    await ls.registrarTelemetria(UNI, posto, { vms: [
+      { nome: 'PULSEBOS19940', estado: 'Off' },
+      { nome: 'GCOM19940', estado: 'Running' },
+      { nome: 'BACKUP', estado: 'Off' },
+    ] }, tk);
+    const dep2 = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    const alerta = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+    // varreu uma vez: o pendente foi limpo, nao repete no proximo giro
+    const naoRepete = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+
+    // maquina COMUM (sem Hyper-V): telemetria sem vms nao inventa lista vazia
+    const UNI2 = 'NOCSEMVM';
+    await ls.cadastrarComputador(UNI2, 'PDV', 'atendimento');
+    const p2 = (await ls.listar()).find((c) => c.codigo === UNI2 && c.nome === 'PDV').posto;
+    const tk2 = await ls.garantirAgentToken(UNI2, p2);
+    await ls.registrarTelemetria(UNI2, p2, { disco: { volumes: [{ letra: 'C:', totalGb: 100, livreGb: 50 }] } }, tk2);
+    const semVm = (await ls.listar()).find((c) => c.codigo === UNI2 && c.posto === p2);
+
+    const src = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      // o estado das VMs fica gravado no host, normalizado pro portugues
+      'o host guarda o estado de cada VM (normalizado)':
+        Array.isArray(dep1.vms) && dep1.vms.length === 3
+        && dep1.vms.find((v) => v.nome === 'PULSEBOS19940').estado === 'Executando'
+        && dep1.vms.find((v) => v.nome === 'BACKUP').estado === 'Desligada',
+      // VM deixada desligada de proposito NAO gera alarme
+      'VM que ja estava desligada não alarma (sem transição a partir de Executando)':
+        semAlerta1.length === 0,
+      // a que CAIU (Executando -> Desligada) alarma, nomeando a VM
+      'VM que estava rodando e caiu gera alerta, nomeando a VM e o estado':
+        !!alerta && Array.isArray(alerta.vms) && alerta.vms.length === 1
+        && alerta.vms[0].nome === 'PULSEBOS19940' && alerta.vms[0].estado === 'Desligada',
+      'o alerta some depois de disparado (não repete a cada varredura)': !naoRepete,
+      'a queda vira evento na linha do tempo do host':
+        (dep2.eventos || []).some((e) => e.tipo === 'vm' && /PULSEBOS19940/.test(e.detalhe || '')),
+      // maquina sem Hyper-V: nada de VMs (null != [])
+      'máquina comum, sem Hyper-V, não ganha lista de VMs': !semVm.vms,
+      // helpers puros
+      'sanitizarVms: array ausente = null (não reportou); presente = lista ordenada':
+        nm.sanitizarVms(undefined) === null
+        && JSON.stringify(nm.sanitizarVms([{ nome: 'B', estado: 'Off' }, { nome: 'A', estado: 'Running' }]).map((v) => v.nome)) === '["A","B"]',
+      'quedasDeVm só conta transição a partir de Executando':
+        nm.quedasDeVm([{ nome: 'X', estado: 'Executando' }], [{ nome: 'X', estado: 'Desligada' }]).length === 1
+        && nm.quedasDeVm([{ nome: 'X', estado: 'Desligada' }], [{ nome: 'X', estado: 'Desligada' }]).length === 0,
+      // AGENTE: so o host reporta (Get-VM guardado), e o dado viaja na telemetria
+      'o agente mede VMs só onde há Hyper-V (Get-VM guardado) e manda na telemetria':
+        /function Medir-VMs \{/.test(src)
+        && /if \(-not \(Get-Command Get-VM -ErrorAction SilentlyContinue\)\) \{ return \$null \}/.test(src)
+        && /if \(\$vms -ne \$null\) \{ \$corpo\.vms = @\(\$vms\) \}/.test(src)
+        // nos DOIS loops (interno e o de atendimento): o host pode estar
+        // classificado como qualquer um dos dois, e tirar de um so era o que
+        // a sabotagem W3 passava batido
+        && (src.match(/\$vmsAgora = Medir-VMs/g) || []).length >= 2,
+      'VERSAO_VIGIA subiu (senão nenhuma das 52 máquinas passa a reportar VM)':
+        require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 64,
+      // no Windows antigo (o BOS/host 2012 R2) tem que sair igual, sem cair no
+      // guard de API do PowerShell 5
+      'no Windows antigo o Medir-VMs sai igual, sem API de PowerShell 5':
+        (() => {
+          const sa = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'HOST', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true });
+          return sa.includes('function Medir-VMs {') && !/::new\(|ToUnixTimeMilliseconds/.test(sa);
+        })(),
+      // a ficha do NOC mostra o estado das VMs, verde/vermelho
+      'a ficha do host mostra as VMs (verde executando, vermelho o resto)':
+        /Array\.isArray\(c\.vms\) && c\.vms\.length/.test(html)
+        && /v\.estado === 'Executando'/.test(html)
+        && /no ar<\/b>/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okVm = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (dep1.vms=${JSON.stringify(dep1.vms)} alerta=${JSON.stringify(alerta && alerta.vms)})`);
+  } catch (e) { okVm = false; console.log('  erro: ' + e.message + '\n' + e.stack); }
+  if (!okVm) ruins += 1;
+  console.log(`${okVm ? '✓' : '✗'} NOC: VM desligada - o host reporta cada VM e alerta quando uma que rodava cai (não as deixadas off)`);
+
+
   let okReinicioAlerta = false;
   try {
     const cab = { Authorization: 'Bearer ' + token };
@@ -7614,6 +7719,43 @@ setTimeout(async () => {
         && s.includes('Set-ScheduledTask -TaskName $NomeTarefa -Trigger (Gatilhos-DaTarefa) | Out-Null')
         && /Reportar-IpLocal\n  Garantir-GatilhoDeRepeticao\n/.test(s)
         && s.includes('function Garantir-GatilhoDeRepeticao {\n  if ($Servico) { return }')),
+      // Master (15/09): "quero que ele rode, e quero que ele permaneca
+      // invisivel para nao apagarem ele achando que e outra coisa". Rodar sem
+      // janela ja e' o lancador acima; ESTA parte e' nao ser apagado por
+      // engano - pasta oculta + um LEIA que se identifica pra quem achar.
+      'v63 (sem subir, nenhuma das 52 maquinas ganha a pasta oculta nem o LEIA)': vg.VERSAO_VIGIA >= 63,
+      'a pasta fixa e marcada como oculta (some do dia a dia), preservando o resto dos atributos': scripts.every((s) =>
+        s.includes('$fi = Get-Item -LiteralPath $PastaFixa -Force')
+        && s.includes('$fi.Attributes = $fi.Attributes -bor [System.IO.FileAttributes]::Hidden')),
+      // a diferenca entre "esconder" legitimo e malware e' se identificar:
+      // quem ligar "mostrar ocultos" tem que reconhecer na hora o que e'
+      'deixa um LEIA que diz o que e, que e da empresa e "nao apague"': scripts.every((s) =>
+        s.includes('LEIA-NOCZenith.txt')
+        && s.includes('NAO APAGUE ESTA PASTA.')
+        && s.includes('DA PROPRIA EMPRESA, instalado de proposito - nao e virus.')),
+      'o LEIA diz de qual maquina e de que versao e (pro suporte saber o que achou)': scripts.every((s) =>
+        s.includes('"Maquina: " + $UnidadePosto + "  |  Versao do agente: " + $VersaoScript')),
+      // apagar nao pode ser a solucao que o proprio agente sugere: ele diz que
+      // so faz a loja aparecer offline
+      'o LEIA explica que apagar nao acelera nada, so derruba o monitoramento': scripts.every((s) =>
+        s.includes('Apagar isto NAO deixa o computador mais rapido')),
+      // NADA de anti-remocao: o dono da maquina (Admin) tem que conseguir tirar
+      'nao ha truque anti-remocao (Administrador tira quando quiser)': scripts.every((s) =>
+        !/attrib .*\+r|Deny|icacls .*\/deny|Set-Acl/i.test(s)
+        && s.includes('NADA de anti-remocao')),
+      // ocultar nao pode derrubar a instalacao: fica FORA do try da pasta fixa,
+      // no seu proprio try, e so tenta se a pasta existe
+      'ocultar/identificar roda isolado - falhar ali nao aborta a instalacao': scripts.every((s) =>
+        /if \(Test-Path \$PastaFixa\) \{\n    try \{[\s\S]*?\} catch \{ Escrever-Log "Nao consegui ocultar\/identificar a pasta/.test(s)),
+      // no Windows antigo (Server 2012 R2, o BOS) tudo isto tem que valer
+      // igual - e sem cair no guard de API do PowerShell 5
+      'no Windows antigo (BOS) a pasta oculta + LEIA saem iguais': (() => {
+        const sa = vg.montarScriptVigia({ codigo: 'DomCG', posto: 'BOS', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true });
+        return sa.includes('[System.IO.FileAttributes]::Hidden')
+          && sa.includes('LEIA-NOCZenith.txt')
+          && sa.startsWith('# NOCZenith')
+          && !/::new\(|ToUnixTimeMilliseconds/.test(sa);
+      })(),
       'NOC: a contagem de servidores tem o MESMO corpo do número principal': /\.kpi-serv\{font-size:1em;font-weight:800;/.test(htmlNoc),
       // 13/09: "quero que a quantidade seja clicável: 47 mostra as máquinas
       // daquele grupo, 1 mostra os servidores, 0 não faz nada"
@@ -12449,6 +12591,48 @@ setTimeout(async () => {
       criadoPorId: 'u', criadoPorEmail: 'a@b.c', campos: { delivery: 500, adyen: 500, caixaInicial: 77 },
     });
 
+    // A VIRADA: a unidade JA TEM fechamento, mas de antes desta regra (ou vindo
+    // da planilha) - sem caixa final nenhum. num(undefined) daria 0 e a tela
+    // diria "caixa final do fechamento de 01/11" apontando pra um numero que
+    // ninguem contou. Aqui a corrente so COMECA: a loja conta a gaveta uma vez.
+    await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-01', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', campos: { delivery: 400, adyen: 400 },
+    });
+    const anteriorSemFinal = await fl.caixaFinalAnterior('CXA3', '2026-11-02');
+    const viradaD1 = await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-02', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 300, caixaInicial: 150 },
+    });
+    const viradaD2 = await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-03', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 320 },
+    });
+    // GAVETA VAZIA CONTADA vira corrente de 0 - o que nao vira e' o 0 que o
+    // create grava sozinho em todo campo numerico que nao veio. A marca e' o
+    // que separa os dois.
+    await fl.create({
+      unidade: 'CXA4', unidadeNome: 'Zero', grupo: 'MANUAL', data: '2026-11-01', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 0 },
+    });
+    const zeroContado = await fl.caixaFinalAnterior('CXA4', '2026-11-02');
+    // A VIRADA: lancamento feito com a regra no ar mas ANTES da marca existir.
+    // O caixa final foi contado (o ramo recusa vazio); o que identifica esse
+    // registro e' a chave caixaInicialDe, que so aquele ramo grava.
+    const dbCx = require('./firestore');
+    await dbCx.collection('fechamentosLive').doc('CXA5__2026-11-01').set({
+      id: 'CXA5__2026-11-01', unidade: 'CXA5', unidadeNome: 'Virada', grupo: 'MANUAL',
+      data: '2026-11-01', gerente: 'x', criadoPorId: 'u', criadoPorEmail: 'a@b.c',
+      delivery: 400, adyen: 400, caixaInicial: 100, caixaFinal: 260,
+      caixaInicialDe: null, // <- a chave que prova o ramo do lancamento
+      faturamento: 400, totalDeclarado: 400, criadoEm: new Date().toISOString(),
+    });
+    fl.invalidarCache(); // escrita direta no banco nao passa pelo create()
+    const viradaSemMarca = await fl.caixaFinalAnterior('CXA5', '2026-11-02');
+
     const htmlL = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
     const conf = {
       'o primeiro fechamento da unidade aceita o valor informado (não há corrente ainda)':
@@ -12474,6 +12658,26 @@ setTimeout(async () => {
         && /function carregarCaixaInicial\(\)/.test(htmlL),
       'a tela diz de qual dia veio o caixa inicial':
         /Caixa final do fechamento de \$\{\(r\.de\|\|''\)/.test(htmlL),
+      // fechamento anterior SEM caixa final: nao inventa R$ 0,00
+      'fechamento anterior sem caixa final não vira corrente (nem zero)':
+        !!anteriorSemFinal && anteriorSemFinal.valor === null
+        && anteriorSemFinal.semCaixaFinal === true && anteriorSemFinal.de === '2026-11-01',
+      'nesse caso a loja conta a gaveta, e a corrente começa dali':
+        viradaD1.caixaInicial === 150 && viradaD1.caixaInicialDe === null
+        && viradaD2.caixaInicial === 300 && viradaD2.caixaInicialDe === '2026-11-02',
+      'lançamento feito antes da marca existir não é jogado fora (a chave caixaInicialDe prova o ramo)':
+        !!viradaSemMarca && viradaSemMarca.valor === 260 && viradaSemMarca.semCaixaFinal === false,
+      'gaveta vazia CONTADA vira corrente de zero (é a marca que separa, não o número)':
+        !!zeroContado && zeroContado.valor === 0 && zeroContado.semCaixaFinal === false,
+      'e a tela pede a contagem em vez de mostrar zero':
+        /semCaixaFinal/.test(htmlL) && /não registrou caixa final/.test(htmlL),
+      // ERA ISTO QUE DEIXAVA O CAMPO VAZIO: a tela abre com unidade e data ja
+      // escolhidas, entao o 'change'/'input' nunca dispara sozinho
+      'o caixa inicial é buscado ao abrir a tela, não só quando trocam unidade/data':
+        /await carregarAjustePosOntem\(\);\n[\s\S]{0,400}?await carregarCaixaInicial\(\);/.test(htmlL),
+      // form.reset() apaga tambem campo so-leitura
+      'e é buscado de novo depois de lançar (o reset apaga o campo só-leitura)':
+        /function resetarForm\(\)\{[^}]*carregarCaixaInicial\(\);[^}]*\n\}/.test(htmlL),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okCaixaCorrente = !falhas.length;
@@ -12498,9 +12702,13 @@ setTimeout(async () => {
   let okTurnoEstacao = false;
   try {
     const ec = require(__dirname + '/estacaoComida.js');
-    const hoje = ec.hojeBrasiliaISO();
     const meioDia = new Date('2026-09-14T15:00:00Z'); // 12h em Brasília
     const noite = new Date('2026-09-14T23:00:00Z');   // 20h em Brasília
+    // A DATA SAI DO RELOGIO DO TESTE, nao do relogio da parede: com
+    // hojeBrasiliaISO() sem argumento, o turno era gravado em 14/09 e
+    // consultado no dia de hoje - passava no dia em que foi escrito e
+    // quebrava sozinho no dia seguinte
+    const hoje = ec.hojeBrasiliaISO(meioDia);
 
     // sem ninguem abrir, o relogio ainda opina - a casa que esquecer de abrir
     // nao pode ficar impedida de vender
@@ -13276,6 +13484,57 @@ setTimeout(async () => {
   } catch (e) { okServer2012 = false; console.log('  erro: ' + e.message); }
   if (!okServer2012) ruins += 1;
   console.log(`${okServer2012 ? '✓' : '✗'} NOCZenith no Windows Server 2012 R2: versão específica pra máquina marcada (TLS 1.2 e sem PowerShell 5), e o padrão das outras intacto`);
+
+  // ------------------------------------------------------------------
+  // "TENTO COLAR E NAO ACONTECE NADA NO POWERSHELL DO BOS" (Master, 15/09/2026)
+  //
+  // Nao era o script: era a INSTRUCAO. O console do Server 2012 R2 / Windows
+  // 8.1 nao tem Ctrl+V - isso so chegou no Windows 10. A tela mandava "Cole
+  // (Ctrl+V) e aperte Enter" pra toda maquina, entao no BOS a pessoa apertava
+  // e nao acontecia NADA: sem erro, sem texto, nada pra investigar. Ali se
+  // cola com o botao direito.
+  //
+  // Quem decide e' a ficha, nao a tela: o windowsAntigo sai da MESMA rota que
+  // monta o comando, pra os dois nunca discordarem.
+  let okColarBos = false;
+  try {
+    const idxB = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlB = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      'a rota do comando devolve se a máquina é Windows antigo':
+        /res\.json\(\{ comando: vigiaScript\.montarComandoInstalacao\([^)]*\), windowsAntigo \}\);/.test(idxB),
+      'a tela lê esse campo da resposta (não de um flag repetido nela)':
+        /const \{ comando, windowsAntigo \} = await resp\.json\(\);/.test(htmlB),
+      // O SINTOMA: apertar Ctrl+V no BOS nao faz nada
+      'em Windows antigo a instrução manda colar com o botão direito, e diz por quê':
+        /BOTÃO DIREITO do mouse/.test(htmlB) && /não tem Ctrl\+V no PowerShell/.test(htmlB),
+      'e dá a saída do menu da janela quando o botão direito não cola':
+        /barra de título da janela > Editar > Colar/.test(htmlB),
+      // entrar por AnyDesk sem area de transferencia compartilhada da o MESMO
+      // sintoma: cola e nao vai nada
+      'lembra da área de transferência do AnyDesk/Área de Trabalho Remota':
+        /área de transferência precisa estar compartilhada/.test(htmlB),
+      'máquina normal continua com Ctrl+V (não vira instrução de botão direito pra todo mundo)':
+        /: '2\) Cole \(Ctrl\+V\) e aperte Enter';/.test(htmlB),
+      // "A VM NAO DEIXA COLAR": sem area de transferencia nao ha comando de
+      // 3.500 caracteres que entre. O arquivo baixado ja tem o token dentro,
+      // e o comando que roda ELE cabe numa linha digitada a mao.
+      'sem área de transferência, o caminho é o arquivo (o token já vai dentro dele)':
+        /ESSA MÁQUINA NÃO PRECISA COLAR NADA/.test(htmlB)
+        && /powershell -ExecutionPolicy Bypass -File/.test(htmlB),
+      'e quem diz que é Windows antigo é o conteúdo baixado, não um flag repetido na tela':
+        /const ehWindowsAntigo = conteudo\.includes\('VERSAO PRA WINDOWS ANTIGO'\);/.test(htmlB)
+        && /VERSAO PRA WINDOWS ANTIGO/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8')),
+      'e aponta a saída de quem quiser colar mesmo assim (RDP/AnyDesk compartilham a área de transferência)':
+        /Remota \(mstsc\) ou AnyDesk/.test(htmlB) && /entre por Área de Trabalho/.test(htmlB),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okColarBos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okColarBos = false; console.log('  erro: ' + e.message); }
+  if (!okColarBos) ruins += 1;
+  console.log(`${okColarBos ? '✓' : '✗'} NOCZenith no BOS: a tela manda colar do jeito que AQUELE Windows cola (Ctrl+V não existe no Server 2012 R2)`);
+
 
   // ------------------------------------------------------------------
   // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
@@ -15507,12 +15766,12 @@ setTimeout(async () => {
         && /monitorar: document\.getElementById\('disp-monitorar'\)\.checked/.test(html)
         && /corpo\.tipoNovo = tipoNovo/.test(html),
       // o modal do aparelho abre DE DENTRO do modal de detalhe (o lapis fica
-      // na lista de aparelhos). Sem z-index proprio ele nasce ATRAS de quem
-      // o chamou - foi exatamente o que o Master reportou
+      // na lista de aparelhos). Sem vir pra frente ele nasce ATRAS de quem o
+      // chamou - foi exatamente o que o Master reportou. O z-index fixo que
+      // resolvia SÓ este caso saiu: hoje quem abre por último fica por cima,
+      // por construção (ver abrirOverlay e o teste da pilha mais abaixo)
       'modal do aparelho fica na frente do modal de detalhe':
-        /#disp-overlay\{z-index:(\d+);\}/.test(html)
-        && Number(html.match(/#disp-overlay\{z-index:(\d+);\}/)[1])
-           > Number(html.match(/\.overlay\{[^}]*z-index:(\d+)/)[1]),
+        /abrirOverlay\('disp-overlay'\)/.test(html) && !/getElementById\('disp-overlay'\)\.classList/.test(html),
       // o chip agora distingue quem tem leitura de status (Zebra) de quem so
       // tem alarme de rede - por isso a condicao deixou de ser uma linha so
       'dispositivo monitorado mostra o chip 🔔 na linha':
@@ -16051,9 +16310,11 @@ setTimeout(async () => {
         /fetch\('\/api\/loja-status\/mensagem-massa'/.test(htmlM) && /destinos: MSG_DESTINOS/.test(htmlM),
       'Enter envia': enviouComEnter && barrouDefault,
       'Shift+Enter quebra linha em vez de enviar': quebrouComShift,
-      // era o bug do print: a caixa de mensagem abria ATRAS do detalhe
+      // era o bug do print: a caixa de mensagem abria ATRAS do detalhe. O
+      // z-index fixo virou regra geral - quem abre por último fica por cima
+      // (ver abrirOverlay, e o teste da pilha que roda a lógica de verdade)
       'a janela de mensagem fica na frente do modal de detalhe':
-        !!zModal && !!zBase && Number(zModal[1]) > Number(zBase[1]),
+        /abrirOverlay\('msg-overlay'\)/.test(htmlM) && !/getElementById\('msg-overlay'\)\.classList\.(add|remove)\('hidden'\)/.test(htmlM),
       'da pra escolher mais computadores na propria janela':
         /id="msg-picker"/.test(htmlM) && /function marcarDestinosMensagem/.test(htmlM),
     };
@@ -21172,7 +21433,7 @@ setTimeout(async () => {
       // a ordem importa: a ficha só aparece DEPOIS de montada, então qualquer
       // erro ao montar significa "cliquei e não aconteceu nada"
       'a ficha é montada antes de ser mostrada (por isso um erro ali some com ela)':
-        /atualizarConteudoDetalhe\(codigo, compComDetalhe\(c\)\);\s*\n\s*document\.getElementById\('detalhe-comp-overlay'\)\.classList\.remove\('hidden'\);/.test(noc),
+        /atualizarConteudoDetalhe\(codigo, compComDetalhe\(c\)\);\s*\n\s*abrirOverlay\('detalhe-comp-overlay'\);/.test(noc),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPushOrfao = !falhas.length;
@@ -22635,6 +22896,265 @@ setTimeout(async () => {
   } catch (e) { okAgregador = false; console.log('  erro: ' + e.message); }
   if (!okAgregador) ruins += 1;
   console.log(`${okAgregador ? '✓' : '✗'} Cowork Agregador: pausar item / fechar loja entra na fila, volta na conversa e cobra quem não executou`);
+
+  // ------------------------------------------------------------------
+  // MAIS DE UMA TAG POR PESSOA, E O QUE CAI PRA QUEM TEM A TAG.
+  //
+  // Pedido do Master (14/09/2026): "precisamos poder marcar mais de 1 tag,
+  // assim eu designo alguém de suporte para cuidar de Agregador, assim os
+  // chamados de agregador acionam quem tiver essa TAG" e "as solicitações
+  // pelo beniboy... caso não dê, ela é direcionada para quem tem a tag dela".
+  //
+  // O risco que isto cobre não é a tela: é o dado. `cargo` (string) está em
+  // todo acesso já cadastrado e é lido pela tela inicial, pelo menu, pelo
+  // Parque e pela conciliação. O conjunto novo (`cargos`) não pode reescrever
+  // nem apagar isso - quem só tem o campo antigo tem que continuar sendo
+  // encontrado por listarPorTag, senão o chamado cai no vazio.
+  let okTags = false;
+  try {
+    const usersMod = require(__dirname + '/users.js');
+    const roteamento = require(__dirname + '/roteamentoTags.js');
+    const base = { role: 'user', active: true, permissions: { sections: [] } };
+    // (a) acesso ANTIGO: só `cargo`, nunca passou por esta tela
+    DOCS.set('users/u-tag-antigo', { ...base, id: 'u-tag-antigo', email: 'antigo@teste.local', nome: 'Ana Antiga', cargo: 'coordenador-agregador' });
+    // (b) acesso NOVO: Suporte que também cuida do Agregador - o caso do pedido
+    DOCS.set('users/u-tag-duplo', {
+      ...base, id: 'u-tag-duplo', email: 'duplo@teste.local', nome: 'Beto Duplo',
+      cargo: 'suporte', cargos: ['suporte', 'coordenador-agregador'],
+      permissions: { sections: ['suporte'] },
+    });
+    // (c) tem a tag mas está INATIVO - não pode receber chamado
+    DOCS.set('users/u-tag-off', { ...base, id: 'u-tag-off', email: 'off@teste.local', cargos: ['coordenador-agregador'], active: false });
+    // (d) só técnico: é quem deve receber o ticket de suporte-ti
+    DOCS.set('users/u-tag-tec', { ...base, id: 'u-tag-tec', email: 'tec@teste.local', nome: 'Caio Técnico', cargos: ['tecnico'], permissions: { sections: ['tecnico'] } });
+
+    const daTagAgg = await usersMod.listarPorTag('coordenador-agregador');
+    const daTagSuporte = await usersMod.listarPorTag('suporte');
+    const tagInventada = await usersMod.listarPorTag('chefe-supremo');
+
+    // tagsDe: o conjunto sai em ordem canônica, sem repetir, e o campo antigo
+    // sozinho continua valendo como tag
+    const tagsDuplo = usersMod.tagsDe(DOCS.get('users/u-tag-duplo'));
+    const tagsAntigo = usersMod.tagsDe(DOCS.get('users/u-tag-antigo'));
+    const tagsLixo = usersMod.tagsDe({ cargos: ['tecnico', 'tecnico', 'inventado'], cargo: 'gerente' });
+    const principal = usersMod.tagPrincipal(['coordenador-agregador', 'gerente']);
+
+    // gravar o conjunto mantém `cargo` (o que o resto do app lê) coerente
+    await usersMod.updateCargos('u-tag-tec', ['coordenador-agregador', 'tecnico']);
+    const depoisDoUpdate = DOCS.get('users/u-tag-tec');
+    // e trocar só a principal (rota antiga) NÃO apaga as outras
+    await usersMod.updateCargo('u-tag-tec', 'suporte');
+    const depoisDaRotaAntiga = DOCS.get('users/u-tag-tec');
+    let tagInvalida = null;
+    try { await usersMod.updateCargos('u-tag-tec', ['tecnico', 'inventado']); } catch (e) { tagInvalida = e.message; }
+
+    // --- roteamento: assunto -> tag -> pessoas -------------------------
+    DOCS.delete('users/u-tag-tec'); // sobra 1 técnico? não: zera e recria limpo
+    DOCS.set('users/u-tec-unico', { ...base, id: 'u-tec-unico', email: 'unico@teste.local', nome: 'Dani Técnica', cargos: ['tecnico'], permissions: { sections: ['tecnico'] } });
+    const destinoTi = await roteamento.destinoDe('suporte-ti');
+    // com DOIS técnicos o ticket não pode nascer no colo de um deles
+    DOCS.set('users/u-tec-dois', { ...base, id: 'u-tec-dois', email: 'dois@teste.local', nome: 'Edu Técnico', cargos: ['tecnico'] });
+    const destinoTiDois = await roteamento.destinoDe('suporte-ti');
+    const destinoCompra = await roteamento.destinoDe('compra');
+    const destinoAgg = await roteamento.destinoDe('agregador');
+
+    const srcBot = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlUsuarios = require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8');
+
+    const conf = {
+      'quem só tem o campo ANTIGO continua sendo encontrado pela tag':
+        daTagAgg.some((u) => u.id === 'u-tag-antigo'),
+      'quem tem DUAS tags é achado pelas duas (o pedido do Master)':
+        daTagAgg.some((u) => u.id === 'u-tag-duplo') && daTagSuporte.some((u) => u.id === 'u-tag-duplo'),
+      'inativo com a tag NÃO recebe chamado': daTagAgg.every((u) => u.id !== 'u-tag-off'),
+      'a mesma pessoa não vem duplicada nas duas consultas':
+        daTagAgg.filter((u) => u.id === 'u-tag-duplo').length === 1,
+      'tag que não existe devolve lista vazia, não erro': Array.isArray(tagInventada) && tagInventada.length === 0,
+      'o conjunto sai em ordem canônica, sem repetido e sem tag inventada':
+        tagsDuplo.join(',') === 'suporte,coordenador-agregador'
+        && tagsAntigo.join(',') === 'coordenador-agregador'
+        && tagsLixo.join(',') === 'gerente,tecnico',
+      'a principal é a primeira da ordem canônica, não a ordem do clique':
+        principal === 'gerente',
+      'gravar o conjunto mantém `cargo` (o que a tela inicial lê) coerente':
+        depoisDoUpdate.cargo === 'tecnico' && depoisDoUpdate.cargos.join(',') === 'tecnico,coordenador-agregador',
+      'trocar só a principal NÃO apaga as outras tags da pessoa':
+        depoisDaRotaAntiga.cargo === 'suporte'
+        && depoisDaRotaAntiga.cargos.includes('coordenador-agregador'),
+      'tag inventada é recusada com o nome dela': /inventado/.test(tagInvalida || ''),
+      'com UMA pessoa na tag, o ticket já nasce no nome dela':
+        destinoTi.tag === 'tecnico' && !!destinoTi.dono && destinoTi.dono.id === 'u-tec-unico',
+      'com DUAS, fica sem dono e as duas são avisadas (ninguém escolhido no par ou ímpar)':
+        destinoTiDois.dono === null && destinoTiDois.pessoas.length === 2,
+      'assunto sem tag (compra/pagamento) continua indo pra Central':
+        destinoCompra.tag === null && destinoCompra.pessoas.length === 0 && destinoCompra.dono === null,
+      'o agregador usa a MESMA tabela de tags': destinoAgg.tag === 'coordenador-agregador'
+        && destinoAgg.pessoas.some((u) => u.id === 'u-tag-duplo'),
+      'o ticket do Beniboy nasce direcionado por tag':
+        /roteamentoTags\.destinoDe\(tipo\)/.test(srcBot)
+        && /direcionadoParaId: destino\.dono \? destino\.dono\.id : null/.test(srcBot),
+      'quem tem a tag é avisado no nome dela quando o ticket nasce':
+        /push\.notifyPorTag\(destino, \{/.test(srcIdx) && /for \(const d of r\.direcionados \|\| \[\]\)/.test(srcIdx),
+      'a tela deixa marcar MAIS DE UMA tag (era rádio, exclusivo)':
+        /type="checkbox" name="\$\{prefixo\}-cargo"/.test(htmlUsuarios)
+        && !/type="radio" name="\$\{prefixo\}-cargo"/.test(htmlUsuarios)
+        && /querySelectorAll\(`input\[name="\$\{prefixo\}-cargo"\]:checked`\)/.test(htmlUsuarios),
+      'a lista mostra TODAS as tags, não só a principal':
+        /cargosDaPessoa\.forEach/.test(htmlUsuarios),
+      // o Beniboy responde toda conversa do widget: o modelo não pode estar
+      // cravado onde só um deploy muda
+      'o modelo do Beniboy sai de env var (custo é decisão do Master)':
+        /process\.env\.SUPORTE_BOT_MODELO \|\| 'claude-opus-5'/.test(srcBot),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTags = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTags = false; console.log('  erro: ' + e.message); }
+  if (!okTags) ruins += 1;
+  console.log(`${okTags ? '✓' : '✗'} Tags: mais de uma por pessoa, e o chamado cai em quem tem a tag do assunto`);
+
+  // ------------------------------------------------------------------
+  // TRANSFERIR CONVERSA: PRA QUEM, NÃO SÓ PRA QUAL NÍVEL.
+  //
+  // Pedido do Master (14/09/2026), olhando o modal da Central do Beniboy:
+  // "em transferir aparecer o usuário de quem tiver a tag suporte". O N2 era
+  // "outro agente (time de Suporte)" e mais nada: a conversa mudava de nível
+  // e o responsável continuava sendo QUEM CLICOU. Na prática ninguém virava
+  // dono, e a pessoa do outro lado esperava alguém do time notar sozinho.
+  let okTransferir = false;
+  try {
+    const sc = require(__dirname + '/suporteChat.js');
+    const base = { role: 'user', active: true };
+    // um do Suporte que atende, um que tem a tag mas não abre a Central, e
+    // um Suporte "de segunda tag" (o caso que o Master pediu: alguém de
+    // outra área designado pro Suporte)
+    DOCS.set('users/u-sup-1', { ...base, id: 'u-sup-1', email: 'sup1@teste.local', nome: 'Fábio Suporte', cargos: ['suporte'], permissions: { sections: ['suporte'] } });
+    DOCS.set('users/u-sup-sem-tela', { ...base, id: 'u-sup-sem-tela', email: 'sup2@teste.local', nome: 'Gabi SemTela', cargo: 'suporte', permissions: { sections: [] } });
+    DOCS.set('users/u-sup-extra', { ...base, id: 'u-sup-extra', email: 'sup3@teste.local', nome: 'Hugo Duplo', cargo: 'tecnico', cargos: ['tecnico', 'suporte'], permissions: { sections: ['suporte', 'tecnico'] } });
+    DOCS.set('users/u-sup-nao', { ...base, id: 'u-sup-nao', email: 'sup4@teste.local', nome: 'Ivo Fora', cargos: ['manutencao'], permissions: { sections: ['suporte'] } });
+
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const semAuth = await pedir('/api/suporte/agentes');
+    const comAuth = await pedir('/api/suporte/agentes', cab);
+    const agentes = comAuth.status === 200 ? JSON.parse(comAuth.corpo) : [];
+    const porId = Object.fromEntries(agentes.map((a) => [a.id, a]));
+
+    // a transferência de verdade, pela rota
+    DOCS.set('suporteChats/chat-transf', {
+      id: 'chat-transf', nome: 'Samuel', status: 'ABERTO', statusAtendimento: 'EM_ATENDIMENTO',
+      nivel: 2, responsavel: { id: 'u-quem-clicou', nome: 'Quem Clicou', email: 'clicou@teste.local' },
+      criadoEm: new Date().toISOString(), mensagens: [],
+    });
+    const transf = await postarJson('/api/suporte-chats/chat-transf/status', {
+      statusAtendimento: 'TRANSFERIDO', nivelDestino: 2,
+      transferidoPara: { id: 'u-sup-1', nome: 'Fábio Suporte', email: 'sup1@teste.local' },
+    }, cab);
+    const depois = await sc.getOne('chat-transf');
+    const ultimoHist = (depois.historicoStatus || [])[(depois.historicoStatus || []).length - 1] || {};
+
+    // N3 · Master: sem destinatário, a conversa fica sem dono esperando quem
+    // daquele nível assumir - o Master não é uma pessoa da fila
+    const paraMaster = await postarJson('/api/suporte-chats/chat-transf/status', {
+      statusAtendimento: 'TRANSFERIDO', nivelDestino: 3,
+    }, cab);
+    const depoisN3 = await sc.getOne('chat-transf');
+
+    const html = require('fs').readFileSync(__dirname + '/public/beniboy.html', 'utf8');
+
+    const conf = {
+      'a lista de destinatários exige estar no time de suporte': semAuth.status === 401 || semAuth.status === 403,
+      'aparece quem tem a tag Suporte': comAuth.status === 200 && !!porId['u-sup-1'],
+      'inclusive quem tem a tag como SEGUNDA tag (o pedido do Master)': !!porId['u-sup-extra'],
+      'quem NÃO tem a tag fica de fora, mesmo tendo a seção Suporte': !porId['u-sup-nao'],
+      'quem tem a tag mas não abre a Central aparece MARCADO, não some':
+        !!porId['u-sup-sem-tela'] && porId['u-sup-sem-tela'].podeAtender === false
+        && porId['u-sup-1'].podeAtender === true,
+      'transferir ENTREGA a conversa: o dono passa a ser quem recebeu, não quem clicou':
+        transf.status === 200 && depois.responsavel && depois.responsavel.id === 'u-sup-1'
+        && depois.statusAtendimento === 'TRANSFERIDO' && depois.nivel === 2,
+      'o histórico guarda de quem PRA QUEM': ultimoHist.para === 'Fábio Suporte' && !!ultimoHist.por,
+      'N3 · Master fica sem dono (ninguém "recebe" no lugar do Master)':
+        paraMaster.status === 200 && depoisN3.nivel === 3 && depoisN3.responsavel === null,
+      'o modal pergunta pra quem, e só no N2':
+        /id="transf-agente"/.test(html) && /carregarAgentesSuporte\(\)/.test(html)
+        && /sel\.value==='2'\) \? '' : 'none'/.test(html),
+      'quem recebeu é avisado no nome dele (não depende de estar com a tela aberta)':
+        /Conversa transferida pra você/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTransferir = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTransferir = false; console.log('  erro: ' + e.message); }
+  if (!okTransferir) ruins += 1;
+  console.log(`${okTransferir ? '✓' : '✗'} Transferir conversa: escolhe a PESSOA com a tag Suporte, e ela vira a dona`);
+
+  // ------------------------------------------------------------------
+  // PAINEL ABERTO DE DENTRO DE OUTRO TEM QUE VIR PRA FRENTE.
+  //
+  // Master (14/09/2026), sobre o 📦 Programas na ficha da máquina: "ícone
+  // quando acionado está indo para trás e não na frente". Todos os .overlay
+  // do NOC dividem o mesmo z-index; com empate quem decide é a ORDEM NO HTML,
+  // e a ficha da máquina é o último elemento do arquivo - então tudo que
+  // nasce de dentro dela nascia atrás dela, invisível.
+  //
+  // Isso já tinha sido remendado três vezes (msg, editar, aparelho) com
+  // z-index fixo, e o painel seguinte veio com o mesmo defeito. O teste é
+  // sobre a REGRA, não sobre os quatro: quem abre por último fica por cima.
+  let okPilhaOverlay = false;
+  try {
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    // roda a pilha de verdade, com um DOM falso - é lógica pura, e sem isso o
+    // teste só olharia texto de arquivo
+    const fonte = html.slice(html.indexOf('const Z_OVERLAY_BASE'), html.indexOf('function abrirProgramas'));
+    const els = {};
+    const documentFake = { getElementById: (id) => els[id] || null };
+    const criar = (id) => { els[id] = { style: {}, escondido: true, classList: { add: () => { els[id].escondido = true; }, remove: () => { els[id].escondido = false; } } }; };
+    ['a-overlay', 'b-overlay', 'c-overlay'].forEach(criar);
+    const api = new Function('document', `${fonte}; return { abrirOverlay, fecharOverlay, pilha: () => PILHA_OVERLAYS, base: Z_OVERLAY_BASE };`)(documentFake);
+
+    api.abrirOverlay('a-overlay');          // a ficha da máquina
+    const zA = Number(els['a-overlay'].style.zIndex);
+    api.abrirOverlay('b-overlay');          // o painel aberto de dentro dela
+    const zB = Number(els['b-overlay'].style.zIndex);
+    api.fecharOverlay('b-overlay');
+    const zBDepois = els['b-overlay'].style.zIndex;
+    const pilhaDepois = api.pilha().slice();
+    // reabrir o MESMO painel não pode empilhar duas vezes (a tela do NOC fica
+    // aberta o dia inteiro; abrir/fechar 200 vezes não pode subir o z-index
+    // até passar por cima do menu)
+    for (let i = 0; i < 200; i++) { api.abrirOverlay('c-overlay'); api.fecharOverlay('c-overlay'); }
+    api.abrirOverlay('c-overlay');
+    const zC = Number(els['c-overlay'].style.zIndex);
+    api.abrirOverlay('a-overlay'); // reabrir o de baixo o traz pra frente
+    const zAReaberto = Number(els['a-overlay'].style.zIndex);
+    // relê o outro DEPOIS: quem sobe empurra o resto pra baixo (reindexar),
+    // e comparar com o valor de antes não provaria nada
+    const zCAgora = Number(els['c-overlay'].style.zIndex);
+
+    const conf = {
+      'o painel aberto DEPOIS fica na frente de quem o abriu': zB > zA,
+      'fechar devolve o z-index pro CSS (não deixa lixo no style)': zBDepois === '',
+      'fechar tira da pilha': !pilhaDepois.includes('b-overlay'),
+      'abrir e fechar 200 vezes não faz o z-index subir sem fim': zC <= api.base + 2,
+      'nunca passa do menu (z-index 998) nem do balão de dica': zC < 998 && zAReaberto < 998,
+      'reabrir o de baixo o traz pra frente': zAReaberto > zCAgora,
+      // o defeito nasceu de cada painel novo ser aberto na mão; enquanto
+      // houver uma abertura fora da pilha, o próximo painel repete o bug
+      'nenhum painel é aberto por fora da pilha':
+        !/getElementById\('[a-z-]*overlay'\)\.classList\.(remove|add)\('hidden'\)/.test(html)
+        && /abrirOverlay\('prog-overlay'\)/.test(html),
+      'os remendos de z-index fixo saíram (a regra substituiu os três)':
+        !/#msg-overlay,#editar-comp-overlay\{z-index:60;\}/.test(html)
+        && !/#disp-overlay\{z-index:60;\}/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPilhaOverlay = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (zA=${zA} zB=${zB} zC=${zC} zA2=${zAReaberto})`);
+  } catch (e) { okPilhaOverlay = false; console.log('  erro: ' + e.message); }
+  if (!okPilhaOverlay) ruins += 1;
+  console.log(`${okPilhaOverlay ? '✓' : '✗'} NOC: painel aberto de dentro da ficha vem PRA FRENTE (era o 📦 Programas nascendo atrás)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

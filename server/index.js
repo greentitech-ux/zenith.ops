@@ -64,6 +64,7 @@ const suporteChatPDF = require('./suporteChatPDF');
 const segurancaChat = require('./segurancaChat');
 const suporteBot = require('./suporteBot');
 const agregadorFila = require('./agregadorFila');
+const roteamentoTags = require('./roteamentoTags');
 const agregadorCowork = require('./agregadorCowork');
 const pedidoWatch = require('./pedidoWatch');
 const preferencias = require('./preferencias');
@@ -1806,7 +1807,12 @@ app.get('/api/loja-status/:codigo/computadores/:posto/comando-instalacao', auth.
     const { codigo, posto } = req.params;
     const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
     const windowsAntigo = await lojaStatus.windowsAntigoDoComputador(codigo, posto);
-    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }) });
+    // devolve o windowsAntigo junto: e' ele que decide COMO a tela manda colar.
+    // No console do Server 2012 R2 / Windows 8.1 nao existe Ctrl+V - mandar
+    // "cole com Ctrl+V" ali faz a pessoa apertar e nao acontecer nada, sem
+    // erro nenhum pra investigar (caso real do BOS do Pulse). Sai daqui, e nao
+    // de um flag repetido na tela, pra nunca discordar da ficha.
+    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }), windowsAntigo });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5547,6 +5553,19 @@ app.put('/api/users/:id/cargo', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.cargo', `Editar cargo do acesso ${req.params.id}`, { id: req.params.id, cargo: req.body.cargo })) return;
     res.json(await users.updateCargo(req.params.id, req.body.cargo));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// O CONJUNTO de tags (mais de uma por pessoa - "designo alguém de suporte
+// para cuidar de Agregador", Master 14/09). A rota de cima continua existindo
+// e vale pra trocar só a principal, sem apagar as outras (ver updateCargo).
+app.put('/api/users/:id/cargos', auth.requireMaster, async (req, res) => {
+  try {
+    const cargos = Array.isArray(req.body.cargos) ? req.body.cargos : [];
+    if (await desviarSeQaMaster(req, res, 'usuarios.cargo', `Editar tags do acesso ${req.params.id}`, { id: req.params.id, cargos })) return;
+    res.json(await users.updateCargos(req.params.id, cargos));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -10071,7 +10090,7 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       redes: redes.REDES,
       // cargo vai junto pra tela marcar a tag ao lado do nome (nome · Suporte/
       // Gerente/...): mesma tag de /usuarios.html, sem inventar rótulo novo
-      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', cargo: u.role === 'master' ? null : (u.cargo || null), unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', cargo: u.role === 'master' ? null : (u.cargo || null), cargos: u.role === 'master' ? [] : users.tagsDe(u), unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
       // a tela precisa saber QUEM é você pra liberar "trocar"/"alterar" na
       // tarefa de que você é responsável, sem reimplementar a regra no navegador
       eu: req.user.id,
@@ -13409,6 +13428,24 @@ async function acionarBeniboy(chatId) {
       broadcast('solicitacao-criada', t, 'solicitacoes');
       push.notifySolicitacao(`Ticket #${t.numeroTicket} · Nova solicitação (Beniboy · chat)`, `${t.titulo || ''} · ${t.unidadeNome || ''}`, t.id);
     }
+    // DIRECIONADO POR TAG (roteamentoTags.js): além do push geral acima, quem
+    // tem a tag do assunto recebe no nome dela. É a diferença entre "chegou
+    // um ticket na Central" e "esse é seu" - sem isso o chamado esperava
+    // alguém passar pela tela por acaso.
+    for (const d of r.direcionados || []) {
+      const destino = d.destino || {};
+      if (!destino.tag || !(destino.pessoas || []).length) continue;
+      await push.notifyPorTag(destino, {
+        titulo: `🏷️ ${destino.rotulo} · ticket #${d.numeroTicket}`,
+        corpo: `${d.titulo || ''}${d.unidadeNome ? ' · ' + d.unidadeNome : ''}`.slice(0, 150),
+        tagPush: 'tag-' + d.ticketId,
+        // o ticket ainda espera a decisão do Master: quem tem a tag vê ele no
+        // Histórico da Central, não na tela de execução (que só recebe depois
+        // de aprovado). Mandar pra tela errada é mandar pra tela vazia.
+        url: '/central-historico.html',
+      }).catch((e) => console.error('[roteamento] falha ao avisar quem tem a tag:', e.message));
+      console.log(`[roteamento] ticket #${d.numeroTicket} (${d.tipo}) -> ${roteamentoTags.descreverDestino(destino)}`);
+    }
     // PAUSAR ITEM / FECHAR LOJA no iFood/99food (tool bloquear_no_agregador):
     // quem executa é o COWORK AGREGADOR. O pedido entra na fila dele
     // (agregadorFila.js), o Cowork puxa e confirma. O coordenador humano
@@ -13840,6 +13877,27 @@ app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, re
 // e botoes de acao rapida chamam essa mesma rota. nivelDestino so e exigido
 // pro status TRANSFERIDO (2=agente humano, 3=Master); motivoSemSolucao so
 // pro status SEM_SOLUCAO. Mesmo guard de acesso do resto do atendimento.
+// Quem pode RECEBER uma conversa transferida: as pessoas com a tag Suporte
+// (users.listarPorTag, que acha tanto o cadastro antigo quanto quem tem mais
+// de uma tag). Vai marcado quem consegue mesmo ABRIR a Central do Beniboy -
+// transferir pra quem não tem a seção é entregar pro vazio, e o Master
+// precisa enxergar isso na hora de escolher, não depois.
+app.get('/api/suporte/agentes', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    const lista = await users.listarPorTag('suporte');
+    res.json(lista.map((u) => ({
+      id: u.id,
+      nome: u.nome,
+      email: u.email,
+      tags: u.tags,
+      podeAtender: u.ehTime || (u.secoes || []).includes('suporte'),
+    })));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => {
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
@@ -13849,8 +13907,21 @@ app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => 
       nivelDestino: req.body.nivelDestino,
       motivoSemSolucao: req.body.motivoSemSolucao,
       autor,
+      transferidoPara: req.body.transferidoPara || null,
     });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    // quem recebeu a conversa é avisado no nome dele - senão a transferência
+    // depende de a pessoa estar com a Central aberta na hora
+    const para = req.body.transferidoPara;
+    if (req.body.statusAtendimento === 'TRANSFERIDO' && para && para.id) {
+      push.notifyUsuario(
+        para.id,
+        '💬 Conversa transferida pra você',
+        `${chat.nome || 'Visitante'}${autor.nome ? ' · de ' + autor.nome : ''}`.slice(0, 150),
+        'suporte-transf-' + chat.id,
+        '/beniboy.html?chat=' + encodeURIComponent(chat.id),
+      ).catch((e) => console.error('[suporte] falha ao avisar quem recebeu a conversa:', e.message));
+    }
     const { token, ...resto } = chat;
     res.json(resto);
   } catch (err) {
@@ -15213,6 +15284,11 @@ function aquecerBoot(promessa, ms) {
         if (t.tipo === 'disco') {
           push.notifyDiscoAlerta(nome, t.codigo, t.nome, t.posto, t.nivel, t.motivos)
             .catch((err) => console.error('Erro no push de alerta de disco:', err.message));
+          continue;
+        }
+        if (t.tipo === 'vm-caiu') {
+          push.notifyVmCaiu(nome, t.codigo, t.nome, t.posto, t.vms)
+            .catch((err) => console.error('Erro no push de VM caiu:', err.message));
           continue;
         }
         // dispositivo de rede marcado (impressora/VM) sumiu/voltou (ver
