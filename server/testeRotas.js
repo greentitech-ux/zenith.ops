@@ -12524,14 +12524,27 @@ setTimeout(async () => {
       // decisao do Master: centralizado, logo abaixo da marca (o modelo que ele
       // mandou). O agente nao enxerga a arte - a posicao e' convencao, e a tela
       // avisa pra arte deixar a faixa livre
-      'o nome sai centralizado a 60% da altura, e a tela avisa pra deixar a faixa livre':
-        /\$y = \[int\]\(\$img\.Height \* 0\.60\)/.test(psPp)
-        && /\$x = \(\$img\.Width - \$tamNome\.Width\) \/ 2/.test(psPp)
-        && /\$xSub = \(\$img\.Width - \$tamSub\.Width\) \/ 2/.test(psPp)
-        && /centralizado, a 60% da altura/.test(htmlPp),
-      'o agente carimba o nome da máquina na arte':
-        /function Carimbar-NomeNaArte/.test(psPp) && /\$nome = \$env:COMPUTERNAME/.test(psPp)
-        && /\$UnidadePosto = "PPDOM \/ PC1"/.test(psPp),
+      // CARIMBO.md: topo-direito na horizontal; centralizado embaixo na
+      // vertical (Makeline). Regua ambar + nome da loja + etiqueta arredondada.
+      'o carimbo vai no topo-direito (horizontal) e centralizado (vertical), conforme a orientação':
+        /\$vertical = \$img\.Height -gt \$img\.Width/.test(psPp)
+        && /\$dir = \$img\.Width - \(84 \* \$esc\)/.test(psPp)
+        && /\$xLoja = \$dir - \$tamLoja\.Width/.test(psPp)
+        && /\$topo = \$img\.Height \* \(1518\.0 \/ 1920\.0\)/.test(psPp)
+        && /\$xLoja = \$cx - \$tamLoja\.Width \/ 2/.test(psPp)
+        && /topo-direito/.test(htmlPp),
+      'o agente carimba o nome da LOJA e o código da máquina (não o hostname)':
+        /function Carimbar-NomeNaArte/.test(psPp)
+        && /\$NomeLojaArte = "PPDOM"/.test(psPp)
+        && /\$NomeMaquinaArte = "PC1"/.test(psPp)
+        && /\$loja = \(\[string\]\$NomeLojaArte\)\.ToUpper\(\)/.test(psPp)
+        && !/\$nome = \$env:COMPUTERNAME/.test(psPp),
+      'a régua âmbar e a etiqueta arredondada saem (fiel ao CARIMBO.md)':
+        /FromHtml\("#e0a33e"\)/.test(psPp) && /FromHtml\("#0a4f79"\)/.test(psPp)
+        && /Retangulo-RedondoCarimbo/.test(psPp),
+      // JPEG sujava arte de cor chapada (a "pessima qualidade"): agora PNG
+      'a arte carimbada é salva em PNG (sem perda)':
+        /ImageFormat\]::Png/.test(psPp) && !/ImageFormat\]::Jpeg/.test(psPp),
       // sem isto, uma falha do System.Drawing deixaria a loja SEM papel de
       // parede - pior do que papel de parede sem o nome escrito
       // INCIDENTE 14/09: "o plano de fundo de todas as unidades ficou preto".
