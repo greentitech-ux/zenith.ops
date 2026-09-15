@@ -450,6 +450,9 @@
   .agente-titulo{display:flex;align-items:center;gap:8px;margin:32px 0 4px;padding-top:20px;border-top:1px solid var(--line);}
   .agente-titulo h2{font-size:16px;}
   .agente-sub{font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.5;}
+  /* seta do recolher.js: os titulos desta tela sao flex, entao o float nao
+     posiciona - joga a seta pro fim da linha (rightmost) sem sumir o 🔄 */
+  .rede-titulo .zr-seta, .agente-titulo .zr-seta{float:none;margin-left:auto;order:99;}
   .agente-secao{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
   .agente-secao-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
   .agente-acao-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;}
@@ -579,8 +582,8 @@
      responde a outra pergunta: a grade acima mostra quem está no ar agora,
      essa lista mostra a QUALIDADE do link ao longo do dia - inclusive de
      quem está online e mesmo assim sofrendo -->
-<div id="rede-root" class="hidden">
-  <div class="rede-titulo">
+<div id="rede-root" class="hidden" data-recolher>
+  <div class="rede-titulo" data-recolher-titulo>
     <h2>📶 Diagnóstico de rede</h2>
     <button type="button" class="btn-notif" onclick="carregarRede()" title="Atualizar">🔄</button>
   </div>
@@ -596,14 +599,17 @@
   <!-- QUEM AINDA FALA COM O ENDERECO ANTIGO. E o que decide se da pra
        aposentar o dominio velho: enquanto houver pendente, desligar deixa
        aquela maquina orfa (ver CLAUDE.md §4) -->
-  <div class="agente-titulo"><h2>🌐 Migração de endereço</h2></div>
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo><h2>🌐 Migração de endereço</h2></div>
   <div class="agente-sub">
     O agente só descobre que existe versão nova pelo endereço que está assado no próprio script dele. Por isso o endereço antigo <b>não pode ser desligado</b> enquanto alguma máquina ainda falar com ele — ela ficaria órfã pra sempre. Aqui você vê quantas faltam.
   </div>
   <div id="migracao-endereco" style="margin-bottom:18px;"></div>
+  </div>
   <!-- papel de parede do parque: UMA imagem pra rede toda; cada computador
        decide se aplica, na política do card dele -->
-  <div class="agente-titulo"><h2>🖼️ Papel de parede do parque</h2></div>
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
     Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos. A máquina <b>carimba, no topo-direito, o nome da loja + o código da máquina</b> (na arte <b>vertical</b>, tipo Makeline, o carimbo vai centralizado embaixo). Deixe essa área do carimbo livre na arte — ela já vem reservada nas bases genéricas. Assim a mesma arte serve a loja inteira e cada máquina se identifica sozinha. A marca sai do <b>perfil da unidade</b> e o grupo sai do <b>cadastro de empresas</b> — unidade sem empresa cai na arte só da marca, nunca na logo de um grupo que não é o dela. Se não houver arte do grupo, cai na arte só da marca; sem essa, na <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
   </div>
@@ -615,7 +621,9 @@
     <span class="msg hidden" id="msg-pp"></span>
   </div>
   <div id="pp-marcas" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
-  <div class="agente-titulo">
+  </div>
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo>
     <h2>🤖 Beniboy — Ações do Agente</h2>
   </div>
   <div class="agente-sub">
@@ -649,6 +657,7 @@
   <div class="agente-secao">
     <h3>📜 Histórico</h3>
     <div id="agente-historico-lista"></div>
+  </div>
   </div>
 </div>
 
