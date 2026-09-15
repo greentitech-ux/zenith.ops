@@ -7305,6 +7305,37 @@ setTimeout(async () => {
   console.log(`${okDispositivoAlarme ? '✓' : '✗'} NOC: impressora/VM marcada como monitorada alarma ao perder rede (só depois de ~2 scans ausentes), nunca pra quem não foi marcado`);
 
   // ------------------------------------------------------------------
+  // "AS UNIDADES ESTAO RECEBENDO NOTIFICACAO" (Master, 15/09) - a loja recebia
+  // "Rede voltou" no navegador dela. NOC e' so pra Master ou Suporte com a tag
+  // (podeReceberCritico), e isso tem que valer nos DOIS lados do ciclo: o bug
+  // era o filtro so pegar a QUEDA (caiu), deixando o "voltou" ir pra todas as
+  // assinaturas.
+  let okGateRede = false;
+  try {
+    const srcPush = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const ini = srcPush.indexOf('async function notifyRedeUnidade');
+    const fim = srcPush.indexOf('\nasync function ', ini + 10);
+    const corpo = srcPush.slice(ini, fim > 0 ? fim : undefined);
+    const conf = {
+      'o push de rede da unidade tem o gate crítico (Master ou Suporte)':
+        /podeReceberCritico\(sub\)/.test(corpo),
+      // O BUG: gate condicionado ao "caiu" deixava o "voltou" vazar
+      'o gate NÃO é condicionado ao "caiu" (senão o "voltou" vaza pra loja)':
+        !/caiu && !podeReceberCritico/.test(corpo)
+        && /if \(!podeReceberCritico\(sub\)\) continue;/.test(corpo),
+      // e o filtro em si e' Master OU Suporte com a tag
+      'podeReceberCritico = Master OU seção suporte':
+        /function podeReceberCritico\(sub\)[\s\S]*?meta\.isMaster[\s\S]*?sections[\s\S]*?includes\('suporte'\)/.test(srcPush),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okGateRede = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okGateRede = false; console.log('  erro: ' + e.message); }
+  if (!okGateRede) ruins += 1;
+  console.log(`${okGateRede ? '✓' : '✗'} NOC: "Rede voltou" também só vai pra Master/Suporte (a loja não recebe notificação do NOC)`);
+
+
+  // ------------------------------------------------------------------
   // A ZEBRA TROCA DE IP. Pedido do Master (13/09/2026): "ela perde muito IP,
   // muda muito de IP, precisamos ver uma forma de identificar quando mudar de
   // IP pois precisa atualizar no Servidor (...) mas se não, precisa ao menos

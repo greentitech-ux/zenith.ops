@@ -1212,7 +1212,11 @@ async function notifyRedeUnidade(unidadeNome, codigo, resumo, caiu) {
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
-    if (caiu && !podeReceberCritico(sub)) continue;
+    // NOC e' so pra Master ou Suporte com a tag - vale pros DOIS lados do
+    // ciclo. Antes o filtro so pegava a queda (caiu); o "voltou" ia pra todas
+    // as assinaturas, e a loja recebia "Rede voltou" no navegador dela (bug
+    // reportado 15/09: "as unidades estao recebendo notificacao").
+    if (!podeReceberCritico(sub)) continue;
     try {
       await webpush.sendNotification(sub, payload, { urgency: caiu ? 'high' : 'normal' });
     } catch (err) {
