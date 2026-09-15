@@ -1805,7 +1805,12 @@ app.get('/api/loja-status/:codigo/computadores/:posto/comando-instalacao', auth.
     const { codigo, posto } = req.params;
     const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
     const windowsAntigo = await lojaStatus.windowsAntigoDoComputador(codigo, posto);
-    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }) });
+    // devolve o windowsAntigo junto: e' ele que decide COMO a tela manda colar.
+    // No console do Server 2012 R2 / Windows 8.1 nao existe Ctrl+V - mandar
+    // "cole com Ctrl+V" ali faz a pessoa apertar e nao acontecer nada, sem
+    // erro nenhum pra investigar (caso real do BOS do Pulse). Sai daqui, e nao
+    // de um flag repetido na tela, pra nunca discordar da ficha.
+    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }), windowsAntigo });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

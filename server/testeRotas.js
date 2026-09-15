@@ -13288,6 +13288,57 @@ setTimeout(async () => {
   console.log(`${okServer2012 ? '✓' : '✗'} NOCZenith no Windows Server 2012 R2: versão específica pra máquina marcada (TLS 1.2 e sem PowerShell 5), e o padrão das outras intacto`);
 
   // ------------------------------------------------------------------
+  // "TENTO COLAR E NAO ACONTECE NADA NO POWERSHELL DO BOS" (Master, 15/09/2026)
+  //
+  // Nao era o script: era a INSTRUCAO. O console do Server 2012 R2 / Windows
+  // 8.1 nao tem Ctrl+V - isso so chegou no Windows 10. A tela mandava "Cole
+  // (Ctrl+V) e aperte Enter" pra toda maquina, entao no BOS a pessoa apertava
+  // e nao acontecia NADA: sem erro, sem texto, nada pra investigar. Ali se
+  // cola com o botao direito.
+  //
+  // Quem decide e' a ficha, nao a tela: o windowsAntigo sai da MESMA rota que
+  // monta o comando, pra os dois nunca discordarem.
+  let okColarBos = false;
+  try {
+    const idxB = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlB = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      'a rota do comando devolve se a máquina é Windows antigo':
+        /res\.json\(\{ comando: vigiaScript\.montarComandoInstalacao\([^)]*\), windowsAntigo \}\);/.test(idxB),
+      'a tela lê esse campo da resposta (não de um flag repetido nela)':
+        /const \{ comando, windowsAntigo \} = await resp\.json\(\);/.test(htmlB),
+      // O SINTOMA: apertar Ctrl+V no BOS nao faz nada
+      'em Windows antigo a instrução manda colar com o botão direito, e diz por quê':
+        /BOTÃO DIREITO do mouse/.test(htmlB) && /não tem Ctrl\+V no PowerShell/.test(htmlB),
+      'e dá a saída do menu da janela quando o botão direito não cola':
+        /barra de título da janela > Editar > Colar/.test(htmlB),
+      // entrar por AnyDesk sem area de transferencia compartilhada da o MESMO
+      // sintoma: cola e nao vai nada
+      'lembra da área de transferência do AnyDesk/Área de Trabalho Remota':
+        /área de transferência precisa estar compartilhada/.test(htmlB),
+      'máquina normal continua com Ctrl+V (não vira instrução de botão direito pra todo mundo)':
+        /: '2\) Cole \(Ctrl\+V\) e aperte Enter';/.test(htmlB),
+      // "A VM NAO DEIXA COLAR": sem area de transferencia nao ha comando de
+      // 3.500 caracteres que entre. O arquivo baixado ja tem o token dentro,
+      // e o comando que roda ELE cabe numa linha digitada a mao.
+      'sem área de transferência, o caminho é o arquivo (o token já vai dentro dele)':
+        /ESSA MÁQUINA NÃO PRECISA COLAR NADA/.test(htmlB)
+        && /powershell -ExecutionPolicy Bypass -File/.test(htmlB),
+      'e quem diz que é Windows antigo é o conteúdo baixado, não um flag repetido na tela':
+        /const ehWindowsAntigo = conteudo\.includes\('VERSAO PRA WINDOWS ANTIGO'\);/.test(htmlB)
+        && /VERSAO PRA WINDOWS ANTIGO/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8')),
+      'e aponta a saída de quem quiser colar mesmo assim (RDP/AnyDesk compartilham a área de transferência)':
+        /Remota \(mstsc\) ou AnyDesk/.test(htmlB) && /entre por Área de Trabalho/.test(htmlB),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okColarBos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okColarBos = false; console.log('  erro: ' + e.message); }
+  if (!okColarBos) ruins += 1;
+  console.log(`${okColarBos ? '✓' : '✗'} NOCZenith no BOS: a tela manda colar do jeito que AQUELE Windows cola (Ctrl+V não existe no Server 2012 R2)`);
+
+
+  // ------------------------------------------------------------------
   // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
   // adyen-monitor, aposentar de vez"). O CLAUDE.md §4 diz que o dominio velho
   // NUNCA pode ser desligado - e o motivo e concreto: o agente so descobre que

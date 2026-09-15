@@ -2870,12 +2870,22 @@ async function copiarComandoVigia(codigo, posto, tipo, prefixo){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
     if(!resp.ok) throw new Error('Erro ao gerar o comando.');
-    const { comando } = await resp.json();
+    const { comando, windowsAntigo } = await resp.json();
+    // COMO COLAR MUDA POR MAQUINA. O console do Server 2012 R2 / Windows 8.1
+    // (o BOS do Pulse) NAO tem Ctrl+V - isso so chegou no Windows 10. Quem
+    // segue "cole com Ctrl+V" ali aperta e nao acontece NADA: sem erro, sem
+    // texto, sem nada pra investigar. Ali se cola com o botao direito.
+    const comoColar = windowsAntigo
+      ? '2) Cole com o BOTÃO DIREITO do mouse (esse Windows não tem Ctrl+V no PowerShell - apertar Ctrl+V ali não faz nada)\n'
+        + '   Se o botão direito não colar: clique na barra de título da janela > Editar > Colar.\n'
+        + '   Se você está entrando por AnyDesk/Área de Trabalho Remota, a área de transferência precisa estar compartilhada - senão não vai nada.\n'
+        + '3) Aperte Enter'
+      : '2) Cole (Ctrl+V) e aperte Enter';
     // o passo-a-passo e o mesmo com ou sem area de transferencia - o que muda
     // e so de onde a pessoa copia. Antes o caminho do fallback perdia a
     // instrucao inteira e sobrava um comando solto sem explicacao
     const passos = 'No computador da loja:\n1) Abra o PowerShell (menu Iniciar > digite PowerShell)\n'
-      + '2) Cole (Ctrl+V) e aperte Enter\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. '
+      + comoColar + '\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. '
       + 'Não precisa clicar em nada nem baixar arquivo, e nada fica "solto" pra apagar depois.\n\n'
       + 'Computador tipo servidor/escritório: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão '
       + 'bloqueada/desconectada (nunca "Sair").';
@@ -2904,6 +2914,30 @@ async function baixarVigia(codigo, posto, tipo){
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
+    // MAQUINA SEM AREA DE TRANSFERENCIA (VM pelo console do hipervisor, o caso
+    // do BOS) - o comando de uma linha tem ~3.500 caracteres e nao ha como
+    // colar nem digitar. O arquivo resolve: ele ja sai com o token desta
+    // maquina assado dentro, entao basta chegar la por rede/pendrive e o
+    // comando que roda ele cabe numa linha digitada a mao.
+    //
+    // Quem diz que e' Windows antigo e' o PROPRIO conteudo baixado (o servidor
+    // marca o bloco), nao um flag repetido aqui - assim nao tem como a tela
+    // discordar da ficha.
+    const ehWindowsAntigo = conteudo.includes('VERSAO PRA WINDOWS ANTIGO');
+    if(ehWindowsAntigo){
+      alert(`Script "NOCZenith-${posto}.ps1" baixado (versão pra Windows antigo - Server 2012 R2 / 7 / 8). ✅\n\n`
+        + `ESSA MÁQUINA NÃO PRECISA COLAR NADA. O token dela já está dentro do arquivo.\n\n`
+        + `1) Leve o arquivo até ela: pasta de rede, pendrive ou a pasta compartilhada da VM.\n`
+        + `2) No PowerShell DELA, aberto COMO ADMINISTRADOR, digite (é curto, dá pra digitar à mão):\n`
+        + `     powershell -ExecutionPolicy Bypass -File "\\\\servidor\\pasta\\NOCZenith-${posto}.ps1"\n`
+        + `   (troque pelo caminho onde o arquivo ficou)\n\n`
+        + `Ele se copia pra uma pasta fixa e passa a rodar de lá - depois disso pode apagar esse arquivo. `
+        + `Dali pra frente se atualiza sozinho.\n\n`
+        + `Por que não dá pra colar: o console do Server 2012 R2 não tem Ctrl+V, e VM aberta pelo console do `
+        + `hipervisor não compartilha área de transferência. Se preferir colar, entre por Área de Trabalho `
+        + `Remota (mstsc) ou AnyDesk - aí a área de transferência funciona e o botão "📋 Copiar comando" serve.`);
+      return;
+    }
     alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\n⚠️ O Windows 11 bloqueia .ps1 baixado (Controle de Aplicativo Inteligente). Se o clique-direito "Executar com o PowerShell" der o aviso de bloqueio, o jeito mais fácil é usar o botão "📋 Copiar comando".\n\nComo instalar por aqui mesmo:\n1) Salve numa pasta qualquer.\n2) Abra o PowerShell e rode (troque pelo caminho onde salvou, com aspas):\n     Unblock-File "C:\\...\\NOCZenith-${posto}.ps1"\n   (tira o selo de "veio da internet" que causa o bloqueio)\n3) Rode:\n     powershell -ExecutionPolicy Bypass -File "C:\\...\\NOCZenith-${posto}.ps1"\n\nEle se instala numa pasta fixa protegida e passa a rodar de lá - então DEPOIS de instalar você PODE APAGAR o arquivo que baixou. Dali pra frente ele se atualiza sozinho.\n\nIMPORTANTE: instale num PowerShell aberto COMO ADMINISTRADOR - assim o NOCZenith também cria a tarefa de BOOT e volta sozinho depois de qualquer reinício, mesmo sem ninguém logar. Sem Administrador, ele só volta no próximo login do usuário.`);
   }catch(e){
     alert(e.message);
