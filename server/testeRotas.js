@@ -12508,7 +12508,7 @@ setTimeout(async () => {
     const imgMaquina = await pedir('/api/loja-status/PPDOM/computadores/PC1/papel-de-parede', { 'x-noc-token': 'tokdom' });
     const imgSemToken = await pedir('/api/loja-status/PPDOM/computadores/PC1/papel-de-parede', {});
     const marcas = await pedir('/api/loja-status/papel-de-parede-marcas', cabPP);
-    const psPp = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'PPDOM', posto: 'PC1', tipo: 'interno', agentToken: 'tokdom' });
+    const psPp = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'PPDOM', posto: 'PC1', tipo: 'interno', agentToken: 'tokdom', maquinaNome: 'DOM-CR-ATM01' });
     const htmlPp = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
 
     const conf = {
@@ -12608,10 +12608,11 @@ setTimeout(async () => {
         && /\$topo = \$img\.Height \* \(1518\.0 \/ 1920\.0\)/.test(psPp)
         && /\$xLoja = \$cx - \$tamLoja\.Width \/ 2/.test(psPp)
         && /topo-direito/.test(htmlPp),
-      'o agente carimba o nome da LOJA e o código da máquina (não o hostname)':
+      'o agente carimba o nome da LOJA e o NOME cadastrado da máquina (não o posto nem o hostname)':
         /function Carimbar-NomeNaArte/.test(psPp)
         && /\$NomeLojaArte = "PPDOM"/.test(psPp)
-        && /\$NomeMaquinaArte = "PC1"/.test(psPp)
+        && /\$NomeMaquinaArte = "DOM-CR-ATM01"/.test(psPp)
+        && !/\$NomeMaquinaArte = "PC1"/.test(psPp)
         && /\$loja = \(\[string\]\$NomeLojaArte\)\.ToUpper\(\)/.test(psPp)
         && !/\$nome = \$env:COMPUTERNAME/.test(psPp),
       'a régua âmbar e a etiqueta arredondada saem (fiel ao CARIMBO.md)':
@@ -13783,6 +13784,11 @@ setTimeout(async () => {
       'a marca na ficha vale pro comando de instalação': marcou.status === 200 && tlsAntesDoRest(cmdRotaDecod),
       'e pra autoatualização (o agente baixa com o token dele e recebe a versão certa)':
         psAuto.status === 200 && tlsAntesDoRest(psAuto.corpo) && /function Agora-Ms/.test(psAuto.corpo),
+      // pedido do Master (15/09): o carimbo do papel de parede tem que trazer o
+      // NOME que ele deu ao computador no NOC ("BOS Pulse"), nao o posto (id
+      // interno tipo "bd848084"/"BOS"). A rota puxa o nome do doc e assa no .ps1.
+      'o carimbo usa o NOME cadastrado do computador, não o posto (id interno)':
+        /\$NomeMaquinaArte = "BOS Pulse"/.test(psAuto.corpo) && !/\$NomeMaquinaArte = "BOS"/.test(psAuto.corpo),
       'máquina sem a marca continua recebendo o padrão pela mesma rota':
         psPadraoRota.status === 200 && !/SecurityProtocol|Agora-Ms/.test(psPadraoRota.corpo),
       'a ficha da máquina tem a caixa "Windows antigo" e manda a marca pro servidor':

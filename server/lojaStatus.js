@@ -1370,6 +1370,15 @@ async function windowsAntigoDoComputador(codigo, posto) {
   return snap.exists && !!snap.data().windowsAntigo;
 }
 
+// nome que o Master deu ao computador no NOC ("Caixa 1", "DOM-CR-ATM01") - vai
+// assado no .ps1 pro carimbo do papel de parede. Sem cadastro, cai no posto
+// (id interno) so pra nao carimbar vazio, mas o certo e o computador ter nome.
+async function nomeDoComputador(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  const nome = snap.exists ? String(snap.data().nome || '').trim() : '';
+  return nome || posto;
+}
+
 // Master cadastra um novo computador pra uma unidade - gera um id curto e
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
@@ -3535,5 +3544,5 @@ module.exports = {
   sanitizarPolitica, definirPolitica, papelDeParedeDe, versaoAplicacao, chaveArte, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, reportarEstadoAgente, pedirCaptura,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
 };

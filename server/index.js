@@ -1816,9 +1816,11 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     // marcada na ficha: sai a versao pra Windows antigo (Server 2012 R2) - e a
     // autoatualizacao dessa maquina continua recebendo a versao certa
     const windowsAntigo = await lojaStatus.windowsAntigoDoComputador(codigo, posto);
-    // nome canonico da loja pro carimbo do papel de parede (ver CARIMBO.md)
+    // nome canonico da loja + nome do computador (o que o Master cadastrou no
+    // NOC, ex "DOM-CR-ATM01") pro carimbo do papel de parede (ver CARIMBO.md)
     const unidadeNome = nomeCanonicoUnidade(codigo);
-    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome });
+    const maquinaNome = await lojaStatus.nomeDoComputador(codigo, posto);
+    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome, maquinaNome });
     res.type('text/plain').send(conteudo);
   } catch (err) {
     res.status(400).type('text/plain').send('# Erro ao gerar o script: ' + err.message);

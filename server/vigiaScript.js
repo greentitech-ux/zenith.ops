@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 67;
+const VERSAO_VIGIA = 68;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -106,7 +106,7 @@ function adaptarParaWindowsAntigo(texto) {
   return out;
 }
 
-function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome, maquinaNome }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
   // segredo desse computador (ver lojaStatus.js) - vai assado no script e
@@ -127,6 +127,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   // tem ", $ nem crase (fica segura nas aspas duplas por conta propria).
   const codigoTextoPS = String(codigo).replace(/[`"$\r\n]/g, '');
   const unidadeNomePS = String(unidadeNome || codigo).replace(/[`"$\r\n]/g, '');
+  // nome do computador no carimbo: o que o Master cadastrou no NOC ("Caixa 1",
+  // "DOM-CR-ATM01"), nao o posto (id interno). Mesma limpeza do nome da loja -
+  // tira crase/aspas/$/quebra que quebrariam a string PowerShell.
+  const maquinaNomePS = String(maquinaNome || posto).replace(/[`"$\r\n]/g, '');
   const urlMonitorar = `${APP_BASE_URL}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlReportarIp = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
   const urlHeartbeat = `${APP_BASE_URL}/api/loja-status/heartbeat`;
@@ -338,7 +342,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // MAQUINA. Nome da loja vem canonico do servidor (nomeCanonicoUnidade);
     // nome da maquina e o posto (ATM01, Makeline, Dispatch...).
     '$NomeLojaArte = "' + unidadeNomePS + '"',
-    '$NomeMaquinaArte = "' + posto + '"',
+    '$NomeMaquinaArte = "' + maquinaNomePS + '"',
     '$CaminhoPolitica = Join-Path (Split-Path -Parent $PSCommandPath) "politica-aplicada.txt"',
     'function Marcar-UiAtiva {',
     '  try { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() | Set-Content -Path $CaminhoFlagUi -Force } catch {}',
