@@ -284,7 +284,7 @@ function textoDoPdf(b) {
 function pedir(caminho, headers = {}) {
   return new Promise((resolve) => {
     const req = http.request({ host: '127.0.0.1', port: 8899, path: caminho, headers }, (res) => {
-      let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b }));
+      let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b, headers: res.headers }));
     });
     req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
     // 4s marcava timeout até em rota que respondia certo (relatório de
@@ -4055,8 +4055,11 @@ setTimeout(async () => {
       req.end();
     });
 
-    const comGzip = await pedirGzip('/fechamentos.html');
-    const semGzip = await pedir('/fechamentos.html');
+    // URL canonica (sem .html): desde as URLs curtas, /fechamentos.html devolve
+    // um 308 pra /fechamentos - pedir o .html trazia o corpo do redirect (47
+    // bytes), nao a pagina. O gzip vale na pagina de verdade.
+    const comGzip = await pedirGzip('/fechamentos');
+    const semGzip = await pedir('/fechamentos');
     const descomprimido = comGzip.encoding === 'gzip' ? zlib.gunzipSync(comGzip.corpo).toString('utf8') : comGzip.corpo.toString('utf8');
 
     const src = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
