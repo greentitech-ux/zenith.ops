@@ -41,6 +41,10 @@ const VOLUMES_MAX = 8;
 // documento sem informar mais nada.
 const DISPOSITIVOS_MAX = 60;
 const MACS_CONHECIDOS_MAX = 250;
+// IP muda (DHCP, troca de porta, roteador reiniciado); MAC e' a identidade.
+// Guardamos poucas trocas por aparelho para responder "qual era o IP antes?"
+// sem transformar o documento de telemetria em um log sem fim.
+const IP_HISTORICO_MAX = 12;
 
 const SAUDE_VALIDA = ['saudavel', 'atencao', 'ruim', 'desconhecida'];
 const NIVEIS = ['ok', 'atencao', 'critico'];
@@ -238,6 +242,7 @@ function mesclarDispositivos(anteriores, atuais, agora) {
   const primeiraVez = !Array.isArray(anteriores) || !anteriores.length;
   const porMac = new Map(lista.filter((d) => d && d.mac).map((d) => [d.mac, { ...d, ativo: false }]));
   const novos = [];
+  const mudaramIp = [];
   atuais.forEach((d) => {
     const antes = porMac.get(d.mac);
     if (!antes) {
@@ -246,7 +251,12 @@ function mesclarDispositivos(anteriores, atuais, agora) {
       if (!primeiraVez) novos.push(registro);
       return;
     }
-    porMac.set(d.mac, {
+    const ipAntes = antes.ip || null;
+    const mudouIp = !!ipAntes && ipAntes !== d.ip;
+    const ipHistorico = mudouIp
+      ? [...(Array.isArray(antes.ipHistorico) ? antes.ipHistorico : []), { de: ipAntes, para: d.ip, em: agora }].slice(-IP_HISTORICO_MAX)
+      : (Array.isArray(antes.ipHistorico) ? antes.ipHistorico : []);
+    const atualizado = {
       ...antes,
       ip: d.ip,
       // nome só é sobrescrito quando a resolução DEU certo - senão um DNS
@@ -255,11 +265,14 @@ function mesclarDispositivos(anteriores, atuais, agora) {
       visto: agora,
       ativo: true,
       desde: antes.desde || agora,
-    });
+      ipHistorico,
+    };
+    porMac.set(d.mac, atualizado);
+    if (mudouIp) mudaramIp.push(atualizado);
   });
   // ativos primeiro, e dentro de cada grupo o visto mais recente na frente
   const todos = [...porMac.values()].sort((a, b) => (b.ativo ? 1 : 0) - (a.ativo ? 1 : 0) || (b.visto || 0) - (a.visto || 0));
-  return { dispositivos: todos.slice(0, MACS_CONHECIDOS_MAX), novos, primeiraVez };
+  return { dispositivos: todos.slice(0, MACS_CONHECIDOS_MAX), novos, mudaramIp, primeiraVez };
 }
 
 // resumo por unidade pro painel: quantos aparelhos a loja enxerga e quantos
@@ -363,11 +376,54 @@ function discosComProblema(docs) {
     .sort((a, b) => NIVEIS.indexOf(b.nivel) - NIVEIS.indexOf(a.nivel));
 }
 
+// ------------------------------------------------------------------ VMs
+//
+// So o HOST Hyper-V reporta isto (o agente devolve $null onde Get-VM nao
+// existe). E' assim que se sabe que uma VM caiu: VM desligada nao consegue
+// falar de si mesma - quem enxerga o estado real e' o host, que esta sempre
+// ligado. Estados normalizados pra portugues, pra tela e pro alerta lerem
+// igual (o Windows devolve Running/Off/Saved/Paused).
+function normalizarEstadoVm(e) {
+  const t = String(e == null ? '' : e).toLowerCase();
+  if (/run|execu/.test(t)) return 'Executando';
+  if (/off|deslig/.test(t)) return 'Desligada';
+  if (/save|salv/.test(t)) return 'Salva';
+  if (/paus/.test(t)) return 'Pausada';
+  return texto(e, 20) || 'Desconhecido';
+}
+// null = o agente NAO reportou VMs (maquina comum, sem Hyper-V) -> nao mexe em
+// nada. [] = host Hyper-V que hoje nao tem VM nenhuma. Ordenado por nome pra
+// comparacao estavel (senao a ordem do Get-VM faria parecer "mudou" sem mudar).
+function sanitizarVms(vms) {
+  if (!Array.isArray(vms)) return null;
+  const out = vms
+    .map((v) => ({ nome: texto(v && v.nome, 80), estado: normalizarEstadoVm(v && v.estado) }))
+    .filter((v) => v.nome)
+    .slice(0, 200)
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+  return out;
+}
+// VM que estava Executando e agora NAO esta = queda inesperada. VM que ja
+// estava desligada (voce a deixou assim de proposito) nao gera nada: sem
+// transicao a partir de Executando, sem alarme - foi a decisao do Master
+// ("so avisar quando cair").
+function quedasDeVm(antesArr, depoisArr) {
+  const antes = {};
+  (Array.isArray(antesArr) ? antesArr : []).forEach((v) => { if (v && v.nome) antes[v.nome] = v.estado; });
+  const caidas = [];
+  for (const v of (Array.isArray(depoisArr) ? depoisArr : [])) {
+    if (antes[v.nome] === 'Executando' && v.estado !== 'Executando') {
+      caidas.push({ nome: v.nome, estado: v.estado });
+    }
+  }
+  return caidas;
+}
+
 module.exports = {
   sanitizarRam,
   LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
   UPTIME_REINICIAR_DIAS,
-  sanitizarDisco, avaliarDisco, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
+  sanitizarDisco, avaliarDisco, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
   sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
   resumoDispositivos, discosComProblema, panorama,
 };

@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const multer = require('multer');
 
 const compression = require('compression');
@@ -92,6 +93,7 @@ const termoResponsabilidade = require('./termoResponsabilidade');
 const saltiversoImport = require('./saltiversoImport');
 const saltiversoVendas = require('./saltiversoVendas');
 const estacaoComida = require('./estacaoComida');
+const estacaoMesasQr = require('./estacaoMesasQr');
 const saltiversoFechamento = require('./saltiversoFechamento');
 const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
@@ -1743,11 +1745,42 @@ app.get('/api/loja-status/papel-de-parede', async (req, res) => {
 app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (req, res) => {
   try {
     await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null);
-    const arte = await lojaStatus.papelDeParedeDe(req.params.codigo);
+    const arte = await lojaStatus.papelDeParedeDe(req.params.codigo, req.params.posto);
     if (!arte || !arte.caminho) return res.sendStatus(404);
+    // arte DESTA maquina ja vem pronta (loja/codigo/logos): o agente NAO deve
+    // carimbar por cima, senao escreve duplicado. A arte do grupo/marca continua
+    // sendo carimbada (sem header). Ver Aplicar-PapelDeParede no vigiaScript.js.
+    if (arte.daMaquina) res.set('X-NOC-Carimbo', 'nao');
     storage.streamArquivo(arte.caminho, arte.tipo || 'image/jpeg', res);
   } catch (err) {
     res.status(403).json({ error: err.message });
+  }
+});
+
+// ARTE DE PAPEL DE PAREDE DESTA MAQUINA (pedido do Master: "cada computador
+// tem sua arte"). auth.requireAuth EXPLICITO: estas rotas estao ACIMA do
+// app.use('/api', auth.requireAuth) (pra conviver com a GET publica logo
+// acima), entao sem ele req.isMaster vinha vazio e o requireMaster barrava ate
+// o proprio Master. Sobe uma imagem so pra este computador; ela ganha da arte do
+// grupo/marca e o agente NAO carimba por cima (ver o header acima). Master-only.
+app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
+    const { codigo, posto } = req.params;
+    const arte = { caminho: null, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() };
+    arte.caminho = await storage.salvarArquivo('parque', req.file, `papel-de-parede-maquina-${String(codigo).replace(/[^\w-]/g, '_')}-${String(posto).replace(/[^\w-]/g, '_')}`);
+    const salvo = await lojaStatus.definirArteDaMaquina(codigo, posto, arte);
+    res.json(salvo);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const r = await lojaStatus.removerArteDaMaquina(req.params.codigo, req.params.posto);
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -1805,7 +1838,12 @@ app.get('/api/loja-status/:codigo/computadores/:posto/comando-instalacao', auth.
     const { codigo, posto } = req.params;
     const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
     const windowsAntigo = await lojaStatus.windowsAntigoDoComputador(codigo, posto);
-    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }) });
+    // devolve o windowsAntigo junto: e' ele que decide COMO a tela manda colar.
+    // No console do Server 2012 R2 / Windows 8.1 nao existe Ctrl+V - mandar
+    // "cole com Ctrl+V" ali faz a pessoa apertar e nao acontecer nada, sem
+    // erro nenhum pra investigar (caso real do BOS do Pulse). Sai daqui, e nao
+    // de um flag repetido na tela, pra nunca discordar da ficha.
+    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }), windowsAntigo });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5214,6 +5252,31 @@ app.put('/api/loja-status/:codigo/computadores/:posto/politica', auth.requireMas
     const politica = await lojaStatus.definirPolitica(req.params.codigo, req.params.posto, req.body);
     broadcast('loja-status-atualizado', { codigo: req.params.codigo, posto: req.params.posto });
     res.json(politica);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Ping de um aparelho da LAN. O Render nao enxerga a rede privada da loja;
+// quem faz a verificacao e o NOCZenith do computador que viu aquele MAC na
+// propria tabela ARP. IP e MAC NAO vem do navegador: sao relidos da ultima
+// telemetria salva, evitando transformar o endpoint numa caixa de comando.
+app.post('/api/loja-status/:codigo/computadores/:posto/dispositivos/:mac/ping', auth.requireMaster, async (req, res) => {
+  try {
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador || computador.tipo !== 'interno') return res.status(404).json({ error: 'Computador interno com NOCZenith não encontrado.' });
+    const mac = String(req.params.mac || '').trim().toLowerCase().replace(/-/g, ':');
+    const dispositivo = (computador.dispositivos || []).find((d) => d.mac === mac);
+    if (!dispositivo || !dispositivo.ip) return res.status(404).json({ error: 'Esse aparelho não está na última varredura de rede.' });
+    const ip = String(dispositivo.ip);
+    // IP foi sanitizado na telemetria (IPv4); ainda assim ele nunca sai do
+    // corpo da requisição. O comando só testa duas vezes e devolve latência.
+    const comando = [
+      `$r = Test-Connection -ComputerName '${ip}' -Count 2 -ErrorAction SilentlyContinue`,
+      `if ($r) { "PING OK · ${ip} · $([Math]::Round((($r | Measure-Object ResponseTime -Average).Average), 0)) ms" } else { "PING FALHOU · ${ip}" }`,
+    ].join('\n');
+    await lojaStatus.enfileirarComando(computador.codigo, computador.posto, comando, { origem: 'noc-ping-dispositivo' });
+    res.json({ ok: true, ip, mac, mensagem: `Ping de ${ip} enfileirado. O resultado aparecerá no último comando desta máquina.` });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -9019,6 +9082,23 @@ app.get('/api/estacao/fechamento', requireSection('estacao-fechamento'), async (
     const unidade = req.query.unidade;
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     res.json(await estacaoComida.fechamentoDoDia(unidade, req.query.data));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// FOLHA DE QR DAS MESAS (ver estacaoMesasQr.js): PDF em A4 com um adesivo
+// por mesa, de `de` até `ate`. Fica com quem fecha o dia (gerente), não com
+// o garçom - é tarefa de montar o salão, não de atender. O QR grava a URL
+// oficial (APP_BASE_URL), não o host do pedido: o adesivo fica colado na
+// mesa por meses e não pode apontar pra um endereço de teste.
+app.get('/api/estacao/mesas-qr.pdf', requireSection('estacao-fechamento'), (req, res) => {
+  try {
+    const unidade = String(req.query.unidade || '').trim();
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const mesas = estacaoMesasQr.faixaDeMesas(req.query.de, req.query.ate);
+    estacaoMesasQr.writePDF(res, {
+      unidade, unidadeNome: ESTACAO_UNIDADES_NOMES[unidade], mesas, baseUrl: APP_BASE_URL,
+      nomeArquivo: `qr-mesas-${mesas[0]}-a-${mesas[mesas.length - 1]}.pdf`,
+    });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -14926,14 +15006,29 @@ app.post('/api/ifood/sincronizar', auth.requireMaster, async (req, res) => {
   res.json(status);
 });
 
-// `extensions: ['html']` faz /atendimento servir atendimento.html - o link que
-// vai pro cliente para de ter cara de arquivo. Vale pras 59 telas.
+// URLs das telas sao sempre curtas: /central-solucoes, nunca
+// /central-solucoes.html. Favoritos, links de e-mail e codigo antigo continuam
+// funcionando, mas recebem um redirect permanente para a URL oficial. Query
+// string e preservada (ex.: /fechamentos.html?grupo=ARCFOOD vira
+// /fechamentos?grupo=ARCFOOD).
 //
-// O endereco COM .html continua respondendo igual, e NAO redireciona: link
-// que ja foi mandado pra cliente, favorito de gente da operacao e o endereco
-// que o NOCZenith abre na maquina de loja (ver montarScriptVigia) tem que
-// continuar valendo exatamente como esta. Os dois enderecos, mesma pagina.
-app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
+// So redireciona arquivos HTML que existem dentro de public. Assim uma rota de
+// API, um anexo ou um caminho inexistente nunca e' alterado por engano.
+const DIRETORIO_PUBLICO = path.join(__dirname, 'public');
+app.get(/^(.*)\.html$/, (req, res, next) => {
+  const rotaHtml = req.path;
+  const arquivo = path.resolve(DIRETORIO_PUBLICO, '.' + rotaHtml);
+  const dentroDoPublico = arquivo === DIRETORIO_PUBLICO || arquivo.startsWith(DIRETORIO_PUBLICO + path.sep);
+  if (!dentroDoPublico || !fs.existsSync(arquivo)) return next();
+
+  const rotaCurta = rotaHtml.slice(0, -'.html'.length);
+  const destino = (rotaCurta === '/index' ? '/' : rotaCurta) + req.originalUrl.slice(rotaHtml.length);
+  return res.redirect(308, destino);
+});
+
+// `extensions: ['html']` serve a pagina depois do redirect: /atendimento
+// encontra atendimento.html, sem expor extensao em nenhum link do sistema.
+app.use(express.static(DIRETORIO_PUBLICO, { extensions: ['html'] }));
 
 // ROTA DE API QUE NAO EXISTE RESPONDE JSON, nao a pagina 404 do Express.
 // Todo lugar do app faz `await resp.json()` na resposta - com HTML no corpo,
@@ -15245,6 +15340,16 @@ function aquecerBoot(promessa, ms) {
         if (t.tipo === 'disco') {
           push.notifyDiscoAlerta(nome, t.codigo, t.nome, t.posto, t.nivel, t.motivos)
             .catch((err) => console.error('Erro no push de alerta de disco:', err.message));
+          continue;
+        }
+        if (t.tipo === 'vm-caiu') {
+          push.notifyVmCaiu(nome, t.codigo, t.nome, t.posto, t.vms)
+            .catch((err) => console.error('Erro no push de VM caiu:', err.message));
+          continue;
+        }
+        if (t.tipo === 'comando-sem-admin') {
+          push.notifyComandoSemAdmin(nome, t.codigo, t.nome, t.posto, t.motivo)
+            .catch((err) => console.error('Erro no push de comando sem admin:', err.message));
           continue;
         }
         // dispositivo de rede marcado (impressora/VM) sumiu/voltou (ver

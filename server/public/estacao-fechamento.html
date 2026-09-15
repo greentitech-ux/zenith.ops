@@ -69,6 +69,22 @@
     <div class="est-erro" id="erro-precos"></div>
   </div>
 
+  <!-- QR DAS MESAS: o garçom lê o QR pra abrir a conta (estacao-salao.html),
+       e este é o único lugar que GERA o QR. Fica no fechamento porque montar
+       o salão é tarefa de quem gerencia, não de quem atende. -->
+  <div class="est-card">
+    <h2>QR Code das mesas</h2>
+    <div class="est-sub">Imprima, recorte e cole um em cada mesa. O QR só diz <b>qual mesa é</b> - o garçom lê e a conta da mesa aparece. Saem 12 por folha A4.</div>
+    <div class="est-barra" style="margin-top:10px;">
+      <label style="flex:0 1 140px;">Da mesa<input id="qr-de" type="number" inputmode="numeric" min="1" max="9999" value="1"></label>
+      <label style="flex:0 1 140px;">Até a mesa<input id="qr-ate" type="number" inputmode="numeric" min="1" max="9999" value="24"></label>
+    </div>
+    <div class="est-acoes" style="margin-top:10px;">
+      <button type="button" class="est-btn principal" onclick="imprimirQrMesas()">🖨️ Gerar folha (PDF)</button>
+    </div>
+    <div class="est-erro" id="erro-qr"></div>
+  </div>
+
 </div>
 
 <script src="/recolher.js"></script>
@@ -284,6 +300,22 @@ function addFeriado(){
 function tirarFeriado(d){
   PRECOS.feriados = (PRECOS.feriados||[]).filter(x=>x!==d);
   renderFeriados();
+}
+
+// A folha sai do servidor (estacaoMesasQr.js) e abre no visualizador do
+// tema.js, o mesmo dos outros relatórios: dá pra conferir antes de mandar
+// pra impressora. A faixa é validada aqui só pra mensagem sair na hora; a
+// regra de verdade (limite de mesas por folha) é a do servidor.
+function imprimirQrMesas(){
+  const erro = document.getElementById('erro-qr');
+  erro.textContent = '';
+  const unidade = unidadeAtual();
+  if(!unidade){ erro.textContent = 'Escolha a unidade.'; return; }
+  const de = Number(document.getElementById('qr-de').value);
+  const ate = Number(document.getElementById('qr-ate').value);
+  if(!(de > 0) || !(ate >= de)){ erro.textContent = 'Informe a faixa de mesas: a final tem que ser maior ou igual à inicial.'; return; }
+  const url = `/api/estacao/mesas-qr.pdf?unidade=${encodeURIComponent(unidade)}&de=${de}&ate=${ate}&token=${encodeURIComponent(authToken)}`;
+  verRelatorio(url, `QR das mesas ${de} a ${ate} · PDF`);
 }
 
 async function salvarPrecos(){

@@ -315,7 +315,7 @@
           <span id="szc-anexo-icone">📎</span>
           <input type="file" id="szc-nova-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
         </label>
-        <input type="text" class="szc-input" id="szc-nova-msg" placeholder="escreva sua mensagem..." maxlength="1000">
+        <input type="text" class="szc-input nao-maiusc" id="szc-nova-msg" placeholder="escreva sua mensagem..." maxlength="1000">
         <button type="button" class="szc-enviar" id="szc-enviar-msg">➤</button>
       </div>
     </div>`);
@@ -383,7 +383,7 @@
       <div class="szc-label">Assunto</div>
       <select class="szc-input" id="szc-assunto">${ASSUNTOS.map((a) => `<option value="${esc(a)}" ${a === 'Acesso/Senha' ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select>
       <div class="szc-label">Mensagem</div>
-      <textarea class="szc-textarea" id="szc-texto" maxlength="1000" placeholder="ex: não consigo entrar no sistema"></textarea>
+      <textarea class="szc-textarea nao-maiusc" id="szc-texto" maxlength="1000" placeholder="ex: não consigo entrar no sistema"></textarea>
       <div class="szc-label">Anexo (opcional)</div>
       <label class="szc-anexo-abrir" id="szc-inicial-anexo-label">
         <span id="szc-inicial-anexo-icone">📎</span>
@@ -693,7 +693,7 @@
           <span id="szc-atend-anexo-icone">📎</span>
           <input type="file" id="szc-atend-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
         </label>
-        <input type="text" class="szc-input" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
+        <input type="text" class="szc-input nao-maiusc" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
         <button type="button" class="szc-enviar" id="szc-atend-enviar">➤</button>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
@@ -941,7 +941,7 @@
     <div class="szc-dm-lista"></div>
     <div class="szc-dm-corpo" style="display:none;"></div>
     <div class="szc-dm-pe" style="display:none;">
-      <textarea class="szc-dm-texto" rows="1" placeholder="Escreva sua resposta..." maxlength="1000"></textarea>
+      <textarea class="szc-dm-texto nao-maiusc" rows="1" placeholder="Escreva sua resposta..." maxlength="1000"></textarea>
       <button type="button" class="szc-dm-enviar">Enviar</button>
     </div>
   </div></div>`);

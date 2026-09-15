@@ -117,8 +117,19 @@ async function setConfig(patch) {
 // O degrau do meio e o que ja estava no ar antes desta mudanca; quem so tem
 // arte por marca continua funcionando igual.
 const chaveArte = (rede, marca) => `${rede}:${marca}`;
-async function papelDeParedeDe(codigo) {
+async function papelDeParedeDe(codigo, posto) {
   const cfg = await getConfig();
+  // ARTE DESTA MAQUINA vem primeiro (pedido do Master: "cada computador tem
+  // sua arte"). Ela ja traz tudo pronto (loja, codigo, logos), entao o agente
+  // NAO carimba nada por cima - quem sinaliza isso e a rota GET, por header.
+  // Sai do espelho em memoria, sem custo de leitura (§3).
+  if (posto) {
+    try {
+      const doc = (await garantirEspelho()).get(docIdFor(codigo, posto));
+      const daMaquina = doc && doc.papelDeParedeArte && doc.papelDeParedeArte.caminho ? doc.papelDeParedeArte : null;
+      if (daMaquina) return { ...daMaquina, marca: null, rede: null, daMaquina: true };
+    } catch (e) { /* sem espelho: cai no fluxo normal */ }
+  }
   const doParque = cfg && cfg.papelDeParede && cfg.papelDeParede.caminho ? cfg.papelDeParede : null;
   // perfil() devolve null pra unidade que nunca foi cadastrada em runtime -
   // nesse caso nao ha marca e a maquina cai no papel de parede do parque
@@ -399,6 +410,11 @@ const DISPOSITIVO_OFFLINE_LIMIAR_MS = Number(process.env.LOJA_STATUS_DISPOSITIVO
 // ~15KB no doc (limite do Firestore e 1MB) e cobrem semanas; alem disso o
 // backup diario da colecao guarda 30 dias de retratos completos.
 const EVENTOS_MAX = 200;
+// comando que exige admin espera a instancia SYSTEM aparecer. A sondagem dela
+// e' a cada ~90s; 15min de folga cobre boot lento sem deixar a fila travada.
+// Alem disso, a maquina instalada SEM Administrador nunca tera SYSTEM: aqui a
+// gente desiste com mensagem clara em vez de segurar a vaga unica de comando.
+const COMANDO_ELEVACAO_TIMEOUT_MS = 15 * 60 * 1000;
 
 // historico de mudancas de IP por computador (pedido do Master: "preciso de
 // dados quando o IP da maquina mudar"). Cobre os DOIS IPs que o NOC enxerga:
@@ -904,7 +920,13 @@ async function heartbeat(codigo, posto, info, token) {
   // verdade sem receber)
   let comandoPendente = null;
   if (tokenOk && atual.tipo === 'interno' && atual.comandoPendenteId) {
-    comandoPendente = await entregarComandoPendente(codigo, posto || 'principal');
+    // souAdmin: o agente diz se esta rodando elevado (a instancia SYSTEM diz
+    // true; a de login, usuario comum, false). soComandoAdmin: a sondagem da
+    // instancia SYSTEM enquanto cede a vez - "so me de comando que exige admin,
+    // deixa o resto pra instancia de login".
+    comandoPendente = await entregarComandoPendente(codigo, posto || 'principal', {
+      souAdmin: !!dados.souAdmin, soComandoAdmin: !!dados.soComandoAdmin,
+    });
   }
   // thread de chat (ver enviarMensagem/responderChat) - manda sempre a
   // lista inteira (capada, pequena), o NOCZenith que guarda localmente
@@ -929,7 +951,7 @@ async function heartbeat(codigo, posto, info, token) {
   // so busca a configuracao inteira (1 leitura) QUANDO este numero muda -
   // pesquisar de tempos em tempos custaria milhares de leituras por dia (§3).
   const politicaLigada = !!(atual && atual.politica && atual.politica.papelDeParedeAtivo);
-  const arteDaMaquina = politicaLigada ? await papelDeParedeDe(codigo) : null;
+  const arteDaMaquina = politicaLigada ? await papelDeParedeDe(codigo, posto || 'principal') : null;
   return {
     mensagemPendente,
     comandoPendente,
@@ -1117,6 +1139,28 @@ function sanitizarPolitica(entrada) {
   };
 }
 
+// ARTE DE PAPEL DE PAREDE DESTA MAQUINA (pedido do Master, 15/09/2026: "cada
+// computador tem sua arte"). Guardada no doc do computador. Sobe a versao da
+// aplicacao (via politicaVersao) pra o agente rebaixar a imagem nova na
+// proxima consulta - mesmo motivo do versaoAplicacao. A arte da maquina ganha
+// da arte do grupo/marca (ver papelDeParedeDe).
+async function definirArteDaMaquina(codigo, posto, arte) {
+  const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data();
+  if (!atual) throw new Error('Computador não encontrado.');
+  const politicaVersao = Number(atual.politicaVersao || 0) + 1;
+  await gravarEEspelhar(codigo, posto, { papelDeParedeArte: arte, politicaVersao });
+  return { ...arte, politicaVersao };
+}
+async function removerArteDaMaquina(codigo, posto) {
+  const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data();
+  if (!atual) throw new Error('Computador não encontrado.');
+  const politicaVersao = Number(atual.politicaVersao || 0) + 1;
+  // null (nao delete) pra o merge do gravarEEspelhar limpar o campo; a maquina
+  // volta pra arte do grupo/marca na proxima consulta
+  await gravarEEspelhar(codigo, posto, { papelDeParedeArte: null, politicaVersao });
+  return { politicaVersao };
+}
+
 async function definirPolitica(codigo, posto, entrada) {
   const politica = sanitizarPolitica(entrada);
   // a versao sobe a cada mudanca: e assim que o agente sabe que tem politica
@@ -1237,7 +1281,7 @@ async function configuracaoAgente(codigo, posto, token) {
   const politica = sanitizarPolitica(atual.politica);
   // so resolve a arte quando a maquina de fato aplica papel de parede: quem
   // esta com a chave desligada nao paga leitura de config nem de unidades
-  const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo) : null;
+  const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo, posto) : null;
   return {
     noPulsoPrint: !!atual.noPulsoPrint,
     capturarAgora,
@@ -1618,6 +1662,33 @@ async function registrarTelemetria(codigo, posto, dados, token) {
       const resumo = merge.novos.slice(0, 5).map((d) => `${d.nome || d.ip} (${d.mac})`).join(', ');
       eventos = [...eventos, { tipo: 'dispositivo-novo', em: agora, detalhe: `${merge.novos.length} novo(s) na rede: ${resumo}`.slice(0, 200) }];
       patch.eventos = eventos.slice(-EVENTOS_MAX);
+    }
+    // O MAC e' a identidade do aparelho. Se ele reaparece com outro IP, nao
+    // tratamos como equipamento novo: registramos a troca para a operacao
+    // conseguir seguir impressora, PDV ou roteador depois de um DHCP.
+    if (merge.mudaramIp && merge.mudaramIp.length) {
+      const resumo = merge.mudaramIp.slice(0, 5).map((d) => `${d.nome || d.mac}: ${d.ipHistorico[d.ipHistorico.length - 1].de} → ${d.ip}`).join(', ');
+      eventos = [...eventos, { tipo: 'dispositivo-ip-mudou', em: agora, detalhe: `${merge.mudaramIp.length} IP(s) alterado(s): ${resumo}`.slice(0, 200) }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+    }
+  }
+
+  // ESTADO DAS VMs (so o HOST Hyper-V reporta - ver Medir-VMs no agente).
+  // E' o unico jeito honesto de saber que uma VM caiu: VM desligada nao
+  // reporta nada de si mesma, entao quem enxerga e' o host, sempre ligado.
+  // So grava quando MUDA: a telemetria chega a cada ~5min, mas o disco do
+  // Firestore nao pode levar uma escrita a cada 5min por host sem motivo.
+  const vms = nocMaquina.sanitizarVms(dados && dados.vms);
+  if (vms && JSON.stringify(vms) !== JSON.stringify(atual.vms || null)) {
+    const caidas = nocMaquina.quedasDeVm(atual.vms, vms);
+    patch.vms = vms;
+    patch.vmsEm = agora;
+    if (caidas.length) {
+      eventos = [...eventos, { tipo: 'vm', em: agora, detalhe: `VM caiu: ${caidas.map((c) => `${c.nome} (${c.estado})`).join(', ')}`.slice(0, 200) }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+      // igual disco/link: o agente marca, a varredura periodica notifica - uma
+      // falha de push nunca pode derrubar o caminho do agente
+      patch.vmAlertaPendente = caidas;
     }
   }
 
@@ -2424,6 +2495,12 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
   const registro = {
     id: comandoRef.id, codigo, posto, comando: comandoFinal,
     origem: op.origem || 'agente', acaoId: op.acaoId || null, aprovacaoId: op.aprovacaoId || null,
+    // requerAdmin: comando que so roda elevado (instalar/desinstalar). O
+    // servidor SO entrega pra um heartbeat que provou ser Administrador (a
+    // instancia SYSTEM do NOCZenith) - ver entregarComandoPendente/heartbeat.
+    // Sem isso, a instancia de LOGIN (usuario comum) pegava o comando e ele
+    // "pulava" na maquina, exatamente o problema que esta entrega resolve.
+    requerAdmin: !!op.requerAdmin,
     status: 'pendente', criadoEm: new Date().toISOString(),
     entregueEm: null, executadoEm: null, resultado: null, erro: null,
   };
@@ -2438,7 +2515,27 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
 // comando buscar). Marca 'entregue' e devolve o texto do comando pro
 // NOCZenith rodar; se ja tiver sido entregue antes (heartbeat duplicado),
 // nao entrega de novo
-async function entregarComandoPendente(codigo, posto) {
+// comando-admin que ninguem elevado veio buscar (maquina sem Administrador):
+// marca o comando como erro e libera a vaga unica de comando do computador.
+async function marcarComandoExpiradoSemAdmin(comandoId, codigo, posto, msg) {
+  const comandoRef = COMANDOS_COLLECTION.doc(String(comandoId || ''));
+  const ref = COLLECTION.doc(docIdFor(codigo, posto));
+  await db.runTransaction(async (tx) => {
+    const cs = await tx.get(comandoRef);
+    // so mexe se ainda for ESTE o pendente e ainda estiver pendente: entre a
+    // leitura da varredura e aqui, a instancia SYSTEM pode ter chegado
+    const rs = await tx.get(ref);
+    if (rs.exists && rs.data().comandoPendenteId === comandoId) {
+      tx.update(ref, { comandoPendenteId: null, comandoAguardandoElevacaoDesde: null });
+    }
+    if (cs.exists && cs.data().status === 'pendente') {
+      tx.update(comandoRef, { status: 'erro', erro: msg, executadoEm: new Date().toISOString() });
+    }
+  });
+  cache.invalidar();
+}
+
+async function entregarComandoPendente(codigo, posto, opcoes) {
   const id = docIdFor(codigo, posto);
   const ref = COLLECTION.doc(id);
   return db.runTransaction(async (tx) => {
@@ -2451,6 +2548,21 @@ async function entregarComandoPendente(codigo, posto) {
     if (!comandoSnap.exists) { tx.update(ref, { comandoPendenteId: null }); return null; }
     const comando = comandoSnap.data();
     if (comando.status !== 'pendente') return null;
+    const opts = opcoes || {};
+    // ---- ELEVACAO ----
+    // comando que exige admin so vai pra um heartbeat que provou ser admin (a
+    // instancia SYSTEM). Pro heartbeat comum (login), fica pendente e marca
+    // desde quando espera elevacao - a varredura desiste com mensagem clara se
+    // a maquina nao tiver NOCZenith elevado (instalado sem Administrador).
+    if (comando.requerAdmin && !opts.souAdmin) {
+      if (!snap.data().comandoAguardandoElevacaoDesde) {
+        tx.update(ref, { comandoAguardandoElevacaoDesde: new Date().toISOString() });
+      }
+      return null;
+    }
+    // a sondagem da instancia SYSTEM (soComandoAdmin) so quer comando-admin:
+    // comando comum continua com a instancia de login, sem disputa
+    if (opts.soComandoAdmin && !comando.requerAdmin) return null;
     // segredo entra SO aqui, na entrega: o registro do comando (o que o Master
     // ve no historico) fica com o marcador, nunca com a senha
     let texto;
@@ -2461,7 +2573,9 @@ async function entregarComandoPendente(codigo, posto) {
       tx.update(ref, { comandoPendenteId: null });
       return null;
     }
-    tx.update(comandoRef, { status: 'entregue', entregueEm: new Date().toISOString() });
+    const patchEntrega = { status: 'entregue', entregueEm: new Date().toISOString() };
+    tx.update(comandoRef, patchEntrega);
+    if (snap.data().comandoAguardandoElevacaoDesde) tx.update(ref, { comandoAguardandoElevacaoDesde: null });
     return { comandoId: comando.id, comando: texto };
   });
 }
@@ -2778,6 +2892,31 @@ async function varrerAlertas() {
         tipo: 'disco', nivel: candidato.discoAlertaPendente,
         motivos: candidato.discoMotivos || [],
       });
+    }
+    // VM DO HOST caiu (Executando -> Desligada/Salva). Quem detecta e' a
+    // telemetria do host (registrarTelemetria); aqui e' so o aviso, de um
+    // lugar so, junto com o resto.
+    if (Array.isArray(candidato.vmAlertaPendente) && candidato.vmAlertaPendente.length) {
+      const caidas = candidato.vmAlertaPendente;
+      await gravarEEspelhar(candidato.codigo, candidato.posto, { vmAlertaPendente: null });
+      transicoes.push({
+        codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+        tipo: 'vm-caiu', vms: caidas,
+      });
+    }
+    // COMANDO-ADMIN sem executor elevado: fica esperando desde
+    // comandoAguardandoElevacaoDesde. Passou do teto -> desiste, libera a vaga
+    // unica de comando e avisa (a maquina foi instalada sem Administrador).
+    if (candidato.comandoPendenteId && candidato.comandoAguardandoElevacaoDesde) {
+      const espera = Date.now() - new Date(candidato.comandoAguardandoElevacaoDesde).getTime();
+      if (espera >= COMANDO_ELEVACAO_TIMEOUT_MS) {
+        const msg = 'Este computador nao tem o NOCZenith elevado (SYSTEM). Reinstale como Administrador para instalar/desinstalar programas.';
+        try { await marcarComandoExpiradoSemAdmin(candidato.comandoPendenteId, candidato.codigo, candidato.posto, msg); } catch (e) { /* proximo giro tenta de novo */ }
+        transicoes.push({
+          codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+          tipo: 'comando-sem-admin', motivo: msg,
+        });
+      }
     }
     // máquina reiniciou/desligou (pedido do Master: "se ele foi reiniciado
     // ou desligado esse deve ser os alertas"). Quem detecta é o heartbeat,
@@ -3372,6 +3511,7 @@ module.exports = {
   // precisa comecar cada cenario do zero
   _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
+  definirArteDaMaquina, removerArteDaMaquina,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
   // invalidarEspelho() de propósito guarda o mapa (o comentário lá explica:

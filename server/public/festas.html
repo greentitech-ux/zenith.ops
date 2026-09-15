@@ -157,7 +157,7 @@
         <div class="sub" id="desconto-preview" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin:2px 0 8px;"></div>
         <div class="sub" style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">Exige usuário e senha de quem autoriza (Gerente, Assistente-gerente, Admin ou Master).</div>
         <div class="grid2">
-          <div><label>Usuário</label><input type="text" id="f-gerenteUsername" autocomplete="off"></div>
+          <div><label>Usuário</label><input type="text" class="valor-exato" id="f-gerenteUsername" autocomplete="off"></div>
           <div><label>Senha</label><input type="password" id="f-gerenteSenha" autocomplete="off"></div>
         </div>
       </div>
@@ -686,7 +686,7 @@ function blocoMissaoHtml(chave, m, isNovo){
       </div>
       ${isNovo ? `
         <label>Código (identificador interno - só letras minúsculas/números/hífen, ex: "polaris")</label>
-        <input type="text" id="t-${prefixo}-codigo" placeholder="ex: polaris" maxlength="30" required>
+        <input type="text" class="valor-exato" id="t-${prefixo}-codigo" placeholder="ex: polaris" maxlength="30" required>
       ` : ''}
       <label>Nome</label>
       <input type="text" id="t-${prefixo}-label" value="${escapeHtml(m.label||'')}" maxlength="60" required>

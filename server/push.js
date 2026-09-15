@@ -826,6 +826,60 @@ async function notifyDiscoAlerta(unidadeNome, codigo, computadorNome, posto, niv
   }
 }
 
+async function notifyComandoSemAdmin(unidadeNome, codigo, computadorNome, posto, motivo) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const dados = {
+    title: '⚙️ Comando não rodou (sem Administrador)',
+    body: `${prefixo}${unidadeNome || codigo}: ${motivo || 'reinstale o NOCZenith como Administrador'}`,
+    tag: `noc-cmd-admin-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-comando-admin', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (comando sem admin):', err.message);
+      }
+    }
+  }
+}
+
+async function notifyVmCaiu(unidadeNome, codigo, computadorNome, posto, vms) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const quais = (vms || []).slice(0, 4).map((v) => `${v.nome} (${v.estado})`).join(', ') || 'uma VM';
+  const n = (vms || []).length;
+  const dados = {
+    title: n > 1 ? `🖥️ ${n} VMs caíram` : '🖥️ VM caiu',
+    body: `${prefixo}${unidadeNome || codigo}: ${quais}`,
+    tag: `noc-vm-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-vm', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (VM caiu):', err.message);
+      }
+    }
+  }
+}
+
 // máquina passou de mais uma semana sem reiniciar. Mesmo público e mesmo
 // espírito do alerta de disco: não é crítico, é lembrete de manutenção -
 // alguém precisa reiniciar aquele computador quando a loja fechar.
@@ -1158,7 +1212,11 @@ async function notifyRedeUnidade(unidadeNome, codigo, resumo, caiu) {
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
-    if (caiu && !podeReceberCritico(sub)) continue;
+    // NOC e' so pra Master ou Suporte com a tag - vale pros DOIS lados do
+    // ciclo. Antes o filtro so pegava a queda (caiu); o "voltou" ia pra todas
+    // as assinaturas, e a loja recebia "Rede voltou" no navegador dela (bug
+    // reportado 15/09: "as unidades estao recebendo notificacao").
+    if (!podeReceberCritico(sub)) continue;
     try {
       await webpush.sendNotification(sub, payload, { urgency: caiu ? 'high' : 'normal' });
     } catch (err) {
@@ -1498,7 +1556,7 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyDispositivoOffline, notifyRedeUnidade, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,

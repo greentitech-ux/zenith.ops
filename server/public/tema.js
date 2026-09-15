@@ -477,10 +477,25 @@
       // código que sabe que aquele pedaço é gente - o mesmo critério do
       // nomePessoa() que o servidor usa nos relatórios.
       + '.maiusc,.maiusc *{text-transform:uppercase;}'
+<<<<<<< HEAD
       // ESCAPES globais - só o que quebra se for redigitado à mão, não o que
       // é feio: bloco de código/comando (o comando de instalação do
       // NOCZenith é colado no PowerShell, e maiúsculo no Base64 não roda) e
       // o que o código marcar como valor exato (token, MAC, IP, chave).
+=======
+      // ESCAPES - só o que quebra se for redigitado à mão, não o que é feio:
+      // bloco de código/comando (o comando de instalação do NOCZenith é
+      // colado no PowerShell, e maiúsculo no Base64 não roda) e o que o
+      // código marcar como valor exato (token, MAC, IP, chave).
+      //
+      // E CHAT/MENSAGEM também é .nao-maiusc, por outro motivo. Master
+      // (14/09): "se for em chat ele fica padrão, do jeito que for escrito".
+      // Conversa não é dado de formulário: a caixa subia pra maiúsculo mas o
+      // balão mostrava o gravado (minúsculo), e quem digitava via uma coisa e
+      // recebia outra. Vale pra todo campo de mensagem: chat de suporte
+      // (suporte-chat.js), chat do chamado (tecnico/manutencao), ticket
+      // público, mensagem direta (usuarios/loja-status), advertência (rh).
+>>>>>>> origin/master
       + 'code,kbd,pre,samp,.nao-maiusc,.nao-maiusc *{text-transform:none;}'
       // valor que alguém RELÊ e redigita em outro lugar tem que sair como
       // está: chave Pix aleatória e senha gerada. Aqui não é feio x bonito -
@@ -492,6 +507,71 @@
     document.head.appendChild(st);
   }
   estiloMaiusculo();
+
+  // ---- DADO PREENCHIDO: o VALOR sobe pra maiúsculo, não só a exibição ----
+  //
+  // Master (14/09), depois de ver a caixa do chat em maiúsculo e a mensagem
+  // chegando em minúsculo: "quero que ao escrever, mesmo que esteja tudo
+  // minúsculo, se for em formulário, relatórios, tudo ficar MAIÚSCULA". Só o
+  // CSS não entrega isso: o campo mostrava MAIÚSCULO, gravava minúsculo, e
+  // em toda tela/lista que não usa .maiusc o dado chegava minúsculo.
+  //
+  // Então o que a pessoa DIGITA num campo de formulário vira maiúsculo de
+  // verdade, na hora, e é isso que segue pro servidor. Vale só pra dado novo:
+  // o histórico gravado continua como está (CLAUDE.md §1, sem migração) e a
+  // regra de CSS acima segue existindo pra ele aparecer maiúsculo na tela.
+  //
+  // A REGRA DE CSS É A FONTE DA VERDADE: só sobe o valor do campo que o
+  // navegador já está exibindo com text-transform:uppercase. Assim todas as
+  // exceções ficam num lugar só - chat (.nao-maiusc), senha, .valor-exato
+  // (username, código, chave Pix, MAC, IP), e os campos de usuário de 4
+  // letras do abastecimento, que trazem lowercase no style. Campo de busca
+  // também fica de fora: filtro não é dado preenchido.
+  function campoSobeValor(el) {
+    if (!el || !(el instanceof HTMLElement)) return false;
+    var tag = el.tagName;
+    if (tag === 'TEXTAREA') { /* segue */ }
+    else if (tag === 'INPUT') {
+      var tipo = (el.getAttribute('type') || 'text').toLowerCase();
+      if (tipo !== 'text') return false;
+    } else return false;
+    if (el.readOnly || el.disabled) return false;
+    if (/busca|filtro|pesquisa/i.test(el.id || '')) return false;
+    return getComputedStyle(el).textTransform === 'uppercase';
+  }
+  function subirValor(el) {
+    var v = el.value;
+    if (!v) return;
+    var up = v.toLocaleUpperCase('pt-BR');
+    if (up === v) return;
+    // guarda o cursor: o toLocaleUpperCase pode mudar o tamanho ("ß" vira
+    // "SS"), então o ajuste é pela diferença
+    var ini = el.selectionStart, fim = el.selectionEnd;
+    var delta = up.length - v.length;
+    el.value = up;
+    if (ini !== null && ini !== undefined) {
+      try { el.setSelectionRange(ini + delta, fim + delta); } catch (e) { /* tipo sem seleção */ }
+    }
+  }
+  // Teclado de celular escreve por COMPOSIÇÃO (autocorreção, acento morto):
+  // mexer no value no meio dela come letra no Android. Espera o
+  // compositionend e sobe tudo de uma vez.
+  var compondo = null;
+  document.addEventListener('compositionstart', function (e) { compondo = e.target; }, true);
+  document.addEventListener('compositionend', function (e) {
+    compondo = null;
+    if (campoSobeValor(e.target)) subirValor(e.target);
+  }, true);
+  document.addEventListener('input', function (e) {
+    if (e.target === compondo || e.isComposing) return;
+    if (campoSobeValor(e.target)) subirValor(e.target);
+  }, true);
+  // 'change' pega o que o input não vê: autopreenchimento do navegador e
+  // colagem por menu em alguns teclados
+  document.addEventListener('change', function (e) {
+    if (campoSobeValor(e.target)) subirValor(e.target);
+  }, true);
+
   // pra quem monta texto em JS (título de PDF na tela, alert, título da aba)
   window.maiusc = function (t) {
     return t === null || t === undefined ? t : String(t).toLocaleUpperCase('pt-BR');

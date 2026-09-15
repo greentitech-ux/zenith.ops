@@ -222,7 +222,7 @@
     </div>
     <form class="create" id="create-form">
       <label>Email<input type="email" id="c-email" required></label>
-      <label>Usuário (login curto, opcional - ex: "jn")<input type="text" id="c-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
+      <label>Usuário (login curto, opcional - ex: "jn")<input type="text" class="valor-exato" id="c-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
       <label>Senha temporária (mín. 8 caracteres)<input type="text" id="c-password" required minlength="8"></label>
 
       <div id="c-sections-wrap"></div>
@@ -256,7 +256,7 @@
   <div class="panel">
     <h2>Atualizar usuários (login) em massa</h2>
     <p style="font-size:12px;color:var(--muted);margin:-6px 0 12px;">Cole uma linha por acesso, no formato <code>email,usuário</code> (ex: copiado de uma planilha - vírgula ou tab entre as colunas). Aplica um por um e mostra o resultado de cada linha; se algum email não existir ou o usuário já estiver em uso, só aquela linha falha, o resto é aplicado normalmente.</p>
-    <textarea id="bulk-username-texto" rows="6" style="width:100%;font-family:var(--mono);font-size:12px;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);" placeholder="jessica.rayana@exemplo.com,jeh&#10;jessica.natacha@exemplo.com,jn&#10;aurea.morais@exemplo.com,aurea"></textarea>
+    <textarea class="valor-exato" id="bulk-username-texto" rows="6" style="width:100%;font-family:var(--mono);font-size:12px;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);" placeholder="jessica.rayana@exemplo.com,jeh&#10;jessica.natacha@exemplo.com,jn&#10;aurea.morais@exemplo.com,aurea"></textarea>
     <button type="button" class="primary" style="margin-top:10px;" onclick="aplicarUsernamesEmMassa()">Aplicar</button>
     <div id="bulk-username-resultado" style="margin-top:12px;"></div>
   </div>
@@ -335,7 +335,7 @@
   <div class="modal" style="max-width:400px;">
     <h3 style="margin:0;">💬 Mensagem direta</h3>
     <div id="mensagem-direta-destino" style="font-size:11.5px;color:var(--muted);margin:4px 0 12px;"></div>
-    <textarea id="mensagem-direta-texto" maxlength="500" placeholder="Escreva o aviso que vai aparecer pra essa pessoa, em qualquer tela do NoPulso que ela estiver (ou por notificação, se estiver com o app fechado)" style="width:100%;min-height:90px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+    <textarea class="nao-maiusc" id="mensagem-direta-texto" maxlength="500" placeholder="Escreva o aviso que vai aparecer pra essa pessoa, em qualquer tela do NoPulso que ela estiver (ou por notificação, se estiver com o app fechado)" style="width:100%;min-height:90px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
     <div id="mensagem-direta-status" style="font-size:12px;padding:8px 10px;border-radius:8px;margin-top:10px;display:none;"></div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
       <button type="button" class="back" style="cursor:pointer;" onclick="fecharMensagemDireta()">Cancelar</button>
@@ -366,7 +366,7 @@
     <h3 style="margin:0;">🧪 Criar acesso QA Master</h3>
     <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">Acesso 100% Master, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) sempre vão pra fila de aprovação - nunca executam direto.</p>
     <label>Email<input type="email" id="qm-email" required></label>
-    <label>Usuário (login curto, opcional)<input type="text" id="qm-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
+    <label>Usuário (login curto, opcional)<input type="text" class="valor-exato" id="qm-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
     <label>Senha temporária (mín. 8 caracteres)<input type="text" id="qm-password" required minlength="8"></label>
     <p class="err hidden" id="qa-master-err"></p>
     <div class="modal-actions">

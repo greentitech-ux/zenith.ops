@@ -284,7 +284,7 @@ function textoDoPdf(b) {
 function pedir(caminho, headers = {}) {
   return new Promise((resolve) => {
     const req = http.request({ host: '127.0.0.1', port: 8899, path: caminho, headers }, (res) => {
-      let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b }));
+      let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b, headers: res.headers }));
     });
     req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
     // 4s marcava timeout até em rota que respondia certo (relatório de
@@ -4055,8 +4055,11 @@ setTimeout(async () => {
       req.end();
     });
 
-    const comGzip = await pedirGzip('/fechamentos.html');
-    const semGzip = await pedir('/fechamentos.html');
+    // URL canonica (sem .html): desde as URLs curtas, /fechamentos.html devolve
+    // um 308 pra /fechamentos - pedir o .html trazia o corpo do redirect (47
+    // bytes), nao a pagina. O gzip vale na pagina de verdade.
+    const comGzip = await pedirGzip('/fechamentos');
+    const semGzip = await pedir('/fechamentos');
     const descomprimido = comGzip.encoding === 'gzip' ? zlib.gunzipSync(comGzip.corpo).toString('utf8') : comGzip.corpo.toString('utf8');
 
     const src = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
@@ -6775,6 +6778,301 @@ setTimeout(async () => {
   if (!okIpImpressora) ruins += 1;
   console.log(`${okIpImpressora ? '✓' : '✗'} NOC: o IP da impressora sai do painel (uma ação serve as 14 lojas) e loja sem Zebra é recusada`);
 
+  // ------------------------------------------------------------------
+  // "QUERO SABER QUANDO E UMA VM DESLIGADA" (Master, 15/09/2026)
+  //
+  // So o HOST Hyper-V reporta as VMs (o agente devolve $null onde Get-VM nao
+  // existe). E' o unico jeito honesto de saber que uma VM caiu: VM desligada
+  // nao fala de si mesma. Decisao do Master: so avisar quando uma VM que
+  // estava EXECUTANDO cai - VM deixada desligada de proposito nao alarma.
+  let okVm = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const nm = require('/home/user/adyen-monitor/server/nocMaquina.js');
+    const UNI = 'NOCVM';
+    await ls.cadastrarComputador(UNI, 'HOST1', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'HOST1').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+
+    // 1a telemetria: duas VMs executando, uma ja desligada de proposito
+    await ls.registrarTelemetria(UNI, posto, { vms: [
+      { nome: 'PULSEBOS19940', estado: 'Running' },
+      { nome: 'GCOM19940', estado: 'Running' },
+      { nome: 'BACKUP', estado: 'Off' },
+    ] }, tk);
+    const dep1 = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    // nada caiu ainda (as duas que rodavam continuam) - varredura nao alarma
+    const semAlerta1 = (await ls.varrerAlertas()).filter((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+
+    // 2a: a PULSEBOS caiu. GCOM segue. BACKUP continua desligada (de proposito)
+    await ls.registrarTelemetria(UNI, posto, { vms: [
+      { nome: 'PULSEBOS19940', estado: 'Off' },
+      { nome: 'GCOM19940', estado: 'Running' },
+      { nome: 'BACKUP', estado: 'Off' },
+    ] }, tk);
+    const dep2 = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    const alerta = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+    // varreu uma vez: o pendente foi limpo, nao repete no proximo giro
+    const naoRepete = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'vm-caiu');
+
+    // maquina COMUM (sem Hyper-V): telemetria sem vms nao inventa lista vazia
+    const UNI2 = 'NOCSEMVM';
+    await ls.cadastrarComputador(UNI2, 'PDV', 'atendimento');
+    const p2 = (await ls.listar()).find((c) => c.codigo === UNI2 && c.nome === 'PDV').posto;
+    const tk2 = await ls.garantirAgentToken(UNI2, p2);
+    await ls.registrarTelemetria(UNI2, p2, { disco: { volumes: [{ letra: 'C:', totalGb: 100, livreGb: 50 }] } }, tk2);
+    const semVm = (await ls.listar()).find((c) => c.codigo === UNI2 && c.posto === p2);
+
+    const src = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      // o estado das VMs fica gravado no host, normalizado pro portugues
+      'o host guarda o estado de cada VM (normalizado)':
+        Array.isArray(dep1.vms) && dep1.vms.length === 3
+        && dep1.vms.find((v) => v.nome === 'PULSEBOS19940').estado === 'Executando'
+        && dep1.vms.find((v) => v.nome === 'BACKUP').estado === 'Desligada',
+      // VM deixada desligada de proposito NAO gera alarme
+      'VM que ja estava desligada não alarma (sem transição a partir de Executando)':
+        semAlerta1.length === 0,
+      // a que CAIU (Executando -> Desligada) alarma, nomeando a VM
+      'VM que estava rodando e caiu gera alerta, nomeando a VM e o estado':
+        !!alerta && Array.isArray(alerta.vms) && alerta.vms.length === 1
+        && alerta.vms[0].nome === 'PULSEBOS19940' && alerta.vms[0].estado === 'Desligada',
+      'o alerta some depois de disparado (não repete a cada varredura)': !naoRepete,
+      'a queda vira evento na linha do tempo do host':
+        (dep2.eventos || []).some((e) => e.tipo === 'vm' && /PULSEBOS19940/.test(e.detalhe || '')),
+      // maquina sem Hyper-V: nada de VMs (null != [])
+      'máquina comum, sem Hyper-V, não ganha lista de VMs': !semVm.vms,
+      // helpers puros
+      'sanitizarVms: array ausente = null (não reportou); presente = lista ordenada':
+        nm.sanitizarVms(undefined) === null
+        && JSON.stringify(nm.sanitizarVms([{ nome: 'B', estado: 'Off' }, { nome: 'A', estado: 'Running' }]).map((v) => v.nome)) === '["A","B"]',
+      'quedasDeVm só conta transição a partir de Executando':
+        nm.quedasDeVm([{ nome: 'X', estado: 'Executando' }], [{ nome: 'X', estado: 'Desligada' }]).length === 1
+        && nm.quedasDeVm([{ nome: 'X', estado: 'Desligada' }], [{ nome: 'X', estado: 'Desligada' }]).length === 0,
+      // AGENTE: so o host reporta (Get-VM guardado), e o dado viaja na telemetria
+      'o agente mede VMs só onde há Hyper-V (Get-VM guardado) e manda na telemetria':
+        /function Medir-VMs \{/.test(src)
+        && /if \(-not \(Get-Command Get-VM -ErrorAction SilentlyContinue\)\) \{ return \$null \}/.test(src)
+        && /if \(\$vms -ne \$null\) \{ \$corpo\.vms = @\(\$vms\) \}/.test(src)
+        // nos DOIS loops (interno e o de atendimento): o host pode estar
+        // classificado como qualquer um dos dois, e tirar de um so era o que
+        // a sabotagem W3 passava batido
+        && (src.match(/\$vmsAgora = Medir-VMs/g) || []).length >= 2,
+      'VERSAO_VIGIA subiu (senão nenhuma das 52 máquinas passa a reportar VM)':
+        require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 64,
+      // no Windows antigo (o BOS/host 2012 R2) tem que sair igual, sem cair no
+      // guard de API do PowerShell 5
+      'no Windows antigo o Medir-VMs sai igual, sem API de PowerShell 5':
+        (() => {
+          const sa = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'HOST', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true });
+          return sa.includes('function Medir-VMs {') && !/::new\(|ToUnixTimeMilliseconds/.test(sa);
+        })(),
+      // a ficha do NOC mostra o estado das VMs, verde/vermelho
+      'a ficha do host mostra as VMs (verde executando, vermelho o resto)':
+        /Array\.isArray\(c\.vms\) && c\.vms\.length/.test(html)
+        && /v\.estado === 'Executando'/.test(html)
+        && /no ar<\/b>/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okVm = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (dep1.vms=${JSON.stringify(dep1.vms)} alerta=${JSON.stringify(alerta && alerta.vms)})`);
+  } catch (e) { okVm = false; console.log('  erro: ' + e.message + '\n' + e.stack); }
+  if (!okVm) ruins += 1;
+  console.log(`${okVm ? '✓' : '✗'} NOC: VM desligada - o host reporta cada VM e alerta quando uma que rodava cai (não as deixadas off)`);
+
+  // ------------------------------------------------------------------
+  // "INSTALAR/DESINSTALAR PELO NOC SEM ACESSAR O COMPUTADOR" - Entrega 2:
+  // ELEVACAO. Instalar/desinstalar exige Administrador. A instancia de LOGIN
+  // roda como usuario comum; se ela pegasse o comando, ele "pulava". Agora:
+  // comando marcado requerAdmin so vai pra um heartbeat que provou ser admin
+  // (a instancia SYSTEM), e o resto continua com a de login.
+  let okElevacao = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const dbA = require('./firestore');
+    const UNI = 'NOCADM';
+    await ls.cadastrarComputador(UNI, 'PC-ADM', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PC-ADM').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    const bater = (extra) => ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0', ...extra }, tk);
+    const idDoc = `${UNI}__${posto}`;
+
+    // COMANDO QUE EXIGE ADMIN
+    const cmdAdmin = await ls.enfileirarComando(UNI, posto, 'echo instalar', { origem: 'agente', requerAdmin: true });
+    // heartbeat da instancia de LOGIN (usuario comum): NAO recebe o comando
+    const login1 = await bater({ souAdmin: false });
+    ls.descartarEspelhoTeste(); // a marca de espera vai ao banco na transacao; o espelho so reflete no proximo refresh
+    const depoisLogin = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    // heartbeat da instancia SYSTEM (admin): recebe
+    const sys1 = await bater({ souAdmin: true });
+    // ja entregue: nao reentrega
+    const sys2 = await bater({ souAdmin: true });
+    await ls.marcarComandoExecutado(cmdAdmin.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
+
+    // COMANDO COMUM (sem admin): a instancia de login recebe normalmente
+    const cmdComum = await ls.enfileirarComando(UNI, posto, 'echo comum', { origem: 'agente' });
+    const login2 = await bater({ souAdmin: false });
+    await ls.marcarComandoExecutado(cmdComum.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
+
+    // SONDAGEM da SYSTEM (soComandoAdmin) NAO pega comando comum: deixa pro login
+    const cmdComum2 = await ls.enfileirarComando(UNI, posto, 'echo comum2', { origem: 'agente' });
+    const sondaSoAdmin = await bater({ souAdmin: true, soComandoAdmin: true });
+    const login3 = await bater({ souAdmin: false }); // login pega
+    await ls.marcarComandoExecutado(cmdComum2.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
+
+    // EXPIRACAO: comando-admin numa maquina sem executor elevado (instalada sem
+    // Administrador). Envelhece a espera e a varredura desiste, liberando a vaga.
+    const UNI2 = 'NOCADM2';
+    await ls.cadastrarComputador(UNI2, 'PC-SEMADM', 'interno');
+    const p2 = (await ls.listar()).find((c) => c.codigo === UNI2 && c.nome === 'PC-SEMADM').posto;
+    const tk2 = await ls.garantirAgentToken(UNI2, p2);
+    const cmdExp = await ls.enfileirarComando(UNI2, p2, 'echo instalar', { origem: 'agente', requerAdmin: true });
+    await ls.heartbeat(UNI2, p2, { userAgent: 'NOCZenith/1.0', souAdmin: false }, tk2); // marca a espera
+    // envelhece a espera pra 16min atras, direto no banco falso
+    const idDoc2 = `${UNI2}__${p2}`;
+    dbA.collection('lojaStatus').doc(idDoc2).set({ comandoAguardandoElevacaoDesde: new Date(Date.now() - 16 * 60 * 1000).toISOString() }, { merge: true });
+    ls.descartarEspelhoTeste();
+    const transExp = (await ls.varrerAlertas()).filter((t) => t.codigo === UNI2 && t.tipo === 'comando-sem-admin');
+    const cmdExpDoc = dbA.collection('lojaStatusComandos').doc(cmdExp.id);
+    const cmdExpData = (await cmdExpDoc.get()).data();
+    const depoisExp = (await ls.listar()).find((c) => c.codigo === UNI2 && c.posto === p2);
+
+    const srcLS = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+    const srcVG = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
+    const srcAA = require('fs').readFileSync(__dirname + '/agenteAcoes.js', 'utf8');
+    const conf = {
+      'comando marcado guarda requerAdmin': cmdAdmin.requerAdmin === true,
+      // O CERNE: usuario comum NAO recebe comando-admin
+      'a instância de login (usuário comum) não recebe comando que exige admin':
+        !login1.comandoPendente,
+      'e fica registrado desde quando espera elevação':
+        !!depoisLogin.comandoAguardandoElevacaoDesde,
+      'a instância SYSTEM (admin) recebe o comando': !!sys1.comandoPendente && /instalar/.test(sys1.comandoPendente.comando),
+      'entregue uma vez só (não reentrega no próximo beat)': !sys2.comandoPendente,
+      // comando comum não muda de dono
+      'comando comum continua indo pra instância de login': !!login2.comandoPendente && /comum/.test(login2.comandoPendente.comando),
+      'a sondagem só-admin da SYSTEM não rouba comando comum': !sondaSoAdmin.comandoPendente,
+      'o comando comum sobra pra login pegar': !!login3.comandoPendente && /comum2/.test(login3.comandoPendente.comando),
+      // expiração
+      'comando-admin sem executor elevado expira e libera a vaga':
+        transExp.length === 1 && !depoisExp.comandoPendenteId
+        && cmdExpData.status === 'erro' && /sem o NOCZenith elevado|reinstale como administrador/i.test(cmdExpData.erro),
+      // produtor: agenteAcoes marca as ações que precisam de admin
+      'a limpeza e a senha do AnyDesk exigem admin (requerAdmin no catálogo)':
+        /requerAprovacao: true,\s*requerAdmin: true,\s*comando: MODELO_LIMPEZA/.test(srcAA)
+        && /requerAprovacao: true,\s*requerAdmin: true,\s*comando: MODELO_ANYDESK_SENHA/.test(srcAA)
+        && /requerAdmin: !!acao\.requerAdmin/.test(srcAA),
+      // servidor: gating por souAdmin e soComandoAdmin
+      'o servidor gateia a entrega por souAdmin/soComandoAdmin':
+        /if \(comando\.requerAdmin && !opts\.souAdmin\)/.test(srcLS)
+        && /if \(opts\.soComandoAdmin && !comando\.requerAdmin\) return null;/.test(srcLS),
+      // agente: manda souAdmin, tem a sondagem elevada e a cedência a chama
+      'o agente informa souAdmin, sonda comando-admin cedendo a vez, e executa por uma função só':
+        /\$corpo\.souAdmin = \(Sou-Admin\)/.test(srcVG)
+        && /function Sondar-ComandoAdmin \{/.test(srcVG)
+        && /soComandoAdmin = \$true/.test(srcVG)
+        && /if \(\$Servico\) \{ Sondar-ComandoAdmin \}/.test(srcVG)
+        && /function Executar-ComandoPendente\(\$cmd\) \{/.test(srcVG),
+      'VERSAO_VIGIA subiu (senão nenhuma das 52 máquinas ganha a elevação)':
+        require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 65,
+      // Windows antigo (BOS) idem, sem API de PowerShell 5
+      'no Windows antigo a sondagem sai sem API de PowerShell 5':
+        (() => { const sa = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'HOST', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true }); return /function Sondar-ComandoAdmin \{/.test(sa) && !/::new\(|ToUnixTimeMilliseconds/.test(sa); })(),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okElevacao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (login1=${JSON.stringify(login1.comandoPendente)} sys1=${JSON.stringify(sys1.comandoPendente && sys1.comandoPendente.comando)} exp=${JSON.stringify(cmdExpData)})`);
+  } catch (e) { okElevacao = false; console.log('  erro: ' + e.message + '\n' + e.stack); }
+  if (!okElevacao) ruins += 1;
+  console.log(`${okElevacao ? '✓' : '✗'} NOC: instalar/desinstalar - comando que exige admin só roda na instância elevada (SYSTEM), o resto na de login`);
+
+  // ------------------------------------------------------------------
+  // "CADA COMPUTADOR TEM SUA ARTE" (Master, 15/09/2026). O papel de parede era
+  // por grupo+marca (uma imagem pra rede toda, com o nome carimbado). Agora
+  // cada maquina pode ter a PROPRIA arte (ATM01, Makeline, Gerencia...), que
+  // ganha da arte do grupo e NAO leva carimbo por cima (ja vem pronta).
+  let okArteMaquina = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCART';
+    await ls.cadastrarComputador(UNI, 'PC-ART', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PC-ART').posto;
+
+    // liga a politica de papel de parede (senao papelDeParedeDe nem resolve)
+    await ls.definirPolitica(UNI, posto, { papelDeParedeAtivo: true });
+
+    // VIA HTTP: a rota de upload fica ACIMA do gate global app.use('/api',
+    // requireAuth), entao precisa de requireAuth EXPLICITO - sem ele o
+    // req.isMaster vinha vazio e o proprio Master levava 403 (bug real,
+    // 15/09). O Master de verdade tem que passar; quem nao tem sessao, nao.
+    const pngMinimo = { nome: 'arte.png', tipo: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
+    const rotaArte = `/api/loja-status/${UNI}/computadores/${posto}/papel-de-parede-arte`;
+    const httpComMaster = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', { Authorization: 'Bearer ' + token }, 'PUT');
+    const httpSemSessao = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', {}, 'PUT');
+    // limpa o que o upload HTTP gravou, pra nao interferir nas asserts abaixo
+    await ls.removerArteDaMaquina(UNI, posto);
+    // sem arte de maquina nem de grupo: cai em nada (ou no parque, se houver)
+    const semNada = await ls.papelDeParedeDe(UNI, posto);
+
+    // define a arte DESTA maquina
+    const salvo = await ls.definirArteDaMaquina(UNI, posto, { caminho: 'parque/arte-atm01.jpg', tipo: 'image/jpeg', em: Date.now(), versao: 12345 });
+    const comArte = await ls.papelDeParedeDe(UNI, posto);
+    // a versao da aplicacao muda quando a arte muda (o agente rebaixa a imagem)
+    const tkArt = await ls.garantirAgentToken(UNI, posto);
+    const cfgAgente = await ls.configuracaoAgente(UNI, posto, tkArt);
+
+    // remove: volta pro grupo/marca (aqui, nada)
+    await ls.removerArteDaMaquina(UNI, posto);
+    const semArteDeNovo = await ls.papelDeParedeDe(UNI, posto);
+
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'X', tipo: 'interno', agentToken: 'ab12' });
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      // a arte da maquina ganha e vem marcada como daMaquina (o header depende disso)
+      'a rota de upload aceita o Master de verdade (não barra por estar acima do gate global)':
+        httpComMaster.status !== 403 && !/Apenas o acesso Master/.test(String(httpComMaster.corpo || '')),
+      'e a rota recusa quem não tem sessão de Master':
+        httpSemSessao.status === 403 || httpSemSessao.status === 401,
+      'a arte desta máquina vence a do grupo, e vem marcada daMaquina':
+        !!comArte && comArte.caminho === 'parque/arte-atm01.jpg' && comArte.daMaquina === true,
+      'a configuração do agente reflete a versão da arte da máquina (ele rebaixa a imagem nova)':
+        !!cfgAgente && /\.12345$/.test(String(cfgAgente.versaoAplicacao)),
+      'sem arte própria não inventa nada (cai no fluxo normal)':
+        (semNada === null || !semNada.daMaquina),
+      'remover a arte da máquina volta pro grupo/marca':
+        (semArteDeNovo === null || !semArteDeNovo.daMaquina),
+      // o servidor manda "nao carimbe" no header quando a arte e da maquina
+      'a rota GET sinaliza X-NOC-Carimbo: nao para arte da máquina':
+        /if \(arte\.daMaquina\) res\.set\('X-NOC-Carimbo', 'nao'\);/.test(idx)
+        && /papelDeParedeDe\(req\.params\.codigo, req\.params\.posto\)/.test(idx),
+      'há rota de upload e de remover a arte por máquina (Master-only, com requireAuth explícito por estar acima do gate)':
+        /app\.put\('\/api\/loja-status\/:codigo\/computadores\/:posto\/papel-de-parede-arte', auth\.requireAuth, auth\.requireMaster/.test(idx)
+        && /app\.delete\('\/api\/loja-status\/:codigo\/computadores\/:posto\/papel-de-parede-arte', auth\.requireAuth, auth\.requireMaster/.test(idx),
+      // o agente le o header e NAO carimba quando e arte da maquina
+      'o agente lê o header e pula o carimbo na arte da máquina':
+        /-PassThru/.test(vg) && /Headers\['X-NOC-Carimbo'\]/.test(vg)
+        && /if \(\$semCarimbo\) \{ \$destino = \$bruto \} else \{ \$destino = Carimbar-NomeNaArte/.test(vg),
+      'VERSAO_VIGIA subiu (senão o agente não sabe ler o header)':
+        require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 66,
+      'no Windows antigo a arte por máquina sai igual, sem API de PowerShell 5':
+        (() => { const sa = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'X', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true }); return /-PassThru/.test(sa) && !/::new\(|ToUnixTimeMilliseconds/.test(sa); })(),
+      // a ficha da maquina tem o uploader
+      'a ficha da máquina tem o campo de arte por máquina (enviar e voltar pro grupo)':
+        /Papel de parede desta máquina/.test(html) && /function enviarArteMaquina\(/.test(html) && /function removerArteMaquina\(/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okArteMaquina = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (comArte=${JSON.stringify(comArte)})`);
+  } catch (e) { okArteMaquina = false; console.log('  erro: ' + e.message + '\n' + e.stack); }
+  if (!okArteMaquina) ruins += 1;
+  console.log(`${okArteMaquina ? '✓' : '✗'} NOC: cada máquina pode ter a própria arte de papel de parede (vence a do grupo, sem carimbo por cima)`);
+
+
+
+
   let okReinicioAlerta = false;
   try {
     const cab = { Authorization: 'Bearer ' + token };
@@ -7005,6 +7303,37 @@ setTimeout(async () => {
   } catch (e) { okDispositivoAlarme = false; console.log('  erro: ' + e.message); }
   if (!okDispositivoAlarme) ruins += 1;
   console.log(`${okDispositivoAlarme ? '✓' : '✗'} NOC: impressora/VM marcada como monitorada alarma ao perder rede (só depois de ~2 scans ausentes), nunca pra quem não foi marcado`);
+
+  // ------------------------------------------------------------------
+  // "AS UNIDADES ESTAO RECEBENDO NOTIFICACAO" (Master, 15/09) - a loja recebia
+  // "Rede voltou" no navegador dela. NOC e' so pra Master ou Suporte com a tag
+  // (podeReceberCritico), e isso tem que valer nos DOIS lados do ciclo: o bug
+  // era o filtro so pegar a QUEDA (caiu), deixando o "voltou" ir pra todas as
+  // assinaturas.
+  let okGateRede = false;
+  try {
+    const srcPush = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const ini = srcPush.indexOf('async function notifyRedeUnidade');
+    const fim = srcPush.indexOf('\nasync function ', ini + 10);
+    const corpo = srcPush.slice(ini, fim > 0 ? fim : undefined);
+    const conf = {
+      'o push de rede da unidade tem o gate crítico (Master ou Suporte)':
+        /podeReceberCritico\(sub\)/.test(corpo),
+      // O BUG: gate condicionado ao "caiu" deixava o "voltou" vazar
+      'o gate NÃO é condicionado ao "caiu" (senão o "voltou" vaza pra loja)':
+        !/caiu && !podeReceberCritico/.test(corpo)
+        && /if \(!podeReceberCritico\(sub\)\) continue;/.test(corpo),
+      // e o filtro em si e' Master OU Suporte com a tag
+      'podeReceberCritico = Master OU seção suporte':
+        /function podeReceberCritico\(sub\)[\s\S]*?meta\.isMaster[\s\S]*?sections[\s\S]*?includes\('suporte'\)/.test(srcPush),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okGateRede = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okGateRede = false; console.log('  erro: ' + e.message); }
+  if (!okGateRede) ruins += 1;
+  console.log(`${okGateRede ? '✓' : '✗'} NOC: "Rede voltou" também só vai pra Master/Suporte (a loja não recebe notificação do NOC)`);
+
 
   // ------------------------------------------------------------------
   // A ZEBRA TROCA DE IP. Pedido do Master (13/09/2026): "ela perde muito IP,
@@ -7614,6 +7943,43 @@ setTimeout(async () => {
         && s.includes('Set-ScheduledTask -TaskName $NomeTarefa -Trigger (Gatilhos-DaTarefa) | Out-Null')
         && /Reportar-IpLocal\n  Garantir-GatilhoDeRepeticao\n/.test(s)
         && s.includes('function Garantir-GatilhoDeRepeticao {\n  if ($Servico) { return }')),
+      // Master (15/09): "quero que ele rode, e quero que ele permaneca
+      // invisivel para nao apagarem ele achando que e outra coisa". Rodar sem
+      // janela ja e' o lancador acima; ESTA parte e' nao ser apagado por
+      // engano - pasta oculta + um LEIA que se identifica pra quem achar.
+      'v63 (sem subir, nenhuma das 52 maquinas ganha a pasta oculta nem o LEIA)': vg.VERSAO_VIGIA >= 63,
+      'a pasta fixa e marcada como oculta (some do dia a dia), preservando o resto dos atributos': scripts.every((s) =>
+        s.includes('$fi = Get-Item -LiteralPath $PastaFixa -Force')
+        && s.includes('$fi.Attributes = $fi.Attributes -bor [System.IO.FileAttributes]::Hidden')),
+      // a diferenca entre "esconder" legitimo e malware e' se identificar:
+      // quem ligar "mostrar ocultos" tem que reconhecer na hora o que e'
+      'deixa um LEIA que diz o que e, que e da empresa e "nao apague"': scripts.every((s) =>
+        s.includes('LEIA-NOCZenith.txt')
+        && s.includes('NAO APAGUE ESTA PASTA.')
+        && s.includes('DA PROPRIA EMPRESA, instalado de proposito - nao e virus.')),
+      'o LEIA diz de qual maquina e de que versao e (pro suporte saber o que achou)': scripts.every((s) =>
+        s.includes('"Maquina: " + $UnidadePosto + "  |  Versao do agente: " + $VersaoScript')),
+      // apagar nao pode ser a solucao que o proprio agente sugere: ele diz que
+      // so faz a loja aparecer offline
+      'o LEIA explica que apagar nao acelera nada, so derruba o monitoramento': scripts.every((s) =>
+        s.includes('Apagar isto NAO deixa o computador mais rapido')),
+      // NADA de anti-remocao: o dono da maquina (Admin) tem que conseguir tirar
+      'nao ha truque anti-remocao (Administrador tira quando quiser)': scripts.every((s) =>
+        !/attrib .*\+r|Deny|icacls .*\/deny|Set-Acl/i.test(s)
+        && s.includes('NADA de anti-remocao')),
+      // ocultar nao pode derrubar a instalacao: fica FORA do try da pasta fixa,
+      // no seu proprio try, e so tenta se a pasta existe
+      'ocultar/identificar roda isolado - falhar ali nao aborta a instalacao': scripts.every((s) =>
+        /if \(Test-Path \$PastaFixa\) \{\n    try \{[\s\S]*?\} catch \{ Escrever-Log "Nao consegui ocultar\/identificar a pasta/.test(s)),
+      // no Windows antigo (Server 2012 R2, o BOS) tudo isto tem que valer
+      // igual - e sem cair no guard de API do PowerShell 5
+      'no Windows antigo (BOS) a pasta oculta + LEIA saem iguais': (() => {
+        const sa = vg.montarScriptVigia({ codigo: 'DomCG', posto: 'BOS', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true });
+        return sa.includes('[System.IO.FileAttributes]::Hidden')
+          && sa.includes('LEIA-NOCZenith.txt')
+          && sa.startsWith('# NOCZenith')
+          && !/::new\(|ToUnixTimeMilliseconds/.test(sa);
+      })(),
       'NOC: a contagem de servidores tem o MESMO corpo do número principal': /\.kpi-serv\{font-size:1em;font-weight:800;/.test(htmlNoc),
       // 13/09: "quero que a quantidade seja clicável: 47 mostra as máquinas
       // daquele grupo, 1 mostra os servidores, 0 não faz nada"
@@ -12449,6 +12815,48 @@ setTimeout(async () => {
       criadoPorId: 'u', criadoPorEmail: 'a@b.c', campos: { delivery: 500, adyen: 500, caixaInicial: 77 },
     });
 
+    // A VIRADA: a unidade JA TEM fechamento, mas de antes desta regra (ou vindo
+    // da planilha) - sem caixa final nenhum. num(undefined) daria 0 e a tela
+    // diria "caixa final do fechamento de 01/11" apontando pra um numero que
+    // ninguem contou. Aqui a corrente so COMECA: a loja conta a gaveta uma vez.
+    await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-01', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', campos: { delivery: 400, adyen: 400 },
+    });
+    const anteriorSemFinal = await fl.caixaFinalAnterior('CXA3', '2026-11-02');
+    const viradaD1 = await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-02', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 300, caixaInicial: 150 },
+    });
+    const viradaD2 = await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-03', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 320 },
+    });
+    // GAVETA VAZIA CONTADA vira corrente de 0 - o que nao vira e' o 0 que o
+    // create grava sozinho em todo campo numerico que nao veio. A marca e' o
+    // que separa os dois.
+    await fl.create({
+      unidade: 'CXA4', unidadeNome: 'Zero', grupo: 'MANUAL', data: '2026-11-01', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 0 },
+    });
+    const zeroContado = await fl.caixaFinalAnterior('CXA4', '2026-11-02');
+    // A VIRADA: lancamento feito com a regra no ar mas ANTES da marca existir.
+    // O caixa final foi contado (o ramo recusa vazio); o que identifica esse
+    // registro e' a chave caixaInicialDe, que so aquele ramo grava.
+    const dbCx = require('./firestore');
+    await dbCx.collection('fechamentosLive').doc('CXA5__2026-11-01').set({
+      id: 'CXA5__2026-11-01', unidade: 'CXA5', unidadeNome: 'Virada', grupo: 'MANUAL',
+      data: '2026-11-01', gerente: 'x', criadoPorId: 'u', criadoPorEmail: 'a@b.c',
+      delivery: 400, adyen: 400, caixaInicial: 100, caixaFinal: 260,
+      caixaInicialDe: null, // <- a chave que prova o ramo do lancamento
+      faturamento: 400, totalDeclarado: 400, criadoEm: new Date().toISOString(),
+    });
+    fl.invalidarCache(); // escrita direta no banco nao passa pelo create()
+    const viradaSemMarca = await fl.caixaFinalAnterior('CXA5', '2026-11-02');
+
     const htmlL = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
     const conf = {
       'o primeiro fechamento da unidade aceita o valor informado (não há corrente ainda)':
@@ -12474,6 +12882,26 @@ setTimeout(async () => {
         && /function carregarCaixaInicial\(\)/.test(htmlL),
       'a tela diz de qual dia veio o caixa inicial':
         /Caixa final do fechamento de \$\{\(r\.de\|\|''\)/.test(htmlL),
+      // fechamento anterior SEM caixa final: nao inventa R$ 0,00
+      'fechamento anterior sem caixa final não vira corrente (nem zero)':
+        !!anteriorSemFinal && anteriorSemFinal.valor === null
+        && anteriorSemFinal.semCaixaFinal === true && anteriorSemFinal.de === '2026-11-01',
+      'nesse caso a loja conta a gaveta, e a corrente começa dali':
+        viradaD1.caixaInicial === 150 && viradaD1.caixaInicialDe === null
+        && viradaD2.caixaInicial === 300 && viradaD2.caixaInicialDe === '2026-11-02',
+      'lançamento feito antes da marca existir não é jogado fora (a chave caixaInicialDe prova o ramo)':
+        !!viradaSemMarca && viradaSemMarca.valor === 260 && viradaSemMarca.semCaixaFinal === false,
+      'gaveta vazia CONTADA vira corrente de zero (é a marca que separa, não o número)':
+        !!zeroContado && zeroContado.valor === 0 && zeroContado.semCaixaFinal === false,
+      'e a tela pede a contagem em vez de mostrar zero':
+        /semCaixaFinal/.test(htmlL) && /não registrou caixa final/.test(htmlL),
+      // ERA ISTO QUE DEIXAVA O CAMPO VAZIO: a tela abre com unidade e data ja
+      // escolhidas, entao o 'change'/'input' nunca dispara sozinho
+      'o caixa inicial é buscado ao abrir a tela, não só quando trocam unidade/data':
+        /await carregarAjustePosOntem\(\);\n[\s\S]{0,400}?await carregarCaixaInicial\(\);/.test(htmlL),
+      // form.reset() apaga tambem campo so-leitura
+      'e é buscado de novo depois de lançar (o reset apaga o campo só-leitura)':
+        /function resetarForm\(\)\{[^}]*carregarCaixaInicial\(\);[^}]*\n\}/.test(htmlL),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okCaixaCorrente = !falhas.length;
@@ -12498,12 +12926,13 @@ setTimeout(async () => {
   let okTurnoEstacao = false;
   try {
     const ec = require(__dirname + '/estacaoComida.js');
-    const hoje = ec.hojeBrasiliaISO();
-    // os instantes saem de `hoje`, não de uma data cravada: o turno é gravado
-    // POR DIA, então uma data fixa passa enquanto o calendário coincide e
-    // quebra sozinha na virada da meia-noite - foi o que aconteceu
-    const meioDia = new Date(`${hoje}T15:00:00Z`); // 12h em Brasília
-    const noite = new Date(`${hoje}T23:00:00Z`);   // 20h em Brasília
+    const meioDia = new Date('2026-09-14T15:00:00Z'); // 12h em Brasília
+    const noite = new Date('2026-09-14T23:00:00Z');   // 20h em Brasília
+    // A DATA SAI DO RELOGIO DO TESTE, nao do relogio da parede: com
+    // hojeBrasiliaISO() sem argumento, o turno era gravado em 14/09 e
+    // consultado no dia de hoje - passava no dia em que foi escrito e
+    // quebrava sozinho no dia seguinte
+    const hoje = ec.hojeBrasiliaISO(meioDia);
 
     // sem ninguem abrir, o relogio ainda opina - a casa que esquecer de abrir
     // nao pode ficar impedida de vender
@@ -12657,6 +13086,62 @@ setTimeout(async () => {
   } catch (e) { okMesaQr = false; console.log('  erro: ' + e.message); }
   if (!okMesaQr) ruins += 1;
   console.log(`${okMesaQr ? '✓' : '✗'} Estação: mesa obrigatória e primeiro campo, e o garçom acha a conta pelo QR da mesa`);
+
+  // ------------------------------------------------------------------
+  // A FOLHA DE IMPRESSAO dos QR (estacaoMesasQr.js). O leitor existia, mas
+  // ninguem tinha como gerar o adesivo. O QR grava a URL do salao com
+  // ?unidade=&mesa= - e' o que o mesaDoQr() do salao le, e o que a camera
+  // comum do celular abre. E grava a URL OFICIAL: o adesivo fica meses na
+  // mesa e nao pode apontar pro host de um pedido de teste.
+  let okFolhaQr = false;
+  try {
+    const fq = require(__dirname + '/estacaoMesasQr.js');
+    const fs2 = require('fs');
+    const htmlS = fs2.readFileSync(__dirname + '/public/estacao-salao.html', 'utf8');
+    const htmlF = fs2.readFileSync(__dirname + '/public/estacao-fechamento.html', 'utf8');
+    const idx = fs2.readFileSync(__dirname + '/index.js', 'utf8');
+    const pkg = JSON.parse(fs2.readFileSync(__dirname + '/package.json', 'utf8'));
+
+    const erroDe = (de, ate) => { try { fq.faixaDeMesas(de, ate); return null; } catch (e2) { return e2.message; } };
+    const url = fq.urlDaMesa('https://exemplo.local', 'Estacao Comida', 12);
+    // o mesmo parse que o salao usa (mesaDoQr): URL com ?mesa=N
+    const mesaLida = Number(new URL(url).searchParams.get('mesa'));
+
+    // gera o PDF de verdade, num res falso, e confere que saiu um PDF
+    const pedacos = [];
+    const resFalso = new (require('stream').Writable)({ write(chunk, enc, cb) { pedacos.push(chunk); cb(); } });
+    resFalso.setHeader = () => {};
+    const terminou = new Promise((r) => resFalso.on('finish', r));
+    fq.writePDF(resFalso, { unidade: 'Estacao Comida', unidadeNome: 'Estação da Comida', mesas: fq.faixaDeMesas(1, 13), baseUrl: 'https://exemplo.local', nomeArquivo: 'x.pdf' });
+    await terminou;
+    const pdf = Buffer.concat(pedacos);
+
+    const conf = {
+      'a faixa vai de `de` ate `ate`, inclusive': fq.faixaDeMesas(3, 5).join(',') === '3,4,5',
+      'sem `ate`, sai so a mesa `de`': fq.faixaDeMesas(7).join(',') === '7',
+      'faixa invertida e folha gigante sao barradas com mensagem':
+        /maior ou igual/.test(erroDe(10, 2) || '') && /por folha/.test(erroDe(1, 1000) || ''),
+      'o QR grava a URL do salao com a unidade e ?mesa=N, que o salao sabe ler':
+        /\/estacao-salao\?unidade=/.test(url) && mesaLida === 12,
+      'o PDF sai de verdade, com mais de uma pagina pra 13 mesas (12 por folha)':
+        pdf.slice(0, 5).toString() === '%PDF-' && (pdf.toString('latin1').match(/\/Type \/Page(?!s)/g) || []).length === 2,
+      // o salao aberto direto pelo QR (camera comum) ja mostra a conta da mesa
+      'o salao aberto pelo QR entra na unidade e mostra a mesa sem tocar em "Ler QR"':
+        /params\.get\('unidade'\)/.test(htmlS) && /mesaDoQr\(params\.get\('mesa'\)\)/.test(htmlS)
+        && /if\(mesaQr\) buscarMesa\(mesaQr\);/.test(htmlS),
+      'quem gera a folha e quem fecha o dia, no fechamento':
+        /mesas-qr\.pdf/.test(htmlF) && /onclick="imprimirQrMesas\(\)"/.test(htmlF)
+        && /app\.get\('\/api\/estacao\/mesas-qr\.pdf', requireSection\('estacao-fechamento'\)/.test(idx),
+      'a folha usa o endereco oficial, nao o host do pedido':
+        /estacaoMesasQr\.writePDF\(res, \{[\s\S]{0,300}?baseUrl: APP_BASE_URL/.test(idx),
+      'a dependencia qrcode esta declarada': !!pkg.dependencies.qrcode,
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n2]) => n2);
+    okFolhaQr = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFolhaQr = false; console.log('  erro: ' + e.message); }
+  if (!okFolhaQr) ruins += 1;
+  console.log(`${okFolhaQr ? '✓' : '✗'} Estação: a folha de impressão dos QR das mesas sai em PDF, com a URL oficial do salão`);
 
 
 
@@ -12913,9 +13398,10 @@ setTimeout(async () => {
   // ------------------------------------------------------------------
   // LINK SEM ".html" (pedido do Master: "para clientes e atendimento sem
   // acesso - www.nopulso.com.br/atendimento.html - como podemos tirar esse
-  // html?"). /atendimento serve a mesma pagina, e o endereco COM .html
-  // continua valendo: tem link ja na mao de cliente, favorito da operacao, e
-  // e' o endereco que o NOCZenith abre na maquina de loja.
+  // html?"). /atendimento serve a pagina oficial; o endereco COM .html
+  // continua aceito como entrada, mas redireciona permanentemente para a URL
+  // curta. Assim favorito e QR antigo seguem funcionando sem perpetuar a
+  // extensao no navegador.
   //
   // A parte que quebra em producao e NAO aparece aqui por HTTP: o muro de
   // senha do dashboard so e' instalado quando DASHBOARD_PASSWORD existe, e a
@@ -12940,11 +13426,10 @@ setTimeout(async () => {
     const interna = await pedir('/loja-status');
 
     const conf = {
-      '/atendimento abre a mesma página que /atendimento.html':
-        semHtml.status === 200 && comHtml.status === 200 && semHtml.corpo === comHtml.corpo
-        && /<title>/i.test(semHtml.corpo),
-      'o endereço COM .html continua valendo (não redireciona)':
-        comHtml.status === 200,
+      '/atendimento abre a página pública na URL canônica':
+        semHtml.status === 200 && /<title>/i.test(semHtml.corpo),
+      'o endereço COM .html continua valendo e redireciona para a URL curta':
+        comHtml.status === 308 && /\/atendimento$/.test(comHtml.headers.location || ''),
       'vale pras telas internas também (o mesmo express.static)':
         interna.status === 200 && /<title>/i.test(interna.corpo),
       'toda página pública é pública nos DOIS endereços (senão o cliente cai no muro de senha)':
@@ -12952,14 +13437,14 @@ setTimeout(async () => {
       'e o atalho não abriu tela interna: /loja-status NÃO virou página pública':
         !publicas.has('/loja-status') && !publicas.has('/loja-status.html'),
       'o static serve sem extensão de propósito (é o que faz /atendimento existir)':
-        /express\.static\(path\.join\(__dirname, 'public'\), \{ extensions: \['html'\] \}\)/.test(fonte),
+        /express\.static\(DIRETORIO_PUBLICO, \{ extensions: \['html'\] \}\)/.test(fonte),
     };
     const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
     okSemHtml = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem=${semHtml.status} com=${comHtml.status} publicas=${publicas.size})`);
   } catch (e) { okSemHtml = false; console.log('  erro: ' + e.message); }
   if (!okSemHtml) ruins += 1;
-  console.log(`${okSemHtml ? '✓' : '✗'} Link sem ".html": /atendimento abre igual, o endereço antigo continua, e o cliente não cai no muro de senha`);
+  console.log(`${okSemHtml ? '✓' : '✗'} Link sem ".html": /atendimento abre sem extensão, o endereço antigo redireciona e o cliente não cai no muro de senha`);
 
   // ------------------------------------------------------------------
   // CONCILIAÇÃO PWR/iFood x DECLARADO (pedido do Master, 13/09/2026: "se o
@@ -13225,6 +13710,57 @@ setTimeout(async () => {
   console.log(`${okServer2012 ? '✓' : '✗'} NOCZenith no Windows Server 2012 R2: versão específica pra máquina marcada (TLS 1.2 e sem PowerShell 5), e o padrão das outras intacto`);
 
   // ------------------------------------------------------------------
+  // "TENTO COLAR E NAO ACONTECE NADA NO POWERSHELL DO BOS" (Master, 15/09/2026)
+  //
+  // Nao era o script: era a INSTRUCAO. O console do Server 2012 R2 / Windows
+  // 8.1 nao tem Ctrl+V - isso so chegou no Windows 10. A tela mandava "Cole
+  // (Ctrl+V) e aperte Enter" pra toda maquina, entao no BOS a pessoa apertava
+  // e nao acontecia NADA: sem erro, sem texto, nada pra investigar. Ali se
+  // cola com o botao direito.
+  //
+  // Quem decide e' a ficha, nao a tela: o windowsAntigo sai da MESMA rota que
+  // monta o comando, pra os dois nunca discordarem.
+  let okColarBos = false;
+  try {
+    const idxB = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlB = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      'a rota do comando devolve se a máquina é Windows antigo':
+        /res\.json\(\{ comando: vigiaScript\.montarComandoInstalacao\([^)]*\), windowsAntigo \}\);/.test(idxB),
+      'a tela lê esse campo da resposta (não de um flag repetido nela)':
+        /const \{ comando, windowsAntigo \} = await resp\.json\(\);/.test(htmlB),
+      // O SINTOMA: apertar Ctrl+V no BOS nao faz nada
+      'em Windows antigo a instrução manda colar com o botão direito, e diz por quê':
+        /BOTÃO DIREITO do mouse/.test(htmlB) && /não tem Ctrl\+V no PowerShell/.test(htmlB),
+      'e dá a saída do menu da janela quando o botão direito não cola':
+        /barra de título da janela > Editar > Colar/.test(htmlB),
+      // entrar por AnyDesk sem area de transferencia compartilhada da o MESMO
+      // sintoma: cola e nao vai nada
+      'lembra da área de transferência do AnyDesk/Área de Trabalho Remota':
+        /área de transferência precisa estar compartilhada/.test(htmlB),
+      'máquina normal continua com Ctrl+V (não vira instrução de botão direito pra todo mundo)':
+        /: '2\) Cole \(Ctrl\+V\) e aperte Enter';/.test(htmlB),
+      // "A VM NAO DEIXA COLAR": sem area de transferencia nao ha comando de
+      // 3.500 caracteres que entre. O arquivo baixado ja tem o token dentro,
+      // e o comando que roda ELE cabe numa linha digitada a mao.
+      'sem área de transferência, o caminho é o arquivo (o token já vai dentro dele)':
+        /ESSA MÁQUINA NÃO PRECISA COLAR NADA/.test(htmlB)
+        && /powershell -ExecutionPolicy Bypass -File/.test(htmlB),
+      'e quem diz que é Windows antigo é o conteúdo baixado, não um flag repetido na tela':
+        /const ehWindowsAntigo = conteudo\.includes\('VERSAO PRA WINDOWS ANTIGO'\);/.test(htmlB)
+        && /VERSAO PRA WINDOWS ANTIGO/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8')),
+      'e aponta a saída de quem quiser colar mesmo assim (RDP/AnyDesk compartilham a área de transferência)':
+        /Remota \(mstsc\) ou AnyDesk/.test(htmlB) && /entre por Área de Trabalho/.test(htmlB),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okColarBos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okColarBos = false; console.log('  erro: ' + e.message); }
+  if (!okColarBos) ruins += 1;
+  console.log(`${okColarBos ? '✓' : '✗'} NOCZenith no BOS: a tela manda colar do jeito que AQUELE Windows cola (Ctrl+V não existe no Server 2012 R2)`);
+
+
+  // ------------------------------------------------------------------
   // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
   // adyen-monitor, aposentar de vez"). O CLAUDE.md §4 diz que o dominio velho
   // NUNCA pode ser desligado - e o motivo e concreto: o agente so descobre que
@@ -13404,7 +13940,7 @@ setTimeout(async () => {
     const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
     const ag = require('/home/user/adyen-monitor/server/agenteAcoes.js');
     const srcLS = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
-    const fnEntrega = /async function entregarComandoPendente\(codigo, posto\) \{[\s\S]*?\n\}/.exec(srcLS);
+    const fnEntrega = /async function entregarComandoPendente\(codigo, posto, opcoes\) \{[\s\S]*?\n\}/.exec(srcLS);
     const fnEnfileira = /async function enfileirarComando\(codigo, posto, comando, opcoes\) \{[\s\S]*?\n\}/.exec(srcLS);
     const modelo = ag.MODELOS_COMANDO.find((m) => m.id === 'anydesk-senha-acesso') || {};
     const cmd = String(modelo.comando || '');
@@ -15270,8 +15806,9 @@ setTimeout(async () => {
 
     // roda a MESMA funcao da tela, extraida do HTML - regex sobre o texto
     // provaria que a linha existe, nao que a conta esta certa
-    const fonte = htmlE.match(/function calcularPreset\([\s\S]*?\n\}\n\/\/ setMonth\(\)[\s\S]*?\nfunction recuarMeses\([\s\S]*?\n\}/);
+    const fonte = htmlE.match(/function calcularPreset\([\s\S]*?\r?\n\}\r?\n\/\/ setMonth\(\)[\s\S]*?\r?\nfunction recuarMeses\([\s\S]*?\r?\n\}/);
     const calc = new Function(`
+      const pad2 = (n) => String(n).padStart(2, '0');
       const isoLocal = (d) => \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`;
       ${fonte ? fonte[0] : 'function calcularPreset(){ return {}; }'}
       return calcularPreset;

@@ -138,6 +138,7 @@ const MODELOS_COMANDO = [
     nome: 'Limpeza: programas básicos que não usamos',
     descricao: 'REMOVE da máquina: Paint, Copilot, os atalhos-app do Chrome (Apresentações, Planilhas, Textos, YouTube), Microsoft OneDrive, TeamViewer e AteraAgent. Só rode a mando do Master. TeamViewer e AteraAgent precisam de Administrador (sem isso ficam PULADOS na saída). AteraAgent é agente de gestão remota: se for o da própria equipe, NÃO remova. Rode o inventário antes.',
     requerAprovacao: true,
+    requerAdmin: true,
     comando: MODELO_LIMPEZA,
   },
   {
@@ -145,6 +146,7 @@ const MODELOS_COMANDO = [
     nome: 'AnyDesk: definir senha de acesso',
     descricao: 'Define a senha de acesso não supervisionado do AnyDesk na máquina, com o valor da variável ANYDESK_SENHA do servidor (Render → Environment). A senha nunca aparece na ação, no histórico nem na saída: só o AnyDesk ID volta. Precisa de Administrador (sem isso fica PULADO). Máquina sem AnyDesk devolve NAO TINHA. Só rode a mando do Master.',
     requerAprovacao: true,
+    requerAdmin: true,
     comando: MODELO_ANYDESK_SENHA,
   },
 ];
@@ -208,6 +210,10 @@ function validarDados(dados) {
   const registro = {
     nome, descricao, tipo,
     requerAprovacao: dados.requerAprovacao !== false,
+    // requerAdmin: comando que so roda elevado (instalar/desinstalar). Default
+    // false - so quem marca de proposito exige a instancia SYSTEM (ver
+    // enfileirarComando/entregarComandoPendente em lojaStatus.js).
+    requerAdmin: dados.requerAdmin === true,
     ativo: dados.ativo !== false,
   };
   if (tipo === 'comando_maquina') {
@@ -453,7 +459,7 @@ async function executarAcaoDoAgente(acaoId, parametros) {
   const params = parametros || {};
   if (acao.tipo === 'comando_maquina') {
     if (!params.codigo || !params.posto) throw new Error('Faltou dizer qual computador (codigo/posto) vai rodar o comando.');
-    await lojaStatus.enfileirarComando(params.codigo, params.posto, acao.comando, { origem: 'agente', acaoId });
+    await lojaStatus.enfileirarComando(params.codigo, params.posto, acao.comando, { origem: 'agente', acaoId, requerAdmin: !!acao.requerAdmin });
     return `Comando "${acao.nome}" enfileirado pro computador ${params.codigo}/${params.posto} - executa no próximo contato do NOCZenith.`;
   }
   const executor = EXECUTORES_SISTEMA[acao.executorSistema];
