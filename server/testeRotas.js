@@ -7002,6 +7002,17 @@ setTimeout(async () => {
 
     // liga a politica de papel de parede (senao papelDeParedeDe nem resolve)
     await ls.definirPolitica(UNI, posto, { papelDeParedeAtivo: true });
+
+    // VIA HTTP: a rota de upload fica ACIMA do gate global app.use('/api',
+    // requireAuth), entao precisa de requireAuth EXPLICITO - sem ele o
+    // req.isMaster vinha vazio e o proprio Master levava 403 (bug real,
+    // 15/09). O Master de verdade tem que passar; quem nao tem sessao, nao.
+    const pngMinimo = { nome: 'arte.png', tipo: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
+    const rotaArte = `/api/loja-status/${UNI}/computadores/${posto}/papel-de-parede-arte`;
+    const httpComMaster = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', { Authorization: 'Bearer ' + token }, 'PUT');
+    const httpSemSessao = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', {}, 'PUT');
+    // limpa o que o upload HTTP gravou, pra nao interferir nas asserts abaixo
+    await ls.removerArteDaMaquina(UNI, posto);
     // sem arte de maquina nem de grupo: cai em nada (ou no parque, se houver)
     const semNada = await ls.papelDeParedeDe(UNI, posto);
 
@@ -7021,6 +7032,10 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
     const conf = {
       // a arte da maquina ganha e vem marcada como daMaquina (o header depende disso)
+      'a rota de upload aceita o Master de verdade (não barra por estar acima do gate global)':
+        httpComMaster.status !== 403 && !/Apenas o acesso Master/.test(String(httpComMaster.corpo || '')),
+      'e a rota recusa quem não tem sessão de Master':
+        httpSemSessao.status === 403 || httpSemSessao.status === 401,
       'a arte desta máquina vence a do grupo, e vem marcada daMaquina':
         !!comArte && comArte.caminho === 'parque/arte-atm01.jpg' && comArte.daMaquina === true,
       'a configuração do agente reflete a versão da arte da máquina (ele rebaixa a imagem nova)':
@@ -7033,9 +7048,9 @@ setTimeout(async () => {
       'a rota GET sinaliza X-NOC-Carimbo: nao para arte da máquina':
         /if \(arte\.daMaquina\) res\.set\('X-NOC-Carimbo', 'nao'\);/.test(idx)
         && /papelDeParedeDe\(req\.params\.codigo, req\.params\.posto\)/.test(idx),
-      'há rota de upload e de remover a arte por máquina (Master-only)':
-        /app\.put\('\/api\/loja-status\/:codigo\/computadores\/:posto\/papel-de-parede-arte', auth\.requireMaster/.test(idx)
-        && /app\.delete\('\/api\/loja-status\/:codigo\/computadores\/:posto\/papel-de-parede-arte', auth\.requireMaster/.test(idx),
+      'há rota de upload e de remover a arte por máquina (Master-only, com requireAuth explícito por estar acima do gate)':
+        /app\.put\('\/api\/loja-status\/:codigo\/computadores\/:posto\/papel-de-parede-arte', auth\.requireAuth, auth\.requireMaster/.test(idx)
+        && /app\.delete\('\/api\/loja-status\/:codigo\/computadores\/:posto\/papel-de-parede-arte', auth\.requireAuth, auth\.requireMaster/.test(idx),
       // o agente le o header e NAO carimba quando e arte da maquina
       'o agente lê o header e pula o carimbo na arte da máquina':
         /-PassThru/.test(vg) && /Headers\['X-NOC-Carimbo'\]/.test(vg)

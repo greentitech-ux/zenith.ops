@@ -1758,9 +1758,12 @@ app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (r
 });
 
 // ARTE DE PAPEL DE PAREDE DESTA MAQUINA (pedido do Master: "cada computador
-// tem sua arte"). Sobe uma imagem so pra este computador; ela ganha da arte do
+// tem sua arte"). auth.requireAuth EXPLICITO: estas rotas estao ACIMA do
+// app.use('/api', auth.requireAuth) (pra conviver com a GET publica logo
+// acima), entao sem ele req.isMaster vinha vazio e o requireMaster barrava ate
+// o proprio Master. Sobe uma imagem so pra este computador; ela ganha da arte do
 // grupo/marca e o agente NAO carimba por cima (ver o header acima). Master-only.
-app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
+app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
     const { codigo, posto } = req.params;
@@ -1772,7 +1775,7 @@ app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', aut
     res.status(400).json({ error: err.message });
   }
 });
-app.delete('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireMaster, async (req, res) => {
+app.delete('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
     const r = await lojaStatus.removerArteDaMaquina(req.params.codigo, req.params.posto);
     res.json(r);
