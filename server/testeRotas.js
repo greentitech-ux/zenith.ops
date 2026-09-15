@@ -15451,12 +15451,12 @@ setTimeout(async () => {
         && /monitorar: document\.getElementById\('disp-monitorar'\)\.checked/.test(html)
         && /corpo\.tipoNovo = tipoNovo/.test(html),
       // o modal do aparelho abre DE DENTRO do modal de detalhe (o lapis fica
-      // na lista de aparelhos). Sem z-index proprio ele nasce ATRAS de quem
-      // o chamou - foi exatamente o que o Master reportou
+      // na lista de aparelhos). Sem vir pra frente ele nasce ATRAS de quem o
+      // chamou - foi exatamente o que o Master reportou. O z-index fixo que
+      // resolvia SÓ este caso saiu: hoje quem abre por último fica por cima,
+      // por construção (ver abrirOverlay e o teste da pilha mais abaixo)
       'modal do aparelho fica na frente do modal de detalhe':
-        /#disp-overlay\{z-index:(\d+);\}/.test(html)
-        && Number(html.match(/#disp-overlay\{z-index:(\d+);\}/)[1])
-           > Number(html.match(/\.overlay\{[^}]*z-index:(\d+)/)[1]),
+        /abrirOverlay\('disp-overlay'\)/.test(html) && !/getElementById\('disp-overlay'\)\.classList/.test(html),
       // o chip agora distingue quem tem leitura de status (Zebra) de quem so
       // tem alarme de rede - por isso a condicao deixou de ser uma linha so
       'dispositivo monitorado mostra o chip 🔔 na linha':
@@ -15995,9 +15995,11 @@ setTimeout(async () => {
         /fetch\('\/api\/loja-status\/mensagem-massa'/.test(htmlM) && /destinos: MSG_DESTINOS/.test(htmlM),
       'Enter envia': enviouComEnter && barrouDefault,
       'Shift+Enter quebra linha em vez de enviar': quebrouComShift,
-      // era o bug do print: a caixa de mensagem abria ATRAS do detalhe
+      // era o bug do print: a caixa de mensagem abria ATRAS do detalhe. O
+      // z-index fixo virou regra geral - quem abre por último fica por cima
+      // (ver abrirOverlay, e o teste da pilha que roda a lógica de verdade)
       'a janela de mensagem fica na frente do modal de detalhe':
-        !!zModal && !!zBase && Number(zModal[1]) > Number(zBase[1]),
+        /abrirOverlay\('msg-overlay'\)/.test(htmlM) && !/getElementById\('msg-overlay'\)\.classList\.(add|remove)\('hidden'\)/.test(htmlM),
       'da pra escolher mais computadores na propria janela':
         /id="msg-picker"/.test(htmlM) && /function marcarDestinosMensagem/.test(htmlM),
     };
@@ -21116,7 +21118,7 @@ setTimeout(async () => {
       // a ordem importa: a ficha só aparece DEPOIS de montada, então qualquer
       // erro ao montar significa "cliquei e não aconteceu nada"
       'a ficha é montada antes de ser mostrada (por isso um erro ali some com ela)':
-        /atualizarConteudoDetalhe\(codigo, compComDetalhe\(c\)\);\s*\n\s*document\.getElementById\('detalhe-comp-overlay'\)\.classList\.remove\('hidden'\);/.test(noc),
+        /atualizarConteudoDetalhe\(codigo, compComDetalhe\(c\)\);\s*\n\s*abrirOverlay\('detalhe-comp-overlay'\);/.test(noc),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPushOrfao = !falhas.length;
@@ -22771,6 +22773,73 @@ setTimeout(async () => {
   } catch (e) { okTransferir = false; console.log('  erro: ' + e.message); }
   if (!okTransferir) ruins += 1;
   console.log(`${okTransferir ? '✓' : '✗'} Transferir conversa: escolhe a PESSOA com a tag Suporte, e ela vira a dona`);
+
+  // ------------------------------------------------------------------
+  // PAINEL ABERTO DE DENTRO DE OUTRO TEM QUE VIR PRA FRENTE.
+  //
+  // Master (14/09/2026), sobre o 📦 Programas na ficha da máquina: "ícone
+  // quando acionado está indo para trás e não na frente". Todos os .overlay
+  // do NOC dividem o mesmo z-index; com empate quem decide é a ORDEM NO HTML,
+  // e a ficha da máquina é o último elemento do arquivo - então tudo que
+  // nasce de dentro dela nascia atrás dela, invisível.
+  //
+  // Isso já tinha sido remendado três vezes (msg, editar, aparelho) com
+  // z-index fixo, e o painel seguinte veio com o mesmo defeito. O teste é
+  // sobre a REGRA, não sobre os quatro: quem abre por último fica por cima.
+  let okPilhaOverlay = false;
+  try {
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    // roda a pilha de verdade, com um DOM falso - é lógica pura, e sem isso o
+    // teste só olharia texto de arquivo
+    const fonte = html.slice(html.indexOf('const Z_OVERLAY_BASE'), html.indexOf('function abrirProgramas'));
+    const els = {};
+    const documentFake = { getElementById: (id) => els[id] || null };
+    const criar = (id) => { els[id] = { style: {}, escondido: true, classList: { add: () => { els[id].escondido = true; }, remove: () => { els[id].escondido = false; } } }; };
+    ['a-overlay', 'b-overlay', 'c-overlay'].forEach(criar);
+    const api = new Function('document', `${fonte}; return { abrirOverlay, fecharOverlay, pilha: () => PILHA_OVERLAYS, base: Z_OVERLAY_BASE };`)(documentFake);
+
+    api.abrirOverlay('a-overlay');          // a ficha da máquina
+    const zA = Number(els['a-overlay'].style.zIndex);
+    api.abrirOverlay('b-overlay');          // o painel aberto de dentro dela
+    const zB = Number(els['b-overlay'].style.zIndex);
+    api.fecharOverlay('b-overlay');
+    const zBDepois = els['b-overlay'].style.zIndex;
+    const pilhaDepois = api.pilha().slice();
+    // reabrir o MESMO painel não pode empilhar duas vezes (a tela do NOC fica
+    // aberta o dia inteiro; abrir/fechar 200 vezes não pode subir o z-index
+    // até passar por cima do menu)
+    for (let i = 0; i < 200; i++) { api.abrirOverlay('c-overlay'); api.fecharOverlay('c-overlay'); }
+    api.abrirOverlay('c-overlay');
+    const zC = Number(els['c-overlay'].style.zIndex);
+    api.abrirOverlay('a-overlay'); // reabrir o de baixo o traz pra frente
+    const zAReaberto = Number(els['a-overlay'].style.zIndex);
+    // relê o outro DEPOIS: quem sobe empurra o resto pra baixo (reindexar),
+    // e comparar com o valor de antes não provaria nada
+    const zCAgora = Number(els['c-overlay'].style.zIndex);
+
+    const conf = {
+      'o painel aberto DEPOIS fica na frente de quem o abriu': zB > zA,
+      'fechar devolve o z-index pro CSS (não deixa lixo no style)': zBDepois === '',
+      'fechar tira da pilha': !pilhaDepois.includes('b-overlay'),
+      'abrir e fechar 200 vezes não faz o z-index subir sem fim': zC <= api.base + 2,
+      'nunca passa do menu (z-index 998) nem do balão de dica': zC < 998 && zAReaberto < 998,
+      'reabrir o de baixo o traz pra frente': zAReaberto > zCAgora,
+      // o defeito nasceu de cada painel novo ser aberto na mão; enquanto
+      // houver uma abertura fora da pilha, o próximo painel repete o bug
+      'nenhum painel é aberto por fora da pilha':
+        !/getElementById\('[a-z-]*overlay'\)\.classList\.(remove|add)\('hidden'\)/.test(html)
+        && /abrirOverlay\('prog-overlay'\)/.test(html),
+      'os remendos de z-index fixo saíram (a regra substituiu os três)':
+        !/#msg-overlay,#editar-comp-overlay\{z-index:60;\}/.test(html)
+        && !/#disp-overlay\{z-index:60;\}/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPilhaOverlay = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (zA=${zA} zB=${zB} zC=${zC} zA2=${zAReaberto})`);
+  } catch (e) { okPilhaOverlay = false; console.log('  erro: ' + e.message); }
+  if (!okPilhaOverlay) ruins += 1;
+  console.log(`${okPilhaOverlay ? '✓' : '✗'} NOC: painel aberto de dentro da ficha vem PRA FRENTE (era o 📦 Programas nascendo atrás)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
