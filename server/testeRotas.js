@@ -12970,6 +12970,62 @@ setTimeout(async () => {
   if (!okMesaQr) ruins += 1;
   console.log(`${okMesaQr ? '✓' : '✗'} Estação: mesa obrigatória e primeiro campo, e o garçom acha a conta pelo QR da mesa`);
 
+  // ------------------------------------------------------------------
+  // A FOLHA DE IMPRESSAO dos QR (estacaoMesasQr.js). O leitor existia, mas
+  // ninguem tinha como gerar o adesivo. O QR grava a URL do salao com
+  // ?unidade=&mesa= - e' o que o mesaDoQr() do salao le, e o que a camera
+  // comum do celular abre. E grava a URL OFICIAL: o adesivo fica meses na
+  // mesa e nao pode apontar pro host de um pedido de teste.
+  let okFolhaQr = false;
+  try {
+    const fq = require(__dirname + '/estacaoMesasQr.js');
+    const fs2 = require('fs');
+    const htmlS = fs2.readFileSync(__dirname + '/public/estacao-salao.html', 'utf8');
+    const htmlF = fs2.readFileSync(__dirname + '/public/estacao-fechamento.html', 'utf8');
+    const idx = fs2.readFileSync(__dirname + '/index.js', 'utf8');
+    const pkg = JSON.parse(fs2.readFileSync(__dirname + '/package.json', 'utf8'));
+
+    const erroDe = (de, ate) => { try { fq.faixaDeMesas(de, ate); return null; } catch (e2) { return e2.message; } };
+    const url = fq.urlDaMesa('https://exemplo.local', 'Estacao Comida', 12);
+    // o mesmo parse que o salao usa (mesaDoQr): URL com ?mesa=N
+    const mesaLida = Number(new URL(url).searchParams.get('mesa'));
+
+    // gera o PDF de verdade, num res falso, e confere que saiu um PDF
+    const pedacos = [];
+    const resFalso = new (require('stream').Writable)({ write(chunk, enc, cb) { pedacos.push(chunk); cb(); } });
+    resFalso.setHeader = () => {};
+    const terminou = new Promise((r) => resFalso.on('finish', r));
+    fq.writePDF(resFalso, { unidade: 'Estacao Comida', unidadeNome: 'Estação da Comida', mesas: fq.faixaDeMesas(1, 13), baseUrl: 'https://exemplo.local', nomeArquivo: 'x.pdf' });
+    await terminou;
+    const pdf = Buffer.concat(pedacos);
+
+    const conf = {
+      'a faixa vai de `de` ate `ate`, inclusive': fq.faixaDeMesas(3, 5).join(',') === '3,4,5',
+      'sem `ate`, sai so a mesa `de`': fq.faixaDeMesas(7).join(',') === '7',
+      'faixa invertida e folha gigante sao barradas com mensagem':
+        /maior ou igual/.test(erroDe(10, 2) || '') && /por folha/.test(erroDe(1, 1000) || ''),
+      'o QR grava a URL do salao com a unidade e ?mesa=N, que o salao sabe ler':
+        /\/estacao-salao\?unidade=/.test(url) && mesaLida === 12,
+      'o PDF sai de verdade, com mais de uma pagina pra 13 mesas (12 por folha)':
+        pdf.slice(0, 5).toString() === '%PDF-' && (pdf.toString('latin1').match(/\/Type \/Page(?!s)/g) || []).length === 2,
+      // o salao aberto direto pelo QR (camera comum) ja mostra a conta da mesa
+      'o salao aberto pelo QR entra na unidade e mostra a mesa sem tocar em "Ler QR"':
+        /params\.get\('unidade'\)/.test(htmlS) && /mesaDoQr\(params\.get\('mesa'\)\)/.test(htmlS)
+        && /if\(mesaQr\) buscarMesa\(mesaQr\);/.test(htmlS),
+      'quem gera a folha e quem fecha o dia, no fechamento':
+        /mesas-qr\.pdf/.test(htmlF) && /onclick="imprimirQrMesas\(\)"/.test(htmlF)
+        && /app\.get\('\/api\/estacao\/mesas-qr\.pdf', requireSection\('estacao-fechamento'\)/.test(idx),
+      'a folha usa o endereco oficial, nao o host do pedido':
+        /estacaoMesasQr\.writePDF\(res, \{[\s\S]{0,300}?baseUrl: APP_BASE_URL/.test(idx),
+      'a dependencia qrcode esta declarada': !!pkg.dependencies.qrcode,
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n2]) => n2);
+    okFolhaQr = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFolhaQr = false; console.log('  erro: ' + e.message); }
+  if (!okFolhaQr) ruins += 1;
+  console.log(`${okFolhaQr ? '✓' : '✗'} Estação: a folha de impressão dos QR das mesas sai em PDF, com a URL oficial do salão`);
+
 
 
 
@@ -13225,9 +13281,10 @@ setTimeout(async () => {
   // ------------------------------------------------------------------
   // LINK SEM ".html" (pedido do Master: "para clientes e atendimento sem
   // acesso - www.nopulso.com.br/atendimento.html - como podemos tirar esse
-  // html?"). /atendimento serve a mesma pagina, e o endereco COM .html
-  // continua valendo: tem link ja na mao de cliente, favorito da operacao, e
-  // e' o endereco que o NOCZenith abre na maquina de loja.
+  // html?"). /atendimento serve a pagina oficial; o endereco COM .html
+  // continua aceito como entrada, mas redireciona permanentemente para a URL
+  // curta. Assim favorito e QR antigo seguem funcionando sem perpetuar a
+  // extensao no navegador.
   //
   // A parte que quebra em producao e NAO aparece aqui por HTTP: o muro de
   // senha do dashboard so e' instalado quando DASHBOARD_PASSWORD existe, e a
@@ -13252,11 +13309,10 @@ setTimeout(async () => {
     const interna = await pedir('/loja-status');
 
     const conf = {
-      '/atendimento abre a mesma página que /atendimento.html':
-        semHtml.status === 200 && comHtml.status === 200 && semHtml.corpo === comHtml.corpo
-        && /<title>/i.test(semHtml.corpo),
-      'o endereço COM .html continua valendo (não redireciona)':
-        comHtml.status === 200,
+      '/atendimento abre a página pública na URL canônica':
+        semHtml.status === 200 && /<title>/i.test(semHtml.corpo),
+      'o endereço COM .html continua valendo e redireciona para a URL curta':
+        comHtml.status === 308 && /\/atendimento$/.test(comHtml.headers.location || ''),
       'vale pras telas internas também (o mesmo express.static)':
         interna.status === 200 && /<title>/i.test(interna.corpo),
       'toda página pública é pública nos DOIS endereços (senão o cliente cai no muro de senha)':
@@ -13264,14 +13320,14 @@ setTimeout(async () => {
       'e o atalho não abriu tela interna: /loja-status NÃO virou página pública':
         !publicas.has('/loja-status') && !publicas.has('/loja-status.html'),
       'o static serve sem extensão de propósito (é o que faz /atendimento existir)':
-        /express\.static\(path\.join\(__dirname, 'public'\), \{ extensions: \['html'\] \}\)/.test(fonte),
+        /express\.static\(DIRETORIO_PUBLICO, \{ extensions: \['html'\] \}\)/.test(fonte),
     };
     const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
     okSemHtml = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem=${semHtml.status} com=${comHtml.status} publicas=${publicas.size})`);
   } catch (e) { okSemHtml = false; console.log('  erro: ' + e.message); }
   if (!okSemHtml) ruins += 1;
-  console.log(`${okSemHtml ? '✓' : '✗'} Link sem ".html": /atendimento abre igual, o endereço antigo continua, e o cliente não cai no muro de senha`);
+  console.log(`${okSemHtml ? '✓' : '✗'} Link sem ".html": /atendimento abre sem extensão, o endereço antigo redireciona e o cliente não cai no muro de senha`);
 
   // ------------------------------------------------------------------
   // CONCILIAÇÃO PWR/iFood x DECLARADO (pedido do Master, 13/09/2026: "se o
@@ -15633,8 +15689,9 @@ setTimeout(async () => {
 
     // roda a MESMA funcao da tela, extraida do HTML - regex sobre o texto
     // provaria que a linha existe, nao que a conta esta certa
-    const fonte = htmlE.match(/function calcularPreset\([\s\S]*?\n\}\n\/\/ setMonth\(\)[\s\S]*?\nfunction recuarMeses\([\s\S]*?\n\}/);
+    const fonte = htmlE.match(/function calcularPreset\([\s\S]*?\r?\n\}\r?\n\/\/ setMonth\(\)[\s\S]*?\r?\nfunction recuarMeses\([\s\S]*?\r?\n\}/);
     const calc = new Function(`
+      const pad2 = (n) => String(n).padStart(2, '0');
       const isoLocal = (d) => \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`;
       ${fonte ? fonte[0] : 'function calcularPreset(){ return {}; }'}
       return calcularPreset;

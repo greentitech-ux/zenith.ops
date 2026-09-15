@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const multer = require('multer');
 
 const compression = require('compression');
@@ -92,6 +93,7 @@ const termoResponsabilidade = require('./termoResponsabilidade');
 const saltiversoImport = require('./saltiversoImport');
 const saltiversoVendas = require('./saltiversoVendas');
 const estacaoComida = require('./estacaoComida');
+const estacaoMesasQr = require('./estacaoMesasQr');
 const saltiversoFechamento = require('./saltiversoFechamento');
 const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
@@ -9027,6 +9029,23 @@ app.get('/api/estacao/fechamento', requireSection('estacao-fechamento'), async (
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// FOLHA DE QR DAS MESAS (ver estacaoMesasQr.js): PDF em A4 com um adesivo
+// por mesa, de `de` até `ate`. Fica com quem fecha o dia (gerente), não com
+// o garçom - é tarefa de montar o salão, não de atender. O QR grava a URL
+// oficial (APP_BASE_URL), não o host do pedido: o adesivo fica colado na
+// mesa por meses e não pode apontar pra um endereço de teste.
+app.get('/api/estacao/mesas-qr.pdf', requireSection('estacao-fechamento'), (req, res) => {
+  try {
+    const unidade = String(req.query.unidade || '').trim();
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const mesas = estacaoMesasQr.faixaDeMesas(req.query.de, req.query.ate);
+    estacaoMesasQr.writePDF(res, {
+      unidade, unidadeNome: ESTACAO_UNIDADES_NOMES[unidade], mesas, baseUrl: APP_BASE_URL,
+      nomeArquivo: `qr-mesas-${mesas[0]}-a-${mesas[mesas.length - 1]}.pdf`,
+    });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, res) => {
   try {
     const { unidade, unidadeNome, itens, pagamentos } = req.body;
@@ -14931,14 +14950,29 @@ app.post('/api/ifood/sincronizar', auth.requireMaster, async (req, res) => {
   res.json(status);
 });
 
-// `extensions: ['html']` faz /atendimento servir atendimento.html - o link que
-// vai pro cliente para de ter cara de arquivo. Vale pras 59 telas.
+// URLs das telas sao sempre curtas: /central-solucoes, nunca
+// /central-solucoes.html. Favoritos, links de e-mail e codigo antigo continuam
+// funcionando, mas recebem um redirect permanente para a URL oficial. Query
+// string e preservada (ex.: /fechamentos.html?grupo=ARCFOOD vira
+// /fechamentos?grupo=ARCFOOD).
 //
-// O endereco COM .html continua respondendo igual, e NAO redireciona: link
-// que ja foi mandado pra cliente, favorito de gente da operacao e o endereco
-// que o NOCZenith abre na maquina de loja (ver montarScriptVigia) tem que
-// continuar valendo exatamente como esta. Os dois enderecos, mesma pagina.
-app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
+// So redireciona arquivos HTML que existem dentro de public. Assim uma rota de
+// API, um anexo ou um caminho inexistente nunca e' alterado por engano.
+const DIRETORIO_PUBLICO = path.join(__dirname, 'public');
+app.get(/^(.*)\.html$/, (req, res, next) => {
+  const rotaHtml = req.path;
+  const arquivo = path.resolve(DIRETORIO_PUBLICO, '.' + rotaHtml);
+  const dentroDoPublico = arquivo === DIRETORIO_PUBLICO || arquivo.startsWith(DIRETORIO_PUBLICO + path.sep);
+  if (!dentroDoPublico || !fs.existsSync(arquivo)) return next();
+
+  const rotaCurta = rotaHtml.slice(0, -'.html'.length);
+  const destino = (rotaCurta === '/index' ? '/' : rotaCurta) + req.originalUrl.slice(rotaHtml.length);
+  return res.redirect(308, destino);
+});
+
+// `extensions: ['html']` serve a pagina depois do redirect: /atendimento
+// encontra atendimento.html, sem expor extensao em nenhum link do sistema.
+app.use(express.static(DIRETORIO_PUBLICO, { extensions: ['html'] }));
 
 // ROTA DE API QUE NAO EXISTE RESPONDE JSON, nao a pagina 404 do Express.
 // Todo lugar do app faz `await resp.json()` na resposta - com HTML no corpo,

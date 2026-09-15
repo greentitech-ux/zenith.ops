@@ -440,7 +440,16 @@ async function boot(){
     ? UNIDADES.map(u=>`<option value="${esc(u.codigo)}">${esc(u.nome)}</option>`).join('')
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
   document.getElementById('root').classList.remove('hidden');
+  // Aberto pelo QR da mesa com a câmera comum do celular (a folha de
+  // impressão grava a URL do salão com ?unidade=&mesa=, ver
+  // estacaoMesasQr.js): já entra na unidade certa e mostra a conta da mesa,
+  // sem o garçom precisar tocar em "Ler QR" de novo.
+  const params = new URLSearchParams(location.search);
+  const unidadeQr = params.get('unidade');
+  if(unidadeQr && UNIDADES.some(u=>u.codigo===unidadeQr)) document.getElementById('unidade').value = unidadeQr;
   await trocarUnidade();
+  const mesaQr = mesaDoQr(params.get('mesa'));
+  if(mesaQr) buscarMesa(mesaQr);
   // o salão muda na mão de outro garçom: o servidor avisa (broadcast
   // estacao-salao-mudou) em vez de a tela ficar perguntando de 5 em 5s
   try{

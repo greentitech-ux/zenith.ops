@@ -839,7 +839,7 @@
     <div class="chat-thread" id="msg-modal-thread"></div>
     <div class="msg-destinos-lista hidden" id="msg-destinos-lista"></div>
 
-    <textarea id="msg-texto" maxlength="500" placeholder="Ex: precisamos que reiniciem o roteador, ou qualquer aviso pra tela desse computador"
+    <textarea class="nao-maiusc" id="msg-texto" maxlength="500" placeholder="Ex: precisamos que reiniciem o roteador, ou qualquer aviso pra tela desse computador"
       oninput="atualizarContadorMensagem()" onkeydown="teclaNaMensagem(event)"></textarea>
     <div class="msg-rodape">
       <span class="msg-dica"><b>Enter</b> envia · <b>Shift+Enter</b> quebra linha</span>
@@ -947,7 +947,7 @@
     <label>Nome do computador</label>
     <input type="text" id="editar-comp-nome" maxlength="60">
     <label>ID do AnyDesk (opcional)</label>
-    <input type="text" id="editar-comp-anydesk" maxlength="40" placeholder="Ex: 123 456 789">
+    <input type="text" class="valor-exato" id="editar-comp-anydesk" maxlength="40" placeholder="Ex: 123 456 789">
     <label>O que o link desse computador mostra</label>
     <div class="radio-tipo">
       <label><input type="radio" name="editar-comp-tipo" value="atendimento"><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
