@@ -631,19 +631,24 @@ function caminhoSubgrupo(id){
   return (g?g.name+' / ':'')+s.name;
 }
 
-// ---------- Tags: cargo (exclusivo) + acessos extras (independentes) -
+// ---------- Tags: cargo (uma OU MAIS) + acessos extras (independentes) -
 // junta num so bloco reaproveitado no formulario de criacao e no modal de
 // Permissoes, pra nao ter que criar o acesso "pelado" e so depois ir ate
 // Acoes marcar cada tag uma por uma ----------
-const CARGOS = [ ['','Sem cargo'], ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'] ];
+const CARGOS = [ ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'], ['coordenador-agregador','🛵 Coord. Agregador'] ];
 function tagsFieldsetHtml(prefixo, tags){
-  tags = tags || { cargo:null, empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeNoPulsoPrint:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, podeBonifVerValorTotal:false, podeBonifVerColaboradores:false, sessaoLonga:false, qaUser:false };
-  const cargoHtml = CARGOS.map(([v,l])=>{
-    const marcado = (tags.cargo||'')===v;
-    return `<label><input type="radio" name="${prefixo}-cargo" value="${v}" ${marcado?'checked':''}> ${l}</label>`;
-  }).join('');
+  tags = tags || { cargo:null, cargos:[], empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeNoPulsoPrint:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, podeBonifVerValorTotal:false, podeBonifVerColaboradores:false, sessaoLonga:false, qaUser:false };
+  // MAIS DE UMA TAG por pessoa (Master, 14/09): "assim eu designo alguém de
+  // suporte para cuidar de Agregador". Era rádio (exclusivo) e por isso a
+  // pessoa do Suporte não podia também cuidar do Agregador. A PRIMEIRA
+  // marcada na ordem desta lista é a principal - é ela que define a tela
+  // inicial e o rótulo, como sempre definiu (ver tagPrincipal em users.js).
+  const marcadas = new Set(tags.cargos && tags.cargos.length ? tags.cargos : (tags.cargo ? [tags.cargo] : []));
+  const cargoHtml = CARGOS.map(([v,l])=>
+    `<label><input type="checkbox" name="${prefixo}-cargo" value="${v}" ${marcadas.has(v)?'checked':''}> ${l}</label>`
+  ).join('');
   return `
-    <div class="group-heading">Cargo <span style="text-transform:none;color:var(--muted);">— rótulo + tela inicial ao entrar</span></div>
+    <div class="group-heading">Cargo <span style="text-transform:none;color:var(--muted);">— pode marcar mais de um; o primeiro da lista define a tela inicial</span></div>
     <div class="checks">${cargoHtml}</div>
     <div class="group-heading" style="margin-top:10px;">Empresa <span style="text-transform:none;color:var(--muted);">— até onde vai o "vê tudo" do Admin</span></div>
     <div style="margin:4px 0 2px;">
@@ -670,7 +675,7 @@ function tagsFieldsetHtml(prefixo, tags){
 }
 function lerTagsForm(prefixo){
   return {
-    cargo: (document.querySelector(`input[name="${prefixo}-cargo"]:checked`)||{}).value || null,
+    cargos: [...document.querySelectorAll(`input[name="${prefixo}-cargo"]:checked`)].map(i=>i.value),
     empresaId: (document.getElementById(prefixo+'-empresa')||{}).value || null,
     isAdmin: document.getElementById(prefixo+'-tag-admin').checked,
     podeCatalogoEstoque: document.getElementById(prefixo+'-tag-catalogo-estoque').checked,
@@ -691,7 +696,7 @@ function lerTagsForm(prefixo){
 // significa que a mudança já valeu
 async function salvarTagsUsuario(id, tags){
   const respostas = await Promise.all([
-    fetch('/api/users/'+id+'/cargo', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cargo: tags.cargo})}),
+    fetch('/api/users/'+id+'/cargos', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cargos: tags.cargos||[]})}),
     fetch('/api/users/'+id+'/is-admin', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({isAdmin: tags.isAdmin})}),
     fetch('/api/users/'+id+'/empresa', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({empresaId: tags.empresaId})}),
     fetch('/api/users/'+id+'/catalogo-estoque', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCatalogoEstoque: tags.podeCatalogoEstoque})}),
@@ -1025,7 +1030,7 @@ function passaBuscaUsuario(u){
   const unidadesLabels = (perms.unidades||[]).map(c=>UNIDADES_NOMES[c]||c);
   const tags = [
     u.role==='master' ? 'master' : 'user',
-    u.cargo, u.isAdmin?'admin':'', u.podeCatalogoEstoque?'catálogo estoque':'',
+    u.cargo, (u.cargos||[]).join(' '), u.isAdmin?'admin':'', u.podeCatalogoEstoque?'catálogo estoque':'',
     u.podeCatalogoInsumos?'insumos':'', u.podeCadastrarOperadores?'operadores':'',
     u.podeRhTodasUnidades?'rh todas unidades':'',
     u.podeRhCadastrarEfetivado?'rh cadastrar efetivado':'',
@@ -1070,7 +1075,15 @@ function renderUsers(){
     const tags = [`<span class="badge ${u.role}">${u.role}</span>`];
     if (u.qaMaster) tags.push(`<span class="badge qa" title="Master de teste - 100% do acesso, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) ficam paradas esperando um Master de verdade aprovar">🧪 QA Master</span>`);
     if (u.qaUser) tags.push(`<span class="badge qa" title="Sempre vê/cria todos os tipos de solicitação na Central; tudo que criar sai marcado TESTE">🧪 QA User</span>`);
-    if (u.cargo) tags.push(`<span class="badge ${u.cargo}" title="Tag de cargo - também define a tela inicial da pessoa ao entrar no app">${({loja:'🏬 loja', gerente:'👔 gerente', tecnico:'🔧 técnico', suporte:'🎧 suporte', manutencao:'🛠️ manutenção'})[u.cargo]||u.cargo}</span>`);
+    // TODAS as tags da pessoa, não só a principal: com uma tag só na tela, o
+    // Master marcava "Coord. Agregador" em alguém do Suporte e a lista
+    // continuava mostrando só "suporte" - parecia que não tinha salvo
+    const cargosDaPessoa = (u.cargos && u.cargos.length) ? u.cargos : (u.cargo ? [u.cargo] : []);
+    cargosDaPessoa.forEach((c, i) => {
+      const rotulo = (CARGOS.find(([v])=>v===c)||[null,c])[1];
+      const principal = i === 0;
+      tags.push(`<span class="badge ${c}" title="${principal?'Tag principal - define a tela inicial da pessoa ao entrar no app':'Tag de cargo'}">${rotulo}${principal && cargosDaPessoa.length>1 ? ' ★' : ''}</span>`);
+    });
     if (u.isAdmin) tags.push(`<span class="badge admin" title="Pode aprovar/rejeitar solicitações da Central, junto com o Master">⭐ admin</span>`);
     if (u.empresaId) {
       const nomeEmp = (EMPRESAS.find(e=>e.id===u.empresaId)||{}).nome || u.empresaId;
@@ -1400,7 +1413,7 @@ function editarPermissoes(id){
   EDITING_USER = id;
   document.getElementById('perm-title').textContent = 'Permissões de ' + u.email;
   const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
-  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, sessaoLonga: !!u.sessaoLonga });
+  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, cargos: u.cargos||(u.cargo?[u.cargo]:[]), empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, sessaoLonga: !!u.sessaoLonga });
   document.getElementById('perm-err').classList.add('hidden');
   permOverlay.classList.add('show');
 }

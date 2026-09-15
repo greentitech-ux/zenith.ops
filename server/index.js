@@ -62,6 +62,9 @@ const suporteChat = require('./suporteChat');
 const suporteChatPDF = require('./suporteChatPDF');
 const segurancaChat = require('./segurancaChat');
 const suporteBot = require('./suporteBot');
+const agregadorFila = require('./agregadorFila');
+const roteamentoTags = require('./roteamentoTags');
+const agregadorCowork = require('./agregadorCowork');
 const pedidoWatch = require('./pedidoWatch');
 const preferencias = require('./preferencias');
 const docsMaster = require('./docsMaster');
@@ -825,6 +828,66 @@ app.post('/api/bot/alerta', async (req, res) => {
     // tipo 'monitor' e url /monitor.html) - dois cards do mesmo aviso
     await push.notifyAlertaExterno(tituloFinal, corpo, `bot-alerta-${unidade || 'geral'}`, c.critico === true);
     res.json({ ok: true, alerta: registro });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+// ---------- COWORK AGREGADOR: pausar item / fechar loja no iFood e 99food ----
+// Pedido do Master (14/09/2026): "agregador é um Cowork que criei, precisamos
+// fazer essa integração com o NoPulso".
+//
+// Mesma forma dos outros Coworks do app (vendas-registro acima): token
+// próprio no header x-bot-token, o robô PUXA o que tem pra fazer e CONFIRMA
+// de volta. O NoPulso não opera painel de agregador - ele decide o que entra
+// na fila e cobra quem não executou (ver agregadorFila.js).
+//
+// 1) O Cowork puxa o que tem pra bloquear. Marca 'entregue' na hora, então
+//    duas sessões dele nunca pausam o mesmo item duas vezes.
+app.get('/api/bot/agregador/fila', async (req, res) => {
+  if (!exigirTokenBot(req, res, 'BOT_AGREGADOR_TOKEN')) return;
+  try {
+    const pedidos = await agregadorFila.puxar({ limite: req.query.limite });
+    if (pedidos.length) console.log(`[agregador] Cowork puxou ${pedidos.length} pedido(s): ${pedidos.map((p) => agregadorFila.descrever(p)).join(' · ')}`);
+    res.json({ ok: true, pedidos });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+// 2) O Cowork confirma. ok=false com tentativa sobrando devolve o pedido pra
+//    fila sozinho (ver concluir); esgotadas as tentativas ele fecha como erro
+//    e a varredura de atraso chama o coordenador humano.
+app.post('/api/bot/agregador/retorno', async (req, res) => {
+  if (!exigirTokenBot(req, res, 'BOT_AGREGADOR_TOKEN')) return;
+  try {
+    const c = req.body || {};
+    if (!c.id) return res.status(400).json({ error: 'Mande o "id" do pedido (o mesmo que veio na fila).' });
+    const { pedido, repetido } = await agregadorFila.concluir(c.id, {
+      ok: c.ok === true, resultado: c.resultado, erro: c.erro,
+    });
+    if (repetido) return res.json({ ok: true, repetido: true, pedido });
+    const oQue = agregadorFila.descrever(pedido);
+    console.log(`[agregador] retorno do Cowork: ${oQue} -> ${pedido.status}${pedido.erro ? ` (${pedido.erro})` : ''}`);
+    broadcast('agregador-pedido', { id: pedido.id, status: pedido.status }, 'suporte');
+
+    // quem pediu fica sabendo NA CONVERSA - o Beniboy prometeu o retorno
+    // quando acionou a ferramenta, e sem isto a pessoa ficaria olhando pro
+    // chat sem saber se a coca saiu do ar ou não
+    if (pedido.chatId && (pedido.status === 'executado' || pedido.status === 'erro')) {
+      const aviso = pedido.status === 'executado'
+        ? `✅ ${oQue} — feito agora no painel.`
+        : `⚠️ ${oQue} — não consegui fazer pelo painel${pedido.erro ? ` (${pedido.erro})` : ''}. O coordenador do agregador foi chamado.`;
+      await suporteChat.adicionarMensagem(pedido.chatId, { de: 'suporte', texto: aviso, bot: true }).catch(() => {});
+      broadcast('suporte-chat', { id: pedido.chatId }, 'suporte');
+    }
+    // erro do robô não pode morrer no log: vira alerta e chama o humano
+    if (pedido.status === 'erro') {
+      await push.notifyAgregador({ id: pedido.chatId, nome: pedido.pedidoPorNome || 'Cowork Agregador' }, {
+        acao: pedido.acao, canal: pedido.canal, unidade: pedido.unidadeNome || pedido.unidade,
+        detalhe: `o Cowork não conseguiu: ${pedido.erro || 'falha sem detalhe'}`,
+      }).catch((e) => console.error('[agregador] falha ao chamar o coordenador:', e.message));
+      await agregadorFila.marcarCoordenadorAvisado(pedido.id).catch(() => {});
+    }
+    res.json({ ok: true, pedido });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5488,6 +5551,19 @@ app.put('/api/users/:id/cargo', auth.requireMaster, async (req, res) => {
   }
 });
 
+// O CONJUNTO de tags (mais de uma por pessoa - "designo alguém de suporte
+// para cuidar de Agregador", Master 14/09). A rota de cima continua existindo
+// e vale pra trocar só a principal, sem apagar as outras (ver updateCargo).
+app.put('/api/users/:id/cargos', auth.requireMaster, async (req, res) => {
+  try {
+    const cargos = Array.isArray(req.body.cargos) ? req.body.cargos : [];
+    if (await desviarSeQaMaster(req, res, 'usuarios.cargo', `Editar tags do acesso ${req.params.id}`, { id: req.params.id, cargos })) return;
+    res.json(await users.updateCargos(req.params.id, cargos));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/users/:id/reset-password', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.resetSenha', `Resetar senha do acesso ${req.params.id}`, { id: req.params.id, password: req.body.password })) return;
@@ -9990,7 +10066,7 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       redes: redes.REDES,
       // cargo vai junto pra tela marcar a tag ao lado do nome (nome · Suporte/
       // Gerente/...): mesma tag de /usuarios.html, sem inventar rótulo novo
-      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', cargo: u.role === 'master' ? null : (u.cargo || null), unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', cargo: u.role === 'master' ? null : (u.cargo || null), cargos: u.role === 'master' ? [] : users.tagsDe(u), unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
       // a tela precisa saber QUEM é você pra liberar "trocar"/"alterar" na
       // tarefa de que você é responsável, sem reimplementar a regra no navegador
       eu: req.user.id,
@@ -13328,6 +13404,57 @@ async function acionarBeniboy(chatId) {
       broadcast('solicitacao-criada', t, 'solicitacoes');
       push.notifySolicitacao(`Ticket #${t.numeroTicket} · Nova solicitação (Beniboy · chat)`, `${t.titulo || ''} · ${t.unidadeNome || ''}`, t.id);
     }
+    // DIRECIONADO POR TAG (roteamentoTags.js): além do push geral acima, quem
+    // tem a tag do assunto recebe no nome dela. É a diferença entre "chegou
+    // um ticket na Central" e "esse é seu" - sem isso o chamado esperava
+    // alguém passar pela tela por acaso.
+    for (const d of r.direcionados || []) {
+      const destino = d.destino || {};
+      if (!destino.tag || !(destino.pessoas || []).length) continue;
+      await push.notifyPorTag(destino, {
+        titulo: `🏷️ ${destino.rotulo} · ticket #${d.numeroTicket}`,
+        corpo: `${d.titulo || ''}${d.unidadeNome ? ' · ' + d.unidadeNome : ''}`.slice(0, 150),
+        tagPush: 'tag-' + d.ticketId,
+        // o ticket ainda espera a decisão do Master: quem tem a tag vê ele no
+        // Histórico da Central, não na tela de execução (que só recebe depois
+        // de aprovado). Mandar pra tela errada é mandar pra tela vazia.
+        url: '/central-historico.html',
+      }).catch((e) => console.error('[roteamento] falha ao avisar quem tem a tag:', e.message));
+      console.log(`[roteamento] ticket #${d.numeroTicket} (${d.tipo}) -> ${roteamentoTags.descreverDestino(destino)}`);
+    }
+    // PAUSAR ITEM / FECHAR LOJA no iFood/99food (tool bloquear_no_agregador):
+    // quem executa é o COWORK AGREGADOR. O pedido entra na fila dele
+    // (agregadorFila.js), o Cowork puxa e confirma. O coordenador humano
+    // continua atrás: se o robô não concluir em MINUTOS_ATE_ATRASO, a
+    // varredura o chama (ver cobrarAgregadorAtrasado).
+    if (r.agregador) {
+      const a = r.agregador;
+      const detalhe = [a.item, a.motivo].filter(Boolean).join(' · ');
+      try {
+        // o Cowork opera o painel POR LOJA: o nome tem que ser o do cadastro,
+        // não o apelido que a pessoa digitou no chat
+        const { encontrada } = await resolverUnidadePublica(a.unidade);
+        const { pedido, repetido } = await agregadorFila.criar({
+          acao: a.acao, canal: a.canal, unidade: encontrada ? encontrada.codigo : a.unidade,
+          unidadeNome: encontrada ? encontrada.nome : a.unidade,
+          item: a.item, motivo: a.motivo, origem: 'beniboy', chatId,
+          pedidoPorNome: r.chat?.nome || null,
+        });
+        const aviso = repetido ? { avisado: false, motivo: 'pedido igual já estava na fila' } : await agregadorCowork.avisarPedidoNovo(pedido);
+        console.log(`[agregador] ${repetido ? 'pedido repetido' : 'pedido novo'} ${pedido.id}: ${agregadorFila.descrever(pedido)}${aviso.avisado ? ' · Cowork avisado' : ` · ${aviso.motivo}`}`);
+        // liga o ritmo rápido da cobrança sem esperar o tick lento
+        agregadorPendente = true;
+        broadcast('agregador-pedido', { id: pedido.id, status: pedido.status, chatId }, 'suporte');
+      } catch (e) {
+        // fila fora do ar / pedido inválido: NÃO pode sumir - cai direto no
+        // coordenador humano, que é o que acontecia antes de existir o Cowork
+        console.error('[agregador] falha ao enfileirar pro Cowork:', e.message);
+        await push.notifyAgregador(r.chat, {
+          acao: a.acao, canal: a.canal, unidade: a.unidade,
+          detalhe: `${detalhe}${detalhe ? ' · ' : ''}(não entrou na fila do Cowork: ${e.message})`,
+        }).catch(() => {});
+      }
+    }
     if (r.chamouAtendente) {
       push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico.html');
       // se a loja de onde veio essa conversa esta sem conexao, a causa real
@@ -13367,6 +13494,10 @@ async function acionarBeniboy(chatId) {
 // alguem escalado da instancia anterior). Depois disso quem manda e o
 // resultado da propria varredura + a escalacao nova em acionarBeniboy.
 let alarmeBeniboyPendente = true;
+// mesma ideia pro Cowork Agregador (ver cobrarAgregadorAtrasado): nasce true
+// pra o primeiro tick depois de um deploy conferir o banco - pode ter ficado
+// pedido aberto da instância anterior, e esse é justamente o que ninguém viu.
+let agregadorPendente = true;
 
 async function reforcarAlarmesBeniboy() {
   const pendentes = await suporteChat.listarParaReforcarAlarme();
@@ -13722,6 +13853,27 @@ app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, re
 // e botoes de acao rapida chamam essa mesma rota. nivelDestino so e exigido
 // pro status TRANSFERIDO (2=agente humano, 3=Master); motivoSemSolucao so
 // pro status SEM_SOLUCAO. Mesmo guard de acesso do resto do atendimento.
+// Quem pode RECEBER uma conversa transferida: as pessoas com a tag Suporte
+// (users.listarPorTag, que acha tanto o cadastro antigo quanto quem tem mais
+// de uma tag). Vai marcado quem consegue mesmo ABRIR a Central do Beniboy -
+// transferir pra quem não tem a seção é entregar pro vazio, e o Master
+// precisa enxergar isso na hora de escolher, não depois.
+app.get('/api/suporte/agentes', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    const lista = await users.listarPorTag('suporte');
+    res.json(lista.map((u) => ({
+      id: u.id,
+      nome: u.nome,
+      email: u.email,
+      tags: u.tags,
+      podeAtender: u.ehTime || (u.secoes || []).includes('suporte'),
+    })));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => {
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
@@ -13731,8 +13883,21 @@ app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => 
       nivelDestino: req.body.nivelDestino,
       motivoSemSolucao: req.body.motivoSemSolucao,
       autor,
+      transferidoPara: req.body.transferidoPara || null,
     });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    // quem recebeu a conversa é avisado no nome dele - senão a transferência
+    // depende de a pessoa estar com a Central aberta na hora
+    const para = req.body.transferidoPara;
+    if (req.body.statusAtendimento === 'TRANSFERIDO' && para && para.id) {
+      push.notifyUsuario(
+        para.id,
+        '💬 Conversa transferida pra você',
+        `${chat.nome || 'Visitante'}${autor.nome ? ' · de ' + autor.nome : ''}`.slice(0, 150),
+        'suporte-transf-' + chat.id,
+        '/beniboy.html?chat=' + encodeURIComponent(chat.id),
+      ).catch((e) => console.error('[suporte] falha ao avisar quem recebeu a conversa:', e.message));
+    }
     const { token, ...resto } = chat;
     res.json(resto);
   } catch (err) {
@@ -15235,6 +15400,36 @@ function aquecerBoot(promessa, ms) {
       if (!alarmeBeniboyPendente && ticksAlarmeBeniboy % 8 !== 0) return;
       reforcarAlarmesBeniboy().catch((err) => console.error('Erro no reforço do alarme do Beniboy:', err.message));
     }, 15 * 1000);
+
+    // COWORK AGREGADOR: cobrar o que ele não executou (ver agregadorFila.js).
+    // O robô pode estar fora do ar, sem sessão ou simplesmente não ter puxado
+    // a fila - e loja fechada no app, ou item que continua vendendo sem
+    // estoque, não pode ficar esperando robô calado. Passou de
+    // MINUTOS_ATE_ATRASO, o coordenador humano é chamado (uma vez por
+    // pedido - marcarCoordenadorAvisado).
+    // Ritmo: 1min enquanto HÁ pedido aberto, 5min quando não há. Consulta que
+    // não acha nada custa 1 leitura igual (CLAUDE.md §3), e o caso comum é
+    // não haver nada na fila.
+    let ticksAgregador = 0;
+    const cobrarAgregadorAtrasado = async () => {
+      const { abertos, atrasados } = await agregadorFila.varrerAtrasados();
+      agregadorPendente = abertos > 0;
+      for (const p of atrasados) {
+        const oQue = agregadorFila.descrever(p);
+        console.log(`[agregador] ${oQue} parado há mais de ${agregadorFila.MINUTOS_ATE_ATRASO}min (status ${p.status}) - chamando o coordenador`);
+        await push.notifyAgregador({ id: p.chatId, nome: p.pedidoPorNome || 'Cowork Agregador' }, {
+          acao: p.acao, canal: p.canal, unidade: p.unidadeNome || p.unidade,
+          detalhe: `o Cowork não executou em ${agregadorFila.MINUTOS_ATE_ATRASO} min`,
+        });
+        await agregadorFila.marcarCoordenadorAvisado(p.id);
+        broadcast('agregador-pedido', { id: p.id, status: p.status, atrasado: true }, 'suporte');
+      }
+    };
+    setInterval(() => {
+      ticksAgregador += 1;
+      if (!agregadorPendente && ticksAgregador % 5 !== 0) return;
+      cobrarAgregadorAtrasado().catch((err) => console.error('Erro na cobrança do Cowork Agregador:', err.message));
+    }, 60 * 1000);
 
     // RH: alerta do 5o dia de teste (ver rh.verificarTestesVencidos) - so
     // roda dentro do horario comercial (evita acordar ninguem de madrugada);

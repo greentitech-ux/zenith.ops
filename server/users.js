@@ -490,25 +490,122 @@ async function updatePodeRhCadastrarEfetivado(id, valor) {
 // Parque, e a tag define a TELA INICIAL da pessoa ao entrar no app (ver
 // index.html): Loja -> Historico de Solicitacoes, Tecnico -> Chamados TI,
 // Manutencao -> Manutencao; sem tag -> Painel.
-const CARGOS_VALIDOS = ['loja', 'gerente', 'assistente-gerente', 'tecnico', 'suporte', 'manutencao', 'operador'];
+// 'coordenador-agregador' é quem pausa item e fecha loja no iFood/99food.
+// Entrou porque o Beniboy precisa saber A QUEM mandar esse pedido: pausar um
+// item no agregador não é coisa que se resolve no chat nem que qualquer
+// atendente faça - tem que chegar em quem tem o painel na mão (Master,
+// 14/09). Sem um cargo, "o time" é todo mundo, e todo mundo é ninguém.
+const CARGOS_VALIDOS = ['loja', 'gerente', 'assistente-gerente', 'tecnico', 'suporte', 'manutencao', 'operador', 'coordenador-agregador'];
 // Ass. Ger (assistente de Gerente) tem as MESMAS permissoes de aprovacao do
 // Gerente (check-out antecipado do Parque, decidir cortesia, alertas de
 // limite do PCD cortesia, etc.) - qualquer checagem de "e gerente" espalhada
 // pelo app deve tratar os dois cargos como equivalentes (ver ehCargoGerente)
+// Os coordenadores de agregador ATIVOS - quem recebe pausa de item e
+// fechamento de loja no iFood/99food quando o Cowork não executa (ver
+// push.notifyAgregador). Hoje é só um caso de listarPorTag: a tag pode estar
+// junto de outras (o Master designa alguém do Suporte pra cuidar disso).
+async function listarCoordenadoresAgregador() {
+  const lista = await listarPorTag('coordenador-agregador');
+  return lista.map((u) => ({ ...u, temSuporte: u.ehTime || (u.secoes || []).includes('suporte') }));
+}
+
+// ---------------------------------------------------------------------------
+// TAGS DE CARGO: MAIS DE UMA POR PESSOA
+//
+// Pedido do Master (14/09/2026): "precisamos poder marcar mais de 1 tag,
+// assim eu designo alguém de suporte para cuidar de Agregador". Antes a tag
+// era exclusiva (um rádio na tela): quem era Suporte não podia também ser
+// Coord. Agregador, e o chamado do agregador não tinha em quem cair.
+//
+// O dado antigo NÃO foi reescrito (CLAUDE.md §1): `cargo` continua sendo a
+// string que já existe em todo acesso e que o app inteiro lê hoje (tela
+// inicial em index.html, nav-menu.js, Parque, conciliação, tarefas). O que
+// entrou foi `cargos`, o ARRAY com o conjunto completo - e `cargo` passa a
+// ser a PRINCIPAL dele (a primeira na ordem canônica de CARGOS_VALIDOS).
+// Quem pergunta "essa pessoa é gerente?" continua funcionando sem saber que
+// existe array; quem pergunta "quem cuida de agregador?" usa listarPorTag().
+//
+// Ordem canônica e não a de clique: duas pessoas com as mesmas tags têm a
+// mesma principal, sempre - senão a tela inicial de alguém mudaria conforme a
+// ordem em que o Master marcou as caixas.
+function tagsDe(u) {
+  if (!u) return [];
+  const brutas = [...(Array.isArray(u.cargos) ? u.cargos : []), ...(u.cargo ? [u.cargo] : [])];
+  const limpas = new Set(brutas.map((c) => String(c || '').toLowerCase()).filter((c) => CARGOS_VALIDOS.includes(c)));
+  return CARGOS_VALIDOS.filter((c) => limpas.has(c));
+}
+function temTag(u, tag) {
+  return tagsDe(u).includes(String(tag || '').toLowerCase());
+}
+// a tag principal: é ela que vai pro campo `cargo` (o que o app já lê)
+function tagPrincipal(tags) {
+  const lista = CARGOS_VALIDOS.filter((c) => (tags || []).includes(c));
+  return lista[0] || null;
+}
+
+// Quem tem a tag, ativos. Duas consultas de propósito: o acesso ANTIGO só tem
+// `cargo` (string) e nunca entraria num array-contains; o novo tem os dois.
+// São ~2 leituras de poucos documentos e o alternativo seria reescrever o
+// cadastro inteiro numa migração - exatamente o que o CLAUDE.md proíbe.
+async function listarPorTag(tag) {
+  const alvo = String(tag || '').toLowerCase();
+  if (!CARGOS_VALIDOS.includes(alvo)) return [];
+  const [porCampo, porArray] = await Promise.all([
+    usersRef.where('cargo', '==', alvo).get(),
+    usersRef.where('cargos', 'array-contains', alvo).get(),
+  ]);
+  const porId = new Map();
+  for (const d of [...porCampo.docs, ...porArray.docs]) {
+    const u = { id: d.id, ...d.data() };
+    if (u.active === false) continue;
+    porId.set(d.id, u);
+  }
+  return [...porId.values()]
+    .map((u) => ({
+      id: u.id,
+      nome: u.nome || u.username || u.email,
+      email: u.email || null,
+      username: u.username || null,
+      tags: tagsDe(u),
+      // quem NAO abre a tela de destino recebe o push sem link pra ela -
+      // clicar e cair em "voce nao tem acesso" e pior que nao ter link
+      secoes: u.role === 'master' || u.isAdmin ? null : ((u.permissions || {}).sections) || [],
+      ehTime: u.role === 'master' || !!u.isAdmin,
+    }))
+    // ordem estável: dois ticks da mesma varredura não podem trocar a ordem
+    .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
+}
+
 function ehCargoGerente(cargo) {
   return cargo === 'gerente' || cargo === 'assistente-gerente';
 }
-async function updateCargo(id, cargo) {
-  const limpo = cargo ? String(cargo).toLowerCase() : null;
-  if (limpo && !CARGOS_VALIDOS.includes(limpo)) throw new Error('Tag inválida. Use "loja", "gerente", "assistente-gerente", "tecnico", "suporte", "manutencao" ou "operador".');
+// Grava o CONJUNTO de tags. Sempre escreve os dois campos juntos - `cargos`
+// (o conjunto) e `cargo` (a principal, que é o que o resto do app lê) - pra
+// nunca existir um acesso em que os dois discordem.
+async function updateCargos(id, cargos) {
+  const lista = (Array.isArray(cargos) ? cargos : [cargos]).map((c) => String(c || '').toLowerCase()).filter(Boolean);
+  const invalida = lista.find((c) => !CARGOS_VALIDOS.includes(c));
+  if (invalida) throw new Error(`Tag inválida: "${invalida}". Use ${CARGOS_VALIDOS.map((c) => `"${c}"`).join(', ')}.`);
+  const limpas = CARGOS_VALIDOS.filter((c) => lista.includes(c)); // ordem canônica, sem repetido
   const ref = usersRef.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Acesso não encontrado.');
   if (snap.data().role === 'master') throw new Error('O acesso Master não usa tag de cargo.');
-  await ref.update({ cargo: limpo });
+  await ref.update({ cargos: limpas, cargo: tagPrincipal(limpas) });
   invalidarUsuario(id);
   usersCache.invalidar();
   return toPublic(await ref.get());
+}
+// a forma antiga (uma tag só) continua valendo: é o que a rota
+// PUT /api/users/:id/cargo manda, e trocar a principal não pode apagar em
+// silêncio as outras tags que a pessoa já tinha
+async function updateCargo(id, cargo) {
+  const limpo = cargo ? String(cargo).toLowerCase() : null;
+  if (limpo && !CARGOS_VALIDOS.includes(limpo)) throw new Error(`Tag inválida. Use ${CARGOS_VALIDOS.map((c) => `"${c}"`).join(', ')}.`);
+  const snap = await usersRef.doc(id).get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  const atuais = tagsDe(snap.data()).filter((c) => c !== snap.data().cargo);
+  return updateCargos(id, limpo ? [limpo, ...atuais] : atuais);
 }
 
 async function resetPassword(id, password) {
@@ -614,6 +711,8 @@ function toPublic(doc) {
     podeBonifVerColaboradores: data.role === 'master' ? null : !!data.podeBonifVerColaboradores,
     sessaoLonga: !!data.sessaoLonga,
     cargo: data.role === 'master' ? null : data.cargo || null,
+    // o conjunto inteiro; `cargo` acima continua sendo a principal (tagsDe)
+    cargos: data.role === 'master' ? [] : tagsDe(data),
     qaMaster: data.role === 'master' ? !!data.qaMaster : null,
     qaUser: data.role === 'master' ? null : !!data.qaUser,
     createdAt: data.createdAt,
@@ -729,6 +828,7 @@ async function criarCopiandoDe({ modeloId, email, username, senha }) {
 }
 
 module.exports = {
+  listarCoordenadoresAgregador,
   VALID_SECTIONS,
   SECTION_VERTICAIS,
   secoesDaVertical,
@@ -739,6 +839,7 @@ module.exports = {
   criarCopiandoDe,
   TIPOS_SOLICITACAO,
   CARGOS_VALIDOS,
+  tagsDe, temTag, tagPrincipal, listarPorTag, updateCargos,
   ehCargoGerente,
   findByIdentifier,
   list,

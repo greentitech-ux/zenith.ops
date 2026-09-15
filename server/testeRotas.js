@@ -15517,12 +15517,12 @@ setTimeout(async () => {
         && /monitorar: document\.getElementById\('disp-monitorar'\)\.checked/.test(html)
         && /corpo\.tipoNovo = tipoNovo/.test(html),
       // o modal do aparelho abre DE DENTRO do modal de detalhe (o lapis fica
-      // na lista de aparelhos). Sem z-index proprio ele nasce ATRAS de quem
-      // o chamou - foi exatamente o que o Master reportou
+      // na lista de aparelhos). Sem vir pra frente ele nasce ATRAS de quem o
+      // chamou - foi exatamente o que o Master reportou. O z-index fixo que
+      // resolvia SÓ este caso saiu: hoje quem abre por último fica por cima,
+      // por construção (ver abrirOverlay e o teste da pilha mais abaixo)
       'modal do aparelho fica na frente do modal de detalhe':
-        /#disp-overlay\{z-index:(\d+);\}/.test(html)
-        && Number(html.match(/#disp-overlay\{z-index:(\d+);\}/)[1])
-           > Number(html.match(/\.overlay\{[^}]*z-index:(\d+)/)[1]),
+        /abrirOverlay\('disp-overlay'\)/.test(html) && !/getElementById\('disp-overlay'\)\.classList/.test(html),
       // o chip agora distingue quem tem leitura de status (Zebra) de quem so
       // tem alarme de rede - por isso a condicao deixou de ser uma linha so
       'dispositivo monitorado mostra o chip 🔔 na linha':
@@ -16061,9 +16061,11 @@ setTimeout(async () => {
         /fetch\('\/api\/loja-status\/mensagem-massa'/.test(htmlM) && /destinos: MSG_DESTINOS/.test(htmlM),
       'Enter envia': enviouComEnter && barrouDefault,
       'Shift+Enter quebra linha em vez de enviar': quebrouComShift,
-      // era o bug do print: a caixa de mensagem abria ATRAS do detalhe
+      // era o bug do print: a caixa de mensagem abria ATRAS do detalhe. O
+      // z-index fixo virou regra geral - quem abre por último fica por cima
+      // (ver abrirOverlay, e o teste da pilha que roda a lógica de verdade)
       'a janela de mensagem fica na frente do modal de detalhe':
-        !!zModal && !!zBase && Number(zModal[1]) > Number(zBase[1]),
+        /abrirOverlay\('msg-overlay'\)/.test(htmlM) && !/getElementById\('msg-overlay'\)\.classList\.(add|remove)\('hidden'\)/.test(htmlM),
       'da pra escolher mais computadores na propria janela':
         /id="msg-picker"/.test(htmlM) && /function marcarDestinosMensagem/.test(htmlM),
     };
@@ -17534,7 +17536,10 @@ setTimeout(async () => {
         ctx.status === 200 && (resps.length === 0 || resps.every((u) => 'cargo' in u))
         && /cargo: u\.role === 'master' \? null : \(u\.cargo \|\| null\)/.test(idxSrc),
       'Meu Dia: tag de cargo ao lado do nome (vocabulário de /usuarios.html) com o "·" centralizado':
-        /const CARGO_TAG=\{loja:'Loja',gerente:'Gerente','assistente-gerente':'Assistente',tecnico:'Técnico',suporte:'Suporte',manutencao:'Manutenção',operador:'Operador'\}/.test(tarefasHtml)
+        (() => {
+          const mapa = (tarefasHtml.match(/const CARGO_TAG=\{([\s\S]*?)\};/) || [])[1] || '';
+          return require('./users.js').CARGOS_VALIDOS.every((c) => mapa.includes(`'${c}':`) || mapa.includes(`${c}:`));
+        })()
         && /\.cargo-tag::before\{content:"·";margin:0 6px/.test(tarefasHtml)
         // as DUAS listas de participante (criar e "alterar") ganham a tag
         // o nome agora passa por nomeUsuario() (que já escapa e marca como
@@ -21179,7 +21184,7 @@ setTimeout(async () => {
       // a ordem importa: a ficha só aparece DEPOIS de montada, então qualquer
       // erro ao montar significa "cliquei e não aconteceu nada"
       'a ficha é montada antes de ser mostrada (por isso um erro ali some com ela)':
-        /atualizarConteudoDetalhe\(codigo, compComDetalhe\(c\)\);\s*\n\s*document\.getElementById\('detalhe-comp-overlay'\)\.classList\.remove\('hidden'\);/.test(noc),
+        /atualizarConteudoDetalhe\(codigo, compComDetalhe\(c\)\);\s*\n\s*abrirOverlay\('detalhe-comp-overlay'\);/.test(noc),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPushOrfao = !falhas.length;
@@ -22485,6 +22490,422 @@ setTimeout(async () => {
   } catch (e) { okEstacaoTelas = false; console.log('  erro: ' + e.message); }
   if (!okEstacaoTelas) ruins += 1;
   console.log(`${okEstacaoTelas ? '✓' : '✗'} Estação da Comida: as três telas (Salão, Caixa, Fechamento), com a tabela do cardápio`);
+
+  // ------------------------------------------------------------------
+  // PAUSAR ITEM / FECHAR LOJA NO IFOOD / 99FOOD -> COWORK AGREGADOR.
+  // Pedido do Master (14/09/2026): "agregador é um Cowork que criei,
+  // precisamos fazer essa integração com o NoPulso". O NoPulso não opera
+  // painel de agregador: ele ENFILEIRA, o Cowork PUXA com o token dele,
+  // executa e CONFIRMA de volta (mesma forma de /api/bot/vendas-registro).
+  //
+  // O que este teste protege, que é onde dinheiro se perde: o pedido não
+  // pode sumir (Cowork calado vira cobrança no coordenador humano), não pode
+  // ser executado duas vezes (duas sessões do Cowork puxando junto), e quem
+  // pediu tem que receber o retorno NA CONVERSA - o Beniboy prometeu isso.
+  let okAgregador = false;
+  try {
+    const fila = require(__dirname + '/agregadorFila.js');
+    const cowork = require(__dirname + '/agregadorCowork.js');
+    const pushAg = require(__dirname + '/push.js');
+    const src = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const TOKEN_ANTES = process.env.BOT_AGREGADOR_TOKEN;
+    const URL_ANTES = process.env.AGREGADOR_WEBHOOK_URL;
+    delete process.env.AGREGADOR_WEBHOOK_URL;
+
+    // --- a fila em si -------------------------------------------------
+    const { pedido: p1 } = await fila.criar({
+      acao: 'pausar-item', canal: 'ifood', unidade: '19855', unidadeNome: 'Dom Bessa',
+      item: 'Coca 2L', motivo: 'acabou o estoque', origem: 'beniboy', chatId: 'chat-agg-1',
+    });
+    // a MESMA coca pedida de novo (outra pessoa avisou) não vira 2 bloqueios
+    const repetido = await fila.criar({
+      acao: 'pausar-item', canal: 'ifood', unidade: '19855', item: '  coca 2l  ', chatId: 'chat-agg-9',
+    });
+    let semItem = null;
+    try { await fila.criar({ acao: 'pausar-item', canal: 'ifood', unidade: '19855' }); } catch (e) { semItem = e.message; }
+
+    // o Cowork puxa: sai da fila marcado como entregue, e um SEGUNDO Cowork
+    // puxando na sequência não recebe o mesmo pedido de novo
+    const puxada1 = await fila.puxar();
+    const puxada2 = await fila.puxar();
+
+    // erro do Cowork com tentativa sobrando volta pra fila (painel fora do ar)
+    await fila.concluir(p1.id, { ok: false, erro: 'painel fora do ar' });
+    const voltouPraFila = (await fila.getOne(p1.id)).status;
+    const puxadaDepoisDoErro = await fila.puxar();
+    // e quando dá certo, fecha e some da fila
+    await fila.concluir(p1.id, { ok: true, resultado: 'item pausado' });
+    const depoisDoOk = await fila.getOne(p1.id);
+    // confirmação duplicada do Cowork não reabre nem reescreve nada
+    const duplicada = await fila.concluir(p1.id, { ok: false, erro: 'chegou atrasado' });
+    const aindaExecutado = (await fila.getOne(p1.id)).status;
+
+    // --- as rotas que o Cowork usa ------------------------------------
+    delete process.env.BOT_AGREGADOR_TOKEN;
+    const filaDesligada = await pedir('/api/bot/agregador/fila', { 'x-bot-token': 'qualquer' });
+    process.env.BOT_AGREGADOR_TOKEN = 'g'.repeat(48);
+    const filaSemToken = await pedir('/api/bot/agregador/fila');
+    const filaTokenDoMaster = await pedir('/api/bot/agregador/fila', { 'x-bot-token': process.env.MASTER_API_TOKEN });
+
+    // um pedido de verdade, ligado a uma conversa, pra conferir o retorno
+    DOCS.set('suporteChats/chat-agg-real', {
+      id: 'chat-agg-real', nome: 'Loja Bessa', status: 'ABERTO', criadoEm: new Date().toISOString(),
+      mensagens: [{ de: 'visitante', texto: 'pausa a coca', em: new Date().toISOString() }],
+    });
+    const { pedido: p2 } = await fila.criar({
+      acao: 'fechar-loja', canal: '99food', unidade: '19855', unidadeNome: 'Dom Bessa',
+      motivo: 'cozinha parada', chatId: 'chat-agg-real',
+    });
+    const filaComToken = await pedir('/api/bot/agregador/fila', { 'x-bot-token': process.env.BOT_AGREGADOR_TOKEN });
+    const jFila = JSON.parse(filaComToken.corpo || '{}');
+    const retornoSemId = await postarJson('/api/bot/agregador/retorno', { ok: true }, { 'x-bot-token': process.env.BOT_AGREGADOR_TOKEN });
+    const retorno = await postarJson('/api/bot/agregador/retorno', { id: p2.id, ok: true, resultado: 'loja fechada no app' }, { 'x-bot-token': process.env.BOT_AGREGADOR_TOKEN });
+    const chatDepois = DOCS.get('suporteChats/chat-agg-real') || {};
+    const ultima = (chatDepois.mensagens || [])[(chatDepois.mensagens || []).length - 1] || {};
+
+    // --- a rede de segurança: Cowork calado acorda gente ---------------
+    const { pedido: p3 } = await fila.criar({
+      acao: 'pausar-item', canal: 'ambos', unidade: '19855', unidadeNome: 'Dom Bessa', item: 'Pizza G',
+    });
+    // esse nasceu agora: ainda NÃO é atraso
+    const agora = await fila.varrerAtrasados();
+    // envelhece o pedido pra além da tolerância
+    DOCS.set('agregadorPedidos/' + p3.id, {
+      ...DOCS.get('agregadorPedidos/' + p3.id),
+      criadoEm: new Date(Date.now() - (fila.MINUTOS_ATE_ATRASO + 5) * 60 * 1000).toISOString(),
+    });
+    const velho = await fila.varrerAtrasados();
+    await fila.marcarCoordenadorAvisado(p3.id);
+    // avisado uma vez, não vira push a cada tick
+    const depoisDeAvisar = await fila.varrerAtrasados();
+
+    // --- o aviso imediato é descartável -------------------------------
+    const semWebhook = await cowork.avisarPedidoNovo(p3);
+
+    if (TOKEN_ANTES === undefined) delete process.env.BOT_AGREGADOR_TOKEN; else process.env.BOT_AGREGADOR_TOKEN = TOKEN_ANTES;
+    if (URL_ANTES !== undefined) process.env.AGREGADOR_WEBHOOK_URL = URL_ANTES;
+
+    const conf = {
+      'o pedido entra na fila pendente e aberto': p1.status === 'pendente' && p1.aberto === true && p1.unidadeNome === 'Dom Bessa',
+      'o MESMO item pedido de novo não vira segundo bloqueio': repetido.repetido === true && repetido.pedido.id === p1.id,
+      'pausar item sem dizer QUAL item é recusado': /exige qual item/i.test(semItem || ''),
+      'o Cowork puxa o pedido e ele sai da fila marcado como entregue':
+        puxada1.length === 1 && puxada1[0].id === p1.id && puxada2.length === 0,
+      'erro com tentativa sobrando devolve o pedido pra fila (não morre no log)':
+        voltouPraFila === 'pendente' && puxadaDepoisDoErro.length === 1,
+      'confirmado com sucesso, fecha e sai da fila':
+        depoisDoOk.status === 'executado' && !depoisDoOk.aberto && depoisDoOk.resultado === 'item pausado',
+      'confirmação duplicada do Cowork não reabre o pedido':
+        duplicada.repetido === true && aindaExecutado === 'executado',
+      'sem BOT_AGREGADOR_TOKEN a rota da fila nem existe (404)': filaDesligada.status === 404,
+      'sem token: 401 · e o token do MASTER não abre (é token próprio)':
+        filaSemToken.status === 401 && filaTokenDoMaster.status === 401,
+      'a fila devolve o pedido com o que o Cowork precisa pra agir':
+        filaComToken.status === 200 && (jFila.pedidos || []).some((x) => x.id === p2.id && x.acao === 'fechar-loja' && x.canal === '99food' && x.unidadeNome === 'Dom Bessa'),
+      'retorno sem id é recusado com o motivo': retornoSemId.status === 400 && /id/.test(retornoSemId.corpo),
+      'o retorno do Cowork cai NA CONVERSA de quem pediu':
+        retorno.status === 200 && ultima.bot === true && /Fechar loja/.test(ultima.texto || '') && /feito agora/.test(ultima.texto || ''),
+      'pedido recém-criado NÃO é atraso': agora.atrasados.every((x) => x.id !== p3.id) && agora.abertos >= 1,
+      'Cowork calado além da tolerância vira cobrança no coordenador':
+        velho.atrasados.some((x) => x.id === p3.id),
+      'o coordenador é chamado UMA vez por pedido, não a cada tick':
+        depoisDeAvisar.atrasados.every((x) => x.id !== p3.id),
+      'sem webhook configurado o aviso não quebra nada - a fila resolve sozinha':
+        semWebhook.avisado === false && /não configurado/.test(semWebhook.motivo || ''),
+      // --- o que o Beniboy faz com isso ---
+      'a ferramenta do Beniboy exige loja, app e (pra pausar) o item':
+        /name: 'bloquear_no_agregador'/.test(src)
+        && /required: \['acao', 'canal', 'unidade'\]/.test(src)
+        && /Pergunte de qual loja é antes de chamar/.test(src)
+        && /Pergunte QUAL item deve ser pausado/.test(src),
+      'acionar o agregador NÃO tira o Beniboy da conversa':
+        !/desativarBot/.test(src.slice(src.indexOf("nome === 'bloquear_no_agregador'"), src.indexOf("nome === 'desbloquear_login'"))),
+      'o prompt manda usar essa ferramenta em vez de chamar_atendente':
+        /iFood\/99food[\s\S]{0,400}bloquear_no_agregador \(nunca chamar_atendente\)/.test(src),
+      'o index.js enfileira pro Cowork (não manda mais direto pro humano)':
+        /agregadorFila\.criar\(\{/.test(srcIdx) && /agregadorCowork\.avisarPedidoNovo\(pedido\)/.test(srcIdx),
+      'se a fila falhar, o pedido cai no coordenador humano na hora':
+        /não entrou na fila do Cowork/.test(srcIdx),
+      'a varredura cobra o Cowork atrasado': /cobrarAgregadorAtrasado/.test(srcIdx)
+        && /agregadorFila\.marcarCoordenadorAvisado\(p\.id\)/.test(srcIdx),
+      // o Cowork é de fora: se a rota não estiver escrita onde ele lê, ela
+      // não existe pra ele - e o Master não saberia qual env var criar
+      'a rota está documentada pro Cowork e o token está no .env.example': (() => {
+        const doc = require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'BENI_API.md'), 'utf8');
+        const env = require('fs').readFileSync(__dirname + '/.env.example', 'utf8');
+        return doc.includes('/api/bot/agregador/fila') && doc.includes('/api/bot/agregador/retorno')
+          && /BOT_AGREGADOR_TOKEN/.test(doc) && /BOT_AGREGADOR_TOKEN=/.test(env);
+      })(),
+      'o cargo de coordenador existe pra receber a cobrança':
+        typeof require(__dirname + '/users.js').listarCoordenadoresAgregador === 'function'
+        && typeof pushAg.notifyAgregador === 'function',
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAgregador = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAgregador = false; console.log('  erro: ' + e.message); }
+  if (!okAgregador) ruins += 1;
+  console.log(`${okAgregador ? '✓' : '✗'} Cowork Agregador: pausar item / fechar loja entra na fila, volta na conversa e cobra quem não executou`);
+
+  // ------------------------------------------------------------------
+  // MAIS DE UMA TAG POR PESSOA, E O QUE CAI PRA QUEM TEM A TAG.
+  //
+  // Pedido do Master (14/09/2026): "precisamos poder marcar mais de 1 tag,
+  // assim eu designo alguém de suporte para cuidar de Agregador, assim os
+  // chamados de agregador acionam quem tiver essa TAG" e "as solicitações
+  // pelo beniboy... caso não dê, ela é direcionada para quem tem a tag dela".
+  //
+  // O risco que isto cobre não é a tela: é o dado. `cargo` (string) está em
+  // todo acesso já cadastrado e é lido pela tela inicial, pelo menu, pelo
+  // Parque e pela conciliação. O conjunto novo (`cargos`) não pode reescrever
+  // nem apagar isso - quem só tem o campo antigo tem que continuar sendo
+  // encontrado por listarPorTag, senão o chamado cai no vazio.
+  let okTags = false;
+  try {
+    const usersMod = require(__dirname + '/users.js');
+    const roteamento = require(__dirname + '/roteamentoTags.js');
+    const base = { role: 'user', active: true, permissions: { sections: [] } };
+    // (a) acesso ANTIGO: só `cargo`, nunca passou por esta tela
+    DOCS.set('users/u-tag-antigo', { ...base, id: 'u-tag-antigo', email: 'antigo@teste.local', nome: 'Ana Antiga', cargo: 'coordenador-agregador' });
+    // (b) acesso NOVO: Suporte que também cuida do Agregador - o caso do pedido
+    DOCS.set('users/u-tag-duplo', {
+      ...base, id: 'u-tag-duplo', email: 'duplo@teste.local', nome: 'Beto Duplo',
+      cargo: 'suporte', cargos: ['suporte', 'coordenador-agregador'],
+      permissions: { sections: ['suporte'] },
+    });
+    // (c) tem a tag mas está INATIVO - não pode receber chamado
+    DOCS.set('users/u-tag-off', { ...base, id: 'u-tag-off', email: 'off@teste.local', cargos: ['coordenador-agregador'], active: false });
+    // (d) só técnico: é quem deve receber o ticket de suporte-ti
+    DOCS.set('users/u-tag-tec', { ...base, id: 'u-tag-tec', email: 'tec@teste.local', nome: 'Caio Técnico', cargos: ['tecnico'], permissions: { sections: ['tecnico'] } });
+
+    const daTagAgg = await usersMod.listarPorTag('coordenador-agregador');
+    const daTagSuporte = await usersMod.listarPorTag('suporte');
+    const tagInventada = await usersMod.listarPorTag('chefe-supremo');
+
+    // tagsDe: o conjunto sai em ordem canônica, sem repetir, e o campo antigo
+    // sozinho continua valendo como tag
+    const tagsDuplo = usersMod.tagsDe(DOCS.get('users/u-tag-duplo'));
+    const tagsAntigo = usersMod.tagsDe(DOCS.get('users/u-tag-antigo'));
+    const tagsLixo = usersMod.tagsDe({ cargos: ['tecnico', 'tecnico', 'inventado'], cargo: 'gerente' });
+    const principal = usersMod.tagPrincipal(['coordenador-agregador', 'gerente']);
+
+    // gravar o conjunto mantém `cargo` (o que o resto do app lê) coerente
+    await usersMod.updateCargos('u-tag-tec', ['coordenador-agregador', 'tecnico']);
+    const depoisDoUpdate = DOCS.get('users/u-tag-tec');
+    // e trocar só a principal (rota antiga) NÃO apaga as outras
+    await usersMod.updateCargo('u-tag-tec', 'suporte');
+    const depoisDaRotaAntiga = DOCS.get('users/u-tag-tec');
+    let tagInvalida = null;
+    try { await usersMod.updateCargos('u-tag-tec', ['tecnico', 'inventado']); } catch (e) { tagInvalida = e.message; }
+
+    // --- roteamento: assunto -> tag -> pessoas -------------------------
+    DOCS.delete('users/u-tag-tec'); // sobra 1 técnico? não: zera e recria limpo
+    DOCS.set('users/u-tec-unico', { ...base, id: 'u-tec-unico', email: 'unico@teste.local', nome: 'Dani Técnica', cargos: ['tecnico'], permissions: { sections: ['tecnico'] } });
+    const destinoTi = await roteamento.destinoDe('suporte-ti');
+    // com DOIS técnicos o ticket não pode nascer no colo de um deles
+    DOCS.set('users/u-tec-dois', { ...base, id: 'u-tec-dois', email: 'dois@teste.local', nome: 'Edu Técnico', cargos: ['tecnico'] });
+    const destinoTiDois = await roteamento.destinoDe('suporte-ti');
+    const destinoCompra = await roteamento.destinoDe('compra');
+    const destinoAgg = await roteamento.destinoDe('agregador');
+
+    const srcBot = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlUsuarios = require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8');
+
+    const conf = {
+      'quem só tem o campo ANTIGO continua sendo encontrado pela tag':
+        daTagAgg.some((u) => u.id === 'u-tag-antigo'),
+      'quem tem DUAS tags é achado pelas duas (o pedido do Master)':
+        daTagAgg.some((u) => u.id === 'u-tag-duplo') && daTagSuporte.some((u) => u.id === 'u-tag-duplo'),
+      'inativo com a tag NÃO recebe chamado': daTagAgg.every((u) => u.id !== 'u-tag-off'),
+      'a mesma pessoa não vem duplicada nas duas consultas':
+        daTagAgg.filter((u) => u.id === 'u-tag-duplo').length === 1,
+      'tag que não existe devolve lista vazia, não erro': Array.isArray(tagInventada) && tagInventada.length === 0,
+      'o conjunto sai em ordem canônica, sem repetido e sem tag inventada':
+        tagsDuplo.join(',') === 'suporte,coordenador-agregador'
+        && tagsAntigo.join(',') === 'coordenador-agregador'
+        && tagsLixo.join(',') === 'gerente,tecnico',
+      'a principal é a primeira da ordem canônica, não a ordem do clique':
+        principal === 'gerente',
+      'gravar o conjunto mantém `cargo` (o que a tela inicial lê) coerente':
+        depoisDoUpdate.cargo === 'tecnico' && depoisDoUpdate.cargos.join(',') === 'tecnico,coordenador-agregador',
+      'trocar só a principal NÃO apaga as outras tags da pessoa':
+        depoisDaRotaAntiga.cargo === 'suporte'
+        && depoisDaRotaAntiga.cargos.includes('coordenador-agregador'),
+      'tag inventada é recusada com o nome dela': /inventado/.test(tagInvalida || ''),
+      'com UMA pessoa na tag, o ticket já nasce no nome dela':
+        destinoTi.tag === 'tecnico' && !!destinoTi.dono && destinoTi.dono.id === 'u-tec-unico',
+      'com DUAS, fica sem dono e as duas são avisadas (ninguém escolhido no par ou ímpar)':
+        destinoTiDois.dono === null && destinoTiDois.pessoas.length === 2,
+      'assunto sem tag (compra/pagamento) continua indo pra Central':
+        destinoCompra.tag === null && destinoCompra.pessoas.length === 0 && destinoCompra.dono === null,
+      'o agregador usa a MESMA tabela de tags': destinoAgg.tag === 'coordenador-agregador'
+        && destinoAgg.pessoas.some((u) => u.id === 'u-tag-duplo'),
+      'o ticket do Beniboy nasce direcionado por tag':
+        /roteamentoTags\.destinoDe\(tipo\)/.test(srcBot)
+        && /direcionadoParaId: destino\.dono \? destino\.dono\.id : null/.test(srcBot),
+      'quem tem a tag é avisado no nome dela quando o ticket nasce':
+        /push\.notifyPorTag\(destino, \{/.test(srcIdx) && /for \(const d of r\.direcionados \|\| \[\]\)/.test(srcIdx),
+      'a tela deixa marcar MAIS DE UMA tag (era rádio, exclusivo)':
+        /type="checkbox" name="\$\{prefixo\}-cargo"/.test(htmlUsuarios)
+        && !/type="radio" name="\$\{prefixo\}-cargo"/.test(htmlUsuarios)
+        && /querySelectorAll\(`input\[name="\$\{prefixo\}-cargo"\]:checked`\)/.test(htmlUsuarios),
+      'a lista mostra TODAS as tags, não só a principal':
+        /cargosDaPessoa\.forEach/.test(htmlUsuarios),
+      // o Beniboy responde toda conversa do widget: o modelo não pode estar
+      // cravado onde só um deploy muda
+      'o modelo do Beniboy sai de env var (custo é decisão do Master)':
+        /process\.env\.SUPORTE_BOT_MODELO \|\| 'claude-opus-5'/.test(srcBot),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTags = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTags = false; console.log('  erro: ' + e.message); }
+  if (!okTags) ruins += 1;
+  console.log(`${okTags ? '✓' : '✗'} Tags: mais de uma por pessoa, e o chamado cai em quem tem a tag do assunto`);
+
+  // ------------------------------------------------------------------
+  // TRANSFERIR CONVERSA: PRA QUEM, NÃO SÓ PRA QUAL NÍVEL.
+  //
+  // Pedido do Master (14/09/2026), olhando o modal da Central do Beniboy:
+  // "em transferir aparecer o usuário de quem tiver a tag suporte". O N2 era
+  // "outro agente (time de Suporte)" e mais nada: a conversa mudava de nível
+  // e o responsável continuava sendo QUEM CLICOU. Na prática ninguém virava
+  // dono, e a pessoa do outro lado esperava alguém do time notar sozinho.
+  let okTransferir = false;
+  try {
+    const sc = require(__dirname + '/suporteChat.js');
+    const base = { role: 'user', active: true };
+    // um do Suporte que atende, um que tem a tag mas não abre a Central, e
+    // um Suporte "de segunda tag" (o caso que o Master pediu: alguém de
+    // outra área designado pro Suporte)
+    DOCS.set('users/u-sup-1', { ...base, id: 'u-sup-1', email: 'sup1@teste.local', nome: 'Fábio Suporte', cargos: ['suporte'], permissions: { sections: ['suporte'] } });
+    DOCS.set('users/u-sup-sem-tela', { ...base, id: 'u-sup-sem-tela', email: 'sup2@teste.local', nome: 'Gabi SemTela', cargo: 'suporte', permissions: { sections: [] } });
+    DOCS.set('users/u-sup-extra', { ...base, id: 'u-sup-extra', email: 'sup3@teste.local', nome: 'Hugo Duplo', cargo: 'tecnico', cargos: ['tecnico', 'suporte'], permissions: { sections: ['suporte', 'tecnico'] } });
+    DOCS.set('users/u-sup-nao', { ...base, id: 'u-sup-nao', email: 'sup4@teste.local', nome: 'Ivo Fora', cargos: ['manutencao'], permissions: { sections: ['suporte'] } });
+
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const semAuth = await pedir('/api/suporte/agentes');
+    const comAuth = await pedir('/api/suporte/agentes', cab);
+    const agentes = comAuth.status === 200 ? JSON.parse(comAuth.corpo) : [];
+    const porId = Object.fromEntries(agentes.map((a) => [a.id, a]));
+
+    // a transferência de verdade, pela rota
+    DOCS.set('suporteChats/chat-transf', {
+      id: 'chat-transf', nome: 'Samuel', status: 'ABERTO', statusAtendimento: 'EM_ATENDIMENTO',
+      nivel: 2, responsavel: { id: 'u-quem-clicou', nome: 'Quem Clicou', email: 'clicou@teste.local' },
+      criadoEm: new Date().toISOString(), mensagens: [],
+    });
+    const transf = await postarJson('/api/suporte-chats/chat-transf/status', {
+      statusAtendimento: 'TRANSFERIDO', nivelDestino: 2,
+      transferidoPara: { id: 'u-sup-1', nome: 'Fábio Suporte', email: 'sup1@teste.local' },
+    }, cab);
+    const depois = await sc.getOne('chat-transf');
+    const ultimoHist = (depois.historicoStatus || [])[(depois.historicoStatus || []).length - 1] || {};
+
+    // N3 · Master: sem destinatário, a conversa fica sem dono esperando quem
+    // daquele nível assumir - o Master não é uma pessoa da fila
+    const paraMaster = await postarJson('/api/suporte-chats/chat-transf/status', {
+      statusAtendimento: 'TRANSFERIDO', nivelDestino: 3,
+    }, cab);
+    const depoisN3 = await sc.getOne('chat-transf');
+
+    const html = require('fs').readFileSync(__dirname + '/public/beniboy.html', 'utf8');
+
+    const conf = {
+      'a lista de destinatários exige estar no time de suporte': semAuth.status === 401 || semAuth.status === 403,
+      'aparece quem tem a tag Suporte': comAuth.status === 200 && !!porId['u-sup-1'],
+      'inclusive quem tem a tag como SEGUNDA tag (o pedido do Master)': !!porId['u-sup-extra'],
+      'quem NÃO tem a tag fica de fora, mesmo tendo a seção Suporte': !porId['u-sup-nao'],
+      'quem tem a tag mas não abre a Central aparece MARCADO, não some':
+        !!porId['u-sup-sem-tela'] && porId['u-sup-sem-tela'].podeAtender === false
+        && porId['u-sup-1'].podeAtender === true,
+      'transferir ENTREGA a conversa: o dono passa a ser quem recebeu, não quem clicou':
+        transf.status === 200 && depois.responsavel && depois.responsavel.id === 'u-sup-1'
+        && depois.statusAtendimento === 'TRANSFERIDO' && depois.nivel === 2,
+      'o histórico guarda de quem PRA QUEM': ultimoHist.para === 'Fábio Suporte' && !!ultimoHist.por,
+      'N3 · Master fica sem dono (ninguém "recebe" no lugar do Master)':
+        paraMaster.status === 200 && depoisN3.nivel === 3 && depoisN3.responsavel === null,
+      'o modal pergunta pra quem, e só no N2':
+        /id="transf-agente"/.test(html) && /carregarAgentesSuporte\(\)/.test(html)
+        && /sel\.value==='2'\) \? '' : 'none'/.test(html),
+      'quem recebeu é avisado no nome dele (não depende de estar com a tela aberta)':
+        /Conversa transferida pra você/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTransferir = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTransferir = false; console.log('  erro: ' + e.message); }
+  if (!okTransferir) ruins += 1;
+  console.log(`${okTransferir ? '✓' : '✗'} Transferir conversa: escolhe a PESSOA com a tag Suporte, e ela vira a dona`);
+
+  // ------------------------------------------------------------------
+  // PAINEL ABERTO DE DENTRO DE OUTRO TEM QUE VIR PRA FRENTE.
+  //
+  // Master (14/09/2026), sobre o 📦 Programas na ficha da máquina: "ícone
+  // quando acionado está indo para trás e não na frente". Todos os .overlay
+  // do NOC dividem o mesmo z-index; com empate quem decide é a ORDEM NO HTML,
+  // e a ficha da máquina é o último elemento do arquivo - então tudo que
+  // nasce de dentro dela nascia atrás dela, invisível.
+  //
+  // Isso já tinha sido remendado três vezes (msg, editar, aparelho) com
+  // z-index fixo, e o painel seguinte veio com o mesmo defeito. O teste é
+  // sobre a REGRA, não sobre os quatro: quem abre por último fica por cima.
+  let okPilhaOverlay = false;
+  try {
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    // roda a pilha de verdade, com um DOM falso - é lógica pura, e sem isso o
+    // teste só olharia texto de arquivo
+    const fonte = html.slice(html.indexOf('const Z_OVERLAY_BASE'), html.indexOf('function abrirProgramas'));
+    const els = {};
+    const documentFake = { getElementById: (id) => els[id] || null };
+    const criar = (id) => { els[id] = { style: {}, escondido: true, classList: { add: () => { els[id].escondido = true; }, remove: () => { els[id].escondido = false; } } }; };
+    ['a-overlay', 'b-overlay', 'c-overlay'].forEach(criar);
+    const api = new Function('document', `${fonte}; return { abrirOverlay, fecharOverlay, pilha: () => PILHA_OVERLAYS, base: Z_OVERLAY_BASE };`)(documentFake);
+
+    api.abrirOverlay('a-overlay');          // a ficha da máquina
+    const zA = Number(els['a-overlay'].style.zIndex);
+    api.abrirOverlay('b-overlay');          // o painel aberto de dentro dela
+    const zB = Number(els['b-overlay'].style.zIndex);
+    api.fecharOverlay('b-overlay');
+    const zBDepois = els['b-overlay'].style.zIndex;
+    const pilhaDepois = api.pilha().slice();
+    // reabrir o MESMO painel não pode empilhar duas vezes (a tela do NOC fica
+    // aberta o dia inteiro; abrir/fechar 200 vezes não pode subir o z-index
+    // até passar por cima do menu)
+    for (let i = 0; i < 200; i++) { api.abrirOverlay('c-overlay'); api.fecharOverlay('c-overlay'); }
+    api.abrirOverlay('c-overlay');
+    const zC = Number(els['c-overlay'].style.zIndex);
+    api.abrirOverlay('a-overlay'); // reabrir o de baixo o traz pra frente
+    const zAReaberto = Number(els['a-overlay'].style.zIndex);
+    // relê o outro DEPOIS: quem sobe empurra o resto pra baixo (reindexar),
+    // e comparar com o valor de antes não provaria nada
+    const zCAgora = Number(els['c-overlay'].style.zIndex);
+
+    const conf = {
+      'o painel aberto DEPOIS fica na frente de quem o abriu': zB > zA,
+      'fechar devolve o z-index pro CSS (não deixa lixo no style)': zBDepois === '',
+      'fechar tira da pilha': !pilhaDepois.includes('b-overlay'),
+      'abrir e fechar 200 vezes não faz o z-index subir sem fim': zC <= api.base + 2,
+      'nunca passa do menu (z-index 998) nem do balão de dica': zC < 998 && zAReaberto < 998,
+      'reabrir o de baixo o traz pra frente': zAReaberto > zCAgora,
+      // o defeito nasceu de cada painel novo ser aberto na mão; enquanto
+      // houver uma abertura fora da pilha, o próximo painel repete o bug
+      'nenhum painel é aberto por fora da pilha':
+        !/getElementById\('[a-z-]*overlay'\)\.classList\.(remove|add)\('hidden'\)/.test(html)
+        && /abrirOverlay\('prog-overlay'\)/.test(html),
+      'os remendos de z-index fixo saíram (a regra substituiu os três)':
+        !/#msg-overlay,#editar-comp-overlay\{z-index:60;\}/.test(html)
+        && !/#disp-overlay\{z-index:60;\}/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPilhaOverlay = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (zA=${zA} zB=${zB} zC=${zC} zA2=${zAReaberto})`);
+  } catch (e) { okPilhaOverlay = false; console.log('  erro: ' + e.message); }
+  if (!okPilhaOverlay) ruins += 1;
+  console.log(`${okPilhaOverlay ? '✓' : '✗'} NOC: painel aberto de dentro da ficha vem PRA FRENTE (era o 📦 Programas nascendo atrás)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

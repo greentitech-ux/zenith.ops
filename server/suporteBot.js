@@ -25,6 +25,7 @@ const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const agenteAcoes = require('./agenteAcoes');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
+const roteamentoTags = require('./roteamentoTags');
 
 // senha padrao que o Beniboy define quando a pessoa NAO lembra a senha atual
 // (2a vez que o mesmo acesso trava depois de ja ter sido desbloqueado por
@@ -32,7 +33,14 @@ const qaAprovacoes = require('./qaAprovacoes');
 // obriga trocar por uma propria no primeiro login (ver users.resetPassword)
 const SENHA_PADRAO_BOT = '12345678';
 
-const MODELO = 'claude-opus-5';
+// O MODELO DO BENIBOY, e por que ele é uma env var.
+//
+// Ele roda em Opus 5, não em Haiku - vale conferir antes de decidir soltar a
+// mão no tamanho do prompt: a diferença de preço por token entre os dois é de
+// mais de uma ordem de grandeza, e o Beniboy responde TODA conversa do widget,
+// em 59 telas. Trocar pra Haiku 4.5 é preencher SUPORTE_BOT_MODELO no Render
+// com 'claude-haiku-4-5-20251001'; sem a variável, nada muda.
+const MODELO = process.env.SUPORTE_BOT_MODELO || 'claude-opus-5';
 const MAX_TOKENS = 700;
 const MAX_RODADAS_TOOLS = 5; // seguranca do loop de tool use
 // baixa interacao: depois disso o bot para de responder e o humano continua
@@ -49,6 +57,16 @@ const ESCALACAO_ALVO_RE = /\b(atendente|humano|suporte|time)\b/i;
 
 // tipos que o bot pode abrir na Central (mesma lista do formulario publico -
 // estorno e ajuste de fechamento ficam de fora, tem fluxo proprio com login)
+// PAUSAR ITEM / FECHAR LOJA no iFood / 99food: quem executa e o COWORK
+// AGREGADOR, o robo do Master que opera os paineis dos agregadores. O bot nao
+// bloqueia nada sozinho e nao chama "um atendente": ele poe o pedido na fila
+// do Cowork (ver bloquear_no_agregador abaixo, agregadorFila.js e
+// acionarBeniboy em index.js) e continua na conversa - o retorno do Cowork
+// volta pra ela sozinho. Se o Cowork nao executar, o coordenador agregador
+// humano e chamado atras (push.notifyAgregador).
+const ACOES_AGREGADOR = ['pausar-item', 'fechar-loja'];
+const CANAIS_AGREGADOR = ['ifood', '99food', 'ambos'];
+
 const TIPOS_TICKET = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'acesso-pessoa'];
 const MOTIVOS_ACESSO_TICKET = ['desligamento', 'ferias'];
 
@@ -121,6 +139,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 ## O que você sabe do NoPulso
 - Login bloqueado (3 senhas erradas seguidas): SEMPRE use desbloquear_login pra resolver na hora, nunca chame um atendente pra isso - vale tanto pro login principal do NoPulso quanto pro login de operador do Abastecimento do Carrinho (balcão, 4 letras + 4 números). A pessoa volta a entrar com a MESMA senha de sempre; só se o mesmo acesso travar de novo é que entra uma senha nova (ver ferramenta abaixo).
 - Estorno: NÃO dá pra você abrir esse ticket direto (exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja foi a compra (pule essa pergunta se já souber pela "loja" do início da conversa) e use gerar_link_estorno_cliente. Se quem fala com você É o cliente (o mais comum), mande o link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo - não precisa de WhatsApp nem de mais ninguém no meio. Se for um funcionário pedindo em nome de um cliente que não está no chat, aí sim ele repassa o link pro cliente por onde for mais fácil (WhatsApp é uma opção, não a única).
+- Pausar item ou fechar a loja no iFood/99food: quem faz é o COWORK AGREGADOR, o robô que opera os painéis - não é com um atendente. Use bloquear_no_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item. Depois é só avisar que está sendo feito; a confirmação cai na conversa sozinha - nunca prometa prazo nem diga que já está feito antes da confirmação chegar.
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
 - Fechamento de caixa: lançado em Lançar fechamento; erro em fechamento já enviado se corrige pelo botão "Pedir correção" no Histórico da Central (só 1 correção pendente por lançamento).
@@ -132,6 +151,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
 - consultar_ticket: andamento de um ticket pelo número.
 - chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. ANTES de chamar, use registrar_nota_interna com um resumo (situacao PENDENTE) pra o humano já chegar sabendo. Avise que o time já foi chamado e responde ali mesmo na conversa.
+- bloquear_no_agregador: põe na fila do Cowork Agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel e confirma nessa conversa sozinho; você continua nela (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que já está sendo feito. Só chame com loja, app e - pra pausar item - o item em mãos.
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
 - desbloquear_login: destrava um acesso bloqueado (3 senhas erradas) - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se travar de novo: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
@@ -180,6 +200,21 @@ const TOOLS_BASE = [
     input_schema: {
       type: 'object',
       properties: { motivo: { type: 'string', description: 'Resumo de 1 linha do que a pessoa precisa, pro atendente já chegar sabendo' } },
+    },
+  },
+  {
+    name: 'bloquear_no_agregador',
+    description: 'Manda PAUSAR ITEM ou FECHAR A LOJA no iFood ou no 99food. O pedido entra na fila do Cowork Agregador (o robô que opera os painéis), que faz o bloqueio e confirma sozinho na conversa. Use SEMPRE que o pedido for esse, em vez de chamar_atendente. Colete ANTES de chamar: a unidade/loja, o canal (iFood, 99food ou os dois) e, quando for pausar item, QUAL item. Não encerra a conversa - você continua nela.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        acao: { type: 'string', enum: ACOES_AGREGADOR, description: 'pausar-item = tirar um item do cardápio; fechar-loja = fechar a loja no app' },
+        canal: { type: 'string', enum: CANAIS_AGREGADOR, description: 'Em qual app: ifood, 99food ou ambos' },
+        unidade: { type: 'string', description: 'Nome da unidade/loja, do jeito que a pessoa falou' },
+        item: { type: 'string', description: 'SÓ pra acao=pausar-item: qual item deve ser pausado. Obrigatório nesse caso.' },
+        motivo: { type: 'string', description: 'Por que (ex: acabou o estoque, cozinha parada, fila grande). 1 linha.' },
+      },
+      required: ['acao', 'canal', 'unidade'],
     },
   },
   {
@@ -361,6 +396,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     const titulo = tipo === 'acesso-pessoa'
       ? `${input.motivoAcesso === 'ferias' ? 'Férias' : 'Desligamento'} — ${String(input.nomePessoa).trim()}`
       : String(input.titulo || '').trim();
+    const destino = await roteamentoTags.destinoDe(tipo).catch(() => ({ pessoas: [], dono: null, tag: null }));
     const registro = await solicitacoes.create({
       tipo,
       unidade: String(input.unidade || '').trim(),
@@ -371,7 +407,13 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       prioridade: input.prioridade,
       criadoPorId: dono ? dono.id : null,
       criadoPorEmail: dono ? (dono.email || dono.username) : `Beniboy (chat de suporte)${quem ? ' — ' + quem : ''}`,
-      direcionadoParaId: null, direcionadoParaEmail: null,
+      // DIRECIONAMENTO POR TAG (roteamentoTags.js). Pedido do Master: o que o
+      // Beniboy não resolve sozinho "é direcionada para quem tem a tag dela".
+      // Com UMA pessoa na tag o ticket já nasce no nome dela; com mais de
+      // uma fica sem dono e todas são avisadas (ver destinoDe) - e quando
+      // ninguém tem a tag, segue pra Central, como sempre foi.
+      direcionadoParaId: destino.dono ? destino.dono.id : null,
+      direcionadoParaEmail: destino.dono ? (destino.dono.email || destino.dono.username) : null,
       nomePessoa: tipo === 'acesso-pessoa' ? String(input.nomePessoa).trim() : undefined,
       motivoAcesso: tipo === 'acesso-pessoa' ? input.motivoAcesso : undefined,
       dataEfetiva: tipo === 'acesso-pessoa' ? input.dataEfetiva : undefined,
@@ -383,8 +425,14 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       numeroTicket: chat.numeroTicket,
     });
     resultado.tickets.push(registro);
+    // o index.js avisa quem tem a tag depois da resposta ser entregue (mesmo
+    // caminho do agregador) - aqui só viaja o destino já resolvido, pra não
+    // pagar a consulta de novo
+    resultado.direcionados.push({ ticketId: registro.id, numeroTicket: registro.numeroTicket, titulo, tipo, unidadeNome: registro.unidadeNome, destino });
     await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'solicitacao', ticketId: registro.id, numero: registro.numeroTicket });
-    return `Ticket #${registro.numeroTicket} criado com sucesso (tipo ${tipo}, unidade ${registro.unidadeNome}). Informe esse número à pessoa.`;
+    const paraQuem = destino.dono ? ` Já está no nome de ${destino.dono.nome}.`
+      : (destino.pessoas || []).length ? ` A equipe de ${destino.rotulo} já foi avisada.` : '';
+    return `Ticket #${registro.numeroTicket} criado com sucesso (tipo ${tipo}, unidade ${registro.unidadeNome}).${paraQuem} Informe esse número à pessoa${paraQuem ? ' e diga que já foi direcionado' : ''}.`;
   }
   if (nome === 'consultar_ticket') {
     const numero = Number(input.numero);
@@ -402,6 +450,28 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     resultado.chamouAtendente = true;
     resultado.motivoAtendente = String(input.motivo || '').trim();
     return 'Atendente humano chamado — o time foi notificado e vai responder nessa mesma conversa. Avise a pessoa e se despeça.';
+  }
+  if (nome === 'bloquear_no_agregador') {
+    const acao = ACOES_AGREGADOR.includes(input.acao) ? input.acao : null;
+    if (!acao) return 'Diga se é pausar-item ou fechar-loja.';
+    const canal = CANAIS_AGREGADOR.includes(input.canal) ? input.canal : null;
+    if (!canal) return 'Pergunte em qual app é: iFood, 99food ou os dois.';
+    const unidade = String(input.unidade || '').trim();
+    if (!unidade) return 'Pergunte de qual loja é antes de chamar - o coordenador precisa saber onde bloquear.';
+    const item = String(input.item || '').trim();
+    if (acao === 'pausar-item' && !item) return 'Pergunte QUAL item deve ser pausado - sem isso o coordenador não tem o que fazer.';
+    const motivo = String(input.motivo || '').trim();
+    // fica no resultado pro index.js notificar o coordenador DEPOIS da
+    // resposta ja ter sido entregue (mesmo caminho dos tickets/escalacao)
+    resultado.agregador = { acao, canal, unidade, item: item || null, motivo: motivo || null };
+    // o time tambem enxerga isso no card da conversa, sem depender do push
+    const oQue = acao === 'fechar-loja' ? 'Fechar loja' : `Pausar item: ${item}`;
+    await suporteChat.registrarNotaInterna(chat.id, {
+      resumo: `${oQue} · ${canal === 'ambos' ? 'iFood e 99food' : canal} · ${unidade}${motivo ? ` — ${motivo}` : ''}`,
+      situacao: 'PENDENTE',
+      pendencia: 'Na fila do Cowork Agregador. Se ele não executar, o coordenador agregador é chamado.',
+    }).catch(() => {});
+    return 'Pedido na fila do Cowork Agregador — ele faz o bloqueio no painel e a confirmação cai nessa conversa sozinha, em alguns minutos. Diga isso pra pessoa em 1 frase (sem prometer horário) e continue na conversa: você NÃO saiu dela, e NÃO precisa chamar atendente.';
   }
   if (nome === 'desbloquear_login') {
     const usuarioAlvo = String(input.username || '').trim();
@@ -652,7 +722,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
     if (msgs.filter((m) => m.bot).length >= MAX_RESPOSTAS_BOT) return null; // baixa interacao: passou do limite, fica pro humano
 
-    const resultado = { tickets: [], chamouAtendente: false, motivoAtendente: '', encerrar: null };
+    const resultado = { tickets: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', encerrar: null, agregador: null };
     const mensagens = montarMensagens(chat);
     const system = await montarSystem(unidades, chat.logado);
     const tools = montarTools(chat.logado);

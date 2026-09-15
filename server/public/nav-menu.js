@@ -392,7 +392,10 @@
     if (it.admin) return isAdmin;
     if (!temVertical(me, it)) return false;
     if (!temRede(me, it)) return false;
-    if (it.gerenteOuSecoes) return isAdmin || /gerente/i.test(String(me.cargo || '')) || it.gerenteOuSecoes.some((s) => temSecao(me, s));
+    // olha o CONJUNTO de tags, não só a principal: quem é Gerente e também
+    // Suporte tem 'suporte' como principal em alguns casos, e perderia o menu
+    // de gerente por causa da ordem (ver tagsDe/tagPrincipal em users.js)
+    if (it.gerenteOuSecoes) return isAdmin || /gerente/i.test([...(me.cargos || []), me.cargo || ''].join(' ')) || it.gerenteOuSecoes.some((s) => temSecao(me, s));
     if (it.secoes) return it.secoes.some((s) => temSecao(me, s));
     return true;
   }

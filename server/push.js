@@ -3,7 +3,8 @@
 // estorno agendado, chargeback e fraude suspeita.
 const webpush = require('web-push');
 const db = require('./firestore');
-const { ehCargoGerente } = require('./users');
+const users = require('./users');
+const { ehCargoGerente } = users;
 const alertasCentral = require('./alertasCentral');
 
 const COLLECTION = db.collection('push_subscriptions');
@@ -310,6 +311,77 @@ async function notifyBeniboyEscalonamento(chat, motivo, opts) {
       }
     }
   }
+}
+
+// AVISAR QUEM TEM A TAG. É o fim de toda rota de "isso não é comigo": o
+// assunto tem uma tag (roteamentoTags.js), a tag tem pessoas, e cada uma
+// recebe no aparelho dela - não um push genérico pra "o time", que é o
+// mesmo que push pra ninguém.
+//
+// `destino` é o que roteamentoTags.destinoDe() devolve. Quando não há
+// ninguém com a tag, devolve entregues:0 e quem chamou decide o que fazer
+// (o padrão, em toda chamada deste app, é acordar o alarme geral em vez de
+// engolir o pedido em silêncio).
+async function notifyPorTag(destino, { titulo, corpo, tagPush, url, critico } = {}) {
+  const pessoas = (destino && destino.pessoas) || [];
+  const alvo = url || (destino && destino.url) || '/';
+  if (critico) {
+    await alertasCentral.registrar({ tipo: 'tag', titulo, resumo: corpo, url: alvo, critico: true });
+  }
+  for (const p of pessoas) {
+    // quem não abre a tela de destino recebe o push sem link pra ela: clicar
+    // e cair em "você não tem acesso" é pior que não ter link
+    const podeAbrir = p.ehTime || podeAbrirUrl(p, alvo);
+    await notifyUsuario(p.id, titulo, corpo, tagPush, podeAbrir ? alvo : '/');
+  }
+  return { entregues: pessoas.length, pessoas };
+}
+
+// a seção que cada tela pede - o suficiente pra não mandar alguém pra uma
+// porta fechada. Tela fora desta lista não restringe (o push leva o link).
+const SECAO_DA_TELA = {
+  '/tecnico.html': 'tecnico',
+  '/manutencao.html': 'manutencao',
+  '/beniboy.html': 'suporte',
+};
+function podeAbrirUrl(pessoa, url) {
+  const secao = SECAO_DA_TELA[String(url || '').split('?')[0]];
+  if (!secao) return true;
+  return (pessoa.secoes || []).includes(secao);
+}
+
+// PAUSAR ITEM / FECHAR LOJA no iFood ou 99food. Não é coisa que se resolve no
+// chat, e não é qualquer atendente que faz: quem tem o painel do agregador na
+// mão é o COORDENADOR AGREGADOR (Master, 14/09). Antes isto caía no alarme
+// geral do Beniboy - "chamei um atendente" - e ficava esperando alguém do time
+// perceber que o pedido era de outra pessoa.
+//
+// Vai pro coordenador POR NOME (push por usuário), e também pro registro da
+// Central, pra não depender de alguém estar com o celular na mão. Se não
+// houver nenhum coordenador cadastrado, cai no alarme geral do Beniboy: é
+// melhor acordar o time do que engolir o pedido em silêncio.
+async function notifyAgregador(chat, { acao, detalhe, unidade, canal } = {}) {
+  const chatId = chat && chat.id;
+  if (!chatId) return { entregues: 0, coordenadores: [] };
+  const coordenadores = await users.listarCoordenadoresAgregador().catch(() => []);
+  const oQue = acao === 'fechar-loja' ? 'Fechar loja' : 'Pausar item';
+  const onde = [canal, unidade].filter(Boolean).join(' · ');
+  const titulo = `🛵 ${oQue} no agregador`;
+  const corpo = `${(chat && chat.nome) || 'Visitante'}${onde ? ' · ' + onde : ''}${detalhe ? ' — ' + detalhe : ''}`.slice(0, 150);
+  const url = '/beniboy.html?chat=' + encodeURIComponent(chatId);
+
+  await alertasCentral.registrar({ tipo: 'agregador', titulo, resumo: corpo, url, critico: true });
+  if (!coordenadores.length) {
+    await notifyBeniboyEscalonamento(chat, `${oQue} no agregador (sem coordenador cadastrado)`);
+    return { entregues: 0, coordenadores: [] };
+  }
+  for (const c of coordenadores) {
+    // so manda pra conversa quem consegue abrir a Central do Beniboy; pros
+    // demais o push vale por si - titulo e corpo ja dizem o que bloquear,
+    // em qual app e em qual loja
+    await notifyUsuario(c.id, titulo, corpo, 'agregador-' + chatId, c.temSuporte ? url : '/');
+  }
+  return { entregues: coordenadores.length, coordenadores };
 }
 
 // alerta de seguranca do chat de suporte: texto tipo comando/script, ou
@@ -1423,7 +1495,7 @@ module.exports = {
   notifyProgramaNovo,
   notifyProgramaSumido,
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
+  notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,

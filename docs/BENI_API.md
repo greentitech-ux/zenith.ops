@@ -283,6 +283,78 @@ ler o resultado em `GET /api/conciliacao` (Master), mudar a regra em
 `GET`/`POST /api/conciliacao-config`, e disparar a cobrança fora de hora em
 `POST /api/conciliacao/cobrar` — mas o normal é não precisar de nada disso.
 
+## 3.3 Pausar item e fechar loja no iFood/99food — a fila que é sua
+
+Esta é a integração do **Cowork Agregador**. Aqui o sentido se inverte: nas
+outras rotas você empurra dado pro NoPulso; nesta **ele tem trabalho pra
+você**.
+
+Quem pede é gente, pelo chat do Beniboy ("acabou a coca, tira do iFood").
+O Beniboy coleta a loja, o app e o item, e põe o pedido na fila. Você puxa,
+faz no painel e confirma. O NoPulso **não** entra no painel do agregador —
+isso é seu.
+
+**1) Puxar o que tem pra fazer** (rode no seu ciclo, ~1 min):
+
+```bash
+curl https://www.nopulso.com.br/api/bot/agregador/fila \
+  -H "x-bot-token: $BOT_AGREGADOR_TOKEN"
+```
+
+```json
+{ "ok": true, "pedidos": [
+  { "id": "aB3...", "acao": "pausar-item", "canal": "ifood",
+    "unidade": "19888", "unidadeNome": "Dominos Bessa",
+    "item": "Coca 2L", "motivo": "acabou o estoque",
+    "criadoEm": "2026-09-14T18:40:00.000Z" }
+] }
+```
+
+| Campo | O que é |
+|---|---|
+| `acao` | `pausar-item` ou `fechar-loja` — só esses dois |
+| `canal` | `ifood`, `99food` ou `ambos` (aí você faz nos dois) |
+| `unidade` / `unidadeNome` | o código da loja e o nome do cadastro |
+| `item` | só em `pausar-item`: o que pausar. Nunca vem vazio |
+| `motivo` | por que, quando a pessoa disse. Contexto, não ordem |
+
+**O pedido já sai da fila quando você puxa.** É de propósito: duas sessões
+suas rodando junto não podem pausar o mesmo item duas vezes. Puxou, é seu.
+
+**2) Confirmar** — sempre, deu certo ou não:
+
+```bash
+curl -X POST https://www.nopulso.com.br/api/bot/agregador/retorno \
+  -H "x-bot-token: $BOT_AGREGADOR_TOKEN" -H "Content-Type: application/json" \
+  -d '{ "id": "aB3...", "ok": true, "resultado": "item pausado no iFood" }'
+```
+
+Deu errado, mande o motivo de verdade: `{"id":"aB3...","ok":false,"erro":"painel não carregou"}`.
+Isso **não é confissão de fracasso** — é o que faz o pedido voltar pra fila e
+ser tentado de novo (até 3 vezes). Ficar calado é pior: em **10 minutos** o
+pedido vira atraso e o **coordenador agregador humano** é chamado no celular
+pra fazer na mão.
+
+**Por que confirmar importa mais do que parece:** quem pediu está olhando o
+chat. Sua confirmação vira, na mesma conversa, `✅ Pausar item: Coca 2L ·
+ifood · Dominos Bessa — feito agora no painel.` Sem ela, a pessoa não sabe
+se pode parar de se preocupar.
+
+**Nunca decida o que bloquear.** Você executa a fila e só. Item que você
+acha que devia sair, loja que parece parada — isso é alerta
+(`POST /api/bot/alerta`), não bloqueio por conta própria. Fechar uma loja que
+estava vendendo custa faturamento na hora.
+
+**Token próprio: `BOT_AGREGADOR_TOKEN`**, no header `x-bot-token` — não o do
+Master. `404 Rota desativada` = o Master ainda não configurou no Render.
+
+**Aviso na hora (opcional):** se o Master configurar `AGREGADOR_WEBHOOK_URL`,
+o NoPulso te chama assim que o pedido nasce (`POST` com
+`{"evento":"agregador.pedido","pedido":{...}}` e o mesmo header `x-bot-token`,
+com o valor de `AGREGADOR_WEBHOOK_TOKEN`). É só pra você não esperar o
+próximo ciclo: **a fila continua sendo a verdade**. Se o aviso não chegar,
+nada se perde — você pega no `GET` seguinte.
+
 ## 4. O que você NÃO PODE — o servidor fecha a porta
 
 Estas rotas pedem a **senha do Master** no corpo (`password`), e você não tem
