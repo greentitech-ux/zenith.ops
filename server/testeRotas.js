@@ -15582,8 +15582,9 @@ setTimeout(async () => {
 
     // roda a MESMA funcao da tela, extraida do HTML - regex sobre o texto
     // provaria que a linha existe, nao que a conta esta certa
-    const fonte = htmlE.match(/function calcularPreset\([\s\S]*?\n\}\n\/\/ setMonth\(\)[\s\S]*?\nfunction recuarMeses\([\s\S]*?\n\}/);
+    const fonte = htmlE.match(/function calcularPreset\([\s\S]*?\r?\n\}\r?\n\/\/ setMonth\(\)[\s\S]*?\r?\nfunction recuarMeses\([\s\S]*?\r?\n\}/);
     const calc = new Function(`
+      const pad2 = (n) => String(n).padStart(2, '0');
       const isoLocal = (d) => \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`;
       ${fonte ? fonte[0] : 'function calcularPreset(){ return {}; }'}
       return calcularPreset;
