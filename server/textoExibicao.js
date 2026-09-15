@@ -19,6 +19,15 @@
 // E transformar na exibição também resolve o passado: os nomes já gravados em
 // minúsculo aparecem maiúsculos sem ninguém migrar nada.
 //
+// ATUALIZAÇÃO (14/09, mais tarde): o DADO NOVO já chega maiúsculo. O Master
+// viu que só a exibição não bastava ("o campo mostra maiúsculo, mas quando
+// chega lá está minúsculo") e decidiu: o que a pessoa DIGITA num campo de
+// formulário vira maiúsculo de verdade, no navegador, antes de ir pro
+// servidor (tema.js, "DADO PREENCHIDO: o VALOR sobe"). O que fica intacto:
+// o histórico (sem migração, ponto 2 acima), o chat (conversa sai como foi
+// escrita) e os valores exatos abaixo. Este módulo continua necessário por
+// causa do histórico: PDF e e-mail ainda leem dado antigo em minúsculo.
+//
 // O QUE SOBE - E SÓ ISSO. A primeira versão subiu a tela inteira (uma regra
 // no `body`) e ficou ruim de ler; o Master corrigiu o alvo (14/09): "não
 // gostei de tudo maiúsculo / o que falei pra ser tudo maiúsculo foi NOMES DOS

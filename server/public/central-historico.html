@@ -456,7 +456,7 @@
         <button type="button" class="link-btn" style="color:var(--bad);" onclick="removerFotoChat()">✕ remover foto</button>
       </div>
       <div style="display:flex;gap:8px;">
-        <input type="text" id="d-chat-texto" placeholder="Escrever uma mensagem..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarChat();}">
+        <input type="text" class="nao-maiusc" id="d-chat-texto" placeholder="Escrever uma mensagem..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarChat();}">
         <label class="foto-btn" id="d-chat-foto-btn" title="Anexar foto">📷<input type="file" id="d-chat-foto" accept="image/*" capture="environment" hidden onchange="selecionarFotoChat(this.files[0])"></label>
         <button type="button" class="btn-primary" style="flex:none;width:auto;margin-top:0;white-space:nowrap;" onclick="enviarChat()">Enviar</button>
       </div>
@@ -538,7 +538,7 @@
         </div>
         <div class="presets" id="rc-presets-interacao"></div>
         <label>Usuário da interação (e-mail ou usuário)</label>
-        <input type="text" id="rc-interacao-usuario" placeholder="ex: suporte ou nome@empresa.com">
+        <input type="text" class="valor-exato" id="rc-interacao-usuario" placeholder="ex: suporte ou nome@empresa.com">
       </div>
 
       <div class="msg hidden" id="msg-rc" style="margin-top:10px;"></div>
@@ -588,7 +588,7 @@
         </div>
         <div>
           <label>Usuário</label>
-          <input type="text" id="ca-username" placeholder="preenche sozinho">
+          <input type="text" class="valor-exato" id="ca-username" placeholder="preenche sozinho">
         </div>
       </div>
       <div class="sub" id="ca-explica" style="margin-top:4px;"></div>

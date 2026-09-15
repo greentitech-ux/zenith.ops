@@ -1,0 +1,591 @@
+<title>Beniboy Orquestrador</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100,400;100,500;100,600;100,700;112,700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33; --line2:#2e3742;
+    --text:#e7ecf1; --muted:#7d8896; --accent:#b8ff3c; --accent-ink:#0b0d10; --accent2:#5cc8ff;
+    --ok:#3ddc97; --warn:#f2b33d; --bad:#ff5c5c;
+    --sans:'Archivo',-apple-system,'Segoe UI',Arial,sans-serif;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,monospace;
+    --accent-text:#b8ff3c; --accent-soft:rgba(184,255,60,.10);
+    --bad-soft:rgba(255,92,92,.12); --warn-soft:rgba(242,179,61,.12); --ok-soft:rgba(61,220,151,.12); --acc2-soft:rgba(92,200,255,.12);
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f3f5f7; --panel:#ffffff; --panel2:#eaeef2; --line:#d6dce3; --line2:#c3cbd4;
+      --text:#111519; --muted:#5b6672; --accent:#b8ff3c; --accent-ink:#0b0d10; --accent2:#0d7fc2;
+      --ok:#148f5f; --warn:#a86d05; --bad:#c92f2f;
+      --accent-text:#4f8a00; --accent-soft:rgba(111,168,0,.12);
+      --bad-soft:rgba(201,47,47,.10); --warn-soft:rgba(168,109,5,.12); --ok-soft:rgba(20,143,95,.12); --acc2-soft:rgba(13,127,194,.12);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#f3f5f7; --panel:#ffffff; --panel2:#eaeef2; --line:#d6dce3; --line2:#c3cbd4;
+    --text:#111519; --muted:#5b6672; --accent:#b8ff3c; --accent-ink:#0b0d10; --accent2:#0d7fc2;
+    --ok:#148f5f; --warn:#a86d05; --bad:#c92f2f;
+    --accent-text:#4f8a00; --accent-soft:rgba(111,168,0,.12);
+    --bad-soft:rgba(201,47,47,.10); --warn-soft:rgba(168,109,5,.12); --ok-soft:rgba(20,143,95,.12); --acc2-soft:rgba(13,127,194,.12);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33; --line2:#2e3742;
+    --text:#e7ecf1; --muted:#7d8896; --accent:#b8ff3c; --accent-ink:#0b0d10; --accent2:#5cc8ff;
+    --ok:#3ddc97; --warn:#f2b33d; --bad:#ff5c5c;
+    --accent-text:#b8ff3c; --accent-soft:rgba(184,255,60,.10);
+    --bad-soft:rgba(255,92,92,.12); --warn-soft:rgba(242,179,61,.12); --ok-soft:rgba(61,220,151,.12); --acc2-soft:rgba(92,200,255,.12);
+  }
+
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.55;padding-inline:20px;padding-block:0 96px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px;margin:0 auto}
+  a{color:var(--accent-text)}
+  h1,h2,h3{text-wrap:balance;margin:0;font-weight:600;letter-spacing:-.01em}
+  h1{font-size:clamp(34px,5vw,50px);line-height:1.05;font-stretch:112%;font-weight:700}
+  h2{font-size:26px;line-height:1.2;margin-top:64px;padding-top:24px;border-top:1px solid var(--line)}
+  h3{font-size:17px;margin-top:28px}
+  p{margin:12px 0;max-width:68ch}
+  ul,ol{margin:10px 0;padding-left:22px;max-width:70ch}
+  li{margin:6px 0}
+  li::marker{color:var(--muted)}
+  strong{font-weight:600;color:var(--text)}
+  code,.mono{font-family:var(--mono);font-size:.88em}
+  code{background:var(--panel2);border:1px solid var(--line);padding:1px 6px;border-radius:4px;white-space:nowrap}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.55;margin:16px 0}
+  pre code{background:none;border:0;padding:0;white-space:pre}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .lead{font-size:19px;color:var(--text);max-width:62ch;margin-top:14px}
+  .muted{color:var(--muted)}
+
+  /* cabeçalho */
+  header{padding-block:56px 8px}
+  .marca{display:flex;align-items:center;gap:14px;margin-bottom:26px}
+  .marca .nome{font-family:var(--mono);font-size:13px;color:var(--muted);letter-spacing:.04em}
+  .marca .nome b{color:var(--text);font-weight:600}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:20px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .meta span b{color:var(--text);font-weight:500}
+  .beniboy .bb-traco{filter:drop-shadow(0 0 5px currentColor)}
+  .beniboy .bb-brilho{stroke:#fff;stroke-dasharray:14 59;stroke-dashoffset:73;opacity:.85;animation:bb-brilho 2.4s linear infinite}
+  .beniboy .bb-nucleo{opacity:.16;transform-origin:32px 32px;animation:bb-respira 2.4s ease-in-out infinite}
+  @keyframes bb-brilho{0%{stroke-dashoffset:73}100%{stroke-dashoffset:-73}}
+  @keyframes bb-respira{0%,100%{transform:scale(.94)}50%{transform:scale(1)}}
+  @media (prefers-reduced-motion:reduce){.beniboy *{animation:none!important}}
+
+  /* números */
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:28px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 16px 14px;display:flex;flex-direction:column;gap:6px;min-height:118px}
+  .tile .n{font-family:var(--mono);font-size:32px;font-weight:600;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+  .tile .l{font-size:13px;color:var(--muted);line-height:1.35}
+  .tile.bad .n{color:var(--bad)} .tile.warn .n{color:var(--warn)} .tile.ok .n{color:var(--ok)} .tile.acc .n{color:var(--accent-text)}
+  @media (max-width:720px){.tiles{grid-template-columns:repeat(2,1fr)}}
+
+  /* tabela */
+  .tabela-wrap{overflow-x:auto;margin:18px 0}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:560px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+  td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  th.num{text-align:right}
+  tr.total td{border-bottom:0;border-top:1px solid var(--line2);font-weight:600}
+
+  /* barras */
+  .barras{display:grid;grid-template-columns:150px 1fr 56px;gap:8px 12px;align-items:center;margin:18px 0 6px;font-size:14px}
+  .barras .rot{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .barras .trk{height:14px;background:var(--panel2);border-radius:3px;overflow:hidden;display:flex}
+  .barras .seg{height:100%}
+  .barras .seg.esc{background:var(--bad);opacity:.85}
+  .barras .seg.bot{background:var(--ok)}
+  .barras .seg.hum{background:var(--line2)}
+  .barras .v{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+  .legenda{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:8px}
+  .legenda i{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:6px}
+  @media (max-width:560px){.barras{grid-template-columns:110px 1fr 48px}}
+
+  /* horas */
+  .horas{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}
+  .hora{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+  .hora .f{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.06em}
+  .hora .n{font-family:var(--mono);font-size:22px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+  .hora .b{height:4px;border-radius:2px;background:var(--accent);margin-top:8px;opacity:.9}
+
+  /* causas */
+  .causas{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
+  .causa{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px}
+  .causa h3{margin:0 0 6px;font-size:15px}
+  .causa p{font-size:14px;color:var(--muted);margin:0}
+  .causa .tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;margin-bottom:10px;border:1px solid var(--line2)}
+  .tag.bad{color:var(--bad);background:var(--bad-soft);border-color:transparent}
+  .tag.warn{color:var(--warn);background:var(--warn-soft);border-color:transparent}
+  .tag.acc2{color:var(--accent2);background:var(--acc2-soft);border-color:transparent}
+  .tag.ok{color:var(--ok);background:var(--ok-soft);border-color:transparent}
+  @media (max-width:640px){.causas{grid-template-columns:1fr}}
+
+  /* diagrama */
+  figure{margin:22px 0 8px}
+  .diag{width:100%;max-width:100%;height:auto;display:block}
+  .diag text{font-family:var(--sans);font-size:13px;fill:var(--text)}
+  .diag .m{font-family:var(--mono);font-size:10.5px;fill:var(--muted);letter-spacing:.04em}
+  .diag .t{font-weight:600;font-size:13.5px}
+  .diag .caixa{fill:var(--panel);stroke:var(--line2);stroke-width:1}
+  .diag .caixa.acc{stroke:var(--accent);stroke-width:1.5}
+  .diag .caixa.fila{fill:var(--panel2);stroke:var(--accent2);stroke-width:1.2;stroke-dasharray:4 3}
+  .diag .caixa.cw{stroke:var(--ok)}
+  .diag .caixa.cw.existe{fill:var(--ok-soft)}
+  .diag .caixa.hum{stroke:var(--warn);stroke-dasharray:3 3}
+  .diag .seta{stroke:var(--muted);stroke-width:1.4;fill:none;marker-end:url(#p)}
+  .diag .seta.acc{stroke:var(--accent)}
+  .diag .seta.ok{stroke:var(--ok)}
+  .diag .seta.warn{stroke:var(--warn);stroke-dasharray:4 3}
+  .diag .rot{font-family:var(--mono);font-size:10px;fill:var(--muted)}
+  figcaption{font-size:13px;color:var(--muted);margin-top:10px;max-width:70ch}
+
+  /* princípios */
+  .principios{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 24px;margin-top:16px}
+  .principios div{padding:10px 0;border-top:1px solid var(--line);font-size:14.5px}
+  .principios b{display:block;margin-bottom:2px}
+  @media (max-width:640px){.principios{grid-template-columns:1fr}}
+
+  /* estados */
+  .estados{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:14px 0;font-family:var(--mono);font-size:12px}
+  .estados .s{padding:4px 10px;border-radius:999px;border:1px solid var(--line2);background:var(--panel)}
+  .estados .s.acc{border-color:var(--accent);color:var(--accent-text)}
+  .estados .s.ok{border-color:var(--ok);color:var(--ok)}
+  .estados .s.bad{border-color:var(--bad);color:var(--bad)}
+  .estados .s.warn{border-color:var(--warn);color:var(--warn)}
+  .estados .a{color:var(--muted)}
+
+  /* coworks */
+  .cw-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
+  .cw{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px}
+  .cw.existe{border-color:var(--ok)}
+  .cw .top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+  .cw h3{margin:0;font-size:16px}
+  .cw .badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .badge.existe{color:var(--ok);background:var(--ok-soft)}
+  .badge.f1{color:var(--accent-text);background:var(--accent-soft)}
+  .badge.f2{color:var(--accent2);background:var(--acc2-soft)}
+  .badge.f3{color:var(--muted);background:var(--panel2)}
+  .cw dl{display:grid;grid-template-columns:78px 1fr;gap:6px 10px;margin:0;font-size:13.5px}
+  .cw dt{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;padding-top:3px}
+  .cw dd{margin:0}
+  .cw dd code{white-space:normal}
+  @media (max-width:640px){.cw-grid{grid-template-columns:1fr}}
+
+  /* sequência */
+  .seq{counter-reset:p;list-style:none;padding:0;margin:18px 0;max-width:none}
+  .seq li{counter-increment:p;display:grid;grid-template-columns:40px 130px 1fr;gap:12px;padding:12px 0;border-top:1px solid var(--line);margin:0;align-items:start}
+  .seq li::before{content:counter(p,decimal-leading-zero);font-family:var(--mono);font-size:13px;color:var(--accent-text);padding-top:2px}
+  .seq .quem{font-family:var(--mono);font-size:11.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;padding-top:3px}
+  .seq .oque{font-size:14.5px}
+  .seq .oque q{font-style:italic;color:var(--text)}
+  .seq .oque q::before,.seq .oque q::after{content:'"';color:var(--muted)}
+  @media (max-width:560px){.seq li{grid-template-columns:36px 1fr}.seq .quem{grid-column:2}.seq .oque{grid-column:2}}
+
+  /* fases */
+  .fases{list-style:none;padding:0;margin:20px 0;max-width:none;counter-reset:f}
+  .fase{counter-increment:f;display:grid;grid-template-columns:64px 1fr;gap:16px;padding:18px 0;border-top:1px solid var(--line)}
+  .fase .num{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.4}
+  .fase .num b{display:block;font-size:26px;color:var(--accent-text);font-weight:600;line-height:1}
+  .fase h3{margin:0 0 4px;font-size:17px}
+  .fase .prazo{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:8px}
+  .fase ul{margin:6px 0 0;font-size:14.5px}
+  .fase .meta-f{margin-top:10px;font-size:13.5px;color:var(--muted)}
+  .fase .meta-f b{color:var(--ok);font-weight:600}
+
+  /* decisões */
+  .decisoes{list-style:none;padding:0;margin:16px 0;max-width:none}
+  .decisoes li{display:grid;grid-template-columns:22px 1fr;gap:12px;padding:10px 0;border-top:1px solid var(--line);font-size:14.5px}
+  .decisoes li::before{content:'';width:14px;height:14px;border:1.5px solid var(--line2);border-radius:3px;margin-top:4px}
+  .decisoes .rec{font-family:var(--mono);font-size:12px;color:var(--accent-text);display:block;margin-top:3px}
+
+  .nota{background:var(--panel);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;font-size:14.5px;margin:18px 0}
+  .nota.warn{border-left-color:var(--warn)}
+  footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.7}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="marca">
+    <svg width="44" height="44" viewBox="0 0 64 64" fill="none" class="beniboy" aria-hidden="true" style="color:var(--accent)">
+      <circle cx="32" cy="32" r="30" fill="var(--panel)"></circle>
+      <circle class="bb-nucleo" cx="32" cy="32" r="22" fill="var(--accent)"></circle>
+      <circle cx="32" cy="32" r="30" stroke="var(--accent)" stroke-width="2.5" fill="none"></circle>
+      <polyline class="bb-traco" points="14,34 22,34 27,21 33,45 38,32 50,32" stroke="var(--accent)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>
+      <polyline class="bb-brilho" points="14,34 22,34 27,21 33,45 38,32 50,32" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>
+    </svg>
+    <div class="nome"><b>NoPulso</b> · proposta de arquitetura</div>
+  </div>
+  <h1>Beniboy Orquestrador</h1>
+  <p class="lead">Hoje o Beniboy resolve o que cabe dentro do NoPulso e, pra todo o resto, chama o Master. A proposta: ele passa a <strong>delegar trabalho pra Coworks executores</strong>, acompanhar a execução e voltar na conversa com o resultado — sem sair dela e sem depender de gente.</p>
+  <div class="meta">
+    <span>base: <b>187 conversas · 1.839 mensagens</b></span>
+    <span>período: <b>08/08 → 15/09/2026</b></span>
+    <span>fonte: <b>suporteChats (produção)</b></span>
+    <span>data: <b>15/09/2026</b></span>
+  </div>
+</header>
+
+<h2 style="margin-top:40px;border-top:0;padding-top:0">O que as conversas dizem</h2>
+<p>Todas as 187 conversas do widget desde que o Beniboy entrou no ar. Os números abaixo são o motivo da proposta, não ilustração.</p>
+
+<div class="tiles">
+  <div class="tile bad"><div class="n">57%</div><div class="l">das conversas foram <b>escaladas pra humano</b> (107 de 187)</div></div>
+  <div class="tile warn"><div class="n">22%</div><div class="l">resolvidas <b>pelo Beniboy sozinho</b> (41 de 187)</div></div>
+  <div class="tile bad"><div class="n">127/130</div><div class="l">conversas com humano foram atendidas <b>pelo próprio Master</b></div></div>
+  <div class="tile bad"><div class="n">18%</div><div class="l">das escalações <b>nunca tiveram resposta humana</b> (19 de 107)</div></div>
+  <div class="tile warn"><div class="n">76%</div><div class="l">das escalações vieram de gente <b>deslogada</b> (81 de 107)</div></div>
+  <div class="tile warn"><div class="n">56%</div><div class="l">das conversas nasceram <b>fora do horário comercial</b> (18h–8h)</div></div>
+  <div class="tile acc"><div class="n">1,4 min</div><div class="l">espera mediana até o humano responder · p90: <b>11,6 min</b></div></div>
+  <div class="tile acc"><div class="n">2</div><div class="l">mensagens do Beniboy por conversa (mediana) — ele é curto, como pedido</div></div>
+</div>
+
+<h3>Por tema: onde ele resolve e onde ele desiste</h3>
+<div class="barras" role="table" aria-label="Conversas por tema">
+  <div class="rot">Senha / login</div><div class="trk"><div class="seg esc" style="width:72%"></div><div class="seg bot" style="width:24%"></div><div class="seg hum" style="width:4%"></div></div><div class="v">54</div>
+  <div class="rot">Pedido / Monitor</div><div class="trk"><div class="seg esc" style="width:58%"></div><div class="seg bot" style="width:15%"></div><div class="seg hum" style="width:27%"></div></div><div class="v">48</div>
+  <div class="rot">Outros</div><div class="trk"><div class="seg esc" style="width:42%"></div><div class="seg bot" style="width:24%"></div><div class="seg hum" style="width:34%"></div></div><div class="v">33</div>
+  <div class="rot">Computador / sistema</div><div class="trk"><div class="seg esc" style="width:46%"></div><div class="seg bot" style="width:29%"></div><div class="seg hum" style="width:25%"></div></div><div class="v">24</div>
+  <div class="rot">Impressora</div><div class="trk"><div class="seg esc" style="width:69%"></div><div class="seg bot" style="width:8%"></div><div class="seg hum" style="width:23%"></div></div><div class="v">13</div>
+  <div class="rot">iFood / 99food</div><div class="trk"><div class="seg esc" style="width:50%"></div><div class="seg bot" style="width:17%"></div><div class="seg hum" style="width:33%"></div></div><div class="v">6</div>
+  <div class="rot">Estorno</div><div class="trk"><div class="seg esc" style="width:40%"></div><div class="seg bot" style="width:40%"></div><div class="seg hum" style="width:20%"></div></div><div class="v">5</div>
+  <div class="rot">Fechamento</div><div class="trk"><div class="seg esc" style="width:25%"></div><div class="seg bot" style="width:50%"></div><div class="seg hum" style="width:25%"></div></div><div class="v">4</div>
+</div>
+<div class="legenda"><span><i style="background:var(--bad)"></i>Beniboy escalou</span><span><i style="background:var(--ok)"></i>Beniboy resolveu sozinho</span><span><i style="background:var(--line2)"></i>humano entrou sem escalação</span></div>
+
+<div class="tabela-wrap">
+<table>
+  <thead><tr><th>Tema</th><th class="num">Conversas</th><th class="num">Escaladas</th><th class="num">Bot resolveu</th><th>O que faltou pro Beniboy</th></tr></thead>
+  <tbody>
+    <tr><td>Senha / login</td><td class="num">54</td><td class="num">39</td><td class="num">13</td><td>11 "bloqueado" ainda escalaram; 8 pediam <em>criar usuário</em>; 4 <em>reset de senha</em>; e-mail corporativo — nada disso ele pode fazer pra quem não é Master</td></tr>
+    <tr><td>Pedido / Monitor</td><td class="num">48</td><td class="num">28</td><td class="num">7</td><td>20 das 28 escalações eram gente deslogada: <code>consultar_pedido</code> exige login com Monitor</td></tr>
+    <tr><td>Computador / sistema</td><td class="num">24</td><td class="num">11</td><td class="num">7</td><td>GCon, PDV, rede, AnyDesk — tudo fora do alcance do NoPulso hoje</td></tr>
+    <tr><td>Impressora</td><td class="num">13</td><td class="num">9</td><td class="num">1</td><td>6 das 9 escalações eram deslogadas; a ferramenta Zebra só aparece pra quem tem loja no acesso</td></tr>
+    <tr><td>Outros / iFood / estorno / fechamento</td><td class="num">48</td><td class="num">20</td><td class="num">13</td><td>iFood já vai pro Cowork Agregador; o resto é orientação que o Contexto do agente ainda não cobre</td></tr>
+    <tr class="total"><td>Total</td><td class="num">187</td><td class="num">107</td><td class="num">41</td><td></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Quando as pessoas procuram</h3>
+<div class="horas">
+  <div class="hora"><div class="f">00–08H</div><div class="n">23</div><div class="b" style="width:28%"></div></div>
+  <div class="hora"><div class="f">08–12H</div><div class="n">10</div><div class="b" style="width:12%"></div></div>
+  <div class="hora"><div class="f">12–18H</div><div class="n">72</div><div class="b" style="width:88%"></div></div>
+  <div class="hora"><div class="f">18–24H</div><div class="n">82</div><div class="b" style="width:100%"></div></div>
+</div>
+<p class="muted" style="font-size:14px">Loja abre à tarde e fecha de madrugada — o pico de suporte é de noite, quando a chance de um humano responder é menor. É exatamente o horário em que um executor que não dorme faz diferença.</p>
+
+<h3>O que o humano fez depois de assumir</h3>
+<p>Nas 130 conversas com humano: <strong>24</strong> viraram ticket ou chamado, <strong>9</strong> desbloqueios, <strong>9</strong> senhas resetadas ou enviadas, e <strong>90</strong> foram só orientação em texto — ou seja, na maior parte das vezes o Master entrou pra <em>explicar</em> ou pra <em>fazer uma coisa pequena fora do NoPulso</em>. Os dois casos são delegáveis.</p>
+
+<h2>Por que ele escala</h2>
+<p>Quatro causas explicam quase todas as 107 escalações. Nenhuma delas é "o modelo não entendeu".</p>
+<div class="causas">
+  <div class="causa"><span class="tag bad">76% das escalações</span><h3>As ferramentas dependem do login</h3><p><code>consultar_pedido</code>, <code>estado_impressora</code> e <code>resetar_impressora</code> só existem pra quem está logado. Mas 3 em cada 4 pessoas que precisam delas chegam pelo QR code da loja, deslogadas.</p></div>
+  <div class="causa"><span class="tag warn">acessos</span><h3>Só o Master pode criar e resetar</h3><p><code>criar_usuario_copiando</code> e <code>resetar_senha_usuario</code> existem no catálogo, mas só aparecem pro Beniboy quando quem fala é o próprio Master. Pra gerente de loja, ele chama… o Master.</p></div>
+  <div class="causa"><span class="tag acc2">fora do NoPulso</span><h3>O problema mora em outro sistema</h3><p>E-mail corporativo, GCon, PWR, Gestor de Pedidos, AnyDesk na máquina. O NoPulso não executa nada fora dele por decisão de projeto — e hoje não tem pra quem passar.</p></div>
+  <div class="causa"><span class="tag bad">18% sem resposta</span><h3>Depois de escalar, ele some</h3><p><code>chamar_atendente</code> desliga o bot. Se ninguém assume, a pessoa fica falando sozinha até o encerramento por inatividade (40 min) — foram 19 conversas assim.</p></div>
+</div>
+
+<h2>A arquitetura proposta</h2>
+<p>O desenho <strong>já existe</strong> pra um caso: pausar item e fechar loja no iFood/99food vão pra uma fila (<code>agregadorPedidos</code>), o Cowork Agregador puxa com o token dele, executa no painel e confirma de volta — e o retorno cai na conversa. A proposta é <strong>generalizar essa fila</strong> pra qualquer tipo de trabalho, com um executor por especialidade.</p>
+
+<figure>
+<svg class="diag" viewBox="0 0 920 470" role="img" aria-label="Diagrama: widget e API entram no Beniboy, que cria trabalhos numa fila; Coworks executores puxam a fila, executam e devolvem o retorno pra conversa; aprovação fica antes da fila e o humano é a rede de segurança">
+  <defs><marker id="p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+
+  <!-- entrada -->
+  <rect class="caixa" x="16" y="150" width="150" height="72" rx="8"/>
+  <text class="t" x="30" y="178">Widget de chat</text>
+  <text class="m" x="30" y="196">LOJA · CLIENTE · GERENTE</text>
+  <text class="m" x="30" y="211">deslogado ou logado</text>
+
+  <rect class="caixa" x="16" y="240" width="150" height="58" rx="8"/>
+  <text class="t" x="30" y="266">Beni (API)</text>
+  <text class="m" x="30" y="284">MASTER NO COWORK</text>
+
+  <!-- beniboy -->
+  <rect class="caixa acc" x="212" y="130" width="190" height="196" rx="10"/>
+  <text class="t" x="228" y="158">Beniboy</text>
+  <text class="m" x="228" y="176">CÉREBRO · CLAUDE OPUS 5</text>
+  <text x="228" y="204" style="font-size:12.5px">entende e coleta dados</text>
+  <text x="228" y="224" style="font-size:12.5px">resolve o que é interno</text>
+  <text x="228" y="244" style="font-size:12.5px">delega o resto</text>
+  <text x="228" y="264" style="font-size:12.5px">acompanha e responde</text>
+  <text class="m" x="228" y="296">delegar_trabalho()</text>
+  <text class="m" x="228" y="312">status_trabalho()</text>
+
+  <!-- fila -->
+  <rect class="caixa fila" x="452" y="150" width="176" height="150" rx="10"/>
+  <text class="t" x="468" y="178">Fila de trabalhos</text>
+  <text class="m" x="468" y="196">FIRESTORE · trabalhos</text>
+  <text x="468" y="224" style="font-size:12.5px">fonte de verdade</text>
+  <text x="468" y="244" style="font-size:12.5px">1 doc = 1 pedido</text>
+  <text x="468" y="264" style="font-size:12.5px">SLA por tipo</text>
+  <text x="468" y="284" style="font-size:12.5px">nada some</text>
+
+  <!-- aprovação -->
+  <rect class="caixa" x="452" y="40" width="176" height="70" rx="8"/>
+  <text class="t" x="468" y="66">Aprovação</text>
+  <text class="m" x="468" y="84">NOC → 🧪 APROVAÇÕES</text>
+  <text class="m" x="468" y="99">só o que for sensível</text>
+  <path class="seta acc" d="M540 110 L540 148"/>
+  <text class="rot" x="548" y="132">aprovado → entra</text>
+
+  <!-- coworks -->
+  <rect class="caixa cw existe" x="690" y="40" width="214" height="60" rx="8"/>
+  <text class="t" x="704" y="63">Cowork Agregador</text>
+  <text class="m" x="704" y="81">JÁ EXISTE · iFood · 99food</text>
+
+  <rect class="caixa cw" x="690" y="112" width="214" height="60" rx="8"/>
+  <text class="t" x="704" y="135">Cowork Acessos</text>
+  <text class="m" x="704" y="153">e-mail corp. · GCon · PWR · senhas</text>
+
+  <rect class="caixa cw" x="690" y="184" width="214" height="60" rx="8"/>
+  <text class="t" x="704" y="207">Cowork Suporte TI</text>
+  <text class="m" x="704" y="225">AnyDesk · diagnóstico · impressora</text>
+
+  <rect class="caixa cw" x="690" y="256" width="214" height="60" rx="8"/>
+  <text class="t" x="704" y="279">Cowork Pedidos &amp; Portais</text>
+  <text class="m" x="704" y="297">Gestor de Pedidos · PWR · iFood</text>
+
+  <!-- setas entrada -->
+  <path class="seta" d="M166 186 L210 186"/>
+  <path class="seta" d="M166 269 L210 269"/>
+  <!-- beniboy -> fila -->
+  <path class="seta acc" d="M402 200 L450 200"/>
+  <text class="rot" x="408" y="192">cria</text>
+  <!-- fila -> coworks (puxar) -->
+  <path class="seta ok" d="M628 200 L660 200 L660 70 L688 70"/>
+  <path class="seta ok" d="M660 142 L688 142"/>
+  <path class="seta ok" d="M660 214 L688 214"/>
+  <path class="seta ok" d="M660 286 L688 286"/>
+  <text class="rot" x="636" y="192">puxa</text>
+  <!-- retorno -->
+  <path class="seta ok" d="M797 316 L797 372 L307 372 L307 328"/>
+  <text class="rot" x="560" y="364">retorno: ok / erro / pergunta / evidência</text>
+  <!-- beniboy -> conversa -->
+  <path class="seta acc" d="M212 300 L190 300 L190 222"/>
+  <text class="rot" x="176" y="238" text-anchor="end">responde</text>
+
+  <!-- humano -->
+  <rect class="caixa hum" x="452" y="400" width="176" height="54" rx="8"/>
+  <text class="t" x="468" y="423">Humano</text>
+  <text class="m" x="468" y="441">REDE DE SEGURANÇA</text>
+  <path class="seta warn" d="M540 300 L540 398"/>
+  <text class="rot" x="548" y="345">passou do SLA</text>
+  <text class="rot" x="548" y="359">ou erro final</text>
+</svg>
+<figcaption>Verde: o que o Cowork faz (puxar, executar, confirmar). Amarelo tracejado: o caminho humano, que continua inteiro embaixo — só entra quando o robô não entregou no prazo.</figcaption>
+</figure>
+
+<h3>Cinco regras que não mudam</h3>
+<div class="principios">
+  <div><b>O NoPulso não executa nada fora dele.</b> Ele enfileira. Quem opera painel externo é um Cowork, como uma pessoa faria.</div>
+  <div><b>O Cowork puxa, executa, confirma.</b> Nunca decide sozinho o que fazer: só executa o que veio da fila, com o token dele, uma especialidade por Cowork.</div>
+  <div><b>Nada some.</b> Trabalho sem confirmação no prazo vira atraso, e atraso chama gente. O caminho humano de hoje fica intacto como fallback.</div>
+  <div><b>O Beniboy não sai da conversa.</b> Delegar não é escalar. Ele continua respondendo enquanto o trabalho anda e é ele quem entrega o resultado.</div>
+  <div><b>Quem age é quem pediu.</b> O trabalho grava quem pediu, em que conversa, e o executor devolve evidência. Ação sensível para na fila de aprovação que já existe.</div>
+  <div><b>Leitura custa dinheiro.</b> Fila consultada por índice de 1 campo (<code>aberto</code>), listas com cache, varredura em ritmo lento quando não há nada aberto — igual ao agregador.</div>
+</div>
+
+<h2>A fila de trabalhos</h2>
+<p><code>agregadorFila.js</code> vira <code>trabalhosFila.js</code>: mesmo ciclo de vida, mesma transação por documento na hora de puxar, mesmas tentativas — só que com <code>tipo</code> e <code>executor</code> genéricos em vez de <code>acao</code> e <code>canal</code> fixos. O agregador passa a ser o primeiro executor da fila nova, sem mudar o que o Cowork Agregador já faz.</p>
+
+<pre><code>{
+  "id": "trb_7Kq2…",
+  "tipo": "resetar_email_corporativo",      // vocabulário fechado, por executor
+  "executor": "acessos",                     // agregador | acessos | suporte-ti | pedidos
+  "parametros": { "email": "gerente.bessa@…", "unidade": "Dominos Bessa" },
+  "resumo": "Resetar senha do e-mail corporativo do gerente da Bessa",
+  "origem": "beniboy",  "chatId": "…",  "pedidoPorNome": "Ana",  "pedidoPorUsername": null,
+  "requerAprovacao": true,  "aprovacaoId": "qa_…",   // reusa qaAprovacoes
+  "status": "pendente",  "aberto": true,             // aberto: só pra consulta barata
+  "slaMin": 15,  "tentativas": 0,  "maxTentativas": 3,
+  "criadoEm": "…", "entregueEm": null, "concluidoEm": null,
+  "progresso": [ { "em": "…", "texto": "abrindo o admin do Workspace" } ],
+  "resultado": null,  "erro": null,  "evidenciaUrl": null,   // print do painel, se houver
+  "avisadoHumanoEm": null
+}</code></pre>
+
+<div class="estados">
+  <span class="s warn">aguardando_aprovacao</span><span class="a">→</span>
+  <span class="s acc">pendente</span><span class="a">→</span>
+  <span class="s">entregue</span><span class="a">→</span>
+  <span class="s">executando</span><span class="a">→</span>
+  <span class="s ok">executado</span>
+  <span class="a" style="margin-left:6px">ou</span>
+  <span class="s bad">erro</span><span class="a">(volta a pendente até 3×)</span>
+  <span class="a" style="margin-left:6px">ou</span>
+  <span class="s">cancelado</span>
+</div>
+
+<h3>Rotas pro Cowork (mesmo padrão de <code>/api/bot/*</code>)</h3>
+<div class="tabela-wrap">
+<table>
+  <thead><tr><th>Rota</th><th>Quem chama</th><th>O que faz</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /api/bot/trabalhos/fila?executor=acessos</code></td><td>Cowork</td><td>Puxa só os trabalhos do seu executor, marca <code>entregue</code> em transação (dois Coworks nunca pegam o mesmo)</td></tr>
+    <tr><td><code>POST /api/bot/trabalhos/:id/progresso</code></td><td>Cowork</td><td>"Abrindo o painel…", "achei o pedido". Opcional; aparece na conversa só se demorar</td></tr>
+    <tr><td><code>POST /api/bot/trabalhos/:id/pergunta</code></td><td>Cowork</td><td>Faltou um dado: a pergunta cai na conversa pelo Beniboy, a resposta volta como parâmetro novo</td></tr>
+    <tr><td><code>POST /api/bot/trabalhos/:id/retorno</code></td><td>Cowork</td><td><code>{ok, resultado, erro, evidenciaUrl}</code>. É o que hoje é <code>/agregador/retorno</code></td></tr>
+    <tr><td><code>POST /api/bot/trabalhos/:id/retorno</code> com <code>x-bot-token</code> errado</td><td>—</td><td>401. Um token por executor: <code>BOT_TRABALHOS_ACESSOS_TOKEN</code>, etc. Token do agregador continua o mesmo</td></tr>
+    <tr><td>webhook por executor</td><td>NoPulso → Cowork</td><td><code>coworkWebhook.js</code> generaliza <code>agregadorCowork.js</code>: <code>COWORK_ACESSOS_WEBHOOK_URL</code> acorda o Cowork; sem URL ele pega no próximo ciclo</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>O que muda no Beniboy</h3>
+<ul>
+  <li><strong>Uma ferramenta nova, <code>delegar_trabalho</code></strong> (<code>tipo</code>, <code>parametros</code>, <code>resumo</code>), no lugar de uma ferramenta por caso. O catálogo de tipos vai no prompt, com os parâmetros de cada um — igual ao <code>PARAMETROS_EXECUTOR</code> de hoje.</li>
+  <li><strong><code>status_trabalho</code></strong>: se a pessoa perguntar "e aí?", ele lê a fila em vez de inventar.</li>
+  <li><strong><code>chamar_atendente</code> deixa de desligar o bot.</strong> Vira "modo espera": o Beniboy segue respondendo o que sabe, avisa quanto tempo a pessoa está esperando e, se ninguém assumir no SLA, tenta delegar o que der.</li>
+  <li><strong>Limite de 8 respostas sobe pra 15</strong> em conversas com trabalho em andamento — o retorno do Cowork não pode chegar com o bot já calado.</li>
+</ul>
+
+<h2>Os executores</h2>
+<p>Cada Cowork é uma sessão com instruções próprias (um <code>docs/COWORK_&lt;NOME&gt;.md</code>, no espírito do <code>BENI_API.md</code>), um token de fila, acesso <em>próprio</em> nos sistemas que opera — nunca a senha do Master — e um agendamento de puxar a fila, acordado antes pelo webhook quando chega trabalho novo.</p>
+
+<div class="cw-grid">
+  <div class="cw existe">
+    <div class="top"><h3>Agregador</h3><span class="badge existe">já roda</span></div>
+    <dl>
+      <dt>recebe</dt><dd><code>pausar_item</code>, <code>fechar_loja</code></dd>
+      <dt>opera</dt><dd>Painel iFood e 99food, por loja</dd>
+      <dt>devolve</dt><dd>ok/erro na conversa; erro final chama o coordenador</dd>
+      <dt>SLA</dt><dd>10 min (loja parada é prejuízo por minuto)</dd>
+      <dt>muda</dt><dd>só passa a ler a fila nova; contrato de retorno igual</dd>
+    </dl>
+  </div>
+  <div class="cw">
+    <div class="top"><h3>Acessos</h3><span class="badge f1">fase 1</span></div>
+    <dl>
+      <dt>recebe</dt><dd><code>resetar_email_corporativo</code>, <code>criar_acesso_externo</code> (GCon, PWR, iFood loja), <code>liberar_permissao_externa</code></dd>
+      <dt>opera</dt><dd>Admin do Google Workspace, GCon, PWR</dd>
+      <dt>devolve</dt><dd>senha temporária (só pro solicitante verificado), print da tela</dd>
+      <dt>SLA</dt><dd>15 min</dd>
+      <dt>aprova</dt><dd>criar acesso: sim · reset: não, se o solicitante for o dono verificado</dd>
+    </dl>
+  </div>
+  <div class="cw">
+    <div class="top"><h3>Suporte TI</h3><span class="badge f2">fase 2</span></div>
+    <dl>
+      <dt>recebe</dt><dd><code>diagnosticar_maquina</code>, <code>acesso_remoto</code>, <code>impressora_fora_do_noc</code></dd>
+      <dt>opera</dt><dd>AnyDesk + NOCZenith (já existe pra comandos fixos) + o que o agente da loja não alcança</dd>
+      <dt>devolve</dt><dd>o que achou, o que fez, e se precisa de mão humana na loja</dd>
+      <dt>SLA</dt><dd>20 min · fora do horário: até a próxima abertura, com aviso</dd>
+      <dt>aprova</dt><dd>acesso remoto: sim (a loja confirma na conversa)</dd>
+    </dl>
+  </div>
+  <div class="cw">
+    <div class="top"><h3>Pedidos &amp; Portais</h3><span class="badge f2">fase 2</span></div>
+    <dl>
+      <dt>recebe</dt><dd><code>consultar_pedido_portal</code>, <code>cancelar_pedido</code>, <code>reenviar_pedido</code>, <code>status_loja_agregador</code></dd>
+      <dt>opera</dt><dd>Gestor de Pedidos, PWR, painel iFood (leitura) — o mesmo robô que já vigia o Gestor de hora em hora</dd>
+      <dt>devolve</dt><dd>status com número do pedido e horário</dd>
+      <dt>SLA</dt><dd>5 min (cliente esperando no chat)</dd>
+      <dt>aprova</dt><dd>cancelar: sim · consultar: não</dd>
+    </dl>
+  </div>
+</div>
+
+<h3>E o que não precisa de Cowork nenhum</h3>
+<p>Uma parte grande das escalações se resolve <strong>dentro do NoPulso</strong>, só abrindo pra mais gente o que hoje é Master-only — com a fila de aprovação como freio:</p>
+<ul>
+  <li><strong>Resetar senha e criar acesso copiando</strong> pra gerente logado: entra como trabalho <code>executor: "nopulso"</code>, cai em Aprovações, o Master aprova pelo card ou pelo chat do Beni ("aprova o 4021"). 12 escalações do período eram exatamente isso.</li>
+  <li><strong>Consultar pedido pra quem está deslogado</strong>, com verificação leve: loja vem do QR code, mais nome do cliente e valor — os mesmos 3 dados que a ferramenta já exige. Resposta sem dado sensível (status e horário, nunca cartão). 20 escalações.</li>
+  <li><strong>Impressora pra deslogado</strong>: a loja do QR code (<code>lojaContexto</code>) já basta pra <code>estado_impressora</code>; só reiniciar exige confirmação. 6 escalações.</li>
+  <li><strong>Desbloqueio quando a pessoa não sabe o username</strong>: buscar por nome + loja e confirmar, em vez de escalar. 11 escalações de "bloqueado" ainda foram pro humano.</li>
+</ul>
+
+<h2>Uma solicitação, de ponta a ponta</h2>
+<p>Exemplo real do tipo mais comum que hoje vai pro Master: gerente de loja, 21h, e-mail corporativo travado.</p>
+<ol class="seq">
+  <li><span class="quem">Gerente</span><span class="oque"><q>não consigo entrar no e-mail da loja, diz senha inválida</q></span></li>
+  <li><span class="quem">Beniboy</span><span class="oque">Reconhece <em>e-mail corporativo</em> ≠ login do NoPulso. Pergunta só o que falta: qual e-mail. Confere que quem fala é gerente da unidade (login, ou QR code + nome no cadastro).</span></li>
+  <li><span class="quem">Beniboy</span><span class="oque"><code>delegar_trabalho(tipo: resetar_email_corporativo, parametros: {email, unidade}, resumo)</code>. Responde: <q>Vou resetar a senha do dominos.bessa@… — te aviso aqui quando estiver pronta, costuma levar uns minutos.</q></span></li>
+  <li><span class="quem">NoPulso</span><span class="oque">Grava o trabalho (<code>pendente</code>, SLA 15 min), acorda o Cowork Acessos pelo webhook, liga a varredura rápida.</span></li>
+  <li><span class="quem">Cowork Acessos</span><span class="oque"><code>GET /fila?executor=acessos</code> → recebe o trabalho, marca <code>entregue</code>. Abre o admin do Workspace com o acesso <em>dele</em>, reseta, tira o print, manda <code>progresso</code> se demorar.</span></li>
+  <li><span class="quem">Cowork Acessos</span><span class="oque"><code>POST /retorno {ok: true, resultado: "senha temporária: …", evidenciaUrl}</code></span></li>
+  <li><span class="quem">Beniboy</span><span class="oque">Entrega na conversa: <q>Pronto — senha temporária <b>X</b>. Entra e troca no primeiro acesso. Deu certo?</q> A senha só vai porque o solicitante foi verificado no passo 2.</span></li>
+  <li><span class="quem">Gerente</span><span class="oque"><q>deu certo, obrigada</q> → <code>encerrar_atendimento</code>. Nota interna gravada com o trabalho, quem pediu e o print. Tempo total: minutos, Master dormindo.</span></li>
+</ol>
+<div class="nota warn">Se o Cowork não confirmar em 15 min: o trabalho vira atraso, o alarme de escalação de hoje toca pro Master, e o Beniboy avisa a pessoa que um humano foi chamado — o mesmo caminho de agora, só que depois de tentar o robô.</div>
+
+<h2>Beniboy mais útil, além da fila</h2>
+<p>A fila resolve <em>executar</em>. Estas quatro coisas resolvem o resto do que apareceu nas conversas.</p>
+<div class="causas">
+  <div class="causa"><span class="tag ok">espera</span><h3>Não sumir depois de escalar</h3><p>Em modo espera ele responde o que sabe, diz há quanto tempo a pessoa espera, e oferece deixar registrado pra retorno. As 19 conversas sem resposta viram no mínimo um ticket com nome e contato.</p></div>
+  <div class="causa"><span class="tag ok">noite</span><h3>Horário fora do comercial com regra</h3><p>Das 18h às 8h ele diz a verdade: "o time humano volta às 8h; o que eu puder fazer sozinho faço agora". Trabalho que exige gente entra na fila com prazo de manhã, não some.</p></div>
+  <div class="causa"><span class="tag ok">aprende</span><h3>Aprender com o que o Master respondeu</h3><p>Ao encerrar uma conversa em que o humano só <em>explicou</em> (90 casos), o NoPulso propõe um parágrafo pro Contexto do agente. O Master aprova com um clique. Sem isso a mesma dúvida volta.</p></div>
+  <div class="causa"><span class="tag ok">proativo</span><h3>Falar antes de perguntarem</h3><p>Alerta do NOC (impressora sem papel, loja offline, pedido parado) abre conversa com a loja pelo próprio widget: "vi que a Zebra do caixa 2 está sem papel". Metade das conversas de impressora nem existiria.</p></div>
+</div>
+
+<h2>Fases</h2>
+<ol class="fases">
+  <li class="fase">
+    <div class="num"><b>1</b>2 semanas</div>
+    <div>
+      <h3>Fila genérica + Cowork Acessos + o que é interno</h3>
+      <div class="prazo">mexe em: trabalhosFila.js (novo) · coworkWebhook.js (novo) · suporteBot.js · index.js · agregadorFila.js (vira alias)</div>
+      <ul>
+        <li>Fila <code>trabalhos</code>, rotas <code>/api/bot/trabalhos/*</code>, um token por executor; agregador migra sem mudar o Cowork.</li>
+        <li>Ferramentas <code>delegar_trabalho</code> e <code>status_trabalho</code>; <code>chamar_atendente</code> vira modo espera.</li>
+        <li>Executor interno: reset e criar acesso pra gerente logado com aprovação; consultar pedido e impressora pra deslogado com loja do QR.</li>
+        <li>Cowork Acessos no ar com o e-mail corporativo (o caso mais pedido).</li>
+      </ul>
+      <div class="meta-f">meta: escalação de <b>57% → 35%</b> · escalação sem resposta <b>18% → 0</b></div>
+    </div>
+  </li>
+  <li class="fase">
+    <div class="num"><b>2</b>3 semanas</div>
+    <div>
+      <h3>Suporte TI e Pedidos &amp; Portais</h3>
+      <div class="prazo">mexe em: docs/COWORK_SUPORTE_TI.md · docs/COWORK_PEDIDOS.md · tela de trabalhos no NOC</div>
+      <ul>
+        <li>Cowork Suporte TI: diagnóstico e acesso remoto com confirmação da loja na conversa.</li>
+        <li>Cowork Pedidos: consulta no Gestor/PWR pra cliente deslogado; cancelar com aprovação.</li>
+        <li>Tela <strong>NOC → Trabalhos</strong>: fila, atrasos, evidências, cancelar — a mesma lista que hoje existe só pro agregador.</li>
+        <li>Regra de horário noturno e aviso de "humano volta às 8h".</li>
+      </ul>
+      <div class="meta-f">meta: escalação <b>→ 25%</b> · resolvido pelo Beniboy <b>22% → 45%</b></div>
+    </div>
+  </li>
+  <li class="fase">
+    <div class="num"><b>3</b>contínuo</div>
+    <div>
+      <h3>Aprender e antecipar</h3>
+      <div class="prazo">mexe em: agenteAcoes.js (contexto) · alertasCentral.js · suporteChat.js</div>
+      <ul>
+        <li>Sugestão automática de parágrafo pro Contexto do agente a cada conversa "só orientação" encerrada.</li>
+        <li>Painel "o que o Beniboy não soube responder" (perguntas que viraram escalação sem trabalho).</li>
+        <li>Alerta do NOC abre conversa proativa com a loja.</li>
+        <li>Beni (API do Master) usa o mesmo cérebro e a mesma fila: "reseta o e-mail da Bessa" no Cowork vira o mesmo trabalho.</li>
+      </ul>
+      <div class="meta-f">meta: Master atende <b>&lt; 20%</b> das conversas humanas (hoje 98%)</div>
+    </div>
+  </li>
+</ol>
+
+<h2>Segurança e limites</h2>
+<ul>
+  <li><strong>Cada Cowork tem acesso próprio</strong> nos portais (usuário do robô, marcado como tal), token de fila só dele, e só lê trabalhos do seu executor. Vazou um, revoga um.</li>
+  <li><strong>Senha e dado sensível só voltam pro solicitante verificado</strong> — login ou QR code + nome no cadastro da unidade. Cliente final nunca recebe dado de outra pessoa; o retorno pro chat passa pelo mesmo filtro que hoje impede o modelo de assinar como outra pessoa.</li>
+  <li><strong>Aprovação continua sendo o freio</strong> pra criar, cancelar, dar acesso remoto: reusa <code>qaAprovacoes</code>, o card diz "<em>fulano (via Beniboy) → Cowork Acessos</em>".</li>
+  <li><strong>Evidência obrigatória</strong> pra ação que muda estado (print do painel no retorno). Fica na nota interna da conversa, com o PDF que o Master já gera.</li>
+  <li><strong>Custo de leitura</strong>: fila por índice <code>aberto</code>, varredura de atraso em ritmo lento sem nada aberto, lista com cache de 30 s — o padrão do agregador, que já passou pelo teste da fatura.</li>
+  <li><strong>O que não entra</strong>: nada de estorno automático, nada de mexer em fechamento, nada de token do Master em Cowork. Estorno continua sendo o Master avaliando o link.</li>
+</ul>
+
+<h2>Decisões que são suas</h2>
+<ol class="decisoes">
+  <li><div>Cowork Acessos opera o e-mail corporativo com um usuário-robô no admin do Workspace?<span class="rec">recomendo: sim, com acesso restrito a reset de senha de contas de loja</span></div></li>
+  <li><div>Gerente logado pode pedir reset/criação de acesso pelo Beniboy, ficando você só com o "aprovar"?<span class="rec">recomendo: sim — são 12 escalações do período que viram um clique</span></div></li>
+  <li><div>Cliente deslogado consulta status de pedido com loja do QR + nome + valor?<span class="rec">recomendo: sim, resposta só com status e horário</span></div></li>
+  <li><div>Fora do horário (18h–8h): Beniboy avisa que humano volta às 8h e enfileira, ou continua tocando o alarme crítico como hoje?<span class="rec">recomendo: alarme só pra trabalho com SLA estourado e pra loja offline</span></div></li>
+  <li><div>Ordem dos executores da fase 2: Suporte TI primeiro (24 conversas) ou Pedidos (48, mas 20 viram internas na fase 1)?<span class="rec">recomendo: Pedidos — cliente esperando no chat pesa mais que máquina lenta</span></div></li>
+</ol>
+
+<footer>
+  Números extraídos em 15/09/2026 de <span class="mono">GET /api/suporte-chats</span> (187 conversas, 08/08–15/09). Temas classificados por palavra-chave nas mensagens do visitante; "escalada" = <span class="mono">botDesativado</span>; "resolvida pelo Beniboy" = RESOLVIDO sem mensagem humana.<br>
+  Código de referência: <span class="mono">server/suporteBot.js · server/agregadorFila.js · server/agregadorCowork.js · server/agenteAcoes.js · docs/AGENTE_MASTER.md · docs/BENI_API.md</span>
+</footer>
+</div>

@@ -1865,7 +1865,7 @@ async function renderDetalheAdvertencia(){
     <hr style="border-color:var(--line);margin:14px 0;">
     <div style="font-weight:600;font-size:13px;margin-bottom:8px;">💬 Mensagens</div>
     <div id="adv-mensagens" style="margin-bottom:10px;"></div>
-    <textarea id="adv-nova-mensagem" rows="2" placeholder="Escreva uma mensagem..."></textarea>
+    <textarea class="nao-maiusc" id="adv-nova-mensagem" rows="2" placeholder="Escreva uma mensagem..."></textarea>
     <button type="button" class="link-btn" onclick="enviarMensagemAdvertencia()">Enviar mensagem</button>
   `;
   const mensagens = await fetch(`/api/rh/advertencias/${a.id}/mensagens`).then(r=>r.ok?r.json():[]).catch(()=>[]);

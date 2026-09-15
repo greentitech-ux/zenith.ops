@@ -399,7 +399,7 @@
       <div id="chat-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
       <div id="chat-previa"></div>
       <div style="display:flex;gap:6px;align-items:center;">
-        <input type="text" id="chat-texto" placeholder="mensagem pro chamado..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarChatChamado();}">
+        <input type="text" class="nao-maiusc" id="chat-texto" placeholder="mensagem pro chamado..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarChatChamado();}">
         <label class="foto-btn" id="chat-foto-btn" title="anexar foto"><span id="chat-foto-icone">📷</span><input type="file" accept="image/*" hidden id="chat-foto" onchange="document.getElementById('chat-foto-icone').textContent = this.files[0] ? '✅' : '📷';"></label>
         <button type="button" class="btn-add" style="margin-top:0;width:auto;padding:8px 14px;" onclick="enviarChatChamado()">Enviar</button>
       </div>
