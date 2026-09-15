@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 62;
+const VERSAO_VIGIA = 63;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -2419,6 +2419,41 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  } catch {',
     '    Write-Host "Aviso: nao consegui usar a pasta fixa ($($_.Exception.Message)). Instalando do lugar atual."',
     '    $Destino = $PSCommandPath',
+    '  }',
+    '  # IDENTIDADE + PASTA OCULTA. Pedido do Master: rodar sem janela (ja faz,',
+    '  # pela tarefa) e nao ser apagado "achando que e outra coisa". Duas',
+    '  # medidas proporcionais, sem brigar com o dono da maquina:',
+    '  #   1) um LEIA que diz o que e, de quem e e "nao apague" - pra quem',
+    '  #      ligar "mostrar ocultos" reconhecer na hora o agente do NOC;',
+    '  #   2) a pasta marcada como oculta, pra ninguem tropecar nela no dia a',
+    '  #      dia e apagar por engano.',
+    '  # NADA de anti-remocao: Administrador que quiser tirar, tira - e o LEIA',
+    '  # explica por que nao vale a pena. Fica FORA do try acima de proposito:',
+    '  # falhar em ocultar nao pode fazer a instalacao achar que perdeu a pasta.',
+    '  if (Test-Path $PastaFixa) {',
+    '    try {',
+    '      $leia = @\'',
+    'NOCZenith - agente de monitoramento do painel NoPulso',
+    '=====================================================',
+    'NAO APAGUE ESTA PASTA.',
+    '',
+    'O que e: o agente que avisa ao painel NoPulso se este computador',
+    'esta ligado, a latencia da rede e os chamados de suporte. E software',
+    'DA PROPRIA EMPRESA, instalado de proposito - nao e virus.',
+    '',
+    'Apagar isto NAO deixa o computador mais rapido: so faz a loja',
+    'aparecer como offline no NOC. Se algo estiver errado, fale com o',
+    'suporte pelo proprio painel NoPulso.',
+    '',
+    'Reinstalar: painel NOC-NoPulso, na ficha deste computador.',
+    '\'@',
+    '      $leiaPath = Join-Path $PastaFixa "LEIA-NOCZenith.txt"',
+    '      Set-Content -Path $leiaPath -Value $leia -Encoding ASCII -Force',
+    '      Add-Content -Path $leiaPath -Value ("Maquina: " + $UnidadePosto + "  |  Versao do agente: " + $VersaoScript) -Encoding ASCII',
+    '      $fi = Get-Item -LiteralPath $PastaFixa -Force',
+    '      $fi.Attributes = $fi.Attributes -bor [System.IO.FileAttributes]::Hidden',
+    '      Escrever-Log "Pasta marcada como oculta e LEIA-NOCZenith.txt gravado."',
+    '    } catch { Escrever-Log "Nao consegui ocultar/identificar a pasta: $($_.Exception.Message)" }',
     '  }',
     '  # sobe pelo lancador sem janela quando da (ver Gravar-Lancador); onde o',
     '  # Windows Script Host esta desligado, cai no powershell.exe de sempre.',

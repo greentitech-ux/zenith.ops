@@ -7614,6 +7614,43 @@ setTimeout(async () => {
         && s.includes('Set-ScheduledTask -TaskName $NomeTarefa -Trigger (Gatilhos-DaTarefa) | Out-Null')
         && /Reportar-IpLocal\n  Garantir-GatilhoDeRepeticao\n/.test(s)
         && s.includes('function Garantir-GatilhoDeRepeticao {\n  if ($Servico) { return }')),
+      // Master (15/09): "quero que ele rode, e quero que ele permaneca
+      // invisivel para nao apagarem ele achando que e outra coisa". Rodar sem
+      // janela ja e' o lancador acima; ESTA parte e' nao ser apagado por
+      // engano - pasta oculta + um LEIA que se identifica pra quem achar.
+      'v63 (sem subir, nenhuma das 52 maquinas ganha a pasta oculta nem o LEIA)': vg.VERSAO_VIGIA >= 63,
+      'a pasta fixa e marcada como oculta (some do dia a dia), preservando o resto dos atributos': scripts.every((s) =>
+        s.includes('$fi = Get-Item -LiteralPath $PastaFixa -Force')
+        && s.includes('$fi.Attributes = $fi.Attributes -bor [System.IO.FileAttributes]::Hidden')),
+      // a diferenca entre "esconder" legitimo e malware e' se identificar:
+      // quem ligar "mostrar ocultos" tem que reconhecer na hora o que e'
+      'deixa um LEIA que diz o que e, que e da empresa e "nao apague"': scripts.every((s) =>
+        s.includes('LEIA-NOCZenith.txt')
+        && s.includes('NAO APAGUE ESTA PASTA.')
+        && s.includes('DA PROPRIA EMPRESA, instalado de proposito - nao e virus.')),
+      'o LEIA diz de qual maquina e de que versao e (pro suporte saber o que achou)': scripts.every((s) =>
+        s.includes('"Maquina: " + $UnidadePosto + "  |  Versao do agente: " + $VersaoScript')),
+      // apagar nao pode ser a solucao que o proprio agente sugere: ele diz que
+      // so faz a loja aparecer offline
+      'o LEIA explica que apagar nao acelera nada, so derruba o monitoramento': scripts.every((s) =>
+        s.includes('Apagar isto NAO deixa o computador mais rapido')),
+      // NADA de anti-remocao: o dono da maquina (Admin) tem que conseguir tirar
+      'nao ha truque anti-remocao (Administrador tira quando quiser)': scripts.every((s) =>
+        !/attrib .*\+r|Deny|icacls .*\/deny|Set-Acl/i.test(s)
+        && s.includes('NADA de anti-remocao')),
+      // ocultar nao pode derrubar a instalacao: fica FORA do try da pasta fixa,
+      // no seu proprio try, e so tenta se a pasta existe
+      'ocultar/identificar roda isolado - falhar ali nao aborta a instalacao': scripts.every((s) =>
+        /if \(Test-Path \$PastaFixa\) \{\n    try \{[\s\S]*?\} catch \{ Escrever-Log "Nao consegui ocultar\/identificar a pasta/.test(s)),
+      // no Windows antigo (Server 2012 R2, o BOS) tudo isto tem que valer
+      // igual - e sem cair no guard de API do PowerShell 5
+      'no Windows antigo (BOS) a pasta oculta + LEIA saem iguais': (() => {
+        const sa = vg.montarScriptVigia({ codigo: 'DomCG', posto: 'BOS', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true });
+        return sa.includes('[System.IO.FileAttributes]::Hidden')
+          && sa.includes('LEIA-NOCZenith.txt')
+          && sa.startsWith('# NOCZenith')
+          && !/::new\(|ToUnixTimeMilliseconds/.test(sa);
+      })(),
       'NOC: a contagem de servidores tem o MESMO corpo do número principal': /\.kpi-serv\{font-size:1em;font-weight:800;/.test(htmlNoc),
       // 13/09: "quero que a quantidade seja clicável: 47 mostra as máquinas
       // daquele grupo, 1 mostra os servidores, 0 não faz nada"
