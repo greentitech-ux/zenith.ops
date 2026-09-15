@@ -117,8 +117,19 @@ async function setConfig(patch) {
 // O degrau do meio e o que ja estava no ar antes desta mudanca; quem so tem
 // arte por marca continua funcionando igual.
 const chaveArte = (rede, marca) => `${rede}:${marca}`;
-async function papelDeParedeDe(codigo) {
+async function papelDeParedeDe(codigo, posto) {
   const cfg = await getConfig();
+  // ARTE DESTA MAQUINA vem primeiro (pedido do Master: "cada computador tem
+  // sua arte"). Ela ja traz tudo pronto (loja, codigo, logos), entao o agente
+  // NAO carimba nada por cima - quem sinaliza isso e a rota GET, por header.
+  // Sai do espelho em memoria, sem custo de leitura (§3).
+  if (posto) {
+    try {
+      const doc = (await garantirEspelho()).get(docIdFor(codigo, posto));
+      const daMaquina = doc && doc.papelDeParedeArte && doc.papelDeParedeArte.caminho ? doc.papelDeParedeArte : null;
+      if (daMaquina) return { ...daMaquina, marca: null, rede: null, daMaquina: true };
+    } catch (e) { /* sem espelho: cai no fluxo normal */ }
+  }
   const doParque = cfg && cfg.papelDeParede && cfg.papelDeParede.caminho ? cfg.papelDeParede : null;
   // perfil() devolve null pra unidade que nunca foi cadastrada em runtime -
   // nesse caso nao ha marca e a maquina cai no papel de parede do parque
@@ -940,7 +951,7 @@ async function heartbeat(codigo, posto, info, token) {
   // so busca a configuracao inteira (1 leitura) QUANDO este numero muda -
   // pesquisar de tempos em tempos custaria milhares de leituras por dia (§3).
   const politicaLigada = !!(atual && atual.politica && atual.politica.papelDeParedeAtivo);
-  const arteDaMaquina = politicaLigada ? await papelDeParedeDe(codigo) : null;
+  const arteDaMaquina = politicaLigada ? await papelDeParedeDe(codigo, posto || 'principal') : null;
   return {
     mensagemPendente,
     comandoPendente,
@@ -1128,6 +1139,28 @@ function sanitizarPolitica(entrada) {
   };
 }
 
+// ARTE DE PAPEL DE PAREDE DESTA MAQUINA (pedido do Master, 15/09/2026: "cada
+// computador tem sua arte"). Guardada no doc do computador. Sobe a versao da
+// aplicacao (via politicaVersao) pra o agente rebaixar a imagem nova na
+// proxima consulta - mesmo motivo do versaoAplicacao. A arte da maquina ganha
+// da arte do grupo/marca (ver papelDeParedeDe).
+async function definirArteDaMaquina(codigo, posto, arte) {
+  const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data();
+  if (!atual) throw new Error('Computador não encontrado.');
+  const politicaVersao = Number(atual.politicaVersao || 0) + 1;
+  await gravarEEspelhar(codigo, posto, { papelDeParedeArte: arte, politicaVersao });
+  return { ...arte, politicaVersao };
+}
+async function removerArteDaMaquina(codigo, posto) {
+  const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data();
+  if (!atual) throw new Error('Computador não encontrado.');
+  const politicaVersao = Number(atual.politicaVersao || 0) + 1;
+  // null (nao delete) pra o merge do gravarEEspelhar limpar o campo; a maquina
+  // volta pra arte do grupo/marca na proxima consulta
+  await gravarEEspelhar(codigo, posto, { papelDeParedeArte: null, politicaVersao });
+  return { politicaVersao };
+}
+
 async function definirPolitica(codigo, posto, entrada) {
   const politica = sanitizarPolitica(entrada);
   // a versao sobe a cada mudanca: e assim que o agente sabe que tem politica
@@ -1248,7 +1281,7 @@ async function configuracaoAgente(codigo, posto, token) {
   const politica = sanitizarPolitica(atual.politica);
   // so resolve a arte quando a maquina de fato aplica papel de parede: quem
   // esta com a chave desligada nao paga leitura de config nem de unidades
-  const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo) : null;
+  const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo, posto) : null;
   return {
     noPulsoPrint: !!atual.noPulsoPrint,
     capturarAgora,
@@ -3470,6 +3503,7 @@ module.exports = {
   // precisa comecar cada cenario do zero
   _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
+  definirArteDaMaquina, removerArteDaMaquina,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
   // invalidarEspelho() de propósito guarda o mapa (o comentário lá explica:

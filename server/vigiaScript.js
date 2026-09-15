@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 65;
+const VERSAO_VIGIA = 66;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1620,9 +1620,15 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $destino = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-nome.jpg"',
     '  $chave = "HKCU:\\Control Panel\\Desktop"',
     '  if ($ligado) {',
-    '    try { Invoke-WebRequest -Uri $UrlPapelDeParede -Headers $CabecalhosAgente -OutFile $bruto -TimeoutSec 30 -UseBasicParsing } catch { Escrever-Log "Papel de parede: nao baixou ($($_.Exception.Message))"; return $false }',
+    '    $semCarimbo = $false',
+    // arte DESTA maquina vem com o header X-NOC-Carimbo: nao (ela ja tem loja,
+    // codigo e logos prontos). -PassThru devolve a resposta junto do -OutFile,
+    // pra ler o header sem uma segunda requisicao.
+    '    try { $respArte = Invoke-WebRequest -Uri $UrlPapelDeParede -Headers $CabecalhosAgente -OutFile $bruto -TimeoutSec 30 -UseBasicParsing -PassThru; if ("$($respArte.Headers[\'X-NOC-Carimbo\'])" -eq \'nao\') { $semCarimbo = $true } } catch { Escrever-Log "Papel de parede: nao baixou ($($_.Exception.Message))"; return $false }',
     '    if (-not (Test-Path $bruto)) { return $false }',
-    '    $destino = Carimbar-NomeNaArte $bruto $destino',
+    // grupo/marca: carimba loja+nome. Da maquina: ja veio pronta, nao carimba
+    // (senao escreve por cima do que a arte ja tem).
+    '    if ($semCarimbo) { $destino = $bruto } else { $destino = Carimbar-NomeNaArte $bruto $destino }',
     '  }',
     // Set-ItemProperty tambem falha SEM terminar. Sem o -ErrorAction Stop, uma
     // maquina que bloqueie a chave despejaria vermelho na tela E o log diria

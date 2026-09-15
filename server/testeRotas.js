@@ -6985,6 +6985,74 @@ setTimeout(async () => {
   if (!okElevacao) ruins += 1;
   console.log(`${okElevacao ? '✓' : '✗'} NOC: instalar/desinstalar - comando que exige admin só roda na instância elevada (SYSTEM), o resto na de login`);
 
+  // ------------------------------------------------------------------
+  // "CADA COMPUTADOR TEM SUA ARTE" (Master, 15/09/2026). O papel de parede era
+  // por grupo+marca (uma imagem pra rede toda, com o nome carimbado). Agora
+  // cada maquina pode ter a PROPRIA arte (ATM01, Makeline, Gerencia...), que
+  // ganha da arte do grupo e NAO leva carimbo por cima (ja vem pronta).
+  let okArteMaquina = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCART';
+    await ls.cadastrarComputador(UNI, 'PC-ART', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PC-ART').posto;
+
+    // liga a politica de papel de parede (senao papelDeParedeDe nem resolve)
+    await ls.definirPolitica(UNI, posto, { papelDeParedeAtivo: true });
+    // sem arte de maquina nem de grupo: cai em nada (ou no parque, se houver)
+    const semNada = await ls.papelDeParedeDe(UNI, posto);
+
+    // define a arte DESTA maquina
+    const salvo = await ls.definirArteDaMaquina(UNI, posto, { caminho: 'parque/arte-atm01.jpg', tipo: 'image/jpeg', em: Date.now(), versao: 12345 });
+    const comArte = await ls.papelDeParedeDe(UNI, posto);
+    // a versao da aplicacao muda quando a arte muda (o agente rebaixa a imagem)
+    const tkArt = await ls.garantirAgentToken(UNI, posto);
+    const cfgAgente = await ls.configuracaoAgente(UNI, posto, tkArt);
+
+    // remove: volta pro grupo/marca (aqui, nada)
+    await ls.removerArteDaMaquina(UNI, posto);
+    const semArteDeNovo = await ls.papelDeParedeDe(UNI, posto);
+
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'X', tipo: 'interno', agentToken: 'ab12' });
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      // a arte da maquina ganha e vem marcada como daMaquina (o header depende disso)
+      'a arte desta máquina vence a do grupo, e vem marcada daMaquina':
+        !!comArte && comArte.caminho === 'parque/arte-atm01.jpg' && comArte.daMaquina === true,
+      'a configuração do agente reflete a versão da arte da máquina (ele rebaixa a imagem nova)':
+        !!cfgAgente && /\.12345$/.test(String(cfgAgente.versaoAplicacao)),
+      'sem arte própria não inventa nada (cai no fluxo normal)':
+        (semNada === null || !semNada.daMaquina),
+      'remover a arte da máquina volta pro grupo/marca':
+        (semArteDeNovo === null || !semArteDeNovo.daMaquina),
+      // o servidor manda "nao carimbe" no header quando a arte e da maquina
+      'a rota GET sinaliza X-NOC-Carimbo: nao para arte da máquina':
+        /if \(arte\.daMaquina\) res\.set\('X-NOC-Carimbo', 'nao'\);/.test(idx)
+        && /papelDeParedeDe\(req\.params\.codigo, req\.params\.posto\)/.test(idx),
+      'há rota de upload e de remover a arte por máquina (Master-only)':
+        /app\.put\('\/api\/loja-status\/:codigo\/computadores\/:posto\/papel-de-parede-arte', auth\.requireMaster/.test(idx)
+        && /app\.delete\('\/api\/loja-status\/:codigo\/computadores\/:posto\/papel-de-parede-arte', auth\.requireMaster/.test(idx),
+      // o agente le o header e NAO carimba quando e arte da maquina
+      'o agente lê o header e pula o carimbo na arte da máquina':
+        /-PassThru/.test(vg) && /Headers\['X-NOC-Carimbo'\]/.test(vg)
+        && /if \(\$semCarimbo\) \{ \$destino = \$bruto \} else \{ \$destino = Carimbar-NomeNaArte/.test(vg),
+      'VERSAO_VIGIA subiu (senão o agente não sabe ler o header)':
+        require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 66,
+      'no Windows antigo a arte por máquina sai igual, sem API de PowerShell 5':
+        (() => { const sa = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'H', posto: 'X', tipo: 'interno', agentToken: 'ab12', windowsAntigo: true }); return /-PassThru/.test(sa) && !/::new\(|ToUnixTimeMilliseconds/.test(sa); })(),
+      // a ficha da maquina tem o uploader
+      'a ficha da máquina tem o campo de arte por máquina (enviar e voltar pro grupo)':
+        /Papel de parede desta máquina/.test(html) && /function enviarArteMaquina\(/.test(html) && /function removerArteMaquina\(/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okArteMaquina = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (comArte=${JSON.stringify(comArte)})`);
+  } catch (e) { okArteMaquina = false; console.log('  erro: ' + e.message + '\n' + e.stack); }
+  if (!okArteMaquina) ruins += 1;
+  console.log(`${okArteMaquina ? '✓' : '✗'} NOC: cada máquina pode ter a própria arte de papel de parede (vence a do grupo, sem carimbo por cima)`);
+
+
 
 
   let okReinicioAlerta = false;

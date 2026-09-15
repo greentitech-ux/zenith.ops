@@ -1745,11 +1745,39 @@ app.get('/api/loja-status/papel-de-parede', async (req, res) => {
 app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (req, res) => {
   try {
     await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null);
-    const arte = await lojaStatus.papelDeParedeDe(req.params.codigo);
+    const arte = await lojaStatus.papelDeParedeDe(req.params.codigo, req.params.posto);
     if (!arte || !arte.caminho) return res.sendStatus(404);
+    // arte DESTA maquina ja vem pronta (loja/codigo/logos): o agente NAO deve
+    // carimbar por cima, senao escreve duplicado. A arte do grupo/marca continua
+    // sendo carimbada (sem header). Ver Aplicar-PapelDeParede no vigiaScript.js.
+    if (arte.daMaquina) res.set('X-NOC-Carimbo', 'nao');
     storage.streamArquivo(arte.caminho, arte.tipo || 'image/jpeg', res);
   } catch (err) {
     res.status(403).json({ error: err.message });
+  }
+});
+
+// ARTE DE PAPEL DE PAREDE DESTA MAQUINA (pedido do Master: "cada computador
+// tem sua arte"). Sobe uma imagem so pra este computador; ela ganha da arte do
+// grupo/marca e o agente NAO carimba por cima (ver o header acima). Master-only.
+app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
+    const { codigo, posto } = req.params;
+    const arte = { caminho: null, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() };
+    arte.caminho = await storage.salvarArquivo('parque', req.file, `papel-de-parede-maquina-${String(codigo).replace(/[^\w-]/g, '_')}-${String(posto).replace(/[^\w-]/g, '_')}`);
+    const salvo = await lojaStatus.definirArteDaMaquina(codigo, posto, arte);
+    res.json(salvo);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireMaster, async (req, res) => {
+  try {
+    const r = await lojaStatus.removerArteDaMaquina(req.params.codigo, req.params.posto);
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
