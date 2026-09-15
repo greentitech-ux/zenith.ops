@@ -442,29 +442,45 @@
     var st = document.createElement('style');
     st.id = 'zmz-maiusc';
     st.textContent = ''
-      // DOIS CASOS, não a tela inteira. A primeira versão subiu o `body`
-      // inteiro e ficou ruim de ler: menu, botão, título e texto corrido não
-      // são dado, são interface. Master (14/09): "não gostei de tudo
-      // maiúsculo / o que falei pra ser tudo maiúsculo foi nomes dos usuários
-      // e dados preenchidos para formulários e relatórios".
+      // ONDE, e não "a tela inteira". Duas voltas antes, isto subia o `body`
+      // de tudo; depois passou a subir TODO campo de TODA tela - e aí a
+      // caixa de resposta do chat também subia, com o atendente escrevendo
+      // "FECHA TUDO E ENTRA NOVAMENTE POR FAVOR" pro cliente e o e-mail de
+      // quem abriu a conversa aparecendo em caixa alta. Master (15/09):
+      // "chat continua ficando maiúsculo e não é pra ser assim / maiúsculo só
+      // preenchimentos de tarefas, formulários, relatórios".
       //
-      // 1) DADO PREENCHIDO: o que a pessoa digitou ou escolheu num campo - e
-      // só isso. O rótulo ao lado continua como está escrito, e o botão
-      // também. O Chromium traz text-transform:none pra campo na folha do
-      // próprio navegador, então os quatro precisam ser nomeados.
-      + 'input,textarea,select,optgroup,option{text-transform:uppercase;}'
+      // 1) DADO PREENCHIDO, só onde a tela DIZ que é disso que ela trata:
+      // <body data-maiusc>. Conversa, busca e filtro nunca são dado
+      // preenchido, e por isso ficam de fora por padrão - tela nova nasce
+      // sem o atributo, que é o lado seguro do erro.
+      + 'body[data-maiusc] input,body[data-maiusc] textarea,'
+      + 'body[data-maiusc] select,body[data-maiusc] optgroup,'
+      + 'body[data-maiusc] option{text-transform:uppercase;}'
+      // ...e mesmo lá dentro, o que NÃO é dado de formulário: buscar e
+      // filtrar é navegação; e-mail e link são endereço, que a pessoa relê
+      // pra conferir (foi assim que um e-mail de cliente foi parar em caixa
+      // alta no card da conversa). Precisam do mesmo prefixo pra ganhar da
+      // regra acima na conta de especificidade.
+      + 'body[data-maiusc] input[type=search],body[data-maiusc] input[type=email],'
+      + 'body[data-maiusc] input[type=url],body[data-maiusc] input[type=tel],'
+      + 'body[data-maiusc] .nao-maiusc,body[data-maiusc] .nao-maiusc *,'
+      + 'body[data-maiusc] code,body[data-maiusc] kbd,body[data-maiusc] pre,'
+      + 'body[data-maiusc] samp,body[data-maiusc] .valor-exato,'
+      + 'body[data-maiusc] .valor-exato *{text-transform:none;}'
       // o placeholder NÃO é dado preenchido: é a dica de como preencher, e
       // em maiúsculo ela vira grito na tela vazia
       + 'input::placeholder,textarea::placeholder{text-transform:none;}'
-      // 2) NOME DE USUÁRIO, onde a tela escreve o nome de uma pessoa. Vem
-      // por classe porque nome não tem tag própria: é o código que sabe que
-      // aquele pedaço é gente - o mesmo critério do nomePessoa() que o
-      // servidor usa nos relatórios.
+      // 2) NOME DE USUÁRIO, onde a tela escreve o nome de uma pessoa. Este
+      // continua valendo em TODA tela: é o pedido original ("nomes dos
+      // usuários"), vem por classe porque nome não tem tag própria, e é o
+      // código que sabe que aquele pedaço é gente - o mesmo critério do
+      // nomePessoa() que o servidor usa nos relatórios.
       + '.maiusc,.maiusc *{text-transform:uppercase;}'
-      // ESCAPES - só o que quebra se for redigitado à mão, não o que é feio:
-      // bloco de código/comando (o comando de instalação do NOCZenith é
-      // colado no PowerShell, e maiúsculo no Base64 não roda) e o que o
-      // código marcar como valor exato (token, MAC, IP, chave).
+      // ESCAPES globais - só o que quebra se for redigitado à mão, não o que
+      // é feio: bloco de código/comando (o comando de instalação do
+      // NOCZenith é colado no PowerShell, e maiúsculo no Base64 não roda) e
+      // o que o código marcar como valor exato (token, MAC, IP, chave).
       + 'code,kbd,pre,samp,.nao-maiusc,.nao-maiusc *{text-transform:none;}'
       // valor que alguém RELÊ e redigita em outro lugar tem que sair como
       // está: chave Pix aleatória e senha gerada. Aqui não é feio x bonito -

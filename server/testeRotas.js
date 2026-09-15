@@ -12499,8 +12499,11 @@ setTimeout(async () => {
   try {
     const ec = require(__dirname + '/estacaoComida.js');
     const hoje = ec.hojeBrasiliaISO();
-    const meioDia = new Date('2026-09-14T15:00:00Z'); // 12h em Brasília
-    const noite = new Date('2026-09-14T23:00:00Z');   // 20h em Brasília
+    // os instantes saem de `hoje`, não de uma data cravada: o turno é gravado
+    // POR DIA, então uma data fixa passa enquanto o calendário coincide e
+    // quebra sozinha na virada da meia-noite - foi o que aconteceu
+    const meioDia = new Date(`${hoje}T15:00:00Z`); // 12h em Brasília
+    const noite = new Date(`${hoje}T23:00:00Z`);   // 20h em Brasília
 
     // sem ninguem abrir, o relogio ainda opina - a casa que esquecer de abrir
     // nao pode ficar impedida de vender
@@ -20768,8 +20771,49 @@ setTimeout(async () => {
         !/body\{text-transform:uppercase/.test(temaSrc)
         && !/button\{text-transform:uppercase/.test(temaSrc)
         && !/,button\{text-transform:uppercase/.test(temaSrc),
-      'sobe o DADO PREENCHIDO: o que foi digitado ou escolhido num campo':
-        /input,textarea,select,optgroup,option\{text-transform:uppercase;\}/.test(temaSrc),
+      // O ESCOPO é a correção do Master (15/09): "chat continua ficando
+      // maiúsculo e não é pra ser assim / maiúsculo só preenchimentos de
+      // tarefas, formulários, relatórios". Subir TODO campo de TODA tela
+      // pegava a caixa de resposta do chat - o atendente escreveu "FECHA
+      // TUDO E ENTRA NOVAMENTE POR FAVOR" pro cliente - e o campo de
+      // contato do widget, que gravou o e-mail de quem abriu em caixa alta.
+      'sobe o DADO PREENCHIDO, e SÓ na tela que declara ser de preenchimento':
+        /body\[data-maiusc\] input,body\[data-maiusc\] textarea,/.test(temaSrc)
+        && !/(^|\+ ')input,textarea,select,optgroup,option\{text-transform:uppercase;\}/.test(temaSrc),
+      'as telas de tarefa e formulário declaram; o chat e o resto NÃO': (() => {
+        const tem = (f) => /<body data-maiusc>/.test(require('fs').readFileSync(__dirname + '/public/' + f, 'utf8'));
+        const declaram = ['tarefas.html', 'formularios.html', 'preencher.html', 'assinar.html'];
+        // as telas de conversa são o caso que o Master reportou; o NOC e a
+        // Central entram como amostra do "resto do app"
+        const naoDeclaram = ['beniboy.html', 'atendimento.html', 'central.html', 'loja-status.html', 'monitor.html'];
+        return declaram.every(tem) && naoDeclaram.every((f) => !tem(f));
+      })(),
+      // o widget de chat vive DENTRO de toda tela (suporte-chat.js): se
+      // alguma das telas de preenchimento declarasse e o widget não tivesse
+      // saída, a conversa voltaria a subir justamente ali
+      'a caixa de conversa fica de fora mesmo na tela que declara':
+        /body\[data-maiusc\] \.nao-maiusc,body\[data-maiusc\] \.nao-maiusc \*,/.test(temaSrc)
+        && /<textarea id="TXT" class="nao-maiusc"/.test(tarefasSrc),
+      // buscar/filtrar é navegação, e e-mail e link são endereço que a
+      // pessoa relê pra conferir - nenhum dos dois é "dado preenchido"
+      'busca, e-mail, link e telefone não sobem nem na tela que declara':
+        /body\[data-maiusc\] input\[type=search\],body\[data-maiusc\] input\[type=email\],/.test(temaSrc)
+        && /body\[data-maiusc\] input\[type=url\],body\[data-maiusc\] input\[type=tel\],/.test(temaSrc),
+      // presença no arquivo não basta: se o escape tiver especificidade
+      // MENOR, o navegador aplica o maiúsculo por cima e o e-mail sobe do
+      // mesmo jeito. Aqui a conta é feita de verdade.
+      'o escape GANHA da regra na cascata (senão o CSS está lá e não vale)': (() => {
+        const espec = (sel) => {
+          const ids = (sel.match(/#[\w-]+/g) || []).length;
+          const cls = (sel.match(/\.[\w-]+|\[[^\]]+\]|:[\w-]+/g) || []).length;
+          const tags = (sel.replace(/\[[^\]]+\]|[.#:][\w-]+/g, '').match(/[a-z]+/g) || []).length;
+          return ids * 100 + cls * 10 + tags;
+        };
+        const base = espec('body[data-maiusc] input');
+        const fuga = espec('body[data-maiusc] input[type=email]');
+        const fugaClasse = espec('body[data-maiusc] .nao-maiusc');
+        return fuga > base && fugaClasse > base;
+      })(),
       // placeholder não é dado preenchido: é a dica de como preencher, e em
       // maiúsculo vira grito na tela vazia
       'o placeholder fica como está escrito':
