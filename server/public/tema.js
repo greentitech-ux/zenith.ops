@@ -477,16 +477,10 @@
       // código que sabe que aquele pedaço é gente - o mesmo critério do
       // nomePessoa() que o servidor usa nos relatórios.
       + '.maiusc,.maiusc *{text-transform:uppercase;}'
-<<<<<<< HEAD
       // ESCAPES globais - só o que quebra se for redigitado à mão, não o que
       // é feio: bloco de código/comando (o comando de instalação do
       // NOCZenith é colado no PowerShell, e maiúsculo no Base64 não roda) e
       // o que o código marcar como valor exato (token, MAC, IP, chave).
-=======
-      // ESCAPES - só o que quebra se for redigitado à mão, não o que é feio:
-      // bloco de código/comando (o comando de instalação do NOCZenith é
-      // colado no PowerShell, e maiúsculo no Base64 não roda) e o que o
-      // código marcar como valor exato (token, MAC, IP, chave).
       //
       // E CHAT/MENSAGEM também é .nao-maiusc, por outro motivo. Master
       // (14/09): "se for em chat ele fica padrão, do jeito que for escrito".
@@ -495,7 +489,6 @@
       // recebia outra. Vale pra todo campo de mensagem: chat de suporte
       // (suporte-chat.js), chat do chamado (tecnico/manutencao), ticket
       // público, mensagem direta (usuarios/loja-status), advertência (rh).
->>>>>>> origin/master
       + 'code,kbd,pre,samp,.nao-maiusc,.nao-maiusc *{text-transform:none;}'
       // valor que alguém RELÊ e redigita em outro lugar tem que sair como
       // está: chave Pix aleatória e senha gerada. Aqui não é feio x bonito -
