@@ -12517,6 +12517,15 @@ setTimeout(async () => {
       'a tela sabe dizer quais marcas ainda não têm arte':
         marcas.status === 200 && Array.isArray(JSON.parse(marcas.corpo).marcas)
         && JSON.parse(marcas.corpo).marcas.some((m) => m.id === 'dominos' && m.temArte === true),
+      // "Arcfood so tem Domino's": o combo grupo+marca lista SO as marcas que a
+      // empresa realmente opera (das unidades dela), nao todas as MARCAS_VALIDAS
+      'o combo grupo+marca mostra só as marcas da empresa (Arcfood = só Domino\'s)':
+        (() => {
+          const combos = JSON.parse(marcas.corpo).combinacoes || [];
+          const arc = combos.filter((c) => c.rede === 'empArcTeste');
+          return arc.length === 1 && arc[0].marca === 'dominos'
+            && !combos.some((c) => c.rede === 'empArcTeste' && ['spoleto', 'milkymoo', 'saobraz', 'saltiverso'].includes(c.marca));
+        })(),
       // ---- agente ----
       'o agente baixa da URL da PRÓPRIA máquina (quem escolhe a marca é o servidor)':
         /\$UrlPapelDeParede = "[^"]*\/api\/loja-status\/PPDOM\/computadores\/PC1\/papel-de-parede"/.test(psPp)

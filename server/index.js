@@ -5318,14 +5318,30 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
       label: unidadesExtras.MARCAS_LABEL[id] || id,
       ...arte(id),
     })),
-    // uma linha por GRUPO cadastrado x marca. Grupo novo aparece aqui sozinho,
-    // no dia em que o Master cadastrar a empresa - sem deploy.
-    combinacoes: (await empresas.listAtivas().catch(() => [])).flatMap((e) => unidadesExtras.MARCAS_VALIDAS.map((m) => ({
-      rede: e.id,
-      marca: m,
-      label: `${e.nome} · ${unidadesExtras.MARCAS_LABEL[m] || m}`,
-      ...arte(lojaStatus.chaveArte(e.id, m)),
-    }))),
+    // uma linha por GRUPO x marca que a empresa REALMENTE tem (Arcfood so opera
+    // Domino's - nao faz sentido oferecer Spoleto/Milky Moo/Sao Braz pra ela).
+    // As marcas saem das unidades da empresa (perfil.marca). Empresa sem
+    // nenhuma unidade marcada cai em TODAS, pra empresa nova nao ficar sem
+    // opcao ate o Master marcar as unidades.
+    combinacoes: await (async () => {
+      const linhas = [];
+      for (const e of (await empresas.listAtivas().catch(() => []))) {
+        const set = new Set();
+        for (const u of await empresas.unidadesDaEmpresa(e.id).catch(() => [])) {
+          const perf = await unidadesExtras.perfil(u).catch(() => null);
+          if (perf && perf.marca && unidadesExtras.MARCAS_VALIDAS.includes(perf.marca)) set.add(perf.marca);
+        }
+        const marcas = set.size ? [...set] : unidadesExtras.MARCAS_VALIDAS;
+        for (const m of marcas) {
+          linhas.push({
+            rede: e.id, marca: m,
+            label: `${e.nome} · ${unidadesExtras.MARCAS_LABEL[m] || m}`,
+            ...arte(lojaStatus.chaveArte(e.id, m)),
+          });
+        }
+      }
+      return linhas;
+    })(),
   });
 });
 
