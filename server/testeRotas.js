@@ -6304,6 +6304,72 @@ setTimeout(async () => {
   console.log(`${okImpressora ? '✓' : '✗'} NOC: Zebra que responde na rede mas parou de imprimir (sem papel, cabeça aberta, fila travada)`);
 
   // ------------------------------------------------------------------
+  // STATUS DA ZEBRA SEMPRE NA LINHA DA FICHA. Pedido do Master: o 🖨️
+  // visivel na linha do aparelho, colorido pelo estado - nao so o alarme
+  // que chega quando ela PARA. O dado ja existe (impressoras{} por MAC no
+  // doc); o buraco que este teste tampa e' o CAMINHO ate a tela: que o
+  // mapa sobrevive ao projetar pro cliente (detalhar), que o aparelho sai
+  // marcado como zebra, e que a ficha le esse mapa pra desenhar o chip.
+  let okZebraFicha = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const STX = String.fromCharCode(2), ETX = String.fromCharCode(3);
+    const linha = (t) => STX + t + ETX;
+    // parte da MESMA resposta real da Caruaru; `mexer` troca um campo pra
+    // simular papel acabando, sem decorar a resposta inteira
+    const RESP = (mexer) => {
+      const b = [['030', '0', '0', '0394', '000', '0', '0', '0', '000', '0', '0', '0'],
+                 ['001', '0', '0', '0', '1', '2', '6', '0', '00000000', '1', '000'],
+                 ['0000', '0']];
+      if (mexer) mexer(b);
+      return b.map((c) => linha(c.join(','))).join('\r\n') + '\r\n';
+    };
+    const UNI = 'ZEBRAFICHA';
+    const MAC = 'ac:3f:a4:11:22:33';
+    await ls.cadastrarComputador(UNI, 'PDV-Z', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-Z').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    await ls.definirApelidoDispositivo(UNI, MAC, { apelido: 'Zebra da cozinha', tipo: 'impressora', marca: 'zebra', monitorar: true });
+
+    const bater = (bruto) => ls.registrarTelemetria(UNI, posto, {
+      dispositivos: [{ mac: MAC, ip: '10.0.0.9', nome: 'ZebraCozinha' }],
+      statusImpressoras: [{ mac: MAC, ip: '10.0.0.9', bruto }],
+    }, tk);
+    const impDe = async () => ((await ls.detalhar(UNI, posto)).impressoras || {})[MAC] || null;
+    const dispDe = async () => ((await ls.detalhar(UNI, posto)).dispositivos || []).find((d) => d.mac === MAC) || null;
+
+    await bater(RESP());
+    const ok = await impDe();
+    const disp = await dispDe();
+    // papel acabou = campo 1 da linha 1 -> critico "Sem papel"
+    await bater(RESP((b) => { b[0][1] = '1'; }));
+    const crit = await impDe();
+
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      'o status da Zebra chega ao cliente (detalhar traz impressoras{})': !!ok && ok.nivel === 'ok',
+      'a fila da impressora vem junto (o Master pediu "mais de 3")': !!ok && ok.fila === 0,
+      'sem papel vira critico no mapa que a ficha lê': !!crit && crit.nivel === 'critico' && /Sem papel/.test((crit.motivos || []).join()),
+      'o aparelho sai marcado como zebra (é o que decide o chip na linha)': !!disp && disp.marca === 'zebra',
+      'a ficha tem o chip de status sempre na linha, lendo impressoras{}':
+        /disp-imp-chip/.test(html) && /c\.impressoras/.test(html),
+      "o chip só aparece pra Zebra (não inventa status pra outro aparelho)":
+        /d\.marca !== 'zebra'/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okZebraFicha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+    // limpa o computador de teste: some do parque (não infla contagem de
+    // outros testes) e o removerComputador derruba o cache de listar() por
+    // inteiro - senão o snapshot que os detalhar() acima deixaram quente
+    // esconderia, por até 10s (TTL), o fantasma que o próximo teste cria só
+    // por heartbeat (ver cacheBase em lojaStatus.js).
+    await ls.removerComputador(UNI, posto);
+  } catch (e) { okZebraFicha = false; console.log('  erro: ' + e.message); }
+  if (!okZebraFicha) ruins += 1;
+  console.log(`${okZebraFicha ? '✓' : '✗'} NOC: status da Zebra (🖨️) sempre na linha da ficha, colorido pelo estado`);
+
+  // ------------------------------------------------------------------
   // ALARME FALSO DE "LOJA SEM CONEXAO". O Master recebeu o alarme critico
   // de DomBessa-GER estando com AnyDesk ABERTO na mesma maquina. Nao era
   // engano do painel: "offline" no NOC quer dizer "parou de falar COM O
@@ -16023,8 +16089,11 @@ setTimeout(async () => {
       // tem alarme de rede - por isso a condicao deixou de ser uma linha so
       'dispositivo monitorado mostra o chip 🔔 na linha':
         /const monitorChip = d\.monitorar/.test(html) && /disp-monitor-chip/.test(html),
+      // o 🖨️ deixou de ser um enfeite grudado no 🔔: virou chip proprio, com
+      // COR pelo estado (ok/atencao/critico/sem leitura), sempre na linha da
+      // Zebra. Quem so tem alarme de rede continua com o 🔔 seco.
       'o chip separa a Zebra (lê status) de quem só tem alarme de rede':
-        /d\.marca === 'zebra'/.test(html) && /🔔🖨️/.test(html),
+        /d\.marca !== 'zebra'/.test(html) && /disp-imp-chip/.test(html) && /🖨️/.test(html),
       'tipo do aparelho aparece na propria linha': /d\.tipoRotulo \? `<span class="disp-tipo-chip"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);

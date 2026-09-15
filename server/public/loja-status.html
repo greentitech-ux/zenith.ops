@@ -316,6 +316,10 @@
      se perder rede) - o mesmo chip 🔔 aparece na linha e no modal de edição */
   .disp-monitor-chip{flex:none;font-size:11px;}
   .disp-tipo-chip{flex:none;font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;white-space:nowrap;}
+  /* status da Zebra SEMPRE visivel na linha do aparelho (pedido do Master):
+     o 🖨️ ganha cor pelo nivel (ok/atencao/critico/sem leitura) e o detalhe
+     completo - papel, cabeca, fila - fica no title. cor vem sempre do token */
+  .disp-imp-chip{flex:none;font-size:10px;border:1px solid currentColor;border-radius:6px;padding:1px 5px;white-space:nowrap;font-weight:600;}
   .disp-monitorar-linha{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0 4px;cursor:pointer;}
   .disp-monitorar-linha input{margin:0;}
   .disp-medidor-ajuda{display:block;color:var(--muted);font-size:11.5px;line-height:1.45;margin:2px 0 8px 24px;}
@@ -1546,10 +1550,34 @@ function atualizarConteudoDetalhe(codigo, c){
       // 🔔 = monitorado (alarme de rede ligado - pedido do Master); sem isso
       // ninguém confere pelo painel o que está armado sem abrir cada aparelho
       const monitorChip = d.monitorar
-        ? (d.marca === 'zebra'
-            ? `<span class="disp-monitor-chip" title="Monitorado + leitura de status (papel, cabeça, fila) a cada ~100s">🔔🖨️</span>`
-            : `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>`)
+        ? `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>`
         : '';
+      // status da Zebra SEMPRE na linha (pedido do Master): o 🖨️ colorido diz
+      // de relance se a impressora está imprimindo. Sai do que o servidor já
+      // guarda por MAC (ver impressoras{} no lojaStatus.js). Só aparece pra
+      // aparelho marcado como Zebra - é o único que responde o ~HS.
+      const impChip = (() => {
+        if (d.marca !== 'zebra') return '';
+        const st = (c.impressoras || {})[d.mac] || null;
+        let cor = 'var(--muted)', rotulo = 'sem leitura', titulo = 'Impressora Zebra — aguardando a primeira leitura de status';
+        if (st) {
+          const quando = st.em ? ` · lido ${tempoRelativo(st.em)}` : '';
+          if (st.nivel === 'ok') {
+            cor = 'var(--ok)'; rotulo = 'OK';
+            titulo = `Imprimindo normal${st.fila != null ? ` · fila ${st.fila}` : ''}${quando}`;
+          } else if (st.nivel === 'atencao') {
+            cor = 'var(--warn,#e0a800)'; rotulo = 'atenção';
+            titulo = `${(st.motivos || []).join(' · ') || 'Atenção'}${quando}`;
+          } else if (st.nivel === 'critico') {
+            cor = 'var(--bad)'; rotulo = 'parada';
+            titulo = `${(st.motivos || []).join(' · ') || 'Parou de imprimir'}${quando}`;
+          } else {
+            cor = 'var(--muted)'; rotulo = 'sem leitura';
+            titulo = `Não respondeu ao status${st.semRespostaEm ? ` · ${tempoRelativo(st.semRespostaEm)}` : quando}`;
+          }
+        }
+        return `<span class="disp-imp-chip" style="color:${cor};" title="${escapeHtml(titulo)}">🖨️ ${escapeHtml(rotulo)}</span>`;
+      })();
       // 📡 e' o ponto de medicao da loja: quem bate o olho na lista precisa
       // saber por qual aparelho a queda da unidade esta sendo contada
       const medidorChip = d.medidorQuedas
@@ -1568,7 +1596,7 @@ function atualizarConteudoDetalhe(codigo, c){
           <div class="disp-topo">
             <div class="disp-nome ${temNome?'':'anon'}" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>
             ${tipoChip}
-            ${medidorChip}${monitorChip}
+            ${impChip}${medidorChip}${monitorChip}
             ${quando}
           </div>
           <div class="disp-rede"><a href="http://${escapeHtml(d.ip)}" target="_blank" rel="noopener" title="Abrir ${escapeHtml(d.ip)} no navegador">${escapeHtml(d.ip)}</a> · ${escapeHtml(d.mac)} ${trocaIp}</div>
