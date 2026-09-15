@@ -405,7 +405,28 @@ async function caixaFinalAnterior(unidade, data) {
   const ultimo = anteriores[0];
   // nenhum fechamento antes: e' o PRIMEIRO da unidade. Nao ha corrente pra
   // puxar, entao vale o que a loja informar (a abertura de verdade da gaveta).
-  return ultimo ? { valor: num(ultimo.caixaFinal), de: ultimo.data } : null;
+  if (!ultimo) return null;
+  // EXISTIR fechamento anterior nao quer dizer que ele TENHA caixa final, e o
+  // CAMPO NAO SERVE DE PROVA: create() grava num(undefined) = 0 em todo campo
+  // numerico que nao veio, entao TODO fechamento do banco tem caixaFinal: 0,
+  // inclusive os milhares de antes desta regra e os que vem da planilha.
+  // Puxar esse 0 como corrente faria a tela dizer "caixa final do fechamento
+  // de 14/09" apontando pra um numero que ninguem contou - dado falso e' pior
+  // que campo vazio (CLAUDE.md §6).
+  //
+  // Quem prova e' a MARCA, gravada so quando a loja lancou de verdade (ver
+  // caixaFinalInformado no create). Sem a marca a corrente ainda nao comecou:
+  // a loja conta a gaveta UMA vez e dali em diante vem sozinho.
+  //
+  // A VIRADA: os fechamentos lancados entre a regra entrar no ar e esta marca
+  // existir tem caixa final contado de verdade, so nao tem a marca. O que os
+  // identifica com precisao e' a CHAVE caixaInicialDe: ela so e' gravada no
+  // ramo do lancamento da loja, e esse ramo recusa caixa final vazio. Entao
+  // ter a chave (mesmo valendo null) prova que alguem contou a gaveta.
+  // Fechamento antigo e planilha nao tem a chave.
+  const registrou = ultimo.caixaFinalInformado === true
+    || Object.prototype.hasOwnProperty.call(ultimo, 'caixaInicialDe');
+  return { valor: registrou ? num(ultimo.caixaFinal) : null, de: ultimo.data, semCaixaFinal: !registrou };
 }
 
 // Faturamento = canais de venda; Total Declarado = formas de pagamento
@@ -545,9 +566,16 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
     }
     // CAIXA INICIAL nao vem do navegador. Sai do ultimo fechamento da unidade -
     // so o primeiro fechamento de todos aceita o valor informado.
+    // a MARCA de que este caixa final foi contado pela loja. E' ela que o dia
+    // seguinte le - o campo em si nao distingue "gaveta vazia" de "ninguem
+    // preencheu", porque campo numerico que nao veio e' gravado como 0
+    registro.caixaFinalInformado = true;
+    // so ha corrente quando o fechamento anterior REGISTROU caixa final; senao
+    // e' o mesmo caso do primeiro fechamento, e a loja conta a gaveta
     const anterior = await caixaFinalAnterior(unidade, data);
-    registro.caixaInicial = anterior ? anterior.valor : num(campos?.caixaInicial);
-    registro.caixaInicialDe = anterior ? anterior.de : null;
+    const temCorrente = !!anterior && anterior.valor !== null;
+    registro.caixaInicial = temCorrente ? anterior.valor : num(campos?.caixaInicial);
+    registro.caixaInicialDe = temCorrente ? anterior.de : null;
   }
   const tiposKpi = await tiposKpiDaUnidade(unidade);
   const grupoKpi = await grupos.grupoDaUnidade(unidade);

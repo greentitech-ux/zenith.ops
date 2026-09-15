@@ -603,6 +603,13 @@ async function carregarCaixaInicial(){
       campo.value = r.valor;
       campo.readOnly = true;
       nota.textContent = `Caixa final do fechamento de ${(r.de||'').split('-').reverse().join('/')}.`;
+    }else if(r && r.semCaixaFinal){
+      // ha fechamento anterior, mas ele nao registrou caixa final (todo
+      // fechamento de antes desta regra, e todo que veio da planilha). Mostrar
+      // R$ 0,00 aqui seria inventar um numero: a corrente comeca agora
+      campo.value = '';
+      campo.readOnly = false;
+      nota.textContent = `O fechamento de ${(r.de||'').split('-').reverse().join('/')} não registrou caixa final. Conte a gaveta e informe quanto havia ao abrir - do próximo dia em diante isso vem sozinho.`;
     }else{
       // PRIMEIRO fechamento da unidade - aqui, sim, alguem conta a gaveta
       campo.value = '';
@@ -1793,6 +1800,9 @@ function resetarForm(){
   aplicarFranquia(document.getElementById('f-unidade').value);
   carregarSangriaDoDia();
   carregarRemakesDoDia();
+  // o reset() apaga tambem o campo so-leitura: sem rebuscar, o proximo
+  // lancamento abre sem caixa inicial nenhum
+  carregarCaixaInicial();
 }
 
 // o formulario tem varios campos de texto/numero soltos (maquininhas,
@@ -1952,6 +1962,10 @@ async function boot(){
     await carregarSangriaDoDia();
     await carregarRemakesDoDia();
     await carregarAjustePosOntem();
+    // DEPOIS do aplicarFranquia (que pode limpar a secao Caixa) e sem depender
+    // de troca nenhuma: a tela abre com unidade e data ja escolhidas, entao o
+    // 'change'/'input' nunca dispara e o campo ficava vazio o dia inteiro
+    await carregarCaixaInicial();
   }
 
   if(podeSangria){

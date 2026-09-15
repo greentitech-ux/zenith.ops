@@ -12449,6 +12449,48 @@ setTimeout(async () => {
       criadoPorId: 'u', criadoPorEmail: 'a@b.c', campos: { delivery: 500, adyen: 500, caixaInicial: 77 },
     });
 
+    // A VIRADA: a unidade JA TEM fechamento, mas de antes desta regra (ou vindo
+    // da planilha) - sem caixa final nenhum. num(undefined) daria 0 e a tela
+    // diria "caixa final do fechamento de 01/11" apontando pra um numero que
+    // ninguem contou. Aqui a corrente so COMECA: a loja conta a gaveta uma vez.
+    await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-01', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', campos: { delivery: 400, adyen: 400 },
+    });
+    const anteriorSemFinal = await fl.caixaFinalAnterior('CXA3', '2026-11-02');
+    const viradaD1 = await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-02', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 300, caixaInicial: 150 },
+    });
+    const viradaD2 = await fl.create({
+      unidade: 'CXA3', unidadeNome: 'Antiga', grupo: 'MANUAL', data: '2026-11-03', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 320 },
+    });
+    // GAVETA VAZIA CONTADA vira corrente de 0 - o que nao vira e' o 0 que o
+    // create grava sozinho em todo campo numerico que nao veio. A marca e' o
+    // que separa os dois.
+    await fl.create({
+      unidade: 'CXA4', unidadeNome: 'Zero', grupo: 'MANUAL', data: '2026-11-01', gerente: 'x',
+      criadoPorId: 'u', criadoPorEmail: 'a@b.c', lancamentoDaLoja: true,
+      campos: { delivery: 400, adyen: 400, caixaFinal: 0 },
+    });
+    const zeroContado = await fl.caixaFinalAnterior('CXA4', '2026-11-02');
+    // A VIRADA: lancamento feito com a regra no ar mas ANTES da marca existir.
+    // O caixa final foi contado (o ramo recusa vazio); o que identifica esse
+    // registro e' a chave caixaInicialDe, que so aquele ramo grava.
+    const dbCx = require('./firestore');
+    await dbCx.collection('fechamentosLive').doc('CXA5__2026-11-01').set({
+      id: 'CXA5__2026-11-01', unidade: 'CXA5', unidadeNome: 'Virada', grupo: 'MANUAL',
+      data: '2026-11-01', gerente: 'x', criadoPorId: 'u', criadoPorEmail: 'a@b.c',
+      delivery: 400, adyen: 400, caixaInicial: 100, caixaFinal: 260,
+      caixaInicialDe: null, // <- a chave que prova o ramo do lancamento
+      faturamento: 400, totalDeclarado: 400, criadoEm: new Date().toISOString(),
+    });
+    fl.invalidarCache(); // escrita direta no banco nao passa pelo create()
+    const viradaSemMarca = await fl.caixaFinalAnterior('CXA5', '2026-11-02');
+
     const htmlL = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
     const conf = {
       'o primeiro fechamento da unidade aceita o valor informado (não há corrente ainda)':
@@ -12474,6 +12516,26 @@ setTimeout(async () => {
         && /function carregarCaixaInicial\(\)/.test(htmlL),
       'a tela diz de qual dia veio o caixa inicial':
         /Caixa final do fechamento de \$\{\(r\.de\|\|''\)/.test(htmlL),
+      // fechamento anterior SEM caixa final: nao inventa R$ 0,00
+      'fechamento anterior sem caixa final não vira corrente (nem zero)':
+        !!anteriorSemFinal && anteriorSemFinal.valor === null
+        && anteriorSemFinal.semCaixaFinal === true && anteriorSemFinal.de === '2026-11-01',
+      'nesse caso a loja conta a gaveta, e a corrente começa dali':
+        viradaD1.caixaInicial === 150 && viradaD1.caixaInicialDe === null
+        && viradaD2.caixaInicial === 300 && viradaD2.caixaInicialDe === '2026-11-02',
+      'lançamento feito antes da marca existir não é jogado fora (a chave caixaInicialDe prova o ramo)':
+        !!viradaSemMarca && viradaSemMarca.valor === 260 && viradaSemMarca.semCaixaFinal === false,
+      'gaveta vazia CONTADA vira corrente de zero (é a marca que separa, não o número)':
+        !!zeroContado && zeroContado.valor === 0 && zeroContado.semCaixaFinal === false,
+      'e a tela pede a contagem em vez de mostrar zero':
+        /semCaixaFinal/.test(htmlL) && /não registrou caixa final/.test(htmlL),
+      // ERA ISTO QUE DEIXAVA O CAMPO VAZIO: a tela abre com unidade e data ja
+      // escolhidas, entao o 'change'/'input' nunca dispara sozinho
+      'o caixa inicial é buscado ao abrir a tela, não só quando trocam unidade/data':
+        /await carregarAjustePosOntem\(\);\n[\s\S]{0,400}?await carregarCaixaInicial\(\);/.test(htmlL),
+      // form.reset() apaga tambem campo so-leitura
+      'e é buscado de novo depois de lançar (o reset apaga o campo só-leitura)':
+        /function resetarForm\(\)\{[^}]*carregarCaixaInicial\(\);[^}]*\n\}/.test(htmlL),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okCaixaCorrente = !falhas.length;
@@ -12498,9 +12560,13 @@ setTimeout(async () => {
   let okTurnoEstacao = false;
   try {
     const ec = require(__dirname + '/estacaoComida.js');
-    const hoje = ec.hojeBrasiliaISO();
     const meioDia = new Date('2026-09-14T15:00:00Z'); // 12h em Brasília
     const noite = new Date('2026-09-14T23:00:00Z');   // 20h em Brasília
+    // A DATA SAI DO RELOGIO DO TESTE, nao do relogio da parede: com
+    // hojeBrasiliaISO() sem argumento, o turno era gravado em 14/09 e
+    // consultado no dia de hoje - passava no dia em que foi escrito e
+    // quebrava sozinho no dia seguinte
+    const hoje = ec.hojeBrasiliaISO(meioDia);
 
     // sem ninguem abrir, o relogio ainda opina - a casa que esquecer de abrir
     // nao pode ficar impedida de vender
