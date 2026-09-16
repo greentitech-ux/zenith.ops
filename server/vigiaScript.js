@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 69;
+const VERSAO_VIGIA = 70;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1722,7 +1722,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  try {',
     '    if ($ligado) {',
     '      Set-ItemProperty -Path $chave -Name Wallpaper -Value $destino -ErrorAction Stop',
-    '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "10" -ErrorAction Stop',
+    // 10 (Preencher) corta as laterais em monitor 4:3/quase quadrado, como no
+    // PDV da foto. 6 (Ajustar/Fit) preserva toda a arte, logos e identificação.
+    '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "6" -ErrorAction Stop',
     '      Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
     '      Set-Content -Path $marca -Value (Get-Date).ToString() -Force -ErrorAction SilentlyContinue',
     '    } else {',
