@@ -334,20 +334,28 @@
   .m-chip.ruim{color:var(--bad);border-color:var(--bad);}
   .equip-tile-info{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.8;}
   .equip-tile-info b{color:var(--text);}
-  /* Ficha completa: navegação curta em vez de uma coluna interminável. Cada
-     aba mantém o contexto da mesma máquina, sem abrir outra janela. */
-  .detalhe-abas{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px;margin:8px 0 12px;border-bottom:1px solid var(--line);scrollbar-width:thin;}
-  .detalhe-aba{flex:0 0 auto;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:18px;padding:6px 10px;font:600 11px var(--sans);cursor:pointer;white-space:nowrap;}
-  .detalhe-aba:hover{border-color:var(--accent);color:var(--text);}
-  .detalhe-aba.ativa{background:var(--accent);border-color:var(--accent);color:#0b0d10;}
-  .detalhe-painel{min-height:120px;}
-  .detalhe-secao-titulo{font:700 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;}
-  .detalhe-resumo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
-  .detalhe-resumo .equip-tile-info{grid-column:1/-1;padding:10px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);}
-  .detalhe-rede-intro{font-size:12px;color:var(--muted);margin-bottom:8px;}
-  .btn-voltar-topo{position:sticky;bottom:10px;margin-left:auto;display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel);color:var(--accent);border-radius:18px;padding:6px 10px;font:600 11px var(--sans);cursor:pointer;box-shadow:0 5px 16px rgba(0,0,0,.28);z-index:2;}
+  /* Ficha operacional: hierarquia clara, o estado em destaque e navegação por
+     abas. Em vez de uma lista técnica longa, cada assunto ocupa seu painel. */
+  #detalhe-comp-overlay .modal{max-width:620px;padding:22px;background:linear-gradient(150deg,var(--panel) 0%,color-mix(in srgb,var(--panel) 93%,#07151b) 100%);}
+  .detalhe-hero{margin:0 0 12px;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(115deg,color-mix(in srgb,var(--panel2) 88%,var(--accent)) 0%,var(--panel2) 60%);}
+  .detalhe-hero-topo{display:flex;align-items:center;gap:9px;}
+  .detalhe-hero-titulo{font-size:18px;font-weight:800;letter-spacing:-.02em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .detalhe-hero-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px;color:var(--muted);font:11px var(--mono);}
+  .detalhe-status-pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 8px;font:700 10px var(--mono);border:1px solid currentColor;}
+  .detalhe-status-pill.online{color:var(--ok);background:color-mix(in srgb,var(--ok) 10%,transparent);}.detalhe-status-pill.offline{color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,transparent);}.detalhe-status-pill.degradado{color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,transparent);}.detalhe-status-pill.nunca{color:var(--muted);}
+  .detalhe-abas{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:0;margin:0 0 15px;border:0;}
+  .detalhe-aba{min-height:58px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:10px;padding:7px 6px;font:700 10.5px var(--sans);cursor:pointer;white-space:normal;transition:.16s ease;}
+  .detalhe-aba .tab-icone{font-size:16px;line-height:1;}.detalhe-aba:hover{border-color:var(--accent);color:var(--text);transform:translateY(-1px);}.detalhe-aba.ativa{background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 72%,white));border-color:var(--accent);color:#0b0d10;box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 20%,transparent);}
+  .detalhe-painel{min-height:170px;border:1px solid var(--line);border-radius:12px;padding:13px;background:rgba(0,0,0,.09);}
+  .detalhe-secao-titulo{font:700 10.5px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 11px;}
+  .detalhe-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+  .detalhe-destaques{display:contents;}.detalhe-kpi{padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);min-width:0;}.detalhe-kpi-label{display:block;font:10px var(--mono);color:var(--muted);margin-bottom:3px;}.detalhe-kpi-valor{font-size:12px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .detalhe-resumo .equip-tile-status{grid-column:1/-1;margin:0!important;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,currentColor 8%,transparent);border:1px solid color-mix(in srgb,currentColor 28%,var(--line));}
+  .detalhe-resumo .equip-tile-info{grid-column:1/-1;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);line-height:1.95;}
+  .detalhe-rede-intro{font-size:12px;color:var(--muted);margin-bottom:8px;}.detalhe-painel .disp-lista{margin-top:8px;}
+  .btn-voltar-topo{position:sticky;bottom:10px;margin:14px 0 0 auto;display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel);color:var(--accent);border-radius:18px;padding:7px 11px;font:700 11px var(--sans);cursor:pointer;box-shadow:0 5px 16px rgba(0,0,0,.28);z-index:2;}
   .btn-voltar-topo:hover{border-color:var(--accent);color:var(--text);}
-  @media(max-width:520px){.detalhe-resumo{grid-template-columns:1fr;}.detalhe-abas{margin-left:-4px;margin-right:-4px;}.btn-voltar-topo{bottom:6px;}}
+  @media(max-width:520px){#detalhe-comp-overlay .modal{padding:16px;}.detalhe-resumo{grid-template-columns:1fr 1fr;}.detalhe-abas{gap:4px;}.detalhe-aba{font-size:9.5px;min-height:54px;}.detalhe-hero{padding:11px;}.btn-voltar-topo{bottom:6px;}}
   .btn-copiar-ip{background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;padding:0 2px;vertical-align:middle;}
   .btn-copiar-ip:hover{color:var(--text);}
   .equip-tile-acoes{display:flex;gap:6px;flex-wrap:wrap;}
@@ -1085,22 +1093,31 @@
          O ✕ nao fica aqui: ele e' o redondo da quina, que mora FORA da caixa
          com rolagem e por isso ja esta sempre visivel. As margens negativas
          cancelam o padding do .modal pra barra cobrir a largura/topo inteiros -->
-    <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
-      <span class="status-dot" id="detalhe-comp-dot"></span>
-      <h3 id="detalhe-comp-nome" style="margin:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></h3>
-      <button type="button" class="icon-btn" title="Editar" id="detalhe-comp-editar">✏️</button>
+    <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-22px;z-index:2;background:var(--panel);margin:-22px -22px 12px;padding:12px 22px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
+      <span style="font:700 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">NOC · ficha operacional</span>
     </div>
-    <div class="sub" id="detalhe-comp-sub"></div>
+    <div class="detalhe-hero">
+      <div class="detalhe-hero-topo">
+        <span class="status-dot" id="detalhe-comp-dot-hero"></span>
+        <div class="detalhe-hero-titulo" id="detalhe-comp-nome-hero">Máquina</div>
+        <button type="button" class="icon-btn" title="Editar" id="detalhe-comp-editar-hero">✏️</button>
+      </div>
+      <div class="detalhe-hero-meta">
+        <span id="detalhe-comp-sub"></span>
+        <span id="detalhe-comp-pill" class="detalhe-status-pill nunca">aguardando</span>
+      </div>
+    </div>
     <div class="detalhe-abas" role="tablist" aria-label="Seções da máquina">
-      <button type="button" class="detalhe-aba ativa" data-detalhe-aba="resumo" onclick="trocarAbaDetalhe('resumo')">Visão geral</button>
-      <button type="button" class="detalhe-aba" data-detalhe-aba="rede" onclick="trocarAbaDetalhe('rede')">Rede</button>
-      <button type="button" class="detalhe-aba" data-detalhe-aba="atividades" onclick="trocarAbaDetalhe('atividades')">Atividades</button>
-      <button type="button" class="detalhe-aba" data-detalhe-aba="politica" onclick="trocarAbaDetalhe('politica')">Política</button>
+      <button type="button" class="detalhe-aba ativa" data-detalhe-aba="resumo" onclick="trocarAbaDetalhe('resumo')"><span class="tab-icone">◈</span>Visão geral</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="rede" onclick="trocarAbaDetalhe('rede')"><span class="tab-icone">◌</span>Rede</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="atividades" onclick="trocarAbaDetalhe('atividades')"><span class="tab-icone">↺</span>Atividades</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="politica" onclick="trocarAbaDetalhe('politica')"><span class="tab-icone">⌘</span>Política</button>
     </div>
     <section class="detalhe-painel" data-detalhe-painel="resumo">
       <div class="detalhe-secao-titulo">Saúde e acesso</div>
       <div class="detalhe-resumo">
         <div class="equip-tile-status" id="detalhe-comp-status"></div>
+        <div class="detalhe-destaques" id="detalhe-comp-destaques"></div>
         <div class="equip-tile-info" id="detalhe-comp-info"></div>
       </div>
     </section>
@@ -1510,9 +1527,12 @@ function atualizarConteudoDetalhe(codigo, c){
   const status = statusDe(c);
   const statusTexto = textoDeEstado(c, status);
   const nomeJs = escapeJs(c.nome||'');
-  document.getElementById('detalhe-comp-dot').className = `status-dot ${status}`;
-  document.getElementById('detalhe-comp-nome').textContent = c.nome || '(sem nome)';
+  document.getElementById('detalhe-comp-dot-hero').className = `status-dot ${status}`;
+  document.getElementById('detalhe-comp-nome-hero').textContent = c.nome || '(sem nome)';
   document.getElementById('detalhe-comp-sub').innerHTML = `${escapeHtml(UNIDADES_NOMES[codigo] || codigo)} · <span class="tipo-badge">${TIPO_COMPUTADOR_LABEL[c.tipo]||TIPO_COMPUTADOR_LABEL.atendimento}</span>`;
+  const pill = document.getElementById('detalhe-comp-pill');
+  pill.className = `detalhe-status-pill ${status}`;
+  pill.textContent = statusTexto;
   const statusEl = document.getElementById('detalhe-comp-status');
   statusEl.className = `equip-tile-status ${status}`;
   statusEl.textContent = statusTexto;
@@ -1607,6 +1627,17 @@ function atualizarConteudoDetalhe(codigo, c){
     infoBits.push(`🔁 sem reiniciar há <b style="color:${precisa?'var(--warn,#e0a800)':'var(--ok)'};">${quanto}</b>`
       + (precisa ? ' <span style="font-size:11px;color:var(--warn,#e0a800);">— passou da semana, reinicie</span>' : ''));
   }
+  // Três indicadores para a leitura de relance, no padrão de painéis NOC:
+  // conectividade, disco e último sinal. O texto detalhado continua abaixo;
+  // os cartões não escondem diagnóstico, só dão prioridade visual ao urgente.
+  const destaques = [];
+  destaques.push({ rotulo:'Conectividade', valor:statusTexto, classe:status });
+  if(c.disco){
+    const nivel = c.discoNivel==='critico' ? 'crítico' : (c.discoNivel==='atencao' ? 'atenção' : 'ok');
+    destaques.push({ rotulo:'Disco', valor:nivel, classe:c.discoNivel==='critico'?'offline':(c.discoNivel==='atencao'?'degradado':'online') });
+  } else destaques.push({ rotulo:'Disco', valor:'aguardando leitura', classe:'nunca' });
+  destaques.push({ rotulo:'Último sinal', valor:status==='nunca'?'sem sinal':tempoRelativo(c.ultimoHeartbeatEm), classe:status });
+  document.getElementById('detalhe-comp-destaques').innerHTML = destaques.map(x=>`<div class="detalhe-kpi"><span class="detalhe-kpi-label">${escapeHtml(x.rotulo)}</span><div class="detalhe-kpi-valor equip-tile-status ${escapeHtml(x.classe)}">${escapeHtml(x.valor)}</div></div>`).join('');
   if(c.dispositivos && c.dispositivos.length){
     // ativos primeiro (e a rede AGORA); quem sumiu continua listado com a
     // ultima vez que apareceu - e assim que se percebe que a impressora saiu
@@ -1739,7 +1770,7 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-icone perigo" data-dica="Remover do NOC" aria-label="Remover do NOC" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
   `;
   renderPoliticaComputador(codigo, c);
-  document.getElementById('detalhe-comp-editar').onclick = () => {
+  document.getElementById('detalhe-comp-editar-hero').onclick = () => {
     fecharDetalheComputador();
     abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo);
   };
