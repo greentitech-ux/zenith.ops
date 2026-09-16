@@ -941,7 +941,7 @@ function renderKpisExtras(unidade){
       return `<div><label>${escapeHtml(k.label)}</label><input type="file" accept="image/*,application/pdf" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-arquivo"></div>`;
     }
     if(tipo === 'tempo'){
-      return `<div><label>${escapeHtml(k.label)} (min:seg ou minutos)</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
+      return `<div><label>${escapeHtml(k.label)}</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
     }
     const bloq = travar(k);
     const classeExtra = bloq ? ' campo-automatico' : '';
@@ -951,8 +951,7 @@ function renderKpisExtras(unidade){
       return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
     }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
-    const sufixo = tipo === 'kg' ? ' (kg)' : (tipo === 'moeda' ? ' (R$)' : (tipo === 'percentual' ? ' (%)' : (tipo === 'quantidade' ? ' (un.)' : '')));
-    return `<div><label>${escapeHtml(k.label)}${sufixo}${marca}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
+    return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
   }).join('');
   // KPI moeda com "somar em" (ver grupos.html) precisa recalcular o preview
   // de Faturamento/Total Declarado a cada digitação, igual Canais/Formas ja

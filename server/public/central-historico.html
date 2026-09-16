@@ -2991,7 +2991,7 @@ function abrirEditarMasterFechamento(id){
       return `<div><label>${escapeHtml(k.label)}</label><input type="text" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="texto" class="mf-kpi-extra-input" value="${escapeHtml(atual||'')}"></div>`;
     }
     if(tipo === 'tempo'){
-      return `<div><label>${escapeHtml(k.label)} (min:seg ou minutos)</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="mf-kpi-extra-input kpi-extra-tempo" value="${segundosParaTempo(atual)}"></div>`;
+      return `<div><label>${escapeHtml(k.label)}</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="mf-kpi-extra-input kpi-extra-tempo" value="${segundosParaTempo(atual)}"></div>`;
     }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
     return `<div><label>${escapeHtml(k.label)}</label><input type="number" step="${step}" inputmode="decimal" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="${tipo}" class="mf-kpi-extra-input" value="${num(atual)}"></div>`;
