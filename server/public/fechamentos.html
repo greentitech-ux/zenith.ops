@@ -353,6 +353,7 @@
       <button type="button" class="multiselect-btn" id="ms-unidade-btn">Todas as unidades</button>
       <div class="multiselect-panel" id="ms-unidade-panel"></div>
     </div>
+    <span class="sub" style="font-size:11px;max-width:290px;">Escolha um intervalo livre para consolidar meses (ex.: 01/01 até 31/08). Os cartões e o resumo abaixo somam todo o período.</span>
   </div>
 </div>
 
@@ -362,6 +363,14 @@
   </h2>
   <div class="sub" id="comparativo-periodo-info" style="margin:-2px 0 12px;"></div>
   <div id="comparativo-periodo-chart"></div>
+</div>
+
+<div class="panel" id="consolidado-mensal-panel">
+  <h2>
+    <div class="title-group"><span>📅 Faturamento consolidado por mês</span><span class="n" id="consolidado-mensal-info"></span></div>
+  </h2>
+  <div class="sub" id="consolidado-mensal-sub" style="margin:-2px 0 12px;"></div>
+  <div class="tablewrap" id="consolidado-mensal-tabela"></div>
 </div>
 
 <div class="panel">
@@ -1331,6 +1340,16 @@ function calcularPreset(tipo, refIso){
     const fim = new Date(ref.getFullYear(), ref.getMonth()+1, 0);
     return {inicio:isoLocal(inicio), fim:isoLocal(fim)};
   }
+  if(tipo==='semestre'){
+    const inicio = new Date(ref.getFullYear(), ref.getMonth()-5, 1);
+    const fim = new Date(ref.getFullYear(), ref.getMonth()+1, 0);
+    return {inicio:isoLocal(inicio), fim:isoLocal(fim)};
+  }
+  if(tipo==='ano'){
+    const inicio = new Date(ref.getFullYear(), 0, 1);
+    const fim = new Date(ref.getFullYear(), 11, 31);
+    return {inicio:isoLocal(inicio), fim:isoLocal(fim)};
+  }
   // trimestre: mes da data de referencia + os 2 meses anteriores
   const inicio = new Date(ref.getFullYear(), ref.getMonth()-2, 1);
   const fim = new Date(ref.getFullYear(), ref.getMonth()+1, 0);
@@ -1373,6 +1392,8 @@ function setupPresets(){
     {lbl:'Semana', tipo:'semana'},
     {lbl:'Mês', tipo:'mes'},
     {lbl:'Trimestre', tipo:'trimestre'},
+    {lbl:'6 meses', tipo:'semestre'},
+    {lbl:'Ano', tipo:'ano'},
   ];
   const cont = document.getElementById('presets');
   cont.innerHTML = presets.map(p=>`<button type="button" class="preset-btn" data-tipo="${p.tipo}">${p.lbl}</button>`).join('');
@@ -1420,7 +1441,7 @@ function setupPresets(){
     if(!ref && !presetAtivo && !outro) return;   // os dois vazios no meio da digitação: espera
     filtroDataAtivo = true;
     if(presetAtivo){
-      // preset GRUDADO: digitar uma data com Semana/Mês/Trimestre aceso
+      // preset GRUDADO: digitar uma data com Semana/Mês/Trimestre/6 meses/Ano aceso
       // re-snapa pro bloco daquela data (é assim que se navega mês a mês,
       // semana a semana), mantendo o preset aceso. "Ontem" vira o próprio
       // dia digitado (navegação dia a dia). Sem isto o Mês ficava travado no
@@ -1684,14 +1705,24 @@ function periodoAnterior(inicio, fim, tipoPreset){
     const prevRef = new Date(dEnd.getFullYear(), dEnd.getMonth()-3, 1);
     return aparado(calcularPreset('trimestre', isoLocal(prevRef)));
   }
-  // dia (Ontem) / semana / intervalo livre: desloca a janela INTEIRA 7 dias
-  // pra trás (fim natural = fim ORIGINAL, nao o aparado - aparar so
-  // acontece dentro de aparado() acima, se for o caso), preservando o dia
-  // da semana - "semana" já é um bloco de 7 dias (dom-sáb), entao esse
-  // mesmo deslocamento já devolve a semana anterior certinha
+  if(tipoPreset === 'semestre'){
+    const prevRef = new Date(dEnd.getFullYear(), dEnd.getMonth()-6, 1);
+    return aparado(calcularPreset('semestre', isoLocal(prevRef)));
+  }
+  if(tipoPreset === 'ano'){
+    const prevRef = new Date(dEnd.getFullYear()-1, 0, 1);
+    return aparado(calcularPreset('ano', isoLocal(prevRef)));
+  }
+  // Dia/semana: desloca sete dias e preserva o mesmo dia da semana. Para
+  // intervalo livre, em especial janeiro-agosto, usa a janela imediatamente
+  // anterior com a MESMA quantidade de dias; comparar só sete dias antes
+  // distorcia qualquer consolidado de vários meses.
   const dStart = new Date(inicio+'T00:00:00');
-  const prevStart = new Date(dStart); prevStart.setDate(prevStart.getDate()-7);
-  const prevEnd = new Date(dEnd); prevEnd.setDate(prevEnd.getDate()-7);
+  const deslocamento = tipoPreset === null
+    ? Math.round((dEnd - dStart) / 86400000) + 1
+    : 7;
+  const prevStart = new Date(dStart); prevStart.setDate(prevStart.getDate()-deslocamento);
+  const prevEnd = new Date(dEnd); prevEnd.setDate(prevEnd.getDate()-deslocamento);
   return aparado({ inicio: isoLocal(prevStart), fim: isoLocal(prevEnd) });
 }
 
@@ -1702,7 +1733,7 @@ function comparativoRange(){
   return calcularPreset('semana', isoLocal(agoraBrasilia()));
 }
 
-const ROTULO_PRESET_COMPARATIVO = {ontem:'dia (mesmo dia da semana)', semana:'semana', mes:'mês', trimestre:'trimestre'};
+const ROTULO_PRESET_COMPARATIVO = {ontem:'dia (mesmo dia da semana)', semana:'semana', mes:'mês', trimestre:'trimestre', semestre:'6 meses', ano:'ano'};
 
 function renderComparativoPeriodo(){
   const {inicio, fim} = comparativoRange();
@@ -1723,7 +1754,7 @@ function renderComparativoPeriodo(){
   } else if(presetAtivo){
     tipoPreset = presetAtivo; rotulo = ROTULO_PRESET_COMPARATIVO[presetAtivo] || 'período (mesmo dia da semana)';
   } else {
-    tipoPreset = null; rotulo = 'período (mesmo dia da semana)';
+    tipoPreset = null; rotulo = 'período consolidado equivalente';
   }
   const anterior = periodoAnterior(inicio, fim, tipoPreset);
   const atuais = filtrarPorIntervalo(inicio, fim);
@@ -1771,6 +1802,42 @@ function renderComparativoPeriodo(){
       <div class="comp-delta ${deltaCls}">${seta} ${Math.abs(delta).toFixed(1)}%</div>
     </div>`;
   }).join('');
+}
+
+// Leitura financeira: não obriga o gestor a somar linhas diárias para saber
+// o resultado de janeiro a agosto. Usa exatamente `rows`, que já respeita
+// grupo, unidades, dia da semana e intervalo selecionados.
+function renderConsolidadoMensal(rows){
+  const tabela = document.getElementById('consolidado-mensal-tabela');
+  const info = document.getElementById('consolidado-mensal-info');
+  const sub = document.getElementById('consolidado-mensal-sub');
+  if(!tabela || !info || !sub) return;
+  const meses = {};
+  rows.forEach(r=>{
+    const chave = String(r.data || '').slice(0,7);
+    if(!/^\d{4}-\d{2}$/.test(chave)) return;
+    const m = meses[chave] ||= {fechamentos:0, faturamento:0, declarado:0, diferenca:0, tc:0, unidades:new Set()};
+    m.fechamentos++;
+    m.faturamento += Number(r.faturamento) || 0;
+    m.declarado += Number(r.totalDeclarado) || 0;
+    m.diferenca += Number(r.diferenca) || 0;
+    m.tc += valorTc(r, grupoKpiDaUnidade(r.unidade));
+    if(r.unidade) m.unidades.add(r.unidade);
+  });
+  const chaves = Object.keys(meses).sort();
+  const {start, end} = intervaloEfetivo();
+  sub.textContent = `Totais consolidados de ${fmtData(start)} até ${fmtData(end)}. Cada linha soma todos os fechamentos do mês.`;
+  info.textContent = chaves.length ? `${chaves.length} mês${chaves.length===1?'':'es'}` : '';
+  if(!chaves.length){
+    tabela.innerHTML = '<div class="empty">Sem fechamentos no período selecionado.</div>';
+    return;
+  }
+  const nomeMes = chave => new Intl.DateTimeFormat('pt-BR',{month:'long',year:'numeric',timeZone:FUSO_BR}).format(new Date(chave+'-01T12:00:00')).replace(/^./, c=>c.toUpperCase());
+  const total = chaves.reduce((a,chave)=>{
+    const m=meses[chave]; a.fechamentos+=m.fechamentos; a.faturamento+=m.faturamento; a.declarado+=m.declarado; a.diferenca+=m.diferenca; a.tc+=m.tc; return a;
+  },{fechamentos:0,faturamento:0,declarado:0,diferenca:0,tc:0});
+  const linha = (rotulo,m,classe='')=>`<tr class="${classe}"><td><b>${rotulo}</b></td><td class="valor">${m.unidades ? m.unidades.size : '—'}</td><td class="valor">${m.fechamentos}</td><td class="valor">${fmtMoney(m.faturamento)}</td><td class="valor">${fmtMoney(m.declarado)}</td><td class="valor ${m.diferenca<0?'bad':(m.diferenca>0?'warn':'ok')}">${fmtMoney(m.diferenca)}</td><td class="valor">${Number(m.tc||0).toFixed(0)}</td></tr>`;
+  tabela.innerHTML = `<table><thead><tr><th>Mês</th><th class="valor">Unidades</th><th class="valor">Fechamentos</th><th class="valor">Faturamento</th><th class="valor">Total declarado</th><th class="valor">Diferença</th><th class="valor">TC</th></tr></thead><tbody>${chaves.map(chave=>linha(nomeMes(chave),meses[chave])).join('')}</tbody><tfoot>${linha('TOTAL DO PERÍODO',total,'total')}</tfoot></table>`;
 }
 
 // ---- KPIs: valor + variacao contra o periodo anterior de mesmo tamanho ----
@@ -3537,6 +3604,7 @@ function render(){
   const rows = filtrar();
   renderKpis(rows);
   renderComparativoPeriodo();
+  renderConsolidadoMensal(rows);
   renderChartAtual();
   // renderDiferencaChart(rows); // painel desativado, ver comentario acima da funcao
   renderUnidadesTable(rows);
