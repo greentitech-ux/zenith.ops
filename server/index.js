@@ -5386,6 +5386,74 @@ app.post('/api/loja-status/:codigo/computadores/:posto/diagnostico/ping', auth.r
     res.status(400).json({ error: err.message });
   }
 });
+
+// ---------- CONSOLE OPERACIONAL NOC ----------
+// É propositalmente separado do ping e do catálogo: aqui o Master pode rodar
+// PowerShell livre (inclusive `ssh usuario@host "comando"`) numa ÚNICA
+// máquina interna. É uma porta de alto privilégio, então não basta a sessão:
+// a senha do Master é confirmada pelo servidor EM TODA execução. O texto fica
+// auditável na fila do NOC, mas nunca vai para console.log e não aceita
+// segredos em linha; senha/token em comando viraria dado persistido no banco.
+const LIMITE_COMANDO_CONSOLE_NOC = 6000;
+function prepararComandoConsoleNoc(valor) {
+  const comando = String(valor || '').replace(/\r\n/g, '\n').trim();
+  if (!comando) throw new Error('Digite o comando PowerShell.');
+  if (comando.length > LIMITE_COMANDO_CONSOLE_NOC) throw new Error(`O comando pode ter no máximo ${LIMITE_COMANDO_CONSOLE_NOC} caracteres.`);
+  if (/\0|[\u0001-\u0008\u000B\u000C\u000E-\u001F]/.test(comando)) throw new Error('O comando contém caracteres inválidos.');
+  // Não é um filtro de comandos: é uma proteção de dado. O NOC registra o
+  // comando para auditoria, por isso senha/token/chave privada devem ficar no
+  // Cofre/na máquina de origem, nunca colados nesta caixa.
+  if (/(?:password|senha|token|api[_-]?key|secret|sshpass|convertto-securestring)\s*(?:=|:|\s)/i.test(comando)) {
+    throw new Error('Não cole senha, token ou chave no console: o comando é auditado. Use uma chave já instalada na máquina ou o Cofre.');
+  }
+  // SSH sem chave costuma abrir pergunta de senha e prender o agente. A
+  // execução em job tem teto de 120s e devolve a saída; para SSH use chave
+  // configurada na máquina e, de preferência, `-o BatchMode=yes`.
+  const codificado = Buffer.from(comando, 'utf16le').toString('base64');
+  const entrega = [
+    "$ErrorActionPreference = 'Stop'",
+    `$nocComandoCodificado = '${codificado}'`,
+    '$nocJob = Start-Job -ScriptBlock {',
+    '  param($codificado)',
+    '  $texto = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($codificado))',
+    '  & ([ScriptBlock]::Create($texto))',
+    '  if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "O comando externo retornou código $LASTEXITCODE." }',
+    '} -ArgumentList $nocComandoCodificado',
+    '$nocFim = Wait-Job -Job $nocJob -Timeout 120',
+    'if (-not $nocFim) { Stop-Job -Job $nocJob -ErrorAction SilentlyContinue; Remove-Job -Job $nocJob -Force -ErrorAction SilentlyContinue; throw "LIMITE ATINGIDO: o comando foi interrompido após 120 segundos." }',
+    '$nocSaida = Receive-Job -Job $nocJob -ErrorAction SilentlyContinue 2>&1 | Out-String',
+    'if ($nocJob.State -ne "Completed") { Remove-Job -Job $nocJob -Force -ErrorAction SilentlyContinue; throw ("FALHOU: " + $nocSaida.Trim()) }',
+    'if ($nocSaida.Trim()) { $nocSaida }',
+    'Remove-Job -Job $nocJob -Force -ErrorAction SilentlyContinue',
+  ].join('\n');
+  return { comando, entrega };
+}
+app.post('/api/loja-status/:codigo/computadores/:posto/console', auth.requireMaster, async (req, res) => {
+  try {
+    // QA Master existe para testar fluxos com aprovação. Um shell arbitrário
+    // não entra nessa categoria: só a conta Master real pode autorizá-lo.
+    if (req.isQaMaster) return res.status(403).json({ error: 'O console operacional exige um Master de verdade.' });
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador || computador.tipo !== 'interno') return res.status(404).json({ error: 'Escolha um computador interno com NOCZenith.' });
+    const preparado = prepararComandoConsoleNoc(req.body?.comando);
+    const registro = await lojaStatus.enfileirarComando(computador.codigo, computador.posto, preparado.comando, {
+      origem: 'noc-console-operacional',
+      comandoEntrega: preparado.entrega,
+      requerAdmin: req.body?.requerAdmin !== false,
+      solicitadoPor: req.user.email,
+    });
+    // Nunca registrar o texto: ele pode conter dados operacionais sensíveis.
+    console.log(`[NOC] ${req.user.email} enfileirou console operacional em ${computador.codigo}/${computador.posto} (${preparado.comando.length} caracteres)`);
+    res.json({
+      ok: true,
+      comandoId: registro.id,
+      mensagem: `Comando enviado para ${computador.nome || computador.posto}. O resultado aparecerá na ficha desta máquina.`,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.get('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) => {
   try {
     const comando = await lojaStatus.detalharComando(req.params.id);

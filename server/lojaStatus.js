@@ -2686,10 +2686,17 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
   const comandoFinal = comando.includes(PLACEHOLDER_IP_IMPRESSORA)
     ? comando.split(PLACEHOLDER_IP_IMPRESSORA).join(await resolverIpImpressora(codigo, posto))
     : comando;
+  // Alguns comandos operacionais precisam de uma camada de execução (por
+  // exemplo, limite de tempo), mas o histórico deve manter o texto que o
+  // Master escreveu. `comandoEntrega` é privado do canal servidor→agente;
+  // nunca é devolvido à tela nem sobrescreve a trilha de auditoria.
+  const comandoEntrega = op.comandoEntrega ? String(op.comandoEntrega) : null;
   const comandoRef = COMANDOS_COLLECTION.doc();
   const registro = {
     id: comandoRef.id, codigo, posto, comando: comandoFinal,
+    comandoEntrega,
     origem: op.origem || 'agente', acaoId: op.acaoId || null, aprovacaoId: op.aprovacaoId || null,
+    solicitadoPor: op.solicitadoPor || null,
     // requerAdmin: comando que so roda elevado (instalar/desinstalar). O
     // servidor SO entrega pra um heartbeat que provou ser Administrador (a
     // instancia SYSTEM do NOCZenith) - ver entregarComandoPendente/heartbeat.
@@ -2776,7 +2783,7 @@ async function entregarComandoPendente(codigo, posto, opcoes) {
     // ve no historico) fica com o marcador, nunca com a senha
     let texto;
     try {
-      texto = substituirSegredos(comando.comando);
+      texto = substituirSegredos(comando.comandoEntrega || comando.comando);
     } catch (e) {
       tx.update(comandoRef, { status: 'erro', erro: e.message, executadoEm: new Date().toISOString() });
       tx.update(ref, { comandoPendenteId: null });

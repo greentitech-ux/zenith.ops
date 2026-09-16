@@ -1070,6 +1070,24 @@
     <div id="ping-resultado" class="msg hidden" style="margin-top:10px;"></div>
   </div>
 </div>
+<!-- Console operacional: intencionalmente por MÁQUINA, nunca em massa.
+     A senha é pedida somente no instante de enviar (pedirSenhaMaster), e a
+     confirmação real acontece no servidor. -->
+<div class="overlay hidden" id="console-noc-overlay">
+  <div class="modal" style="max-width:650px;">
+    <div class="modal-head"><h3 style="margin:0;">⌨️ Console operacional</h3><button type="button" class="icon-btn" onclick="fecharConsoleNoc()">✕</button></div>
+    <p class="sub" id="console-noc-origem" style="margin:8px 0 12px;"></p>
+    <label>Comando PowerShell</label>
+    <textarea id="console-noc-comando" maxlength="6000" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Ex.: Get-Service | Where-Object Status -eq 'Stopped'&#10;SSH: ssh -o BatchMode=yes usuario@10.0.0.5 &quot;hostname&quot;" style="font-family:var(--mono);min-height:180px;resize:vertical;"></textarea>
+    <label class="check-linha"><input type="checkbox" id="console-noc-admin" checked> Executar como Administrador (SYSTEM)</label>
+    <p class="sub" style="font-size:11px;line-height:1.5;margin:8px 0 0;">Executa em uma única máquina e para após 120 segundos. A senha do Master será pedida sempre que você enviar. Não cole senhas, tokens ou chaves: o comando fica no histórico de auditoria. Para SSH, use uma chave já configurada na máquina e <code>-o BatchMode=yes</code>.</p>
+    <div id="console-noc-status" class="msg hidden" style="margin-top:10px;"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" onclick="fecharConsoleNoc()">Cancelar</button>
+      <button type="button" class="btn-primary" id="console-noc-enviar" onclick="enviarConsoleNoc()">🔒 Confirmar e executar</button>
+    </div>
+  </div>
+</div>
 <!-- Programas da maquina, em janela PROPRIA (pedido do Master): o Registro de
      atividades e' pra investigar incidente - queda, comando, acesso remoto. Uma
      maquina que atualiza Chrome toda semana empurrava isso pra fora da tela. -->
@@ -1803,6 +1821,7 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-icone" data-dica="Baixar o agente NOC-NoPulso" aria-label="Baixar o agente NOC-NoPulso" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
     ${c.noPulsoPrint ? `<button type="button" class="btn-icone" data-dica="Capturar a tela desta máquina agora" aria-label="Capturar a tela desta máquina agora" onclick="capturarAgora('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📸</button>` : ''}
     ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Diagnóstico de rede: ping por esta máquina" aria-label="Diagnóstico de rede: ping por esta máquina" onclick="abrirDiagnosticoPing('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">⌁</button>` : ''}
+    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Console PowerShell nesta máquina" aria-label="Console PowerShell" onclick="abrirConsoleNoc('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">⌨️</button>` : ''}
     ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Reiniciar este computador" aria-label="Reiniciar este computador" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁</button>` : ''}
     <button type="button" class="btn-icone" data-dica="Programas desta máquina" aria-label="Programas desta máquina" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
     <button type="button" class="btn-icone perigo" data-dica="Remover do NOC" aria-label="Remover do NOC" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
@@ -1868,6 +1887,49 @@ async function executarDiagnosticoPing(){
     mostrarResultadoPing(d.mensagem||'Ping enfileirado.');
     acompanharDiagnosticoPing(d.comandoId);
   }catch(e){ mostrarResultadoPing(e.message,true); }
+}
+
+// ================= CONSOLE OPERACIONAL =================
+// O alvo vem sempre da ficha que a pessoa abriu. Não há console global ou em
+// massa: isso força uma decisão consciente sobre QUAL computador vai executar.
+let CONSOLE_NOC_ALVO = null;
+function abrirConsoleNoc(codigo, posto, nome){
+  CONSOLE_NOC_ALVO = { codigo, posto, nome };
+  document.getElementById('console-noc-origem').textContent = `Destino: ${nome || posto}. O comando roda pelo NOCZenith desta máquina.`;
+  document.getElementById('console-noc-comando').value = '';
+  document.getElementById('console-noc-admin').checked = true;
+  const msg = document.getElementById('console-noc-status'); msg.textContent=''; msg.className='msg hidden';
+  abrirOverlay('console-noc-overlay');
+  setTimeout(()=>document.getElementById('console-noc-comando').focus(), 50);
+}
+function fecharConsoleNoc(){ fecharOverlay('console-noc-overlay'); CONSOLE_NOC_ALVO = null; }
+function mostrarResultadoConsoleNoc(texto, erro){
+  const msg=document.getElementById('console-noc-status');
+  msg.textContent=texto; msg.className=erro?'msg err':'msg'; msg.classList.remove('hidden');
+}
+async function enviarConsoleNoc(){
+  if(!CONSOLE_NOC_ALVO) return;
+  const comando=(document.getElementById('console-noc-comando').value||'').trim();
+  if(!comando) return mostrarResultadoConsoleNoc('Digite o comando PowerShell.', true);
+  if(!confirm(`Enviar este comando para ${CONSOLE_NOC_ALVO.nome || CONSOLE_NOC_ALVO.posto}?\n\nEle executará somente nessa máquina e o resultado ficará no histórico do NOC.`)) return;
+  // Nenhuma confirmação é reaproveitada: esta chamada abre o modal de senha
+  // do Master em TODA execução, mesmo com a página já autenticada.
+  const password = await pedirSenhaMaster('autorizar este comando PowerShell');
+  if(password === null) return;
+  const btn=document.getElementById('console-noc-enviar');
+  btn.disabled=true; mostrarResultadoConsoleNoc('Confirmando e enviando ao NOCZenith…');
+  try{
+    const r=await fetch(`/api/loja-status/${encodeURIComponent(CONSOLE_NOC_ALVO.codigo)}/computadores/${encodeURIComponent(CONSOLE_NOC_ALVO.posto)}/console`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ comando, password, requerAdmin: document.getElementById('console-noc-admin').checked }),
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não consegui enviar o comando.');
+    document.getElementById('console-noc-comando').value='';
+    mostrarResultadoConsoleNoc(`${d.mensagem || 'Comando enfileirado.'} ID: ${d.comandoId}`);
+    await carregar();
+  }catch(e){ mostrarResultadoConsoleNoc(e.message,true); }
+  finally{ btn.disabled=false; }
 }
 
 // ================= PROGRAMAS DA MÁQUINA =================
