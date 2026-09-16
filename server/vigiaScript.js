@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 70;
+const VERSAO_VIGIA = 71;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -219,18 +219,22 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $urlApp = "' + APP_BASE_URL + '/"',
     '  # 1) tira o "Zenith Ops" antigo (PWA registrado pelo Chrome/Edge)',
     '  $chaves = @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")',
-    '  $antigos = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match "^Zenith ?Ops$" -and $_.UninstallString -match "--uninstall-app-id=" })',
+    '  # Remove app antigo "Zenith Ops" E duplicatas de "NoPulso"',
+    '  $antigos = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { ($_.DisplayName -match "^Zenith ?Ops$|^NoPulso(\s*\(\d+\))?$") -and $_.UninstallString -match "--uninstall-app-id=" })',
     '  foreach ($a in $antigos) {',
     '    try {',
     '      # UninstallString: "C:\\...\\chrome.exe" --profile-directory=Default --uninstall-app-id=xxxx',
     '      if ($a.UninstallString -match \'^"([^"]+)"\\s*(.*)$\') {',
     '        Start-Process -FilePath $Matches[1] -ArgumentList ($Matches[2] + " --no-startup-window") -Wait -WindowStyle Hidden',
-    '        Escrever-Log "App antigo removido: $($a.DisplayName)"',
+    '        Escrever-Log "App removido: $($a.DisplayName)"',
     '      }',
-    '    } catch { Escrever-Log "Nao consegui remover o app antigo ($($a.DisplayName)): $($_.Exception.Message)" }',
+    '    } catch { Escrever-Log "Nao consegui remover o app ($($a.DisplayName)): $($_.Exception.Message)" }',
     '  }',
-    '  foreach ($lnk in @("$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Zenith Ops.lnk", "$env:USERPROFILE\\Desktop\\Zenith Ops.lnk", "$env:PUBLIC\\Desktop\\Zenith Ops.lnk")) {',
-    '    if (Test-Path $lnk) { Remove-Item $lnk -Force -ErrorAction SilentlyContinue }',
+    '  # Remove atalhos antigos e duplicatas de atalhos NoPulso',
+    '  foreach ($lnk in @("$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Zenith Ops.lnk", "$env:USERPROFILE\\Desktop\\Zenith Ops.lnk", "$env:PUBLIC\\Desktop\\Zenith Ops.lnk", "$env:USERPROFILE\\Desktop\\NoPulso*.lnk", "$env:PUBLIC\\Desktop\\NoPulso*.lnk")) {',
+    '    foreach ($item in @(Get-Item $lnk -Force -ErrorAction SilentlyContinue)) {',
+    '      Remove-Item $item -Force -ErrorAction SilentlyContinue',
+    '    }',
     '  }',
     '  # 2) manda o Chrome e o Edge instalarem o app NoPulso (icone na area de trabalho, abre em janela)',
     '  $politica = \'[{"url":"\' + $urlApp + \'","create_desktop_shortcut":true,"default_launch_container":"window"}]\'',
