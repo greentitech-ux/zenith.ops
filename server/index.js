@@ -5162,7 +5162,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'zebra', 'rede'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'zebra', 'rede', 'reset-senha'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
@@ -5184,6 +5184,12 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
         verbo: 'Resetar as Zebras de',
         comando: async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)),
         origem: 'manutencao-zebra',
+      },
+      'reset-senha': {
+        acao: 'manutencao.resetarSenha',
+        verbo: 'Resetar a senha do Windows de',
+        comando: lojaStatus.COMANDO_RESET_SENHA,
+        origem: 'manutencao-reset-senha',
       },
     };
     const t = TAREFAS[tarefa];
