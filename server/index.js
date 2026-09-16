@@ -5354,6 +5354,42 @@ app.post('/api/loja-status/:codigo/computadores/:posto/dispositivos/:mac/ping', 
   }
 });
 
+// Diagnóstico manual de rede: o Master informa um IPv4 PRIVADO e o NOCZenith
+// da máquina escolhida faz somente ping. Não é um terminal remoto: IP público,
+// hostname, porta, PowerShell ou qualquer outro comando são recusados.
+function ipv4PrivadoValido(valor) {
+  const partes = String(valor || '').trim().split('.');
+  if (partes.length !== 4 || !partes.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)) return false;
+  const [a, b] = partes.map(Number);
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+app.post('/api/loja-status/:codigo/computadores/:posto/diagnostico/ping', auth.requireMaster, async (req, res) => {
+  try {
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador || computador.tipo !== 'interno') return res.status(404).json({ error: 'Computador interno com NOCZenith não encontrado.' });
+    const ip = String(req.body?.ip || '').trim();
+    if (!ipv4PrivadoValido(ip)) return res.status(400).json({ error: 'Informe um IPv4 privado válido (10.x.x.x, 172.16–31.x.x ou 192.168.x.x).' });
+    const comando = [
+      `$r = Test-Connection -ComputerName '${ip}' -Count 3 -ErrorAction SilentlyContinue`,
+      `if ($r) { "PING OK · ${ip} · $([Math]::Round((($r | Measure-Object ResponseTime -Average).Average), 0)) ms · $($r.Count)/3 respostas" } else { "PING FALHOU · ${ip} · sem resposta" }`,
+    ].join('\n');
+    const registro = await lojaStatus.enfileirarComando(computador.codigo, computador.posto, comando, { origem: 'noc-diagnostico-ping' });
+    console.log(`[NOC] ${req.user.email} pediu ping de ${computador.codigo}/${computador.posto} para ${ip}`);
+    res.json({ ok: true, comandoId: registro.id, ip, mensagem: `Ping para ${ip} enviado à máquina de origem.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const comando = await lojaStatus.detalharComando(req.params.id);
+    if (!comando) return res.status(404).json({ error: 'Diagnóstico não encontrado.' });
+    res.json(comando);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // papel de parede do parque: UMA imagem pra rede toda; cada computador decide
 // se aplica (politica.papelDeParedeAtivo). Servida sem sessao porque quem
 // baixa e a maquina - o caminho e opaco e a imagem e do proprio grupo.

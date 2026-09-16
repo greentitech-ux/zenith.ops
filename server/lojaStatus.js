@@ -2657,6 +2657,20 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
   return registro;
 }
 
+// A tela de diagnóstico mostra o andamento do ping sem expor o texto do
+// PowerShell. Só o resultado que o agente devolveu é necessário para operação.
+async function detalharComando(comandoId) {
+  const snap = await COMANDOS_COLLECTION.doc(String(comandoId || '')).get();
+  if (!snap.exists) return null;
+  const c = snap.data();
+  return {
+    id: snap.id, codigo: c.codigo, posto: c.posto, origem: c.origem || null,
+    status: c.status || 'pendente', criadoEm: c.criadoEm || null,
+    entregueEm: c.entregueEm || null, executadoEm: c.executadoEm || null,
+    resultado: c.resultado || null, erro: c.erro || null,
+  };
+}
+
 // chamado de dentro do heartbeat() - transacao sobre 1 documento so (nao
 // precisa de indice composto: o comandoPendenteId ja diz exatamente qual
 // comando buscar). Marca 'entregue' e devolve o texto do comando pro
@@ -3668,7 +3682,7 @@ module.exports = {
   // falso e ser levado a sério, inclusive pra ENVELHECER a última batida,
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
-  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
+  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando,
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,

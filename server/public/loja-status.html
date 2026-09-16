@@ -281,12 +281,13 @@
   .equip-tile-ip{font-family:var(--mono);font-size:10.5px;color:var(--text);margin-top:4px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85;}
   .equip-tile-ip:hover{opacity:1;color:var(--accent);}
   .equip-tile-ip-copy{opacity:.6;font-size:9.5px;}
-  .ev-linha{display:flex;align-items:center;gap:7px;font-size:11.5px;padding:3px 0;font-family:var(--mono);color:var(--muted);border-bottom:1px solid rgba(255,255,255,.04);}
-  .ev-linha b{color:var(--text);font-weight:600;}
-  .ev-dot{width:7px;height:7px;border-radius:50%;flex:none;}
+  .ev-linha{display:flex;align-items:flex-start;gap:9px;font-size:11.5px;padding:9px 7px;font-family:var(--mono);color:var(--muted);border:1px solid transparent;border-bottom-color:rgba(255,255,255,.06);}
+  .ev-linha:hover{background:var(--panel2);border-color:var(--line);border-radius:8px;}.ev-linha b{color:var(--text);font-weight:700;}
+  .ev-dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:5px;}
   .ev-dot.ok{background:var(--ok);}
   .ev-dot.bad{background:var(--bad);}
   .ev-dot.warn{background:var(--warn);}
+  .ev-corpo{flex:1;min-width:0;}.ev-topo{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}.ev-data{flex:none;color:var(--muted);font-size:10px;white-space:nowrap;}.ev-detalhe{margin-top:3px;line-height:1.45;word-break:break-word;color:var(--muted);}.ev-meta{margin-top:4px;font-size:10.5px;color:var(--muted);}.ev-agrupado{border-left:2px solid var(--warn);background:color-mix(in srgb,var(--warn) 5%,transparent);}
   .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);flex:none;}
   .equip-tile-status{font-family:var(--mono);font-size:10px;font-weight:700;}
   .equip-tile-status.online{color:var(--ok);}
@@ -1054,6 +1055,19 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="ping-overlay">
+  <div class="modal" style="max-width:470px;">
+    <div class="modal-head"><h3 style="margin:0;">⌁ Diagnóstico de rede</h3><button type="button" class="icon-btn" onclick="fecharDiagnosticoPing()">✕</button></div>
+    <p class="sub" id="ping-origem" style="margin:8px 0 14px;"></p>
+    <label>IP de destino</label>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="ping-ip" inputmode="decimal" autocomplete="off" placeholder="ex.: 10.161.117.200" style="margin:0;flex:1;">
+      <button type="button" class="btn-primary" onclick="executarDiagnosticoPing()">Ping</button>
+    </div>
+    <p class="sub" style="font-size:11px;line-height:1.45;">Executa três testes pela máquina escolhida. Aceita apenas IPs privados; não abre terminal nem executa comandos livres.</p>
+    <div id="ping-resultado" class="msg hidden" style="margin-top:10px;"></div>
+  </div>
+</div>
 <!-- Programas da maquina, em janela PROPRIA (pedido do Master): o Registro de
      atividades e' pra investigar incidente - queda, comando, acesso remoto. Uma
      maquina que atualiza Chrome toda semana empurrava isso pra fora da tela. -->
@@ -1771,6 +1785,7 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-icone" data-dica="Copiar o comando de instalação pro PowerShell da loja" aria-label="Copiar o comando de instalação pro PowerShell da loja" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋</button>
     <button type="button" class="btn-icone" data-dica="Baixar o agente NOC-NoPulso" aria-label="Baixar o agente NOC-NoPulso" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
     ${c.noPulsoPrint ? `<button type="button" class="btn-icone" data-dica="Capturar a tela desta máquina agora" aria-label="Capturar a tela desta máquina agora" onclick="capturarAgora('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📸</button>` : ''}
+    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Diagnóstico de rede: ping por esta máquina" aria-label="Diagnóstico de rede" onclick="abrirDiagnosticoPing('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">⌁</button>` : ''}
     ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Reiniciar este computador" aria-label="Reiniciar este computador" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁</button>` : ''}
     <button type="button" class="btn-icone" data-dica="Programas desta máquina" aria-label="Programas desta máquina" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
     <button type="button" class="btn-icone perigo" data-dica="Remover do NOC" aria-label="Remover do NOC" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
@@ -1796,6 +1811,46 @@ async function pingDispositivo(codigo, posto, mac, ip){
     alert(d.mensagem || 'Ping enfileirado.');
     await carregar();
   }catch(e){ alert(e.message); }
+}
+let PING_DIAGNOSTICO = null;
+function abrirDiagnosticoPing(codigo, posto, nome){
+  PING_DIAGNOSTICO = { codigo, posto, nome };
+  document.getElementById('ping-origem').textContent = `Origem: ${nome || posto}. O teste será executado por este NOCZenith, dentro da rede dele.`;
+  document.getElementById('ping-ip').value = '';
+  const msg = document.getElementById('ping-resultado'); msg.textContent=''; msg.className='msg hidden';
+  abrirOverlay('ping-overlay');
+  setTimeout(()=>document.getElementById('ping-ip').focus(), 50);
+}
+function fecharDiagnosticoPing(){ fecharOverlay('ping-overlay'); PING_DIAGNOSTICO=null; }
+function mostrarResultadoPing(texto, erro){
+  const msg=document.getElementById('ping-resultado');
+  msg.textContent=texto; msg.className=erro?'msg err':'msg'; msg.classList.remove('hidden');
+}
+async function acompanharDiagnosticoPing(comandoId, tentativa=0){
+  if(!PING_DIAGNOSTICO) return;
+  try{
+    const r=await fetch(`/api/loja-status/comandos/${encodeURIComponent(comandoId)}`);
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não consegui consultar o diagnóstico.');
+    if(d.status==='executado') return mostrarResultadoPing(d.resultado||'Ping concluído.');
+    if(d.status==='erro') return mostrarResultadoPing(d.erro||'O ping falhou.',true);
+    if(tentativa>=20) return mostrarResultadoPing('O diagnóstico continua na fila. Abra novamente esta máquina para ver o último comando.',true);
+    mostrarResultadoPing(`Aguardando o NOCZenith executar o ping… (${tentativa+1}/20)`);
+    setTimeout(()=>acompanharDiagnosticoPing(comandoId,tentativa+1),1500);
+  }catch(e){ mostrarResultadoPing(e.message,true); }
+}
+async function executarDiagnosticoPing(){
+  if(!PING_DIAGNOSTICO) return;
+  const ip=(document.getElementById('ping-ip').value||'').trim();
+  if(!ip) return mostrarResultadoPing('Informe o IP de destino.',true);
+  mostrarResultadoPing('Enviando teste para a máquina de origem…');
+  try{
+    const r=await fetch(`/api/loja-status/${encodeURIComponent(PING_DIAGNOSTICO.codigo)}/computadores/${encodeURIComponent(PING_DIAGNOSTICO.posto)}/diagnostico/ping`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não consegui iniciar o ping.');
+    mostrarResultadoPing(d.mensagem||'Ping enfileirado.');
+    acompanharDiagnosticoPing(d.comandoId);
+  }catch(e){ mostrarResultadoPing(e.message,true); }
 }
 
 // ================= PROGRAMAS DA MÁQUINA =================
@@ -2004,6 +2059,25 @@ function dataDoEvento(ms){
   try{ return new Date(ms).toLocaleDateString('sv-SE', { timeZone:'America/Sao_Paulo' }); }
   catch(e){ return ''; }
 }
+function cardEvento(nivel, titulo, em, detalhe, meta, classe){
+  return `<article class="ev-linha ${classe||''}"><span class="ev-dot ${nivel||''}"></span><div class="ev-corpo"><div class="ev-topo"><b>${titulo}</b><time class="ev-data">${escapeHtml(fmtDataHora(em))}</time></div>${detalhe?`<div class="ev-detalhe">${detalhe}</div>`:''}${meta?`<div class="ev-meta">${meta}</div>`:''}</div></article>`;
+}
+function compactarEventosDetalhe(eventos){
+  const saida=[];
+  for(let i=0;i<eventos.length;){
+    const atual=eventos[i];
+    // A batida do serviço remoto é útil como diagnóstico, mas quatro batidas
+    // iguais seguidas não são quatro acontecimentos. Elas viram um cartão com
+    // contagem e intervalo, deixando queda/sessão real visível na linha do tempo.
+    if(atual.tipo==='acesso-remoto'){
+      const iguais=[atual]; let j=i+1;
+      while(j<eventos.length && eventos[j].tipo==='acesso-remoto' && String(eventos[j].detalhe||'')===String(atual.detalhe||'')){ iguais.push(eventos[j]); j++; }
+      if(iguais.length>1){ saida.push({...atual, tipo:'acesso-remoto-agrupado', quantidade:iguais.length, ateEm:iguais[iguais.length-1].em}); i=j; continue; }
+    }
+    saida.push(atual); i++;
+  }
+  return saida;
+}
 function linhaEvento(ev){
   // retrato de IP carimbado no evento (ver varrerAlertas em lojaStatus.js):
   // no "Caiu" e o IP de QUANDO caiu; no "Voltou", o IP com que voltou -
@@ -2016,13 +2090,13 @@ function linhaEvento(ev){
     // por qual meio ela estava falando quando silenciou: separa "arrancaram
     // o cabo" de "o provedor caiu" sem ter que adivinhar depois
     const meio = ev.link ? ` · <span style="color:var(--muted);font-size:11px;">estava ${ev.link==='ethernet'?'no cabo':(ev.link==='wifi'?'no Wi-Fi':escapeHtml(ev.link))}</span>` : '';
-    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}${sufixoIp}${meio}</div>`;
+    return cardEvento('bad','Caiu',ev.em,`${sufixoIp.replace(/^ · /,'')}${meio.replace(/^ · /,'')}`,ev.link ? `Conexão: ${escapeHtml(ev.link)}` : 'Sem sinal do agente');
   }
   // reinício detectado pelo agente (LastBootUpTime mudou), não por ausência
   // de heartbeat - por isso aparece mesmo quando a máquina nem chegou a
   // sumir do painel
   if(ev.tipo==='reiniciou'){
-    return `<div class="ev-linha"><span class="ev-dot ${ev.inesperado?'bad':'warn'}"></span><b>${ev.inesperado?'⚡ Desligamento inesperado':'🔄 Reiniciou'}</b> · ${fmtDataHora(ev.em)}${ev.inesperado?' · <span style="color:var(--muted);font-size:11px;">queda de energia ou travamento</span>':''}</div>`;
+    return cardEvento(ev.inesperado?'bad':'warn',ev.inesperado?'⚡ Desligamento inesperado':'🔄 Reiniciou',ev.em,ev.inesperado?'queda de energia ou travamento':'Reinício detectado pelo agente');
   }
   if(ev.tipo==='link'){
     const nome = (t) => t==='ethernet' ? 'cabo' : (t==='wifi' ? 'Wi-Fi' : (t==='nenhum' ? 'sem rede' : (t||'—')));
@@ -2030,27 +2104,31 @@ function linhaEvento(ev){
       ? '<b>🔌 Ethernet caiu</b> · seguiu por ' + escapeHtml(nome(ev.para))
       : `<b>🔗 Link mudou</b> · ${escapeHtml(nome(ev.de))} → <b>${escapeHtml(nome(ev.para))}</b>`;
     const vel = ev.mbps ? ` · <span style="color:var(--muted);font-size:11px;">${ev.mbps >= 1000 ? (ev.mbps/1000)+' Gbps' : ev.mbps+' Mbps'}</span>` : '';
-    return `<div class="ev-linha"><span class="ev-dot warn"></span>${detalhe} · ${fmtDataHora(ev.em)}${vel}</div>`;
+    return cardEvento('warn',ev.ethernetCaida?'🔌 Ethernet caiu':'🔗 Link mudou',ev.em,detalhe.replace(/<b>.*?<\/b> · /,''),vel.replace(/^ · /,''));
   }
   if(ev.tipo==='ip'){
     const qual = ev.ipTipo==='local' ? '🏠 IP local' : '🌐 IP público';
     const texto = ev.de
       ? `mudou · ${escapeHtml(ev.de)} → <b>${escapeHtml(ev.para)}</b>`
       : `registrado · <b>${escapeHtml(ev.para)}</b>`;
-    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>${qual}</b> ${texto} · ${fmtDataHora(ev.em)}</div>`;
+    return cardEvento('warn',qual,ev.em,texto);
   }
   // SESSÃO = alguém entrou de verdade (lido do log da própria ferramenta, ver
   // Verificar-SessaoRemota no vigiaScript.js). É o evento que interessa, e por
   // isso é o único vermelho dos dois
   if(ev.tipo==='sessao-remota'){
-    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>🔓 Sessão remota</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+    return cardEvento('bad','🔓 Sessão remota',ev.em,ev.detalhe?escapeHtml(ev.detalhe):'Uma sessão remota foi detectada');
   }
   // ...e isto é só o serviço conversando com a nuvem dele. Fica registrado
   // porque é assim que se descobre que a máquina tem acesso remoto ligado 24h,
   // mas não é ninguém entrando - o rótulo diz isso, senão as duas linhas se
   // parecem e a de verdade se perde no meio
   if(ev.tipo==='acesso-remoto'){
-    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Serviço de acesso remoto ligado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+    return cardEvento('warn','Serviço remoto disponível',ev.em,ev.detalhe?escapeHtml(ev.detalhe):'Serviço conectado, sem sessão humana detectada');
+  }
+  if(ev.tipo==='acesso-remoto-agrupado'){
+    const intervalo = ev.ateEm ? `${fmtDataHora(ev.ateEm)} a ${fmtDataHora(ev.em)}` : '';
+    return cardEvento('warn','Serviço remoto disponível',ev.em,ev.detalhe?escapeHtml(ev.detalhe):'Serviço conectado, sem sessão humana detectada',`${ev.quantidade} registros iguais agrupados${intervalo?` · ${intervalo}`:''}`,'ev-agrupado');
   }
   if(ev.tipo==='disco'){
     return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
@@ -2113,7 +2191,7 @@ function renderEventosDetalhe(){
   // rolagem pra lista nao "pular" pro topo no meio de uma leitura
   const listaAntiga = document.getElementById('ev-lista');
   const scrollAnterior = listaAntiga ? listaAntiga.scrollTop : 0;
-  const linhas = filtrados.map(linhaEvento).join('')
+   const linhas = compactarEventosDetalhe(filtrados).map(linhaEvento).join('')
     || '<div class="ev-linha" style="color:var(--muted);">nenhum registro nesse dia.</div>';
   elEv.innerHTML = `
     <div class="sub" style="font-weight:700;font-size:12px;margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
