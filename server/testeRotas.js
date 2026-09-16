@@ -14557,9 +14557,18 @@ setTimeout(async () => {
       // o push: so sessao toca o celular do Master
       'só a sessão vira push; o serviço conectado nunca mais toca o celular':
         /if \(ehSessao && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
-      'a tela separa as duas linhas, e só a sessão é vermelha':
-        /ev\.tipo==='sessao-remota'/.test(html) && /🔓 Sessão remota/.test(html) && /ev-dot bad"><\/span><b>🔓 Sessão remota/.test(html)
-        && /<b>Serviço de acesso remoto ligado<\/b>/.test(html),
+      // presa ao HTML inline e ao rótulo em texto, esta asserção quebrou quando
+      // os eventos viraram cardEvento() - sem nenhum defeito real. O que
+      // importa não é a marcação: é a sessão sair em VERMELHO e o serviço
+      // conectado NÃO, pra a linha de verdade não se perder no meio.
+      'a tela separa as duas linhas, e só a sessão é vermelha': (() => {
+        const chamada = (tipo) => (html.match(new RegExp(`ev\\.tipo==='${tipo}'\\)\\{[\\s\\S]{0,400}?cardEvento\\('([a-z]+)'\\s*,\\s*'([^']*)'`)) || []);
+        const [, nivelSessao, rotuloSessao] = chamada('sessao-remota');
+        const [, nivelServico, rotuloServico] = chamada('acesso-remoto');
+        return nivelSessao === 'bad' && /Sessão remota/.test(rotuloSessao || '')
+          && !!nivelServico && nivelServico !== 'bad' && !!rotuloServico
+          && rotuloServico !== rotuloSessao;
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okSessaoRemota = !falhas.length;
