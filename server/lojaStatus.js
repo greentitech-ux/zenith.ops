@@ -2039,6 +2039,30 @@ const COMANDO_REINICIAR_ANYDESK = [
   '}',
 ].join('\n');
 
+// Serviço do TEF mostrado como "GSurfRSA Listener". A lista é fechada: não
+// aceitamos nome de serviço vindo da tela, pois isso transformaria a manutenção
+// em execução remota arbitrária. Só as máquinas escolhidas pelo Master recebem
+// este comando, pela mesma fila elevada usada pelo AnyDesk.
+const COMANDO_REINICIAR_GSURF_RSA = [
+  '$svc = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "GSurfRSA Listener" -or $_.DisplayName -eq "GSurfRSA Listener" }) | Select-Object -First 1',
+  'if (-not $svc) {',
+  '  "Serviço GSurfRSA Listener não foi encontrado nesta máquina."',
+  '} else {',
+  '  try {',
+  '    Restart-Service -InputObject $svc -Force -ErrorAction Stop',
+  '    Start-Sleep -Seconds 3',
+  '    $depois = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue',
+  '    "$($svc.Name): reiniciado · estado agora: $($depois.Status)"',
+  '  } catch {',
+  '    $msg = $_.Exception.Message',
+  '    if ($msg -match "abrir o servi" -or $msg -match "cannot open .* service" -or $msg -match "Access is denied" -or $msg -match "Acesso negado") {',
+  '      $msg = "o NOCZenith desta maquina nao esta como Administrador - reinstale pelo botao Copiar comando num PowerShell como Administrador"',
+  '    }',
+  '    "GSurfRSA Listener: FALHOU - $msg"',
+  '  }',
+  '}',
+].join('\n');
+
 // RESET DA ZEBRA POR ZPL, sem ir na loja. Pedido do Master: "o mesmo botao
 // do AnyDesk, mas que faz o reset da impressora Zebra pelo ZPL - o codigo
 // executaria de acordo com a impressora Zebra que esteja com a tag que foi
@@ -3574,7 +3598,7 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA,
   COMANDO_REDE_DESTRAVAR,
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,

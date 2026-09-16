@@ -12549,6 +12549,10 @@ setTimeout(async () => {
       'papel de parede que não gravou não é marcado como aplicado':
         /catch \{ Escrever-Log "Papel de parede: o Windows negou a gravacao[^"]*"; return \$false \}/.test(psPp)
         && /if \(-not \$Servico -and -not \$okPapel\) \{[^}]*return \}/.test(psPp),
+      'o serviço não marca a política da sessão Windows antes de aplicar a arte':
+        /politica-aplicada-servico\.txt/.test(psPp)
+        && /function Caminho-PoliticaAplicada/.test(psPp)
+        && /Set-Content -Path \(Caminho-PoliticaAplicada\) -Value \$versao/.test(psPp),
       'a tela oferece grupo + marca, e não só marca':
         /optgroup label="Grupo \+ marca"/.test(htmlPp) && /fd\.append\('rede', rede\)/.test(htmlPp),
       'a loja com marca recebe a arte da MARCA, não a do parque':
@@ -12574,7 +12578,7 @@ setTimeout(async () => {
       // só busca a política inteira quando o número muda.
       'o heartbeat leva a versão, e o agente interno reage a ela (antes só aplicava ao reiniciar)':
         typeof (await ls.heartbeat('PPDOM', 'PC1', { userAgent: 'NOCZenith/1.0' }, 'tokdom')).versaoAplicacao === 'string'
-        && /if \(\$null -ne \$resp\.versaoAplicacao -and "\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
+        && /if \(\$null -ne \$resp\.versaoAplicacao -and "v\$VersaoScript\|\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
         && /try \{ Sincronizar-Politica \}/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
@@ -12638,8 +12642,9 @@ setTimeout(async () => {
       'se o carimbo falhar, aplica a arte crua em vez de desistir':
         /return \$origem \}/.test(psPp) && /\$destino = Carimbar-NomeNaArte \$bruto \$destino/.test(psPp),
       'o agente compara a versão de aplicação, com queda pra política se o servidor for antigo':
-        /\$versao = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
-        && /\$versao = "\$\(\$cfg\.politicaVersao\)"/.test(psPp),
+        /\$versaoServidor = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
+        && /\$versaoServidor = "\$\(\$cfg\.politicaVersao\)"/.test(psPp)
+        && /\$versao = "v\$VersaoScript\|\$versaoServidor"/.test(psPp),
       // agente novo = 52 maquinas baixando de novo; sem subir a versao,
       // ninguem baixa e a mudanca toda fica so no servidor
       'a versão do vigia subiu junto (senão nenhuma máquina pega o script novo)':
@@ -14762,6 +14767,45 @@ setTimeout(async () => {
   } catch (e) { okAnydesk = false; console.log('  erro: ' + e.message); }
   if (!okAnydesk) ruins += 1;
   console.log(`${okAnydesk ? '✓' : '✗'} NOC: dá pra reiniciar só o AnyDesk, sem derrubar o caixa junto`);
+
+  // ------------------------------------------------------------------
+  // GSurfRSA Listener (TEF): o operador fica preso quando o serviço trava.
+  // A manutenção precisa atingir SOMENTE as máquinas escolhidas, nunca o
+  // parque inteiro e nunca um nome de serviço que veio livre do navegador.
+  let okGsurfRsa = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabG = { Authorization: 'Bearer ' + token };
+    const htmlG = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cmd = ls.COMANDO_REINICIAR_GSURF_RSA || '';
+    const srvG = await ls.cadastrarComputador('GSURFTESTE', 'PdvTef', 'interno');
+    await ls.heartbeat('GSURFTESTE', srvG.posto, { userAgent: 'NOCZenith/1.0' });
+    const alvo = [{ codigo: 'GSURFTESTE', posto: srvG.posto }];
+    const semSenha = await postarJson('/api/loja-status/manutencao/reiniciar', { alvos: alvo, tarefa: 'gsurfRsa' }, cabG);
+    const enviou = await postarJson('/api/loja-status/manutencao/reiniciar', {
+      alvos: alvo, tarefa: 'gsurfRsa', password: process.env.MASTER_PASSWORD,
+    }, cabG);
+    const resp = enviou.status === 200 ? JSON.parse(enviou.corpo) : {};
+    const doc = (await ls.listar('GSURFTESTE')).find((c) => c.posto === srvG.posto) || {};
+    const fila = doc.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${doc.comandoPendenteId}`) || {}) : {};
+    const conf = {
+      'o comando é fechado no servidor para o GSurfRSA Listener':
+        /GSurfRSA Listener/.test(cmd) && /Restart-Service/.test(cmd) && !/shutdown/i.test(cmd),
+      'serviço ausente devolve explicação clara': /não foi encontrado|nao foi encontrado/.test(cmd),
+      'continua exigindo senha do Master': semSenha.status === 401 || semSenha.status === 400,
+      'só a máquina escolhida recebe a tarefa TEF':
+        enviou.status === 200 && resp.tarefa === 'gsurfRsa' && resp.enfileirados === 1
+        && /GSurfRSA Listener/.test(fila.comando || '') && !/shutdown/i.test(fila.comando || ''),
+      'a tela tem confirmação e avisa que o computador não reinicia':
+        /manutEnviar\('gsurfRsa'\)/.test(htmlG) && /GSurfRSA Listener/.test(htmlG)
+        && /computador NÃO reinicia/.test(htmlG),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okGsurfRsa = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okGsurfRsa = false; console.log('  erro: ' + e.message); }
+  if (!okGsurfRsa) ruins += 1;
+  console.log(`${okGsurfRsa ? '✓' : '✗'} NOC: reinicia o GSurfRSA Listener só nas máquinas TEF selecionadas`);
 
   // ------------------------------------------------------------------
   // BUSCA NA JANELA DE MANUTENCAO. Pedido do Master: "filtro de pesquisa

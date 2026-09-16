@@ -820,7 +820,8 @@
     <div class="msg hidden" id="manut-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
-      <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
+       <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
+       <button type="button" class="btn-ghost" id="manut-gsurf-rsa" onclick="manutEnviar('gsurfRsa')" title="Reinicia só o serviço GSurfRSA Listener (TEF), sem reiniciar o computador. Use apenas nas máquinas selecionadas que apresentam o erro de automação/TEF.">💳 Reiniciar GSurfRSA</button>
       <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
       <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
       <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar('abortar')" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
@@ -2553,6 +2554,7 @@ function atualizarContagemManut(){
   document.getElementById('manut-confirmar').disabled = !n;
   document.getElementById('manut-abortar').disabled = !n;
   document.getElementById('manut-anydesk').disabled = !n;
+  document.getElementById('manut-gsurf-rsa').disabled = !n;
   document.getElementById('manut-zebra').disabled = !n;
   document.getElementById('manut-rede').disabled = !n;
   document.getElementById('manut-agendar').disabled = !n;
@@ -2672,6 +2674,7 @@ const MANUT_TAREFAS = {
   reiniciar: { botao: 'manut-confirmar', rotulo: 'Reinício' },
   abortar: { botao: 'manut-abortar', rotulo: 'Abort' },
   anydesk: { botao: 'manut-anydesk', rotulo: 'Reinício do AnyDesk' },
+  gsurfRsa: { botao: 'manut-gsurf-rsa', rotulo: 'Reinício do GSurfRSA Listener' },
   zebra: { botao: 'manut-zebra', rotulo: 'Reset das Zebras' },
   rede: { botao: 'manut-rede', rotulo: 'Destrave da rede' },
 };
@@ -2701,6 +2704,9 @@ async function manutEnviar(tarefa){
     // confirmacao mais leve, e dizendo o que NAO acontece: a duvida de quem
     // clica e se vai derrubar o caixa junto
     if(!confirm(`Reiniciar o serviço do AnyDesk em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO computador NÃO reinicia e ninguém é interrompido - só o acesso remoto cai por alguns segundos e volta.`)) return;
+  }
+  if(tarefa === 'gsurfRsa'){
+    if(!confirm(`Reiniciar o serviço GSurfRSA Listener (TEF) em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO computador NÃO reinicia. A operação só é enviada às máquinas selecionadas e pode interromper uma transação TEF em andamento por alguns segundos.`)) return;
   }
   const btn = document.getElementById(MANUT_TAREFAS[tarefa].botao);
   btn.disabled = true;
