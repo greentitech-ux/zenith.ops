@@ -9213,6 +9213,8 @@ app.post('/api/estacao/comandas', requireSection('estacao-salao'), async (req, r
 });
 app.patch('/api/estacao/comandas/:id/mesa', requireSection('estacao-salao'), async (req, res) => {
   try {
+    const existente = await estacaoComida.getComanda(req.params.id);
+    if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const c = await estacaoComida.definirMesa(req.params.id, (req.body || {}).mesa, req.user.email);
     broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
     res.json(c);
@@ -9220,6 +9222,8 @@ app.patch('/api/estacao/comandas/:id/mesa', requireSection('estacao-salao'), asy
 });
 app.post('/api/estacao/comandas/:id/itens', requireSection('estacao-salao'), async (req, res) => {
   try {
+    const existente = await estacaoComida.getComanda(req.params.id);
+    if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const { itemId, quantidade } = req.body || {};
     const c = await estacaoComida.lancarItem({ comandaId: req.params.id, itemId, quantidade, porEmail: req.user.email });
     broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
@@ -9228,6 +9232,8 @@ app.post('/api/estacao/comandas/:id/itens', requireSection('estacao-salao'), asy
 });
 app.delete('/api/estacao/comandas/:id/itens/:indice', requireSection('estacao-salao'), async (req, res) => {
   try {
+    const existente = await estacaoComida.getComanda(req.params.id);
+    if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const c = await estacaoComida.removerItem({ comandaId: req.params.id, indice: req.params.indice, nome: req.query.nome, porEmail: req.user.email });
     broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
     res.json(c);
@@ -9236,6 +9242,8 @@ app.delete('/api/estacao/comandas/:id/itens/:indice', requireSection('estacao-sa
 // cancelar é do caixa/gerente, não do salão: é a porta de sair sem pagar
 app.post('/api/estacao/comandas/:id/cancelar', requireSection('estacao-caixa'), async (req, res) => {
   try {
+    const existente = await estacaoComida.getComanda(req.params.id);
+    if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const c = await estacaoComida.cancelarComanda({ id: req.params.id, motivo: (req.body || {}).motivo, porEmail: req.user.email });
     broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
     res.json(c);

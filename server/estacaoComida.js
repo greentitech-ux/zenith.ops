@@ -270,6 +270,12 @@ async function garantirEspelho(unidade) {
 // inteiro (CLAUDE.md §3: uma escrita não pode custar a releitura de tudo)
 async function gravarEEspelhar(comanda) {
   await COMANDAS.doc(comanda.id).set(comanda, { merge: true });
+  return aplicarNoEspelho(comanda);
+}
+
+// Uma transação pode gravar pagamento e várias comandas de uma só vez. Depois
+// que ela confirma, atualizamos o espelho sem fazer uma segunda gravação.
+async function aplicarNoEspelho(comanda) {
   const mapa = await garantirEspelho(comanda.unidade);
   if (comanda.status === 'ABERTA') mapa.set(comanda.id, comanda);
   else mapa.delete(comanda.id);
@@ -322,10 +328,6 @@ async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, p
   if (!tipo) throw new Error('Escolha se a comanda é rodízio adulto ou criança.');
   // UMA aberta por número: sem isso, a 7541 entregue de novo à noite somaria
   // o consumo da pessoa que já foi embora
-  const jaAberta = await abertaDoNumero(unidade, n);
-  if (jaAberta) {
-    throw new Error(`A comanda ${n} já está aberta${jaAberta.mesa ? ` na mesa ${jaAberta.mesa}` : ''}. Feche no caixa antes de entregar esse cartão de novo.`);
-  }
   const data = hojeBrasiliaISO(agora);
   const precos = await getPrecos(unidade);
   // o turno vem do CAIXA (ver turnoVigente) - o relogio so opina se ninguem abriu
@@ -356,7 +358,17 @@ async function abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, p
     abertaPorEmail: porEmail || null,
     pagaEm: null, pagaPorEmail: null, caixa: null, pagamentoId: null,
   };
-  return gravarEEspelhar(comanda);
+  // A verificação e a criação precisam ser a MESMA operação. Sem transação,
+  // dois tablets podem ler "livre" e entregar o mesmo cartão duas vezes.
+  await db.runTransaction(async (tx) => {
+    const abertas = await tx.get(COMANDAS.where('unidade', '==', unidade).where('status', '==', 'ABERTA'));
+    const jaAberta = abertas.docs.map((d) => d.data()).find((c) => c.numero === n);
+    if (jaAberta) {
+      throw new Error(`A comanda ${n} já está aberta${jaAberta.mesa ? ` na mesa ${jaAberta.mesa}` : ''}. Feche no caixa antes de entregar esse cartão de novo.`);
+    }
+    tx.set(ref, comanda);
+  });
+  return aplicarNoEspelho(comanda);
 }
 
 // mudar de mesa é rotina (o grupo troca de lugar, ou o garçom errou o número)
@@ -592,17 +604,31 @@ async function receber({ unidade, unidadeNome, numeros, caixa, pagamentos, comSe
     em: new Date(agora).toISOString(),
     porEmail: porEmail || null,
   };
-  await ref.set(registro);
-  // as comandas viram PAGA depois do pagamento existir: se algo falhar no
-  // meio, sobra um pagamento sem comanda fechada (que o fechamento mostra)
-  // em vez de comanda fechada sem pagamento, que seria dinheiro sumido
-  for (const c of conta.comandas) {
-    await gravarEEspelhar({
-      ...c, totais: undefined, status: 'PAGA',
-      pagaEm: registro.em, pagaPorEmail: porEmail || null, caixa: registro.caixa, pagamentoId: registro.id,
+  // Pagamento e baixa das comandas são indivisíveis. A transação também
+  // impede cobrança dupla se o caixa der dois toques ou dois terminais
+  // tentarem receber a mesma comanda ao mesmo tempo.
+  const comandasPagas = await db.runTransaction(async (tx) => {
+    const atuais = [];
+    for (const c of conta.comandas) {
+      const snap = await tx.get(COMANDAS.doc(c.id));
+      if (!snap.exists || snap.data().status !== 'ABERTA') {
+        throw new Error(`A comanda ${c.numero} acabou de ser fechada. Atualize a conta antes de receber.`);
+      }
+      const atual = snap.data();
+      const totalAtual = totaisDaComanda(atual, conta.servicoPct, comServico).total;
+      if (Math.abs(totalAtual - c.totais.total) > 0.01) {
+        throw new Error(`A conta da comanda ${c.numero} mudou. Atualize antes de receber.`);
+      }
+      atuais.push({ ...atual, totais: totaisDaComanda(atual, conta.servicoPct, comServico) });
+    }
+    tx.set(ref, registro);
+    atuais.forEach((c) => tx.set(COMANDAS.doc(c.id), {
+      status: 'PAGA', pagaEm: registro.em, pagaPorEmail: porEmail || null, caixa: registro.caixa, pagamentoId: registro.id,
       totalCobrado: c.totais.total, servicoCobrado: c.totais.servico,
-    });
-  }
+    }, { merge: true }));
+    return atuais.map((c) => ({ ...c, totais: undefined, status: 'PAGA', pagaEm: registro.em, pagaPorEmail: porEmail || null, caixa: registro.caixa, pagamentoId: registro.id, totalCobrado: c.totais.total, servicoCobrado: c.totais.servico }));
+  });
+  await Promise.all(comandasPagas.map(aplicarNoEspelho));
   // baixa de estoque por bebida vendida (rastreabilidade - mesma ideia do
   // balcão do Saltiverso). Falha aqui NÃO desfaz o pagamento: o dinheiro já
   // entrou, e estoque se reconcilia na contagem.

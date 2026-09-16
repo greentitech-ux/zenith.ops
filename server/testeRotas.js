@@ -13237,7 +13237,9 @@ setTimeout(async () => {
       // barrar ANTES de ler o Firestore: comanda sem mesa custa 0 leitura (§3)
       'a mesa e checada antes de qualquer leitura (numero repetido, tabela de preco)':
         /const mesaN = sanitizarMesa\(mesa, \{ obrigatoria: true \}\);[\s\S]{0,200}?const n = sanitizarNumero\(numero\);/.test(modM)
-        && /const mesaN = sanitizarMesa[\s\S]*?await abertaDoNumero/.test(modM),
+        // a checagem agora fica dentro da transação: assim dois tablets não
+        // conseguem abrir o mesmo cartão no mesmo instante.
+        && /await db\.runTransaction\(async \(tx\) => \{[\s\S]*?COMANDAS\.where\('unidade', '==', unidade\)\.where\('status', '==', 'ABERTA'\)/.test(modM),
       'com mesa, a comanda abre e guarda o numero da mesa': !!comMesa && comMesa.mesa === 7,
       'comanda antiga, sem mesa no banco, continua aparecendo (e consumo a pagar)':
         salaoLegado.semMesa.length === 1 && salaoLegado.semMesa[0].numero === 99,
