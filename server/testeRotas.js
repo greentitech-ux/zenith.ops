@@ -12549,6 +12549,10 @@ setTimeout(async () => {
       'papel de parede que não gravou não é marcado como aplicado':
         /catch \{ Escrever-Log "Papel de parede: o Windows negou a gravacao[^"]*"; return \$false \}/.test(psPp)
         && /if \(-not \$Servico -and -not \$okPapel\) \{[^}]*return \}/.test(psPp),
+      'o serviço não marca a política da sessão Windows antes de aplicar a arte':
+        /politica-aplicada-servico\.txt/.test(psPp)
+        && /function Caminho-PoliticaAplicada/.test(psPp)
+        && /Set-Content -Path \(Caminho-PoliticaAplicada\) -Value \$versao/.test(psPp),
       'a tela oferece grupo + marca, e não só marca':
         /optgroup label="Grupo \+ marca"/.test(htmlPp) && /fd\.append\('rede', rede\)/.test(htmlPp),
       'a loja com marca recebe a arte da MARCA, não a do parque':
@@ -12574,7 +12578,7 @@ setTimeout(async () => {
       // só busca a política inteira quando o número muda.
       'o heartbeat leva a versão, e o agente interno reage a ela (antes só aplicava ao reiniciar)':
         typeof (await ls.heartbeat('PPDOM', 'PC1', { userAgent: 'NOCZenith/1.0' }, 'tokdom')).versaoAplicacao === 'string'
-        && /if \(\$null -ne \$resp\.versaoAplicacao -and "\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
+        && /if \(\$null -ne \$resp\.versaoAplicacao -and "v\$VersaoScript\|\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
         && /try \{ Sincronizar-Politica \}/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
@@ -12638,8 +12642,9 @@ setTimeout(async () => {
       'se o carimbo falhar, aplica a arte crua em vez de desistir':
         /return \$origem \}/.test(psPp) && /\$destino = Carimbar-NomeNaArte \$bruto \$destino/.test(psPp),
       'o agente compara a versão de aplicação, com queda pra política se o servidor for antigo':
-        /\$versao = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
-        && /\$versao = "\$\(\$cfg\.politicaVersao\)"/.test(psPp),
+        /\$versaoServidor = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
+        && /\$versaoServidor = "\$\(\$cfg\.politicaVersao\)"/.test(psPp)
+        && /\$versao = "v\$VersaoScript\|\$versaoServidor"/.test(psPp),
       // agente novo = 52 maquinas baixando de novo; sem subir a versao,
       // ninguem baixa e a mudanca toda fica so no servidor
       'a versão do vigia subiu junto (senão nenhuma máquina pega o script novo)':
