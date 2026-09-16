@@ -520,6 +520,19 @@
   // (username, código, chave Pix, MAC, IP), e os campos de usuário de 4
   // letras do abastecimento, que trazem lowercase no style. Campo de busca
   // também fica de fora: filtro não é dado preenchido.
+  //
+  // Nome de PESSOA, por outro lado, é padrão operacional do NoPulso: aparece
+  // em responsável, assinatura, cliente, colaborador e relatórios. A pessoa
+  // não deve ter que lembrar de usar Caps Lock em cada tela. Não inclui nome
+  // de empresa, unidade, produto ou plataforma — esses têm grafia própria.
+  function campoNomeDePessoa(el) {
+    if (!el || !(el instanceof HTMLElement)) return false;
+    var rotulo = '';
+    try { rotulo = (el.closest('label') || {}).textContent || ''; } catch (e) { /* sem label */ }
+    var pista = [el.id || '', el.getAttribute('name') || '', el.getAttribute('placeholder') || '', el.getAttribute('aria-label') || '', rotulo].join(' ').toLocaleLowerCase('pt-BR');
+    if (/usuario|username|login|email|senha|busca|filtro|pesquisa|pix|cpf|cnpj|ip|mac|codigo|c[oó]digo|fantasia|raz[aã]o|empresa|unidade|marca|produto|item|plataforma|arquivo/.test(pista)) return false;
+    return /\bnome\b|respons[aá]vel|assinante|cliente|colaborador|depositante|titular|favorecido|gerente|m[aã]e/.test(pista);
+  }
   function campoSobeValor(el) {
     if (!el || !(el instanceof HTMLElement)) return false;
     var tag = el.tagName;
@@ -530,7 +543,7 @@
     } else return false;
     if (el.readOnly || el.disabled) return false;
     if (/busca|filtro|pesquisa/i.test(el.id || '')) return false;
-    return getComputedStyle(el).textTransform === 'uppercase';
+    return getComputedStyle(el).textTransform === 'uppercase' || campoNomeDePessoa(el);
   }
   function subirValor(el) {
     var v = el.value;
@@ -564,6 +577,19 @@
   document.addEventListener('change', function (e) {
     if (campoSobeValor(e.target)) subirValor(e.target);
   }, true);
+  // Valores já preenchidos por busca de CPF, rascunho ou edição também seguem
+  // a regra. Sem isso o campo só ficaria correto depois de a pessoa digitar a
+  // próxima letra, que é precisamente o caso de "Jane" do formulário.
+  function normalizarNomesDaTela() {
+    document.querySelectorAll('input[type="text"], textarea').forEach(function (el) {
+      if (campoNomeDePessoa(el)) {
+        el.style.textTransform = 'uppercase';
+        subirValor(el);
+      }
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', normalizarNomesDaTela, { once: true });
+  else normalizarNomesDaTela();
 
   // pra quem monta texto em JS (título de PDF na tela, alert, título da aba)
   window.maiusc = function (t) {

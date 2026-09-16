@@ -262,6 +262,7 @@
         <a class="back" href="/lancamento.html">➕ Adicionar Fechamento</a>
         <button class="back hidden" id="btn-sincronizar-planilhas" onclick="sincronizarPlanilhas(false)" style="cursor:pointer;">🔄 Sincronizar agora</button>
         <button class="back hidden" id="btn-sincronizar-completa" onclick="sincronizarPlanilhas(true)" title="Relê a planilha inteira do zero (mais lento) - use depois de reorganizar/limpar abas na planilha, pra descartar linhas antigas que a leitura incremental não percebe que sumiram" style="cursor:pointer;">🔁 Recarregar tudo</button>
+        <button class="back hidden" id="btn-pausa-sync" onclick="togglePausaSync()" title="Congela a leitura das planilhas até você retomar - use quando for mexer na planilha sem o NoPulso relendo por cima. Não apaga nada do que já foi lido." style="cursor:pointer;">⏸️ Pausar sincronização</button>
         <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
         <div class="nav-divider"></div>
         <button class="btn-notif btn-sair" onclick="logout()" title="Sair" style="cursor:pointer;">🚪</button>
@@ -783,13 +784,17 @@ function escapeHtml(s){ const d=document.createElement('div'); d.textContent = s
 async function carregarStatusSincronizacao(){
   try{
     const status = await fetch('/api/fechamentos/sincronizacao').then(r=>r.json());
-    if(status.ultimoErro){
+    aplicarEstadoPausa(status);
+    if(status.pausada){
+      SYNC_INFO_SUFIXO = ' · ⏸️ sincronização pausada';
+      SYNC_INFO_TITLE = `Sincronização pausada${status.pausadaPor?' por '+status.pausadaPor:''}${status.pausadaEm?' · '+new Date(status.pausadaEm).toLocaleString('pt-BR',{timeZone:FUSO_BR}):''}. A leitura das planilhas fica congelada até um Master retomar.`;
+    } else if(status.ultimoErro){
       SYNC_INFO_SUFIXO = ' · ⚠️ planilhas não sincronizadas';
       SYNC_INFO_TITLE = `Falha na última tentativa de sincronização: ${status.ultimoErro}`;
     } else if(status.ultimaEm){
       const dt = new Date(status.ultimaEm);
       SYNC_INFO_SUFIXO = ' · ✅ planilhas sincronizadas';
-      SYNC_INFO_TITLE = `Última sincronização automática: ${dt.toLocaleString('pt-BR',{timeZone:FUSO_BR})}`;
+      SYNC_INFO_TITLE = `Última sincronização: ${dt.toLocaleString('pt-BR',{timeZone:FUSO_BR})}`;
     } else {
       SYNC_INFO_SUFIXO = ' · aguardando 1ª sincronização';
       SYNC_INFO_TITLE = '';
@@ -798,6 +803,34 @@ async function carregarStatusSincronizacao(){
     SYNC_INFO_SUFIXO = '';
     SYNC_INFO_TITLE = '';
   }
+}
+
+// reflete a pausa nos botões: o de pausar vira "retomar", e os de sincronizar
+// ficam travados enquanto está pausado (o servidor recusa de qualquer forma)
+function aplicarEstadoPausa(status){
+  const btn = document.getElementById('btn-pausa-sync');
+  if(btn){
+    btn.textContent = status.pausada ? '▶️ Retomar sincronização' : '⏸️ Pausar sincronização';
+    btn.classList.toggle('ok', !!status.pausada);
+  }
+  ['btn-sincronizar-planilhas','btn-sincronizar-completa'].forEach(id=>{
+    const b = document.getElementById(id); if(b) b.disabled = !!status.pausada;
+  });
+}
+
+async function togglePausaSync(){
+  const btn = document.getElementById('btn-pausa-sync');
+  const vaiPausar = !/Retomar/.test(btn.textContent);
+  if(vaiPausar && !confirm('Pausar a sincronização das planilhas? A leitura fica congelada (nada é apagado) até você retomar. Serve pra mexer na planilha sem o NoPulso reler por cima.')) return;
+  btn.disabled = true;
+  try{
+    const resp = await fetch('/api/fechamentos/sincronizacao/pausa', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ pausada: vaiPausar }) });
+    const status = await resp.json();
+    if(!resp.ok) throw new Error(status.error || 'Não consegui mudar a pausa.');
+    aplicarEstadoPausa(status);
+    await carregar(); // re-renderiza o cabeçalho (#sync-info) com o novo estado
+  }catch(err){ alert('Não foi possível: ' + err.message); }
+  finally{ btn.disabled = false; }
 }
 
 
@@ -3580,6 +3613,7 @@ async function boot(){
 
   document.getElementById('btn-sincronizar-planilhas').classList.toggle('hidden', !isMaster);
   document.getElementById('btn-sincronizar-completa').classList.toggle('hidden', !isMaster);
+  document.getElementById('btn-pausa-sync').classList.toggle('hidden', !isMaster);
   document.getElementById('import-bravo-panel').classList.toggle('hidden', !isMaster);
 
   if(!secoes.includes('fechamentos')){

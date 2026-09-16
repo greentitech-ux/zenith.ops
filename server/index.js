@@ -1765,6 +1765,9 @@ app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (r
 // grupo/marca e o agente NAO carimba por cima (ver o header acima). Master-only.
 app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
+    // trava de segurança: papel de parede entra na tela de 52 máquinas, então
+    // confirma a senha do Master antes (o campo vai junto no multipart)
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
     const { codigo, posto } = req.params;
     const arte = { caminho: null, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() };
@@ -1777,6 +1780,7 @@ app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', aut
 });
 app.delete('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     const r = await lojaStatus.removerArteDaMaquina(req.params.codigo, req.params.posto);
     res.json(r);
   } catch (err) {
@@ -1816,9 +1820,11 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     // marcada na ficha: sai a versao pra Windows antigo (Server 2012 R2) - e a
     // autoatualizacao dessa maquina continua recebendo a versao certa
     const windowsAntigo = await lojaStatus.windowsAntigoDoComputador(codigo, posto);
-    // nome canonico da loja pro carimbo do papel de parede (ver CARIMBO.md)
+    // nome canonico da loja + nome do computador (o que o Master cadastrou no
+    // NOC, ex "DOM-CR-ATM01") pro carimbo do papel de parede (ver CARIMBO.md)
     const unidadeNome = nomeCanonicoUnidade(codigo);
-    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome });
+    const maquinaNome = await lojaStatus.nomeDoComputador(codigo, posto);
+    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome, maquinaNome });
     res.type('text/plain').send(conteudo);
   } catch (err) {
     res.status(400).type('text/plain').send('# Erro ao gerar o script: ' + err.message);
@@ -4905,6 +4911,7 @@ const EXECUTORES_QA = {
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
+  'manutencao.reiniciarGsurfRsa': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_GSURF_RSA, { origem: 'manutencao-gsurf-rsa' }),
   'manutencao.destravarRede': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REDE_DESTRAVAR, { origem: 'manutencao-rede' }),
   'formularios.removerAssinatura': (p) => formularios.removerAssinatura(p.id, p.chave, p.porEmail),
   'manutencao.resetZebra': (p) => lojaStatus.enfileirarComandoEmAlvos(
@@ -5155,7 +5162,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'zebra', 'rede'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'zebra', 'rede'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
@@ -5163,6 +5170,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       // caixa, ao contrario de reiniciar a maquina inteira por causa de um
       // servico so
       anydesk: { acao: 'manutencao.reiniciarAnydesk', verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
+      gsurfRsa: { acao: 'manutencao.reiniciarGsurfRsa', verbo: 'Reiniciar o GSurfRSA Listener de', comando: lojaStatus.COMANDO_REINICIAR_GSURF_RSA, origem: 'manutencao-gsurf-rsa' },
       // O comando aqui e uma FUNCAO porque muda de unidade pra unidade: leva
       // os IPs das Zebras DAQUELA loja. Os IPs saem de impressorasPraSondar,
       // que so devolve o que o Master marcou como impressora Zebra - e a
@@ -5197,6 +5205,65 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       // interrompe ninguém, então não há o que abortar.
       abortavelPorSegundos: tarefa === 'reiniciar' ? 120 : 0,
     });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- PROGRAMAS REMOTOS ----------
+// Instalação e remoção são deliberadamente mais restritas do que as demais
+// ações do NOC: não existe campo de comando livre. Instalar aceita apenas o ID
+// de um catálogo que o Master mantém; remover aceita apenas um nome que a
+// própria máquina informou na última varredura. Ambas pedem a senha novamente
+// e exigem o heartbeat SYSTEM do agente.
+app.get('/api/loja-status/programas/catalogo', auth.requireMaster, async (req, res) => {
+  try {
+    res.json({ catalogo: await lojaStatus.listarCatalogoProgramas() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/loja-status/programas/catalogo', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const catalogo = await lojaStatus.salvarCatalogoProgramas(req.body?.catalogo);
+    console.log(`[NOC] ${req.user.email} atualizou o catálogo de programas (${catalogo.length} itens)`);
+    res.json({ catalogo });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/loja-status/:codigo/computadores/:posto/programas/instalar', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const item = (await lojaStatus.listarCatalogoProgramas()).find((x) => x.id === String(req.body?.id || ''));
+    if (!item) return res.status(400).json({ error: 'Programa não encontrado no catálogo aprovado.' });
+    const comando = lojaStatus.comandoInstalarCatalogo(item);
+    const registro = await lojaStatus.enfileirarComando(req.params.codigo, req.params.posto, comando, {
+      origem: `programas-instalar:${item.id}`, requerAdmin: true,
+    });
+    console.log(`[NOC] ${req.user.email} pediu instalação de ${item.wingetId} em ${req.params.codigo}/${req.params.posto}`);
+    res.json({ ok: true, comandoId: registro.id, mensagem: `${item.nome} foi colocado na fila do NOCZenith elevado.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/loja-status/:codigo/computadores/:posto/programas/remover', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const nome = String(req.body?.nome || '').trim();
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador) return res.status(404).json({ error: 'Computador não encontrado.' });
+    if (!(computador.programas || []).includes(nome)) return res.status(400).json({ error: 'Só é possível remover um programa que apareceu na última varredura desta máquina.' });
+    if (!lojaStatus.programaPodeSerRemovido(nome)) return res.status(400).json({ error: 'Esse componente é protegido e não pode ser removido remotamente pelo NOC.' });
+    const registro = await lojaStatus.enfileirarComando(req.params.codigo, req.params.posto, lojaStatus.comandoRemoverPrograma(nome), {
+      origem: 'programas-remover', requerAdmin: true,
+    });
+    console.log(`[NOC] ${req.user.email} pediu remoção de ${nome} em ${req.params.codigo}/${req.params.posto}`);
+    res.json({ ok: true, comandoId: registro.id, mensagem: `${nome} foi colocado na fila do NOCZenith elevado.` });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5251,6 +5318,9 @@ app.get('/api/loja-status/config', auth.requireMaster, async (req, res) => {
 // POLITICA DA MAQUINA (papel de parede, USB, instalacao) - so o Master liga
 app.put('/api/loja-status/:codigo/computadores/:posto/politica', auth.requireMaster, async (req, res) => {
   try {
+    // trava de segurança: salvar política muda o comportamento da máquina (USB,
+    // instalação, papel de parede) - confirma a senha do Master antes
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     const politica = await lojaStatus.definirPolitica(req.params.codigo, req.params.posto, req.body);
     broadcast('loja-status-atualizado', { codigo: req.params.codigo, posto: req.params.posto });
     res.json(politica);
@@ -5279,6 +5349,42 @@ app.post('/api/loja-status/:codigo/computadores/:posto/dispositivos/:mac/ping', 
     ].join('\n');
     await lojaStatus.enfileirarComando(computador.codigo, computador.posto, comando, { origem: 'noc-ping-dispositivo' });
     res.json({ ok: true, ip, mac, mensagem: `Ping de ${ip} enfileirado. O resultado aparecerá no último comando desta máquina.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Diagnóstico manual de rede: o Master informa um IPv4 PRIVADO e o NOCZenith
+// da máquina escolhida faz somente ping. Não é um terminal remoto: IP público,
+// hostname, porta, PowerShell ou qualquer outro comando são recusados.
+function ipv4PrivadoValido(valor) {
+  const partes = String(valor || '').trim().split('.');
+  if (partes.length !== 4 || !partes.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)) return false;
+  const [a, b] = partes.map(Number);
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+app.post('/api/loja-status/:codigo/computadores/:posto/diagnostico/ping', auth.requireMaster, async (req, res) => {
+  try {
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador || computador.tipo !== 'interno') return res.status(404).json({ error: 'Computador interno com NOCZenith não encontrado.' });
+    const ip = String(req.body?.ip || '').trim();
+    if (!ipv4PrivadoValido(ip)) return res.status(400).json({ error: 'Informe um IPv4 privado válido (10.x.x.x, 172.16–31.x.x ou 192.168.x.x).' });
+    const comando = [
+      `$r = Test-Connection -ComputerName '${ip}' -Count 3 -ErrorAction SilentlyContinue`,
+      `if ($r) { "PING OK · ${ip} · $([Math]::Round((($r | Measure-Object ResponseTime -Average).Average), 0)) ms · $($r.Count)/3 respostas" } else { "PING FALHOU · ${ip} · sem resposta" }`,
+    ].join('\n');
+    const registro = await lojaStatus.enfileirarComando(computador.codigo, computador.posto, comando, { origem: 'noc-diagnostico-ping' });
+    console.log(`[NOC] ${req.user.email} pediu ping de ${computador.codigo}/${computador.posto} para ${ip}`);
+    res.json({ ok: true, comandoId: registro.id, ip, mensagem: `Ping para ${ip} enviado à máquina de origem.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const comando = await lojaStatus.detalharComando(req.params.id);
+    if (!comando) return res.status(404).json({ error: 'Diagnóstico não encontrado.' });
+    res.json(comando);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5318,19 +5424,50 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
       label: unidadesExtras.MARCAS_LABEL[id] || id,
       ...arte(id),
     })),
-    // uma linha por GRUPO cadastrado x marca. Grupo novo aparece aqui sozinho,
-    // no dia em que o Master cadastrar a empresa - sem deploy.
-    combinacoes: (await empresas.listAtivas().catch(() => [])).flatMap((e) => unidadesExtras.MARCAS_VALIDAS.map((m) => ({
-      rede: e.id,
-      marca: m,
-      label: `${e.nome} · ${unidadesExtras.MARCAS_LABEL[m] || m}`,
-      ...arte(lojaStatus.chaveArte(e.id, m)),
-    }))),
+    // uma linha por GRUPO x marca que a empresa REALMENTE tem (Arcfood so opera
+    // Domino's - nao faz sentido oferecer Spoleto/Milky Moo/Sao Braz pra ela).
+    // As marcas saem das unidades da empresa (perfil.marca). Empresa sem
+    // nenhuma unidade marcada cai em TODAS, pra empresa nova nao ficar sem
+    // opcao ate o Master marcar as unidades.
+    combinacoes: await (async () => {
+      const linhas = [];
+      for (const e of (await empresas.listAtivas().catch(() => []))) {
+        const set = new Set();
+        for (const u of await empresas.unidadesDaEmpresa(e.id).catch(() => [])) {
+          const perf = await unidadesExtras.perfil(u).catch(() => null);
+          if (perf && perf.marca && unidadesExtras.MARCAS_VALIDAS.includes(perf.marca)) set.add(perf.marca);
+        }
+        const marcas = set.size ? [...set] : unidadesExtras.MARCAS_VALIDAS;
+        for (const m of marcas) {
+          linhas.push({
+            rede: e.id, marca: m,
+            label: `${e.nome} · ${unidadesExtras.MARCAS_LABEL[m] || m}`,
+            ...arte(lojaStatus.chaveArte(e.id, m)),
+          });
+        }
+      }
+      return linhas;
+    })(),
   });
+});
+
+// "por que não subiu em todos?": estado por máquina (ligado? tem arte? online?
+// versão do agente?), computado só quando o Master abre o painel do parque.
+// Nome de um segmento só, pelo mesmo motivo do -marcas (não colidir com as
+// rotas /api/loja-status/:codigo/...).
+app.get('/api/loja-status/papel-de-parede-diagnostico', auth.requireMaster, async (req, res) => {
+  try {
+    res.json({ maquinas: await lojaStatus.diagnosticoPapelDeParede() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
+    // trava de segurança: a arte do parque cai em todas as máquinas ligadas -
+    // confirma a senha do Master antes (o campo vai junto no multipart)
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
     // marca e rede vem no MESMO form da imagem (campos de texto do multipart),
     // entao so existem depois do multer - nao da pra ler antes do upload
@@ -5784,9 +5921,44 @@ app.get('/api/relatorios/:nome', auth.requireMaster, async (req, res) => {
 // sincronizarPlanilhasFechamento roda com sucesso (1x no boot; depois so
 // quando o Master aciona manualmente - sem sincronizacao automatica).
 let fechamentosData = require('./fechamentos-snapshot.json');
-let statusSincronizacaoPlanilhas = { ultimaEm: null, ultimoErro: null, sincronizando: false };
+let statusSincronizacaoPlanilhas = { ultimaEm: null, ultimoErro: null, sincronizando: false, pausada: false, pausadaPor: null, pausadaEm: null };
+
+// PAUSA DA SINCRONIZACAO (pedido do Master): uma trava pra ele congelar a
+// leitura das planilhas quando quiser mexer nelas sem o NoPulso relendo por
+// cima. So o Master liga/desliga (via botao). Fica num doc do Firestore pra
+// sobreviver a reinicio - senao o boot voltaria a sincronizar e a pausa se
+// perderia calada. A leitura e' rara (boot + clique), entao o custo e' nulo.
+const SYNC_PAUSA_DOC = db.collection('appConfig').doc('fechamentosSync');
+let pausaSyncCarregada = false;
+async function carregarPausaSync() {
+  if (pausaSyncCarregada) return;
+  try {
+    const snap = await SYNC_PAUSA_DOC.get();
+    const d = snap.exists ? (snap.data() || {}) : {};
+    statusSincronizacaoPlanilhas.pausada = !!d.pausada;
+    statusSincronizacaoPlanilhas.pausadaPor = d.pausadaPor || null;
+    statusSincronizacaoPlanilhas.pausadaEm = d.pausadaEm || null;
+    pausaSyncCarregada = true;
+  } catch (e) { /* Firestore fora do ar: assume nao-pausada, tenta de novo depois */ }
+}
+async function definirPausaSync(pausada, porEmail) {
+  const patch = {
+    pausada: !!pausada,
+    pausadaPor: pausada ? (porEmail || null) : null,
+    pausadaEm: pausada ? new Date().toISOString() : null,
+  };
+  await SYNC_PAUSA_DOC.set(patch, { merge: true });
+  Object.assign(statusSincronizacaoPlanilhas, patch);
+  pausaSyncCarregada = true;
+  return patch;
+}
 
 async function sincronizarPlanilhasFechamento({ completa = false } = {}) {
+  await carregarPausaSync();
+  // pausada: nao le a planilha (nem no boot, nem no botao). O status volta com
+  // pulou:'pausada' e sem erro (pausa nao e' falha) pra tela avisar em vez de
+  // parecer que sincronizou - e pra a rota nao responder 502 por erro velho.
+  if (statusSincronizacaoPlanilhas.pausada) return { ...statusSincronizacaoPlanilhas, ultimoErro: null, pulou: 'pausada' };
   if (statusSincronizacaoPlanilhas.sincronizando) return statusSincronizacaoPlanilhas;
   statusSincronizacaoPlanilhas.sincronizando = true;
   try {
@@ -6220,6 +6392,18 @@ app.post('/api/fechamentos/sincronizar-planilhas', auth.requireMaster, async (re
   const status = await sincronizarPlanilhasFechamento({ completa: req.body?.completa === true });
   if (status.ultimoErro) return res.status(502).json(status);
   res.json(status);
+});
+
+// Pausar/retomar a sincronização das planilhas - só o Master, pela tela (é a
+// trava pra ele congelar a leitura enquanto mexe na planilha). Pausar não toca
+// nos dados já lidos; só impede a próxima leitura até ele retomar.
+app.post('/api/fechamentos/sincronizacao/pausa', auth.requireMaster, async (req, res) => {
+  try {
+    await definirPausaSync(req.body?.pausada === true, req.user.email);
+    res.json(statusSincronizacaoPlanilhas);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // KPI's extras tipo "arquivo" (ver grupos.js) mandam o arquivo com fieldname

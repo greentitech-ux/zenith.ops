@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 67;
+const VERSAO_VIGIA = 70;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -106,7 +106,7 @@ function adaptarParaWindowsAntigo(texto) {
   return out;
 }
 
-function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome, maquinaNome }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
   // segredo desse computador (ver lojaStatus.js) - vai assado no script e
@@ -127,6 +127,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   // tem ", $ nem crase (fica segura nas aspas duplas por conta propria).
   const codigoTextoPS = String(codigo).replace(/[`"$\r\n]/g, '');
   const unidadeNomePS = String(unidadeNome || codigo).replace(/[`"$\r\n]/g, '');
+  // nome do computador no carimbo: o que o Master cadastrou no NOC ("Caixa 1",
+  // "DOM-CR-ATM01"), nao o posto (id interno). Mesma limpeza do nome da loja -
+  // tira crase/aspas/$/quebra que quebrariam a string PowerShell.
+  const maquinaNomePS = String(maquinaNome || posto).replace(/[`"$\r\n]/g, '');
   const urlMonitorar = `${APP_BASE_URL}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlReportarIp = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
   const urlHeartbeat = `${APP_BASE_URL}/api/loja-status/heartbeat`;
@@ -338,8 +342,12 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // MAQUINA. Nome da loja vem canonico do servidor (nomeCanonicoUnidade);
     // nome da maquina e o posto (ATM01, Makeline, Dispatch...).
     '$NomeLojaArte = "' + unidadeNomePS + '"',
-    '$NomeMaquinaArte = "' + posto + '"',
-    '$CaminhoPolitica = Join-Path (Split-Path -Parent $PSCommandPath) "politica-aplicada.txt"',
+    '$NomeMaquinaArte = "' + maquinaNomePS + '"',
+    // O serviço roda como SYSTEM e não consegue alterar o papel de parede da
+    // sessão interativa. Não pode, portanto, compartilhar o mesmo marcador:
+    // ele marcaria a política antes de o usuário aplicar a arte.
+    '$CaminhoPoliticaLogin = Join-Path (Split-Path -Parent $PSCommandPath) "politica-aplicada.txt"',
+    '$CaminhoPoliticaServico = Join-Path (Split-Path -Parent $PSCommandPath) "politica-aplicada-servico.txt"',
     'function Marcar-UiAtiva {',
     '  try { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() | Set-Content -Path $CaminhoFlagUi -Force } catch {}',
     '}',
@@ -1714,7 +1722,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  try {',
     '    if ($ligado) {',
     '      Set-ItemProperty -Path $chave -Name Wallpaper -Value $destino -ErrorAction Stop',
-    '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "10" -ErrorAction Stop',
+    // 10 (Preencher) corta as laterais em monitor 4:3/quase quadrado, como no
+    // PDV da foto. 6 (Ajustar/Fit) preserva toda a arte, logos e identificação.
+    '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "6" -ErrorAction Stop',
     '      Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
     '      Set-Content -Path $marca -Value (Get-Date).ToString() -Force -ErrorAction SilentlyContinue',
     '    } else {',
@@ -1821,9 +1831,15 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# versao que ESTA maquina ja aplicou. O heartbeat devolve a versao atual;\n'
     + '# so quando os dois numeros diferem e que vale buscar a politica inteira -\n'
     + '# consultar de tempos em tempos custaria milhares de leituras por dia.',
+    'function Caminho-PoliticaAplicada {',
+    '  if ($Servico) { return $CaminhoPoliticaServico }',
+    '  return $CaminhoPoliticaLogin',
+    '}',
+    '',
     'function Versao-PoliticaAplicada {',
-    '  if (-not (Test-Path $CaminhoPolitica)) { return "" }',
-    '  try { return (Get-Content $CaminhoPolitica -First 1).Trim() } catch { return "" }',
+    '  $arquivo = Caminho-PoliticaAplicada',
+    '  if (-not (Test-Path $arquivo)) { return "" }',
+    '  try { return (Get-Content $arquivo -First 1).Trim() } catch { return "" }',
     '}',
     '',
     'function Sincronizar-Politica {',
@@ -1835,8 +1851,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # so a imagem do papel de parede muda - antes, arte nova nao chegava em',
     '    # maquina nenhuma ate alguem mexer numa trava da politica. Servidor',
     '    # antigo nao manda o campo: cai no politicaVersao, como era.',
-    '    $versao = "$($cfg.versaoAplicacao)"',
-    '    if (-not $versao -or $versao -eq "") { $versao = "$($cfg.politicaVersao)" }',
+    '    $versaoServidor = "$($cfg.versaoAplicacao)"',
+    '    if (-not $versaoServidor -or $versaoServidor -eq "") { $versaoServidor = "$($cfg.politicaVersao)" }',
+    // A versão do agente faz este conserto tentar uma vez mesmo quando a
+    // política e a imagem já existiam antes da atualização.
+    '    $versao = "v$VersaoScript|$versaoServidor"',
     '    if ((Versao-PoliticaAplicada) -eq $versao) { return }',
     '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
@@ -1849,7 +1868,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // como aplicada: a versao ficaria carimbada e a maquina nunca mais tentaria
     // - a loja ficaria pra sempre sem o papel de parede, calada.
     '    if (-not $Servico -and -not $okPapel) { Escrever-Log "Politica: papel de parede nao aplicou - tentando de novo na proxima mudanca."; return }',
-    '    Set-Content -Path $CaminhoPolitica -Value $versao -Force',
+    '    Set-Content -Path (Caminho-PoliticaAplicada) -Value $versao -Force',
     '    Escrever-Log "Politica versao $versao aplicada."',
     '  } catch { Escrever-Log "Falha ao sincronizar a politica: $($_.Exception.Message)" }',
     '}',
@@ -2349,7 +2368,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // sai de um arquivo ao lado do script. So quando os dois diferem e que o
     // agente busca a politica inteira - 1 leitura por mudanca REAL, em vez de
     // uma consulta a cada volta do laco.
-    '      if ($null -ne $resp.versaoAplicacao -and "$($resp.versaoAplicacao)" -ne (Versao-PoliticaAplicada)) {',
+    '      if ($null -ne $resp.versaoAplicacao -and "v$VersaoScript|$($resp.versaoAplicacao)" -ne (Versao-PoliticaAplicada)) {',
     '        try { Sincronizar-Politica } catch { Escrever-Log "Politica nao sincronizou: $($_.Exception.Message)" }',
     '      }',
     '      if ($resp.comandoPendente) { Executar-ComandoPendente $resp.comandoPendente }',

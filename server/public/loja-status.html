@@ -281,12 +281,13 @@
   .equip-tile-ip{font-family:var(--mono);font-size:10.5px;color:var(--text);margin-top:4px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85;}
   .equip-tile-ip:hover{opacity:1;color:var(--accent);}
   .equip-tile-ip-copy{opacity:.6;font-size:9.5px;}
-  .ev-linha{display:flex;align-items:center;gap:7px;font-size:11.5px;padding:3px 0;font-family:var(--mono);color:var(--muted);border-bottom:1px solid rgba(255,255,255,.04);}
-  .ev-linha b{color:var(--text);font-weight:600;}
-  .ev-dot{width:7px;height:7px;border-radius:50%;flex:none;}
+  .ev-linha{display:flex;align-items:flex-start;gap:9px;font-size:11.5px;padding:9px 7px;font-family:var(--mono);color:var(--muted);border:1px solid transparent;border-bottom-color:rgba(255,255,255,.06);}
+  .ev-linha:hover{background:var(--panel2);border-color:var(--line);border-radius:8px;}.ev-linha b{color:var(--text);font-weight:700;}
+  .ev-dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:5px;}
   .ev-dot.ok{background:var(--ok);}
   .ev-dot.bad{background:var(--bad);}
   .ev-dot.warn{background:var(--warn);}
+  .ev-corpo{flex:1;min-width:0;}.ev-topo{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}.ev-data{flex:none;color:var(--muted);font-size:10px;white-space:nowrap;}.ev-detalhe{margin-top:3px;line-height:1.45;word-break:break-word;color:var(--muted);}.ev-meta{margin-top:4px;font-size:10.5px;color:var(--muted);}.ev-agrupado{border-left:2px solid var(--warn);background:color-mix(in srgb,var(--warn) 5%,transparent);}
   .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);flex:none;}
   .equip-tile-status{font-family:var(--mono);font-size:10px;font-weight:700;}
   .equip-tile-status.online{color:var(--ok);}
@@ -302,20 +303,29 @@
      responde as quatro coisas que a pessoa precisa: status (bolinha), nome,
      IP e MAC. Nome vem do DNS/NetBIOS ou do apelido dado aqui mesmo. */
   .disp-lista{margin-top:6px;border-top:1px solid var(--line);}
-  .disp-linha{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11.5px;}
-  .disp-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok);}
+  .disp-linha{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:11.5px;}
+  .disp-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok);margin-top:12px;}
   .disp-dot.off{background:var(--muted);opacity:.5;}
   .disp-topo{display:flex;align-items:baseline;gap:6px;}
   .disp-nome{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
   .disp-visto{flex:none;font-size:9.5px;color:var(--muted);white-space:nowrap;}
   .disp-nome.anon{font-weight:400;color:var(--muted);font-style:italic;}
-  .disp-rede{font-family:var(--mono);font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .disp-editar{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:4px;flex:none;min-width:28px;}
+  .disp-enderecos{display:grid;gap:2px;margin-top:3px;font-family:var(--mono);font-size:10.5px;min-width:0;}
+  .disp-endereco{display:flex;align-items:center;gap:4px;min-width:0;line-height:1.45;}
+  .disp-ip{color:var(--accent);font-weight:700;text-decoration:none;white-space:nowrap;}.disp-ip:hover{color:var(--text);text-decoration:underline;}
+  .disp-mac{color:var(--muted);white-space:nowrap;letter-spacing:.01em;}.disp-troca-ip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .disp-editar{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:3px;flex:none;min-width:26px;line-height:1;}
   .disp-editar:hover{color:var(--accent);}
+  .disp-copiar{color:var(--accent);}.disp-acoes{display:flex;flex-direction:column;gap:3px;align-items:center;padding-top:1px;}
+  @media(max-width:520px){.disp-linha{gap:6px;}.disp-enderecos{font-size:10px;}.disp-acoes{min-width:28px;}.disp-nome{max-width:calc(100vw - 130px);}}
   /* dispositivo marcado (impressora/VM monitorada - pedido do Master: alarma
      se perder rede) - o mesmo chip 🔔 aparece na linha e no modal de edição */
   .disp-monitor-chip{flex:none;font-size:11px;}
   .disp-tipo-chip{flex:none;font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;white-space:nowrap;}
+  /* status da Zebra SEMPRE visivel na linha do aparelho (pedido do Master):
+     o 🖨️ ganha cor pelo nivel (ok/atencao/critico/sem leitura) e o detalhe
+     completo - papel, cabeca, fila - fica no title. cor vem sempre do token */
+  .disp-imp-chip{flex:none;font-size:10px;border:1px solid currentColor;border-radius:6px;padding:1px 5px;white-space:nowrap;font-weight:600;}
   .disp-monitorar-linha{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0 4px;cursor:pointer;}
   .disp-monitorar-linha input{margin:0;}
   .disp-medidor-ajuda{display:block;color:var(--muted);font-size:11.5px;line-height:1.45;margin:2px 0 8px 24px;}
@@ -330,6 +340,28 @@
   .m-chip.ruim{color:var(--bad);border-color:var(--bad);}
   .equip-tile-info{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.8;}
   .equip-tile-info b{color:var(--text);}
+  /* Ficha operacional: hierarquia clara, o estado em destaque e navegação por
+     abas. Em vez de uma lista técnica longa, cada assunto ocupa seu painel. */
+  #detalhe-comp-overlay .modal{max-width:620px;padding:22px;background:linear-gradient(150deg,var(--panel) 0%,color-mix(in srgb,var(--panel) 93%,#07151b) 100%);}
+  .detalhe-hero{margin:0 0 12px;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(115deg,color-mix(in srgb,var(--panel2) 88%,var(--accent)) 0%,var(--panel2) 60%);}
+  .detalhe-hero-topo{display:flex;align-items:center;gap:9px;}
+  .detalhe-hero-titulo{font-size:18px;font-weight:800;letter-spacing:-.02em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .detalhe-hero-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px;color:var(--muted);font:11px var(--mono);}
+  .detalhe-status-pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 8px;font:700 10px var(--mono);border:1px solid currentColor;}
+  .detalhe-status-pill.online{color:var(--ok);background:color-mix(in srgb,var(--ok) 10%,transparent);}.detalhe-status-pill.offline{color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,transparent);}.detalhe-status-pill.degradado{color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,transparent);}.detalhe-status-pill.nunca{color:var(--muted);}
+  .detalhe-abas{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:0;margin:0 0 15px;border:0;}
+  .detalhe-aba{min-height:58px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:10px;padding:7px 6px;font:700 10.5px var(--sans);cursor:pointer;white-space:normal;transition:.16s ease;}
+  .detalhe-aba .tab-icone{font-size:16px;line-height:1;}.detalhe-aba:hover{border-color:var(--accent);color:var(--text);transform:translateY(-1px);}.detalhe-aba.ativa{background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 72%,white));border-color:var(--accent);color:#0b0d10;box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 20%,transparent);}
+  .detalhe-painel{min-height:170px;border:1px solid var(--line);border-radius:12px;padding:13px;background:rgba(0,0,0,.09);}
+  .detalhe-secao-titulo{font:700 10.5px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 11px;}
+  .detalhe-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+  .detalhe-destaques{display:contents;}.detalhe-kpi{padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);min-width:0;}.detalhe-kpi-label{display:block;font:10px var(--mono);color:var(--muted);margin-bottom:3px;}.detalhe-kpi-valor{font-size:12px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .detalhe-resumo .equip-tile-status{grid-column:1/-1;margin:0!important;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,currentColor 8%,transparent);border:1px solid color-mix(in srgb,currentColor 28%,var(--line));}
+  .detalhe-resumo .equip-tile-info{grid-column:1/-1;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);line-height:1.95;}
+  .detalhe-rede-intro{font-size:12px;color:var(--muted);margin-bottom:8px;}.detalhe-painel .disp-lista{margin-top:8px;}
+  .btn-voltar-topo{position:sticky;bottom:10px;margin:14px 0 0 auto;display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel);color:var(--accent);border-radius:18px;padding:7px 11px;font:700 11px var(--sans);cursor:pointer;box-shadow:0 5px 16px rgba(0,0,0,.28);z-index:2;}
+  .btn-voltar-topo:hover{border-color:var(--accent);color:var(--text);}
+  @media(max-width:520px){#detalhe-comp-overlay .modal{padding:16px;}.detalhe-resumo{grid-template-columns:1fr 1fr;}.detalhe-abas{gap:4px;}.detalhe-aba{font-size:9.5px;min-height:54px;}.detalhe-hero{padding:11px;}.btn-voltar-topo{bottom:6px;}}
   .btn-copiar-ip{background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;padding:0 2px;vertical-align:middle;}
   .btn-copiar-ip:hover{color:var(--text);}
   .equip-tile-acoes{display:flex;gap:6px;flex-wrap:wrap;}
@@ -450,6 +482,9 @@
   .agente-titulo{display:flex;align-items:center;gap:8px;margin:32px 0 4px;padding-top:20px;border-top:1px solid var(--line);}
   .agente-titulo h2{font-size:16px;}
   .agente-sub{font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.5;}
+  /* seta do recolher.js: os titulos desta tela sao flex, entao o float nao
+     posiciona - joga a seta pro fim da linha (rightmost) sem sumir o 🔄 */
+  .rede-titulo .zr-seta, .agente-titulo .zr-seta{float:none;margin-left:auto;order:99;}
   .agente-secao{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
   .agente-secao-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
   .agente-acao-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;}
@@ -579,8 +614,8 @@
      responde a outra pergunta: a grade acima mostra quem está no ar agora,
      essa lista mostra a QUALIDADE do link ao longo do dia - inclusive de
      quem está online e mesmo assim sofrendo -->
-<div id="rede-root" class="hidden">
-  <div class="rede-titulo">
+<div id="rede-root" class="hidden" data-recolher>
+  <div class="rede-titulo" data-recolher-titulo>
     <h2>📶 Diagnóstico de rede</h2>
     <button type="button" class="btn-notif" onclick="carregarRede()" title="Atualizar">🔄</button>
   </div>
@@ -596,16 +631,19 @@
   <!-- QUEM AINDA FALA COM O ENDERECO ANTIGO. E o que decide se da pra
        aposentar o dominio velho: enquanto houver pendente, desligar deixa
        aquela maquina orfa (ver CLAUDE.md §4) -->
-  <div class="agente-titulo"><h2>🌐 Migração de endereço</h2></div>
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo><h2>🌐 Migração de endereço</h2></div>
   <div class="agente-sub">
     O agente só descobre que existe versão nova pelo endereço que está assado no próprio script dele. Por isso o endereço antigo <b>não pode ser desligado</b> enquanto alguma máquina ainda falar com ele — ela ficaria órfã pra sempre. Aqui você vê quantas faltam.
   </div>
   <div id="migracao-endereco" style="margin-bottom:18px;"></div>
+  </div>
   <!-- papel de parede do parque: UMA imagem pra rede toda; cada computador
        decide se aplica, na política do card dele -->
-  <div class="agente-titulo"><h2>🖼️ Papel de parede do parque</h2></div>
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
-    Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos. A máquina <b>carimba, no topo-direito, o nome da loja + o código da máquina</b> (na arte <b>vertical</b>, tipo Makeline, o carimbo vai centralizado embaixo). Deixe essa área do carimbo livre na arte — ela já vem reservada nas bases genéricas. Assim a mesma arte serve a loja inteira e cada máquina se identifica sozinha. A marca sai do <b>perfil da unidade</b> e o grupo sai do <b>cadastro de empresas</b> — unidade sem empresa cai na arte só da marca, nunca na logo de um grupo que não é o dela. Se não houver arte do grupo, cai na arte só da marca; sem essa, na <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
+    Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos. A máquina <b>carimba, no topo-direito, o nome da loja + o nome do computador cadastrado no NOC</b> (na arte <b>vertical</b>, tipo Makeline, o carimbo vai centralizado embaixo). Deixe essa área do carimbo livre na arte — ela já vem reservada nas bases genéricas. Assim a mesma arte serve a loja inteira e cada máquina se identifica sozinha. A marca sai do <b>perfil da unidade</b> e o grupo sai do <b>cadastro de empresas</b> — unidade sem empresa cai na arte só da marca, nunca na logo de um grupo que não é o dela. Se não houver arte do grupo, cai na arte só da marca; sem essa, na <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
     <select id="pp-marca" style="max-width:200px;"><option value="">Todas as marcas (padrão)</option></select>
@@ -615,7 +653,16 @@
     <span class="msg hidden" id="msg-pp"></span>
   </div>
   <div id="pp-marcas" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
-  <div class="agente-titulo">
+  <!-- "por que não subiu em todos?": mostra, por máquina, se a arte vai aplicar
+       e, quando não, o motivo (desligado / sem marca / sem arte / offline) -->
+  <div style="margin-bottom:6px;">
+    <button type="button" class="btn-mini" onclick="carregarDiagnosticoPapel()">🔍 Por que não subiu em todos?</button>
+    <span class="msg hidden" id="msg-pp-diag"></span>
+  </div>
+  <div id="pp-diag" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
+  </div>
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo>
     <h2>🤖 Beniboy — Ações do Agente</h2>
   </div>
   <div class="agente-sub">
@@ -649,6 +696,26 @@
   <div class="agente-secao">
     <h3>📜 Histórico</h3>
     <div id="agente-historico-lista"></div>
+  </div>
+  </div>
+</div>
+
+<!-- Trava de segurança: re-autenticação antes de papel de parede e salvar
+     política. A confirmação real é no servidor (exigirSenhaDoMaster); este
+     modal só coleta a senha, mascarada. -->
+<div class="overlay hidden" id="senha-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="document.getElementById('senha-cancel').click()">✕</span>
+  <div class="modal">
+    <h3>🔒 Confirme sua senha</h3>
+    <div class="sub" style="margin-bottom:8px;">Para <b id="senha-acao">esta ação</b>, confirme que é você.</div>
+    <input type="password" id="senha-input" autocomplete="new-password" placeholder="sua senha de Master">
+    <div class="msg hidden err" id="senha-erro" style="margin-top:6px;"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" id="senha-cancel">Cancelar</button>
+      <button type="button" class="btn-primary" id="senha-ok">Confirmar</button>
+    </div>
+  </div>
   </div>
 </div>
 
@@ -800,7 +867,8 @@
     <div class="msg hidden" id="manut-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
-      <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
+       <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
+       <button type="button" class="btn-ghost" id="manut-gsurf-rsa" onclick="manutEnviar('gsurfRsa')" title="Reinicia só o serviço GSurfRSA Listener (TEF), sem reiniciar o computador. Use apenas nas máquinas selecionadas que apresentam o erro de automação/TEF.">💳 Reiniciar GSurfRSA</button>
       <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
       <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
       <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar('abortar')" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
@@ -987,6 +1055,19 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="ping-overlay">
+  <div class="modal" style="max-width:470px;">
+    <div class="modal-head"><h3 style="margin:0;">⌁ Diagnóstico de rede</h3><button type="button" class="icon-btn" onclick="fecharDiagnosticoPing()">✕</button></div>
+    <p class="sub" id="ping-origem" style="margin:8px 0 14px;"></p>
+    <label>IP de destino</label>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="ping-ip" inputmode="decimal" autocomplete="off" placeholder="ex.: 10.161.117.200" style="margin:0;flex:1;">
+      <button type="button" class="btn-primary" onclick="executarDiagnosticoPing()">Ping</button>
+    </div>
+    <p class="sub" style="font-size:11px;line-height:1.45;">Executa três testes pela máquina escolhida. Aceita apenas IPs privados; não abre terminal nem executa comandos livres.</p>
+    <div id="ping-resultado" class="msg hidden" style="margin-top:10px;"></div>
+  </div>
+</div>
 <!-- Programas da maquina, em janela PROPRIA (pedido do Master): o Registro de
      atividades e' pra investigar incidente - queda, comando, acesso remoto. Uma
      maquina que atualiza Chrome toda semana empurrava isso pra fora da tela. -->
@@ -1001,6 +1082,23 @@
       <button type="button" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
       <button type="button" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
     </div>
+    <div id="prog-acoes-master" class="hidden" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2,rgba(255,255,255,.03));">
+      <div style="font-weight:700;font-size:13px;margin-bottom:7px;">Gerenciar por catálogo</div>
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+        <select id="prog-catalogo" style="flex:1 1 190px;min-width:0;"></select>
+        <button type="button" class="btn-primary" onclick="instalarProgramaCatalogo()">Instalar</button>
+      </div>
+      <div class="sub" style="margin-top:7px;font-size:11.5px;">Instala somente itens aprovados. Remover usa a lista real desta máquina e pede a senha Master em cada ação.</div>
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer;font-size:12px;">Editar catálogo de instalações</summary>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:7px;">
+          <input id="prog-catalogo-nome" maxlength="80" placeholder="Nome exibido" style="flex:1 1 130px;min-width:0;">
+          <input id="prog-catalogo-winget" maxlength="120" placeholder="ID do winget, ex.: Google.Chrome" style="flex:1 1 180px;min-width:0;">
+          <button type="button" class="btn-ghost" onclick="adicionarProgramaCatalogo()">Adicionar</button>
+        </div>
+        <div id="prog-catalogo-itens" style="margin-top:7px;"></div>
+      </details>
+    </div>
     <input type="search" id="prog-busca" placeholder="Buscar programa..." oninput="pintarProgramas()" style="margin:10px 0 6px;">
     <div id="prog-corpo"></div>
   </div></div>
@@ -1014,17 +1112,46 @@
          O ✕ nao fica aqui: ele e' o redondo da quina, que mora FORA da caixa
          com rolagem e por isso ja esta sempre visivel. As margens negativas
          cancelam o padding do .modal pra barra cobrir a largura/topo inteiros -->
-    <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
-      <span class="status-dot" id="detalhe-comp-dot"></span>
-      <h3 id="detalhe-comp-nome" style="margin:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></h3>
-      <button type="button" class="icon-btn" title="Editar" id="detalhe-comp-editar">✏️</button>
+    <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-22px;z-index:2;background:var(--panel);margin:-22px -22px 12px;padding:12px 22px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
+      <span style="font:700 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);">NOC · ficha operacional</span>
     </div>
-    <div class="sub" id="detalhe-comp-sub"></div>
-    <div class="equip-tile-status" id="detalhe-comp-status" style="margin-bottom:12px;"></div>
-    <div class="equip-tile-info" id="detalhe-comp-info"></div>
-    <div id="detalhe-comp-eventos" style="margin-top:14px;"></div>
+    <div class="detalhe-hero">
+      <div class="detalhe-hero-topo">
+        <span class="status-dot" id="detalhe-comp-dot-hero"></span>
+        <div class="detalhe-hero-titulo" id="detalhe-comp-nome-hero">Máquina</div>
+        <button type="button" class="icon-btn" title="Editar" id="detalhe-comp-editar-hero">✏️</button>
+      </div>
+      <div class="detalhe-hero-meta">
+        <span id="detalhe-comp-sub"></span>
+        <span id="detalhe-comp-pill" class="detalhe-status-pill nunca">aguardando</span>
+      </div>
+    </div>
+    <div class="detalhe-abas" role="tablist" aria-label="Seções da máquina">
+      <button type="button" class="detalhe-aba ativa" data-detalhe-aba="resumo" onclick="trocarAbaDetalhe('resumo')"><span class="tab-icone">◈</span>Visão geral</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="rede" onclick="trocarAbaDetalhe('rede')"><span class="tab-icone">◌</span>Rede</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="atividades" onclick="trocarAbaDetalhe('atividades')"><span class="tab-icone">↺</span>Atividades</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="politica" onclick="trocarAbaDetalhe('politica')"><span class="tab-icone">⌘</span>Política</button>
+    </div>
+    <section class="detalhe-painel" data-detalhe-painel="resumo">
+      <div class="detalhe-secao-titulo">Saúde e acesso</div>
+      <div class="detalhe-resumo">
+        <div class="equip-tile-status" id="detalhe-comp-status"></div>
+        <div class="detalhe-destaques" id="detalhe-comp-destaques"></div>
+        <div class="equip-tile-info" id="detalhe-comp-info"></div>
+      </div>
+    </section>
+    <section class="detalhe-painel" data-detalhe-painel="rede" style="display:none;">
+      <div class="detalhe-secao-titulo">Rede da unidade</div>
+      <div id="detalhe-comp-rede"></div>
+    </section>
+    <section class="detalhe-painel" data-detalhe-painel="atividades" style="display:none;">
+      <div id="detalhe-comp-eventos"></div>
+    </section>
+    <section class="detalhe-painel" data-detalhe-painel="politica" style="display:none;">
+      <div id="detalhe-comp-politica" class="hidden" style="border-top:1px solid var(--line);padding-top:12px;"></div>
+    </section>
     <div class="equip-tile-acoes" id="detalhe-comp-acoes" style="margin-top:16px;"></div>
-    <div id="detalhe-comp-politica" class="hidden" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px;"></div>
+    <button type="button" class="btn-voltar-topo" onclick="voltarTopoDetalhe()">↑ Voltar ao topo</button>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharDetalheComputador()">Fechar</button>
     </div>
@@ -1419,14 +1546,18 @@ function atualizarConteudoDetalhe(codigo, c){
   const status = statusDe(c);
   const statusTexto = textoDeEstado(c, status);
   const nomeJs = escapeJs(c.nome||'');
-  document.getElementById('detalhe-comp-dot').className = `status-dot ${status}`;
-  document.getElementById('detalhe-comp-nome').textContent = c.nome || '(sem nome)';
+  document.getElementById('detalhe-comp-dot-hero').className = `status-dot ${status}`;
+  document.getElementById('detalhe-comp-nome-hero').textContent = c.nome || '(sem nome)';
   document.getElementById('detalhe-comp-sub').innerHTML = `${escapeHtml(UNIDADES_NOMES[codigo] || codigo)} · <span class="tipo-badge">${TIPO_COMPUTADOR_LABEL[c.tipo]||TIPO_COMPUTADOR_LABEL.atendimento}</span>`;
+  const pill = document.getElementById('detalhe-comp-pill');
+  pill.className = `detalhe-status-pill ${status}`;
+  pill.textContent = statusTexto;
   const statusEl = document.getElementById('detalhe-comp-status');
   statusEl.className = `equip-tile-status ${status}`;
   statusEl.textContent = statusTexto;
 
   const infoBits = [];
+  const redeBits = [];
   // ip = publico (visto pelo servidor via x-forwarded-for); ipLocal = da
   // rede da loja, reportado pelo script de vigia (ver baixarVigia) - e o
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
@@ -1515,6 +1646,17 @@ function atualizarConteudoDetalhe(codigo, c){
     infoBits.push(`🔁 sem reiniciar há <b style="color:${precisa?'var(--warn,#e0a800)':'var(--ok)'};">${quanto}</b>`
       + (precisa ? ' <span style="font-size:11px;color:var(--warn,#e0a800);">— passou da semana, reinicie</span>' : ''));
   }
+  // Três indicadores para a leitura de relance, no padrão de painéis NOC:
+  // conectividade, disco e último sinal. O texto detalhado continua abaixo;
+  // os cartões não escondem diagnóstico, só dão prioridade visual ao urgente.
+  const destaques = [];
+  destaques.push({ rotulo:'Conectividade', valor:statusTexto, classe:status });
+  if(c.disco){
+    const nivel = c.discoNivel==='critico' ? 'crítico' : (c.discoNivel==='atencao' ? 'atenção' : 'ok');
+    destaques.push({ rotulo:'Disco', valor:nivel, classe:c.discoNivel==='critico'?'offline':(c.discoNivel==='atencao'?'degradado':'online') });
+  } else destaques.push({ rotulo:'Disco', valor:'aguardando leitura', classe:'nunca' });
+  destaques.push({ rotulo:'Último sinal', valor:status==='nunca'?'sem sinal':tempoRelativo(c.ultimoHeartbeatEm), classe:status });
+  document.getElementById('detalhe-comp-destaques').innerHTML = destaques.map(x=>`<div class="detalhe-kpi"><span class="detalhe-kpi-label">${escapeHtml(x.rotulo)}</span><div class="detalhe-kpi-valor equip-tile-status ${escapeHtml(x.classe)}">${escapeHtml(x.valor)}</div></div>`).join('');
   if(c.dispositivos && c.dispositivos.length){
     // ativos primeiro (e a rede AGORA); quem sumiu continua listado com a
     // ultima vez que apareceu - e assim que se percebe que a impressora saiu
@@ -1537,10 +1679,34 @@ function atualizarConteudoDetalhe(codigo, c){
       // 🔔 = monitorado (alarme de rede ligado - pedido do Master); sem isso
       // ninguém confere pelo painel o que está armado sem abrir cada aparelho
       const monitorChip = d.monitorar
-        ? (d.marca === 'zebra'
-            ? `<span class="disp-monitor-chip" title="Monitorado + leitura de status (papel, cabeça, fila) a cada ~100s">🔔🖨️</span>`
-            : `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>`)
+        ? `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>`
         : '';
+      // status da Zebra SEMPRE na linha (pedido do Master): o 🖨️ colorido diz
+      // de relance se a impressora está imprimindo. Sai do que o servidor já
+      // guarda por MAC (ver impressoras{} no lojaStatus.js). Só aparece pra
+      // aparelho marcado como Zebra - é o único que responde o ~HS.
+      const impChip = (() => {
+        if (d.marca !== 'zebra') return '';
+        const st = (c.impressoras || {})[d.mac] || null;
+        let cor = 'var(--muted)', rotulo = 'sem leitura', titulo = 'Impressora Zebra — aguardando a primeira leitura de status';
+        if (st) {
+          const quando = st.em ? ` · lido ${tempoRelativo(st.em)}` : '';
+          if (st.nivel === 'ok') {
+            cor = 'var(--ok)'; rotulo = 'OK';
+            titulo = `Imprimindo normal${st.fila != null ? ` · fila ${st.fila}` : ''}${quando}`;
+          } else if (st.nivel === 'atencao') {
+            cor = 'var(--warn,#e0a800)'; rotulo = 'atenção';
+            titulo = `${(st.motivos || []).join(' · ') || 'Atenção'}${quando}`;
+          } else if (st.nivel === 'critico') {
+            cor = 'var(--bad)'; rotulo = 'parada';
+            titulo = `${(st.motivos || []).join(' · ') || 'Parou de imprimir'}${quando}`;
+          } else {
+            cor = 'var(--muted)'; rotulo = 'sem leitura';
+            titulo = `Não respondeu ao status${st.semRespostaEm ? ` · ${tempoRelativo(st.semRespostaEm)}` : quando}`;
+          }
+        }
+        return `<span class="disp-imp-chip" style="color:${cor};" title="${escapeHtml(titulo)}">🖨️ ${escapeHtml(rotulo)}</span>`;
+      })();
       // 📡 e' o ponto de medicao da loja: quem bate o olho na lista precisa
       // saber por qual aparelho a queda da unidade esta sendo contada
       const medidorChip = d.medidorQuedas
@@ -1559,18 +1725,19 @@ function atualizarConteudoDetalhe(codigo, c){
           <div class="disp-topo">
             <div class="disp-nome ${temNome?'':'anon'}" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>
             ${tipoChip}
-            ${medidorChip}${monitorChip}
+            ${impChip}${medidorChip}${monitorChip}
             ${quando}
           </div>
-          <div class="disp-rede"><a href="http://${escapeHtml(d.ip)}" target="_blank" rel="noopener" title="Abrir ${escapeHtml(d.ip)} no navegador">${escapeHtml(d.ip)}</a> · ${escapeHtml(d.mac)} ${trocaIp}</div>
+          <div class="disp-enderecos">
+            <div class="disp-endereco"><a class="disp-ip" href="http://${escapeHtml(d.ip)}" target="_blank" rel="noopener" title="Abrir ${escapeHtml(d.ip)} no navegador">${escapeHtml(d.ip)}</a><button type="button" class="disp-editar disp-copiar" title="Copiar IP" aria-label="Copiar IP" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.ip)},"IP")'>⧉</button>${trocaIp ? `<span class="disp-troca-ip">${trocaIp}</span>` : ''}</div>
+            <div class="disp-endereco"><span class="disp-mac">${escapeHtml(d.mac)}</span><button type="button" class="disp-editar disp-copiar" title="Copiar MAC" aria-label="Copiar MAC" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.mac)},"MAC")'>⧉</button></div>
+          </div>
         </div>
-        <div style="display:flex;gap:3px;align-items:center;">
-          <button type="button" class="disp-editar" title="Copiar IP" aria-label="Copiar IP" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.ip)},"IP")'>⧉</button>
-          <button type="button" class="disp-editar" title="Copiar MAC" aria-label="Copiar MAC" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.mac)},"MAC")'>⧉</button>
+        <div class="disp-acoes">
           <button type="button" class="disp-editar" title="Fazer ping por este NOCZenith" aria-label="Fazer ping" onclick='event.stopPropagation();pingDispositivo(${JSON.stringify(codigo)},${JSON.stringify(c.posto)},${JSON.stringify(d.mac)},${JSON.stringify(d.ip)})'>◉</button>
+          <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
+            onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,medidorQuedas:!!d.medidorQuedas,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
         </div>
-        <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
-          onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,medidorQuedas:!!d.medidorQuedas,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
       </div>`;
     };
     // TODOS os aparelhos, numa janela de ~5 linhas com rolagem interna -
@@ -1578,15 +1745,18 @@ function atualizarConteudoDetalhe(codigo, c){
     // 30s re-renderiza o modal aberto, entao a posicao da rolagem e
     // preservada la embaixo, depois do innerHTML
     const html = [...ativos, ...sumidos].map(linhaDisp).join('');
-    infoBits.push(`📡 <b>${ativos.length}</b> aparelho(s) na rede da loja`
+    redeBits.push(`<div class="detalhe-rede-intro">📡 <b>${ativos.length}</b> aparelho(s) na rede da loja`
       + (sumidos.length ? ` · <span style="color:var(--muted);">${sumidos.length} sumiu(ram)</span>` : '')
-      + ` · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}<div class="disp-lista" id="disp-lista" style="max-height:180px;overflow-y:auto;overscroll-behavior:contain;">${html}</div>`);
+      + ` · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}</div><div class="disp-lista" id="disp-lista" style="max-height:360px;overflow-y:auto;overscroll-behavior:contain;">${html}</div>`);
   }
   // preserva a rolagem da lista de aparelhos entre um poll e outro (mesmo
   // cuidado do ev-lista em renderEventosDetalhe)
   const dispListaAntiga = document.getElementById('disp-lista');
   const dispScrollAnterior = dispListaAntiga ? dispListaAntiga.scrollTop : 0;
   document.getElementById('detalhe-comp-info').innerHTML = infoBits.length ? infoBits.join('<br>') : '<span style="color:var(--muted);">sem mais informações.</span>';
+  document.getElementById('detalhe-comp-rede').innerHTML = redeBits.length
+    ? redeBits.join('')
+    : '<div class="prog-vazio">A máquina ainda não enviou uma varredura de rede.</div>';
   const dispListaNova = document.getElementById('disp-lista');
   if(dispListaNova) dispListaNova.scrollTop = dispScrollAnterior;
 
@@ -1615,12 +1785,13 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-icone" data-dica="Copiar o comando de instalação pro PowerShell da loja" aria-label="Copiar o comando de instalação pro PowerShell da loja" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋</button>
     <button type="button" class="btn-icone" data-dica="Baixar o agente NOC-NoPulso" aria-label="Baixar o agente NOC-NoPulso" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
     ${c.noPulsoPrint ? `<button type="button" class="btn-icone" data-dica="Capturar a tela desta máquina agora" aria-label="Capturar a tela desta máquina agora" onclick="capturarAgora('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📸</button>` : ''}
+    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Diagnóstico de rede: ping por esta máquina" aria-label="Diagnóstico de rede" onclick="abrirDiagnosticoPing('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">⌁</button>` : ''}
     ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Reiniciar este computador" aria-label="Reiniciar este computador" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁</button>` : ''}
     <button type="button" class="btn-icone" data-dica="Programas desta máquina" aria-label="Programas desta máquina" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
     <button type="button" class="btn-icone perigo" data-dica="Remover do NOC" aria-label="Remover do NOC" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
   `;
   renderPoliticaComputador(codigo, c);
-  document.getElementById('detalhe-comp-editar').onclick = () => {
+  document.getElementById('detalhe-comp-editar-hero').onclick = () => {
     fecharDetalheComputador();
     abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo);
   };
@@ -1641,6 +1812,46 @@ async function pingDispositivo(codigo, posto, mac, ip){
     await carregar();
   }catch(e){ alert(e.message); }
 }
+let PING_DIAGNOSTICO = null;
+function abrirDiagnosticoPing(codigo, posto, nome){
+  PING_DIAGNOSTICO = { codigo, posto, nome };
+  document.getElementById('ping-origem').textContent = `Origem: ${nome || posto}. O teste será executado por este NOCZenith, dentro da rede dele.`;
+  document.getElementById('ping-ip').value = '';
+  const msg = document.getElementById('ping-resultado'); msg.textContent=''; msg.className='msg hidden';
+  abrirOverlay('ping-overlay');
+  setTimeout(()=>document.getElementById('ping-ip').focus(), 50);
+}
+function fecharDiagnosticoPing(){ fecharOverlay('ping-overlay'); PING_DIAGNOSTICO=null; }
+function mostrarResultadoPing(texto, erro){
+  const msg=document.getElementById('ping-resultado');
+  msg.textContent=texto; msg.className=erro?'msg err':'msg'; msg.classList.remove('hidden');
+}
+async function acompanharDiagnosticoPing(comandoId, tentativa=0){
+  if(!PING_DIAGNOSTICO) return;
+  try{
+    const r=await fetch(`/api/loja-status/comandos/${encodeURIComponent(comandoId)}`);
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não consegui consultar o diagnóstico.');
+    if(d.status==='executado') return mostrarResultadoPing(d.resultado||'Ping concluído.');
+    if(d.status==='erro') return mostrarResultadoPing(d.erro||'O ping falhou.',true);
+    if(tentativa>=20) return mostrarResultadoPing('O diagnóstico continua na fila. Abra novamente esta máquina para ver o último comando.',true);
+    mostrarResultadoPing(`Aguardando o NOCZenith executar o ping… (${tentativa+1}/20)`);
+    setTimeout(()=>acompanharDiagnosticoPing(comandoId,tentativa+1),1500);
+  }catch(e){ mostrarResultadoPing(e.message,true); }
+}
+async function executarDiagnosticoPing(){
+  if(!PING_DIAGNOSTICO) return;
+  const ip=(document.getElementById('ping-ip').value||'').trim();
+  if(!ip) return mostrarResultadoPing('Informe o IP de destino.',true);
+  mostrarResultadoPing('Enviando teste para a máquina de origem…');
+  try{
+    const r=await fetch(`/api/loja-status/${encodeURIComponent(PING_DIAGNOSTICO.codigo)}/computadores/${encodeURIComponent(PING_DIAGNOSTICO.posto)}/diagnostico/ping`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não consegui iniciar o ping.');
+    mostrarResultadoPing(d.mensagem||'Ping enfileirado.');
+    acompanharDiagnosticoPing(d.comandoId);
+  }catch(e){ mostrarResultadoPing(e.message,true); }
+}
 
 // ================= PROGRAMAS DA MÁQUINA =================
 // Janela própria, com duas abas, porque são duas perguntas diferentes:
@@ -1650,6 +1861,7 @@ async function pingDispositivo(codigo, posto, mac, ip){
 // a guarda, e a ficha da máquina já trouxe tudo (ver detalhar/listar).
 let PROG_ATUAL = null;
 let PROG_ABA = 'mudancas';
+let PROG_CATALOGO = [];
 // ---------- pilha de painéis (quem abre por último fica por cima) ----------
 // Os .overlay desta tela dividem o mesmo z-index do CSS. Com empate, o
 // navegador pinta por ordem de HTML - então um painel aberto de dentro de
@@ -1690,10 +1902,87 @@ function abrirProgramas(codigo, posto){
   PROG_ABA = 'mudancas';
   document.getElementById('prog-titulo').textContent = `📦 Programas · ${PROG_ATUAL.nome || posto}`;
   document.getElementById('prog-busca').value = '';
+  document.getElementById('prog-acoes-master').classList.toggle('hidden', !IS_MASTER || PROG_ATUAL.tipo !== 'interno');
+  if(IS_MASTER && PROG_ATUAL.tipo === 'interno') carregarCatalogoProgramas();
   trocarAbaProgramas('mudancas');
   abrirOverlay('prog-overlay');
 }
 function fecharProgramas(){ fecharOverlay('prog-overlay'); PROG_ATUAL = null; }
+function pintarCatalogoProgramas(){
+  const select = document.getElementById('prog-catalogo');
+  const itens = document.getElementById('prog-catalogo-itens');
+  if(!select || !itens) return;
+  select.innerHTML = PROG_CATALOGO.length
+    ? PROG_CATALOGO.map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.nome)}${x.descricao ? ' — '+escapeHtml(x.descricao) : ''}</option>`).join('')
+    : '<option value="">Nenhum item no catálogo</option>';
+  itens.innerHTML = PROG_CATALOGO.map(x=>`<div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px;"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(x.nome)} <span class="sub">(${escapeHtml(x.wingetId)})</span></span><button type="button" class="btn-icone perigo" title="Remover do catálogo" onclick="removerDoCatalogoPrograma('${escapeJs(x.id)}')">✕</button></div>`).join('');
+}
+async function carregarCatalogoProgramas(){
+  try{
+    const r = await fetch('/api/loja-status/programas/catalogo');
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui carregar o catálogo.');
+    PROG_CATALOGO = d.catalogo || [];
+    pintarCatalogoProgramas();
+  }catch(e){ alert(e.message); }
+}
+async function salvarCatalogoProgramas(){
+  const password = prompt('Digite sua senha Master para alterar o catálogo de instalações:');
+  if(password === null) return false;
+  const r = await fetch('/api/loja-status/programas/catalogo', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({catalogo:PROG_CATALOGO, password}) });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ alert(d.error || 'Não consegui salvar o catálogo.'); return false; }
+  PROG_CATALOGO = d.catalogo || [];
+  pintarCatalogoProgramas();
+  return true;
+}
+async function adicionarProgramaCatalogo(){
+  const nome = (document.getElementById('prog-catalogo-nome').value||'').trim();
+  const wingetId = (document.getElementById('prog-catalogo-winget').value||'').trim();
+  if(!nome || !wingetId) return alert('Informe o nome e o ID do winget.');
+  if(!/^[A-Za-z0-9][A-Za-z0-9._-]{1,120}$/.test(wingetId)) return alert('O ID do winget tem formato inválido. Exemplo: Google.Chrome');
+  const id = wingetId.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+  if(PROG_CATALOGO.some(x=>x.id===id || x.wingetId.toLowerCase()===wingetId.toLowerCase())) return alert('Esse programa já está no catálogo.');
+  PROG_CATALOGO.push({id,nome,wingetId,descricao:''});
+  if(await salvarCatalogoProgramas()){
+    document.getElementById('prog-catalogo-nome').value='';
+    document.getElementById('prog-catalogo-winget').value='';
+  }
+}
+async function removerDoCatalogoPrograma(id){
+  const item = PROG_CATALOGO.find(x=>x.id===id);
+  if(!item || !confirm(`Remover ${item.nome} do catálogo? Isso não desinstala nada das máquinas.`)) return;
+  PROG_CATALOGO = PROG_CATALOGO.filter(x=>x.id!==id);
+  await salvarCatalogoProgramas();
+}
+async function instalarProgramaCatalogo(){
+  if(!PROG_ATUAL) return;
+  const id = document.getElementById('prog-catalogo').value;
+  const item = PROG_CATALOGO.find(x=>x.id===id);
+  if(!item) return alert('Escolha um programa válido do catálogo.');
+  if(!confirm(`Instalar ${item.nome} em ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nO agente elevado fará a instalação em segundo plano.`)) return;
+  const password = prompt('Digite sua senha Master para autorizar a instalação:');
+  if(password === null) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/instalar`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui enfileirar a instalação.');
+    alert(d.mensagem || 'Instalação enfileirada.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+async function removerProgramaAtual(nome){
+  if(!PROG_ATUAL || !confirm(`Remover “${nome}” de ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nO desinstalador registrado no Windows será executado pelo agente elevado.`)) return;
+  const password = prompt('Digite sua senha Master para autorizar a remoção:');
+  if(password === null) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/remover`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,password})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui enfileirar a remoção.');
+    alert(d.mensagem || 'Remoção enfileirada.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
 function trocarAbaProgramas(aba){
   PROG_ABA = aba;
   document.getElementById('prog-aba-mudancas').classList.toggle('ativa', aba==='mudancas');
@@ -1710,8 +1999,9 @@ function pintarProgramas(){
   if(PROG_ABA==='atuais'){
     const lista = (PROG_ATUAL.programas||[]).filter(casa).slice().sort((a,b)=>a.localeCompare(b,'pt-BR'));
     document.getElementById('prog-aba-atuais').textContent = `Instalados agora (${(PROG_ATUAL.programas||[]).length})`;
+    const podeRemover = IS_MASTER && PROG_ATUAL.tipo === 'interno';
     corpo.innerHTML = lista.length
-      ? lista.map(x=>`<div class="prog-linha"><span class="prog-sinal">•</span><span>${escapeHtml(x)}</span></div>`).join('') + `<div class="prog-rodape">${escapeHtml(quando)}</div>`
+      ? lista.map(x=>`<div class="prog-linha"><span class="prog-sinal">•</span><span style="flex:1;min-width:0;">${escapeHtml(x)}</span>${podeRemover ? `<button type="button" class="btn-ghost perigo" style="padding:3px 7px;font-size:11px;" onclick="removerProgramaAtual('${escapeJs(x)}')">Remover</button>` : ''}</div>`).join('') + `<div class="prog-rodape">${escapeHtml(quando)}</div>`
       : `<div class="prog-vazio">${busca ? 'Nenhum programa com esse nome.' : 'A máquina ainda não mandou a lista de programas. Ela envia na primeira consulta depois de instalada.'}</div>`;
     return;
   }
@@ -1769,6 +2059,25 @@ function dataDoEvento(ms){
   try{ return new Date(ms).toLocaleDateString('sv-SE', { timeZone:'America/Sao_Paulo' }); }
   catch(e){ return ''; }
 }
+function cardEvento(nivel, titulo, em, detalhe, meta, classe){
+  return `<article class="ev-linha ${classe||''}"><span class="ev-dot ${nivel||''}"></span><div class="ev-corpo"><div class="ev-topo"><b>${titulo}</b><time class="ev-data">${escapeHtml(fmtDataHora(em))}</time></div>${detalhe?`<div class="ev-detalhe">${detalhe}</div>`:''}${meta?`<div class="ev-meta">${meta}</div>`:''}</div></article>`;
+}
+function compactarEventosDetalhe(eventos){
+  const saida=[];
+  for(let i=0;i<eventos.length;){
+    const atual=eventos[i];
+    // A batida do serviço remoto é útil como diagnóstico, mas quatro batidas
+    // iguais seguidas não são quatro acontecimentos. Elas viram um cartão com
+    // contagem e intervalo, deixando queda/sessão real visível na linha do tempo.
+    if(atual.tipo==='acesso-remoto'){
+      const iguais=[atual]; let j=i+1;
+      while(j<eventos.length && eventos[j].tipo==='acesso-remoto' && String(eventos[j].detalhe||'')===String(atual.detalhe||'')){ iguais.push(eventos[j]); j++; }
+      if(iguais.length>1){ saida.push({...atual, tipo:'acesso-remoto-agrupado', quantidade:iguais.length, ateEm:iguais[iguais.length-1].em}); i=j; continue; }
+    }
+    saida.push(atual); i++;
+  }
+  return saida;
+}
 function linhaEvento(ev){
   // retrato de IP carimbado no evento (ver varrerAlertas em lojaStatus.js):
   // no "Caiu" e o IP de QUANDO caiu; no "Voltou", o IP com que voltou -
@@ -1781,13 +2090,13 @@ function linhaEvento(ev){
     // por qual meio ela estava falando quando silenciou: separa "arrancaram
     // o cabo" de "o provedor caiu" sem ter que adivinhar depois
     const meio = ev.link ? ` · <span style="color:var(--muted);font-size:11px;">estava ${ev.link==='ethernet'?'no cabo':(ev.link==='wifi'?'no Wi-Fi':escapeHtml(ev.link))}</span>` : '';
-    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}${sufixoIp}${meio}</div>`;
+    return cardEvento('bad','Caiu',ev.em,`${sufixoIp.replace(/^ · /,'')}${meio.replace(/^ · /,'')}`,ev.link ? `Conexão: ${escapeHtml(ev.link)}` : 'Sem sinal do agente');
   }
   // reinício detectado pelo agente (LastBootUpTime mudou), não por ausência
   // de heartbeat - por isso aparece mesmo quando a máquina nem chegou a
   // sumir do painel
   if(ev.tipo==='reiniciou'){
-    return `<div class="ev-linha"><span class="ev-dot ${ev.inesperado?'bad':'warn'}"></span><b>${ev.inesperado?'⚡ Desligamento inesperado':'🔄 Reiniciou'}</b> · ${fmtDataHora(ev.em)}${ev.inesperado?' · <span style="color:var(--muted);font-size:11px;">queda de energia ou travamento</span>':''}</div>`;
+    return cardEvento(ev.inesperado?'bad':'warn',ev.inesperado?'⚡ Desligamento inesperado':'🔄 Reiniciou',ev.em,ev.inesperado?'queda de energia ou travamento':'Reinício detectado pelo agente');
   }
   if(ev.tipo==='link'){
     const nome = (t) => t==='ethernet' ? 'cabo' : (t==='wifi' ? 'Wi-Fi' : (t==='nenhum' ? 'sem rede' : (t||'—')));
@@ -1795,27 +2104,31 @@ function linhaEvento(ev){
       ? '<b>🔌 Ethernet caiu</b> · seguiu por ' + escapeHtml(nome(ev.para))
       : `<b>🔗 Link mudou</b> · ${escapeHtml(nome(ev.de))} → <b>${escapeHtml(nome(ev.para))}</b>`;
     const vel = ev.mbps ? ` · <span style="color:var(--muted);font-size:11px;">${ev.mbps >= 1000 ? (ev.mbps/1000)+' Gbps' : ev.mbps+' Mbps'}</span>` : '';
-    return `<div class="ev-linha"><span class="ev-dot warn"></span>${detalhe} · ${fmtDataHora(ev.em)}${vel}</div>`;
+    return cardEvento('warn',ev.ethernetCaida?'🔌 Ethernet caiu':'🔗 Link mudou',ev.em,detalhe.replace(/<b>.*?<\/b> · /,''),vel.replace(/^ · /,''));
   }
   if(ev.tipo==='ip'){
     const qual = ev.ipTipo==='local' ? '🏠 IP local' : '🌐 IP público';
     const texto = ev.de
       ? `mudou · ${escapeHtml(ev.de)} → <b>${escapeHtml(ev.para)}</b>`
       : `registrado · <b>${escapeHtml(ev.para)}</b>`;
-    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>${qual}</b> ${texto} · ${fmtDataHora(ev.em)}</div>`;
+    return cardEvento('warn',qual,ev.em,texto);
   }
   // SESSÃO = alguém entrou de verdade (lido do log da própria ferramenta, ver
   // Verificar-SessaoRemota no vigiaScript.js). É o evento que interessa, e por
   // isso é o único vermelho dos dois
   if(ev.tipo==='sessao-remota'){
-    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>🔓 Sessão remota</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+    return cardEvento('bad','🔓 Sessão remota',ev.em,ev.detalhe?escapeHtml(ev.detalhe):'Uma sessão remota foi detectada');
   }
   // ...e isto é só o serviço conversando com a nuvem dele. Fica registrado
   // porque é assim que se descobre que a máquina tem acesso remoto ligado 24h,
   // mas não é ninguém entrando - o rótulo diz isso, senão as duas linhas se
   // parecem e a de verdade se perde no meio
   if(ev.tipo==='acesso-remoto'){
-    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Serviço de acesso remoto ligado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+    return cardEvento('warn','Serviço remoto disponível',ev.em,ev.detalhe?escapeHtml(ev.detalhe):'Serviço conectado, sem sessão humana detectada');
+  }
+  if(ev.tipo==='acesso-remoto-agrupado'){
+    const intervalo = ev.ateEm ? `${fmtDataHora(ev.ateEm)} a ${fmtDataHora(ev.em)}` : '';
+    return cardEvento('warn','Serviço remoto disponível',ev.em,ev.detalhe?escapeHtml(ev.detalhe):'Serviço conectado, sem sessão humana detectada',`${ev.quantidade} registros iguais agrupados${intervalo?` · ${intervalo}`:''}`,'ev-agrupado');
   }
   if(ev.tipo==='disco'){
     return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
@@ -1878,7 +2191,7 @@ function renderEventosDetalhe(){
   // rolagem pra lista nao "pular" pro topo no meio de uma leitura
   const listaAntiga = document.getElementById('ev-lista');
   const scrollAnterior = listaAntiga ? listaAntiga.scrollTop : 0;
-  const linhas = filtrados.map(linhaEvento).join('')
+   const linhas = compactarEventosDetalhe(filtrados).map(linhaEvento).join('')
     || '<div class="ev-linha" style="color:var(--muted);">nenhum registro nesse dia.</div>';
   elEv.innerHTML = `
     <div class="sub" style="font-weight:700;font-size:12px;margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1894,17 +2207,38 @@ function renderEventosDetalhe(){
 }
 
 let DETALHE_ATUAL = null; // { codigo, posto }
+let DETALHE_ABA = 'resumo';
+function trocarAbaDetalhe(aba){
+  const permitidas = ['resumo','rede','atividades','politica'];
+  DETALHE_ABA = permitidas.includes(aba) ? aba : 'resumo';
+  document.querySelectorAll('[data-detalhe-aba]').forEach((el)=>{
+    const ativa = el.dataset.detalheAba === DETALHE_ABA;
+    el.classList.toggle('ativa', ativa);
+    el.setAttribute('aria-selected', ativa ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-detalhe-painel]').forEach((el)=>{
+    el.style.display = el.dataset.detalhePainel === DETALHE_ABA ? '' : 'none';
+  });
+  const modal = document.querySelector('#detalhe-comp-overlay .modal');
+  if(modal) modal.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function voltarTopoDetalhe(){
+  const modal = document.querySelector('#detalhe-comp-overlay .modal');
+  if(modal) modal.scrollTo({ top: 0, behavior: 'smooth' });
+}
 function abrirDetalheComputador(codigo, posto){
   const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
   if(!c) return;
   // abriu OUTRO computador: o filtro de data do anterior nao vale mais
   if(!DETALHE_ATUAL || DETALHE_ATUAL.codigo!==codigo || DETALHE_ATUAL.posto!==posto) EV_FILTRO_DATA = '';
   DETALHE_ATUAL = { codigo, posto };
+  DETALHE_ABA = 'resumo';
   // abre na hora com o resumo (e o que ja tiver de detalhe de uma abertura
   // anterior) e busca o detalhe pesado em paralelo - quando chegar, o modal
   // se re-renderiza sozinho
   atualizarConteudoDetalhe(codigo, compComDetalhe(c));
   abrirOverlay('detalhe-comp-overlay');
+  trocarAbaDetalhe('resumo');
   buscarDetalheComp(codigo, posto).then(d => {
     if(d && DETALHE_ATUAL && DETALHE_ATUAL.codigo===codigo && DETALHE_ATUAL.posto===posto) atualizarDetalheSeAberto();
   });
@@ -2509,6 +2843,7 @@ function atualizarContagemManut(){
   document.getElementById('manut-confirmar').disabled = !n;
   document.getElementById('manut-abortar').disabled = !n;
   document.getElementById('manut-anydesk').disabled = !n;
+  document.getElementById('manut-gsurf-rsa').disabled = !n;
   document.getElementById('manut-zebra').disabled = !n;
   document.getElementById('manut-rede').disabled = !n;
   document.getElementById('manut-agendar').disabled = !n;
@@ -2628,6 +2963,7 @@ const MANUT_TAREFAS = {
   reiniciar: { botao: 'manut-confirmar', rotulo: 'Reinício' },
   abortar: { botao: 'manut-abortar', rotulo: 'Abort' },
   anydesk: { botao: 'manut-anydesk', rotulo: 'Reinício do AnyDesk' },
+  gsurfRsa: { botao: 'manut-gsurf-rsa', rotulo: 'Reinício do GSurfRSA Listener' },
   zebra: { botao: 'manut-zebra', rotulo: 'Reset das Zebras' },
   rede: { botao: 'manut-rede', rotulo: 'Destrave da rede' },
 };
@@ -2657,6 +2993,9 @@ async function manutEnviar(tarefa){
     // confirmacao mais leve, e dizendo o que NAO acontece: a duvida de quem
     // clica e se vai derrubar o caixa junto
     if(!confirm(`Reiniciar o serviço do AnyDesk em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO computador NÃO reinicia e ninguém é interrompido - só o acesso remoto cai por alguns segundos e volta.`)) return;
+  }
+  if(tarefa === 'gsurfRsa'){
+    if(!confirm(`Reiniciar o serviço GSurfRSA Listener (TEF) em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO computador NÃO reinicia. A operação só é enviada às máquinas selecionadas e pode interromper uma transação TEF em andamento por alguns segundos.`)) return;
   }
   const btn = document.getElementById(MANUT_TAREFAS[tarefa].botao);
   btn.disabled = true;
@@ -3108,6 +3447,38 @@ async function carregarMarcasPapelDeParede(){
     atualizarVerPapelDeParede();
   }catch(e){ /* a seção continua utilizável só com a arte padrão */ }
 }
+
+// "por que não subiu em todos?": lê o estado por máquina e resume — quantas vão
+// aplicar, quantas offline, e a LISTA das que não vão, agrupada pelo motivo. É
+// o que responde a pergunta do Master sem abrir máquina por máquina.
+async function carregarDiagnosticoPapel(){
+  const alvo = document.getElementById('pp-diag');
+  if(!alvo) return;
+  alvo.innerHTML = 'Carregando…';
+  try{
+    const r = await fetch('/api/loja-status/papel-de-parede-diagnostico');
+    if(!r.ok){ alvo.innerHTML = 'Não consegui carregar o diagnóstico.'; return; }
+    const maq = (await r.json()).maquinas || [];
+    if(!maq.length){ alvo.innerHTML = 'Nenhum computador cadastrado.'; return; }
+    const conta = (m)=>maq.filter(x=>x.motivo===m).length;
+    const naoAplica = ['desligado','sem-marca','sem-arte'];
+    const rotulo = {
+      'desligado':'🖼️ desligado no card (ligue a política da máquina)',
+      'sem-marca':'sem marca no perfil da unidade (não casa arte de grupo/marca)',
+      'sem-arte':'sem arte pra essa marca/grupo (nem padrão)',
+      'offline':'offline (aplica quando a máquina voltar)',
+    };
+    const linhaMaq = (x)=>`${escapeHtml(x.nome)} <span style="color:var(--muted)">(${escapeHtml(x.codigo)})</span>`;
+    let html = `<b>${conta('ok')}</b> vão aplicar · <b>${conta('offline')}</b> offline · <b>${maq.filter(x=>naoAplica.includes(x.motivo)).length}</b> não vão aplicar do jeito que está`;
+    for(const mot of [...naoAplica,'offline']){
+      const g = maq.filter(x=>x.motivo===mot);
+      if(!g.length) continue;
+      html += `<div style="margin-top:8px;"><b style="color:var(--text)">${escapeHtml(rotulo[mot])}</b> — ${g.length}<br>${g.map(linhaMaq).join(' · ')}</div>`;
+    }
+    html += `<div style="margin-top:10px;">Máquina que aparece em "vão aplicar" mas continua sem trocar: aplica na próxima batida; se <b>ninguém estiver logado no Windows</b>, só quando alguém logar — a instância de sistema não tem área de trabalho. Agente antigo se atualiza sozinho.</div>`;
+    alvo.innerHTML = html;
+  }catch(e){ alvo.innerHTML = 'Erro ao carregar o diagnóstico.'; }
+}
 function atualizarVerPapelDeParede(){
   const sel = document.getElementById('pp-marca');
   const ver = document.getElementById('pp-ver');
@@ -3116,12 +3487,37 @@ function atualizarVerPapelDeParede(){
   const q = b ? `?marca=${encodeURIComponent(b)}&rede=${encodeURIComponent(a)}` : (a ? `?marca=${encodeURIComponent(a)}` : '');
   ver.href = `/api/loja-status/papel-de-parede${q}`;
 }
+// Trava de segurança (pedido do Master): re-autenticação antes de papel de
+// parede e salvar política. Devolve a senha digitada, ou null se cancelar.
+// A verificação de verdade é no servidor (exigirSenhaDoMaster) - aqui é só a
+// coleta, mascarada. Reinício/reset já pedem senha no próprio modal.
+function pedirSenhaMaster(acaoTexto){
+  return new Promise((resolve)=>{
+    const ov = document.getElementById('senha-overlay');
+    const inp = document.getElementById('senha-input');
+    const erro = document.getElementById('senha-erro');
+    const ok = document.getElementById('senha-ok');
+    const cancel = document.getElementById('senha-cancel');
+    if(!ov || !inp){ resolve(null); return; }
+    document.getElementById('senha-acao').textContent = acaoTexto || 'esta ação';
+    inp.value = ''; erro.classList.add('hidden');
+    ov.classList.remove('hidden');
+    setTimeout(()=>inp.focus(), 50);
+    const fechar = (val)=>{ ov.classList.add('hidden'); ok.onclick=null; cancel.onclick=null; inp.onkeydown=null; resolve(val); };
+    ok.onclick = ()=>{ if(!inp.value){ erro.textContent='Digite sua senha.'; erro.classList.remove('hidden'); return; } fechar(inp.value); };
+    cancel.onclick = ()=>fechar(null);
+    inp.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); ok.onclick(); } else if(e.key==='Escape'){ e.preventDefault(); fechar(null); } };
+  });
+}
+
 async function enviarPapelDeParede(){
   const input = document.getElementById('pp-arquivo');
   const msg = document.getElementById('msg-pp');
   msg.classList.add('hidden');
   const arquivo = (input.files||[])[0];
   if(!arquivo){ msg.textContent='Escolha a imagem.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const senha = await pedirSenhaMaster('enviar o papel de parede do parque');
+  if(senha===null) return;
   const escolha = (document.getElementById('pp-marca')||{}).value || '';
   // "GBE:dominos" -> rede + marca; "dominos" -> só marca; "" -> arte padrão
   const [a, b] = escolha.split(':');
@@ -3130,6 +3526,7 @@ async function enviarPapelDeParede(){
   try{
     const fd = new FormData();
     fd.append('imagem', arquivo);
+    fd.append('password', senha);
     if(marca) fd.append('marca', marca);
     if(rede) fd.append('rede', rede);
     const r = await fetch('/api/loja-status/papel-de-parede', { method:'PUT', body: fd });
@@ -3197,7 +3594,9 @@ async function enviarArteMaquina(codigo, posto){
   const inp = document.getElementById('pp-maq-arquivo');
   const msg = document.getElementById('msg-pp-maq');
   if(!inp.files || !inp.files[0]){ msg.textContent='Escolha a imagem desta máquina.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
-  const fd = new FormData(); fd.append('imagem', inp.files[0]);
+  const senha = await pedirSenhaMaster('enviar a arte desta máquina');
+  if(senha===null) return;
+  const fd = new FormData(); fd.append('imagem', inp.files[0]); fd.append('password', senha);
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/papel-de-parede-arte`, { method:'PUT', body: fd });
     const d = await r.json();
@@ -3209,8 +3608,10 @@ async function enviarArteMaquina(codigo, posto){
 }
 async function removerArteMaquina(codigo, posto){
   const msg = document.getElementById('msg-pp-maq');
+  const senha = await pedirSenhaMaster('remover a arte desta máquina');
+  if(senha===null) return;
   try{
-    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/papel-de-parede-arte`, { method:'DELETE' });
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/papel-de-parede-arte`, { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: senha }) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui remover.');
     msg.textContent = 'Voltou pra arte do grupo/marca (com carimbo). Troca na próxima consulta.';
@@ -3222,6 +3623,9 @@ async function salvarPoliticaComputador(codigo, posto){
   const corpo = {};
   document.querySelectorAll('#detalhe-comp-politica [data-pol]').forEach(el=>{ corpo[el.dataset.pol] = el.checked; });
   const msg = document.getElementById('msg-politica');
+  const senha = await pedirSenhaMaster('salvar a política desta máquina');
+  if(senha===null) return;
+  corpo.password = senha;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/politica`, {
       method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo) });

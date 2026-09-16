@@ -78,6 +78,82 @@ async function setConfig(patch) {
   configCache = null;
   return getConfig();
 }
+
+// Catálogo fechado para a tela de Programas. A tela nunca manda um comando ou
+// uma URL: ela escolhe apenas um ID desta lista, e o servidor monta o comando.
+// Isso mantém "instalar pelo NOC" útil sem virar um PowerShell remoto aberto.
+const CATALOGO_PROGRAMAS_PADRAO = [
+  { id: 'google-chrome', nome: 'Google Chrome', wingetId: 'Google.Chrome', descricao: 'Navegador Google Chrome' },
+  { id: 'anydesk', nome: 'AnyDesk', wingetId: 'AnyDeskSoftwareGmbH.AnyDesk', descricao: 'Acesso remoto AnyDesk' },
+  { id: 'advanced-ip-scanner', nome: 'Advanced IP Scanner', wingetId: 'Famatech.AdvancedIPScanner', descricao: 'Varredura de rede' },
+];
+
+function catalogoProgramasSeguro(lista) {
+  const vistos = new Set();
+  return (Array.isArray(lista) ? lista : []).map((item) => {
+    const nome = String(item?.nome || '').trim().slice(0, 80);
+    const wingetId = String(item?.wingetId || '').trim();
+    const id = String(item?.id || wingetId.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-+|-+$/g, '').slice(0, 80);
+    const descricao = String(item?.descricao || '').trim().slice(0, 160);
+    if (!id || !nome || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,120}$/.test(wingetId) || vistos.has(id)) return null;
+    vistos.add(id);
+    return { id, nome, wingetId, descricao };
+  }).filter(Boolean);
+}
+
+async function listarCatalogoProgramas() {
+  const config = await getConfig();
+  const salvo = catalogoProgramasSeguro(config.catalogoProgramas);
+  return salvo.length ? salvo : CATALOGO_PROGRAMAS_PADRAO;
+}
+
+async function salvarCatalogoProgramas(lista) {
+  const catalogo = catalogoProgramasSeguro(lista);
+  if (!catalogo.length) throw new Error('O catálogo precisa ter ao menos um programa válido.');
+  await setConfig({ catalogoProgramas: catalogo });
+  return catalogo;
+}
+
+function aspasPowerShell(valor) { return `'${String(valor).replace(/'/g, "''")}'`; }
+
+function comandoInstalarCatalogo(item) {
+  // item já passou pela validação do catálogo; repetir a validação evita que
+  // alguém use esta função no futuro sem passar pela fronteira acima.
+  if (!item || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,120}$/.test(item.wingetId || '')) throw new Error('Item de catálogo inválido.');
+  return [
+    '$winget = (Get-Command winget.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)',
+    'if (-not $winget) { "FALHOU: winget não está disponível nesta máquina. Atualize o App Installer do Windows e tente novamente."; exit 1 }',
+    `$id = ${aspasPowerShell(item.wingetId)}`,
+    `$nome = ${aspasPowerShell(item.nome)}`,
+    'Write-Output ("Instalando " + $nome + " pelo catálogo aprovado...")',
+    '& $winget install --id $id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity',
+    '$codigo = $LASTEXITCODE',
+    'if ($codigo -eq 0) { "OK: instalação concluída. A lista de programas será atualizada na próxima varredura." } else { "FALHOU: winget retornou o código $codigo."; exit $codigo }',
+  ].join('\n');
+}
+
+function programaPodeSerRemovido(nome) {
+  const n = String(nome || '').trim();
+  if (!n || n.length > 180) return false;
+  // Componentes que costumam quebrar Windows, o próprio agente e runtimes
+  // compartilhados ficam fora da remoção remota. Para eles, a intervenção é
+  // presencial/assistida e consciente, nunca um clique no painel.
+  return !/(nopulso|noczenith|microsoft edge|visual c\+\+|windows update|update for .*windows|microsoft windows)/i.test(n);
+}
+
+function comandoRemoverPrograma(nome) {
+  if (!programaPodeSerRemovido(nome)) throw new Error('Esse componente é protegido e não pode ser removido remotamente pelo NOC.');
+  return [
+    `$nome = ${aspasPowerShell(nome)}`,
+    '$raizes = @(\'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\', \'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\')',
+    '$item = @(Get-ItemProperty -Path $raizes -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq $nome -and ($_.QuietUninstallString -or ($_.UninstallString -match \'(?i)msiexec\')) } | Select-Object -First 1)',
+    'if (-not $item) { "FALHOU: o programa não tem um desinstalador silencioso registrado no sistema. Para não abrir uma janela invisível ao usuário, ele não pode ser removido remotamente."; exit 1 }',
+    '$linha = if ($item[0].QuietUninstallString) { $item[0].QuietUninstallString } else { $item[0].UninstallString }',
+    'if ($linha -match \'(?i)msiexec(\\.exe)?\') { $args = "/x $($item[0].PSChildName) /qn /norestart"; $p = Start-Process -FilePath msiexec.exe -ArgumentList $args -Wait -PassThru -WindowStyle Hidden }',
+    'else { $p = Start-Process -FilePath cmd.exe -ArgumentList \'/c\', $linha -Wait -PassThru -WindowStyle Hidden }',
+    'if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) { "OK: remoção concluída. A lista será atualizada na próxima varredura." } else { "FALHOU: o desinstalador retornou o código $($p.ExitCode)."; exit $p.ExitCode }',
+  ].join('\n');
+}
 // ---- PAPEL DE PAREDE: UMA ARTE POR MARCA, NAO UMA POR MAQUINA ----
 //
 // O que muda de um PDV pro outro e so o NOME da maquina, e quem carimba o
@@ -1092,6 +1168,44 @@ async function detalhar(codigo, posto) {
   return (await listar()).find((d) => docIdFor(d.codigo, d.posto) === alvo) || null;
 }
 
+// DIAGNOSTICO DO PAPEL DE PAREDE (pedido do Master: "por que não subiu em
+// todos?"). Pra cada computador diz se a arte VAI aplicar e, quando não, por
+// quê — sem o Master ter que abrir máquina por máquina. Motivos:
+//   desligado      - a trava 🖼️ do card está off (nada aplica sem ela)
+//   sem-marca      - a unidade não tem marca no perfil, então não casa arte de
+//                    grupo+marca nem de marca (cai só na padrão, se houver)
+//   sem-arte       - tem marca, mas não há arte pra ela (nem do grupo, nem da
+//                    marca, nem padrão) - ver papelDeParedeDe
+//   offline        - vai aplicar quando a máquina voltar
+//   ok             - ligado, com arte e no ar; aplica na próxima batida. Só a
+//                    instância logada aplica (SYSTEM não tem área de trabalho),
+//                    então máquina sem ninguém logado no Windows aplica quando
+//                    alguém logar.
+// Custa leitura só quando o Master abre o painel — fora do poll de 30s.
+async function diagnosticoPapelDeParede() {
+  const docs = await listar();
+  const linhas = [];
+  for (const d of docs) {
+    const ativo = !!(d.politica && d.politica.papelDeParedeAtivo);
+    let arte = null;
+    if (ativo) arte = await papelDeParedeDe(d.codigo, d.posto).catch(() => null);
+    let motivo;
+    if (!ativo) motivo = 'desligado';
+    else if (!arte) {
+      const perf = await unidades.perfil(d.codigo).catch(() => null);
+      motivo = (perf && perf.marca) ? 'sem-arte' : 'sem-marca';
+    } else if (!d.online) motivo = 'offline';
+    else motivo = 'ok';
+    const tipoArte = arte ? (arte.daMaquina ? 'maquina' : (arte.rede ? 'grupo+marca' : (arte.marca ? 'marca' : 'padrao'))) : null;
+    linhas.push({
+      codigo: d.codigo, posto: d.posto, nome: d.nome || d.posto,
+      online: !!d.online, ativo, temArte: !!arte, tipoArte,
+      agenteVersao: d.agenteVersao || null, motivo,
+    });
+  }
+  return linhas;
+}
+
 // get-or-create do segredo do computador - chamado ao gerar o .ps1 (ver rota
 // vigia.ps1 em index.js), pra que o token va assado no script daquele posto.
 // Idempotente: uma vez criado, sempre devolve o mesmo. Nao invalida o cache
@@ -1368,6 +1482,15 @@ async function noPulsoPrintDoComputador(codigo, posto) {
 async function windowsAntigoDoComputador(codigo, posto) {
   const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
   return snap.exists && !!snap.data().windowsAntigo;
+}
+
+// nome que o Master deu ao computador no NOC ("Caixa 1", "DOM-CR-ATM01") - vai
+// assado no .ps1 pro carimbo do papel de parede. Sem cadastro, cai no posto
+// (id interno) so pra nao carimbar vazio, mas o certo e o computador ter nome.
+async function nomeDoComputador(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  const nome = snap.exists ? String(snap.data().nome || '').trim() : '';
+  return nome || posto;
 }
 
 // Master cadastra um novo computador pra uma unidade - gera um id curto e
@@ -1992,6 +2115,30 @@ const COMANDO_REINICIAR_ANYDESK = [
   '}',
 ].join('\n');
 
+// Serviço do TEF mostrado como "GSurfRSA Listener". A lista é fechada: não
+// aceitamos nome de serviço vindo da tela, pois isso transformaria a manutenção
+// em execução remota arbitrária. Só as máquinas escolhidas pelo Master recebem
+// este comando, pela mesma fila elevada usada pelo AnyDesk.
+const COMANDO_REINICIAR_GSURF_RSA = [
+  '$svc = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "GSurfRSA Listener" -or $_.DisplayName -eq "GSurfRSA Listener" }) | Select-Object -First 1',
+  'if (-not $svc) {',
+  '  "Serviço GSurfRSA Listener não foi encontrado nesta máquina."',
+  '} else {',
+  '  try {',
+  '    Restart-Service -InputObject $svc -Force -ErrorAction Stop',
+  '    Start-Sleep -Seconds 3',
+  '    $depois = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue',
+  '    "$($svc.Name): reiniciado · estado agora: $($depois.Status)"',
+  '  } catch {',
+  '    $msg = $_.Exception.Message',
+  '    if ($msg -match "abrir o servi" -or $msg -match "cannot open .* service" -or $msg -match "Access is denied" -or $msg -match "Acesso negado") {',
+  '      $msg = "o NOCZenith desta maquina nao esta como Administrador - reinstale pelo botao Copiar comando num PowerShell como Administrador"',
+  '    }',
+  '    "GSurfRSA Listener: FALHOU - $msg"',
+  '  }',
+  '}',
+].join('\n');
+
 // RESET DA ZEBRA POR ZPL, sem ir na loja. Pedido do Master: "o mesmo botao
 // do AnyDesk, mas que faz o reset da impressora Zebra pelo ZPL - o codigo
 // executaria de acordo com a impressora Zebra que esteja com a tag que foi
@@ -2508,6 +2655,20 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
   await ref.set({ comandoPendenteId: comandoRef.id }, { merge: true });
   cache.invalidar();
   return registro;
+}
+
+// A tela de diagnóstico mostra o andamento do ping sem expor o texto do
+// PowerShell. Só o resultado que o agente devolveu é necessário para operação.
+async function detalharComando(comandoId) {
+  const snap = await COMANDOS_COLLECTION.doc(String(comandoId || '')).get();
+  if (!snap.exists) return null;
+  const c = snap.data();
+  return {
+    id: snap.id, codigo: c.codigo, posto: c.posto, origem: c.origem || null,
+    status: c.status || 'pendente', criadoEm: c.criadoEm || null,
+    entregueEm: c.entregueEm || null, executadoEm: c.executadoEm || null,
+    resultado: c.resultado || null, erro: c.erro || null,
+  };
 }
 
 // chamado de dentro do heartbeat() - transacao sobre 1 documento so (nao
@@ -3505,12 +3666,13 @@ module.exports = {
   substituirSegredos, SEGREDOS_PERMITIDOS,
   impressorasPraSondar,
   flushHeartbeatsPendentes,
-  heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
+  heartbeat, listar, listarResumo, detalhar, diagnosticoPapelDeParede, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   // alerta de internet por unidade: o estado vive em memoria, e o teste
   // precisa comecar cada cenario do zero
   _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
+  listarCatalogoProgramas, salvarCatalogoProgramas, comandoInstalarCatalogo, comandoRemoverPrograma, programaPodeSerRemovido,
   definirArteDaMaquina, removerArteDaMaquina,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
@@ -3520,14 +3682,14 @@ module.exports = {
   // falso e ser levado a sério, inclusive pra ENVELHECER a última batida,
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
-  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
+  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando,
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA,
   COMANDO_REDE_DESTRAVAR,
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
@@ -3535,5 +3697,5 @@ module.exports = {
   sanitizarPolitica, definirPolitica, papelDeParedeDe, versaoAplicacao, chaveArte, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, reportarEstadoAgente, pedirCaptura,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
 };

@@ -2766,6 +2766,48 @@ setTimeout(async () => {
   if (!okBravoForaDoSync) ruins += 1;
   console.log(`${okBravoForaDoSync ? '✓' : '✗'} Fechamentos: sincronização não toca mais na planilha do Grupo Bravo (só ARCFOOD)`);
 
+  // ---- PAUSAR SINCRONIZACAO (pedido do Master, 16/09/2026). Uma trava pra ele
+  // congelar a leitura das planilhas enquanto mexe nelas. So o Master, pela
+  // tela. Pausada, nem o boot nem o botao leem a planilha - a prova e que a
+  // rota devolve pulou:'pausada' em vez de tentar sincronizar.
+  let okPausaSync = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    DOCS.set('users/u-fech-comum', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'fech-comum@teste.local', username: 'fechcomum',
+      permissions: { sections: ['fechamentos'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabComum = { Authorization: 'Bearer ' + (await auth.login('fech-comum@teste.local', 'SenhaDeTeste!2026')).token };
+
+    const pausou = await postarJson('/api/fechamentos/sincronizacao/pausa', { pausada: true }, cab);
+    const statusPausado = await pedir('/api/fechamentos/sincronizacao', cab);
+    // com a pausa ligada, sincronizar tem que PULAR (não ler a planilha)
+    const syncPausado = await postarJson('/api/fechamentos/sincronizar-planilhas', {}, cab);
+    const semMaster = await postarJson('/api/fechamentos/sincronizacao/pausa', { pausada: true }, cabComum);
+    const retomou = await postarJson('/api/fechamentos/sincronizacao/pausa', { pausada: false }, cab);
+    const statusRetomado = await pedir('/api/fechamentos/sincronizacao', cab);
+    const html = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+    const j = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return {}; } };
+    const conf = {
+      'pausar liga a trava (Master)': pausou.status === 200 && j(pausou).pausada === true,
+      'o status reflete a pausa': statusPausado.status === 200 && j(statusPausado).pausada === true,
+      "com a pausa ligada a sincronização PULA (não lê a planilha)":
+        syncPausado.status === 200 && j(syncPausado).pulou === 'pausada',
+      'retomar desliga a trava': retomou.status === 200 && j(retomou).pausada === false && j(statusRetomado).pausada === false,
+      'só o Master pausa (pela tela) - usuário comum é recusado': semMaster.status === 403,
+      'a tela tem o botão de pausar, só pro Master':
+        /id="btn-pausa-sync"/.test(html) && /function togglePausaSync\(\)/.test(html)
+        && /getElementById\('btn-pausa-sync'\)\.classList\.toggle\('hidden', !isMaster\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPausaSync = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pausou=${pausou.status} sync=${syncPausado.corpo.slice(0, 80)} comum=${semMaster.status})`);
+  } catch (e) { okPausaSync = false; console.log('  erro: ' + e.message); }
+  if (!okPausaSync) ruins += 1;
+  console.log(`${okPausaSync ? '✓' : '✗'} Fechamentos: pausar/retomar a sincronização (só o Master, pela tela; pausada não lê a planilha)`);
+
   // ---- CUSTO DE LEITURA do caminho de autenticação (sessions.js).
   // existeEValida roda no requireAuth de TODA requisição autenticada (~90
   // rotas), e antes lia a coleção INTEIRA de sessões por um cache único
@@ -6304,6 +6346,72 @@ setTimeout(async () => {
   console.log(`${okImpressora ? '✓' : '✗'} NOC: Zebra que responde na rede mas parou de imprimir (sem papel, cabeça aberta, fila travada)`);
 
   // ------------------------------------------------------------------
+  // STATUS DA ZEBRA SEMPRE NA LINHA DA FICHA. Pedido do Master: o 🖨️
+  // visivel na linha do aparelho, colorido pelo estado - nao so o alarme
+  // que chega quando ela PARA. O dado ja existe (impressoras{} por MAC no
+  // doc); o buraco que este teste tampa e' o CAMINHO ate a tela: que o
+  // mapa sobrevive ao projetar pro cliente (detalhar), que o aparelho sai
+  // marcado como zebra, e que a ficha le esse mapa pra desenhar o chip.
+  let okZebraFicha = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const STX = String.fromCharCode(2), ETX = String.fromCharCode(3);
+    const linha = (t) => STX + t + ETX;
+    // parte da MESMA resposta real da Caruaru; `mexer` troca um campo pra
+    // simular papel acabando, sem decorar a resposta inteira
+    const RESP = (mexer) => {
+      const b = [['030', '0', '0', '0394', '000', '0', '0', '0', '000', '0', '0', '0'],
+                 ['001', '0', '0', '0', '1', '2', '6', '0', '00000000', '1', '000'],
+                 ['0000', '0']];
+      if (mexer) mexer(b);
+      return b.map((c) => linha(c.join(','))).join('\r\n') + '\r\n';
+    };
+    const UNI = 'ZEBRAFICHA';
+    const MAC = 'ac:3f:a4:11:22:33';
+    await ls.cadastrarComputador(UNI, 'PDV-Z', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-Z').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    await ls.definirApelidoDispositivo(UNI, MAC, { apelido: 'Zebra da cozinha', tipo: 'impressora', marca: 'zebra', monitorar: true });
+
+    const bater = (bruto) => ls.registrarTelemetria(UNI, posto, {
+      dispositivos: [{ mac: MAC, ip: '10.0.0.9', nome: 'ZebraCozinha' }],
+      statusImpressoras: [{ mac: MAC, ip: '10.0.0.9', bruto }],
+    }, tk);
+    const impDe = async () => ((await ls.detalhar(UNI, posto)).impressoras || {})[MAC] || null;
+    const dispDe = async () => ((await ls.detalhar(UNI, posto)).dispositivos || []).find((d) => d.mac === MAC) || null;
+
+    await bater(RESP());
+    const ok = await impDe();
+    const disp = await dispDe();
+    // papel acabou = campo 1 da linha 1 -> critico "Sem papel"
+    await bater(RESP((b) => { b[0][1] = '1'; }));
+    const crit = await impDe();
+
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      'o status da Zebra chega ao cliente (detalhar traz impressoras{})': !!ok && ok.nivel === 'ok',
+      'a fila da impressora vem junto (o Master pediu "mais de 3")': !!ok && ok.fila === 0,
+      'sem papel vira critico no mapa que a ficha lê': !!crit && crit.nivel === 'critico' && /Sem papel/.test((crit.motivos || []).join()),
+      'o aparelho sai marcado como zebra (é o que decide o chip na linha)': !!disp && disp.marca === 'zebra',
+      'a ficha tem o chip de status sempre na linha, lendo impressoras{}':
+        /disp-imp-chip/.test(html) && /c\.impressoras/.test(html),
+      "o chip só aparece pra Zebra (não inventa status pra outro aparelho)":
+        /d\.marca !== 'zebra'/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okZebraFicha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+    // limpa o computador de teste: some do parque (não infla contagem de
+    // outros testes) e o removerComputador derruba o cache de listar() por
+    // inteiro - senão o snapshot que os detalhar() acima deixaram quente
+    // esconderia, por até 10s (TTL), o fantasma que o próximo teste cria só
+    // por heartbeat (ver cacheBase em lojaStatus.js).
+    await ls.removerComputador(UNI, posto);
+  } catch (e) { okZebraFicha = false; console.log('  erro: ' + e.message); }
+  if (!okZebraFicha) ruins += 1;
+  console.log(`${okZebraFicha ? '✓' : '✗'} NOC: status da Zebra (🖨️) sempre na linha da ficha, colorido pelo estado`);
+
+  // ------------------------------------------------------------------
   // ALARME FALSO DE "LOJA SEM CONEXAO". O Master recebeu o alarme critico
   // de DomBessa-GER estando com AnyDesk ABERTO na mesma maquina. Nao era
   // engano do painel: "offline" no NOC quer dizer "parou de falar COM O
@@ -7009,8 +7117,10 @@ setTimeout(async () => {
     // 15/09). O Master de verdade tem que passar; quem nao tem sessao, nao.
     const pngMinimo = { nome: 'arte.png', tipo: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
     const rotaArte = `/api/loja-status/${UNI}/computadores/${posto}/papel-de-parede-arte`;
-    const httpComMaster = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', { Authorization: 'Bearer ' + token }, 'PUT');
-    const httpSemSessao = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', {}, 'PUT');
+    // a rota agora pede a senha do Master (trava de segurança) - vai no multipart
+    const httpComMaster = await postarMultipart(rotaArte, { password: process.env.MASTER_PASSWORD }, pngMinimo, 'imagem', { Authorization: 'Bearer ' + token }, 'PUT');
+    const httpSemSessao = await postarMultipart(rotaArte, { password: process.env.MASTER_PASSWORD }, pngMinimo, 'imagem', {}, 'PUT');
+    const httpSemSenha = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', { Authorization: 'Bearer ' + token }, 'PUT');
     // limpa o que o upload HTTP gravou, pra nao interferir nas asserts abaixo
     await ls.removerArteDaMaquina(UNI, posto);
     // sem arte de maquina nem de grupo: cai em nada (ou no parque, se houver)
@@ -7036,6 +7146,8 @@ setTimeout(async () => {
         httpComMaster.status !== 403 && !/Apenas o acesso Master/.test(String(httpComMaster.corpo || '')),
       'e a rota recusa quem não tem sessão de Master':
         httpSemSessao.status === 403 || httpSemSessao.status === 401,
+      'a arte por máquina pede a senha do Master (trava de segurança)':
+        httpSemSenha.status === 400 && /Senha incorreta/.test(String(httpSemSenha.corpo || '')),
       'a arte desta máquina vence a do grupo, e vem marcada daMaquina':
         !!comArte && comArte.caminho === 'parque/arte-atm01.jpg' && comArte.daMaquina === true,
       'a configuração do agente reflete a versão da arte da máquina (ele rebaixa a imagem nova)':
@@ -12290,10 +12402,13 @@ setTimeout(async () => {
     });
     const cabComum = { Authorization: 'Bearer ' + (await auth.login('pol-comum@teste.local', 'SenhaDeTeste!2026')).token };
     const comum = await enviarJson('PUT', rotaPol, { bloquearUsbStorage: true }, cabComum);
-    const p1 = await enviarJson('PUT', rotaPol, { papelDeParedeAtivo: true, bloquearUsbStorage: true, bloquearInstalacao: true, alertarInstalacao: true }, cabP);
+    // salvar política agora pede a senha do Master (trava de segurança)
+    const SENHA = process.env.MASTER_PASSWORD;
+    const pSemSenha = await enviarJson('PUT', rotaPol, { bloquearUsbStorage: true }, cabP);
+    const p1 = await enviarJson('PUT', rotaPol, { papelDeParedeAtivo: true, bloquearUsbStorage: true, bloquearInstalacao: true, alertarInstalacao: true, password: SENHA }, cabP);
     const pol1 = p1.status === 200 ? JSON.parse(p1.corpo) : {};
     const cfg1 = await ls.configuracaoAgente('POL', 'PC1', 'tokpol');
-    const p2 = await enviarJson('PUT', rotaPol, { alertarInstalacao: true }, cabP);
+    const p2 = await enviarJson('PUT', rotaPol, { alertarInstalacao: true, password: SENHA }, cabP);
     const pol2 = p2.status === 200 ? JSON.parse(p2.corpo) : {};
     const cfg2 = await ls.configuracaoAgente('POL', 'PC1', 'tokpol');
     // programas: 1a coleta e foto inicial; a 2a com item novo alerta
@@ -12312,6 +12427,8 @@ setTimeout(async () => {
     const conf = {
       'só o Master define a política (usuário do NOC logado não muda trava de máquina)':
         semLogin.status === 401 && comum.status === 403 && p1.status === 200,
+      'salvar política pede a senha do Master (trava de segurança)':
+        pSemSenha.status === 400 && /Senha incorreta/.test(String(pSemSenha.corpo || '')),
       'a política chega ao agente pela configuração dele': cfg1.politica.bloquearUsbStorage === true
         && cfg1.politica.papelDeParedeAtivo === true && cfg1.politica.bloquearInstalacao === true,
       'a versão SOBE a cada mudança (é como o vigia sabe que tem política nova)':
@@ -12410,8 +12527,11 @@ setTimeout(async () => {
     DOCS.set('lojaStatus/PPDOM__PC2', { codigo: 'PPDOM', posto: 'PC2', nome: 'PDV Desl', agentToken: 'tokdesl', tipo: 'interno', ultimoHeartbeatEm: Date.now(), eventos: [], politica: { papelDeParedeAtivo: false }, politicaVersao: 3 });
 
     // arte do parque (a de sempre) + arte da marca Domino's
-    const envParque = await postarMultipart('/api/loja-status/papel-de-parede', {}, { nome: 'p.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
-    const envDom = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos' }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    // a rota agora pede a senha do Master (trava de segurança): vai no multipart
+    const SENHA = process.env.MASTER_PASSWORD;
+    const envParque = await postarMultipart('/api/loja-status/papel-de-parede', { password: SENHA }, { nome: 'p.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const envSemSenha = await postarMultipart('/api/loja-status/papel-de-parede', {}, { nome: 'x.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const envDom = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', password: SENHA }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arteDom = await ls.papelDeParedeDe('PPDOM');
     // antes de existir arte do grupo, a ARCFOOD cai na arte so-da-marca
     const arcSoMarca = await ls.papelDeParedeDe('19855');
@@ -12421,7 +12541,7 @@ setTimeout(async () => {
     DOCS.set('empresas/empArcTeste', { id: 'empArcTeste', nome: 'ARCFOOD', ativa: true, tipoNegocio: 'alimentacao', unidades: ['19855'] });
     DOCS.set('empresas/empBravoTeste', { id: 'empBravoTeste', nome: 'Grupo Bravo', ativa: true, tipoNegocio: 'alimentacao', unidades: ['PPDOM'] });
     emp.invalidarCache();
-    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'empArcTeste' }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'empArcTeste', password: SENHA }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arcComGrupo = await ls.papelDeParedeDe('19855');
     const gbeDepois = await ls.papelDeParedeDe('PPDOM');
     const arteSem = await ls.papelDeParedeDe('PPSEM');
@@ -12430,19 +12550,19 @@ setTimeout(async () => {
     // a versao de aplicacao tem de MEXER quando so a imagem troca
     const antes = (await ls.configuracaoAgente('PPDOM', 'PC1', 'tokdom')).versaoAplicacao;
     await new Promise((r) => setTimeout(r, 5));
-    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos' }, { nome: 'd2.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', password: SENHA }, { nome: 'd2.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const depois = (await ls.configuracaoAgente('PPDOM', 'PC1', 'tokdom')).versaoAplicacao;
     const cfgDesl = await ls.configuracaoAgente('PPDOM', 'PC2', 'tokdesl');
 
     // subir arte de UMA marca nao pode apagar a das outras (setConfig e merge)
-    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'spoleto' }, { nome: 's.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'spoleto', password: SENHA }, { nome: 's.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const domAindaTem = !!(await ls.papelDeParedeDe('PPDOM')).marca;
     const spoAgoraTem = (await ls.papelDeParedeDe('PPSPO')).marca === 'spoleto';
 
     const imgMaquina = await pedir('/api/loja-status/PPDOM/computadores/PC1/papel-de-parede', { 'x-noc-token': 'tokdom' });
     const imgSemToken = await pedir('/api/loja-status/PPDOM/computadores/PC1/papel-de-parede', {});
     const marcas = await pedir('/api/loja-status/papel-de-parede-marcas', cabPP);
-    const psPp = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'PPDOM', posto: 'PC1', tipo: 'interno', agentToken: 'tokdom' });
+    const psPp = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'PPDOM', posto: 'PC1', tipo: 'interno', agentToken: 'tokdom', maquinaNome: 'DOM-CR-ATM01' });
     const htmlPp = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
 
     const conf = {
@@ -12483,10 +12603,16 @@ setTimeout(async () => {
       'papel de parede que não gravou não é marcado como aplicado':
         /catch \{ Escrever-Log "Papel de parede: o Windows negou a gravacao[^"]*"; return \$false \}/.test(psPp)
         && /if \(-not \$Servico -and -not \$okPapel\) \{[^}]*return \}/.test(psPp),
+      'o serviço não marca a política da sessão Windows antes de aplicar a arte':
+        /politica-aplicada-servico\.txt/.test(psPp)
+        && /function Caminho-PoliticaAplicada/.test(psPp)
+        && /Set-Content -Path \(Caminho-PoliticaAplicada\) -Value \$versao/.test(psPp),
       'a tela oferece grupo + marca, e não só marca':
         /optgroup label="Grupo \+ marca"/.test(htmlPp) && /fd\.append\('rede', rede\)/.test(htmlPp),
       'a loja com marca recebe a arte da MARCA, não a do parque':
         envParque.status === 200 && envDom.status === 200 && arteDom.marca === 'dominos',
+      'a arte do parque pede a senha do Master (trava de segurança)':
+        envSemSenha.status === 400 && /Senha incorreta/.test(String(envSemSenha.corpo || '')),
       'loja sem marca cai na arte do parque (não fica sem papel de parede)':
         !!arteSem && arteSem.marca === null && !!arteSem.caminho,
       'marca sem arte enviada também cai na do parque':
@@ -12508,7 +12634,7 @@ setTimeout(async () => {
       // só busca a política inteira quando o número muda.
       'o heartbeat leva a versão, e o agente interno reage a ela (antes só aplicava ao reiniciar)':
         typeof (await ls.heartbeat('PPDOM', 'PC1', { userAgent: 'NOCZenith/1.0' }, 'tokdom')).versaoAplicacao === 'string'
-        && /if \(\$null -ne \$resp\.versaoAplicacao -and "\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
+        && /if \(\$null -ne \$resp\.versaoAplicacao -and "v\$VersaoScript\|\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
         && /try \{ Sincronizar-Politica \}/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
@@ -12517,6 +12643,15 @@ setTimeout(async () => {
       'a tela sabe dizer quais marcas ainda não têm arte':
         marcas.status === 200 && Array.isArray(JSON.parse(marcas.corpo).marcas)
         && JSON.parse(marcas.corpo).marcas.some((m) => m.id === 'dominos' && m.temArte === true),
+      // "Arcfood so tem Domino's": o combo grupo+marca lista SO as marcas que a
+      // empresa realmente opera (das unidades dela), nao todas as MARCAS_VALIDAS
+      'o combo grupo+marca mostra só as marcas da empresa (Arcfood = só Domino\'s)':
+        (() => {
+          const combos = JSON.parse(marcas.corpo).combinacoes || [];
+          const arc = combos.filter((c) => c.rede === 'empArcTeste');
+          return arc.length === 1 && arc[0].marca === 'dominos'
+            && !combos.some((c) => c.rede === 'empArcTeste' && ['spoleto', 'milkymoo', 'saobraz', 'saltiverso'].includes(c.marca));
+        })(),
       // ---- agente ----
       'o agente baixa da URL da PRÓPRIA máquina (quem escolhe a marca é o servidor)':
         /\$UrlPapelDeParede = "[^"]*\/api\/loja-status\/PPDOM\/computadores\/PC1\/papel-de-parede"/.test(psPp)
@@ -12533,10 +12668,11 @@ setTimeout(async () => {
         && /\$topo = \$img\.Height \* \(1518\.0 \/ 1920\.0\)/.test(psPp)
         && /\$xLoja = \$cx - \$tamLoja\.Width \/ 2/.test(psPp)
         && /topo-direito/.test(htmlPp),
-      'o agente carimba o nome da LOJA e o código da máquina (não o hostname)':
+      'o agente carimba o nome da LOJA e o NOME cadastrado da máquina (não o posto nem o hostname)':
         /function Carimbar-NomeNaArte/.test(psPp)
         && /\$NomeLojaArte = "PPDOM"/.test(psPp)
-        && /\$NomeMaquinaArte = "PC1"/.test(psPp)
+        && /\$NomeMaquinaArte = "DOM-CR-ATM01"/.test(psPp)
+        && !/\$NomeMaquinaArte = "PC1"/.test(psPp)
         && /\$loja = \(\[string\]\$NomeLojaArte\)\.ToUpper\(\)/.test(psPp)
         && !/\$nome = \$env:COMPUTERNAME/.test(psPp),
       'a régua âmbar e a etiqueta arredondada saem (fiel ao CARIMBO.md)':
@@ -12553,6 +12689,8 @@ setTimeout(async () => {
       // rodava; quando a politica voltou a ser relida, rodou em todas de uma vez.
       'desligar NUNCA grava papel de parede vazio':
         !/Name Wallpaper -Value ""/.test(psPp),
+      'a arte se ajusta à tela sem cortar laterais, logos ou identificação':
+        /if \(\$ligado\) \{[\s\S]{0,700}Name WallpaperStyle -Value "6"/.test(psPp),
       'desligar so mexe se a imagem for nossa, ou se a tela estiver apagada':
         /if \(-not \$nossa -and \$atual -ne ""\) \{ return \$true \}/.test(psPp)
         && psPp.includes('Web\\Wallpaper\\Windows\\img0.jpg'),
@@ -12562,8 +12700,9 @@ setTimeout(async () => {
       'se o carimbo falhar, aplica a arte crua em vez de desistir':
         /return \$origem \}/.test(psPp) && /\$destino = Carimbar-NomeNaArte \$bruto \$destino/.test(psPp),
       'o agente compara a versão de aplicação, com queda pra política se o servidor for antigo':
-        /\$versao = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
-        && /\$versao = "\$\(\$cfg\.politicaVersao\)"/.test(psPp),
+        /\$versaoServidor = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
+        && /\$versaoServidor = "\$\(\$cfg\.politicaVersao\)"/.test(psPp)
+        && /\$versao = "v\$VersaoScript\|\$versaoServidor"/.test(psPp),
       // agente novo = 52 maquinas baixando de novo; sem subir a versao,
       // ninguem baixa e a mudanca toda fica so no servidor
       'a versão do vigia subiu junto (senão nenhuma máquina pega o script novo)':
@@ -12583,6 +12722,48 @@ setTimeout(async () => {
   } catch (e) { okPapelMarca = false; console.log('  erro: ' + e.message); }
   if (!okPapelMarca) ruins += 1;
   console.log(`${okPapelMarca ? '✓' : '✗'} Papel de parede: uma arte por grupo + marca (as duas logos), o nome da máquina escrito nela, e trocar a imagem chega na loja`);
+
+  // ------------------------------------------------------------------
+  // "POR QUE NAO SUBIU EM TODOS?" (Master, 16/09/2026). O papel de parede
+  // aplica so quando 3 coisas batem: trava 🖼️ ligada no card, a unidade
+  // resolve pra uma arte, e a maquina online. Sem visibilidade, o Master
+  // ficava adivinhando. diagnosticoPapelDeParede() diz, por maquina, se vai
+  // aplicar e, quando nao, por que.
+  let okDiagPapel = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const U = 'PPDIAG';
+    const mk = async (nome, ativo, arte, online) => {
+      await ls.cadastrarComputador(U, nome, 'interno');
+      const posto = (await ls.listar()).find((c) => c.codigo === U && c.nome === nome).posto;
+      await ls.definirPolitica(U, posto, { papelDeParedeAtivo: ativo });
+      // arte DA MAQUINA resolve sem depender de config/marca compartilhada (é o
+      // 1o ramo de papelDeParedeDe) - deixa o teste determinístico
+      if (arte) await ls.definirArteDaMaquina(U, posto, { caminho: 'x.png', tipo: 'image/png', versao: 1, em: Date.now() });
+      if (online) await ls.heartbeat(U, posto, { userAgent: 'NOCZenith/1.0' }, await ls.garantirAgentToken(U, posto));
+      return posto;
+    };
+    const pOk = await mk('PC-OK', true, true, true);
+    const pOff = await mk('PC-OFF', true, true, false);
+    const pDes = await mk('PC-DES', false, true, true);
+    const diag = await ls.diagnosticoPapelDeParede();
+    const de = (posto) => diag.find((x) => x.codigo === U && x.posto === posto) || null;
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const conf = {
+      'ligado + com arte + online = vai aplicar (ok)': !!de(pOk) && de(pOk).motivo === 'ok' && de(pOk).temArte === true,
+      'ligado + com arte + offline = aplica quando voltar (offline)': !!de(pOff) && de(pOff).motivo === 'offline',
+      'desligado no card = não aplica (desligado), mesmo com arte': !!de(pDes) && de(pDes).motivo === 'desligado',
+      'a rota Master do diagnóstico existe e chama a função': /papel-de-parede-diagnostico/.test(idx) && /diagnosticoPapelDeParede/.test(idx),
+      'o painel do parque tem o botão e a função que lê o diagnóstico': /carregarDiagnosticoPapel\(\)/.test(html) && /papel-de-parede-diagnostico/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDiagPapel = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ok=${JSON.stringify(de(pOk))} off=${JSON.stringify(de(pOff))} des=${JSON.stringify(de(pDes))})`);
+    for (const p of [pOk, pOff, pDes]) await ls.removerComputador(U, p);
+  } catch (e) { okDiagPapel = false; console.log('  erro: ' + e.message); }
+  if (!okDiagPapel) ruins += 1;
+  console.log(`${okDiagPapel ? '✓' : '✗'} Papel de parede: diagnóstico "por que não subiu em todos?" (ligado/sem arte/offline por máquina)`);
 
   // ------------------------------------------------------------------
   // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)
@@ -13263,7 +13444,10 @@ setTimeout(async () => {
     const soMaster = await pedir('/api/qa-aprovacoes', cabTok);
     // 2) e escreve: mesma rota de Master que o navegador usa
     DOCS.set('lojaStatus/TOK__PC1', { codigo: 'TOK', posto: 'PC1', nome: 'Tok', tipo: 'interno', agentToken: 'tk', ultimoHeartbeatEm: Date.now(), eventos: [] });
-    const escreveu = await enviarJson('PUT', '/api/loja-status/TOK/computadores/PC1/politica', { bloquearUsbStorage: true }, cabTok);
+    // salvar política pede a senha do Master (trava de segurança). O token
+    // AGE como o Master, mas não substitui a senha: sem ela, trava até pra ele.
+    const escreveuSemSenha = await enviarJson('PUT', '/api/loja-status/TOK/computadores/PC1/politica', { bloquearUsbStorage: true }, cabTok);
+    const escreveu = await enviarJson('PUT', '/api/loja-status/TOK/computadores/PC1/politica', { bloquearUsbStorage: true, password: process.env.MASTER_PASSWORD }, cabTok);
     // 3) token errado nao entra
     const errado = await pedir('/api/me', { Authorization: 'Bearer ' + 'b'.repeat(64) });
     const vazio = await pedir('/api/me', { Authorization: 'Bearer ' });
@@ -13272,6 +13456,8 @@ setTimeout(async () => {
         eu.status === 200 && euJson.role === 'master' && euJson.email === process.env.MASTER_EMAIL,
       'e vale nas rotas que exigem Master (nenhuma checagem de rota precisou mudar)':
         soMaster.status === 200 && escreveu.status === 200,
+      'a trava de senha vale até pro token: sem a senha do Master, política é recusada':
+        escreveuSemSenha.status === 400 && /Senha incorreta/.test(String(escreveuSemSenha.corpo || '')),
       'token errado é recusado': errado.status === 401 && vazio.status === 401,
       // o coracao: UM caminho de permissao, nao dois
       'sessão e token preenchem o req pela MESMA função (não há dois sistemas de permissão)':
@@ -13709,6 +13895,11 @@ setTimeout(async () => {
       'a marca na ficha vale pro comando de instalação': marcou.status === 200 && tlsAntesDoRest(cmdRotaDecod),
       'e pra autoatualização (o agente baixa com o token dele e recebe a versão certa)':
         psAuto.status === 200 && tlsAntesDoRest(psAuto.corpo) && /function Agora-Ms/.test(psAuto.corpo),
+      // pedido do Master (15/09): o carimbo do papel de parede tem que trazer o
+      // NOME que ele deu ao computador no NOC ("BOS Pulse"), nao o posto (id
+      // interno tipo "bd848084"/"BOS"). A rota puxa o nome do doc e assa no .ps1.
+      'o carimbo usa o NOME cadastrado do computador, não o posto (id interno)':
+        /\$NomeMaquinaArte = "BOS Pulse"/.test(psAuto.corpo) && !/\$NomeMaquinaArte = "BOS"/.test(psAuto.corpo),
       'máquina sem a marca continua recebendo o padrão pela mesma rota':
         psPadraoRota.status === 200 && !/SecurityProtocol|Agora-Ms/.test(psPadraoRota.corpo),
       'a ficha da máquina tem a caixa "Windows antigo" e manda a marca pro servidor':
@@ -14640,6 +14831,45 @@ setTimeout(async () => {
   } catch (e) { okAnydesk = false; console.log('  erro: ' + e.message); }
   if (!okAnydesk) ruins += 1;
   console.log(`${okAnydesk ? '✓' : '✗'} NOC: dá pra reiniciar só o AnyDesk, sem derrubar o caixa junto`);
+
+  // ------------------------------------------------------------------
+  // GSurfRSA Listener (TEF): o operador fica preso quando o serviço trava.
+  // A manutenção precisa atingir SOMENTE as máquinas escolhidas, nunca o
+  // parque inteiro e nunca um nome de serviço que veio livre do navegador.
+  let okGsurfRsa = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabG = { Authorization: 'Bearer ' + token };
+    const htmlG = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cmd = ls.COMANDO_REINICIAR_GSURF_RSA || '';
+    const srvG = await ls.cadastrarComputador('GSURFTESTE', 'PdvTef', 'interno');
+    await ls.heartbeat('GSURFTESTE', srvG.posto, { userAgent: 'NOCZenith/1.0' });
+    const alvo = [{ codigo: 'GSURFTESTE', posto: srvG.posto }];
+    const semSenha = await postarJson('/api/loja-status/manutencao/reiniciar', { alvos: alvo, tarefa: 'gsurfRsa' }, cabG);
+    const enviou = await postarJson('/api/loja-status/manutencao/reiniciar', {
+      alvos: alvo, tarefa: 'gsurfRsa', password: process.env.MASTER_PASSWORD,
+    }, cabG);
+    const resp = enviou.status === 200 ? JSON.parse(enviou.corpo) : {};
+    const doc = (await ls.listar('GSURFTESTE')).find((c) => c.posto === srvG.posto) || {};
+    const fila = doc.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${doc.comandoPendenteId}`) || {}) : {};
+    const conf = {
+      'o comando é fechado no servidor para o GSurfRSA Listener':
+        /GSurfRSA Listener/.test(cmd) && /Restart-Service/.test(cmd) && !/shutdown/i.test(cmd),
+      'serviço ausente devolve explicação clara': /não foi encontrado|nao foi encontrado/.test(cmd),
+      'continua exigindo senha do Master': semSenha.status === 401 || semSenha.status === 400,
+      'só a máquina escolhida recebe a tarefa TEF':
+        enviou.status === 200 && resp.tarefa === 'gsurfRsa' && resp.enfileirados === 1
+        && /GSurfRSA Listener/.test(fila.comando || '') && !/shutdown/i.test(fila.comando || ''),
+      'a tela tem confirmação e avisa que o computador não reinicia':
+        /manutEnviar\('gsurfRsa'\)/.test(htmlG) && /GSurfRSA Listener/.test(htmlG)
+        && /computador NÃO reinicia/.test(htmlG),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okGsurfRsa = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okGsurfRsa = false; console.log('  erro: ' + e.message); }
+  if (!okGsurfRsa) ruins += 1;
+  console.log(`${okGsurfRsa ? '✓' : '✗'} NOC: reinicia o GSurfRSA Listener só nas máquinas TEF selecionadas`);
 
   // ------------------------------------------------------------------
   // BUSCA NA JANELA DE MANUTENCAO. Pedido do Master: "filtro de pesquisa
@@ -16015,8 +16245,11 @@ setTimeout(async () => {
       // tem alarme de rede - por isso a condicao deixou de ser uma linha so
       'dispositivo monitorado mostra o chip 🔔 na linha':
         /const monitorChip = d\.monitorar/.test(html) && /disp-monitor-chip/.test(html),
+      // o 🖨️ deixou de ser um enfeite grudado no 🔔: virou chip proprio, com
+      // COR pelo estado (ok/atencao/critico/sem leitura), sempre na linha da
+      // Zebra. Quem so tem alarme de rede continua com o 🔔 seco.
       'o chip separa a Zebra (lê status) de quem só tem alarme de rede':
-        /d\.marca === 'zebra'/.test(html) && /🔔🖨️/.test(html),
+        /d\.marca !== 'zebra'/.test(html) && /disp-imp-chip/.test(html) && /🖨️/.test(html),
       'tipo do aparelho aparece na propria linha': /d\.tipoRotulo \? `<span class="disp-tipo-chip"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
