@@ -79,8 +79,17 @@ button:not(:disabled):active, [role="button"]:active { transform: translateY(1px
  * Ativos e RH. Em telas muito estreitas a informação continua inteira em
  * vez de os campos numéricos espremidos deixarem o botão de ação escapar. */
 @media (max-width: 420px) {
-  .grid2, .grid2-doc { grid-template-columns: 1fr !important; }
-
+  /* .grid2 NÃO entra aqui. Esta fundação existe pra dar contraste, foco e
+     alvo de toque coerentes - e o próprio topo deste arquivo diz que "as
+     telas continuam donas de seus layouts específicos". Um
+     grid-template-columns:1fr !important fazia o oposto: carimbava UMA coluna
+     em todo formulário de celular, em todas as telas, sem a tela poder
+     discordar.
+     O efeito no aparelho da loja (390px): cada campo de número ocupando a
+     largura inteira, e o Lançamento de fechamento virando uma tela de
+     rolagem por seção - "por que 1 caixa gigante tem ficado na tela inteira"
+     (Master, 16/09/2026). Onde uma coluna for mesmo o certo, quem decide é a
+     tela, sem !important. */
   .linha-item, .f-item {
     grid-template-columns: minmax(0, 1fr) minmax(56px, 72px) auto !important;
   }

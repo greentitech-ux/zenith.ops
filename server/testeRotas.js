@@ -23880,6 +23880,69 @@ setTimeout(async () => {
   if (!okEstacaoGrande) ruins += 1;
   console.log(`${okEstacaoGrande ? '✓' : '✗'} Estação em casa grande: 100 mesas cabem na tela, no QR e no servidor`);
 
+  // ------------------------------------------------------------------
+  // FORMULÁRIO NO CELULAR: DUAS COLUNAS, TAMANHOS IGUAIS.
+  //
+  // Master (16/09/2026, print do Lançamento de fechamento): "visando diminuir
+  // tela / organizar em tamanhos iguais 2 colunas / por que 1 caixa gigante
+  // tem ficado na tela inteira".
+  //
+  // A causa não estava na tela: estava na FUNDAÇÃO. O ui-foundation.css, que
+  // o tema.js carrega em todas as páginas, tinha
+  // `.grid2 { grid-template-columns: 1fr !important }` abaixo de 420px - e o
+  // celular da loja tem 390px. Um !important numa folha global carimbava UMA
+  // coluna em todo formulário do app, sem a tela poder discordar; o próprio
+  // topo daquele arquivo diz que "as telas continuam donas de seus layouts".
+  //
+  // Campo de número curto (unidades, minutos, reais) cabe em meia largura de
+  // sobra. O que este teste protege é a regra não voltar por baixo.
+  let okFormularioDuasColunas = false;
+  try {
+    const fsF = require('fs');
+    const fundacao = fsF.readFileSync(__dirname + '/public/ui-foundation.css', 'utf8');
+    const lanc = fsF.readFileSync(__dirname + '/public/lancamento.html', 'utf8');
+    const fech = fsF.readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+    // o mínimo de uma grade auto-fit: acima da metade da tela do celular
+    // (390px menos as bordas) ela NUNCA cabe duas vezes, e vira um card por tela
+    const minimoDaGrade = (css, classe) => {
+      const i = css.indexOf('.' + classe + '{');
+      if (i < 0) return null;
+      const m = css.slice(i, css.indexOf('}', i)).match(/minmax\((\d+)px/);
+      return m ? Number(m[1]) : null;
+    };
+
+    const conf = {
+      'a fundação não carimba mais UMA coluna em todo formulário do app':
+        !/\.grid2[^{]*\{[^}]*grid-template-columns:\s*1fr\s*!important/.test(fundacao)
+        && !/\.grid2,\s*\.grid2-doc\s*\{\s*grid-template-columns:\s*1fr\s*!important/.test(fundacao),
+      // a regra saiu, mas a fundação continua fazendo o que ela existe pra fazer
+      'e continua ajustando o que é dela (linha de item apertada no celular)':
+        /\.linha-item,\s*\.f-item\s*\{/.test(fundacao) && /@media \(max-width: 420px\)/.test(fundacao),
+      'o formulário do lançamento abre em 2 colunas iguais já no celular':
+        /\.grid2\{display:grid;grid-template-columns:1fr 1fr;gap:10px;\}/.test(lanc)
+        && !/@media\(min-width:440px\)\{ \.grid2\{grid-template-columns:1fr 1fr;\} \}/.test(lanc),
+      // rótulo de 1 linha ao lado de rótulo de 3 desalinhava as caixas
+      'as caixas alinham pela base, mesmo com rótulos de alturas diferentes':
+        /\.grid2 > div\{display:flex;flex-direction:column;min-width:0;\}/.test(lanc)
+        && /\.grid2 > div > input,\.grid2 > div > select,\.grid2 > div > textarea\{margin-top:auto;\}/.test(lanc),
+      'em tela larga os campos numerosos abrem em 3, ainda iguais':
+        /@media\(min-width:760px\)\{ \.grid-campos\{grid-template-columns:1fr 1fr 1fr;\} \}/.test(lanc)
+        && (lanc.match(/class="grid2 grid-campos hidden"/g) || []).length === 3,
+      // o aviso do cadeado é texto corrido: em meia coluna ele espremia
+      'o aviso que atravessa a grade continua ocupando a linha inteira':
+        /\.grid2 > \.sub\{grid-column:1\/-1;\}/.test(lanc),
+      // mesma queixa, outra tela: 200px de mínimo nunca cabe 2x em 390px
+      'os cartões do Fechamentos cabem dois por linha no celular':
+        minimoDaGrade(fech, 'kpis') !== null && minimoDaGrade(fech, 'kpis') <= 170
+        && /@media\(max-width:560px\)\{ \.kpi\{padding:12px 13px;\} \.kpi \.val\{font-size:17px;\} \}/.test(fech),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFormularioDuasColunas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (minKpis=${minimoDaGrade(fech, 'kpis')})`);
+  } catch (e) { okFormularioDuasColunas = false; console.log('  erro: ' + e.message); }
+  if (!okFormularioDuasColunas) ruins += 1;
+  console.log(`${okFormularioDuasColunas ? '✓' : '✗'} Formulário no celular: 2 colunas iguais (o !important da fundação forçava 1)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

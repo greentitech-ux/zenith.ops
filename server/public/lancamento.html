@@ -70,7 +70,7 @@
   .secao{border-top:1px solid var(--line);margin-top:14px;padding-top:14px;}
   .secao:first-of-type{border-top:none;margin-top:0;padding-top:0;}
   .secao-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
-  label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono);}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono);line-height:1.35;}
   label:first-child{margin-top:0;}
   input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
@@ -89,8 +89,28 @@
   .campo-automatico::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
   .campo-automatico{-moz-appearance:textfield;}
   textarea{resize:vertical;min-height:56px;}
-  .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
-  @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} }
+  /* DUAS COLUNAS JÁ NO CELULAR (Master, 16/09/2026: "organizar em tamanhos
+     iguais, 2 colunas... por que 1 caixa gigante tem ficado na tela inteira").
+     A regra antiga só virava 2 colunas acima de 440px - e o celular da loja
+     tem 390px. Resultado: cada campo ocupava a largura inteira e a seção de
+     KPI's virava uma tela de rolagem por si só.
+     Os campos aqui são número curto (unidades, minutos, reais): metade da
+     largura sobra pra todos eles. */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  /* o rótulo de um campo quebra em 2 linhas e o do vizinho não ("Valor Total
+     Taxa de Entrega" x "Total"). Sem isto as caixas ficavam em alturas
+     diferentes na mesma faixa - a coluna parecia torta. Cada célula é uma
+     coluna flex e a caixa desce pro fim dela: os campos alinham pela BASE,
+     que é onde o dedo vai. */
+  .grid2 > div{display:flex;flex-direction:column;min-width:0;}
+  .grid2 > div > label{margin-top:0;}
+  .grid2 > div > input,.grid2 > div > select,.grid2 > div > textarea{margin-top:auto;}
+  /* em tela larga cabem três sem apertar nada - a lista de KPI's de uma loja
+     Domino's passa de dez campos, e três colunas cortam a rolagem pela metade
+     de novo. Tamanhos continuam iguais. */
+  @media(min-width:760px){ .grid-campos{grid-template-columns:1fr 1fr 1fr;} }
+  /* o aviso do cadeado atravessa a grade inteira, em qualquer largura */
+  .grid2 > .sub{grid-column:1/-1;}
   .linha-item{display:grid;grid-template-columns:1fr 88px auto;gap:6px;align-items:center;margin-top:6px;}
   .linha-item input{padding:9px 10px;font-size:13.5px;}
   .btn-remover{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;width:32px;height:36px;font-size:15px;cursor:pointer;flex:none;}
@@ -289,13 +309,13 @@
         <div id="ler-canais-selecao" class="sub hidden" style="margin-top:6px;"></div>
         <div id="ler-canais-msg" class="sub hidden" style="margin-top:6px;"></div>
       </div>
-      <div class="grid2 hidden" id="canais-extras-container" style="margin-top:6px;"></div>
+      <div class="grid2 grid-campos hidden" id="canais-extras-container" style="margin-top:6px;"></div>
       <div class="sub hidden" id="canais-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
     </div>
 
     <div class="secao" data-recolher="nao">
       <div class="secao-titulo">Formas de pagamento<span class="chip-foto hidden" id="chip-foto-formas"></span></div>
-      <div class="grid2 hidden" id="formas-extras-container" style="margin-top:6px;"></div>
+      <div class="grid2 grid-campos hidden" id="formas-extras-container" style="margin-top:6px;"></div>
       <div class="sub hidden" id="formas-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
     </div>
 
@@ -333,7 +353,7 @@
 
     <div class="secao" data-recolher="nao">
        <div class="secao-titulo">KPI's<span class="chip-foto hidden" id="chip-foto-kpis"></span></div>
-       <div class="grid2 hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
+       <div class="grid2 grid-campos hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
        <div class="sub hidden" id="kpis-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
        <div class="pos-aviso hidden" id="aviso-kpis-pendentes"></div>
       <div class="resumo">

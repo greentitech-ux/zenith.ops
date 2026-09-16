@@ -49,12 +49,13 @@
   .hidden{display:none!important;}
   .sub{color:var(--muted);font-size:12px;margin-top:4px;font-family:var(--mono);}
 
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
   .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0;}
   .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono);line-height:1.35;}
   /* nowrap + a coluna com folga: sem isso "R$ 68.437,95" quebrava entre o
      "R$" e o numero, e valor de milhao quebrava no meio do proprio numero */
   .kpi .val{font-family:var(--mono);font-size:20px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  @media(max-width:560px){ .kpi{padding:12px 13px;} .kpi .val{font-size:17px;} }
   .kpi .val.ok{color:var(--ok);} .kpi .val.bad{color:var(--bad);} .kpi .val.warn{color:var(--warn);}
   /* quando a Diferenca de caixa esta negativa o card inteiro ganha borda
      vermelha, pra saltar no meio dos outros 5 KPIs (pedido do handoff de
