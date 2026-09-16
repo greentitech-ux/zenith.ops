@@ -41,10 +41,17 @@ const SENHA_PADRAO_BOT = '12345678';
 // em 59 telas. Trocar pra Haiku 4.5 é preencher SUPORTE_BOT_MODELO no Render
 // com 'claude-haiku-4-5-20251001'; sem a variável, nada muda.
 const MODELO = process.env.SUPORTE_BOT_MODELO || 'claude-opus-5';
-const MAX_TOKENS = 700;
+// O chat nao e' so uma FAQ: ele coleta dados, aciona ferramentas e devolve
+// uma decisao. Um pouco mais de margem evita que ele abandone uma resolucao
+// no meio para economizar duas frases. Continua configuravel no Render para
+// que o custo fique sob controle.
+const MAX_TOKENS = Number(process.env.SUPORTE_BOT_MAX_TOKENS) || 1100;
+const ESFORCO = process.env.SUPORTE_BOT_ESFORCO || 'medium';
 const MAX_RODADAS_TOOLS = 5; // seguranca do loop de tool use
-// baixa interacao: depois disso o bot para de responder e o humano continua
-const MAX_RESPOSTAS_BOT = 8;
+// Limite e rede de seguranca, nao uma forma silenciosa de abandonar a
+// conversa. Ao chegar nele, responderConversa faz handoff explicito, com
+// nota interna e alarme para o time.
+const MAX_RESPOSTAS_BOT = 12;
 
 // rede de seguranca: as vezes o modelo escreve na resposta final que "ja
 // chamou" um atendente sem de fato ter chamado a ferramenta chamar_atendente
@@ -136,6 +143,13 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - NUNCA diga que "chamou", "chamei", "acionei" ou "notifiquei" um atendente/time humano sem ter chamado a ferramenta chamar_atendente NESSA MESMA resposta - isso dispara um alarme real pro time, então a frase e a ação têm que andar sempre juntas. Se ainda não chamou a ferramenta, chame agora ou fale só no futuro ("posso chamar um atendente", "vou chamar um atendente").
 - Nunca invente informação sobre o sistema. Se não souber ou o assunto for sensível (senha de outra pessoa, dados financeiros, urgência grave), use chamar_atendente.
 
+## Ordem de resolução (obrigatória)
+1. Entenda a intenção e use o contexto que já existe na conversa; não peça de novo nome, loja, número ou dado que a pessoa já informou.
+2. Se houver uma ferramenta capaz de resolver ou consultar, use-a antes de pensar em chamar alguém. Depois explique o resultado em linguagem simples.
+3. Se a ação tiver impacto operacional, prepare-a para aprovação quando o catálogo disser que exige aprovação. Nunca alegue que algo foi executado antes do retorno da ferramenta.
+4. Só escale para humano quando faltar uma autorização, uma informação que não está disponível ou uma ferramenta. Antes da escalada, registre o resumo e a pendência.
+5. Nunca deixe a pessoa sem próximo passo: informe o que foi feito, o que está pendente e onde a confirmação aparecerá.
+
 ## O que você sabe do NoPulso
 - Login bloqueado (3 senhas erradas seguidas): SEMPRE use desbloquear_login pra resolver na hora, nunca chame um atendente pra isso - vale tanto pro login principal do NoPulso quanto pro login de operador do Abastecimento do Carrinho (balcão, 4 letras + 4 números). A pessoa volta a entrar com a MESMA senha de sempre; só se o mesmo acesso travar de novo é que entra uma senha nova (ver ferramenta abaixo).
 - Estorno: NÃO dá pra você abrir esse ticket direto (exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja foi a compra (pule essa pergunta se já souber pela "loja" do início da conversa) e use gerar_link_estorno_cliente. Se quem fala com você É o cliente (o mais comum), mande o link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo - não precisa de WhatsApp nem de mais ninguém no meio. Se for um funcionário pedindo em nome de um cliente que não está no chat, aí sim ele repassa o link pro cliente por onde for mais fácil (WhatsApp é uma opção, não a única).
@@ -150,6 +164,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 ## Ferramentas
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
 - consultar_ticket: andamento de um ticket pelo número.
+- consultar_meu_atendimento: consulta o protocolo DESTA conversa e os tickets que ela própria abriu. Use quando a pessoa perguntar pelo próprio protocolo, andamento ou número do ticket; não peça o número se ele já é o protocolo exibido no chat.
 - chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. ANTES de chamar, use registrar_nota_interna com um resumo (situacao PENDENTE) pra o humano já chegar sabendo. Avise que o time já foi chamado e responde ali mesmo na conversa.
 - bloquear_no_agregador: põe na fila do Cowork Agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel e confirma nessa conversa sozinho; você continua nela (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que já está sendo feito. Só chame com loja, app e - pra pausar item - o item em mãos.
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
@@ -186,8 +201,17 @@ const TOOLS_BASE = [
     },
   },
   {
+    name: 'consultar_meu_atendimento',
+    description: 'Consulta o protocolo desta conversa e os tickets vinculados a ela. Não expõe ticket de outra pessoa.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: 'consultar_ticket',
-    description: 'Consulta o andamento de um ticket da Central pelo número (ex: 10045).',
+    description: 'Consulta o andamento de um ticket da Central pelo número (ex: 10045). Disponível somente para o time autorizado.',
     input_schema: {
       type: 'object',
       properties: { numero: { type: 'integer', description: 'Número do ticket, sem o #' } },
@@ -325,7 +349,12 @@ const TOOL_RESETAR_IMPRESSORA = {
 };
 
 function montarTools(logado) {
-  const tools = (logado && logado.temMonitor) ? [...TOOLS_BASE, TOOL_CONSULTAR_PEDIDO] : [...TOOLS_BASE];
+  // Ticket por numero contem dados operacionais. Visitante publico consulta
+  // apenas o proprio protocolo; a busca por um numero arbitrario fica com o
+  // time autenticado (Master/Admin/secao Suporte).
+  const tools = TOOLS_BASE.filter((tool) => tool.name !== 'consultar_ticket');
+  if (logado && logado.ehTimeSuporte) tools.push(TOOLS_BASE.find((tool) => tool.name === 'consultar_ticket'));
+  if (logado && logado.temMonitor) tools.push(TOOL_CONSULTAR_PEDIDO);
   if (logado && logado.isMaster) tools.push(TOOL_EXECUTAR_ACAO_AGENTE);
   // quem tem loja no acesso resolve a propria impressora sem esperar humano
   if (logado && ((logado.unidades || []).length || logado.isMaster)) {
@@ -434,7 +463,33 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       : (destino.pessoas || []).length ? ` A equipe de ${destino.rotulo} já foi avisada.` : '';
     return `Ticket #${registro.numeroTicket} criado com sucesso (tipo ${tipo}, unidade ${registro.unidadeNome}).${paraQuem} Informe esse número à pessoa${paraQuem ? ' e diga que já foi direcionado' : ''}.`;
   }
+  if (nome === 'consultar_meu_atendimento') {
+    const vinculados = Array.isArray(chat.ticketsVinculados) ? chat.ticketsVinculados : [];
+    const todos = vinculados.length ? await solicitacoes.listAll() : [];
+    const tickets = vinculados.map((v) => {
+      const ticket = todos.find((s) => s.id === v.ticketId || s.numeroTicket === v.numero);
+      return ticket ? {
+        numero: ticket.numeroTicket,
+        tipo: ticket.tipo,
+        titulo: ticket.titulo,
+        unidade: ticket.unidadeNome || ticket.unidade,
+        status: ticket.status,
+        andamento: ticket.execucaoStatus || null,
+      } : { numero: v.numero, tipo: v.tipo, status: 'vinculado ao atendimento' };
+    });
+    return JSON.stringify({
+      protocolo: chat.numeroTicket,
+      atendimento: chat.statusAtendimento || 'PENDENTE',
+      tickets,
+      mensagem: tickets.length
+        ? 'Use apenas estes dados, pois pertencem a esta conversa.'
+        : 'Este é o protocolo do chat. Ainda não há uma solicitação da Central vinculada a ele.',
+    });
+  }
   if (nome === 'consultar_ticket') {
+    // A ferramenta nao entra no catalogo de visitante, mas a checagem aqui
+    // impede vazamento caso o modelo tente usa-la fora do contexto previsto.
+    if (!chat.logado || !chat.logado.ehTimeSuporte) return 'Sem autorização para consultar ticket de outra pessoa. Use consultar_meu_atendimento ou chamar_atendente.';
     const numero = Number(input.numero);
     const todos = await solicitacoes.listAll();
     const t = todos.find((s) => s.numeroTicket === numero);
@@ -446,9 +501,21 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     });
   }
   if (nome === 'chamar_atendente') {
+    // O resumo nao pode depender de o modelo lembrar de chamar uma segunda
+    // ferramenta. Toda transferencia já deixa para o humano o ultimo pedido,
+    // perfil e protocolo - a principal causa de "me explica de novo".
+    const ultimaMensagem = [...(chat.mensagens || [])].reverse().find((m) => m.de === 'visitante');
+    const motivo = String(input.motivo || '').trim();
+    await suporteChat.registrarNotaInterna(chat.id, {
+      resumo: `Handoff Beniboy · protocolo #${chat.numeroTicket}. ${motivo || 'Sem motivo informado.'}`,
+      situacao: 'PENDENTE',
+      pendencia: ultimaMensagem && ultimaMensagem.texto
+        ? `Última mensagem da pessoa: ${String(ultimaMensagem.texto).slice(0, 600)}`
+        : 'Continuar o atendimento nesta conversa.',
+    }).catch(() => {});
     await suporteChat.desativarBot(chat.id);
     resultado.chamouAtendente = true;
-    resultado.motivoAtendente = String(input.motivo || '').trim();
+    resultado.motivoAtendente = motivo;
     return 'Atendente humano chamado — o time foi notificado e vai responder nessa mesma conversa. Avise a pessoa e se despeça.';
   }
   if (nome === 'bloquear_no_agregador') {
@@ -708,6 +775,29 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
 // poll disparar em corrida) - so UMA execucao do bot por conversa por vez
 const emAndamento = new Set();
 
+// O limite de conversa existe para evitar um loop caro ou uma triagem que
+// nunca termina. Antes ele apenas retornava null: para a pessoa parecia que o
+// suporte tinha sumido. Este handoff e' deterministico, auditavel e dispara o
+// mesmo alerta usado quando o proprio modelo chama um humano.
+async function escalarPorLimite(chat) {
+  const ultimaMensagem = [...(chat.mensagens || [])].reverse().find((m) => m.de === 'visitante');
+  const motivo = 'Conversa atingiu o limite de tentativas automáticas; precisa de continuidade humana.';
+  await suporteChat.registrarNotaInterna(chat.id, {
+    resumo: `Handoff automático Beniboy · protocolo #${chat.numeroTicket}. ${motivo}`,
+    situacao: 'PENDENTE',
+    pendencia: ultimaMensagem && ultimaMensagem.texto
+      ? `Última mensagem da pessoa: ${String(ultimaMensagem.texto).slice(0, 600)}`
+      : 'Revisar o histórico desta conversa.',
+  }).catch(() => {});
+  await suporteChat.desativarBot(chat.id);
+  const atualizado = await suporteChat.adicionarMensagem(chat.id, {
+    de: 'suporte',
+    bot: true,
+    texto: 'Já organizei o histórico deste atendimento e chamei o time para continuar por aqui. Você não precisa repetir as informações.',
+  });
+  return { chat: atualizado, tickets: [], direcionados: [], agregador: null, encerrar: null, chamouAtendente: true, motivoAtendente: motivo };
+}
+
 // Gera (e grava) a resposta do bot pra conversa. Retorna null quando o bot
 // nao deve/nao consegue falar; senao { chat, tickets, chamouAtendente }.
 // `unidades` = nomes validos pra abertura de ticket (vem do index.js).
@@ -720,7 +810,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
     if (chat.atendidoPorEmail || chat.botDesativado) return null; // humano assumiu / bot ja se despediu
     const msgs = chat.mensagens || [];
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
-    if (msgs.filter((m) => m.bot).length >= MAX_RESPOSTAS_BOT) return null; // baixa interacao: passou do limite, fica pro humano
+    if (msgs.filter((m) => m.bot).length >= MAX_RESPOSTAS_BOT) return escalarPorLimite(chat);
 
     const resultado = { tickets: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', encerrar: null, agregador: null };
     const mensagens = montarMensagens(chat);
@@ -728,7 +818,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
     const tools = montarTools(chat.logado);
     let resp = await getCliente().messages.create({
       model: MODELO, max_tokens: MAX_TOKENS, system, messages: mensagens,
-      tools, output_config: { effort: 'low' },
+      tools, output_config: { effort: ESFORCO },
     });
 
     let rodadas = 0;
@@ -749,7 +839,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
       mensagens.push({ role: 'user', content: results });
       resp = await getCliente().messages.create({
         model: MODELO, max_tokens: MAX_TOKENS, system, messages: mensagens,
-        tools, output_config: { effort: 'low' },
+        tools, output_config: { effort: ESFORCO },
       });
     }
 
@@ -798,4 +888,4 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
   }
 }
 
-module.exports = { ativo, responderConversa, MODELO, donoDoChat };
+module.exports = { ativo, responderConversa, MODELO, ESFORCO, donoDoChat, escalarPorLimite };
