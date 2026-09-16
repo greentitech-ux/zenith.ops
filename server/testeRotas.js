@@ -14727,6 +14727,45 @@ setTimeout(async () => {
   console.log(`${okAnydesk ? '✓' : '✗'} NOC: dá pra reiniciar só o AnyDesk, sem derrubar o caixa junto`);
 
   // ------------------------------------------------------------------
+  // GSurfRSA Listener (TEF): o operador fica preso quando o serviço trava.
+  // A manutenção precisa atingir SOMENTE as máquinas escolhidas, nunca o
+  // parque inteiro e nunca um nome de serviço que veio livre do navegador.
+  let okGsurfRsa = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabG = { Authorization: 'Bearer ' + token };
+    const htmlG = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cmd = ls.COMANDO_REINICIAR_GSURF_RSA || '';
+    const srvG = await ls.cadastrarComputador('GSURFTESTE', 'PdvTef', 'interno');
+    await ls.heartbeat('GSURFTESTE', srvG.posto, { userAgent: 'NOCZenith/1.0' });
+    const alvo = [{ codigo: 'GSURFTESTE', posto: srvG.posto }];
+    const semSenha = await postarJson('/api/loja-status/manutencao/reiniciar', { alvos: alvo, tarefa: 'gsurfRsa' }, cabG);
+    const enviou = await postarJson('/api/loja-status/manutencao/reiniciar', {
+      alvos: alvo, tarefa: 'gsurfRsa', password: process.env.MASTER_PASSWORD,
+    }, cabG);
+    const resp = enviou.status === 200 ? JSON.parse(enviou.corpo) : {};
+    const doc = (await ls.listar('GSURFTESTE')).find((c) => c.posto === srvG.posto) || {};
+    const fila = doc.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${doc.comandoPendenteId}`) || {}) : {};
+    const conf = {
+      'o comando é fechado no servidor para o GSurfRSA Listener':
+        /GSurfRSA Listener/.test(cmd) && /Restart-Service/.test(cmd) && !/shutdown/i.test(cmd),
+      'serviço ausente devolve explicação clara': /não foi encontrado|nao foi encontrado/.test(cmd),
+      'continua exigindo senha do Master': semSenha.status === 401 || semSenha.status === 400,
+      'só a máquina escolhida recebe a tarefa TEF':
+        enviou.status === 200 && resp.tarefa === 'gsurfRsa' && resp.enfileirados === 1
+        && /GSurfRSA Listener/.test(fila.comando || '') && !/shutdown/i.test(fila.comando || ''),
+      'a tela tem confirmação e avisa que o computador não reinicia':
+        /manutEnviar\('gsurfRsa'\)/.test(htmlG) && /GSurfRSA Listener/.test(htmlG)
+        && /computador NÃO reinicia/.test(htmlG),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okGsurfRsa = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okGsurfRsa = false; console.log('  erro: ' + e.message); }
+  if (!okGsurfRsa) ruins += 1;
+  console.log(`${okGsurfRsa ? '✓' : '✗'} NOC: reinicia o GSurfRSA Listener só nas máquinas TEF selecionadas`);
+
+  // ------------------------------------------------------------------
   // BUSCA NA JANELA DE MANUTENCAO. Pedido do Master: "filtro de pesquisa
   // digitado, a fim de ser mais rapido digitando o nome da maquina e
   // aparece". Com o parque inteiro na lista, achar UMA maquina era rolar

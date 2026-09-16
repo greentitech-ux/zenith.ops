@@ -4907,6 +4907,7 @@ const EXECUTORES_QA = {
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
+  'manutencao.reiniciarGsurfRsa': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_GSURF_RSA, { origem: 'manutencao-gsurf-rsa' }),
   'manutencao.destravarRede': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REDE_DESTRAVAR, { origem: 'manutencao-rede' }),
   'formularios.removerAssinatura': (p) => formularios.removerAssinatura(p.id, p.chave, p.porEmail),
   'manutencao.resetZebra': (p) => lojaStatus.enfileirarComandoEmAlvos(
@@ -5157,7 +5158,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'zebra', 'rede'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'zebra', 'rede'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
@@ -5165,6 +5166,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       // caixa, ao contrario de reiniciar a maquina inteira por causa de um
       // servico so
       anydesk: { acao: 'manutencao.reiniciarAnydesk', verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
+      gsurfRsa: { acao: 'manutencao.reiniciarGsurfRsa', verbo: 'Reiniciar o GSurfRSA Listener de', comando: lojaStatus.COMANDO_REINICIAR_GSURF_RSA, origem: 'manutencao-gsurf-rsa' },
       // O comando aqui e uma FUNCAO porque muda de unidade pra unidade: leva
       // os IPs das Zebras DAQUELA loja. Os IPs saem de impressorasPraSondar,
       // que so devolve o que o Master marcou como impressora Zebra - e a
