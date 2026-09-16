@@ -67,6 +67,7 @@
   .msg{font-size:12.5px;padding:9px 12px;border-radius:8px;margin-top:12px;}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
   .msg.err{background:var(--bad-dim);color:var(--bad);}
+  .msg.info{background:rgba(92,200,255,.10);border:1px solid rgba(92,200,255,.32);color:var(--accent2);}
   .tablewrap{overflow-x:auto;}
   table{width:100%;min-width:560px;border-collapse:collapse;font-size:12.5px;}
   thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9.5px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);}
@@ -288,6 +289,7 @@
       </fieldset>
 
       <div class="msg hidden" id="modal-perfil-msg"></div>
+      <div class="msg info hidden" id="modal-perfil-copia-aviso">A cópia começa sem unidades para preservar o perfil original. Selecione apenas as unidades que devem usar esta nova regra.</div>
     </form>
     <div class="modal-actions">
       <button type="button" class="btn-ghost" onclick="fecharModalPerfil()">Cancelar</button>
@@ -386,6 +388,7 @@ function renderPerfis(){
       <td><span class="badge ${p.ativa!==false?'ativa':'inativa'}">${p.ativa!==false?'ativa':'inativa'}</span></td>
       <td><div class="rowacts">
         <button type="button" onclick="abrirModalPerfil('${p.id}')">✏️ Editar</button>
+        <button type="button" onclick="duplicarPerfil('${p.id}')" title="Criar uma cópia sem mover as unidades">⧉ Duplicar</button>
         <button type="button" onclick="excluirPerfil('${p.id}','${escapeHtml(p.nome).replace(/'/g,"\\'")}')">🗑️ Excluir</button>
       </div></td>
     </tr>`;
@@ -439,25 +442,34 @@ function lerMetricas(containerId){
   })).filter(m=>m.label);
 }
 
-function abrirModalPerfil(id){
-  EDITANDO_PERFIL_ID = id;
+function abrirModalPerfil(id, duplicar){
   const p = id ? PERFIS.find(x=>x.id===id) : null;
-  document.getElementById('modal-perfil-titulo').textContent = p ? `Editar perfil: ${p.nome}` : 'Novo perfil';
-  document.getElementById('pf-nome').value = p ? p.nome : '';
+  const ehCopia = !!(duplicar && p);
+  // Duplicar nunca edita a origem. Tambem nasce sem unidades: copiar a lista
+  // moveria cada unidade do perfil atual, pela regra de exclusividade.
+  EDITANDO_PERFIL_ID = ehCopia ? null : id;
+  document.getElementById('modal-perfil-titulo').textContent = ehCopia ? `Duplicar perfil: ${p.nome}` : (p ? `Editar perfil: ${p.nome}` : 'Novo perfil');
+  document.getElementById('pf-nome').value = p ? (ehCopia ? `Cópia de ${p.nome}` : p.nome) : '';
   document.getElementById('pf-ativa').checked = p ? p.ativa!==false : true;
   document.getElementById('pf-percentualPool').value = p ? p.percentualPool : 1;
   document.getElementById('pf-splitMetasOutras').value = p ? p.splitMetasOutras : 70;
   document.getElementById('pf-splitGerente').value = p ? p.splitGerente : 60;
   document.getElementById('pf-splitGerenteOutras').value = p ? p.splitGerenteOutras : 25;
-  document.getElementById('pf-unidades').innerHTML = unidadesBoxHtml(p ? p.unidades : []);
+  document.getElementById('pf-unidades').innerHTML = unidadesBoxHtml(ehCopia ? [] : (p ? p.unidades : []));
   document.getElementById('pf-metricas-gerente').innerHTML = '';
   document.getElementById('pf-metricas-colab').innerHTML = '';
   (p ? p.metricasGerente||[] : []).forEach(m=>adicionarMetrica('pf-metricas-gerente', m.label, m.peso));
   (p ? p.metricasColaboradores||[] : []).forEach(m=>adicionarMetrica('pf-metricas-colab', m.label, m.peso));
   document.querySelectorAll('#pf-metricas-gerente .metrica-label, #pf-metricas-colab .metrica-label').forEach(atualizarNotaAssiduidade);
   document.getElementById('modal-perfil-msg').classList.add('hidden');
+  document.getElementById('modal-perfil-copia-aviso').classList.toggle('hidden', !ehCopia);
   document.getElementById('modal-perfil-overlay').classList.add('show');
+  if(ehCopia){
+    const nome = document.getElementById('pf-nome');
+    nome.focus(); nome.select();
+  }
 }
+function duplicarPerfil(id){ abrirModalPerfil(id, true); }
 function fecharModalPerfil(){ document.getElementById('modal-perfil-overlay').classList.remove('show'); }
 
 async function salvarPerfil(){
