@@ -7,11 +7,9 @@
 // conectado, a mesma opção cria um EVENTO na agenda com sala do Meet e
 // convida os participantes: o compromisso cai no calendário deles.
 //
-// FALLBACK É REGRA, NÃO ENFEITE. Se o Workspace não estiver configurado, ou
-// a chamada falhar (rede, cota, delegação revogada), a reunião é criada do
-// mesmo jeito, com a sala do Jitsi que sempre existiu. Reunião sem sala
-// nenhuma seria pior que reunião no Jitsi: alguém marca, avisa a equipe e na
-// hora não há onde entrar.
+// A SALA É SEMPRE CORPORATIVA. Quando Calendar/Meet não responder, a criação
+// falha antes de gravar. Assim, todo link automático do NoPulso nasce no Meet
+// e vem acompanhado do evento na agenda da empresa.
 //
 // O QUE PRECISA SER FEITO NO WORKSPACE: docs/GOOGLE_WORKSPACE.md.
 'use strict';
@@ -81,9 +79,35 @@ function convidadosLimpos(emails) {
     .map((email) => ({ email }));
 }
 
+function linkDoMeet(evento) {
+  return evento?.hangoutLink
+    || (evento?.conferenceData?.entryPoints || []).find((p) => p && p.entryPointType === 'video')?.uri
+    || '';
+}
+
+const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A criação de conferenceData pode ser assíncrona: o POST devolve o evento
+// antes de o Meet entregar o entry point. Consultamos o mesmo evento por um
+// curto período para nunca gravar uma reunião sem o link que a pessoa espera.
+async function esperarLinkDoMeet(evento, token) {
+  let atual = evento;
+  for (let tentativa = 0; tentativa < 6; tentativa++) {
+    const link = linkDoMeet(atual);
+    if (link) return link;
+    if (!atual?.id) break;
+    await esperar(350);
+    const url = `${API}/calendars/${encodeURIComponent(agenda())}/events/${encodeURIComponent(atual.id)}?conferenceDataVersion=1`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) break;
+    atual = await resp.json().catch(() => atual);
+  }
+  return '';
+}
+
 /**
- * Cria o evento com sala do Meet. Lança se não der - quem chama decide o
- * fallback (ver tarefas.js: cai na sala do Jitsi).
+ * Cria o evento com sala do Meet. Lança se não der: a reunião não é gravada
+ * sem uma sala corporativa válida.
  * @returns {{link:string, eventoId:string, agenda:string, convidados:number}}
  */
 async function criarSala({ titulo, descricao, dia, hora, duracaoMin, convidados = [] }) {
@@ -121,10 +145,15 @@ async function criarSala({ titulo, descricao, dia, hora, duracaoMin, convidados 
   if (!resp.ok) {
     throw new Error(`Google Agenda recusou criar a reunião: ${data.error?.message || resp.status}.`);
   }
-  const link = data.hangoutLink
-    || (data.conferenceData?.entryPoints || []).find((p) => p && p.entryPointType === 'video')?.uri
-    || '';
-  if (!link) throw new Error('O evento foi criado mas veio sem sala do Meet (confira se o Meet está habilitado para a conta).');
+  const link = await esperarLinkDoMeet(data, token);
+  if (!link) {
+    // Não deixa evento órfão quando a política do domínio não permite Meet.
+    if (data.id) {
+      const apagar = `${API}/calendars/${encodeURIComponent(agenda())}/events/${encodeURIComponent(data.id)}?sendUpdates=all`;
+      await fetch(apagar, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    }
+    throw new Error('O Google criou o evento, mas não entregou a sala do Meet. Confira se o Google Meet está habilitado para a conta e tente novamente.');
+  }
   return { link, eventoId: data.id || '', agenda: agenda(), convidados: pessoas.length };
 }
 
@@ -146,4 +175,4 @@ async function cancelarSala(eventoId) {
   }
 }
 
-module.exports = { criarSala, cancelarSala, configurado, janela, convidadosLimpos, CALENDAR_SCOPE };
+module.exports = { criarSala, cancelarSala, configurado, janela, convidadosLimpos, linkDoMeet, esperarLinkDoMeet, CALENDAR_SCOPE };

@@ -17,20 +17,15 @@ const auth = require('./auth');
 const HORA_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DURACAO_MIN = 5;
 const DURACAO_MAX = 600;
-// Sala Jitsi sob demanda: sem conta, sem credencial, sem custo. Trocável por
-// env se um dia houver instância própria.
-const REUNIAO_BASE_URL = (process.env.REUNIAO_BASE_URL || 'https://meet.jit.si').replace(/\/+$/, '');
-// Nome ALEATÓRIO, nunca derivado de título/unidade/data: no Jitsi quem tem o
-// link entra, e "reuniao-tirol-1109" é adivinhável. Mesmo crypto dos tokens de
-// assinatura. Por isso o link é credencial - não sai em PDF nem em relatório.
-function gerarLinkReuniao() {
-  return `${REUNIAO_BASE_URL}/nopulso-${crypto.randomBytes(9).toString('hex')}`;
-}
 function limparLinkColado(valor) {
   const url = String(valor || '').trim().slice(0, 400);
-  if (!url) throw new Error('Cole o link da reunião, ou use "Gerar link".');
-  if (!/^https:\/\//i.test(url)) throw new Error('O link da reunião precisa começar com https://');
-  return url;
+  if (!url) throw new Error('Cole um link do Google Meet, ou escolha "Criar no Google Meet".');
+  let meet;
+  try { meet = new URL(url); } catch (_) { throw new Error('O link da reunião precisa ser um endereço válido do Google Meet.'); }
+  if (meet.protocol !== 'https:' || meet.hostname !== 'meet.google.com') {
+    throw new Error('As reuniões do NoPulso usam somente links https://meet.google.com/.');
+  }
+  return meet.href;
 }
 // devolve os campos da reunião já validados, ou os nulos de uma tarefa comum
 function camposDaReuniao({ ehReuniao, horaInicio, duracaoMin, linkReuniao, linkOrigem }) {
@@ -42,32 +37,30 @@ function camposDaReuniao({ ehReuniao, horaInicio, duracaoMin, linkReuniao, linkO
   const colado = String(linkOrigem || '') === 'colado';
   return {
     ehReuniao: true, horaInicio: hora, duracaoMin: duracao,
-    linkReuniao: colado ? limparLinkColado(linkReuniao) : gerarLinkReuniao(),
-    linkOrigem: colado ? 'colado' : 'gerado',
+    // Link automático é exclusivamente Google Meet. Não se cria uma reunião
+    // com sala alternativa: se o Workspace não estiver pronto, a pessoa vê o
+    // erro e corrige a integração antes de avisar participantes.
+    linkReuniao: colado ? limparLinkColado(linkReuniao) : null,
+    linkOrigem: colado ? 'colado' : 'google-pendente',
   };
 }
 
-// Troca a sala do Jitsi pela sala do Meet quando o Workspace está conectado.
-// Devolve SEMPRE um objeto pra mesclar: vazio quando não há nada a trocar.
-// Falhar aqui não pode derrubar a criação da reunião - por isso o catch
-// devolve vazio em vez de propagar; o que se perde é a agenda, não a sala.
+// Gera a sala no Google Meet e o evento no Calendar. Não há fallback: a regra
+// do NoPulso é que toda sala gerada venha da agenda corporativa.
 async function salaDoWorkspace(reuniao, { titulo, descricao, dia, pessoas }) {
-  if (!reuniao.ehReuniao || reuniao.linkOrigem !== 'gerado') return {};
-  if (!reuniaoGoogle.configurado()) return {};
-  try {
-    const sala = await reuniaoGoogle.criarSala({
-      titulo,
-      descricao,
-      dia,
-      hora: reuniao.horaInicio,
-      duracaoMin: reuniao.duracaoMin,
-      convidados: (pessoas || []).map((p) => p && p.email).filter(Boolean),
-    });
-    return { linkReuniao: sala.link, linkOrigem: 'google', eventoGoogleId: sala.eventoId };
-  } catch (e) {
-    console.warn('[reuniao] Workspace não criou a sala, seguindo com a sala própria:', e.message);
-    return {};
+  if (!reuniao.ehReuniao || reuniao.linkOrigem !== 'google-pendente') return {};
+  if (!reuniaoGoogle.configurado()) {
+    throw new Error('Google Meet ainda não está conectado. Configure GOOGLE_MEET_USUARIO e a delegação do Google Calendar antes de criar a reunião.');
   }
+  const sala = await reuniaoGoogle.criarSala({
+    titulo,
+    descricao,
+    dia,
+    hora: reuniao.horaInicio,
+    duracaoMin: reuniao.duracaoMin,
+    convidados: (pessoas || []).map((p) => p && p.email).filter(Boolean),
+  });
+  return { linkReuniao: sala.link, linkOrigem: 'google', eventoGoogleId: sala.eventoId };
 }
 
 const COLLECTION = db.collection('tarefas');
@@ -287,12 +280,8 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
   // valida ANTES de gravar: reunião sem hora não é reunião, e link colado
   // sem https não é link. Falhar aqui é melhor que gravar pela metade.
   const reuniao = camposDaReuniao({ ehReuniao, horaInicio, duracaoMin, linkReuniao, linkOrigem });
-  // Sala do Workspace quando ele está conectado. camposDaReuniao já deixou
-  // uma sala do Jitsi na mão: se o Google responder, ela é trocada pela sala
-  // do Meet (e o evento cai na agenda de quem foi convidado); se não
-  // responder, a reunião nasce com a sala que sempre teve. Reunião sem sala
-  // nenhuma seria o único desfecho inaceitável - alguém marca, avisa a
-  // equipe, e na hora não há onde entrar.
+  // Sala corporativa obrigatória: a tarefa só é gravada depois que o Google
+  // devolve o link do Meet e o id do evento. Isso impede salas fora da agenda.
   Object.assign(reuniao, await salaDoWorkspace(reuniao, {
     titulo: texto, descricao, dia: entrega,
     pessoas: [responsavel || usuario, ...(colaboradores || [])],
@@ -892,4 +881,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, gerarLinkReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

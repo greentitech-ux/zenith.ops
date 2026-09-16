@@ -1,18 +1,13 @@
 # Conectar a sala de reunião ao Google Workspace
 
-Hoje "Gerar link automaticamente" devolve uma sala do **Jitsi**: funciona, mas
-é uma sala solta — não entra na agenda de ninguém, não manda convite e não
-aparece no Meet da empresa.
+Ao escolher **Criar no Google Meet**, o NoPulso cria um evento na agenda da
+empresa com **sala do Google Meet** e convida os participantes: o compromisso
+cai no calendário deles.
 
-Com o Workspace conectado, a **mesma opção** passa a criar um evento na agenda
-com **sala do Google Meet** e convidar os participantes: o compromisso cai no
-calendário deles.
-
-> **O Jitsi não sai.** Se o Workspace não estiver configurado, ou a chamada ao
-> Google falhar (rede, cota, delegação revogada), a reunião é criada do mesmo
-> jeito com a sala do Jitsi. Reunião **sem sala nenhuma** seria o único
-> desfecho inaceitável: alguém marca, avisa a equipe, e na hora não há onde
-> entrar.
+> **Sem fallback.** Se o Workspace não estiver configurado, ou a chamada ao
+> Google falhar (rede, cota ou delegação), a reunião não é criada. Isso garante
+> que todo link gerado pelo NoPulso seja um `meet.google.com` da empresa, e
+> evita avisar uma equipe sobre uma sala alternativa sem agenda.
 
 ---
 
@@ -85,8 +80,8 @@ mostrar:
 - um link `https://meet.google.com/...` (em vez de `meet.jit.si`)
 - o aviso "O compromisso foi pra agenda de quem participa"
 
-Se continuar saindo `meet.jit.si`, o log do servidor diz o porquê na linha
-`[reuniao] Workspace não criou a sala`. Os dois erros comuns:
+Se a criação falhar, a própria tela mostra a resposta do Google. Os dois erros
+comuns são:
 
 | No log | O que falta |
 |---|---|
@@ -103,5 +98,5 @@ Se continuar saindo `meet.jit.si`, o log do servidor diz o porquê na linha
 | Reunião **cancelada** no NoPulso | o evento é apagado da agenda de todo mundo |
 | Reunião **vira tarefa** | o evento é apagado — não vai mais acontecer como reunião |
 
-O link da sala **não sai em PDF nem em relatório**, com Meet ou com Jitsi:
+O link da sala **não sai em PDF nem em relatório**:
 quem tem o link entra, então ele é credencial.

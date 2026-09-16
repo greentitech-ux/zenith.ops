@@ -22586,6 +22586,13 @@ setTimeout(async () => {
     const gauth = require('fs').readFileSync(__dirname + '/googleAuth.js', 'utf8');
     const tjs = require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8');
 
+    // Teste de fluxo sem credencial real: simulamos o Calendar autorizado e
+    // confirmamos que a reunião automática recebe somente um link do Meet.
+    const configuradoAntes = rg.configurado;
+    const criarSalaAntes = rg.criarSala;
+    rg.configurado = () => true;
+    rg.criarSala = async () => ({ link: 'https://meet.google.com/test-sala-123', eventoId: 'evento-meet-teste' });
+
     // uma reunião de verdade, pela rota
     const cri = await postarJson('/api/tarefas', {
       titulo: 'Reunião semanal', descricao: 'pauta', dataInicio: '2026-09-14', dataEntrega: '2026-09-14',
@@ -22646,15 +22653,13 @@ setTimeout(async () => {
           if (antes === undefined) delete process.env.GOOGLE_MEET_USUARIO; else process.env.GOOGLE_MEET_USUARIO = antes;
           return JSON.stringify(r) === JSON.stringify(['a@x.com', 'b@y.com']);
         })(),
-      // FALLBACK É REGRA: reunião sem sala nenhuma seria o único desfecho
-      // inaceitável - alguém marca, avisa a equipe, e na hora não há onde entrar
-      'Workspace desligado ou falhando NÃO impede a reunião: ela nasce com a sala própria':
-        !rg.configurado()
-        && reu.ehReuniao === true && /^https:\/\/[^ ]+\/nopulso-[0-9a-f]{18}$/.test(reu.linkReuniao || '')
-        && reu.linkOrigem === 'gerado'
-        && /catch \(e\) \{\n    console\.warn\('\[reuniao\] Workspace não criou a sala, seguindo com a sala própria:'/.test(tjs),
-      'e a troca só acontece quando o link seria gerado (link colado à mão fica como está)':
-        /if \(!reuniao\.ehReuniao \|\| reuniao\.linkOrigem !== 'gerado'\) return \{\};/.test(tjs),
+      'reunião automática só nasce com sala do Google Meet e evento na agenda':
+        reu.ehReuniao === true && /^https:\/\/meet\.google\.com\//.test(reu.linkReuniao || '')
+        && reu.linkOrigem === 'google' && reu.eventoGoogleId === 'evento-meet-teste'
+        && /Google Meet ainda não está conectado/.test(tjs),
+      'link colado também é limitado ao Meet, e só ele pula a geração automática':
+        /meet\.hostname !== 'meet\.google\.com'/.test(tjs)
+        && /if \(!reuniao\.ehReuniao \|\| reuniao\.linkOrigem !== 'google-pendente'\) return \{\};/.test(tjs),
       'cancelar a reunião tira o compromisso da agenda de quem foi convidado':
         /if \(tarefa\.eventoGoogleId\) await reuniaoGoogle\.cancelarSala\(tarefa\.eventoGoogleId\);/.test(tjs),
 
@@ -22719,11 +22724,13 @@ setTimeout(async () => {
         })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    rg.configurado = configuradoAntes;
+    rg.criarSala = criarSalaAntes;
     okReuniaoSai = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (cri=${cri.status} uma=${rUma.status} varias=${rVarias.status} virou=${virou.status} ${String(rUma.corpo || '').slice(0, 140)})`);
   } catch (e) { okReuniaoSai = false; console.log('  erro: ' + e.message); }
   if (!okReuniaoSai) ruins += 1;
-  console.log(`${okReuniaoSai ? '✓' : '✗'} Reunião: sala do Workspace (com queda pra sala própria), virar tarefa e decisões virando trabalho`);
+  console.log(`${okReuniaoSai ? '✓' : '✗'} Reunião: Google Meet obrigatório, virar tarefa e decisões virando trabalho`);
 
   // ---------------------------------------------------------------------
   // Cabeçalho dos PDFs: a marca ALINHADA, sem a linha preta por cima dela.
