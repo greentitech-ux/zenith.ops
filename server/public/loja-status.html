@@ -1586,13 +1586,28 @@ function atualizarConteudoDetalhe(codigo, c){
   if(disp) infoBits.push(`💻 ${escapeHtml(disp)}`);
   if(c.abertoDesde) infoBits.push(`⏱️ aberto ${escapeHtml(tempoRelativo(c.abertoDesde))}`);
   if(status!=='nunca') infoBits.push(`📶 sinal ${escapeHtml(tempoRelativo(c.ultimoHeartbeatEm))}`);
+  // Zebra não é "último comando" genérico: logo abaixo do sinal fica o resumo
+  // operacional dela (IP, reset, fila e retorno), sempre com o ícone certo.
+  const eventosZebra = (c.eventos || []).filter(e => String(e.tipo || '').startsWith('impressora'))
+    .sort((a,b) => (b.em || 0) - (a.em || 0)).slice(0, 3);
+  const zebras = (c.dispositivos || []).filter(d => d.marca === 'zebra');
+  if(zebras.length || eventosZebra.length){
+    const estado = zebras.map(d => {
+      const st = (c.impressoras || {})[d.mac] || {};
+      const cor = st.nivel === 'ok' ? 'var(--ok)' : (st.nivel === 'critico' ? 'var(--bad)' : 'var(--warn,#e0a800)');
+      return `${escapeHtml(d.ip || 'sem IP')} <b style="color:${cor};">${escapeHtml(st.nivel === 'ok' ? 'operacional' : (st.nivel || 'sem leitura'))}</b>`;
+    }).join(' · ');
+    const historico = eventosZebra.map(e => `<span style="font-size:11px;">• ${escapeHtml(e.detalhe || 'atualização da impressora')} · ${escapeHtml(tempoRelativo(e.em))}</span>`).join('<br>');
+    infoBits.push(`🖨️ Zebra${estado ? `: ${estado}` : ''}${historico ? `<br>${historico}` : ''}`);
+  }
   // ultimo acesso remoto detectado pelo NOCZenith (AnyDesk/TeamViewer/
   // DWService/etc - ver Verificar-AcessoRemoto em baixarVigia) - so o Master
   // recebe o push na hora, mas fica registrado aqui pra qualquer um ver
   if(c.ultimoAcessoRemotoEm) infoBits.push(`🛑 acesso remoto: <b>${escapeHtml(c.ultimoAcessoRemotoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoAcessoRemotoEm))}`);
   // resultado do ultimo comando enfileirado (ver botao ▶ Rodar acao) - saida
   // ou erro que o NOCZenith devolveu
-  if(c.ultimoComandoEm){
+  const ultimoFoiZebra = /~JR|Zpl-Enviar|zebra/i.test(String(c.ultimoComandoTexto || ''));
+  if(c.ultimoComandoEm && !ultimoFoiZebra){
     const saida = c.ultimoComandoErro
       ? `<span style="color:var(--bad);">erro: ${escapeHtml(c.ultimoComandoErro)}</span>`
       : `<span style="color:var(--ok);white-space:pre-wrap;">${escapeHtml((c.ultimoComandoResultado||'(sem saída)')).slice(0,600)}</span>`;

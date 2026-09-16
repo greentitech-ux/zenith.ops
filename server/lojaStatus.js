@@ -1792,6 +1792,13 @@ async function registrarTelemetria(codigo, posto, dados, token) {
     if (merge.mudaramIp && merge.mudaramIp.length) {
       const resumo = merge.mudaramIp.slice(0, 5).map((d) => `${d.nome || d.mac}: ${d.ipHistorico[d.ipHistorico.length - 1].de} → ${d.ip}`).join(', ');
       eventos = [...eventos, { tipo: 'dispositivo-ip-mudou', em: agora, detalhe: `${merge.mudaramIp.length} IP(s) alterado(s): ${resumo}`.slice(0, 200) }];
+      // A Zebra merece um aviso próprio na ficha: a operação precisa saber que
+      // foi ELA (e não qualquer outro aparelho DHCP) que ganhou outro IP.
+      const zebras = merge.mudaramIp.filter((d) => d.marca === 'zebra');
+      eventos = [...eventos, ...zebras.map((d) => {
+        const h = d.ipHistorico[d.ipHistorico.length - 1] || {};
+        return { tipo: 'impressora-ip-mudou', em: agora, detalhe: `${d.ip}: IP mudou de ${h.de || '?'} para ${d.ip}`.slice(0, 200) };
+      })];
       patch.eventos = eventos.slice(-EVENTOS_MAX);
     }
   }
@@ -2827,16 +2834,22 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
     resultado: d.resultado || null,
     erro: d.erro || null,
   };
+  const foiComandoZebra = /~JR|Zpl-Enviar|zebra/i.test(String(comando.comando || ''));
   await comandoRef.update(patch);
   // carimba o ultimo resultado no doc do computador (alem de liberar a fila),
   // pra aparecer no detalhe do computador no NOC - quem mandou o comando ve o
   // que voltou sem precisar entrar na maquina
+  const eventoZebra = foiComandoZebra ? {
+    tipo: 'impressora-comando', em: Date.now(),
+    detalhe: String(patch.erro || patch.resultado || 'reset enviado').slice(0, 200),
+  } : null;
   await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).set({
     comandoPendenteId: null,
     ultimoComandoEm: patch.executadoEm,
     ultimoComandoTexto: String(comando.comando || '').slice(0, 200),
     ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 2000) : null,
     ultimoComandoErro: patch.erro ? String(patch.erro).slice(0, 500) : null,
+    ...(eventoZebra ? { eventos: [...((compSnap.data() || {}).eventos || []), eventoZebra].slice(-EVENTOS_MAX) } : {}),
   }, { merge: true });
   cache.invalidar();
   return { ...comando, ...patch };
