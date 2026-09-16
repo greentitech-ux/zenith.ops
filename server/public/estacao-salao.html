@@ -50,6 +50,15 @@
        número. O QR não guarda valor nenhum - ele só diz QUAL mesa é; o valor
        vem da consulta ao vivo, senão um adesivo colado hoje mostraria o
        consumo de ontem pra sempre. -->
+  <!-- O ESTADO DO SALÃO, antes de qualquer campo: quem chega no meio do
+       serviço pergunta "como estamos", e isso estava numa frase de 11px
+       cinza embaixo de tudo. Todo número aqui vem de /api/estacao/salao. -->
+  <div class="est-estado" id="estado-salao"></div>
+
+  <!-- ABRIR e ACHAR são o ciclo inteiro do garçom: no celular seguem
+       empilhados, no balcão (tela larga) ficam lado a lado - o segundo não
+       precisa de rolagem. -->
+  <div class="est-duplo">
   <div class="est-card" id="card-mesa">
     <h2>Conta da mesa</h2>
     <div class="est-sub">Leia o QR Code da mesa, ou digite o número. Mostra quem está lá e quanto deu.</div>
@@ -72,6 +81,7 @@
     </div>
     <div class="est-acoes"><button type="button" class="est-btn principal" onclick="abrirComanda()">Abrir comanda</button></div>
     <div class="est-erro" id="erro-abrir"></div>
+  </div>
   </div>
 
   <div class="est-card">
@@ -152,18 +162,48 @@ function todasComandas(){
 }
 function acharComanda(id){ return todasComandas().find(c=>c.id===id) || null; }
 
+// tempo que a mesa está aberta, a partir da comanda mais antiga dela
+// (`desde`, do servidor). É o número que diz se a mesa está virando - e o
+// garçom lê "há 1h20" mais rápido do que calcula 19:04 -> agora.
+function haQuantoTempo(iso){
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return '';
+  const min = Math.floor((Date.now() - d.getTime()) / 60000);
+  if(min < 1) return 'agora';
+  if(min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `há ${h}h${String(m).padStart(2,'0')}` : `há ${h}h`;
+}
+function stat(rotulo, valor, sub, classe){
+  // stat de dinheiro fica mais largo (.largo): o valor não pode quebrar linha
+  const largo = /dinheiro/.test(classe||'') ? ' largo' : '';
+  return `<div class="est-stat${largo}"><div class="est-stat-rot">${esc(rotulo)}</div>`
+    + `<div class="est-stat-val ${classe||''}">${esc(valor)}</div>`
+    + (sub ? `<div class="est-stat-sub">${esc(sub)}</div>` : '') + '</div>';
+}
+
 function renderSalao(){
   const s = SALAO;
-  document.getElementById('resumo-salao').textContent = s.pessoas
-    ? `${s.pessoas} pessoa(s) no salão · ${fmtReal(s.subtotalAberto)} em aberto · serviço ${s.servicoPct}%`
-    : 'Nenhuma comanda aberta.';
+  // a faixa de estado: mesas, pessoas e o que está em aberto. Sem comanda
+  // nenhuma ela some - faixa de zeros não informa, só ocupa a tela do celular
+  document.getElementById('estado-salao').innerHTML = s.pessoas
+    ? stat('Mesas', String(s.mesas.length), s.semMesa.length ? `+${s.semMesa.length} sem mesa` : '')
+      + stat('Pessoas', String(s.pessoas))
+      + stat('Em aberto', fmtReal(s.subtotalAberto), `serviço ${s.servicoPct}%`, 'destaque dinheiro')
+    : '';
+  // a frase repetia, palavra por palavra, o que a faixa de cima já mostra -
+  // dois lugares com o mesmo número é um pra ficar desatualizado
+  document.getElementById('resumo-salao').textContent = s.pessoas ? '' : 'Nenhuma comanda aberta.';
 
   document.getElementById('mesas').innerHTML = s.mesas.length
     ? `<div class="est-mesas">${s.mesas.map(m=>`
         <button type="button" class="est-mesa" onclick="verMesa(${m.mesa})">
           <div class="est-mesa-cap">Mesa</div>
-          <div class="est-mesa-num">${m.mesa}</div>
-          <div class="est-mesa-cap">${m.pessoas} pessoa(s) · desde ${esc(horaCurta(m.desde))}</div>
+          <div class="est-mesa-topo">
+            <div class="est-mesa-num">${m.mesa}</div>
+            <div class="est-mesa-tempo" title="desde ${esc(horaCurta(m.desde))}">${esc(haQuantoTempo(m.desde))}</div>
+          </div>
+          <div class="est-mesa-cap">${m.pessoas} pessoa(s)</div>
           <div class="est-mesa-val">${fmtReal(m.subtotal)}</div>
         </button>`).join('')}</div>`
     : '';

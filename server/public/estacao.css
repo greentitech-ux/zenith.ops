@@ -127,3 +127,98 @@
   .est-dialogo{width:100%;max-height:100vh;border-radius:0;padding:14px 12px;}
   .est-modal{padding:0;align-items:stretch;}
 }
+
+/* ===================================================================
+ * O ESTADO DO SERVIÇO, VISTO DE LONGE
+ *
+ * As três telas mostravam número dentro de frase ("12 pessoa(s) no salão ·
+ * R$ 1.240,00 em aberto · serviço 10%") em fonte de 11px cinza - o mesmo
+ * peso do texto de ajuda ao lado. Quem trabalha de pé, com uma mão, não lê
+ * frase: bate o olho. Aqui o que a operação decide em cima ganha corpo, e o
+ * resto continua sendo o resto.
+ *
+ * Todo número destes blocos vem do servidor (salao() e fechamentoDoDia() em
+ * estacaoComida.js). Nenhum é estimado, projetado ou "meta" - o que não
+ * existe no dado não aparece na tela.
+ * ================================================================== */
+
+/* faixa de estado: a linha que responde "como está o salão agora" */
+.est-estado{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch;margin-bottom:14px;}
+.est-estado .est-stat{flex:1 1 96px;}
+/* dinheiro precisa de mais largura que uma contagem: "R$ 12.480,90" em caixa
+   de 96px virava três linhas ("R$" / "12.480," / "90") - ilegível, e o pior
+   tipo de ilegível, porque ainda parece número. */
+.est-estado .est-stat.largo{flex:1 1 160px;}
+
+.est-stat{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:10px 12px;min-width:0;}
+/* o rótulo QUEBRA em vez de truncar: "Total do d…" não é rótulo, é enigma */
+.est-stat-rot{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;line-height:1.3;}
+/* e o valor NUNCA quebra - número partido no meio se lê errado */
+.est-stat-val{font:700 21px var(--mono);line-height:1.15;margin-top:3px;white-space:nowrap;}
+.est-stat-val.destaque{color:var(--accent);}
+.est-stat-sub{font:10px var(--mono);color:var(--muted);margin-top:2px;}
+.est-stat-val.dinheiro{font-size:16px;}
+@media(max-width:560px){ .est-stat-val{font-size:19px;} .est-stat-val.dinheiro{font-size:15px;} }
+
+/* pastilha de turno - o estado que mais muda o preço da mesa */
+.est-turno{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel2);font:11px var(--mono);color:var(--muted);}
+.est-turno b{color:var(--text);font-weight:600;text-transform:uppercase;letter-spacing:.06em;}
+.est-turno.aberto{border-color:var(--accent);color:var(--accent);}
+.est-turno.aberto b{color:var(--accent);}
+.est-turno::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor;flex:none;}
+
+/* composição de um total (rodízio x consumo x serviço x balcão) e formas de
+   pagamento: a mesma barra, porque é a mesma pergunta - "de onde veio" */
+.est-barra-prop{display:flex;height:9px;border-radius:999px;overflow:hidden;background:var(--panel2);border:1px solid var(--line);}
+.est-barra-prop i{display:block;height:100%;}
+.est-barra-prop i.a{background:var(--accent);}
+.est-barra-prop i.b{background:var(--accent2);}
+.est-barra-prop i.c{background:var(--ok);}
+.est-barra-prop i.d{background:var(--warn);}
+.est-legenda{display:flex;gap:12px;flex-wrap:wrap;margin-top:9px;}
+.est-legenda span{display:inline-flex;align-items:center;gap:5px;font:11px var(--mono);color:var(--muted);}
+.est-legenda em{width:9px;height:9px;border-radius:3px;flex:none;font-style:normal;}
+.est-legenda em.a{background:var(--accent);} .est-legenda em.b{background:var(--accent2);}
+.est-legenda em.c{background:var(--ok);}     .est-legenda em.d{background:var(--warn);}
+.est-legenda b{color:var(--text);font-weight:600;}
+
+/* mesa: o cartão que o garçom identifica de longe. O tempo da mesa é dado
+   real (`desde`, a comanda mais antiga) e é o que diz se a mesa está
+   virando - por isso fica junto do número, não escondido embaixo. */
+.est-mesa{display:grid;gap:2px;}
+.est-mesa-topo{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.est-mesa-tempo{font:10px var(--mono);color:var(--muted);flex:none;}
+.est-mesa-val{color:var(--text);}
+
+/* AÇÕES DO GARÇOM lado a lado: abrir comanda e achar a conta são o ciclo
+   inteiro do salão, e estavam em dois cards empilhados - no celular, o
+   segundo só aparecia depois de rolar. */
+.est-duplo{display:grid;gap:12px;}
+@media(min-width:720px){ .est-duplo{grid-template-columns:1fr 1fr;align-items:start;} }
+.est-duplo .est-card{margin-bottom:0;}
+
+/* tabela enxuta (por caixa, no Fechamento) - no celular vira cartão, porque
+   tabela de 6 colunas em 390px não se lê */
+.est-tabela{width:100%;border-collapse:collapse;font-size:13px;}
+.est-tabela th{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;}
+.est-tabela th:first-child{text-align:left;}
+.est-tabela td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono);}
+.est-tabela td:first-child{text-align:left;font-family:var(--sans);}
+.est-tabela tr:last-child td{border-bottom:0;}
+.est-tabela .zerado{color:var(--muted);}
+@media(max-width:560px){
+  .est-tabela,.est-tabela tbody,.est-tabela tr,.est-tabela td{display:block;width:100%;}
+  .est-tabela thead{display:none;}
+  .est-tabela tr{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+  .est-tabela td{border:0;padding:3px 0;display:flex;justify-content:space-between;gap:12px;text-align:right;}
+  .est-tabela td::before{content:attr(data-rot);font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;align-self:center;}
+  .est-tabela td:first-child{font-weight:700;padding-bottom:7px;margin-bottom:5px;border-bottom:1px solid var(--line);}
+  .est-tabela td:first-child::before{content:'Caixa';}
+}
+
+/* aviso de bloqueio: quando falta um passo antes (turno fechado, preço sem
+   tabela). Diz o que fazer, não só que não dá. */
+.est-aviso{display:flex;gap:10px;align-items:start;background:color-mix(in srgb,var(--warn) 10%,var(--panel2));
+  border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));border-radius:10px;padding:11px 12px;font-size:12.5px;line-height:1.5;}
+.est-aviso b{color:var(--warn);}

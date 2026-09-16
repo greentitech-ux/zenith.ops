@@ -39,6 +39,9 @@
 
   <div class="est-card">
     <h2>O dia</h2>
+    <!-- os quatro números do dia, antes da quebra por linha: total, pessoas,
+         ticket médio e o que ficou aberto. Todos de /api/estacao/fechamento. -->
+    <div class="est-estado" id="estado-dia"></div>
     <div class="est-sub" id="resumo-dia">carregando...</div>
     <div id="total-dia"></div>
   </div>
@@ -145,31 +148,72 @@ function linhasFormas(formas){
     .map(([id, rotulo])=>`<div class="est-linha"><span>${rotulo}</span><b>${fmtReal(formas[id])}</b></div>`).join('');
 }
 
+function stat(rotulo, valor, sub, classe){
+  // stat de dinheiro fica mais largo (.largo): o valor não pode quebrar linha
+  const largo = /dinheiro/.test(classe||'') ? ' largo' : '';
+  return `<div class="est-stat${largo}"><div class="est-stat-rot">${esc(rotulo)}</div>`
+    + `<div class="est-stat-val ${classe||''}">${esc(valor)}</div>`
+    + (sub ? `<div class="est-stat-sub">${esc(sub)}</div>` : '') + '</div>';
+}
+
+// DE ONDE VEIO O DINHEIRO DO DIA, em barra. As quatro linhas já existiam
+// (rodízio, consumo, balcão, serviço) mas em coluna: pra saber se o consumo
+// puxou o dia era preciso dividir de cabeça. A barra responde de relance, e
+// usa os MESMOS números - nenhuma estimativa entra aqui.
+function barraComposicao(t){
+  const partes = [
+    { chave:'a', rotulo:'Rodízio', valor: t.rodizio },
+    { chave:'b', rotulo:'Consumo', valor: t.consumo },
+    { chave:'c', rotulo:'Balcão', valor: t.balcao },
+    { chave:'d', rotulo:'Serviço', valor: t.servico },
+  ].filter(p => p.valor > 0);
+  const soma = partes.reduce((x,p)=>x+p.valor, 0);
+  if(!soma) return '';
+  return `<div class="est-barra-prop">${partes.map(p=>`<i class="${p.chave}" style="width:${(p.valor/soma*100).toFixed(2)}%" title="${esc(p.rotulo)}"></i>`).join('')}</div>`
+    + `<div class="est-legenda">${partes.map(p=>`<span><em class="${p.chave}"></em>${esc(p.rotulo)} <b>${fmtReal(p.valor)}</b></span>`).join('')}</div>`;
+}
+
 function renderDia(f){
   const t = f.total;
-  document.getElementById('resumo-dia').textContent = t.pagamentos
-    ? `${t.pagamentos} conta(s) fechada(s) · ${t.pessoas} pessoa(s) · ticket médio ${fmtReal(t.ticketMedio)}`
-    : 'Nenhuma conta fechada neste dia.';
-  document.getElementById('total-dia').innerHTML = `
-    <div class="est-totais" style="margin-top:0;padding-top:0;border-top:0;">
+  // o que o dono do dia olha primeiro: quanto entrou, quantas pessoas, e
+  // quanto cada uma deixou. Todos do servidor (fechamentoDoDia).
+  document.getElementById('estado-dia').innerHTML = t.pagamentos
+    ? stat('Total do dia', fmtReal(t.total), `${t.pagamentos} conta(s)`, 'destaque dinheiro')
+      + stat('Pessoas', String(t.pessoas))
+      + stat('Ticket médio', fmtReal(t.ticketMedio), '', 'dinheiro')
+      + (f.subtotalAberto ? stat('Ainda aberto', fmtReal(f.subtotalAberto), `${(f.abertas||[]).length} comanda(s)`, 'dinheiro') : '')
+    : '';
+  document.getElementById('resumo-dia').textContent = t.pagamentos ? '' : 'Nenhuma conta fechada neste dia.';
+  document.getElementById('total-dia').innerHTML = t.pagamentos ? `
+    ${barraComposicao(t)}
+    <div class="est-totais">
       <div class="est-linha"><span>Rodízio</span><b>${fmtReal(t.rodizio)}</b></div>
       <div class="est-linha"><span>Consumo</span><b>${fmtReal(t.consumo)}</b></div>
       <div class="est-linha"><span>Balcão</span><b>${fmtReal(t.balcao)}</b></div>
       <div class="est-linha"><span>Serviço</span><b>${fmtReal(t.servico)}</b></div>
       <div class="est-linha total"><span>Total do dia</span><b>${fmtReal(t.total)}</b></div>
       ${linhasFormas(t.formas)}
-    </div>`;
+    </div>` : '';
 
-  document.getElementById('por-caixa').innerHTML = `<div class="est-lista">${
-    f.porCaixa.map(c=>`<div class="est-item" style="display:block;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;">
-        <b style="font-family:var(--mono);font-size:15px;">Caixa ${esc(c.caixa)}</b>
-        <b style="font-family:var(--mono);color:${c.total?'var(--accent)':'var(--muted)'};">${fmtReal(c.total)}</b>
-      </div>
-      <div class="est-comanda-meta">${c.pagamentos} conta(s) · ${c.pessoas} pessoa(s)</div>
-      ${c.total ? `<div class="est-totais" style="margin-top:8px;padding-top:8px;">${linhasFormas(c.formas)}</div>` : ''}
-    </div>`).join('')
-  }</div>`;
+  // POR CAIXA em tabela: conferir gaveta é comparar caixa com caixa, e em
+  // cartões empilhados a comparação exigia rolar. No celular cada linha
+  // vira cartão de novo (o CSS cuida), porque 5 colunas não cabem em 390px.
+  document.getElementById('por-caixa').innerHTML = `
+    <table class="est-tabela">
+      <thead><tr><th>Caixa</th><th>Contas</th><th>Pessoas</th><th>Serviço</th><th>Total</th></tr></thead>
+      <tbody>${f.porCaixa.map(c=>`<tr>
+        <td>Caixa ${esc(c.caixa)}</td>
+        <td data-rot="Contas" class="${c.pagamentos?'':'zerado'}">${c.pagamentos}</td>
+        <td data-rot="Pessoas" class="${c.pessoas?'':'zerado'}">${c.pessoas}</td>
+        <td data-rot="Serviço" class="${c.servico?'':'zerado'}">${fmtReal(c.servico)}</td>
+        <td data-rot="Total" style="${c.total?'color:var(--accent);font-weight:700;':'color:var(--muted);'}">${fmtReal(c.total)}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+    ${f.porCaixa.filter(c=>c.total).map(c=>`
+      <div style="margin-top:12px;">
+        <div class="est-comanda-meta">Caixa ${esc(c.caixa)} · como recebeu</div>
+        <div class="est-totais" style="margin-top:6px;">${linhasFormas(c.formas)}</div>
+      </div>`).join('')}`;
 
   const ab = f.abertas || [];
   document.getElementById('card-abertas').hidden = !ab.length;

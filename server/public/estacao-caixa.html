@@ -48,6 +48,11 @@
        e a tela diz isso, pra ninguém achar que alguém decidiu. -->
   <div class="est-card" id="card-turno">
     <h2>Turno da venda</h2>
+    <!-- O TURNO É O PREÇO. Ele estava em texto corrido cinza, do mesmo peso
+         da ajuda ao lado - e é o estado que decide quanto cada rodízio custa.
+         Agora é pastilha: acesa quando o caixa abriu, apagada quando quem
+         manda ainda é o relógio. -->
+    <div id="turno-pastilha" style="margin-bottom:8px;"></div>
     <div class="est-sub" id="turno-sub">—</div>
     <div class="est-barra" style="margin-top:8px;">
       <button type="button" class="est-btn" id="btn-almoco" onclick="abrirTurno('almoco')">Abrir almoço</button>
@@ -144,9 +149,15 @@ async function carregarTurno(){
     TURNO = await pedir(`/api/estacao/turno?unidade=${encodeURIComponent(unidadeAtual())}`);
   }catch(e){ TURNO = null; sub.textContent = e.message; return; }
   const rot = TURNO.turno === 'jantar' ? 'JANTAR' : 'ALMOÇO';
+  document.getElementById('turno-pastilha').innerHTML =
+    `<span class="est-turno ${TURNO.porCaixa ? 'aberto' : ''}"><b>${esc(rot)}</b>`
+    + `${TURNO.porCaixa ? 'aberto no caixa' : 'pelo horário'}</span>`;
+  // sem turno aberto, o preço sai pelo RELÓGIO - e um almoço que varou das
+  // 18h passa a cobrar jantar no meio do serviço. Isso não é informação de
+  // rodapé: é aviso, e diz o que fazer.
   sub.innerHTML = TURNO.porCaixa
-    ? `Valendo: <b>${rot}</b> — aberto no caixa. Todo rodízio lançado agora usa o preço de ${rot.toLowerCase()}.`
-    : `Valendo: <b>${rot}</b> — <b>ninguém abriu turno hoje</b>, então está valendo o horário. Abra o turno pra travar o preço.`;
+    ? `Todo rodízio lançado agora usa o preço de <b>${rot.toLowerCase()}</b>.`
+    : `<div class="est-aviso"><span>⚠</span><div><b>Ninguém abriu o turno hoje.</b> O preço está saindo pelo horário (${rot.toLowerCase()}) - se o serviço virar, o valor vira junto, no meio das mesas. Abra o turno abaixo pra travar.</div></div>`;
   document.getElementById('btn-almoco').classList.toggle('principal', TURNO.turno === 'almoco');
   document.getElementById('btn-jantar').classList.toggle('principal', TURNO.turno === 'jantar');
 }

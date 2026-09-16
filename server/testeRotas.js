@@ -12975,7 +12975,8 @@ setTimeout(async () => {
       'virar pro jantar troca tudo, na hora':
         jantarDepois.turno === 'jantar' && jantarDepois.porCaixa === true,
       'a tela sabe dizer se quem decidiu foi o caixa ou o horário':
-        /porCaixa/.test(htmlC) && /ninguém abriu turno hoje/.test(htmlC),
+        /porCaixa/.test(htmlC) && /Ninguém abriu o turno hoje/.test(htmlC)
+        && /class="est-turno \$\{TURNO\.porCaixa \? 'aberto' : ''\}"/.test(htmlC),
       'turno inválido é recusado': recusouTurnoInvalido,
       // a comanda tem de usar o turno VIGENTE, nao chamar o relogio direto
       'a comanda usa o turno vigente, não o relógio':
@@ -23487,6 +23488,81 @@ setTimeout(async () => {
   } catch (e) { okArquivosServidos = false; console.log('  erro: ' + e.message); }
   if (!okArquivosServidos) ruins += 1;
   console.log(`${okArquivosServidos ? '✓' : '✗'} Arquivos servidos: JS válido e sem marcador de conflito (o que travou o app com a suíte verde)`);
+
+  // ------------------------------------------------------------------
+  // ESTAÇÃO: O ESTADO DO SERVIÇO VISTO DE LONGE.
+  //
+  // Master (16/09/2026): "reveja tudo que já falei da estação da comida,
+  // melhore o que já tem e crie o que falta visualmente".
+  //
+  // As três telas mostravam os números que a operação decide em cima dentro
+  // de frase de 11px cinza, do mesmo peso do texto de ajuda ao lado - quem
+  // trabalha de pé, com uma mão, não lê frase. O que este teste protege NÃO é
+  // o desenho (isso é a varredura visual): é que todo número exibido venha do
+  // SERVIDOR. Tela que inventa número é pior que tela feia - a operação
+  // decide em cima dela (CLAUDE.md §6).
+  let okEstacaoVisual = false;
+  try {
+    const fsE = require('fs');
+    const css = fsE.readFileSync(__dirname + '/public/estacao.css', 'utf8');
+    const salao = fsE.readFileSync(__dirname + '/public/estacao-salao.html', 'utf8');
+    const caixa = fsE.readFileSync(__dirname + '/public/estacao-caixa.html', 'utf8');
+    const fech = fsE.readFileSync(__dirname + '/public/estacao-fechamento.html', 'utf8');
+    const mod = fsE.readFileSync(__dirname + '/estacaoComida.js', 'utf8');
+
+    const conf = {
+      // cada campo da faixa tem que EXISTIR no retorno de salao()
+      'a faixa do Salão só mostra o que o servidor devolve':
+        /stat\('Mesas', String\(s\.mesas\.length\)/.test(salao)
+        && /stat\('Pessoas', String\(s\.pessoas\)\)/.test(salao)
+        && /stat\('Em aberto', fmtReal\(s\.subtotalAberto\), `serviço \$\{s\.servicoPct\}%`/.test(salao)
+        && /mesas: \[\.\.\.porMesa\.values\(\)\]/.test(mod) && /pessoas: abertas\.length/.test(mod)
+        && /subtotalAberto: arred\(/.test(mod) && /servicoPct: precos\.servicoPct/.test(mod),
+      // o tempo da mesa sai de `desde` (a comanda mais antiga), que o servidor
+      // calcula - a tela não estima nada
+      'o tempo da mesa vem do `desde` do servidor':
+        /if \(c\.abertaEm < m\.desde\) m\.desde = c\.abertaEm/.test(mod)
+        && /function haQuantoTempo\(iso\)/.test(salao)
+        && /haQuantoTempo\(m\.desde\)/.test(salao),
+      'a faixa do Fechamento só mostra o que fechamentoDoDia devolve':
+        /stat\('Total do dia', fmtReal\(t\.total\)/.test(fech)
+        && /stat\('Ticket médio', fmtReal\(t\.ticketMedio\)/.test(fech)
+        && /ticketMedio: total\.pessoas \? arred\(total\.total \/ total\.pessoas\) : 0/.test(mod),
+      // a barra é proporção dos MESMOS quatro números que já estavam em linha
+      'a barra de composição é feita dos valores reais, não de percentual solto':
+        /function barraComposicao\(t\)/.test(fech)
+        && /valor: t\.rodizio/.test(fech) && /valor: t\.consumo/.test(fech)
+        && /valor: t\.balcao/.test(fech) && /valor: t\.servico/.test(fech)
+        && /\(p\.valor\/soma\*100\)\.toFixed\(2\)/.test(fech),
+      // faixa de zeros não informa e ainda ocupa a tela inteira do celular
+      'sem movimento, a faixa some em vez de mostrar uma parede de zeros':
+        /document\.getElementById\('estado-salao'\)\.innerHTML = s\.pessoas\s*\n\s*\?/.test(salao)
+        && /document\.getElementById\('estado-dia'\)\.innerHTML = t\.pagamentos\s*\n\s*\?/.test(fech),
+      // o mesmo número em dois lugares é um pra ficar desatualizado
+      'o resumo em frase não repete a faixa':
+        /resumo-salao'\)\.textContent = s\.pessoas \? '' :/.test(salao)
+        && /resumo-dia'\)\.textContent = t\.pagamentos \? '' :/.test(fech),
+      // "R$ 12.480,90" em caixa estreita virava três linhas no celular
+      'valor em dinheiro não quebra linha, e o rótulo não é truncado':
+        /\.est-stat-val\{[^}]*white-space:nowrap/.test(css)
+        && !/\.est-stat-rot\{[^}]*text-overflow:ellipsis/.test(css)
+        && /\.est-estado \.est-stat\.largo\{flex:1 1 160px;\}/.test(css)
+        && /const largo = \/dinheiro\/\.test\(classe\|\|''\) \? ' largo' : '';/.test(salao),
+      // turno é o PREÇO: em texto cinza ele tinha o peso de uma observação
+      'o turno do caixa é estado visível, e sem turno aberto vira aviso':
+        /class="est-turno \$\{TURNO\.porCaixa \? 'aberto' : ''\}"/.test(caixa)
+        && /est-aviso/.test(caixa) && /Ninguém abriu o turno hoje/.test(caixa)
+        && /\.est-turno\.aberto\{border-color:var\(--accent\)/.test(css),
+      // CLAUDE.md §2: cor cravada escapa da troca do tema Claro
+      'nada de hex cravado no CSS novo (o tema Claro troca o acento)':
+        !/#b8ff3c/i.test(css.slice(css.indexOf('O ESTADO DO SERVIÇO'))),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okEstacaoVisual = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEstacaoVisual = false; console.log('  erro: ' + e.message); }
+  if (!okEstacaoVisual) ruins += 1;
+  console.log(`${okEstacaoVisual ? '✓' : '✗'} Estação: o estado do serviço em número grande - e todo número vem do servidor`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
