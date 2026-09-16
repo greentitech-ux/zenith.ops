@@ -12647,6 +12647,8 @@ setTimeout(async () => {
       // rodava; quando a politica voltou a ser relida, rodou em todas de uma vez.
       'desligar NUNCA grava papel de parede vazio':
         !/Name Wallpaper -Value ""/.test(psPp),
+      'a arte se ajusta à tela sem cortar laterais, logos ou identificação':
+        /if \(\$ligado\) \{[\s\S]{0,700}Name WallpaperStyle -Value "6"/.test(psPp),
       'desligar so mexe se a imagem for nossa, ou se a tela estiver apagada':
         /if \(-not \$nossa -and \$atual -ne ""\) \{ return \$true \}/.test(psPp)
         && psPp.includes('Web\\Wallpaper\\Windows\\img0.jpg'),
