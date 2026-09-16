@@ -1765,6 +1765,9 @@ app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (r
 // grupo/marca e o agente NAO carimba por cima (ver o header acima). Master-only.
 app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
+    // trava de segurança: papel de parede entra na tela de 52 máquinas, então
+    // confirma a senha do Master antes (o campo vai junto no multipart)
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
     const { codigo, posto } = req.params;
     const arte = { caminho: null, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() };
@@ -1777,6 +1780,7 @@ app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', aut
 });
 app.delete('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     const r = await lojaStatus.removerArteDaMaquina(req.params.codigo, req.params.posto);
     res.json(r);
   } catch (err) {
@@ -5255,6 +5259,9 @@ app.get('/api/loja-status/config', auth.requireMaster, async (req, res) => {
 // POLITICA DA MAQUINA (papel de parede, USB, instalacao) - so o Master liga
 app.put('/api/loja-status/:codigo/computadores/:posto/politica', auth.requireMaster, async (req, res) => {
   try {
+    // trava de segurança: salvar política muda o comportamento da máquina (USB,
+    // instalação, papel de parede) - confirma a senha do Master antes
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     const politica = await lojaStatus.definirPolitica(req.params.codigo, req.params.posto, req.body);
     broadcast('loja-status-atualizado', { codigo: req.params.codigo, posto: req.params.posto });
     res.json(politica);
@@ -5363,6 +5370,9 @@ app.get('/api/loja-status/papel-de-parede-diagnostico', auth.requireMaster, asyn
 
 app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
+    // trava de segurança: a arte do parque cai em todas as máquinas ligadas -
+    // confirma a senha do Master antes (o campo vai junto no multipart)
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
     // marca e rede vem no MESMO form da imagem (campos de texto do multipart),
     // entao so existem depois do multer - nao da pra ler antes do upload

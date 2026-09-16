@@ -672,6 +672,25 @@
   </div>
 </div>
 
+<!-- Trava de segurança: re-autenticação antes de papel de parede e salvar
+     política. A confirmação real é no servidor (exigirSenhaDoMaster); este
+     modal só coleta a senha, mascarada. -->
+<div class="overlay hidden" id="senha-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="document.getElementById('senha-cancel').click()">✕</span>
+  <div class="modal">
+    <h3>🔒 Confirme sua senha</h3>
+    <div class="sub" style="margin-bottom:8px;">Para <b id="senha-acao">esta ação</b>, confirme que é você.</div>
+    <input type="password" id="senha-input" autocomplete="new-password" placeholder="sua senha de Master">
+    <div class="msg hidden err" id="senha-erro" style="margin-top:6px;"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" id="senha-cancel">Cancelar</button>
+      <button type="button" class="btn-primary" id="senha-ok">Confirmar</button>
+    </div>
+  </div>
+  </div>
+</div>
+
 <div class="overlay hidden" id="acao-overlay">
   <div class="sheet-wrap">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalAcao()">✕</span>
@@ -3198,12 +3217,37 @@ function atualizarVerPapelDeParede(){
   const q = b ? `?marca=${encodeURIComponent(b)}&rede=${encodeURIComponent(a)}` : (a ? `?marca=${encodeURIComponent(a)}` : '');
   ver.href = `/api/loja-status/papel-de-parede${q}`;
 }
+// Trava de segurança (pedido do Master): re-autenticação antes de papel de
+// parede e salvar política. Devolve a senha digitada, ou null se cancelar.
+// A verificação de verdade é no servidor (exigirSenhaDoMaster) - aqui é só a
+// coleta, mascarada. Reinício/reset já pedem senha no próprio modal.
+function pedirSenhaMaster(acaoTexto){
+  return new Promise((resolve)=>{
+    const ov = document.getElementById('senha-overlay');
+    const inp = document.getElementById('senha-input');
+    const erro = document.getElementById('senha-erro');
+    const ok = document.getElementById('senha-ok');
+    const cancel = document.getElementById('senha-cancel');
+    if(!ov || !inp){ resolve(null); return; }
+    document.getElementById('senha-acao').textContent = acaoTexto || 'esta ação';
+    inp.value = ''; erro.classList.add('hidden');
+    ov.classList.remove('hidden');
+    setTimeout(()=>inp.focus(), 50);
+    const fechar = (val)=>{ ov.classList.add('hidden'); ok.onclick=null; cancel.onclick=null; inp.onkeydown=null; resolve(val); };
+    ok.onclick = ()=>{ if(!inp.value){ erro.textContent='Digite sua senha.'; erro.classList.remove('hidden'); return; } fechar(inp.value); };
+    cancel.onclick = ()=>fechar(null);
+    inp.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); ok.onclick(); } else if(e.key==='Escape'){ e.preventDefault(); fechar(null); } };
+  });
+}
+
 async function enviarPapelDeParede(){
   const input = document.getElementById('pp-arquivo');
   const msg = document.getElementById('msg-pp');
   msg.classList.add('hidden');
   const arquivo = (input.files||[])[0];
   if(!arquivo){ msg.textContent='Escolha a imagem.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const senha = await pedirSenhaMaster('enviar o papel de parede do parque');
+  if(senha===null) return;
   const escolha = (document.getElementById('pp-marca')||{}).value || '';
   // "GBE:dominos" -> rede + marca; "dominos" -> só marca; "" -> arte padrão
   const [a, b] = escolha.split(':');
@@ -3212,6 +3256,7 @@ async function enviarPapelDeParede(){
   try{
     const fd = new FormData();
     fd.append('imagem', arquivo);
+    fd.append('password', senha);
     if(marca) fd.append('marca', marca);
     if(rede) fd.append('rede', rede);
     const r = await fetch('/api/loja-status/papel-de-parede', { method:'PUT', body: fd });
@@ -3279,7 +3324,9 @@ async function enviarArteMaquina(codigo, posto){
   const inp = document.getElementById('pp-maq-arquivo');
   const msg = document.getElementById('msg-pp-maq');
   if(!inp.files || !inp.files[0]){ msg.textContent='Escolha a imagem desta máquina.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
-  const fd = new FormData(); fd.append('imagem', inp.files[0]);
+  const senha = await pedirSenhaMaster('enviar a arte desta máquina');
+  if(senha===null) return;
+  const fd = new FormData(); fd.append('imagem', inp.files[0]); fd.append('password', senha);
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/papel-de-parede-arte`, { method:'PUT', body: fd });
     const d = await r.json();
@@ -3291,8 +3338,10 @@ async function enviarArteMaquina(codigo, posto){
 }
 async function removerArteMaquina(codigo, posto){
   const msg = document.getElementById('msg-pp-maq');
+  const senha = await pedirSenhaMaster('remover a arte desta máquina');
+  if(senha===null) return;
   try{
-    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/papel-de-parede-arte`, { method:'DELETE' });
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/papel-de-parede-arte`, { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: senha }) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui remover.');
     msg.textContent = 'Voltou pra arte do grupo/marca (com carimbo). Troca na próxima consulta.';
@@ -3304,6 +3353,9 @@ async function salvarPoliticaComputador(codigo, posto){
   const corpo = {};
   document.querySelectorAll('#detalhe-comp-politica [data-pol]').forEach(el=>{ corpo[el.dataset.pol] = el.checked; });
   const msg = document.getElementById('msg-politica');
+  const senha = await pedirSenhaMaster('salvar a política desta máquina');
+  if(senha===null) return;
+  corpo.password = senha;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/politica`, {
       method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo) });

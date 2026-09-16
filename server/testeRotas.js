@@ -7075,8 +7075,10 @@ setTimeout(async () => {
     // 15/09). O Master de verdade tem que passar; quem nao tem sessao, nao.
     const pngMinimo = { nome: 'arte.png', tipo: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
     const rotaArte = `/api/loja-status/${UNI}/computadores/${posto}/papel-de-parede-arte`;
-    const httpComMaster = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', { Authorization: 'Bearer ' + token }, 'PUT');
-    const httpSemSessao = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', {}, 'PUT');
+    // a rota agora pede a senha do Master (trava de segurança) - vai no multipart
+    const httpComMaster = await postarMultipart(rotaArte, { password: process.env.MASTER_PASSWORD }, pngMinimo, 'imagem', { Authorization: 'Bearer ' + token }, 'PUT');
+    const httpSemSessao = await postarMultipart(rotaArte, { password: process.env.MASTER_PASSWORD }, pngMinimo, 'imagem', {}, 'PUT');
+    const httpSemSenha = await postarMultipart(rotaArte, {}, pngMinimo, 'imagem', { Authorization: 'Bearer ' + token }, 'PUT');
     // limpa o que o upload HTTP gravou, pra nao interferir nas asserts abaixo
     await ls.removerArteDaMaquina(UNI, posto);
     // sem arte de maquina nem de grupo: cai em nada (ou no parque, se houver)
@@ -7102,6 +7104,8 @@ setTimeout(async () => {
         httpComMaster.status !== 403 && !/Apenas o acesso Master/.test(String(httpComMaster.corpo || '')),
       'e a rota recusa quem não tem sessão de Master':
         httpSemSessao.status === 403 || httpSemSessao.status === 401,
+      'a arte por máquina pede a senha do Master (trava de segurança)':
+        httpSemSenha.status === 400 && /Senha incorreta/.test(String(httpSemSenha.corpo || '')),
       'a arte desta máquina vence a do grupo, e vem marcada daMaquina':
         !!comArte && comArte.caminho === 'parque/arte-atm01.jpg' && comArte.daMaquina === true,
       'a configuração do agente reflete a versão da arte da máquina (ele rebaixa a imagem nova)':
@@ -12356,10 +12360,13 @@ setTimeout(async () => {
     });
     const cabComum = { Authorization: 'Bearer ' + (await auth.login('pol-comum@teste.local', 'SenhaDeTeste!2026')).token };
     const comum = await enviarJson('PUT', rotaPol, { bloquearUsbStorage: true }, cabComum);
-    const p1 = await enviarJson('PUT', rotaPol, { papelDeParedeAtivo: true, bloquearUsbStorage: true, bloquearInstalacao: true, alertarInstalacao: true }, cabP);
+    // salvar política agora pede a senha do Master (trava de segurança)
+    const SENHA = process.env.MASTER_PASSWORD;
+    const pSemSenha = await enviarJson('PUT', rotaPol, { bloquearUsbStorage: true }, cabP);
+    const p1 = await enviarJson('PUT', rotaPol, { papelDeParedeAtivo: true, bloquearUsbStorage: true, bloquearInstalacao: true, alertarInstalacao: true, password: SENHA }, cabP);
     const pol1 = p1.status === 200 ? JSON.parse(p1.corpo) : {};
     const cfg1 = await ls.configuracaoAgente('POL', 'PC1', 'tokpol');
-    const p2 = await enviarJson('PUT', rotaPol, { alertarInstalacao: true }, cabP);
+    const p2 = await enviarJson('PUT', rotaPol, { alertarInstalacao: true, password: SENHA }, cabP);
     const pol2 = p2.status === 200 ? JSON.parse(p2.corpo) : {};
     const cfg2 = await ls.configuracaoAgente('POL', 'PC1', 'tokpol');
     // programas: 1a coleta e foto inicial; a 2a com item novo alerta
@@ -12378,6 +12385,8 @@ setTimeout(async () => {
     const conf = {
       'só o Master define a política (usuário do NOC logado não muda trava de máquina)':
         semLogin.status === 401 && comum.status === 403 && p1.status === 200,
+      'salvar política pede a senha do Master (trava de segurança)':
+        pSemSenha.status === 400 && /Senha incorreta/.test(String(pSemSenha.corpo || '')),
       'a política chega ao agente pela configuração dele': cfg1.politica.bloquearUsbStorage === true
         && cfg1.politica.papelDeParedeAtivo === true && cfg1.politica.bloquearInstalacao === true,
       'a versão SOBE a cada mudança (é como o vigia sabe que tem política nova)':
@@ -12476,8 +12485,11 @@ setTimeout(async () => {
     DOCS.set('lojaStatus/PPDOM__PC2', { codigo: 'PPDOM', posto: 'PC2', nome: 'PDV Desl', agentToken: 'tokdesl', tipo: 'interno', ultimoHeartbeatEm: Date.now(), eventos: [], politica: { papelDeParedeAtivo: false }, politicaVersao: 3 });
 
     // arte do parque (a de sempre) + arte da marca Domino's
-    const envParque = await postarMultipart('/api/loja-status/papel-de-parede', {}, { nome: 'p.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
-    const envDom = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos' }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    // a rota agora pede a senha do Master (trava de segurança): vai no multipart
+    const SENHA = process.env.MASTER_PASSWORD;
+    const envParque = await postarMultipart('/api/loja-status/papel-de-parede', { password: SENHA }, { nome: 'p.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const envSemSenha = await postarMultipart('/api/loja-status/papel-de-parede', {}, { nome: 'x.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const envDom = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', password: SENHA }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arteDom = await ls.papelDeParedeDe('PPDOM');
     // antes de existir arte do grupo, a ARCFOOD cai na arte so-da-marca
     const arcSoMarca = await ls.papelDeParedeDe('19855');
@@ -12487,7 +12499,7 @@ setTimeout(async () => {
     DOCS.set('empresas/empArcTeste', { id: 'empArcTeste', nome: 'ARCFOOD', ativa: true, tipoNegocio: 'alimentacao', unidades: ['19855'] });
     DOCS.set('empresas/empBravoTeste', { id: 'empBravoTeste', nome: 'Grupo Bravo', ativa: true, tipoNegocio: 'alimentacao', unidades: ['PPDOM'] });
     emp.invalidarCache();
-    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'empArcTeste' }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'empArcTeste', password: SENHA }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arcComGrupo = await ls.papelDeParedeDe('19855');
     const gbeDepois = await ls.papelDeParedeDe('PPDOM');
     const arteSem = await ls.papelDeParedeDe('PPSEM');
@@ -12496,12 +12508,12 @@ setTimeout(async () => {
     // a versao de aplicacao tem de MEXER quando so a imagem troca
     const antes = (await ls.configuracaoAgente('PPDOM', 'PC1', 'tokdom')).versaoAplicacao;
     await new Promise((r) => setTimeout(r, 5));
-    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos' }, { nome: 'd2.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', password: SENHA }, { nome: 'd2.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const depois = (await ls.configuracaoAgente('PPDOM', 'PC1', 'tokdom')).versaoAplicacao;
     const cfgDesl = await ls.configuracaoAgente('PPDOM', 'PC2', 'tokdesl');
 
     // subir arte de UMA marca nao pode apagar a das outras (setConfig e merge)
-    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'spoleto' }, { nome: 's.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
+    await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'spoleto', password: SENHA }, { nome: 's.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const domAindaTem = !!(await ls.papelDeParedeDe('PPDOM')).marca;
     const spoAgoraTem = (await ls.papelDeParedeDe('PPSPO')).marca === 'spoleto';
 
@@ -12557,6 +12569,8 @@ setTimeout(async () => {
         /optgroup label="Grupo \+ marca"/.test(htmlPp) && /fd\.append\('rede', rede\)/.test(htmlPp),
       'a loja com marca recebe a arte da MARCA, não a do parque':
         envParque.status === 200 && envDom.status === 200 && arteDom.marca === 'dominos',
+      'a arte do parque pede a senha do Master (trava de segurança)':
+        envSemSenha.status === 400 && /Senha incorreta/.test(String(envSemSenha.corpo || '')),
       'loja sem marca cai na arte do parque (não fica sem papel de parede)':
         !!arteSem && arteSem.marca === null && !!arteSem.caminho,
       'marca sem arte enviada também cai na do parque':
@@ -13385,7 +13399,10 @@ setTimeout(async () => {
     const soMaster = await pedir('/api/qa-aprovacoes', cabTok);
     // 2) e escreve: mesma rota de Master que o navegador usa
     DOCS.set('lojaStatus/TOK__PC1', { codigo: 'TOK', posto: 'PC1', nome: 'Tok', tipo: 'interno', agentToken: 'tk', ultimoHeartbeatEm: Date.now(), eventos: [] });
-    const escreveu = await enviarJson('PUT', '/api/loja-status/TOK/computadores/PC1/politica', { bloquearUsbStorage: true }, cabTok);
+    // salvar política pede a senha do Master (trava de segurança). O token
+    // AGE como o Master, mas não substitui a senha: sem ela, trava até pra ele.
+    const escreveuSemSenha = await enviarJson('PUT', '/api/loja-status/TOK/computadores/PC1/politica', { bloquearUsbStorage: true }, cabTok);
+    const escreveu = await enviarJson('PUT', '/api/loja-status/TOK/computadores/PC1/politica', { bloquearUsbStorage: true, password: process.env.MASTER_PASSWORD }, cabTok);
     // 3) token errado nao entra
     const errado = await pedir('/api/me', { Authorization: 'Bearer ' + 'b'.repeat(64) });
     const vazio = await pedir('/api/me', { Authorization: 'Bearer ' });
@@ -13394,6 +13411,8 @@ setTimeout(async () => {
         eu.status === 200 && euJson.role === 'master' && euJson.email === process.env.MASTER_EMAIL,
       'e vale nas rotas que exigem Master (nenhuma checagem de rota precisou mudar)':
         soMaster.status === 200 && escreveu.status === 200,
+      'a trava de senha vale até pro token: sem a senha do Master, política é recusada':
+        escreveuSemSenha.status === 400 && /Senha incorreta/.test(String(escreveuSemSenha.corpo || '')),
       'token errado é recusado': errado.status === 401 && vazio.status === 401,
       // o coracao: UM caminho de permissao, nao dois
       'sessão e token preenchem o req pela MESMA função (não há dois sistemas de permissão)':

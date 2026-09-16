@@ -371,6 +371,10 @@ senha, tem token. Chamando sem ela você toma **400 "Senha incorreta."**:
 | `POST /api/empresas/:id/arquivar` | arquivar empresa |
 | `POST /api/empresas/:id/desarquivar` | desarquivar empresa |
 | `DELETE /api/empresas/:id` | excluir empresa |
+| `PUT /api/loja-status/papel-de-parede` | enviar/trocar a arte do parque (cai em todas as máquinas ligadas) |
+| `PUT /api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte` | enviar a arte própria de uma máquina |
+| `DELETE /api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte` | remover a arte própria de uma máquina |
+| `PUT /api/loja-status/:codigo/computadores/:posto/politica` | salvar a política da máquina (papel de parede, USB, instalação) |
 
 A senha volta **400 "Senha incorreta."**, e não 401, de propósito: senha de
 confirmação errada não é sessão inválida.
