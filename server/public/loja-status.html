@@ -1048,6 +1048,7 @@
     </label>
     <div class="msg hidden" id="editar-comp-status"></div>
     <div class="modal-acoes">
+      <button type="button" class="btn-ghost hidden" id="editar-comp-voltar" onclick="voltarDaEdicaoParaFicha()">← Voltar para ficha</button>
       <button type="button" class="btn-ghost" onclick="fecharModalEditarComputador()">Cancelar</button>
       <button type="button" class="btn-primary" id="editar-comp-salvar" onclick="salvarEdicaoComputador()">Salvar</button>
     </div>
@@ -1793,7 +1794,7 @@ function atualizarConteudoDetalhe(codigo, c){
   renderPoliticaComputador(codigo, c);
   document.getElementById('detalhe-comp-editar-hero').onclick = () => {
     fecharDetalheComputador();
-    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo);
+    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo, true);
   };
 }
 function copiarDadoRede(valor, rotulo){
@@ -3328,7 +3329,8 @@ async function baixarVigia(codigo, posto, tipo){
 
 let EDITAR_COMP_CODIGO = null;
 let EDITAR_COMP_POSTO = null;
-function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo){
+let EDITAR_COMP_ORIGEM = null;
+function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, veioDaFicha = false){
   document.getElementById('editar-comp-notebook').checked = !!ehNotebook;
   document.getElementById('editar-comp-windows-antigo').checked = !!windowsAntigo;
   document.getElementById('editar-comp-servidor').checked = !!ehServidor;
@@ -3337,6 +3339,8 @@ function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydesk
   document.getElementById('editar-comp-nopulso-print').checked = !!noPulsoPrint;
   EDITAR_COMP_CODIGO = codigo;
   EDITAR_COMP_POSTO = posto;
+  EDITAR_COMP_ORIGEM = veioDaFicha ? { codigo, posto } : null;
+  document.getElementById('editar-comp-voltar').classList.toggle('hidden', !EDITAR_COMP_ORIGEM);
   document.getElementById('editar-comp-unidade').textContent = `${nomeAtual || posto} · atualmente em ${UNIDADES_NOMES[codigo] || codigo}`;
   const unidadesOrdenadas = UNIDADES.slice().sort((a,b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   document.getElementById('editar-comp-unidade-select').innerHTML = unidadesOrdenadas.map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('');
@@ -3347,7 +3351,17 @@ function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydesk
   document.getElementById('editar-comp-status').classList.add('hidden');
   abrirOverlay('editar-comp-overlay');
 }
-function fecharModalEditarComputador(){ fecharOverlay('editar-comp-overlay'); EDITAR_COMP_CODIGO = null; EDITAR_COMP_POSTO = null; }
+function fecharModalEditarComputador(){
+  fecharOverlay('editar-comp-overlay');
+  EDITAR_COMP_CODIGO = null;
+  EDITAR_COMP_POSTO = null;
+  EDITAR_COMP_ORIGEM = null;
+}
+function voltarDaEdicaoParaFicha(){
+  const origem = EDITAR_COMP_ORIGEM;
+  fecharModalEditarComputador();
+  if(origem) abrirDetalheComputador(origem.codigo, origem.posto);
+}
 async function salvarEdicaoComputador(){
   const nome = document.getElementById('editar-comp-nome').value.trim();
   const tipo = document.querySelector('input[name="editar-comp-tipo"]:checked').value;
@@ -3387,8 +3401,12 @@ async function salvarEdicaoComputador(){
     // guarda antes de fechar: fecharModalEditarComputador() zera as duas
     const compCodigo = EDITAR_COMP_CODIGO;
     const compPosto = EDITAR_COMP_POSTO;
+    const origem = EDITAR_COMP_ORIGEM;
     fecharModalEditarComputador();
     await carregar();
+    // Quando a edição foi aberta a partir da ficha, a confirmação volta para
+    // ela (na aba Visão geral), já com os dados recém-salvos.
+    if(origem) abrirDetalheComputador(compCodigo, compPosto);
     // mudou de unidade: o vigia que ja esta instalado tem a unidade VELHA
     // assada dentro dele (ver codigoTextoPS em vigiaScript.js), entao nao
     // basta reabrir um link - a maquina precisa ser reinstalada com o
