@@ -23806,6 +23806,80 @@ setTimeout(async () => {
   if (!okEstacaoVisual) ruins += 1;
   console.log(`${okEstacaoVisual ? '✓' : '✗'} Estação: o estado do serviço em número grande - e todo número vem do servidor`);
 
+  // ------------------------------------------------------------------
+  // ESTAÇÃO EM CASA GRANDE: 50, 70, ATÉ 100 MESAS (Master, 16/09/2026).
+  //
+  // O salão foi desenhado pra uma casa pequena. Com 8 mesas ocupadas o cartão
+  // grande é perfeito; com 60 ele vira uma parede de rolagem no celular, e o
+  // garçom que precisa da mesa 72 rola até achar - de pé, com uma mão.
+  //
+  // O que este teste protege é a ESCALA, não o desenho: o servidor tem que
+  // aceitar a numeração inteira, a grade tem que ficar densa sozinha quando a
+  // casa enche, e o gerente tem que saber quanto papel vai gastar ANTES de
+  // mandar 100 QRs pra impressora.
+  let okEstacaoGrande = false;
+  try {
+    const ec = require(__dirname + '/estacaoComida.js');
+    const qr = require(__dirname + '/estacaoMesasQr.js');
+    const fsG = require('fs');
+    const salao = fsG.readFileSync(__dirname + '/public/estacao-salao.html', 'utf8');
+    const fech = fsG.readFileSync(__dirname + '/public/estacao-fechamento.html', 'utf8');
+    const css = fsG.readFileSync(__dirname + '/public/estacao.css', 'utf8');
+
+    // a numeração inteira da casa tem que passar pelo servidor, ponta a ponta
+    const faixaCem = qr.faixaDeMesas(1, 100);
+    let recusouInvertida = false;
+    try { qr.faixaDeMesas(50, 10); } catch (e) { recusouInvertida = true; }
+    // e o input da tela não pode barrar antes do servidor: com max=100 a mesa
+    // 120 de uma casa que cresceu seria recusada pelo NAVEGADOR, sem mensagem
+    const maxMesaNaTela = (salao.match(/id="novo-mesa"[^>]*max="(\d+)"/) || [])[1];
+
+    const conf = {
+      'o servidor aceita a numeração de uma casa grande (a mesa 100 é válida)':
+        ec.sanitizarMesaParaTeste ? true : (() => {
+          // sanitizarMesa não é exportada: o caminho real é abrir comanda, e
+          // o limite está no módulo - confere pela fonte, que é o que vale
+          const mod = fsG.readFileSync(__dirname + '/estacaoComida.js', 'utf8');
+          return /if \(!\(n > 0\) \|\| n > 9999\) throw new Error\('Número de mesa inválido\.'\)/.test(mod);
+        })(),
+      'a tela não barra antes do servidor': Number(maxMesaNaTela) >= 999,
+      'o gerador de QR faz as 100 de uma vez': faixaCem.length === 100
+        && faixaCem[0] === 1 && faixaCem[99] === 100,
+      'faixa invertida é recusada (senão sai folha em branco)': recusouInvertida,
+      // 12 por folha é a grade A4 do gerador; 100 mesas = 9 folhas, e isso
+      // precisa aparecer ANTES de mandar pra impressora
+      'a tela diz quantas folhas vão sair, com a mesma grade do gerador':
+        /const QR_POR_FOLHA = 12;/.test(fech)
+        && /Math\.ceil\(mesas \/ QR_POR_FOLHA\)/.test(fech)
+        && /3 colunas x 4 linhas = 12 adesivos por página/.test(fsG.readFileSync(__dirname + '/estacaoMesasQr.js', 'utf8')),
+      'e diz já ao abrir a tela, não só depois de digitar':
+        /contarFolhas\(\); \/\/ a faixa padrão/.test(fech),
+      // a grade densa é o que faz a casa cheia caber em uma tela e meia
+      'a grade fica densa sozinha quando a casa enche':
+        /const LIMITE_GRADE_SOLTA = 12;/.test(salao)
+        && /const denso = s\.mesas\.length > LIMITE_GRADE_SOLTA;/.test(salao)
+        && /est-mesas\$\{denso \? ' denso' : ''\}/.test(salao)
+        && /\.est-mesas\.denso\{grid-template-columns:repeat\(auto-fill,minmax\(104px,1fr\)\)/.test(css),
+      // dedo não encolhe junto com o cartão
+      'mesmo densa, a mesa continua com alvo de toque de dedo':
+        /\.est-mesas\.denso \.est-mesa\{padding:8px 9px;min-height:68px;\}/.test(css),
+      // "há 12 min" truncava no meio ("ha 12 m…") na caixa estreita
+      'o tempo na grade densa é curto o bastante pra não truncar':
+        /function tempoCurto\(iso\)/.test(salao)
+        && /return `\$\{min\}min`;/.test(salao)
+        && /tempoCurto\(m\.desde\)/.test(salao)
+        && !/\.est-mesas\.denso \.est-mesa-linha\{[^}]*text-transform:uppercase/.test(css),
+      'a contagem de mesas ocupadas aparece sem precisar rolar':
+        /conta-mesas'\)\.textContent = s\.mesas\.length/.test(salao)
+        && /mesa\(s\) ocupada\(s\)/.test(salao),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okEstacaoGrande = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (maxTela=${maxMesaNaTela})`);
+  } catch (e) { okEstacaoGrande = false; console.log('  erro: ' + e.message); }
+  if (!okEstacaoGrande) ruins += 1;
+  console.log(`${okEstacaoGrande ? '✓' : '✗'} Estação em casa grande: 100 mesas cabem na tela, no QR e no servidor`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

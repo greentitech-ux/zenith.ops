@@ -222,3 +222,32 @@
 .est-aviso{display:flex;gap:10px;align-items:start;background:color-mix(in srgb,var(--warn) 10%,var(--panel2));
   border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));border-radius:10px;padding:11px 12px;font-size:12.5px;line-height:1.5;}
 .est-aviso b{color:var(--warn);}
+
+/* ===================================================================
+ * CASA GRANDE: 50, 70, ATÉ 100 MESAS (Master, 16/09/2026).
+ *
+ * O cartão de mesa foi desenhado pra uma casa pequena: com 8 mesas ocupadas
+ * ele é perfeito, com 60 vira uma parede de 20 linhas de rolagem no celular -
+ * e o garçom que precisa da mesa 72 rola até achar, de pé, com uma mão.
+ *
+ * Acima de um punhado de mesas a grade fica DENSA: o número continua sendo o
+ * que se lê de longe, pessoas e tempo entram numa linha só, e cabem 4 mesas
+ * por faixa em vez de 3 - uma casa cheia passa a caber em uma tela e meia.
+ * O alvo de toque não encolhe abaixo de 44px, que é o que o dedo precisa.
+ *
+ * Achar UMA mesa específica continua sendo pelo campo "Conta da mesa" lá em
+ * cima (digita o número, ou lê o QR): a grade é pra varrer o salão, não pra
+ * procurar - e por isso ela pode ser densa sem perder o serviço.
+ * ================================================================== */
+.est-mesas.denso{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:7px;}
+.est-mesas.denso .est-mesa{padding:8px 9px;min-height:68px;}
+.est-mesas.denso .est-mesa-num{font-size:19px;}
+.est-mesas.denso .est-mesa-val{font-size:12.5px;margin-top:4px;}
+.est-mesas.denso .est-mesa-linha{font:10.5px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.est-mesas.denso .est-mesa-cap,.est-mesas.denso .est-mesa-tempo{display:none;}
+@media(max-width:560px){ .est-mesas.denso{grid-template-columns:repeat(auto-fill,minmax(88px,1fr));} }
+
+/* contagem ao lado do título da seção: "Salão agora · 48 mesas" responde
+   antes de rolar quanto salão existe pra varrer */
+.est-titulo-linha{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.est-titulo-linha .est-conta{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;}

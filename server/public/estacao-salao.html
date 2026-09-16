@@ -63,7 +63,7 @@
     <h2>Conta da mesa</h2>
     <div class="est-sub">Leia o QR Code da mesa, ou digite o número. Mostra quem está lá e quanto deu.</div>
     <div class="est-barra" style="margin-bottom:10px;">
-      <label style="flex:1 1 120px;">Mesa<input id="busca-mesa" type="number" inputmode="numeric" min="1" max="200" placeholder="ex: 7" onkeydown="if(event.key==='Enter'){event.preventDefault();buscarMesa()}"></label>
+      <label style="flex:1 1 120px;">Mesa<input id="busca-mesa" type="number" inputmode="numeric" min="1" max="9999" placeholder="ex: 7" onkeydown="if(event.key==='Enter'){event.preventDefault();buscarMesa()}"></label>
       <button type="button" class="est-btn principal" style="flex:none;" onclick="buscarMesa()">Ver conta</button>
       <button type="button" class="est-btn" style="flex:none;" id="btn-ler-qr" onclick="lerQrCode()">📷 Ler QR</button>
     </div>
@@ -75,7 +75,7 @@
     <h2>Abrir comanda</h2>
     <div class="est-sub">Uma comanda por pessoa. A <b>mesa vem primeiro</b>: é ela que o QR Code identifica, e é por ela que a conta é encontrada.</div>
     <div class="est-barra" style="margin-bottom:10px;">
-      <label style="flex:1 1 110px;">Mesa <span style="color:var(--bad)">*</span><input id="novo-mesa" type="number" inputmode="numeric" min="1" max="200" placeholder="ex: 7" required></label>
+      <label style="flex:1 1 110px;">Mesa <span style="color:var(--bad)">*</span><input id="novo-mesa" type="number" inputmode="numeric" min="1" max="9999" placeholder="ex: 7" required></label>
       <label style="flex:1 1 170px;">Rodízio<select id="novo-tipo"><option value="adulto">Adulto</option><option value="crianca">Criança (6 a 10)</option><option value="crianca-ate-5">Criança até 5 (não paga)</option></select></label>
       <label style="flex:1 1 120px;">Número do cartão<input id="novo-numero" type="number" inputmode="numeric" min="1" max="999" placeholder="ex: 12"></label>
     </div>
@@ -85,7 +85,7 @@
   </div>
 
   <div class="est-card">
-    <h2>Salão agora</h2>
+    <div class="est-titulo-linha"><h2>Salão agora</h2><span class="est-conta" id="conta-mesas"></span></div>
     <div class="est-sub" id="resumo-salao">carregando...</div>
     <div id="mesas"></div>
     <div id="sem-mesa"></div>
@@ -128,6 +128,10 @@ function horaCurta(iso){ const d = new Date(iso); return isNaN(d.getTime()) ? ''
 const ROTULO_TIPO = { adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':'Criança até 5' };
 const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
 const ROTULO_TURNO = { almoco:'almoço', jantar:'jantar' };
+// acima disto a grade de mesas fica densa (ver .est-mesas.denso). Uma dúzia é
+// o que cabe numa tela de celular sem rolar; daí pra cima, varrer o salão
+// passa a valer mais que o tamanho do cartão.
+const LIMITE_GRADE_SOLTA = 12;
 function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
 
 let ME = null, UNIDADES = [], SALAO = null, CATALOGO = [], COMANDA_ABERTA = null;
@@ -165,6 +169,17 @@ function acharComanda(id){ return todasComandas().find(c=>c.id===id) || null; }
 // tempo que a mesa está aberta, a partir da comanda mais antiga dela
 // (`desde`, do servidor). É o número que diz se a mesa está virando - e o
 // garçom lê "há 1h20" mais rápido do que calcula 19:04 -> agora.
+// a mesma conta, sem o "há": na grade densa cada caractere conta, e
+// "há 12 min" truncava no meio ("ha 12 m…")
+function tempoCurto(iso){
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return '';
+  const min = Math.floor((Date.now() - d.getTime()) / 60000);
+  if(min < 1) return 'agora';
+  if(min < 60) return `${min}min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `${h}h${String(m).padStart(2,'0')}` : `${h}h`;
+}
 function haQuantoTempo(iso){
   const d = new Date(iso);
   if(isNaN(d.getTime())) return '';
@@ -195,15 +210,23 @@ function renderSalao(){
   // dois lugares com o mesmo número é um pra ficar desatualizado
   document.getElementById('resumo-salao').textContent = s.pessoas ? '' : 'Nenhuma comanda aberta.';
 
+  // CASA GRANDE (Master, 16/09/2026: "pretendem ter umas 50, 70 até 100
+  // mesas"). Passando de uma dúzia ocupadas, o cartão grande vira parede de
+  // rolagem: a grade fica densa e a casa cheia cabe em uma tela e meia.
+  // Achar UMA mesa continua sendo pelo campo lá em cima (número ou QR).
+  const denso = s.mesas.length > LIMITE_GRADE_SOLTA;
+  document.getElementById('conta-mesas').textContent = s.mesas.length
+    ? `${s.mesas.length} mesa(s) ocupada(s)` : '';
   document.getElementById('mesas').innerHTML = s.mesas.length
-    ? `<div class="est-mesas">${s.mesas.map(m=>`
-        <button type="button" class="est-mesa" onclick="verMesa(${m.mesa})">
+    ? `<div class="est-mesas${denso ? ' denso' : ''}">${s.mesas.map(m=>`
+        <button type="button" class="est-mesa" onclick="verMesa(${m.mesa})" title="Mesa ${m.mesa} · ${m.pessoas} pessoa(s) · ${esc(haQuantoTempo(m.desde))}">
           <div class="est-mesa-cap">Mesa</div>
           <div class="est-mesa-topo">
             <div class="est-mesa-num">${m.mesa}</div>
             <div class="est-mesa-tempo" title="desde ${esc(horaCurta(m.desde))}">${esc(haQuantoTempo(m.desde))}</div>
           </div>
           <div class="est-mesa-cap">${m.pessoas} pessoa(s)</div>
+          <div class="est-mesa-linha">${m.pessoas}p · ${esc(tempoCurto(m.desde))}</div>
           <div class="est-mesa-val">${fmtReal(m.subtotal)}</div>
         </button>`).join('')}</div>`
     : '';
@@ -287,7 +310,7 @@ function pintarComanda(c){
 
   const painelMesa = `
     <div class="est-barra">
-      <label style="flex:1 1 130px;">Mesa<input id="mesa-comanda" type="number" inputmode="numeric" min="1" max="200" value="${c.mesa||''}" placeholder="onde sentou"></label>
+      <label style="flex:1 1 130px;">Mesa<input id="mesa-comanda" type="number" inputmode="numeric" min="1" max="9999" value="${c.mesa||''}" placeholder="onde sentou"></label>
       <button type="button" class="est-btn principal" style="flex:none;" onclick="salvarMesa('${esc(c.id)}')">Salvar</button>
     </div>
     ${(c.historicoMesa||[]).length ? `<div class="est-sub" style="margin-top:4px;">Trocas desta comanda</div>

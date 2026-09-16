@@ -79,12 +79,13 @@
     <h2>QR Code das mesas</h2>
     <div class="est-sub">Imprima, recorte e cole um em cada mesa. O QR só diz <b>qual mesa é</b> - o garçom lê e a conta da mesa aparece. Saem 12 por folha A4.</div>
     <div class="est-barra" style="margin-top:10px;">
-      <label style="flex:0 1 140px;">Da mesa<input id="qr-de" type="number" inputmode="numeric" min="1" max="9999" value="1"></label>
-      <label style="flex:0 1 140px;">Até a mesa<input id="qr-ate" type="number" inputmode="numeric" min="1" max="9999" value="24"></label>
+      <label style="flex:0 1 140px;">Da mesa<input id="qr-de" type="number" inputmode="numeric" min="1" max="9999" value="1" oninput="contarFolhas()"></label>
+      <label style="flex:0 1 140px;">Até a mesa<input id="qr-ate" type="number" inputmode="numeric" min="1" max="9999" value="24" oninput="contarFolhas()"></label>
     </div>
     <div class="est-acoes" style="margin-top:10px;">
       <button type="button" class="est-btn principal" onclick="imprimirQrMesas()">🖨️ Gerar folha (PDF)</button>
     </div>
+    <div class="est-comanda-meta" id="conta-folhas" style="margin-top:8px;"></div>
     <div class="est-erro" id="erro-qr"></div>
   </div>
 
@@ -362,6 +363,23 @@ function imprimirQrMesas(){
   verRelatorio(url, `QR das mesas ${de} a ${ate} · PDF`);
 }
 
+// QUANTAS FOLHAS VÃO SAIR. A casa vai ter de 50 a 100 mesas (Master,
+// 16/09/2026): "de 1 até 100" é uma faixa que ninguém confere de cabeça, e
+// papel errado só aparece depois de impresso. 12 por folha é a grade A4 do
+// gerador (3 colunas x 4 linhas, ver estacaoMesasQr.js) - se ela mudar lá,
+// muda aqui junto.
+const QR_POR_FOLHA = 12;
+function contarFolhas(){
+  const alvo = document.getElementById('conta-folhas');
+  if(!alvo) return;
+  const de = Number(document.getElementById('qr-de').value);
+  const ate = Number(document.getElementById('qr-ate').value);
+  if(!(de > 0) || !(ate >= de)){ alvo.textContent = ''; return; }
+  const mesas = ate - de + 1;
+  const folhas = Math.ceil(mesas / QR_POR_FOLHA);
+  alvo.textContent = `${mesas} mesa(s) · ${folhas} folha(s) A4`;
+}
+
 async function salvarPrecos(){
   const erro = document.getElementById('erro-precos');
   erro.textContent = '';
@@ -411,6 +429,7 @@ async function boot(){
     ? UNIDADES.map(u=>`<option value="${esc(u.codigo)}">${esc(u.nome)}</option>`).join('')
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
   document.getElementById('root').classList.remove('hidden');
+  contarFolhas(); // a faixa padrão já entra dizendo quantas folhas saem
   await carregar();
 }
 boot();
