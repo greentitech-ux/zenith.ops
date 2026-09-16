@@ -334,6 +334,20 @@
   .m-chip.ruim{color:var(--bad);border-color:var(--bad);}
   .equip-tile-info{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.8;}
   .equip-tile-info b{color:var(--text);}
+  /* Ficha completa: navegação curta em vez de uma coluna interminável. Cada
+     aba mantém o contexto da mesma máquina, sem abrir outra janela. */
+  .detalhe-abas{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px;margin:8px 0 12px;border-bottom:1px solid var(--line);scrollbar-width:thin;}
+  .detalhe-aba{flex:0 0 auto;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:18px;padding:6px 10px;font:600 11px var(--sans);cursor:pointer;white-space:nowrap;}
+  .detalhe-aba:hover{border-color:var(--accent);color:var(--text);}
+  .detalhe-aba.ativa{background:var(--accent);border-color:var(--accent);color:#0b0d10;}
+  .detalhe-painel{min-height:120px;}
+  .detalhe-secao-titulo{font:700 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;}
+  .detalhe-resumo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+  .detalhe-resumo .equip-tile-info{grid-column:1/-1;padding:10px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);}
+  .detalhe-rede-intro{font-size:12px;color:var(--muted);margin-bottom:8px;}
+  .btn-voltar-topo{position:sticky;bottom:10px;margin-left:auto;display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel);color:var(--accent);border-radius:18px;padding:6px 10px;font:600 11px var(--sans);cursor:pointer;box-shadow:0 5px 16px rgba(0,0,0,.28);z-index:2;}
+  .btn-voltar-topo:hover{border-color:var(--accent);color:var(--text);}
+  @media(max-width:520px){.detalhe-resumo{grid-template-columns:1fr;}.detalhe-abas{margin-left:-4px;margin-right:-4px;}.btn-voltar-topo{bottom:6px;}}
   .btn-copiar-ip{background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;padding:0 2px;vertical-align:middle;}
   .btn-copiar-ip:hover{color:var(--text);}
   .equip-tile-acoes{display:flex;gap:6px;flex-wrap:wrap;}
@@ -1077,11 +1091,31 @@
       <button type="button" class="icon-btn" title="Editar" id="detalhe-comp-editar">✏️</button>
     </div>
     <div class="sub" id="detalhe-comp-sub"></div>
-    <div class="equip-tile-status" id="detalhe-comp-status" style="margin-bottom:12px;"></div>
-    <div class="equip-tile-info" id="detalhe-comp-info"></div>
-    <div id="detalhe-comp-eventos" style="margin-top:14px;"></div>
+    <div class="detalhe-abas" role="tablist" aria-label="Seções da máquina">
+      <button type="button" class="detalhe-aba ativa" data-detalhe-aba="resumo" onclick="trocarAbaDetalhe('resumo')">Visão geral</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="rede" onclick="trocarAbaDetalhe('rede')">Rede</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="atividades" onclick="trocarAbaDetalhe('atividades')">Atividades</button>
+      <button type="button" class="detalhe-aba" data-detalhe-aba="politica" onclick="trocarAbaDetalhe('politica')">Política</button>
+    </div>
+    <section class="detalhe-painel" data-detalhe-painel="resumo">
+      <div class="detalhe-secao-titulo">Saúde e acesso</div>
+      <div class="detalhe-resumo">
+        <div class="equip-tile-status" id="detalhe-comp-status"></div>
+        <div class="equip-tile-info" id="detalhe-comp-info"></div>
+      </div>
+    </section>
+    <section class="detalhe-painel" data-detalhe-painel="rede" style="display:none;">
+      <div class="detalhe-secao-titulo">Rede da unidade</div>
+      <div id="detalhe-comp-rede"></div>
+    </section>
+    <section class="detalhe-painel" data-detalhe-painel="atividades" style="display:none;">
+      <div id="detalhe-comp-eventos"></div>
+    </section>
+    <section class="detalhe-painel" data-detalhe-painel="politica" style="display:none;">
+      <div id="detalhe-comp-politica" class="hidden" style="border-top:1px solid var(--line);padding-top:12px;"></div>
+    </section>
     <div class="equip-tile-acoes" id="detalhe-comp-acoes" style="margin-top:16px;"></div>
-    <div id="detalhe-comp-politica" class="hidden" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px;"></div>
+    <button type="button" class="btn-voltar-topo" onclick="voltarTopoDetalhe()">↑ Voltar ao topo</button>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharDetalheComputador()">Fechar</button>
     </div>
@@ -1484,6 +1518,7 @@ function atualizarConteudoDetalhe(codigo, c){
   statusEl.textContent = statusTexto;
 
   const infoBits = [];
+  const redeBits = [];
   // ip = publico (visto pelo servidor via x-forwarded-for); ipLocal = da
   // rede da loja, reportado pelo script de vigia (ver baixarVigia) - e o
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
@@ -1659,15 +1694,18 @@ function atualizarConteudoDetalhe(codigo, c){
     // 30s re-renderiza o modal aberto, entao a posicao da rolagem e
     // preservada la embaixo, depois do innerHTML
     const html = [...ativos, ...sumidos].map(linhaDisp).join('');
-    infoBits.push(`📡 <b>${ativos.length}</b> aparelho(s) na rede da loja`
+    redeBits.push(`<div class="detalhe-rede-intro">📡 <b>${ativos.length}</b> aparelho(s) na rede da loja`
       + (sumidos.length ? ` · <span style="color:var(--muted);">${sumidos.length} sumiu(ram)</span>` : '')
-      + ` · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}<div class="disp-lista" id="disp-lista" style="max-height:180px;overflow-y:auto;overscroll-behavior:contain;">${html}</div>`);
+      + ` · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}</div><div class="disp-lista" id="disp-lista" style="max-height:360px;overflow-y:auto;overscroll-behavior:contain;">${html}</div>`);
   }
   // preserva a rolagem da lista de aparelhos entre um poll e outro (mesmo
   // cuidado do ev-lista em renderEventosDetalhe)
   const dispListaAntiga = document.getElementById('disp-lista');
   const dispScrollAnterior = dispListaAntiga ? dispListaAntiga.scrollTop : 0;
   document.getElementById('detalhe-comp-info').innerHTML = infoBits.length ? infoBits.join('<br>') : '<span style="color:var(--muted);">sem mais informações.</span>';
+  document.getElementById('detalhe-comp-rede').innerHTML = redeBits.length
+    ? redeBits.join('')
+    : '<div class="prog-vazio">A máquina ainda não enviou uma varredura de rede.</div>';
   const dispListaNova = document.getElementById('disp-lista');
   if(dispListaNova) dispListaNova.scrollTop = dispScrollAnterior;
 
@@ -2054,17 +2092,38 @@ function renderEventosDetalhe(){
 }
 
 let DETALHE_ATUAL = null; // { codigo, posto }
+let DETALHE_ABA = 'resumo';
+function trocarAbaDetalhe(aba){
+  const permitidas = ['resumo','rede','atividades','politica'];
+  DETALHE_ABA = permitidas.includes(aba) ? aba : 'resumo';
+  document.querySelectorAll('[data-detalhe-aba]').forEach((el)=>{
+    const ativa = el.dataset.detalheAba === DETALHE_ABA;
+    el.classList.toggle('ativa', ativa);
+    el.setAttribute('aria-selected', ativa ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-detalhe-painel]').forEach((el)=>{
+    el.style.display = el.dataset.detalhePainel === DETALHE_ABA ? '' : 'none';
+  });
+  const modal = document.querySelector('#detalhe-comp-overlay .modal');
+  if(modal) modal.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function voltarTopoDetalhe(){
+  const modal = document.querySelector('#detalhe-comp-overlay .modal');
+  if(modal) modal.scrollTo({ top: 0, behavior: 'smooth' });
+}
 function abrirDetalheComputador(codigo, posto){
   const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
   if(!c) return;
   // abriu OUTRO computador: o filtro de data do anterior nao vale mais
   if(!DETALHE_ATUAL || DETALHE_ATUAL.codigo!==codigo || DETALHE_ATUAL.posto!==posto) EV_FILTRO_DATA = '';
   DETALHE_ATUAL = { codigo, posto };
+  DETALHE_ABA = 'resumo';
   // abre na hora com o resumo (e o que ja tiver de detalhe de uma abertura
   // anterior) e busca o detalhe pesado em paralelo - quando chegar, o modal
   // se re-renderiza sozinho
   atualizarConteudoDetalhe(codigo, compComDetalhe(c));
   abrirOverlay('detalhe-comp-overlay');
+  trocarAbaDetalhe('resumo');
   buscarDetalheComp(codigo, posto).then(d => {
     if(d && DETALHE_ATUAL && DETALHE_ATUAL.codigo===codigo && DETALHE_ATUAL.posto===posto) atualizarDetalheSeAberto();
   });
