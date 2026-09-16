@@ -5826,9 +5826,44 @@ app.get('/api/relatorios/:nome', auth.requireMaster, async (req, res) => {
 // sincronizarPlanilhasFechamento roda com sucesso (1x no boot; depois so
 // quando o Master aciona manualmente - sem sincronizacao automatica).
 let fechamentosData = require('./fechamentos-snapshot.json');
-let statusSincronizacaoPlanilhas = { ultimaEm: null, ultimoErro: null, sincronizando: false };
+let statusSincronizacaoPlanilhas = { ultimaEm: null, ultimoErro: null, sincronizando: false, pausada: false, pausadaPor: null, pausadaEm: null };
+
+// PAUSA DA SINCRONIZACAO (pedido do Master): uma trava pra ele congelar a
+// leitura das planilhas quando quiser mexer nelas sem o NoPulso relendo por
+// cima. So o Master liga/desliga (via botao). Fica num doc do Firestore pra
+// sobreviver a reinicio - senao o boot voltaria a sincronizar e a pausa se
+// perderia calada. A leitura e' rara (boot + clique), entao o custo e' nulo.
+const SYNC_PAUSA_DOC = db.collection('appConfig').doc('fechamentosSync');
+let pausaSyncCarregada = false;
+async function carregarPausaSync() {
+  if (pausaSyncCarregada) return;
+  try {
+    const snap = await SYNC_PAUSA_DOC.get();
+    const d = snap.exists ? (snap.data() || {}) : {};
+    statusSincronizacaoPlanilhas.pausada = !!d.pausada;
+    statusSincronizacaoPlanilhas.pausadaPor = d.pausadaPor || null;
+    statusSincronizacaoPlanilhas.pausadaEm = d.pausadaEm || null;
+    pausaSyncCarregada = true;
+  } catch (e) { /* Firestore fora do ar: assume nao-pausada, tenta de novo depois */ }
+}
+async function definirPausaSync(pausada, porEmail) {
+  const patch = {
+    pausada: !!pausada,
+    pausadaPor: pausada ? (porEmail || null) : null,
+    pausadaEm: pausada ? new Date().toISOString() : null,
+  };
+  await SYNC_PAUSA_DOC.set(patch, { merge: true });
+  Object.assign(statusSincronizacaoPlanilhas, patch);
+  pausaSyncCarregada = true;
+  return patch;
+}
 
 async function sincronizarPlanilhasFechamento({ completa = false } = {}) {
+  await carregarPausaSync();
+  // pausada: nao le a planilha (nem no boot, nem no botao). O status volta com
+  // pulou:'pausada' e sem erro (pausa nao e' falha) pra tela avisar em vez de
+  // parecer que sincronizou - e pra a rota nao responder 502 por erro velho.
+  if (statusSincronizacaoPlanilhas.pausada) return { ...statusSincronizacaoPlanilhas, ultimoErro: null, pulou: 'pausada' };
   if (statusSincronizacaoPlanilhas.sincronizando) return statusSincronizacaoPlanilhas;
   statusSincronizacaoPlanilhas.sincronizando = true;
   try {
@@ -6262,6 +6297,18 @@ app.post('/api/fechamentos/sincronizar-planilhas', auth.requireMaster, async (re
   const status = await sincronizarPlanilhasFechamento({ completa: req.body?.completa === true });
   if (status.ultimoErro) return res.status(502).json(status);
   res.json(status);
+});
+
+// Pausar/retomar a sincronização das planilhas - só o Master, pela tela (é a
+// trava pra ele congelar a leitura enquanto mexe na planilha). Pausar não toca
+// nos dados já lidos; só impede a próxima leitura até ele retomar.
+app.post('/api/fechamentos/sincronizacao/pausa', auth.requireMaster, async (req, res) => {
+  try {
+    await definirPausaSync(req.body?.pausada === true, req.user.email);
+    res.json(statusSincronizacaoPlanilhas);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // KPI's extras tipo "arquivo" (ver grupos.js) mandam o arquivo com fieldname

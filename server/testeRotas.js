@@ -2766,6 +2766,48 @@ setTimeout(async () => {
   if (!okBravoForaDoSync) ruins += 1;
   console.log(`${okBravoForaDoSync ? '✓' : '✗'} Fechamentos: sincronização não toca mais na planilha do Grupo Bravo (só ARCFOOD)`);
 
+  // ---- PAUSAR SINCRONIZACAO (pedido do Master, 16/09/2026). Uma trava pra ele
+  // congelar a leitura das planilhas enquanto mexe nelas. So o Master, pela
+  // tela. Pausada, nem o boot nem o botao leem a planilha - a prova e que a
+  // rota devolve pulou:'pausada' em vez de tentar sincronizar.
+  let okPausaSync = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    DOCS.set('users/u-fech-comum', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'fech-comum@teste.local', username: 'fechcomum',
+      permissions: { sections: ['fechamentos'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabComum = { Authorization: 'Bearer ' + (await auth.login('fech-comum@teste.local', 'SenhaDeTeste!2026')).token };
+
+    const pausou = await postarJson('/api/fechamentos/sincronizacao/pausa', { pausada: true }, cab);
+    const statusPausado = await pedir('/api/fechamentos/sincronizacao', cab);
+    // com a pausa ligada, sincronizar tem que PULAR (não ler a planilha)
+    const syncPausado = await postarJson('/api/fechamentos/sincronizar-planilhas', {}, cab);
+    const semMaster = await postarJson('/api/fechamentos/sincronizacao/pausa', { pausada: true }, cabComum);
+    const retomou = await postarJson('/api/fechamentos/sincronizacao/pausa', { pausada: false }, cab);
+    const statusRetomado = await pedir('/api/fechamentos/sincronizacao', cab);
+    const html = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+    const j = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return {}; } };
+    const conf = {
+      'pausar liga a trava (Master)': pausou.status === 200 && j(pausou).pausada === true,
+      'o status reflete a pausa': statusPausado.status === 200 && j(statusPausado).pausada === true,
+      "com a pausa ligada a sincronização PULA (não lê a planilha)":
+        syncPausado.status === 200 && j(syncPausado).pulou === 'pausada',
+      'retomar desliga a trava': retomou.status === 200 && j(retomou).pausada === false && j(statusRetomado).pausada === false,
+      'só o Master pausa (pela tela) - usuário comum é recusado': semMaster.status === 403,
+      'a tela tem o botão de pausar, só pro Master':
+        /id="btn-pausa-sync"/.test(html) && /function togglePausaSync\(\)/.test(html)
+        && /getElementById\('btn-pausa-sync'\)\.classList\.toggle\('hidden', !isMaster\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPausaSync = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pausou=${pausou.status} sync=${syncPausado.corpo.slice(0, 80)} comum=${semMaster.status})`);
+  } catch (e) { okPausaSync = false; console.log('  erro: ' + e.message); }
+  if (!okPausaSync) ruins += 1;
+  console.log(`${okPausaSync ? '✓' : '✗'} Fechamentos: pausar/retomar a sincronização (só o Master, pela tela; pausada não lê a planilha)`);
+
   // ---- CUSTO DE LEITURA do caminho de autenticação (sessions.js).
   // existeEValida roda no requireAuth de TODA requisição autenticada (~90
   // rotas), e antes lia a coleção INTEIRA de sessões por um cache único
