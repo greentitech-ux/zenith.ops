@@ -306,6 +306,7 @@
   .disp-linha{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:11.5px;}
   .disp-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok);margin-top:12px;}
   .disp-dot.off{background:var(--muted);opacity:.5;}
+  .disp-dot.indeterminado{background:var(--warn);opacity:1;}
   .disp-topo{display:flex;align-items:baseline;gap:6px;}
   .disp-nome{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
   .disp-visto{flex:none;font-size:9.5px;color:var(--muted);white-space:nowrap;}
@@ -1720,10 +1721,11 @@ function atualizarConteudoDetalhe(codigo, c){
       // de relance se a impressora está imprimindo. Sai do que o servidor já
       // guarda por MAC (ver impressoras{} no lojaStatus.js). Só aparece pra
       // aparelho marcado como Zebra - é o único que responde o ~HS.
+      const estadoZebra = d.marca === 'zebra' ? ((c.impressoras || {})[d.mac] || null) : null;
       const impChip = (() => {
         if (d.marca !== 'zebra') return '';
-        const st = (c.impressoras || {})[d.mac] || null;
-        let cor = 'var(--muted)', rotulo = 'sem leitura', titulo = 'Impressora Zebra — aguardando a primeira leitura de status';
+        const st = estadoZebra;
+        let cor = 'var(--warn,#e0a800)', rotulo = 'sem confirmação', titulo = 'Impressora Zebra — ainda não houve uma leitura de status. Isso não significa que ela está desligada.';
         if (st) {
           const quando = st.em ? ` · lido ${tempoRelativo(st.em)}` : '';
           if (st.nivel === 'ok') {
@@ -1736,8 +1738,8 @@ function atualizarConteudoDetalhe(codigo, c){
             cor = 'var(--bad)'; rotulo = 'parada';
             titulo = `${(st.motivos || []).join(' · ') || 'Parou de imprimir'}${quando}`;
           } else {
-            cor = 'var(--muted)'; rotulo = 'sem leitura';
-            titulo = `Não respondeu ao status${st.semRespostaEm ? ` · ${tempoRelativo(st.semRespostaEm)}` : quando}`;
+            cor = 'var(--warn,#e0a800)'; rotulo = 'sem confirmação';
+            titulo = `Ainda não consegui confirmar o status pela porta da Zebra${st.semRespostaEm ? ` · última tentativa ${tempoRelativo(st.semRespostaEm)}` : quando}. Isso não prova que ela está offline.`;
           }
         }
         return `<span class="disp-imp-chip" style="color:${cor};" title="${escapeHtml(titulo)}">🖨️ ${escapeHtml(rotulo)}</span>`;
@@ -1754,8 +1756,13 @@ function atualizarConteudoDetalhe(codigo, c){
       const trocaIp = ultimaTrocaIp
         ? `<span class="disp-visto" title="IP mudou de ${escapeHtml(ultimaTrocaIp.de)} para ${escapeHtml(ultimaTrocaIp.para)}">IP alterado ${escapeHtml(tempoRelativo(ultimaTrocaIp.em))}</span>`
         : '';
+      const zebraSemConfirmacao = d.marca === 'zebra' && (!estadoZebra || estadoZebra.nivel === 'desconhecido');
+      const estadoDaLinha = zebraSemConfirmacao ? 'indeterminado' : (d.ativo === false ? 'off' : 'on');
+      const tituloDot = zebraSemConfirmacao
+        ? 'Zebra sem confirmação de status — não significa que esteja offline'
+        : (d.ativo === false ? 'Não apareceu na última varredura de rede' : 'Vista na última varredura de rede');
       return `<div class="disp-linha">
-        <span class="disp-dot ${d.ativo === false ? 'off' : 'on'}"></span>
+        <span class="disp-dot ${estadoDaLinha}" title="${escapeHtml(tituloDot)}"></span>
         <div style="flex:1;min-width:0;">
           <div class="disp-topo">
             <div class="disp-nome ${temNome?'':'anon'}" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>

@@ -1744,15 +1744,22 @@ async function registrarTelemetria(codigo, posto, dados, token) {
       const aval = impressoraStatus.avaliar(lido);
       const anterior = antes[item.mac] || null;
       // 'desconhecido' NAO entra na maquina de estados: nao confirma problema
-      // nem cancela um que ja estava valendo. So carimba a ultima tentativa.
+      // nem cancela um que ja estava valendo. Mantem a ÚLTIMA leitura válida
+      // em vez de pintar uma Zebra antes OK como "off" depois de uma tentativa
+      // isolada sem resposta; a tentativa fica registrada separadamente.
       if (aval.nivel === 'desconhecido') {
-        depois[item.mac] = { ...(anterior || {}), ip: item.ip, nivel: 'desconhecido', em: agora, semRespostaEm: agora };
+        const tinhaLeituraValida = anterior && anterior.nivel && anterior.nivel !== 'desconhecido';
+        depois[item.mac] = {
+          ...(anterior || {}), ip: item.ip,
+          ...(tinhaLeituraValida ? {} : { nivel: 'desconhecido', em: agora }),
+          tentativaSemRespostaEm: agora, semRespostaEm: agora,
+        };
         continue;
       }
       const d = impressoraStatus.decidirAviso(anterior && anterior.estado, aval);
       depois[item.mac] = {
         ip: item.ip, em: agora, nivel: aval.nivel, motivos: aval.motivos,
-        fila: lido.fila, estado: d.estado, semRespostaEm: null,
+        fila: lido.fila, estado: d.estado, semRespostaEm: null, tentativaSemRespostaEm: null,
       };
       if (d.avisar) pendentes.push({ mac: item.mac, ip: item.ip, nivel: d.avisar.nivel, motivos: d.avisar.motivos });
       if (d.normalizou) pendentes.push({ mac: item.mac, ip: item.ip, nivel: 'ok', motivos: [], de: d.normalizou.de });

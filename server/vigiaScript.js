@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 71;
+const VERSAO_VIGIA = 72;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -909,7 +909,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $out += @{ mac = $imp.mac; ip = $imp.ip; bruto = (Sondar-Impressora $imp.ip) }',
     '  }',
     '  if ($out.Count -eq 0) { return $null }',
-    '  return $out',
+    // A vírgula preserva a coleção mesmo com UMA Zebra. Sem ela o
+    // PowerShell a desenrola em objeto e o JSON deixa de ser uma lista.
+    '  return ,$out',
     '}',
     '',
     '# RAM instalada e livre (pedido do Master, 12/09/2026: "quantos gigas de RAM',
@@ -950,7 +952,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $up = Medir-Uptime',
     '    if ($up -ne $null) { $corpo.uptimeHoras = $up }',
     '    if ($dispositivos -and $dispositivos.Count -gt 0) { $corpo.dispositivos = $dispositivos }',
-    '    if ($impressoras -and $impressoras.Count -gt 0) { $corpo.statusImpressoras = $impressoras }',
+    '    if ($impressoras -and @($impressoras).Count -gt 0) { $corpo.statusImpressoras = @($impressoras) }',
     '    # so o host Hyper-V manda isto (ver Medir-VMs); \$null em maquina comum',
     '    if ($vms -ne $null) { $corpo.vms = @($vms) }',
     '    # boot e link viajam junto: em computador de atendimento quem bate o',

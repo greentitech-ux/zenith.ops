@@ -183,9 +183,16 @@ function decidirAviso(anterior, agora) {
 const MAX_IMPRESSORAS = 8;
 const MAX_BRUTO = 2000;
 function sanitizarStatusImpressoras(lista) {
-  if (!Array.isArray(lista)) return null;
+  // PowerShell serializa uma coleção de UM item como objeto (em vez de
+  // array) se ela escapar do pipeline sem estar embrulhada. Era exatamente o
+  // caso de loja com uma única Zebra: a sonda respondia, mas o servidor
+  // descartava a leitura por não ser Array e o painel ficava "sem leitura".
+  // Aceitar o objeto único mantém compatibilidade com agentes já instalados;
+  // o agente atual também força array para o formato novo ficar consistente.
+  const itens = Array.isArray(lista) ? lista : (lista && typeof lista === 'object' ? [lista] : null);
+  if (!itens) return null;
   const out = [];
-  for (const item of lista.slice(0, MAX_IMPRESSORAS)) {
+  for (const item of itens.slice(0, MAX_IMPRESSORAS)) {
     const mac = String((item && item.mac) || '').trim().toLowerCase();
     if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) continue;
     out.push({
