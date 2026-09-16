@@ -2257,6 +2257,36 @@ const COMANDO_ABORTAR_REINICIO = [
   'try { shutdown /a; "Reinicio abortado." } catch { "Nao havia reinicio em contagem." }',
 ].join('\n');
 
+const COMANDO_RESET_SENHA = [
+  'try {',
+  '  # Tenta encontrar o usuario atual da sessao ativa ou desktop interativo',
+  '  $usuarioAtivo = $null',
+  '  $sessoes = Get-WmiObject Win32_LoggedInUser -ComputerName . | Select-Object -ExpandProperty Antecedent | Select-Object -ExpandProperty Name | Select-Object -Unique',
+  '  ',
+  '  # Se nao achar sessao ativa, pega o primeiro usuario que nao e admin ou guest',
+  '  if (-not $usuarioAtivo) {',
+  '    $usuarioAtivo = Get-LocalUser | Where-Object { $_.Name -notmatch "^(Administrator|Guest|SYSTEM|LOCAL SERVICE|NETWORK SERVICE|DefaultAccount)$" } | Select-Object -First 1 | Select-Object -ExpandProperty Name',
+  '  }',
+  '  ',
+  '  if ($usuarioAtivo) {',
+  '    # Gera senha nova aleatoria com 12 caracteres',
+  '    $charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"',
+  '    $senha = ""',
+  '    1..12 | ForEach-Object { $senha += $charset.Substring((Get-Random -Maximum $charset.Length), 1) }',
+  '    ',
+  '    # Reseta a senha',
+  '    $objUser = [ADSI]("WinNT://./"+$usuarioAtivo)',
+  '    $objUser.SetPassword($senha)',
+  '    [ADSI]("WinNT://./"+$usuarioAtivo).CommitChanges()',
+  '    "Senha resetada para o usuario $usuarioAtivo. Nova senha: $senha"',
+  '  } else {',
+  '    throw "Nenhum usuario local encontrado para resetar (verificar se existe usuario alem de Administrator/Guest)."',
+  '  }',
+  '} catch {',
+  '  "Erro ao resetar senha: $($_ | Out-String)"',
+  '}',
+].join('\n');
+
 // Dispara um comando fixo numa LISTA de alvos escolhida pelo painel (1
 // máquina, uma unidade inteira, ou várias unidades de uma vez). Mesma
 // mecânica do enfileirarComandoEmTodos - e em paralelo pelo mesmo motivo:
@@ -3690,7 +3720,7 @@ module.exports = {
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA,
-  COMANDO_REDE_DESTRAVAR,
+  COMANDO_REDE_DESTRAVAR, COMANDO_RESET_SENHA,
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
