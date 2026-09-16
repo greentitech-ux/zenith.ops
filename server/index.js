@@ -5347,6 +5347,18 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
   });
 });
 
+// "por que não subiu em todos?": estado por máquina (ligado? tem arte? online?
+// versão do agente?), computado só quando o Master abre o painel do parque.
+// Nome de um segmento só, pelo mesmo motivo do -marcas (não colidir com as
+// rotas /api/loja-status/:codigo/...).
+app.get('/api/loja-status/papel-de-parede-diagnostico', auth.requireMaster, async (req, res) => {
+  try {
+    res.json({ maquinas: await lojaStatus.diagnosticoPapelDeParede() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });

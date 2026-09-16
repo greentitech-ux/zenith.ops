@@ -12661,6 +12661,48 @@ setTimeout(async () => {
   console.log(`${okPapelMarca ? '✓' : '✗'} Papel de parede: uma arte por grupo + marca (as duas logos), o nome da máquina escrito nela, e trocar a imagem chega na loja`);
 
   // ------------------------------------------------------------------
+  // "POR QUE NAO SUBIU EM TODOS?" (Master, 16/09/2026). O papel de parede
+  // aplica so quando 3 coisas batem: trava 🖼️ ligada no card, a unidade
+  // resolve pra uma arte, e a maquina online. Sem visibilidade, o Master
+  // ficava adivinhando. diagnosticoPapelDeParede() diz, por maquina, se vai
+  // aplicar e, quando nao, por que.
+  let okDiagPapel = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const U = 'PPDIAG';
+    const mk = async (nome, ativo, arte, online) => {
+      await ls.cadastrarComputador(U, nome, 'interno');
+      const posto = (await ls.listar()).find((c) => c.codigo === U && c.nome === nome).posto;
+      await ls.definirPolitica(U, posto, { papelDeParedeAtivo: ativo });
+      // arte DA MAQUINA resolve sem depender de config/marca compartilhada (é o
+      // 1o ramo de papelDeParedeDe) - deixa o teste determinístico
+      if (arte) await ls.definirArteDaMaquina(U, posto, { caminho: 'x.png', tipo: 'image/png', versao: 1, em: Date.now() });
+      if (online) await ls.heartbeat(U, posto, { userAgent: 'NOCZenith/1.0' }, await ls.garantirAgentToken(U, posto));
+      return posto;
+    };
+    const pOk = await mk('PC-OK', true, true, true);
+    const pOff = await mk('PC-OFF', true, true, false);
+    const pDes = await mk('PC-DES', false, true, true);
+    const diag = await ls.diagnosticoPapelDeParede();
+    const de = (posto) => diag.find((x) => x.codigo === U && x.posto === posto) || null;
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const conf = {
+      'ligado + com arte + online = vai aplicar (ok)': !!de(pOk) && de(pOk).motivo === 'ok' && de(pOk).temArte === true,
+      'ligado + com arte + offline = aplica quando voltar (offline)': !!de(pOff) && de(pOff).motivo === 'offline',
+      'desligado no card = não aplica (desligado), mesmo com arte': !!de(pDes) && de(pDes).motivo === 'desligado',
+      'a rota Master do diagnóstico existe e chama a função': /papel-de-parede-diagnostico/.test(idx) && /diagnosticoPapelDeParede/.test(idx),
+      'o painel do parque tem o botão e a função que lê o diagnóstico': /carregarDiagnosticoPapel\(\)/.test(html) && /papel-de-parede-diagnostico/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDiagPapel = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ok=${JSON.stringify(de(pOk))} off=${JSON.stringify(de(pOff))} des=${JSON.stringify(de(pDes))})`);
+    for (const p of [pOk, pOff, pDes]) await ls.removerComputador(U, p);
+  } catch (e) { okDiagPapel = false; console.log('  erro: ' + e.message); }
+  if (!okDiagPapel) ruins += 1;
+  console.log(`${okDiagPapel ? '✓' : '✗'} Papel de parede: diagnóstico "por que não subiu em todos?" (ligado/sem arte/offline por máquina)`);
+
+  // ------------------------------------------------------------------
   // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)
   // "preciso poder marcar como medidor de quedas da unidade - um equipamento
   // que nao tem acesso, como um Modem, para ser o ponto de medicao".

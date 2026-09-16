@@ -1092,6 +1092,44 @@ async function detalhar(codigo, posto) {
   return (await listar()).find((d) => docIdFor(d.codigo, d.posto) === alvo) || null;
 }
 
+// DIAGNOSTICO DO PAPEL DE PAREDE (pedido do Master: "por que não subiu em
+// todos?"). Pra cada computador diz se a arte VAI aplicar e, quando não, por
+// quê — sem o Master ter que abrir máquina por máquina. Motivos:
+//   desligado      - a trava 🖼️ do card está off (nada aplica sem ela)
+//   sem-marca      - a unidade não tem marca no perfil, então não casa arte de
+//                    grupo+marca nem de marca (cai só na padrão, se houver)
+//   sem-arte       - tem marca, mas não há arte pra ela (nem do grupo, nem da
+//                    marca, nem padrão) - ver papelDeParedeDe
+//   offline        - vai aplicar quando a máquina voltar
+//   ok             - ligado, com arte e no ar; aplica na próxima batida. Só a
+//                    instância logada aplica (SYSTEM não tem área de trabalho),
+//                    então máquina sem ninguém logado no Windows aplica quando
+//                    alguém logar.
+// Custa leitura só quando o Master abre o painel — fora do poll de 30s.
+async function diagnosticoPapelDeParede() {
+  const docs = await listar();
+  const linhas = [];
+  for (const d of docs) {
+    const ativo = !!(d.politica && d.politica.papelDeParedeAtivo);
+    let arte = null;
+    if (ativo) arte = await papelDeParedeDe(d.codigo, d.posto).catch(() => null);
+    let motivo;
+    if (!ativo) motivo = 'desligado';
+    else if (!arte) {
+      const perf = await unidades.perfil(d.codigo).catch(() => null);
+      motivo = (perf && perf.marca) ? 'sem-arte' : 'sem-marca';
+    } else if (!d.online) motivo = 'offline';
+    else motivo = 'ok';
+    const tipoArte = arte ? (arte.daMaquina ? 'maquina' : (arte.rede ? 'grupo+marca' : (arte.marca ? 'marca' : 'padrao'))) : null;
+    linhas.push({
+      codigo: d.codigo, posto: d.posto, nome: d.nome || d.posto,
+      online: !!d.online, ativo, temArte: !!arte, tipoArte,
+      agenteVersao: d.agenteVersao || null, motivo,
+    });
+  }
+  return linhas;
+}
+
 // get-or-create do segredo do computador - chamado ao gerar o .ps1 (ver rota
 // vigia.ps1 em index.js), pra que o token va assado no script daquele posto.
 // Idempotente: uma vez criado, sempre devolve o mesmo. Nao invalida o cache
@@ -3514,7 +3552,7 @@ module.exports = {
   substituirSegredos, SEGREDOS_PERMITIDOS,
   impressorasPraSondar,
   flushHeartbeatsPendentes,
-  heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
+  heartbeat, listar, listarResumo, detalhar, diagnosticoPapelDeParede, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   // alerta de internet por unidade: o estado vive em memoria, e o teste
   // precisa comecar cada cenario do zero

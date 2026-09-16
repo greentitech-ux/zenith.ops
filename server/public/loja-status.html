@@ -615,7 +615,7 @@
   <div data-recolher>
   <div class="agente-titulo" data-recolher-titulo><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
-    Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos. A máquina <b>carimba, no topo-direito, o nome da loja + o código da máquina</b> (na arte <b>vertical</b>, tipo Makeline, o carimbo vai centralizado embaixo). Deixe essa área do carimbo livre na arte — ela já vem reservada nas bases genéricas. Assim a mesma arte serve a loja inteira e cada máquina se identifica sozinha. A marca sai do <b>perfil da unidade</b> e o grupo sai do <b>cadastro de empresas</b> — unidade sem empresa cai na arte só da marca, nunca na logo de um grupo que não é o dela. Se não houver arte do grupo, cai na arte só da marca; sem essa, na <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
+    Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos. A máquina <b>carimba, no topo-direito, o nome da loja + o nome do computador cadastrado no NOC</b> (na arte <b>vertical</b>, tipo Makeline, o carimbo vai centralizado embaixo). Deixe essa área do carimbo livre na arte — ela já vem reservada nas bases genéricas. Assim a mesma arte serve a loja inteira e cada máquina se identifica sozinha. A marca sai do <b>perfil da unidade</b> e o grupo sai do <b>cadastro de empresas</b> — unidade sem empresa cai na arte só da marca, nunca na logo de um grupo que não é o dela. Se não houver arte do grupo, cai na arte só da marca; sem essa, na <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
     <select id="pp-marca" style="max-width:200px;"><option value="">Todas as marcas (padrão)</option></select>
@@ -625,6 +625,13 @@
     <span class="msg hidden" id="msg-pp"></span>
   </div>
   <div id="pp-marcas" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
+  <!-- "por que não subiu em todos?": mostra, por máquina, se a arte vai aplicar
+       e, quando não, o motivo (desligado / sem marca / sem arte / offline) -->
+  <div style="margin-bottom:6px;">
+    <button type="button" class="btn-mini" onclick="carregarDiagnosticoPapel()">🔍 Por que não subiu em todos?</button>
+    <span class="msg hidden" id="msg-pp-diag"></span>
+  </div>
+  <div id="pp-diag" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
   </div>
   <div data-recolher>
   <div class="agente-titulo" data-recolher-titulo>
@@ -3144,6 +3151,38 @@ async function carregarMarcasPapelDeParede(){
       : 'Todas as combinações de grupo e marca com arte própria.';
     atualizarVerPapelDeParede();
   }catch(e){ /* a seção continua utilizável só com a arte padrão */ }
+}
+
+// "por que não subiu em todos?": lê o estado por máquina e resume — quantas vão
+// aplicar, quantas offline, e a LISTA das que não vão, agrupada pelo motivo. É
+// o que responde a pergunta do Master sem abrir máquina por máquina.
+async function carregarDiagnosticoPapel(){
+  const alvo = document.getElementById('pp-diag');
+  if(!alvo) return;
+  alvo.innerHTML = 'Carregando…';
+  try{
+    const r = await fetch('/api/loja-status/papel-de-parede-diagnostico');
+    if(!r.ok){ alvo.innerHTML = 'Não consegui carregar o diagnóstico.'; return; }
+    const maq = (await r.json()).maquinas || [];
+    if(!maq.length){ alvo.innerHTML = 'Nenhum computador cadastrado.'; return; }
+    const conta = (m)=>maq.filter(x=>x.motivo===m).length;
+    const naoAplica = ['desligado','sem-marca','sem-arte'];
+    const rotulo = {
+      'desligado':'🖼️ desligado no card (ligue a política da máquina)',
+      'sem-marca':'sem marca no perfil da unidade (não casa arte de grupo/marca)',
+      'sem-arte':'sem arte pra essa marca/grupo (nem padrão)',
+      'offline':'offline (aplica quando a máquina voltar)',
+    };
+    const linhaMaq = (x)=>`${escapeHtml(x.nome)} <span style="color:var(--muted)">(${escapeHtml(x.codigo)})</span>`;
+    let html = `<b>${conta('ok')}</b> vão aplicar · <b>${conta('offline')}</b> offline · <b>${maq.filter(x=>naoAplica.includes(x.motivo)).length}</b> não vão aplicar do jeito que está`;
+    for(const mot of [...naoAplica,'offline']){
+      const g = maq.filter(x=>x.motivo===mot);
+      if(!g.length) continue;
+      html += `<div style="margin-top:8px;"><b style="color:var(--text)">${escapeHtml(rotulo[mot])}</b> — ${g.length}<br>${g.map(linhaMaq).join(' · ')}</div>`;
+    }
+    html += `<div style="margin-top:10px;">Máquina que aparece em "vão aplicar" mas continua sem trocar: aplica na próxima batida; se <b>ninguém estiver logado no Windows</b>, só quando alguém logar — a instância de sistema não tem área de trabalho. Agente antigo se atualiza sozinho.</div>`;
+    alvo.innerHTML = html;
+  }catch(e){ alvo.innerHTML = 'Erro ao carregar o diagnóstico.'; }
 }
 function atualizarVerPapelDeParede(){
   const sel = document.getElementById('pp-marca');
