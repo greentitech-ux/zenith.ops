@@ -302,16 +302,21 @@
      responde as quatro coisas que a pessoa precisa: status (bolinha), nome,
      IP e MAC. Nome vem do DNS/NetBIOS ou do apelido dado aqui mesmo. */
   .disp-lista{margin-top:6px;border-top:1px solid var(--line);}
-  .disp-linha{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11.5px;}
-  .disp-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok);}
+  .disp-linha{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:11.5px;}
+  .disp-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok);margin-top:12px;}
   .disp-dot.off{background:var(--muted);opacity:.5;}
   .disp-topo{display:flex;align-items:baseline;gap:6px;}
   .disp-nome{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
   .disp-visto{flex:none;font-size:9.5px;color:var(--muted);white-space:nowrap;}
   .disp-nome.anon{font-weight:400;color:var(--muted);font-style:italic;}
-  .disp-rede{font-family:var(--mono);font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .disp-editar{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:4px;flex:none;min-width:28px;}
+  .disp-enderecos{display:grid;gap:2px;margin-top:3px;font-family:var(--mono);font-size:10.5px;min-width:0;}
+  .disp-endereco{display:flex;align-items:center;gap:4px;min-width:0;line-height:1.45;}
+  .disp-ip{color:var(--accent);font-weight:700;text-decoration:none;white-space:nowrap;}.disp-ip:hover{color:var(--text);text-decoration:underline;}
+  .disp-mac{color:var(--muted);white-space:nowrap;letter-spacing:.01em;}.disp-troca-ip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .disp-editar{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:3px;flex:none;min-width:26px;line-height:1;}
   .disp-editar:hover{color:var(--accent);}
+  .disp-copiar{color:var(--accent);}.disp-acoes{display:flex;flex-direction:column;gap:3px;align-items:center;padding-top:1px;}
+  @media(max-width:520px){.disp-linha{gap:6px;}.disp-enderecos{font-size:10px;}.disp-acoes{min-width:28px;}.disp-nome{max-width:calc(100vw - 130px);}}
   /* dispositivo marcado (impressora/VM monitorada - pedido do Master: alarma
      se perder rede) - o mesmo chip 🔔 aparece na linha e no modal de edição */
   .disp-monitor-chip{flex:none;font-size:11px;}
@@ -1709,15 +1714,16 @@ function atualizarConteudoDetalhe(codigo, c){
             ${impChip}${medidorChip}${monitorChip}
             ${quando}
           </div>
-          <div class="disp-rede"><a href="http://${escapeHtml(d.ip)}" target="_blank" rel="noopener" title="Abrir ${escapeHtml(d.ip)} no navegador">${escapeHtml(d.ip)}</a> · ${escapeHtml(d.mac)} ${trocaIp}</div>
+          <div class="disp-enderecos">
+            <div class="disp-endereco"><a class="disp-ip" href="http://${escapeHtml(d.ip)}" target="_blank" rel="noopener" title="Abrir ${escapeHtml(d.ip)} no navegador">${escapeHtml(d.ip)}</a><button type="button" class="disp-editar disp-copiar" title="Copiar IP" aria-label="Copiar IP" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.ip)},"IP")'>⧉</button>${trocaIp ? `<span class="disp-troca-ip">${trocaIp}</span>` : ''}</div>
+            <div class="disp-endereco"><span class="disp-mac">${escapeHtml(d.mac)}</span><button type="button" class="disp-editar disp-copiar" title="Copiar MAC" aria-label="Copiar MAC" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.mac)},"MAC")'>⧉</button></div>
+          </div>
         </div>
-        <div style="display:flex;gap:3px;align-items:center;">
-          <button type="button" class="disp-editar" title="Copiar IP" aria-label="Copiar IP" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.ip)},"IP")'>⧉</button>
-          <button type="button" class="disp-editar" title="Copiar MAC" aria-label="Copiar MAC" onclick='event.stopPropagation();copiarDadoRede(${JSON.stringify(d.mac)},"MAC")'>⧉</button>
+        <div class="disp-acoes">
           <button type="button" class="disp-editar" title="Fazer ping por este NOCZenith" aria-label="Fazer ping" onclick='event.stopPropagation();pingDispositivo(${JSON.stringify(codigo)},${JSON.stringify(c.posto)},${JSON.stringify(d.mac)},${JSON.stringify(d.ip)})'>◉</button>
+          <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
+            onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,medidorQuedas:!!d.medidorQuedas,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
         </div>
-        <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
-          onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,medidorQuedas:!!d.medidorQuedas,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
       </div>`;
     };
     // TODOS os aparelhos, numa janela de ~5 linhas com rolagem interna -
