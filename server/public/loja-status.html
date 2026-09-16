@@ -1041,6 +1041,23 @@
       <button type="button" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
       <button type="button" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
     </div>
+    <div id="prog-acoes-master" class="hidden" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2,rgba(255,255,255,.03));">
+      <div style="font-weight:700;font-size:13px;margin-bottom:7px;">Gerenciar por catálogo</div>
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+        <select id="prog-catalogo" style="flex:1 1 190px;min-width:0;"></select>
+        <button type="button" class="btn-primary" onclick="instalarProgramaCatalogo()">Instalar</button>
+      </div>
+      <div class="sub" style="margin-top:7px;font-size:11.5px;">Instala somente itens aprovados. Remover usa a lista real desta máquina e pede a senha Master em cada ação.</div>
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer;font-size:12px;">Editar catálogo de instalações</summary>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:7px;">
+          <input id="prog-catalogo-nome" maxlength="80" placeholder="Nome exibido" style="flex:1 1 130px;min-width:0;">
+          <input id="prog-catalogo-winget" maxlength="120" placeholder="ID do winget, ex.: Google.Chrome" style="flex:1 1 180px;min-width:0;">
+          <button type="button" class="btn-ghost" onclick="adicionarProgramaCatalogo()">Adicionar</button>
+        </div>
+        <div id="prog-catalogo-itens" style="margin-top:7px;"></div>
+      </details>
+    </div>
     <input type="search" id="prog-busca" placeholder="Buscar programa..." oninput="pintarProgramas()" style="margin:10px 0 6px;">
     <div id="prog-corpo"></div>
   </div></div>
@@ -1714,6 +1731,7 @@ async function pingDispositivo(codigo, posto, mac, ip){
 // a guarda, e a ficha da máquina já trouxe tudo (ver detalhar/listar).
 let PROG_ATUAL = null;
 let PROG_ABA = 'mudancas';
+let PROG_CATALOGO = [];
 // ---------- pilha de painéis (quem abre por último fica por cima) ----------
 // Os .overlay desta tela dividem o mesmo z-index do CSS. Com empate, o
 // navegador pinta por ordem de HTML - então um painel aberto de dentro de
@@ -1754,10 +1772,87 @@ function abrirProgramas(codigo, posto){
   PROG_ABA = 'mudancas';
   document.getElementById('prog-titulo').textContent = `📦 Programas · ${PROG_ATUAL.nome || posto}`;
   document.getElementById('prog-busca').value = '';
+  document.getElementById('prog-acoes-master').classList.toggle('hidden', !IS_MASTER || PROG_ATUAL.tipo !== 'interno');
+  if(IS_MASTER && PROG_ATUAL.tipo === 'interno') carregarCatalogoProgramas();
   trocarAbaProgramas('mudancas');
   abrirOverlay('prog-overlay');
 }
 function fecharProgramas(){ fecharOverlay('prog-overlay'); PROG_ATUAL = null; }
+function pintarCatalogoProgramas(){
+  const select = document.getElementById('prog-catalogo');
+  const itens = document.getElementById('prog-catalogo-itens');
+  if(!select || !itens) return;
+  select.innerHTML = PROG_CATALOGO.length
+    ? PROG_CATALOGO.map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.nome)}${x.descricao ? ' — '+escapeHtml(x.descricao) : ''}</option>`).join('')
+    : '<option value="">Nenhum item no catálogo</option>';
+  itens.innerHTML = PROG_CATALOGO.map(x=>`<div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px;"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(x.nome)} <span class="sub">(${escapeHtml(x.wingetId)})</span></span><button type="button" class="btn-icone perigo" title="Remover do catálogo" onclick="removerDoCatalogoPrograma('${escapeJs(x.id)}')">✕</button></div>`).join('');
+}
+async function carregarCatalogoProgramas(){
+  try{
+    const r = await fetch('/api/loja-status/programas/catalogo');
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui carregar o catálogo.');
+    PROG_CATALOGO = d.catalogo || [];
+    pintarCatalogoProgramas();
+  }catch(e){ alert(e.message); }
+}
+async function salvarCatalogoProgramas(){
+  const password = prompt('Digite sua senha Master para alterar o catálogo de instalações:');
+  if(password === null) return false;
+  const r = await fetch('/api/loja-status/programas/catalogo', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({catalogo:PROG_CATALOGO, password}) });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ alert(d.error || 'Não consegui salvar o catálogo.'); return false; }
+  PROG_CATALOGO = d.catalogo || [];
+  pintarCatalogoProgramas();
+  return true;
+}
+async function adicionarProgramaCatalogo(){
+  const nome = (document.getElementById('prog-catalogo-nome').value||'').trim();
+  const wingetId = (document.getElementById('prog-catalogo-winget').value||'').trim();
+  if(!nome || !wingetId) return alert('Informe o nome e o ID do winget.');
+  if(!/^[A-Za-z0-9][A-Za-z0-9._-]{1,120}$/.test(wingetId)) return alert('O ID do winget tem formato inválido. Exemplo: Google.Chrome');
+  const id = wingetId.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+  if(PROG_CATALOGO.some(x=>x.id===id || x.wingetId.toLowerCase()===wingetId.toLowerCase())) return alert('Esse programa já está no catálogo.');
+  PROG_CATALOGO.push({id,nome,wingetId,descricao:''});
+  if(await salvarCatalogoProgramas()){
+    document.getElementById('prog-catalogo-nome').value='';
+    document.getElementById('prog-catalogo-winget').value='';
+  }
+}
+async function removerDoCatalogoPrograma(id){
+  const item = PROG_CATALOGO.find(x=>x.id===id);
+  if(!item || !confirm(`Remover ${item.nome} do catálogo? Isso não desinstala nada das máquinas.`)) return;
+  PROG_CATALOGO = PROG_CATALOGO.filter(x=>x.id!==id);
+  await salvarCatalogoProgramas();
+}
+async function instalarProgramaCatalogo(){
+  if(!PROG_ATUAL) return;
+  const id = document.getElementById('prog-catalogo').value;
+  const item = PROG_CATALOGO.find(x=>x.id===id);
+  if(!item) return alert('Escolha um programa válido do catálogo.');
+  if(!confirm(`Instalar ${item.nome} em ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nO agente elevado fará a instalação em segundo plano.`)) return;
+  const password = prompt('Digite sua senha Master para autorizar a instalação:');
+  if(password === null) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/instalar`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui enfileirar a instalação.');
+    alert(d.mensagem || 'Instalação enfileirada.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+async function removerProgramaAtual(nome){
+  if(!PROG_ATUAL || !confirm(`Remover “${nome}” de ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nO desinstalador registrado no Windows será executado pelo agente elevado.`)) return;
+  const password = prompt('Digite sua senha Master para autorizar a remoção:');
+  if(password === null) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/remover`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,password})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui enfileirar a remoção.');
+    alert(d.mensagem || 'Remoção enfileirada.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
 function trocarAbaProgramas(aba){
   PROG_ABA = aba;
   document.getElementById('prog-aba-mudancas').classList.toggle('ativa', aba==='mudancas');
@@ -1774,8 +1869,9 @@ function pintarProgramas(){
   if(PROG_ABA==='atuais'){
     const lista = (PROG_ATUAL.programas||[]).filter(casa).slice().sort((a,b)=>a.localeCompare(b,'pt-BR'));
     document.getElementById('prog-aba-atuais').textContent = `Instalados agora (${(PROG_ATUAL.programas||[]).length})`;
+    const podeRemover = IS_MASTER && PROG_ATUAL.tipo === 'interno';
     corpo.innerHTML = lista.length
-      ? lista.map(x=>`<div class="prog-linha"><span class="prog-sinal">•</span><span>${escapeHtml(x)}</span></div>`).join('') + `<div class="prog-rodape">${escapeHtml(quando)}</div>`
+      ? lista.map(x=>`<div class="prog-linha"><span class="prog-sinal">•</span><span style="flex:1;min-width:0;">${escapeHtml(x)}</span>${podeRemover ? `<button type="button" class="btn-ghost perigo" style="padding:3px 7px;font-size:11px;" onclick="removerProgramaAtual('${escapeJs(x)}')">Remover</button>` : ''}</div>`).join('') + `<div class="prog-rodape">${escapeHtml(quando)}</div>`
       : `<div class="prog-vazio">${busca ? 'Nenhum programa com esse nome.' : 'A máquina ainda não mandou a lista de programas. Ela envia na primeira consulta depois de instalada.'}</div>`;
     return;
   }

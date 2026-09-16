@@ -5210,6 +5210,65 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
   }
 });
 
+// ---------- PROGRAMAS REMOTOS ----------
+// Instalação e remoção são deliberadamente mais restritas do que as demais
+// ações do NOC: não existe campo de comando livre. Instalar aceita apenas o ID
+// de um catálogo que o Master mantém; remover aceita apenas um nome que a
+// própria máquina informou na última varredura. Ambas pedem a senha novamente
+// e exigem o heartbeat SYSTEM do agente.
+app.get('/api/loja-status/programas/catalogo', auth.requireMaster, async (req, res) => {
+  try {
+    res.json({ catalogo: await lojaStatus.listarCatalogoProgramas() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/loja-status/programas/catalogo', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const catalogo = await lojaStatus.salvarCatalogoProgramas(req.body?.catalogo);
+    console.log(`[NOC] ${req.user.email} atualizou o catálogo de programas (${catalogo.length} itens)`);
+    res.json({ catalogo });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/loja-status/:codigo/computadores/:posto/programas/instalar', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const item = (await lojaStatus.listarCatalogoProgramas()).find((x) => x.id === String(req.body?.id || ''));
+    if (!item) return res.status(400).json({ error: 'Programa não encontrado no catálogo aprovado.' });
+    const comando = lojaStatus.comandoInstalarCatalogo(item);
+    const registro = await lojaStatus.enfileirarComando(req.params.codigo, req.params.posto, comando, {
+      origem: `programas-instalar:${item.id}`, requerAdmin: true,
+    });
+    console.log(`[NOC] ${req.user.email} pediu instalação de ${item.wingetId} em ${req.params.codigo}/${req.params.posto}`);
+    res.json({ ok: true, comandoId: registro.id, mensagem: `${item.nome} foi colocado na fila do NOCZenith elevado.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/loja-status/:codigo/computadores/:posto/programas/remover', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const nome = String(req.body?.nome || '').trim();
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador) return res.status(404).json({ error: 'Computador não encontrado.' });
+    if (!(computador.programas || []).includes(nome)) return res.status(400).json({ error: 'Só é possível remover um programa que apareceu na última varredura desta máquina.' });
+    if (!lojaStatus.programaPodeSerRemovido(nome)) return res.status(400).json({ error: 'Esse componente é protegido e não pode ser removido remotamente pelo NOC.' });
+    const registro = await lojaStatus.enfileirarComando(req.params.codigo, req.params.posto, lojaStatus.comandoRemoverPrograma(nome), {
+      origem: 'programas-remover', requerAdmin: true,
+    });
+    console.log(`[NOC] ${req.user.email} pediu remoção de ${nome} em ${req.params.codigo}/${req.params.posto}`);
+    res.json({ ok: true, comandoId: registro.id, mensagem: `${nome} foi colocado na fila do NOCZenith elevado.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // REINICIO AUTOMATICO PROGRAMADO (Master). Pedido do Master: "escolho qual
 // reinicia todos os dias as 4h" e, depois, "horario pode variar" - dia da
 // semana escolhido, hora diferente por dia e tolerancia.

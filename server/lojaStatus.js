@@ -78,6 +78,82 @@ async function setConfig(patch) {
   configCache = null;
   return getConfig();
 }
+
+// Catálogo fechado para a tela de Programas. A tela nunca manda um comando ou
+// uma URL: ela escolhe apenas um ID desta lista, e o servidor monta o comando.
+// Isso mantém "instalar pelo NOC" útil sem virar um PowerShell remoto aberto.
+const CATALOGO_PROGRAMAS_PADRAO = [
+  { id: 'google-chrome', nome: 'Google Chrome', wingetId: 'Google.Chrome', descricao: 'Navegador Google Chrome' },
+  { id: 'anydesk', nome: 'AnyDesk', wingetId: 'AnyDeskSoftwareGmbH.AnyDesk', descricao: 'Acesso remoto AnyDesk' },
+  { id: 'advanced-ip-scanner', nome: 'Advanced IP Scanner', wingetId: 'Famatech.AdvancedIPScanner', descricao: 'Varredura de rede' },
+];
+
+function catalogoProgramasSeguro(lista) {
+  const vistos = new Set();
+  return (Array.isArray(lista) ? lista : []).map((item) => {
+    const nome = String(item?.nome || '').trim().slice(0, 80);
+    const wingetId = String(item?.wingetId || '').trim();
+    const id = String(item?.id || wingetId.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-+|-+$/g, '').slice(0, 80);
+    const descricao = String(item?.descricao || '').trim().slice(0, 160);
+    if (!id || !nome || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,120}$/.test(wingetId) || vistos.has(id)) return null;
+    vistos.add(id);
+    return { id, nome, wingetId, descricao };
+  }).filter(Boolean);
+}
+
+async function listarCatalogoProgramas() {
+  const config = await getConfig();
+  const salvo = catalogoProgramasSeguro(config.catalogoProgramas);
+  return salvo.length ? salvo : CATALOGO_PROGRAMAS_PADRAO;
+}
+
+async function salvarCatalogoProgramas(lista) {
+  const catalogo = catalogoProgramasSeguro(lista);
+  if (!catalogo.length) throw new Error('O catálogo precisa ter ao menos um programa válido.');
+  await setConfig({ catalogoProgramas: catalogo });
+  return catalogo;
+}
+
+function aspasPowerShell(valor) { return `'${String(valor).replace(/'/g, "''")}'`; }
+
+function comandoInstalarCatalogo(item) {
+  // item já passou pela validação do catálogo; repetir a validação evita que
+  // alguém use esta função no futuro sem passar pela fronteira acima.
+  if (!item || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,120}$/.test(item.wingetId || '')) throw new Error('Item de catálogo inválido.');
+  return [
+    '$winget = (Get-Command winget.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)',
+    'if (-not $winget) { "FALHOU: winget não está disponível nesta máquina. Atualize o App Installer do Windows e tente novamente."; exit 1 }',
+    `$id = ${aspasPowerShell(item.wingetId)}`,
+    `$nome = ${aspasPowerShell(item.nome)}`,
+    'Write-Output ("Instalando " + $nome + " pelo catálogo aprovado...")',
+    '& $winget install --id $id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity',
+    '$codigo = $LASTEXITCODE',
+    'if ($codigo -eq 0) { "OK: instalação concluída. A lista de programas será atualizada na próxima varredura." } else { "FALHOU: winget retornou o código $codigo."; exit $codigo }',
+  ].join('\n');
+}
+
+function programaPodeSerRemovido(nome) {
+  const n = String(nome || '').trim();
+  if (!n || n.length > 180) return false;
+  // Componentes que costumam quebrar Windows, o próprio agente e runtimes
+  // compartilhados ficam fora da remoção remota. Para eles, a intervenção é
+  // presencial/assistida e consciente, nunca um clique no painel.
+  return !/(nopulso|noczenith|microsoft edge|visual c\+\+|windows update|update for .*windows|microsoft windows)/i.test(n);
+}
+
+function comandoRemoverPrograma(nome) {
+  if (!programaPodeSerRemovido(nome)) throw new Error('Esse componente é protegido e não pode ser removido remotamente pelo NOC.');
+  return [
+    `$nome = ${aspasPowerShell(nome)}`,
+    '$raizes = @(\'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\', \'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\')',
+    '$item = @(Get-ItemProperty -Path $raizes -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq $nome -and ($_.QuietUninstallString -or ($_.UninstallString -match \'(?i)msiexec\')) } | Select-Object -First 1)',
+    'if (-not $item) { "FALHOU: o programa não tem um desinstalador silencioso registrado no sistema. Para não abrir uma janela invisível ao usuário, ele não pode ser removido remotamente."; exit 1 }',
+    '$linha = if ($item[0].QuietUninstallString) { $item[0].QuietUninstallString } else { $item[0].UninstallString }',
+    'if ($linha -match \'(?i)msiexec(\\.exe)?\') { $args = "/x $($item[0].PSChildName) /qn /norestart"; $p = Start-Process -FilePath msiexec.exe -ArgumentList $args -Wait -PassThru -WindowStyle Hidden }',
+    'else { $p = Start-Process -FilePath cmd.exe -ArgumentList \'/c\', $linha -Wait -PassThru -WindowStyle Hidden }',
+    'if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) { "OK: remoção concluída. A lista será atualizada na próxima varredura." } else { "FALHOU: o desinstalador retornou o código $($p.ExitCode)."; exit $p.ExitCode }',
+  ].join('\n');
+}
 // ---- PAPEL DE PAREDE: UMA ARTE POR MARCA, NAO UMA POR MAQUINA ----
 //
 // O que muda de um PDV pro outro e so o NOME da maquina, e quem carimba o
@@ -3582,6 +3658,7 @@ module.exports = {
   // precisa comecar cada cenario do zero
   _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
+  listarCatalogoProgramas, salvarCatalogoProgramas, comandoInstalarCatalogo, comandoRemoverPrograma, programaPodeSerRemovido,
   definirArteDaMaquina, removerArteDaMaquina,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
