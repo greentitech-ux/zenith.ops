@@ -5464,6 +5464,15 @@ app.get('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) =>
   }
 });
 
+app.get('/api/loja-status/comandos-pendentes', auth.requireMaster, async (req, res) => {
+  try {
+    const comandos = await lojaStatus.listarComandosPendentes();
+    res.json({ comandos });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // papel de parede do parque: UMA imagem pra rede toda; cada computador decide
 // se aplica (politica.papelDeParedeAtivo). Servida sem sessao porque quem
 // baixa e a maquina - o caminho e opaco e a imagem e do proprio grupo.

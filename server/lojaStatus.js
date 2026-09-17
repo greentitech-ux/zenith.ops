@@ -2870,6 +2870,31 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   return { ...comando, ...patch };
 }
 
+// Lista comandos recentes para o painel de monitoramento.
+// Retorna a forma simplificada que a tela do painel espera (sem o comando completo,
+// pra evitar exposição acidental de secrets ou senhas)
+async function listarComandosPendentes() {
+  const agora = Date.now();
+  const umDiaAtras = new Date(agora - 24 * 60 * 60 * 1000).toISOString();
+  const snap = await COMANDOS_COLLECTION.get();
+  return snap.docs
+    .map((doc) => {
+      const c = doc.data();
+      return {
+        id: doc.id,
+        codigo: c.codigo,
+        posto: c.posto,
+        status: c.status || 'pendente',
+        criadoEm: c.criadoEm || null,
+        nomeComando: null,
+        comando: String(c.comando || '').slice(0, 100),
+      };
+    })
+    .filter((c) => c.criadoEm >= umDiaAtras) // filtra últimas 24h em memória
+    .sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''))
+    .slice(0, 200); // limita a 200 comandos
+}
+
 // tamanho maximo da thread guardada por computador - so o suficiente pra
 // dar contexto na janela de chat, sem o documento crescer sem limite
 const CHAT_MAX_MENSAGENS = 30;
@@ -3751,7 +3776,7 @@ module.exports = {
   // falso e ser levado a sério, inclusive pra ENVELHECER a última batida,
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
-  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando,
+  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, listarComandosPendentes,
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,
