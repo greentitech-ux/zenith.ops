@@ -1962,19 +1962,20 @@ async function carregarComandos(){
   if(!alvo.innerHTML) alvo.innerHTML = 'Carregando…';
   try{
     const r = await fetch('/api/loja-status/comandos-recentes');
-    if(!r.ok){ alvo.innerHTML = 'Não consegui carregar os comandos.'; return; }
+    if(!r.ok){ alvo.innerHTML = '<div class="sub">Não consegui carregar os comandos.</div>'; return; }
     const maquinas = (await r.json()).maquinas || [];
+    const hora = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
     if(!maquinas.length){
-      resumo.textContent = '';
-      alvo.innerHTML = 'Nenhuma máquina recebeu comando ainda.';
+      // o resumo nao fica vazio nem aqui: senao o 🔄 sobra sozinho na linha
+      resumo.textContent = `nenhum comando ainda · lido às ${hora}`;
+      alvo.innerHTML = '<div class="sub">Nenhuma máquina recebeu comando ainda.</div>';
       return;
     }
     const conta = (s)=>maquinas.filter(x=>x.status===s).length;
     const andando = conta('pendente') + conta('entregue');
-    const hora = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
     resumo.textContent = `${maquinas.length} máquina(s) · ${andando} em andamento · ${conta('erro')} com erro · lido às ${hora}`;
     alvo.innerHTML = maquinas.map(linhaComando).join('');
-  }catch(err){ alvo.innerHTML = 'Não consegui carregar os comandos.'; }
+  }catch(err){ alvo.innerHTML = '<div class="sub">Não consegui carregar os comandos.</div>'; }
 }
 
 function fecharProgramas(){ fecharOverlay('prog-overlay'); PROG_ATUAL = null; }
