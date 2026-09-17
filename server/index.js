@@ -1821,7 +1821,7 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     // autoatualizacao dessa maquina continua recebendo a versao certa
     const windowsAntigo = await lojaStatus.windowsAntigoDoComputador(codigo, posto);
     // nome canonico da loja + nome do computador (o que o Master cadastrou no
-    // NOC, ex "DOM-CR-ATM01") pro carimbo do papel de parede (ver CARIMBO.md)
+    // NOC, ex "DOM-CR-ATM01") pro carimbo do papel de parede (ver docs/CARIMBO.md)
     const unidadeNome = nomeCanonicoUnidade(codigo);
     const maquinaNome = await lojaStatus.nomeDoComputador(codigo, posto);
     const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome, maquinaNome });

@@ -12656,18 +12656,40 @@ setTimeout(async () => {
       'o agente baixa da URL da PRÓPRIA máquina (quem escolhe a marca é o servidor)':
         /\$UrlPapelDeParede = "[^"]*\/api\/loja-status\/PPDOM\/computadores\/PC1\/papel-de-parede"/.test(psPp)
         && /Invoke-WebRequest -Uri \$UrlPapelDeParede -Headers \$CabecalhosAgente/.test(psPp),
-      // decisao do Master: centralizado, logo abaixo da marca (o modelo que ele
-      // mandou). O agente nao enxerga a arte - a posicao e' convencao, e a tela
-      // avisa pra arte deixar a faixa livre
-      // CARIMBO.md: topo-direito na horizontal; centralizado embaixo na
-      // vertical (Makeline). Regua ambar + nome da loja + etiqueta arredondada.
-      'o carimbo vai no topo-direito (horizontal) e centralizado (vertical), conforme a orientação':
+      // O agente nao enxerga a arte: a posicao e' convencao com quem desenha,
+      // e a tela avisa pra deixar as duas areas livres. Ver docs/CARIMBO.md.
+      // DOIS blocos em slots separados: o nome da loja encostado na direita
+      // (centralizado na vertical) e a PLACA da maquina centralizada no card.
+      // Ate set/2026 a etiqueta vinha empilhada embaixo do nome - quem voltar
+      // a empilhar quebra aqui.
+      'nome da loja num slot e placa da máquina em OUTRO, centralizada':
         /\$vertical = \$img\.Height -gt \$img\.Width/.test(psPp)
-        && /\$dir = \$img\.Width - \(84 \* \$esc\)/.test(psPp)
+        && /\$dir = \$img\.Width - \(\$margemDir \* \$esc\)/.test(psPp)
         && /\$xLoja = \$dir - \$tamLoja\.Width/.test(psPp)
-        && /\$topo = \$img\.Height \* \(1518\.0 \/ 1920\.0\)/.test(psPp)
         && /\$xLoja = \$cx - \$tamLoja\.Width \/ 2/.test(psPp)
-        && /topo-direito/.test(htmlPp),
+        && /\$xEtiq = \(\$img\.Width - \$etiqW\) \/ 2\.0/.test(psPp)
+        && !/\$xEtiq = \$dir - \$etiqW/.test(psPp)
+        && /topo-direito/.test(htmlPp) && /centralizada no meio/.test(htmlPp),
+      // a geometria mora no carimboLayout.js: mexer no carimbo e' mexer LA.
+      // Comparando com o modulo, e nao com numero cravado, o teste segue a
+      // config - mas pega quem escrever medida solta dentro do PowerShell.
+      'toda medida do carimbo vem do carimboLayout.js':
+        (() => {
+          const { CARIMBO_LAYOUT: CL } = require(__dirname + '/carimboLayout.js');
+          const h = CL.horizontal, v = CL.vertical;
+          return psPp.includes(`$fonteEtiq = ${h.etiqueta.fonte}; $topoEtiq = ${h.etiqueta.topo}`)
+            && psPp.includes(`$fonteEtiq = ${v.etiqueta.fonte}; $topoEtiq = ${v.etiqueta.topo}`)
+            && psPp.includes(`$topoLoja = ${v.unidade.topo}`)
+            && psPp.includes(`$margemDir = ${h.unidade.margemDireita}`)
+            && psPp.includes(`FromHtml("${CL.cores.etiquetaTexto}")`);
+        })(),
+      // o desenho pede letter-spacing .14em; System.Drawing nao tem, entao o
+      // script desenha caractere a caractere. Sem isso a placa sai estreita.
+      'a placa sai em MAIÚSCULAS e com o espaçamento entre letras do desenho':
+        /\$maq = \(\[string\]\$NomeMaquinaArte\)\.ToUpper\(\)/.test(psPp)
+        && /function Desenhar-ComEspacamento/.test(psPp)
+        && /Desenhar-ComEspacamento \$g \$maq \$fEtiq/.test(psPp)
+        && /\$lsEtiq = 0\.14/.test(psPp),
       'o agente carimba o nome da LOJA e o NOME cadastrado da máquina (não o posto nem o hostname)':
         /function Carimbar-NomeNaArte/.test(psPp)
         && /\$NomeLojaArte = "PPDOM"/.test(psPp)
