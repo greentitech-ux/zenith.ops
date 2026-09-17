@@ -86,6 +86,7 @@ const CATALOGO_PROGRAMAS_PADRAO = [
   { id: 'google-chrome', nome: 'Google Chrome', wingetId: 'Google.Chrome', descricao: 'Navegador Google Chrome' },
   { id: 'anydesk', nome: 'AnyDesk', wingetId: 'AnyDeskSoftwareGmbH.AnyDesk', descricao: 'Acesso remoto AnyDesk' },
   { id: 'advanced-ip-scanner', nome: 'Advanced IP Scanner', wingetId: 'Famatech.AdvancedIPScanner', descricao: 'Varredura de rede' },
+  { id: 'ifood-gestor', nome: 'iFood Gestor', wingetId: 'ifood.ifood', descricao: 'Gestor de Pedidos iFood' },
 ];
 
 function catalogoProgramasSeguro(lista) {
