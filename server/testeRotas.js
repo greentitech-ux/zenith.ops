@@ -14182,6 +14182,83 @@ setTimeout(async () => {
   console.log(`${okAnydeskSenha ? '✓' : '✗'} NOC: senha do AnyDesk em massa - o segredo só entra na entrega, nunca no catálogo, no histórico ou na saída`);
 
   // ------------------------------------------------------------------
+  // PAINEL DE COMANDOS. Pedido do Master: "nao consigo saber se o script rodou
+  // ou nao, nao importa de onde saia o comando" - um painel com o nome da
+  // maquina, o comando e o status dele.
+  //
+  // Alem do ciclo de vida, este teste guarda DUAS coisas que ja deram errado:
+  //
+  // 1) O painel NAO pode varrer a colecao de comandos. Ela cresce pra sempre e
+  //    um filtro de data feito depois da leitura cobra por todo comando ja
+  //    enviado - numa tela que recarrega sozinha, e o caminho do
+  //    RESOURCE_EXHAUSTED (§3). O estado sai do espelho em memoria.
+  // 2) A entrega tem que APARECER na hora. entregarComandoPendente escreve
+  //    dentro de uma transacao e nao invalidava nada: sem espelharEscrita, o
+  //    painel mostrava PENDENTE por ate 10 min numa maquina que ja tinha
+  //    recebido o comando (§6, tela que mente).
+  let okPainelComandos = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const srcLS = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+    const fnPainel = /async function estadoDosComandos\(\) \{[\s\S]*?\n\}/.exec(srcLS);
+    const fnEntrega2 = /async function entregarComandoPendente\([\s\S]*?\n\}/.exec(srcLS);
+
+    const UNI = 'NOCPAINEL';
+    await ls.cadastrarComputador(UNI, 'PDV-PAINEL', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-PAINEL').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+    const linha = async () => (await ls.estadoDosComandos()).find((m) => m.codigo === UNI) || null;
+
+    // (a) maquina que nunca recebeu comando nao ocupa linha no painel
+    const semComando = await linha();
+    // (b) enfileirado -> PENDENTE, com o texto do comando a vista
+    const cmd = await ls.enfileirarComando(UNI, posto, 'Get-Date # painel', {});
+    const pend = await linha();
+    // (c) entregue ao NOCZenith -> ENTREGUE, SEM esperar o espelho vencer.
+    // Pelo caminho de verdade: a entrega acontece DENTRO do heartbeat.
+    const bat = await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0', souAdmin: true }, tk);
+    const entr = await linha();
+    // (d) resultado de volta -> EXECUTADO, e o carimbo de "em curso" some
+    await ls.marcarComandoExecutado(cmd.id, { resultado: 'saiu certo' }, { codigo: UNI, posto, token: tk });
+    const exec = await linha();
+    // (e) comando que volta com erro -> ERRO
+    const cmd2 = await ls.enfileirarComando(UNI, posto, 'Get-Date # falha', {});
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0', souAdmin: true }, tk);
+    await ls.marcarComandoExecutado(cmd2.id, { erro: 'deu ruim' }, { codigo: UNI, posto, token: tk });
+    const errado = await linha();
+    // o doc cru: o carimbo de "em curso" tem que ter sido apagado no fim
+    const cru = await ls.detalhar(UNI, posto);
+
+    const conf = {
+      'máquina que nunca recebeu comando não ocupa linha': semComando === null,
+      'enfileirado aparece como PENDENTE': !!pend && pend.status === 'pendente',
+      'o texto do comando vai junto (é o que diz QUAL script rodou)': !!pend && /Get-Date # painel/.test(pend.comando || ''),
+      'a linha diz de que máquina é': !!pend && pend.codigo === UNI && !!pend.nome,
+      'o heartbeat do agente realmente levou o comando': !!bat && !!bat.comandoPendente && /Get-Date # painel/.test(bat.comandoPendente.comando || ''),
+      'entregue ao agente vira ENTREGUE na hora (não espera o espelho vencer)': !!entr && entr.status === 'entregue',
+      'resultado de volta vira EXECUTADO': !!exec && exec.status === 'executado',
+      'executado mostra a saída que a máquina devolveu': !!exec && /saiu certo/.test(exec.saida || ''),
+      'comando que falhou vira ERRO, com a mensagem': !!errado && errado.status === 'erro' && /deu ruim/.test(errado.saida || ''),
+      'comando terminado apaga o carimbo de "em curso" (não deixa texto morto no doc)':
+        !!cru && !cru.comandoEmCursoTexto && !cru.comandoEmCursoStatus && !cru.comandoEmCursoDesde,
+      // §5: os quatro estados são os do código, não rótulo novo
+      'só os quatro estados do código': [pend, entr, exec, errado]
+        .every((l) => ['pendente', 'entregue', 'executado', 'erro'].includes(l && l.status)),
+      // §3: a trava de custo
+      'o painel sai de listar() (espelho em memória), não da coleção de comandos':
+        !!fnPainel && /await listar\(\)/.test(fnPainel[0]) && !/COMANDOS_COLLECTION/.test(fnPainel[0]),
+      'a entrega repete o patch no espelho depois do commit (senão o painel mente por 10 min)':
+        !!fnEntrega2 && /espelharEscrita\(id, patchEspelho\)/.test(fnEntrega2[0]),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPainelComandos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pend=${JSON.stringify(pend)} entr=${JSON.stringify(entr)} exec=${JSON.stringify(exec)})`);
+  } catch (e) { okPainelComandos = false; console.log('  erro: ' + e.message); }
+  if (!okPainelComandos) ruins += 1;
+  console.log(`${okPainelComandos ? '✓' : '✗'} NOC: painel de comandos - o estado de cada máquina sai do espelho (sem varrer a coleção) e a entrega aparece na hora`);
+
+  // ------------------------------------------------------------------
   // TRAVA DA MAQUININHA POS. Pedido do Master (07/09/2026): "adicionar uma
   // trava pra lançamento de Maquininha POS - sempre que for lançar perguntar
   // se está lançando correto, se for antes das 23:59 principalmente" e, no

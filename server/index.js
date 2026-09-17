@@ -5396,10 +5396,13 @@ app.get('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) =>
   }
 });
 
-app.get('/api/loja-status/comandos-pendentes', auth.requireMaster, async (req, res) => {
+// PAINEL DE COMANDOS: uma linha por maquina 'interno', dizendo em que pe esta
+// o comando dela. Nome de um segmento so pelo mesmo motivo do -marcas: nao
+// colidir com /api/loja-status/:codigo/... logo abaixo. Nao custa leitura -
+// sai do espelho em memoria (ver estadoDosComandos).
+app.get('/api/loja-status/comandos-recentes', auth.requireMaster, async (req, res) => {
   try {
-    const comandos = await lojaStatus.listarComandosPendentes();
-    res.json({ comandos });
+    res.json({ maquinas: await lojaStatus.estadoDosComandos() });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

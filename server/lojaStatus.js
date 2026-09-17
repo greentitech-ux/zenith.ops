@@ -1151,6 +1151,9 @@ const CAMPOS_SO_DO_DETALHE = [
   'eventos', 'ipHistorico', 'chatMensagens', 'dispositivos',
   'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
   'ultimoComandoTexto', 'ultimoComandoResultado', 'ultimoComandoErro',
+  // mesmo motivo do ultimoComandoTexto: 200 chars x dezenas de maquinas a cada
+  // poll. Quem precisa do texto e o painel de comandos, que tem rota propria
+  'comandoEmCursoTexto',
 ];
 function resumoDe(doc) {
   const copia = { ...doc };
@@ -2693,7 +2696,17 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
     entregueEm: null, executadoEm: null, resultado: null, erro: null,
   };
   await comandoRef.set(registro);
-  await ref.set({ comandoPendenteId: comandoRef.id }, { merge: true });
+  // carimba o comando EM CURSO no doc da maquina, na mesma escrita que ja
+  // gravava o ponteiro. Custo zero (mesmo documento, mesmo set) e e o que
+  // deixa o painel de comandos responder "rodou?" saindo so do espelho em
+  // memoria - sem varrer a colecao de comandos, que cresce pra sempre (§3).
+  // O par disso e a limpeza em marcarComandoExecutado/marcarComandoExpiradoSemAdmin.
+  await ref.set({
+    comandoPendenteId: comandoRef.id,
+    comandoEmCursoTexto: String(comandoFinal).slice(0, 200),
+    comandoEmCursoDesde: registro.criadoEm,
+    comandoEmCursoStatus: 'pendente',
+  }, { merge: true });
   cache.invalidar();
   return registro;
 }
@@ -2712,6 +2725,13 @@ async function detalharComando(comandoId) {
   };
 }
 
+// apaga o carimbo de "em curso" do doc da maquina. Vai junto de TODA escrita
+// que zera o comandoPendenteId. Quem decide se ha comando em voo e o
+// comandoPendenteId, entao deixar isto pra tras nao faz o painel mentir - mas
+// deixa 200 chars de texto morto em cada doc, que ainda viajam no detalhe da
+// ficha. Limpar e o par da escrita que carimbou.
+const SEM_COMANDO_EM_CURSO = { comandoEmCursoTexto: null, comandoEmCursoDesde: null, comandoEmCursoStatus: null };
+
 // chamado de dentro do heartbeat() - transacao sobre 1 documento so (nao
 // precisa de indice composto: o comandoPendenteId ja diz exatamente qual
 // comando buscar). Marca 'entregue' e devolve o texto do comando pro
@@ -2728,7 +2748,7 @@ async function marcarComandoExpiradoSemAdmin(comandoId, codigo, posto, msg) {
     // leitura da varredura e aqui, a instancia SYSTEM pode ter chegado
     const rs = await tx.get(ref);
     if (rs.exists && rs.data().comandoPendenteId === comandoId) {
-      tx.update(ref, { comandoPendenteId: null, comandoAguardandoElevacaoDesde: null });
+      tx.update(ref, { comandoPendenteId: null, comandoAguardandoElevacaoDesde: null, ...SEM_COMANDO_EM_CURSO });
     }
     if (cs.exists && cs.data().status === 'pendente') {
       tx.update(comandoRef, { status: 'erro', erro: msg, executadoEm: new Date().toISOString() });
@@ -2740,7 +2760,14 @@ async function marcarComandoExpiradoSemAdmin(comandoId, codigo, posto, msg) {
 async function entregarComandoPendente(codigo, posto, opcoes) {
   const id = docIdFor(codigo, posto);
   const ref = COLLECTION.doc(id);
-  return db.runTransaction(async (tx) => {
+  // o que a entrega mudou no doc da maquina, pra repetir no espelho DEPOIS do
+  // commit. Sem isso o painel mostrava PENDENTE por ate 10 min (a validade do
+  // espelho) numa maquina que ja tinha recebido o comando - §6, tela que mente.
+  // Nao da pra mexer no espelho de dentro da transacao: ela pode repetir, e um
+  // patch de tentativa que nao vingou deixaria a memoria divergindo do banco.
+  let patchEspelho = null;
+  const entrega = await db.runTransaction(async (tx) => {
+    patchEspelho = null; // cada tentativa recomeca do zero
     const snap = await tx.get(ref);
     if (!snap.exists) return null;
     const comandoPendenteId = snap.data().comandoPendenteId;
@@ -2772,14 +2799,21 @@ async function entregarComandoPendente(codigo, posto, opcoes) {
       texto = substituirSegredos(comando.comando);
     } catch (e) {
       tx.update(comandoRef, { status: 'erro', erro: e.message, executadoEm: new Date().toISOString() });
-      tx.update(ref, { comandoPendenteId: null });
+      patchEspelho = { comandoPendenteId: null, ...SEM_COMANDO_EM_CURSO };
+      tx.update(ref, patchEspelho);
       return null;
     }
     const patchEntrega = { status: 'entregue', entregueEm: new Date().toISOString() };
     tx.update(comandoRef, patchEntrega);
-    if (snap.data().comandoAguardandoElevacaoDesde) tx.update(ref, { comandoAguardandoElevacaoDesde: null });
+    // mesma transacao, mesmo documento: o painel passa a ver 'entregue' sem
+    // nenhuma leitura extra (§5 - os quatro estados vem do proprio codigo)
+    patchEspelho = { comandoEmCursoStatus: 'entregue' };
+    if (snap.data().comandoAguardandoElevacaoDesde) patchEspelho.comandoAguardandoElevacaoDesde = null;
+    tx.update(ref, patchEspelho);
     return { comandoId: comando.id, comando: texto };
   });
+  if (patchEspelho) espelharEscrita(id, patchEspelho);
+  return entrega;
 }
 
 // SEGREDO NO COMANDO. Pedido do Master (07/09/2026): "colocar uma senha de
@@ -2833,6 +2867,7 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   // que voltou sem precisar entrar na maquina
   await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).set({
     comandoPendenteId: null,
+    ...SEM_COMANDO_EM_CURSO,
     ultimoComandoEm: patch.executadoEm,
     ultimoComandoTexto: String(comando.comando || '').slice(0, 200),
     ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 2000) : null,
@@ -2842,29 +2877,45 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   return { ...comando, ...patch };
 }
 
-// Lista comandos recentes para o painel de monitoramento.
-// Retorna a forma simplificada que a tela do painel espera (sem o comando completo,
-// pra evitar exposição acidental de secrets ou senhas)
-async function listarComandosPendentes() {
-  const agora = Date.now();
-  const umDiaAtras = new Date(agora - 24 * 60 * 60 * 1000).toISOString();
-  const snap = await COMANDOS_COLLECTION.get();
-  return snap.docs
-    .map((doc) => {
-      const c = doc.data();
+// ONDE CADA MAQUINA ESTA, em comando - a resposta pro "rodou ou nao rodou?".
+//
+// Sai de listar(), que vem do espelho em memoria: ZERO leitura no Firestore
+// (§3). A tentacao obvia era varrer a colecao de comandos e filtrar as ultimas
+// 24h - mas o filtro acontece DEPOIS da leitura, entao se paga por todo comando
+// ja enviado desde sempre, numa tela que recarrega sozinha. E o caminho do
+// RESOURCE_EXHAUSTED.
+//
+// Uma linha por maquina, nao uma por comando: enfileirarComando so deixa UM
+// comando em voo por computador, entao o ultimo comando E o estado atual
+// daquela maquina. Historico de comando antigo continua no detalhe da ficha.
+//
+// Os quatro estados sao os do proprio codigo (§5): pendente e entregue vem do
+// carimbo em curso; executado e erro, do resultado que a maquina devolveu.
+async function estadoDosComandos() {
+  const docs = (await listar()).filter((d) => d.tipo === 'interno');
+  return docs
+    .map((d) => {
+      const base = { codigo: d.codigo, posto: d.posto, nome: d.nome || null, online: !!d.online };
+      if (d.comandoPendenteId) {
+        return {
+          ...base,
+          status: d.comandoEmCursoStatus === 'entregue' ? 'entregue' : 'pendente',
+          comando: d.comandoEmCursoTexto || null,
+          em: d.comandoEmCursoDesde || null,
+          saida: null,
+        };
+      }
+      if (!d.ultimoComandoEm) return null; // nunca recebeu comando: nao ocupa linha
       return {
-        id: doc.id,
-        codigo: c.codigo,
-        posto: c.posto,
-        status: c.status || 'pendente',
-        criadoEm: c.criadoEm || null,
-        nomeComando: null,
-        comando: String(c.comando || '').slice(0, 100),
+        ...base,
+        status: d.ultimoComandoErro ? 'erro' : 'executado',
+        comando: d.ultimoComandoTexto || null,
+        em: d.ultimoComandoEm,
+        saida: d.ultimoComandoErro || d.ultimoComandoResultado || null,
       };
     })
-    .filter((c) => c.criadoEm >= umDiaAtras) // filtra últimas 24h em memória
-    .sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''))
-    .slice(0, 200); // limita a 200 comandos
+    .filter(Boolean)
+    .sort((a, b) => String(b.em || '').localeCompare(String(a.em || '')));
 }
 
 // tamanho maximo da thread guardada por computador - so o suficiente pra
@@ -3748,7 +3799,7 @@ module.exports = {
   // falso e ser levado a sério, inclusive pra ENVELHECER a última batida,
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
-  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, listarComandosPendentes,
+  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, estadoDosComandos,
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,

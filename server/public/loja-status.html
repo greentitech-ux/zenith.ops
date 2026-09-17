@@ -519,6 +519,7 @@
       <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
       <button type="button" class="btn-icone hidden" id="btn-manutencao" onclick="abrirManutencao()" data-dica="Reiniciar máquinas do parque (uma, uma unidade ou várias)" aria-label="Reiniciar máquinas do parque">🔁</button>
       <button type="button" class="btn-icone hidden" id="btn-limpar-travados" onclick="limparTravados()" data-dica="Destravar lojas: fechar processos travados do agente NOC-NoPulso" aria-label="Destravar lojas">🧹</button>
+      <button type="button" class="btn-icone hidden" id="btn-comandos" onclick="abrirComandos()" data-dica="Comandos: em que pé está o comando de cada máquina" aria-label="Painel de comandos">📋</button>
       <!-- atalho pra central de HD/temperatura/reboot: o card daqui mostra o
            computador que voce ja escolheu; la e a frota inteira de uma vez -->
       <a class="btn-icone" href="/noc-maquinas.html" data-dica="Saúde das máquinas: HD, temperatura e tempo ligado de toda a frota" aria-label="Saúde das máquinas">💽</a>
@@ -1073,6 +1074,22 @@
 <!-- Programas da maquina, em janela PROPRIA (pedido do Master): o Registro de
      atividades e' pra investigar incidente - queda, comando, acesso remoto. Uma
      maquina que atualiza Chrome toda semana empurrava isso pra fora da tela. -->
+<!-- PAINEL DE COMANDOS. Responde "o script rodou?" sem abrir maquina por
+     maquina. Uma linha por computador 'interno': enfileirarComando so deixa um
+     comando em voo por vez, entao o ultimo comando E o estado atual dela.
+     Os quatro estados sao os do codigo (§5), nao rotulo novo. -->
+<div class="overlay hidden" id="comandos-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharComandos()">✕</span>
+  <div class="modal" role="dialog" aria-label="Painel de comandos">
+    <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
+      <h3 style="margin:0;flex:1 1 auto;min-width:0;">📋 Comandos</h3>
+      <button type="button" class="btn-ghost" onclick="carregarComandos()">🔄</button>
+    </div>
+    <div class="sub" id="comandos-resumo" style="margin-bottom:8px;"></div>
+    <div id="comandos-corpo"></div>
+  </div></div>
+</div>
 <div class="overlay hidden" id="prog-overlay">
   <div class="sheet-wrap">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharProgramas()">✕</span>
@@ -1909,6 +1926,70 @@ function abrirProgramas(codigo, posto){
   trocarAbaProgramas('mudancas');
   abrirOverlay('prog-overlay');
 }
+// ---- PAINEL DE COMANDOS ----------------------------------------------
+// Atualiza sozinho SO enquanto a folha esta aberta. O dado sai do espelho em
+// memoria do servidor (leitura zero no Firestore), mas aba fechada nao tem por
+// que pedir nada. O numero no resumo e o intervalo DE VERDADE - §6: nada de
+// "ao vivo" com numero que o codigo nao pratica.
+let COMANDOS_TIMER = null;
+const COMANDOS_INTERVALO_MS = 20000;
+
+// os quatro estados vem do servidor, nao sao rotulo novo (§5)
+const COMANDO_ESTADO = {
+  pendente:  { rotulo:'PENDENTE',  cor:'var(--muted)', fundo:'var(--panel2)' },
+  entregue:  { rotulo:'ENTREGUE',  cor:'var(--warn)',  fundo:'var(--warn-dim)' },
+  executado: { rotulo:'EXECUTADO', cor:'var(--ok)',    fundo:'var(--ok-dim)' },
+  erro:      { rotulo:'ERRO',      cor:'var(--bad)',   fundo:'var(--bad-dim)' },
+};
+
+function abrirComandos(){
+  abrirOverlay('comandos-overlay');
+  carregarComandos();
+  if(COMANDOS_TIMER) clearInterval(COMANDOS_TIMER);
+  COMANDOS_TIMER = setInterval(()=>{ if(!document.hidden) carregarComandos(); }, COMANDOS_INTERVALO_MS);
+}
+function fecharComandos(){
+  fecharOverlay('comandos-overlay');
+  if(COMANDOS_TIMER){ clearInterval(COMANDOS_TIMER); COMANDOS_TIMER = null; }
+}
+
+function linhaComando(m){
+  const e = COMANDO_ESTADO[m.status] || COMANDO_ESTADO.pendente;
+  const nome = m.nome || m.posto;
+  const saida = m.saida ? `<div class="sub" style="font-family:var(--mono);font-size:11px;margin-top:4px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(String(m.saida).slice(0,300))}</div>` : '';
+  return `<div style="border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:7px;background:var(--panel2);">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span style="font-weight:700;min-width:0;word-break:break-word;">${escapeHtml(nome)}</span>
+      <span class="sub" style="font-size:11.5px;">${escapeHtml(m.codigo)}${m.online ? '' : ' · offline'}</span>
+      <span style="margin-left:auto;font-size:11px;font-weight:700;letter-spacing:.4px;padding:3px 8px;border-radius:999px;color:${e.cor};background:${e.fundo};">${e.rotulo}</span>
+    </div>
+    <div style="font-family:var(--mono);font-size:11.5px;margin-top:5px;word-break:break-word;opacity:.85;">${escapeHtml(m.comando || '(sem texto)')}</div>
+    <div class="sub" style="font-size:11px;margin-top:3px;">${escapeHtml(tempoRelativo(m.em))}</div>
+    ${saida}
+  </div>`;
+}
+
+async function carregarComandos(){
+  const alvo = document.getElementById('comandos-corpo');
+  const resumo = document.getElementById('comandos-resumo');
+  if(!alvo) return;
+  if(!alvo.innerHTML) alvo.innerHTML = 'Carregando…';
+  try{
+    const r = await fetch('/api/loja-status/comandos-recentes');
+    if(!r.ok){ alvo.innerHTML = 'Não consegui carregar os comandos.'; return; }
+    const maquinas = (await r.json()).maquinas || [];
+    if(!maquinas.length){
+      resumo.textContent = '';
+      alvo.innerHTML = 'Nenhuma máquina recebeu comando ainda.';
+      return;
+    }
+    const conta = (s)=>maquinas.filter(x=>x.status===s).length;
+    const andando = conta('pendente') + conta('entregue');
+    resumo.textContent = `${maquinas.length} máquina(s) · ${andando} em andamento · ${conta('erro')} com erro · atualiza a cada ${COMANDOS_INTERVALO_MS/1000}s`;
+    alvo.innerHTML = maquinas.map(linhaComando).join('');
+  }catch(err){ alvo.innerHTML = 'Não consegui carregar os comandos.'; }
+}
+
 function fecharProgramas(){ fecharOverlay('prog-overlay'); PROG_ATUAL = null; }
 function pintarCatalogoProgramas(){
   const select = document.getElementById('prog-catalogo');
@@ -4336,6 +4417,7 @@ async function boot(){
     document.getElementById('agente-root').classList.remove('hidden');
     document.getElementById('btn-limpar-travados').classList.remove('hidden');
     document.getElementById('btn-manutencao').classList.remove('hidden');
+    document.getElementById('btn-comandos').classList.remove('hidden');
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
     carregarMigracaoEndereco();
