@@ -502,6 +502,20 @@
   .qa-item .qa-erro{font-size:11.5px;color:var(--bad);margin-top:6px;}
   .check-linha{display:flex;align-items:center;gap:8px;font-family:var(--sans);font-size:12.5px;color:var(--text);margin:14px 0 0;cursor:pointer;}
   .check-linha input{width:auto;flex:none;margin:0;}
+  /* ---- fila operacional de comandos (Master) ---- */
+  .cmd-painel{margin-bottom:18px;}
+  .cmd-toolbar{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap;margin:2px 0 11px;}
+  .cmd-filtros{display:flex;gap:6px;flex-wrap:wrap;}
+  .cmd-filtro{border:1px solid var(--line);border-radius:16px;background:var(--panel2);color:var(--muted);font:10.5px var(--mono);padding:5px 9px;cursor:pointer;}
+  .cmd-filtro.ativo{border-color:var(--accent);color:var(--accent);background:rgba(184,255,60,.09);}
+  .cmd-lista{display:grid;gap:7px;max-height:360px;overflow:auto;padding-right:2px;}
+  .cmd-linha{display:grid;grid-template-columns:auto minmax(140px,1fr) auto auto;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--muted);border-radius:9px;padding:9px 10px;}
+  .cmd-linha.pendente{border-left-color:var(--warn);} .cmd-linha.entregue{border-left-color:var(--accent);} .cmd-linha.executado{border-left-color:var(--ok);} .cmd-linha.erro{border-left-color:var(--bad);}
+  .cmd-alvo{font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cmd-meta{font:10.5px var(--mono);color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cmd-tipo{font-size:11px;color:var(--text);white-space:nowrap;}.cmd-status{font:10px var(--mono);white-space:nowrap;text-transform:uppercase;}
+  .cmd-status.pendente{color:var(--warn);}.cmd-status.entregue{color:var(--accent);}.cmd-status.executado{color:var(--ok);}.cmd-status.erro{color:var(--bad);}
+  @media(max-width:640px){.cmd-linha{grid-template-columns:auto minmax(0,1fr) auto;gap:8px;}.cmd-tipo{grid-column:2;white-space:normal;font-size:10px;}.cmd-status{grid-column:3;grid-row:1 / span 2;}.cmd-lista{max-height:330px;}}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -518,6 +532,7 @@
     </div>
     <div class="header-nav">
       <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
+      <button type="button" class="btn-icone hidden" id="btn-comandos" onclick="alternarPainelComandos()" data-dica="Fila de comandos: acompanhar execução sem expor PowerShell" aria-label="Fila de comandos">⌘</button>
       <button type="button" class="btn-icone hidden" id="btn-manutencao" onclick="abrirManutencao()" data-dica="Reiniciar máquinas do parque (uma, uma unidade ou várias)" aria-label="Reiniciar máquinas do parque">🔁</button>
       <button type="button" class="btn-icone hidden" id="btn-limpar-travados" onclick="limparTravados()" data-dica="Destravar lojas: fechar processos travados do agente NOC-NoPulso" aria-label="Destravar lojas">🧹</button>
       <!-- atalho pra central de HD/temperatura/reboot: o card daqui mostra o
@@ -556,6 +571,21 @@
       <div class="kpi-num" id="kpi-num-nunca">0</div>
       <div class="kpi-label">⚪ Sem agente</div>
     </button>
+  </div>
+
+  <div class="uni-panel recolhido cmd-painel hidden" id="comandos-panel">
+    <button type="button" class="uni-panel-head" onclick="alternarPainelComandos()" aria-expanded="false" aria-controls="comandos-corpo">
+      <span><span class="uni-caret">▾</span> ⌘ Fila operacional de comandos</span>
+      <span class="uni-panel-sub" id="comandos-sub">clique para carregar</span>
+    </button>
+    <div id="comandos-corpo" class="uni-grid quedas-corpo">
+      <div class="cmd-toolbar">
+        <div class="cmd-filtros" id="comandos-filtros"></div>
+        <button type="button" class="btn-secundario" onclick="carregarComandosRecentes()">↻ Atualizar</button>
+      </div>
+      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Mostra somente alvo, tipo seguro, estado e horário das últimas 24h. O conteúdo do PowerShell e a saída não aparecem nesta lista.</div>
+      <div class="cmd-lista" id="comandos-lista"></div>
+    </div>
   </div>
 
   <!-- Painel por unidade: cada unidade com quantos computadores online/offline.
@@ -2784,6 +2814,65 @@ async function carregar(){
   }catch(e){ /* mantem a ultima lista carregada na tela */ }
 }
 
+// Fila consolidada: deliberadamente não busca detalhe do comando nem mostra
+// resultado. Quem precisa investigar abre a ficha da máquina; esta visão é
+// para saber se a execução está andando sem espalhar PowerShell pela tela.
+let COMANDOS_RECENTES = [];
+let FILTRO_COMANDOS = 'todos';
+let COMANDOS_CARREGADOS = false;
+const ROTULO_STATUS_COMANDO = { pendente:'na fila', entregue:'executando', executado:'concluído', erro:'erro' };
+function alternarPainelComandos(){
+  const painel = document.getElementById('comandos-panel');
+  if(!painel || painel.classList.contains('hidden')) return;
+  const aberto = painel.classList.contains('recolhido');
+  painel.classList.toggle('recolhido', !aberto);
+  painel.querySelector('.uni-panel-head').setAttribute('aria-expanded', aberto ? 'true' : 'false');
+  if(aberto && !COMANDOS_CARREGADOS) carregarComandosRecentes();
+}
+function selecionarFiltroComandos(filtro){
+  FILTRO_COMANDOS = filtro;
+  renderComandosRecentes();
+}
+function renderComandosRecentes(){
+  const lista = document.getElementById('comandos-lista');
+  const filtros = document.getElementById('comandos-filtros');
+  const sub = document.getElementById('comandos-sub');
+  if(!lista || !filtros || !sub) return;
+  const opcoes = [['todos','Todos'],['pendente','Na fila'],['entregue','Executando'],['erro','Com erro'],['executado','Concluídos']];
+  filtros.innerHTML = opcoes.map(([id,nome])=>`<button type="button" class="cmd-filtro ${FILTRO_COMANDOS===id?'ativo':''}" onclick="selecionarFiltroComandos('${id}')">${nome}</button>`).join('');
+  const visiveis = COMANDOS_RECENTES.filter(c=>FILTRO_COMANDOS==='todos'||c.status===FILTRO_COMANDOS);
+  const ativos = COMANDOS_RECENTES.filter(c=>c.status==='pendente'||c.status==='entregue').length;
+  sub.textContent = COMANDOS_RECENTES.length ? `${ativos} ativo${ativos===1?'':'s'} · últimas 24h` : 'nenhum comando nas últimas 24h';
+  if(!visiveis.length){ lista.innerHTML='<div class="empty" style="padding:16px;">Nenhum comando neste filtro.</div>'; return; }
+  lista.innerHTML = visiveis.map(c=>{
+    const status = ROTULO_STATUS_COMANDO[c.status] || 'desconhecido';
+    const classe = ROTULO_STATUS_COMANDO[c.status] ? c.status : '';
+    const unidade = UNIDADES_NOMES[c.unidadeCodigo || c.codigo] || c.codigo || 'sem unidade';
+    const quando = c.executadoEm || c.entregueEm || c.criadoEm;
+    const admin = c.requerAdmin ? ' · admin' : '';
+    return `<div class="cmd-linha ${classe}">
+      <span aria-hidden="true">${c.status==='erro'?'●':c.status==='executado'?'●':'◌'}</span>
+      <div><div class="cmd-alvo" title="${escapeHtml(c.nomeComputador || c.posto)}">${escapeHtml(c.nomeComputador || c.posto || 'Computador')}</div><div class="cmd-meta">${escapeHtml(unidade)} · ${escapeHtml(c.posto || '')}${admin}</div></div>
+      <span class="cmd-tipo">${escapeHtml(c.nomeComando || 'Comando operacional')}</span>
+      <span class="cmd-status ${classe}">${status} · ${escapeHtml(tempoRelativo(quando))}</span>
+    </div>`;
+  }).join('');
+}
+async function carregarComandosRecentes(){
+  const lista = document.getElementById('comandos-lista');
+  if(lista && !COMANDOS_CARREGADOS) lista.innerHTML='<div class="empty" style="padding:16px;">Carregando fila operacional…</div>';
+  try{
+    const res = await fetch('/api/loja-status/comandos-pendentes?limite=100');
+    const dados = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(dados.error || 'Não foi possível consultar a fila.');
+    COMANDOS_RECENTES = Array.isArray(dados.comandos) ? dados.comandos : [];
+    COMANDOS_CARREGADOS = true;
+    renderComandosRecentes();
+  }catch(e){
+    if(lista) lista.innerHTML='<div class="empty" style="padding:16px;">Não foi possível carregar a fila agora.</div>';
+  }
+}
+
 // ---------------------------------------------------------------------
 // JANELA DE MANUTENÇÃO. A tela monta o ALVO (quem reinicia); o comando em
 // si mora no servidor e não sai daqui - ver a rota
@@ -4420,6 +4509,8 @@ async function boot(){
     document.getElementById('agente-root').classList.remove('hidden');
     document.getElementById('btn-limpar-travados').classList.remove('hidden');
     document.getElementById('btn-manutencao').classList.remove('hidden');
+    document.getElementById('btn-comandos').classList.remove('hidden');
+    document.getElementById('comandos-panel').classList.remove('hidden');
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
     carregarMigracaoEndereco();
@@ -4435,6 +4526,9 @@ async function boot(){
   // a rede muda numa escala de minutos (e o acumulado e do dia inteiro),
   // entao nao precisa do mesmo ritmo da grade de presenca
   setInterval(() => { if(!document.hidden) carregarRede(); }, 120000);
+  // Atualiza só quando o Master realmente abriu a fila; evita mais leituras
+  // Firestore para uma seção que normalmente fica recolhida.
+  setInterval(() => { if(!document.hidden && !document.getElementById('comandos-panel').classList.contains('recolhido')) carregarComandosRecentes(); }, 30000);
   setInterval(atualizarTickerCarga, 15000);
   document.addEventListener('visibilitychange', () => { if(!document.hidden) carregar(); });
 }

@@ -5466,7 +5466,7 @@ app.get('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) =>
 
 app.get('/api/loja-status/comandos-pendentes', auth.requireMaster, async (req, res) => {
   try {
-    const comandos = await lojaStatus.listarComandosPendentes();
+    const comandos = await lojaStatus.listarComandosPendentes(req.query?.limite);
     res.json({ comandos });
   } catch (err) {
     res.status(400).json({ error: err.message });

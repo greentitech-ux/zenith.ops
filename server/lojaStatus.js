@@ -2703,6 +2703,11 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
   const registro = {
     id: comandoRef.id, codigo, posto, comando: comandoFinal,
     comandoEntrega,
+    // A fila de monitoramento precisa identificar o alvo sem consultar toda a
+    // coleção de computadores. É só nome/unidade já visível ao Master, nunca
+    // o conteúdo do PowerShell nem resultado que possa conter dado sensível.
+    nomeComputador: atual.nome || posto,
+    unidadeCodigo: codigo,
     origem: op.origem || 'agente', acaoId: op.acaoId || null, aprovacaoId: op.aprovacaoId || null,
     solicitadoPor: op.solicitadoPor || null,
     // requerAdmin: comando que so roda elevado (instalar/desinstalar). O
@@ -2870,13 +2875,25 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   return { ...comando, ...patch };
 }
 
-// Lista comandos recentes para o painel de monitoramento.
-// Retorna a forma simplificada que a tela do painel espera (sem o comando completo,
-// pra evitar exposição acidental de secrets ou senhas)
-async function listarComandosPendentes() {
-  const agora = Date.now();
-  const umDiaAtras = new Date(agora - 24 * 60 * 60 * 1000).toISOString();
-  const snap = await COMANDOS_COLLECTION.get();
+// Lista a fila operacional sem expor PowerShell, resultado ou erro. O painel
+// serve para responder "qual máquina está aguardando e há quanto tempo", não
+// para virar outro console. A consulta já nasce limitada no Firestore: não lê
+// o histórico inteiro a cada atualização do NOC.
+function nomeSeguroDoComando(c) {
+  if (c.origem === 'noc-console-operacional') return 'Console operacional';
+  if (c.acaoId) return 'Ação aprovada do catálogo';
+  if (c.origem === 'diagnostico-rede') return 'Diagnóstico de rede';
+  if (c.origem === 'manutencao') return 'Manutenção programada';
+  return 'Comando operacional';
+}
+async function listarComandosPendentes(limiteInformado) {
+  const limite = Math.max(20, Math.min(200, Number(limiteInformado) || 100));
+  const umDiaAtras = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const snap = await COMANDOS_COLLECTION
+    .where('criadoEm', '>=', umDiaAtras)
+    .orderBy('criadoEm', 'desc')
+    .limit(limite)
+    .get();
   return snap.docs
     .map((doc) => {
       const c = doc.data();
@@ -2884,15 +2901,16 @@ async function listarComandosPendentes() {
         id: doc.id,
         codigo: c.codigo,
         posto: c.posto,
+        nomeComputador: c.nomeComputador || c.posto,
+        unidadeCodigo: c.unidadeCodigo || c.codigo,
         status: c.status || 'pendente',
         criadoEm: c.criadoEm || null,
-        nomeComando: null,
-        comando: String(c.comando || '').slice(0, 100),
+        entregueEm: c.entregueEm || null,
+        executadoEm: c.executadoEm || null,
+        requerAdmin: c.requerAdmin === true,
+        nomeComando: nomeSeguroDoComando(c),
       };
     })
-    .filter((c) => c.criadoEm >= umDiaAtras) // filtra últimas 24h em memória
-    .sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''))
-    .slice(0, 200); // limita a 200 comandos
 }
 
 // tamanho maximo da thread guardada por computador - so o suficiente pra
