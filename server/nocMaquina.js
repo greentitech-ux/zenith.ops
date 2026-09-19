@@ -27,6 +27,13 @@
 // Não são chute: são os pontos onde a decisão de quem opera muda.
 const LIVRE_CRITICO_PCT = 5;    // abaixo disso o Windows já começa a falhar
 const LIVRE_ATENCAO_PCT = 10;   // aqui ainda dá pra agendar uma limpeza
+// Memória não é espaço em disco: em uma máquina de 4 GB, chegar a 0,3 GB
+// livres já causa paginação constante, mesmo que o SSD ainda tenha espaço.
+// O percentual protege máquinas maiores; o piso em GB protege as pequenas.
+const RAM_LIVRE_CRITICA_GB = 0.5;
+const RAM_LIVRE_ATENCAO_GB = 1;
+const RAM_LIVRE_CRITICA_PCT = 10;
+const RAM_LIVRE_ATENCAO_PCT = 20;
 const TEMPERATURA_ALTA_C = 60;  // acima disso a vida útil despenca
 const HORAS_MUITO_USO = 35000;  // ~4 anos ligado direto: disco em fim de vida
 // política da casa: computador de loja é reiniciado uma vez por semana.
@@ -121,6 +128,19 @@ function sanitizarRam(ram) {
   const livreGb = plausivel(ram.livreGb, 0, 512);
   if (livreGb != null) out.livreGb = Math.min(livreGb, totalGb);
   return out;
+}
+
+function avaliarRam(ram) {
+  if (!ram || ram.totalGb == null || ram.livreGb == null) return { nivel: 'ok', motivos: [] };
+  const livrePct = Math.round((ram.livreGb / ram.totalGb) * 1000) / 10;
+  const detalhe = `RAM: só ${ram.livreGb} GB livres de ${ram.totalGb} GB (${livrePct}%)`;
+  if (ram.livreGb < RAM_LIVRE_CRITICA_GB || livrePct < RAM_LIVRE_CRITICA_PCT) {
+    return { nivel: 'critico', motivos: [detalhe] };
+  }
+  if (ram.livreGb < RAM_LIVRE_ATENCAO_GB || livrePct < RAM_LIVRE_ATENCAO_PCT) {
+    return { nivel: 'atencao', motivos: [detalhe] };
+  }
+  return { nivel: 'ok', motivos: [] };
 }
 
 function avaliarDisco(disco) {
@@ -301,12 +321,15 @@ function panorama(docs) {
   const linhas = docs.map((d) => {
     const disco = d.disco || null;
     const av = avaliarDisco(disco);
+    const ram = sanitizarRam(d.ram);
+    const ar = avaliarRam(ram);
     const dias = diasLigado(d.uptimeHoras);
     const precisaReiniciar = ciclosSemReiniciar(d.uptimeHoras) >= 1;
     // o pior entre disco e reboot vira o nível do CARD - quem olha no celular
     // decide pela cor da borda, não lendo cada campo
-    const nivel = precisaReiniciar ? pior(av.nivel, 'atencao') : av.nivel;
-    const motivos = [...av.motivos];
+    let nivel = pior(av.nivel, ar.nivel);
+    if (precisaReiniciar) nivel = pior(nivel, 'atencao');
+    const motivos = [...av.motivos, ...ar.motivos];
     if (precisaReiniciar) motivos.push(`ligado há ${dias} dias sem reiniciar`);
     // o volume mais apertado é o que decide se a máquina vai travar
     const volumes = (disco && disco.volumes) || [];
@@ -328,7 +351,7 @@ function panorama(docs) {
       temperatura,
       // sem medição ainda: a central mostra isso como estado próprio em vez
       // de fingir que está tudo bem
-      temMedicao: !!disco || d.uptimeHoras != null,
+      temMedicao: !!disco || !!ram || d.uptimeHoras != null,
       uptimeHoras: d.uptimeHoras != null ? d.uptimeHoras : null,
       uptimeDias: dias,
       precisaReiniciar,
@@ -343,7 +366,7 @@ function panorama(docs) {
       // Nao custa leitura nova (e o mesmo documento ja lido) e nao inventa
       // campo nenhum: cada um destes ja existe e ja e' mostrado em
       // loja-status.html - aqui so' viaja junto.
-      ram: d.ram || null,
+      ram,
       ramMedidaEm: d.ramMedidaEm || null,
       ipLocal: d.ipLocal || null,
       ip: d.ip || null,
@@ -420,10 +443,9 @@ function quedasDeVm(antesArr, depoisArr) {
 }
 
 module.exports = {
-  sanitizarRam,
-  LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
+  LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, RAM_LIVRE_CRITICA_GB, RAM_LIVRE_ATENCAO_GB, RAM_LIVRE_CRITICA_PCT, RAM_LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
   UPTIME_REINICIAR_DIAS,
-  sanitizarDisco, avaliarDisco, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
+  sanitizarDisco, avaliarDisco, sanitizarRam, avaliarRam, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
   sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
   resumoDispositivos, discosComProblema, panorama,
 };

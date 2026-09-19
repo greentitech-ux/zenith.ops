@@ -15640,6 +15640,11 @@ function aquecerBoot(promessa, ms) {
             .catch((err) => console.error('Erro no push de alerta de disco:', err.message));
           continue;
         }
+        if (t.tipo === 'ram') {
+          push.notifyRamAlerta(nome, t.codigo, t.nome, t.posto, t.nivel, t.motivos)
+            .catch((err) => console.error('Erro no push de alerta de RAM:', err.message));
+          continue;
+        }
         if (t.tipo === 'vm-caiu') {
           push.notifyVmCaiu(nome, t.codigo, t.nome, t.posto, t.vms)
             .catch((err) => console.error('Erro no push de VM caiu:', err.message));

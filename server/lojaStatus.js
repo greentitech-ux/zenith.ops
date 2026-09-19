@@ -1666,7 +1666,22 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   let eventos = atual.eventos || [];
 
   const ram = nocMaquina.sanitizarRam(dados && dados.ram);
-  if (ram) { patch.ram = ram; patch.ramMedidaEm = agora; }
+  if (ram) {
+    const antes = atual.ramNivel || 'ok';
+    const depois = nocMaquina.avaliarRam(ram);
+    patch.ram = ram;
+    patch.ramMedidaEm = agora;
+    patch.ramNivel = depois.nivel;
+    patch.ramMotivos = depois.motivos;
+    // Primeiro alerta também vale: versões antigas já guardavam a leitura de
+    // RAM, mas ainda não tinham ramNivel. Assim um PC já estrangulado não
+    // fica silencioso até piorar mais uma vez.
+    if (depois.nivel !== 'ok' && depois.nivel !== antes) {
+      eventos = [...eventos, { tipo: 'ram', em: agora, detalhe: depois.motivos.join(' · ').slice(0, 200) }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+      patch.ramAlertaPendente = depois.nivel;
+    }
+  }
   const disco = nocMaquina.sanitizarDisco(dados && dados.disco);
   if (disco) {
     const antes = nocMaquina.avaliarDisco(atual.disco);
@@ -3177,6 +3192,17 @@ async function varrerAlertas() {
         codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
         tipo: 'disco', nivel: candidato.discoAlertaPendente,
         motivos: candidato.discoMotivos || [],
+      });
+    }
+    // Memória sob pressão precisa chegar rápido: não mata processo nem
+    // reinicia o PDV sozinho; apenas abre o alerta com a medição que justifica
+    // uma ação aprovada pelo operador.
+    if (candidato.ramAlertaPendente) {
+      await gravarEEspelhar(candidato.codigo, candidato.posto, { ramAlertaPendente: null });
+      transicoes.push({
+        codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+        tipo: 'ram', nivel: candidato.ramAlertaPendente,
+        motivos: candidato.ramMotivos || [],
       });
     }
     // VM DO HOST caiu (Executando -> Desligada/Salva). Quem detecta e' a

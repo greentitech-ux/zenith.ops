@@ -826,6 +826,34 @@ async function notifyDiscoAlerta(unidadeNome, codigo, computadorNome, posto, niv
   }
 }
 
+// Ao contrário de desgaste de disco, pouca RAM já prejudica o atendimento
+// naquele momento. O alerta é crítico quando a própria saúde classificou como
+// tal, mas continua sendo uma notificação de diagnóstico: nenhuma aplicação é
+// encerrada remotamente sem aprovação explícita.
+async function notifyRamAlerta(unidadeNome, codigo, computadorNome, posto, nivel, motivos) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const lista = (motivos || []).slice(0, 2).join(' · ') || 'verifique os processos em uso';
+  const dados = {
+    title: nivel === 'critico' ? '🧠 RAM crítica no computador' : '🧠 RAM pedindo atenção',
+    body: `${prefixo}${unidadeNome || codigo}: ${lista}`,
+    tag: `noc-ram-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-ram', titulo: dados.title, resumo: dados.body, url: dados.url, critico: nivel === 'critico' });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (alerta de RAM):', err.message);
+    }
+  }
+}
+
 async function notifyComandoSemAdmin(unidadeNome, codigo, computadorNome, posto, motivo) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
@@ -1556,7 +1584,7 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyRamAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyDispositivoOffline, notifyRedeUnidade, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,
