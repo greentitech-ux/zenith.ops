@@ -6288,12 +6288,16 @@ setTimeout(async () => {
     const lixo = nivelDe('nao sou um HS');
     const vazio = nivelDe('');
 
-    // maquina de estados: 1 leitura ruim nao alarma, 2 alarmam UMA vez
+    // máquina de estados: crítico sai no primeiro retorno; fila/atenção
+    // continua precisando de duas leituras para não alarmar um pico normal.
     const ruim = imp.avaliar(imp.parseStatusZebra(mexer(0, 1, '1')));
     const p1 = imp.decidirAviso(null, ruim);
     const p2 = imp.decidirAviso(p1.estado, ruim);
     const p3 = imp.decidirAviso(p2.estado, ruim);
     const volta = imp.decidirAviso(p3.estado, imp.avaliar(ok));
+    const filaAlerta = imp.avaliar(imp.parseStatusZebra(mexer(0, 4, '007')));
+    const fila1 = imp.decidirAviso(null, filaAlerta);
+    const fila2 = imp.decidirAviso(fila1.estado, filaAlerta);
 
     const src = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
     const vig = require('/home/user/adyen-monitor/server/vigiaScript.js');
@@ -6318,8 +6322,9 @@ setTimeout(async () => {
       // resposta ilegivel nunca pode virar alarme - seria o jeito mais rapido
       // de treinar todo mundo a ignorar o alarme
       'resposta ilegível vira desconhecido, não alarme': lixo.nivel === 'desconhecido' && vazio.nivel === 'desconhecido',
-      'uma leitura ruim sozinha NÃO avisa': p1.avisar === null,
-      'duas leituras seguidas confirmam e avisam': !!p2.avisar && p2.avisar.nivel === 'critico',
+      'sem papel avisa já na primeira leitura válida': !!p1.avisar && p1.avisar.nivel === 'critico',
+      'o mesmo crítico não avisa de novo na segunda leitura': p2.avisar === null,
+      'fila/atenção ainda exige duas leituras seguidas': fila1.avisar === null && !!fila2.avisar && fila2.avisar.nivel === 'atencao',
       'o mesmo problema não avisa de novo na terceira': p3.avisar === null,
       'voltar ao normal fecha o ciclo': !!volta.normalizou,
       // sem o bump o agente instalado nunca baixa a versao com a sonda

@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 72;
+const VERSAO_VIGIA = 73;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1939,15 +1939,16 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# que nao pode atrasar e o heartbeat.',
     '$TicksParaDiagnosticoRede = 12',
     '# saude do HD a cada ~864 ticks de 25s (~6h) e varredura da rede local a',
-    '# cada ~144 (~1h). Disco nao muda de estado em minutos e a lista de',
-    '# aparelhos da loja tambem nao - medir mais nao informa mais, so gera',
-    '# escrita. As duas tambem rodam uma vez logo apos o boot (tick 4), senao',
-    '# o painel ficaria 6h vazio depois de cada reinicio.',
+    '# cada ~36 (~15min). Disco nao muda de estado em minutos, mas impressora',
+    '# em DHCP pode trocar de IP durante o expediente: esperar 1h fazia o',
+    '# alerta chegar quando a operacao ja tinha percebido. A leitura continua',
+    '# passiva (ARP/NetNeighbor), sem varrer portas nem a faixa inteira.',
     '$TicksParaDisco = 864',
-    '$TicksParaVarreduraRede = 144',
-    '# a sonda da impressora e o que derruba a deteccao de ~2h pra minutos:',
-    '# 4 ticks x 25s = ~100s. So abre socket se a lista nao estiver vazia.',
-    '$TicksParaSondarImpressora = 4',
+    '$TicksParaVarreduraRede = 36',
+    '# Zebra monitorada: ~2 ticks x 25s = ~50s. Sem papel/cabeca aberta sai',
+    '# no primeiro retorno; fila continua exigindo duas leituras para evitar',
+    '# ruído em lote normal. So abre socket se a lista nao estiver vazia.',
+    '$TicksParaSondarImpressora = 2',
     '# link fisico a cada ~4 ticks de 25s (~100s). Nao vale medir a cada',
     '# batida: e uma consulta ao Windows e o cabo nao cai e volta em 25s. E',
     '# nao vale espacar mais: e o dado que diz se a loja caiu pro Wi-Fi.',
@@ -2459,12 +2460,12 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '$TicksParaVerificacaoPesada = 6',
     '# atualização em até ~2min; o GET de versão é leve e não atrasa o NOC.',
     '$TicksParaVerificarAtualizacao = 5',
-    '# mesmas cadencias do tipo interno (~6h disco, ~1h rede), convertidas pro',
+    '# mesmas cadencias do tipo interno (~6h disco, ~15min rede), convertidas pro',
     '# tick de 20s deste loop',
     '$TicksParaDisco = 1080',
-    '$TicksParaVarreduraRede = 180',
-    '# ~100s tambem aqui (5 ticks x 20s)',
-    '$TicksParaSondarImpressora = 5',
+    '$TicksParaVarreduraRede = 45',
+    '# ~40s tambem aqui (2 ticks x 20s)',
+    '$TicksParaSondarImpressora = 2',
     '# estado das VMs do host a cada ~15 ticks de 20s (~5min) + tick 2 apos boot.',
     '# Guardado: em maquina sem Hyper-V Medir-VMs devolve $null e nada e enviado,',
     '# entao pode viver nos dois tipos de loop sem custo em quem nao e host.',

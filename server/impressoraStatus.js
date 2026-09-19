@@ -45,9 +45,11 @@ const ETX = String.fromCharCode(3);
 const FILA_LIMITE = Number(process.env.IMPRESSORA_FILA_LIMITE) > 0
   ? Number(process.env.IMPRESSORA_FILA_LIMITE) : 3;
 
-// quantas leituras seguidas com o MESMO problema antes de alarmar. Uma
-// leitura isolada e' ruido: a fila enche por 2 segundos no meio de um lote,
-// a cabeca fica "aberta" no instante em que o operador troca a bobina.
+// quantas leituras seguidas com o MESMO alerta de ATENCAO antes de alarmar.
+// Uma fila enche por segundos no meio de um lote; confirmar evita ruído. Já
+// "Sem papel", cabeça aberta, ribbon ausente e memória corrompida são sinais
+// objetivos da Zebra: esperar uma segunda sonda atrasava o atendimento sem
+// melhorar a certeza, então os críticos saem na primeira leitura válida.
 const LEITURAS_PRA_CONFIRMAR = Number(process.env.IMPRESSORA_LEITURAS_CONFIRMAR) > 0
   ? Number(process.env.IMPRESSORA_LEITURAS_CONFIRMAR) : 2;
 
@@ -159,7 +161,8 @@ function decidirAviso(anterior, agora) {
       normalizou: { de: ant.motivos || [] },
     };
   }
-  const confirmado = problema && repeticoes >= LEITURAS_PRA_CONFIRMAR;
+  const leiturasNecessarias = agora.nivel === 'critico' ? 1 : LEITURAS_PRA_CONFIRMAR;
+  const confirmado = problema && repeticoes >= leiturasNecessarias;
   const jaAvisado = mesmaChave && ant.avisado;
   return {
     estado: {

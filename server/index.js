@@ -15752,12 +15752,14 @@ function aquecerBoot(promessa, ms) {
         }
       }
     };
-    // 2min (era 1min). O limiar de queda é 90s e o push crítico só sai depois
-    // da janela de confirmação, então o que muda de fato é a detecção chegar
-    // até 1min mais tarde numa queda - contra metade das varreduras por dia.
+    // 1min: a telemetria da Zebra e a troca de IP já chegam ao servidor, mas
+    // os alertas pendentes só eram despachados no giro seguinte. Com 2min,
+    // isso somava atraso evitável à sonda local. A confirmação de queda segue
+    // sendo de 4min, portanto este ritmo não cria alerta de conectividade
+    // falso; apenas torna visível mais cedo o fato já confirmado pelo agente.
     // NOC_VARREDURA_MS ajusta sem deploy.
     const VARREDURA_MS = Number(process.env.NOC_VARREDURA_MS) > 0
-      ? Number(process.env.NOC_VARREDURA_MS) : 2 * 60 * 1000;
+      ? Number(process.env.NOC_VARREDURA_MS) : 60 * 1000;
     setInterval(() => {
       rodarVarreduraLojaStatus().catch((err) => console.error('Erro na varredura de conectividade das lojas:', err.message));
     }, VARREDURA_MS);
