@@ -6284,20 +6284,19 @@ setTimeout(async () => {
     const semPapel = nivelDe(mexer(0, 1, '1'));
     const cabeca = nivelDe(mexer(1, 2, '1'));
     const fila7 = nivelDe(mexer(0, 4, '007'));
-    const fila3 = nivelDe(mexer(0, 4, '003'));
+    const fila2 = nivelDe(mexer(0, 4, '002'));
+    const fila1 = nivelDe(mexer(0, 4, '001'));
     const lixo = nivelDe('nao sou um HS');
     const vazio = nivelDe('');
 
-    // máquina de estados: crítico sai no primeiro retorno; fila/atenção
-    // continua precisando de duas leituras para não alarmar um pico normal.
+    // Máquina de estados: crítico e fila >= 2 saem no primeiro retorno.
     const ruim = imp.avaliar(imp.parseStatusZebra(mexer(0, 1, '1')));
     const p1 = imp.decidirAviso(null, ruim);
     const p2 = imp.decidirAviso(p1.estado, ruim);
     const p3 = imp.decidirAviso(p2.estado, ruim);
     const volta = imp.decidirAviso(p3.estado, imp.avaliar(ok));
     const filaAlerta = imp.avaliar(imp.parseStatusZebra(mexer(0, 4, '007')));
-    const fila1 = imp.decidirAviso(null, filaAlerta);
-    const fila2 = imp.decidirAviso(fila1.estado, filaAlerta);
+    const filaAvisoImediato = imp.decidirAviso(null, filaAlerta);
 
     const src = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
     const vig = require('/home/user/adyen-monitor/server/vigiaScript.js');
@@ -6315,16 +6314,17 @@ setTimeout(async () => {
         && okBessa.modoImpressao === 2 && imp.avaliar(okBessa).nivel === 'ok',
       'sem papel é crítico': semPapel.nivel === 'critico' && /Sem papel/.test(semPapel.motivos.join()),
       'cabeça aberta é crítico': cabeca.nivel === 'critico' && /Cabeça aberta/.test(cabeca.motivos.join()),
-      // o pedido original do Master ("mais de 3 arquivos"), agora medido na
-      // fila DA IMPRESSORA em vez do Spooler do Windows, que nao existe aqui
-      'fila com 7 vira atenção': fila7.nivel === 'atencao' && /7 trabalho/.test(fila7.motivos.join()),
-      'fila com 3 NÃO alarma (o limite é MAIS de 3)': fila3.nivel === 'ok',
+      // Fila é medida na própria Zebra (não no Spooler do Windows). Dois
+      // pedidos já não podem ficar esperando, nem no horário de pico.
+      'fila com 7 vira atenção imediata': fila7.nivel === 'atencao' && fila7.imediato && /7 trabalho/.test(fila7.motivos.join()),
+      'fila com 2 já alarma imediatamente': fila2.nivel === 'atencao' && fila2.imediato,
+      'fila com 1 ainda não alarma': fila1.nivel === 'ok',
       // resposta ilegivel nunca pode virar alarme - seria o jeito mais rapido
       // de treinar todo mundo a ignorar o alarme
       'resposta ilegível vira desconhecido, não alarme': lixo.nivel === 'desconhecido' && vazio.nivel === 'desconhecido',
       'sem papel avisa já na primeira leitura válida': !!p1.avisar && p1.avisar.nivel === 'critico',
       'o mesmo crítico não avisa de novo na segunda leitura': p2.avisar === null,
-      'fila/atenção ainda exige duas leituras seguidas': fila1.avisar === null && !!fila2.avisar && fila2.avisar.nivel === 'atencao',
+      'fila com dois ou mais avisa na primeira leitura': !!filaAvisoImediato.avisar && filaAvisoImediato.avisar.nivel === 'atencao',
       'o mesmo problema não avisa de novo na terceira': p3.avisar === null,
       'voltar ao normal fecha o ciclo': !!volta.normalizou,
       // sem o bump o agente instalado nunca baixa a versao com a sonda

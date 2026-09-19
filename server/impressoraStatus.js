@@ -39,11 +39,12 @@
 const STX = String.fromCharCode(2);
 const ETX = String.fromCharCode(3);
 
-// fila propria da impressora acima disso = "acumulando". O Master pediu
-// "mais de 3 arquivos"; env pra ajustar sem deploy se a operacao mostrar
-// que 3 e' apertado demais num pico normal.
+// Dois ou mais trabalhos na fila própria já é incidente operacional: o
+// pedido precisa sair na hora, inclusive no pico. O número representa o
+// PRIMEIRO valor que alerta (>=), não uma folga acima dele. Continua em env
+// para ajuste consciente, sem deploy.
 const FILA_LIMITE = Number(process.env.IMPRESSORA_FILA_LIMITE) > 0
-  ? Number(process.env.IMPRESSORA_FILA_LIMITE) : 3;
+  ? Number(process.env.IMPRESSORA_FILA_LIMITE) : 2;
 
 // quantas leituras seguidas com o MESMO alerta de ATENCAO antes de alarmar.
 // Uma fila enche por segundos no meio de um lote; confirmar evita ruído. Já
@@ -127,7 +128,8 @@ function avaliar(status) {
   if (status.ramCorrompida) criticos.push('Memória corrompida');
   if (status.pausada) atencao.push('Impressora pausada');
   if (status.bufferCheio) atencao.push('Buffer cheio');
-  if (status.fila != null && status.fila > FILA_LIMITE) {
+  const filaParada = status.fila != null && status.fila >= FILA_LIMITE;
+  if (filaParada) {
     atencao.push(`Fila com ${status.fila} trabalho(s) parados`);
   }
   if (status.temperaturaAlta) atencao.push('Cabeça superaquecida');
@@ -138,7 +140,9 @@ function avaliar(status) {
   // a chave e' o que decide se o problema e' o MESMO da leitura anterior -
   // por isso inclui os motivos, e nao so o nivel. Papel acabando depois de
   // uma fila travada sao dois problemas, e os dois merecem aviso.
-  return { nivel, motivos, chave: `${nivel}:${motivos.join('|')}` };
+  // Fila com dois trabalhos não é um pico tolerável: já existe pedido
+  // aguardando. Assim como defeito físico, é enviada no primeiro retorno.
+  return { nivel, motivos, imediato: criticos.length > 0 || filaParada, chave: `${nivel}:${motivos.join('|')}` };
 }
 
 // ---------------------------------------------------------------
@@ -161,7 +165,7 @@ function decidirAviso(anterior, agora) {
       normalizou: { de: ant.motivos || [] },
     };
   }
-  const leiturasNecessarias = agora.nivel === 'critico' ? 1 : LEITURAS_PRA_CONFIRMAR;
+  const leiturasNecessarias = agora.imediato ? 1 : LEITURAS_PRA_CONFIRMAR;
   const confirmado = problema && repeticoes >= leiturasNecessarias;
   const jaAvisado = mesmaChave && ant.avisado;
   return {
