@@ -68,6 +68,7 @@
       // conectividade das lojas: e infra, encaixa melhor aqui do que em
       // Solicitacoes (onde estava) - mesmo publico do Beniboy
       { id: 'nav-loja-status', href: '/loja-status.html', icone: '📡', rotulo: 'NOC-NoPulso', secoes: ['suporte'] },
+      { id: 'nav-noc-incidentes', href: '/noc-incidentes.html', icone: '🚨', rotulo: 'Incidentes NOC', secoes: ['suporte'] },
       { id: 'nav-noc-rede', href: '/noc-rede.html', icone: '📈', rotulo: 'Análise de Rede', secoes: ['suporte'] },
       { id: 'nav-noc-maquinas', href: '/noc-maquinas.html', icone: '💽', rotulo: 'Saúde das Máquinas', secoes: ['suporte'] },
     ] },
@@ -138,6 +139,7 @@
   const VOLTAR = {
     '/noc-rede.html': 'nav-loja-status',
     '/noc-maquinas.html': 'nav-loja-status',
+    '/noc-incidentes.html': 'nav-loja-status',
     '/vendas-recordes.html': 'nav-fechamentos-arcfood',
     '/abastecimento-relatorios.html': 'nav-abastecimento',
     '/entregas-regras.html': 'nav-entregas',

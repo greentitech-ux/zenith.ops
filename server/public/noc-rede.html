@@ -37,6 +37,9 @@
   h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;}
   .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
   .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .noc-tabs{display:flex;gap:7px;margin-top:11px;overflow:auto;padding-bottom:2px;}
+  .noc-tab{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);white-space:nowrap;}
+  .noc-tab.ativo{background:var(--accent);border-color:var(--accent);color:#0b0d10;font-weight:700;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
   .hidden{display:none!important;}
@@ -135,6 +138,7 @@
       <h1>📈 Análise de Rede</h1>
     </div>
   </div>
+  <nav class="noc-tabs" aria-label="Navegação do NOC"><a class="noc-tab" href="/noc-incidentes.html">Incidentes</a><a class="noc-tab" href="/noc-maquinas.html">Máquinas</a><a class="noc-tab ativo" href="/noc-rede.html">Rede</a><a class="noc-tab" href="/loja-status.html">NOC completo</a></nav>
   <div class="header-nav">
     <span style="font-family:var(--mono);font-size:10px;color:var(--muted);" id="atualizado"></span>
     <!-- o "← NOC-NoPulso" que ficava aqui virou a seta padrao ao lado do

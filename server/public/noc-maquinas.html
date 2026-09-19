@@ -31,6 +31,9 @@
   .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;
     width:38px;height:38px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;}
   .header-nav{display:flex;align-items:center;gap:8px;margin-top:8px;}
+  .noc-tabs{display:flex;gap:7px;margin-top:11px;overflow:auto;padding-bottom:2px;}
+  .noc-tab{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);white-space:nowrap;}
+  .noc-tab.ativo{background:var(--accent);border-color:var(--accent);color:#0b0d10;font-weight:700;}
   button.back{font-family:var(--mono);font-size:11px;color:var(--muted);padding:8px 12px;border-radius:16px;
     border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;min-height:36px;}
   button.back:hover{color:var(--text);border-color:var(--accent);}
@@ -175,6 +178,7 @@
       <h1>💽 Saúde das Máquinas</h1>
     </div>
   </div>
+  <nav class="noc-tabs" aria-label="Navegação do NOC"><a class="noc-tab" href="/noc-incidentes.html">Incidentes</a><a class="noc-tab ativo" href="/noc-maquinas.html">Máquinas</a><a class="noc-tab" href="/noc-rede.html">Rede</a><a class="noc-tab" href="/loja-status.html">NOC completo</a></nav>
   <div class="header-nav">
     <button class="back" onclick="carregar()">🔄 Atualizar</button>
     <button class="mobile-action" id="noc-instalar" type="button" onclick="nocMobileInstalar()">📲 Instalar NOC</button>
