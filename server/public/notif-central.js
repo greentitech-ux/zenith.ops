@@ -160,8 +160,10 @@
       });
     } catch (e) { /* navegador pode bloquear audio antes de alguma interacao - so nao toca */ }
   }
-  const tocarSomSolicitacao = () => tocarBeep([[0, 880], [0.18, 1160]]);
-  const tocarSomFraude = () => tocarBeep([[0, 660], [0.16, 660], [0.32, 880]]);
+  // Chamada de cabine: duas notas claras, ascendentes e curtas. É menos
+  // agressivo que um beep de sistema e mantém o alerta reconhecível no app.
+  const tocarSomSolicitacao = () => tocarBeep([[0, 880], [0.23, 1174.66]]);
+  const tocarSomFraude = () => tocarBeep([[0, 783.99], [0.18, 1046.5], [0.36, 1318.51]]);
 
   const ICONES_TIPO = { estorno: '💳', 'ajuste-fechamento': '🧾', compra: '🛒', manutencao: '🔧', 'suporte-ti': '💻', pagamento: '💸', nota: '📄', 'quebra-caixa': '⚠️', 'desvio-estoque': '📦⚠️' };
   const LABELS_TIPO = { estorno: 'Estorno', 'ajuste-fechamento': 'Ajuste de fechamento', compra: 'Compra', manutencao: 'Manutenção', 'suporte-ti': 'Suporte TI', pagamento: 'Pagamento', nota: 'Nota fiscal', 'quebra-caixa': 'Quebra de caixa', 'desvio-estoque': 'Desvio de estoque' };

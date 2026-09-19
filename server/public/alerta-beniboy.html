@@ -70,20 +70,23 @@
   let sirenTimer = null;
   let vibraTimer = null;
 
-  function tocarTom(delay, freq) {
+  // Sino de cabine: dois tons arredondados e ascendentes, em vez da sirene
+  // quadrada/estridente. É um som original gerado pelo navegador, inspirado
+  // no aviso de chamada de aeronave, sem arquivo externo nem marca específica.
+  function tocarTom(delay, freq, duracao = 0.48) {
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    osc.type = 'square'; osc.frequency.value = freq;
+    osc.type = 'sine'; osc.frequency.value = freq;
     gain.gain.setValueAtTime(0.0001, audioCtx.currentTime + delay);
-    gain.gain.exponentialRampToValueAtTime(0.4, audioCtx.currentTime + delay + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + 0.42);
+    gain.gain.exponentialRampToValueAtTime(0.24, audioCtx.currentTime + delay + 0.035);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + duracao);
     osc.connect(gain); gain.connect(audioCtx.destination);
     osc.start(audioCtx.currentTime + delay);
-    osc.stop(audioCtx.currentTime + delay + 0.45);
+    osc.stop(audioCtx.currentTime + delay + duracao + 0.03);
   }
   function tocarSirene() {
     if (!audioCtx) return;
-    try { tocarTom(0, 1046); tocarTom(0.45, 784); } catch (e) { /* segue so com vibracao/tela */ }
+    try { tocarTom(0, 880); tocarTom(0.23, 1174.66); } catch (e) { /* segue so com vibracao/tela */ }
   }
   function iniciarSom() {
     try {
@@ -91,7 +94,7 @@
       if (audioCtx.state === 'suspended') audioCtx.resume();
       document.getElementById('aviso-mudo').classList.add('hidden');
       tocarSirene();
-      if (!sirenTimer) sirenTimer = setInterval(tocarSirene, 900);
+      if (!sirenTimer) sirenTimer = setInterval(tocarSirene, 1250);
     } catch (e) {
       document.getElementById('aviso-mudo').classList.remove('hidden');
     }
