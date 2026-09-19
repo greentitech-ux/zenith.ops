@@ -590,7 +590,7 @@
 
   <!-- Painel por unidade: cada unidade com quantos computadores online/offline.
        Clicar numa unidade filtra a grade de baixo por ela. -->
-  <div class="uni-panel">
+  <div class="uni-panel" id="unidades-panel">
     <button type="button" class="uni-panel-head" id="uni-panel-toggle" onclick="alternarPainelUnidades()" aria-expanded="true" aria-controls="grid-unidades">
       <span><span class="uni-caret" id="uni-caret">▾</span> 📍 Por unidade</span>
       <span class="uni-panel-sub" id="uni-panel-sub"></span>
@@ -2446,7 +2446,11 @@ function renderKpis(){
 // ideia do tamanho dos cards), pra não ter que fechar de novo a cada carga.
 const CHAVE_UNI_RECOLHIDO = 'noc-unidades-recolhido';
 function aplicarPainelUnidades(recolhido){
-  const painel = document.querySelector('.uni-panel');
+  // A fila operacional também usa .uni-panel e aparece ANTES desta seção.
+  // querySelector('.uni-panel') sempre pegava a primeira e, por isso, clicar
+  // em "Por unidade" recolhia/abria a fila de comandos. O alvo é nominal e
+  // exclusivo: cada cabeçalho só controla o próprio painel.
+  const painel = document.getElementById('unidades-panel');
   if(!painel) return;
   painel.classList.toggle('recolhido', recolhido);
   const btn = document.getElementById('uni-panel-toggle');
@@ -2455,7 +2459,8 @@ function aplicarPainelUnidades(recolhido){
   if(caret) caret.textContent = recolhido ? '▸' : '▾';
 }
 function alternarPainelUnidades(){
-  const painel = document.querySelector('.uni-panel');
+  const painel = document.getElementById('unidades-panel');
+  if(!painel) return;
   const recolhido = !painel.classList.contains('recolhido');
   aplicarPainelUnidades(recolhido);
   try{ localStorage.setItem(CHAVE_UNI_RECOLHIDO, recolhido ? '1' : '0'); }catch(e){ /* navegador sem storage: só não lembra */ }
@@ -2484,7 +2489,7 @@ function renderUnidades(){
     || (UNIDADES_NOMES[a]||a).localeCompare(UNIDADES_NOMES[b]||b, 'pt-BR'));
   // com o painel fechado, o subtítulo é a única pista de que tem conteúdo
   // ali - por isso ele diz o que está escondido, não só a contagem
-  const recolhido = document.querySelector('.uni-panel')?.classList.contains('recolhido');
+  const recolhido = document.getElementById('unidades-panel')?.classList.contains('recolhido');
   sub.textContent = `${codigos.length} unidade${codigos.length===1?'':'s'}${recolhido ? ' · clique pra expandir' : ''}`;
   if(!codigos.length){ grid.innerHTML = '<div class="empty" style="width:100%;">nenhuma unidade com computador cadastrado.</div>'; return; }
   grid.innerHTML = codigos.map(cod => {
