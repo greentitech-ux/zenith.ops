@@ -3843,6 +3843,20 @@ app.get('/api/loja-status/maquinas', requireSection('suporte'), async (req, res)
   }
 });
 
+// Central operacional do NOC. A fonte é a mesma Central de Alertas que já
+// recebe cada push do agente: assim "atender" não cria um segundo estado nem
+// deixa a tela NOC dizendo aberto enquanto a Central diz resolvido. Suporte
+// pode acompanhar; somente Master recebe a permissão de encerrar o incidente.
+app.get('/api/loja-status/incidentes', requireSection('suporte'), async (req, res) => {
+  try {
+    const todos = await alertasCentral.listar();
+    const incidentes = todos.filter((a) => /^noc-/.test(String(a.tipo || '')));
+    res.json({ incidentes, podeAtender: req.user.role === 'master' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- Monitor: alertar a propria loja sobre um pedido especifico -
 // pedido explicito do usuario ("clico a linha do pagamento e escolho quais
 // computadores, ou todos, pra dar o alerta"). Diferente do alerta de fraude
