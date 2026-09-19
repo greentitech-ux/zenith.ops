@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Saúde das Máquinas — NOC-NoPulso</title>
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest-noc.json">
+<meta name="theme-color" content="#0b0d10">
 <style>
   :root{
     --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
@@ -30,6 +34,9 @@
   button.back{font-family:var(--mono);font-size:11px;color:var(--muted);padding:8px 12px;border-radius:16px;
     border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;min-height:36px;}
   button.back:hover{color:var(--text);border-color:var(--accent);}
+  button.mobile-action{font-family:var(--mono);font-size:10.5px;color:var(--text);padding:8px 10px;border-radius:16px;
+    border:1px solid var(--line);background:var(--panel2);cursor:pointer;white-space:nowrap;min-height:36px;}
+  button.mobile-action.ativo{border-color:var(--ok);color:var(--ok);} button.mobile-action:disabled{opacity:.75;cursor:default;}
   #atualizado{font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:auto;text-align:right;}
   .hidden{display:none!important;}
   .vazio{font-size:12.5px;color:var(--muted);padding:18px 0;line-height:1.6;}
@@ -170,6 +177,8 @@
   </div>
   <div class="header-nav">
     <button class="back" onclick="carregar()">🔄 Atualizar</button>
+    <button class="mobile-action" id="noc-instalar" type="button" onclick="nocMobileInstalar()">📲 Instalar NOC</button>
+    <button class="mobile-action" id="noc-push" type="button" onclick="nocMobilePush()">🔔 Ativar alertas</button>
     <span id="atualizado"></span>
   </div>
 </header>
@@ -557,6 +566,7 @@ document.getElementById('busca').addEventListener('input', (e) => {
   }catch(e){ document.getElementById('sem-acesso').classList.remove('hidden'); }
 })();
 </script>
+<script src="/noc-mobile.js"></script>
 <script src="/recolher.js"></script>
 <script src="/nav-menu.js"></script>
 </body>
