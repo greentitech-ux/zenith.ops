@@ -366,6 +366,15 @@ function normalizarEntradaApelido(valor) {
   }
   return { apelido: null, tipo: null, monitorar: false, marca: null, medidorQuedas: false };
 }
+
+// O MAC é a identidade do equipamento; IP é apenas o endereço atual. Todo
+// aparelho categorizado no NOC entra no histórico/alerta de troca de IP,
+// mesmo sem alarme para quando SUMIR da rede. Isso evita que o checkbox de
+// queda esconda DHCP de impressora, PULSE, GCOM, VM Host ou tipo criado pelo
+// Master, sem transformar aparelho aleatório em notificação.
+function acompanhaIpPorMac(cfg) {
+  return !!(cfg && cfg.tipo);
+}
 // quem e' o medidor daquela unidade (ou null)
 function medidorDaUnidade(daUnidade) {
   const achado = Object.entries(daUnidade || {}).find(([, v]) => normalizarEntradaApelido(v).medidorQuedas);
@@ -2886,6 +2895,7 @@ function nomeSeguroDoComando(c) {
   if (c.origem === 'manutencao') return 'Manutenção programada';
   return 'Comando operacional';
 }
+
 async function listarComandosPendentes(limiteInformado) {
   const limite = Math.max(20, Math.min(200, Number(limiteInformado) || 100));
   const umDiaAtras = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -3091,10 +3101,13 @@ async function varrerAlertas() {
       let alarmePatch = null;
       for (const disp of candidato.dispositivos) {
         const cfg = normalizarEntradaApelido(daUnidade[disp.mac]);
-        if (!cfg.monitorar) continue;
+        const acompanharIp = acompanhaIpPorMac(cfg);
+        // "Monitorar" é o alarme de SUMIU da rede. Troca de IP é outra
+        // preocupação: qualquer equipamento categorizado acompanha pelo MAC.
+        if (!cfg.monitorar && !acompanharIp) continue;
         const estado = alarmeAtual[disp.mac] || null;
         const semVerHaMs = Date.now() - (disp.visto || 0);
-        if (!disp.ativo && semVerHaMs >= DISPOSITIVO_OFFLINE_LIMIAR_MS && !(estado && estado.avisadoOffline)) {
+        if (cfg.monitorar && !disp.ativo && semVerHaMs >= DISPOSITIVO_OFFLINE_LIMIAR_MS && !(estado && estado.avisadoOffline)) {
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...(estado || {}), avisadoOffline: true, offlineDesde: disp.visto } };
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
@@ -3115,15 +3128,15 @@ async function varrerAlertas() {
         // nada no NOC pisque: pro monitor a impressora está ativa, só que
         // noutro lugar.
         //
-        // Só pra dispositivo MONITORADO (o Master marcou a impressora). Numa
-        // loja o DHCP troca IP de celular o dia inteiro - alertar por tudo
-        // que muda de endereço seria ruído puro.
+        // Para todo EQUIPAMENTO CATEGORIZADO, identificado pelo MAC. Celular
+        // ou aparelho aleatório sem tipo continua fora: DHCP deles muda o dia
+        // inteiro e alertar tudo seria ruído puro.
         //
         // ipAvisado guarda o ÚLTIMO endereço que já apareceu num alerta (ou o
         // primeiro que vimos). Primeira vez não avisa: não há "de" nenhum, e
         // anunciar o IP inicial de cada impressora marcada seria um alerta
         // por dispositivo no dia em que isto subir.
-        if (disp.ativo && disp.ip && estado && estado.ipAvisado && estado.ipAvisado !== disp.ip) {
+        if (acompanharIp && disp.ativo && disp.ip && estado && estado.ipAvisado && estado.ipAvisado !== disp.ip) {
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...estado, ipAvisado: disp.ip, ipMudouEm: Date.now() } };
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
@@ -3132,11 +3145,11 @@ async function varrerAlertas() {
             apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
             tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
           });
-        } else if (disp.ativo && disp.ip && (!estado || !estado.ipAvisado)) {
+        } else if (acompanharIp && disp.ativo && disp.ip && (!estado || !estado.ipAvisado)) {
           // linha de base, em silêncio: a partir daqui qualquer troca aparece
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...(estado || {}), ipAvisado: disp.ip } };
         }
-        if (disp.ativo && estado && estado.avisadoOffline) {
+        if (cfg.monitorar && disp.ativo && estado && estado.avisadoOffline) {
           // preserva o que ja estava na entrada (ipAvisado, inclusive o que a
           // checagem de IP acabou de gravar) - antes isto reescrevia a entrada
           // inteira e a linha de base do IP se perdia a cada volta

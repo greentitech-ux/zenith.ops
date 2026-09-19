@@ -1024,7 +1024,8 @@
       <option value="bematech">Bematech (só alarme de rede, por enquanto)</option>
       <option value="outra">Outra marca (só alarme de rede)</option>
     </select>
-    <label class="disp-monitorar-linha"><input type="checkbox" id="disp-monitorar"> Monitorar (alarma se esse aparelho perder rede)</label>
+    <label class="disp-monitorar-linha"><input type="checkbox" id="disp-monitorar"> Monitorar queda de rede (alarma se esse aparelho sumir)</label>
+    <small class="disp-medidor-ajuda">📍 IP é sempre acompanhado pelo <b>MAC</b> de todo equipamento com tipo definido. Se o IP mudar, o NOC atualiza e avisa; esta opção é apenas para alerta de equipamento fora da rede.</small>
     <label class="disp-monitorar-linha"><input type="checkbox" id="disp-medidor" onchange="aoMarcarMedidor()"> 📡 Medidor de quedas desta unidade</label>
     <small class="disp-medidor-ajuda">Um aparelho que fica sempre ligado — o modem ou o roteador. Quando ele some da rede, o NOC registra como queda da <b>loja</b>, e não como um aparelho isolado. Só um por unidade: marcar aqui desmarca o anterior.</small>
     <div class="msg hidden" id="disp-modal-status"></div>

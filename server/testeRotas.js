@@ -7467,8 +7467,8 @@ setTimeout(async () => {
   // trabalho pro antigo. Nenhum alarme existente pega isso, porque todos eles
   // perguntam "sumiu?" e a resposta aqui é não.
   //
-  // Só pra dispositivo MONITORADO: numa loja o DHCP troca IP de celular o dia
-  // inteiro, e alertar por tudo que muda de endereço seria ruído puro.
+  // Todo EQUIPAMENTO CATEGORIZADO é acompanhado pelo MAC. Celular sem tipo
+  // segue fora: DHCP dele muda o dia inteiro e alertar isso seria ruído puro.
   let okIpMudou = false;
   try {
     const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
@@ -7478,10 +7478,12 @@ setTimeout(async () => {
     const idDoc = `lojaStatus/${UNI}__${posto}`;
     const MAC_ZEBRA = 'a4:2b:b0:99:88:11';
     const MAC_CELULAR = 'a4:2b:b0:99:88:22';
-    await ls.definirApelidoDispositivo(UNI, MAC_ZEBRA, { apelido: 'Zebra do balcão', tipo: 'impressora', monitorar: true });
-    // celular NÃO monitorado, trocando de IP o tempo todo (é o caso comum na
-    // loja - e é exatamente por isso que ele não pode alarmar)
-    await ls.definirApelidoDispositivo(UNI, MAC_CELULAR, { apelido: 'Celular do gerente', tipo: 'celular' });
+    // Basta o equipamento ter tipo: IP é acompanhado pelo MAC mesmo sem
+    // ativar o alarme de "sumiu da rede".
+    await ls.definirApelidoDispositivo(UNI, MAC_ZEBRA, { apelido: 'Zebra do balcão', tipo: 'impressora', monitorar: false });
+    // celular sem tipo, trocando de IP o tempo todo: não é equipamento
+    // cadastrado e não pode gerar ruído.
+    await ls.definirApelidoDispositivo(UNI, MAC_CELULAR, { apelido: 'Celular do gerente' });
 
     const comDisp = (zebraIp, celularIp) => {
       const b = DOCS.get(idDoc);
@@ -7501,7 +7503,7 @@ setTimeout(async () => {
     const primeira = doIp(await comDisp('10.0.0.50', '10.0.0.90'));
     // mesmo IP de novo: nada
     const parada = doIp(await comDisp('10.0.0.50', '10.0.0.90'));
-    // o DHCP mexeu nos dois - só a Zebra (monitorada) alarma
+    // o DHCP mexeu nos dois - só a Zebra categorizada alarma
     const mudou = doIp(await comDisp('10.0.0.77', '10.0.0.91'));
     const celularAlarmou = mudou.some((t) => t.mac === MAC_CELULAR);
     // varrer de novo sem mudar nada não repete
@@ -7534,7 +7536,8 @@ setTimeout(async () => {
       'trocou de IP: alarma uma vez, com os dois endereços':
         mudou.length === 1 && mudou[0].mac === MAC_ZEBRA && mudou[0].de === '10.0.0.50' && mudou[0].para === '10.0.0.77'
         && mudou[0].apelido === 'Zebra do balcão',
-      'celular (não monitorado) trocando de IP nunca alarma': !celularAlarmou,
+      'equipamento categorizado alerta sem precisar marcar queda de rede': mudou.length === 1,
+      'celular sem tipo trocando de IP nunca alarma': !celularAlarmou,
       'varrer de novo sem mudança não repete': !naoRepete.length,
       'trocou outra vez: o "de" é o endereço mais recente, não o original':
         mudouDeNovo.length === 1 && mudouDeNovo[0].de === '10.0.0.77' && mudouDeNovo[0].para === '10.0.0.88',
