@@ -7050,6 +7050,7 @@ setTimeout(async () => {
     const srcLS = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
     const srcVG = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
     const srcAA = require('fs').readFileSync(__dirname + '/agenteAcoes.js', 'utf8');
+    const srcIndex = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
     const conf = {
       'comando marcado guarda requerAdmin': cmdAdmin.requerAdmin === true,
       // O CERNE: usuario comum NAO recebe comando-admin
@@ -7076,6 +7077,9 @@ setTimeout(async () => {
       'o servidor gateia a entrega por souAdmin/soComandoAdmin':
         /if \(comando\.requerAdmin && !opts\.souAdmin\)/.test(srcLS)
         && /if \(opts\.soComandoAdmin && !comando\.requerAdmin\) return null;/.test(srcLS),
+      'a rota de heartbeat preserva os marcadores da instância SYSTEM':
+        /souAdmin:\s*req\.body\.souAdmin === true/.test(srcIndex)
+        && /soComandoAdmin:\s*req\.body\.soComandoAdmin === true/.test(srcIndex),
       // agente: manda souAdmin, tem a sondagem elevada e a cedência a chama
       'o agente informa souAdmin, sonda comando-admin cedendo a vez, e executa por uma função só':
         /\$corpo\.souAdmin = \(Sou-Admin\)/.test(srcVG)

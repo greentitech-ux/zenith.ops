@@ -1563,6 +1563,13 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // e o redeDiagnostico.sanitizarAmostra, chamado la dentro.
       rede: req.body.rede,
       tailscale: req.body.tailscale,
+      // A instancia _Boot do NOCZenith roda como SYSTEM e usa estes dois
+      // marcadores para receber SOMENTE comandos que exigem elevacao. Eles
+      // ja eram enviados pelo agente, mas a rota os descartava aqui; como
+      // consequencia, o servidor enxergava inclusive o SYSTEM como usuario
+      // comum e deixava instalar/desinstalar preso na fila.
+      souAdmin: req.body.souAdmin === true,
+      soComandoAdmin: req.body.soComandoAdmin === true,
     }, token);
     res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao });
   } catch (err) {
