@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 74;
+const VERSAO_VIGIA = 75;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -915,13 +915,21 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '}',
     '',
     '# RAM instalada e livre (pedido do Master, 12/09/2026: "quantos gigas de RAM',
-    '# tem nos computadores"). Vai junto da telemetria (mesma cadencia do disco).',
+    '# tem nos computadores"). Quando sobra menos de 1 GB, inclui somente os 6',
+    '# maiores processos: diagnostica a causa sem transformar telemetria normal',
+    '# em uma varredura pesada a cada cinco minutos.',
     'function Medir-Ram {',
     '  try {',
     '    $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop',
     '    $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue',
     '    $r = @{ totalGb = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1) }',
     '    if ($os -and $os.FreePhysicalMemory) { $r.livreGb = [math]::Round($os.FreePhysicalMemory / 1MB, 1) }',
+    '    if ($r.livreGb -ne $null -and $r.livreGb -lt 1) {',
+    '      $top = @(Get-Process -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 6 | ForEach-Object {',
+    '        if ($_.WorkingSet64 -gt 0 -and $_.ProcessName) { @{ nome = "$($_.ProcessName)"; mb = [math]::Round($_.WorkingSet64 / 1MB, 0) } }',
+    '      })',
+    '      if ($top.Count -gt 0) { $r.processos = @($top) }',
+    '    }',
     '    return $r',
     '  } catch { return $null }',
     '}',

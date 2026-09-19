@@ -127,7 +127,34 @@ function sanitizarRam(ram) {
   const out = { totalGb };
   const livreGb = plausivel(ram.livreGb, 0, 512);
   if (livreGb != null) out.livreGb = Math.min(livreGb, totalGb);
+  // Só processos de maior consumo quando a máquina está sob pressão. Nome e
+  // megabytes são normalizados aqui porque vêm de um agente instalado, não de
+  // uma tela autenticada; nunca guardamos linha de comando, usuário ou PID.
+  const processos = (Array.isArray(ram.processos) ? ram.processos : [ram.processos])
+    .filter(Boolean).map((p) => {
+      const nome = String(p.nome || '').trim().replace(/[^a-zA-Z0-9._ -]/g, '').slice(0, 80);
+      const mb = Number(p.mb);
+      return nome && Number.isFinite(mb) && mb >= 1 && mb <= 262144
+        ? { nome, mb: Math.round(mb) } : null;
+    }).filter(Boolean).sort((a, b) => b.mb - a.mb).slice(0, 6);
+  if (processos.length) out.processos = processos;
   return out;
+}
+
+function diagnosticoRam(ram) {
+  if (!ram || ram.totalGb == null || ram.livreGb == null) return null;
+  const processo = (ram.processos || [])[0] || null;
+  const causa = processo ? `${processo.nome} usa cerca de ${processo.mb} MB` : null;
+  if (ram.totalGb <= 4) {
+    return {
+      causa,
+      acao: 'Capacidade limitada: ampliar para pelo menos 8 GB de RAM. Reiniciar alivia apenas temporariamente.',
+    };
+  }
+  return {
+    causa,
+    acao: processo ? 'Revise o processo acima antes de encerrar qualquer aplicação de operação.' : 'Colete os processos de maior consumo antes de encerrar qualquer aplicação.',
+  };
 }
 
 function avaliarRam(ram) {
@@ -367,6 +394,7 @@ function panorama(docs) {
       // campo nenhum: cada um destes ja existe e ja e' mostrado em
       // loja-status.html - aqui so' viaja junto.
       ram,
+      ramDiagnostico: diagnosticoRam(ram),
       ramMedidaEm: d.ramMedidaEm || null,
       ipLocal: d.ipLocal || null,
       ip: d.ip || null,
@@ -445,7 +473,7 @@ function quedasDeVm(antesArr, depoisArr) {
 module.exports = {
   LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, RAM_LIVRE_CRITICA_GB, RAM_LIVRE_ATENCAO_GB, RAM_LIVRE_CRITICA_PCT, RAM_LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
   UPTIME_REINICIAR_DIAS,
-  sanitizarDisco, avaliarDisco, sanitizarRam, avaliarRam, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
+  sanitizarDisco, avaliarDisco, sanitizarRam, avaliarRam, diagnosticoRam, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
   sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
   resumoDispositivos, discosComProblema, panorama,
 };

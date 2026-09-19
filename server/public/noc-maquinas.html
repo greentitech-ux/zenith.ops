@@ -477,6 +477,13 @@ function cardHtml(c){
   if(c.ram && c.ram.totalGb != null){
     linha('RAM', `<b>${c.ram.totalGb} GB</b>${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}`
       + (c.ramMedidaEm ? ` <span class="sub">· medido ${escapeHtml(tempoRelativo(c.ramMedidaEm))}</span>` : ''));
+    const processos = (c.ram.processos || []).slice(0, 3)
+      .map(p=>`${escapeHtml(p.nome)} <span class="sub">${escapeHtml(p.mb)} MB</span>`).join(' · ');
+    if(processos) linha('Maior consumo', processos);
+    if(c.ramDiagnostico){
+      const partes = [c.ramDiagnostico.causa, c.ramDiagnostico.acao].filter(Boolean).map(escapeHtml).join(' · ');
+      if(partes) linha('Ação sugerida', `<span class="warn">${partes}</span>`);
+    }
   }
   if(c.uptimeHoras != null){
     const quanto = c.uptimeDias >= 1 ? `${c.uptimeDias} dia(s)` : `${Math.round(c.uptimeHoras)}h`;
