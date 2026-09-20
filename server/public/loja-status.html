@@ -504,18 +504,24 @@
   .check-linha input{width:auto;flex:none;margin:0;}
   /* ---- fila operacional de comandos (Master) ---- */
   .cmd-painel{margin-bottom:18px;}
-  .cmd-toolbar{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap;margin:2px 0 11px;}
-  .cmd-filtros{display:flex;gap:6px;flex-wrap:wrap;}
-  .cmd-filtro{border:1px solid var(--line);border-radius:16px;background:var(--panel2);color:var(--muted);font:10.5px var(--mono);padding:5px 9px;cursor:pointer;}
+  .cmd-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:2px 0 11px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);}
+  .cmd-controles{display:grid;gap:8px;min-width:min(100%,560px);}
+  .cmd-filtros,.cmd-periodos{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+  .cmd-filtro{border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--muted);font:10.5px var(--mono);padding:6px 10px;cursor:pointer;}
   .cmd-filtro.ativo{border-color:var(--accent);color:var(--accent);background:rgba(184,255,60,.09);}
-  .cmd-lista{display:grid;gap:7px;max-height:360px;overflow:auto;padding-right:2px;}
-  .cmd-linha{display:grid;grid-template-columns:auto minmax(140px,1fr) auto auto;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--muted);border-radius:9px;padding:9px 10px;}
+  .cmd-periodos:before{content:'PERÍODO';font:9px var(--mono);letter-spacing:.08em;color:var(--muted);margin-right:2px;}
+  .cmd-datas{display:none;gap:6px;align-items:center;font:10px var(--mono);color:var(--muted);}.cmd-datas.visivel{display:flex;}
+  .cmd-datas input{width:132px;background:var(--panel);border:1px solid var(--line);border-radius:7px;color:var(--text);padding:6px;font:11px var(--mono);}
+  .cmd-lista{display:grid;gap:8px;max-height:470px;overflow:auto;padding-right:2px;}
+  .cmd-linha{display:grid;grid-template-columns:auto minmax(150px,1fr) minmax(130px,.7fr) auto;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:11px;padding:11px 12px;}
   .cmd-linha.pendente{border-left-color:var(--warn);} .cmd-linha.entregue{border-left-color:var(--accent);} .cmd-linha.executado{border-left-color:var(--ok);} .cmd-linha.erro{border-left-color:var(--bad);}
-  .cmd-alvo{font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cmd-linha.cancelado{border-left-color:var(--muted);opacity:.72;}
+  .cmd-alvo{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cmd-meta{font:10.5px var(--mono);color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .cmd-tipo{font-size:11px;color:var(--text);white-space:nowrap;}.cmd-status{font:10px var(--mono);white-space:nowrap;text-transform:uppercase;}
-  .cmd-status.pendente{color:var(--warn);}.cmd-status.entregue{color:var(--accent);}.cmd-status.executado{color:var(--ok);}.cmd-status.erro{color:var(--bad);}
-  @media(max-width:640px){.cmd-linha{grid-template-columns:auto minmax(0,1fr) auto;gap:8px;}.cmd-tipo{grid-column:2;white-space:normal;font-size:10px;}.cmd-status{grid-column:3;grid-row:1 / span 2;}.cmd-lista{max-height:330px;}}
+  .cmd-tipo{font-size:11px;color:var(--text);line-height:1.35;}.cmd-hora{font:10px var(--mono);color:var(--muted);margin-top:4px;}
+  .cmd-status{font:10px var(--mono);white-space:nowrap;text-transform:uppercase;}.cmd-status.pendente{color:var(--warn);}.cmd-status.entregue{color:var(--accent);}.cmd-status.executado{color:var(--ok);}.cmd-status.erro{color:var(--bad);}.cmd-status.cancelado{color:var(--muted);}
+  .cmd-estado{display:grid;justify-items:end;gap:6px;text-align:right;}.cmd-cancelar{border:1px solid rgba(255,91,91,.55);background:rgba(255,91,91,.08);color:#ff8a8a;border-radius:7px;padding:4px 7px;font:10px var(--mono);cursor:pointer;}.cmd-cancelar:hover{background:rgba(255,91,91,.18);}.cmd-cancelar:disabled{opacity:.55;cursor:wait;}
+  @media(max-width:640px){.cmd-toolbar{padding:10px;}.cmd-periodos:before{width:100%;}.cmd-datas{width:100%;}.cmd-datas input{flex:1;min-width:0;}.cmd-linha{grid-template-columns:auto minmax(0,1fr) auto;gap:8px;}.cmd-tipo{grid-column:2;white-space:normal;font-size:10.5px;}.cmd-estado{grid-column:3;grid-row:1 / span 2;align-self:start;}.cmd-lista{max-height:400px;}}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -580,10 +586,14 @@
     </button>
     <div id="comandos-corpo" class="uni-grid quedas-corpo">
       <div class="cmd-toolbar">
-        <div class="cmd-filtros" id="comandos-filtros"></div>
+        <div class="cmd-controles">
+          <div class="cmd-filtros" id="comandos-filtros"></div>
+          <div class="cmd-periodos" id="comandos-periodos"></div>
+          <div class="cmd-datas" id="comandos-datas"><label>De <input type="date" id="comandos-de" onchange="aplicarDatasComandos()"></label><label>Até <input type="date" id="comandos-ate" onchange="aplicarDatasComandos()"></label></div>
+        </div>
         <button type="button" class="btn-secundario" onclick="carregarComandosRecentes()">↻ Atualizar</button>
       </div>
-      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Mostra somente alvo, tipo seguro, estado e horário das últimas 24h. O conteúdo do PowerShell e a saída não aparecem nesta lista.</div>
+      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Acompanhe destino, ação, estado e horário sem expor PowerShell ou saída. O <b>✕ Cancelar</b> remove com segurança apenas comandos ainda na fila; comandos já entregues continuam protegidos contra cancelamento enganoso.</div>
       <div class="cmd-lista" id="comandos-lista"></div>
     </div>
   </div>
@@ -2825,8 +2835,9 @@ async function carregar(){
 // para saber se a execução está andando sem espalhar PowerShell pela tela.
 let COMANDOS_RECENTES = [];
 let FILTRO_COMANDOS = 'todos';
+let PERIODO_COMANDOS = '7d';
 let COMANDOS_CARREGADOS = false;
-const ROTULO_STATUS_COMANDO = { pendente:'na fila', entregue:'executando', executado:'concluído', erro:'erro' };
+const ROTULO_STATUS_COMANDO = { pendente:'na fila', entregue:'executando', executado:'concluído', erro:'erro', cancelado:'cancelado' };
 function alternarPainelComandos(){
   const painel = document.getElementById('comandos-panel');
   if(!painel || painel.classList.contains('hidden')) return;
@@ -2839,28 +2850,59 @@ function selecionarFiltroComandos(filtro){
   FILTRO_COMANDOS = filtro;
   renderComandosRecentes();
 }
+function dataComandosEmIso(data, fim){
+  if(!data) return '';
+  const sufixo = fim ? 'T23:59:59.999-03:00' : 'T00:00:00-03:00';
+  const d = new Date(data + sufixo);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : '';
+}
+function selecionarPeriodoComandos(periodo){
+  PERIODO_COMANDOS = periodo;
+  document.getElementById('comandos-datas')?.classList.toggle('visivel', periodo==='personalizado');
+  if(periodo!=='personalizado') carregarComandosRecentes(); else renderComandosRecentes();
+}
+function aplicarDatasComandos(){
+  const de=document.getElementById('comandos-de')?.value||'';
+  const ate=document.getElementById('comandos-ate')?.value||'';
+  if(!de && !ate) return;
+  if(de && ate && de>ate){ alert('A data inicial não pode ser posterior à final.'); return; }
+  PERIODO_COMANDOS='personalizado'; carregarComandosRecentes();
+}
+function intervaloComandos(){
+  const agora=new Date();
+  if(PERIODO_COMANDOS==='personalizado') return { inicio:dataComandosEmIso(document.getElementById('comandos-de')?.value||'',false), fim:dataComandosEmIso(document.getElementById('comandos-ate')?.value||'',true), rotulo:'período escolhido' };
+  const dias=PERIODO_COMANDOS==='hoje'?0:Number(PERIODO_COMANDOS.replace('d',''))||7;
+  const inicio=new Date(agora);
+  if(dias===0) inicio.setHours(0,0,0,0); else inicio.setDate(inicio.getDate()-dias);
+  return { inicio:inicio.toISOString(), fim:'', rotulo:PERIODO_COMANDOS==='hoje'?'hoje':`últimos ${dias} dias` };
+}
 function renderComandosRecentes(){
   const lista = document.getElementById('comandos-lista');
   const filtros = document.getElementById('comandos-filtros');
+  const periodos = document.getElementById('comandos-periodos');
   const sub = document.getElementById('comandos-sub');
-  if(!lista || !filtros || !sub) return;
-  const opcoes = [['todos','Todos'],['pendente','Na fila'],['entregue','Executando'],['erro','Com erro'],['executado','Concluídos']];
+  if(!lista || !filtros || !periodos || !sub) return;
+  const opcoes = [['todos','Todos'],['pendente','Na fila'],['entregue','Executando'],['erro','Com erro'],['executado','Concluídos'],['cancelado','Cancelados']];
+  const opcoesPeriodo = [['hoje','Hoje'],['7d','7 dias'],['30d','30 dias'],['personalizado','Datas']];
   filtros.innerHTML = opcoes.map(([id,nome])=>`<button type="button" class="cmd-filtro ${FILTRO_COMANDOS===id?'ativo':''}" onclick="selecionarFiltroComandos('${id}')">${nome}</button>`).join('');
+  periodos.innerHTML = opcoesPeriodo.map(([id,nome])=>`<button type="button" class="cmd-filtro ${PERIODO_COMANDOS===id?'ativo':''}" onclick="selecionarPeriodoComandos('${id}')">${nome}</button>`).join('');
   const visiveis = COMANDOS_RECENTES.filter(c=>FILTRO_COMANDOS==='todos'||c.status===FILTRO_COMANDOS);
   const ativos = COMANDOS_RECENTES.filter(c=>c.status==='pendente'||c.status==='entregue').length;
-  sub.textContent = COMANDOS_RECENTES.length ? `${ativos} ativo${ativos===1?'':'s'} · últimas 24h` : 'nenhum comando nas últimas 24h';
+  const periodo=intervaloComandos().rotulo;
+  sub.textContent = COMANDOS_RECENTES.length ? `${ativos} ativo${ativos===1?'':'s'} · ${COMANDOS_RECENTES.length} registro${COMANDOS_RECENTES.length===1?'':'s'} · ${periodo}` : `nenhum comando em ${periodo}`;
   if(!visiveis.length){ lista.innerHTML='<div class="empty" style="padding:16px;">Nenhum comando neste filtro.</div>'; return; }
   lista.innerHTML = visiveis.map(c=>{
     const status = ROTULO_STATUS_COMANDO[c.status] || 'desconhecido';
     const classe = ROTULO_STATUS_COMANDO[c.status] ? c.status : '';
     const unidade = UNIDADES_NOMES[c.unidadeCodigo || c.codigo] || c.codigo || 'sem unidade';
-    const quando = c.executadoEm || c.entregueEm || c.criadoEm;
+    const quando = c.canceladoEm || c.executadoEm || c.entregueEm || c.criadoEm;
     const admin = c.requerAdmin ? ' · admin' : '';
+    const podeCancelar = c.status==='pendente';
     return `<div class="cmd-linha ${classe}">
       <span aria-hidden="true">${c.status==='erro'?'●':c.status==='executado'?'●':'◌'}</span>
       <div><div class="cmd-alvo" title="${escapeHtml(c.nomeComputador || c.posto)}">${escapeHtml(c.nomeComputador || c.posto || 'Computador')}</div><div class="cmd-meta">${escapeHtml(unidade)} · ${escapeHtml(c.posto || '')}${admin}</div></div>
-      <span class="cmd-tipo">${escapeHtml(c.nomeComando || 'Comando operacional')}</span>
-      <span class="cmd-status ${classe}">${status} · ${escapeHtml(tempoRelativo(quando))}</span>
+      <div><div class="cmd-tipo">${escapeHtml(c.nomeComando || 'Comando operacional')}</div><div class="cmd-hora">${escapeHtml(fmtDataHora(quando))} · ${escapeHtml(tempoRelativo(quando))}</div></div>
+      <div class="cmd-estado"><span class="cmd-status ${classe}">${status}</span>${podeCancelar?`<button type="button" class="cmd-cancelar" onclick="cancelarComandoFila('${escapeJs(c.id)}',this)" aria-label="Cancelar comando na fila" title="Cancelar antes da entrega">✕ Cancelar</button>`:''}</div>
     </div>`;
   }).join('');
 }
@@ -2868,7 +2910,9 @@ async function carregarComandosRecentes(){
   const lista = document.getElementById('comandos-lista');
   if(lista && !COMANDOS_CARREGADOS) lista.innerHTML='<div class="empty" style="padding:16px;">Carregando fila operacional…</div>';
   try{
-    const res = await fetch('/api/loja-status/comandos-pendentes?limite=100');
+    const periodo=intervaloComandos();
+    const qs=new URLSearchParams({limite:'200'}); if(periodo.inicio) qs.set('inicio',periodo.inicio); if(periodo.fim) qs.set('fim',periodo.fim);
+    const res = await fetch('/api/loja-status/comandos-pendentes?'+qs.toString());
     const dados = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(dados.error || 'Não foi possível consultar a fila.');
     COMANDOS_RECENTES = Array.isArray(dados.comandos) ? dados.comandos : [];
@@ -2877,6 +2921,20 @@ async function carregarComandosRecentes(){
   }catch(e){
     if(lista) lista.innerHTML='<div class="empty" style="padding:16px;">Não foi possível carregar a fila agora.</div>';
   }
+}
+async function cancelarComandoFila(id, botao){
+  const alvo=COMANDOS_RECENTES.find(c=>c.id===id);
+  if(!alvo || alvo.status!=='pendente') return carregarComandosRecentes();
+  if(!confirm(`Cancelar “${alvo.nomeComando || 'Comando operacional'}” para ${alvo.nomeComputador || alvo.posto}?\n\nEle será removido antes de chegar à máquina.`)) return;
+  const password=await pedirSenhaMaster('cancelar este comando da fila');
+  if(password===null) return;
+  if(botao) { botao.disabled=true; botao.textContent='Cancelando…'; }
+  try{
+    const r=await fetch('/api/loja-status/comandos/'+encodeURIComponent(id),{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não consegui cancelar o comando.');
+    await carregarComandosRecentes();
+  }catch(e){ alert(e.message); if(botao){botao.disabled=false;botao.textContent='✕ Cancelar';} }
 }
 
 // ---------------------------------------------------------------------

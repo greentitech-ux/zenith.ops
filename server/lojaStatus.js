@@ -2825,8 +2825,44 @@ async function detalharComando(comandoId) {
     id: snap.id, codigo: c.codigo, posto: c.posto, origem: c.origem || null,
     status: c.status || 'pendente', criadoEm: c.criadoEm || null,
     entregueEm: c.entregueEm || null, executadoEm: c.executadoEm || null,
+    canceladoEm: c.canceladoEm || null, canceladoPor: c.canceladoPor || null,
     resultado: c.resultado || null, erro: c.erro || null,
   };
+}
+
+// Cancela SOMENTE antes da entrega. Depois que o agente recebe um PowerShell,
+// não existe uma forma genérica e segura de "desexecutá-lo"; fingir que o X
+// parou algo em execução seria perigoso. A transação disputa a mesma vaga que
+// o heartbeat usa para entregar o comando, portanto ou o Master cancela ou a
+// máquina recebe — nunca os dois estados ao mesmo tempo.
+async function cancelarComandoPendente(comandoId, porEmail) {
+  const id = String(comandoId || '').trim();
+  if (!id) throw new Error('Comando inválido.');
+  const comandoRef = COMANDOS_COLLECTION.doc(id);
+  let retorno = null;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(comandoRef);
+    if (!snap.exists) throw new Error('Comando não encontrado.');
+    const comando = snap.data();
+    if (comando.status !== 'pendente') {
+      throw new Error(comando.status === 'entregue'
+        ? 'Este comando já foi entregue à máquina e não pode ser cancelado por aqui.'
+        : 'Este comando já foi finalizado.');
+    }
+    const agora = new Date().toISOString();
+    const computadorRef = COLLECTION.doc(docIdFor(comando.codigo, comando.posto));
+    const computador = await tx.get(computadorRef);
+    // Só limpa se esta ainda for a vaga ocupada por este comando. Isso preserva
+    // um comando novo enfileirado logo após o cancelamento de um antigo.
+    if (computador.exists && computador.data().comandoPendenteId === id) {
+      tx.update(computadorRef, { comandoPendenteId: null, comandoAguardandoElevacaoDesde: null });
+    }
+    const patch = { status: 'cancelado', canceladoEm: agora, canceladoPor: String(porEmail || '').slice(0, 160) || null };
+    tx.update(comandoRef, patch);
+    retorno = { id, ...patch, codigo: comando.codigo, posto: comando.posto };
+  });
+  cache.invalidar();
+  return retorno;
 }
 
 // chamado de dentro do heartbeat() - transacao sobre 1 documento so (nao
@@ -2977,11 +3013,18 @@ function nomeSeguroDoComando(c) {
   return 'Comando operacional';
 }
 
-async function listarComandosPendentes(limiteInformado) {
-  const limite = Math.max(20, Math.min(200, Number(limiteInformado) || 100));
-  const umDiaAtras = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const snap = await COMANDOS_COLLECTION
-    .where('criadoEm', '>=', umDiaAtras)
+async function listarComandosPendentes(consulta) {
+  const entrada = typeof consulta === 'object' && consulta ? consulta : { limite: consulta };
+  const limite = Math.max(20, Math.min(200, Number(entrada.limite) || 100));
+  const dataValida = (valor) => {
+    const data = new Date(String(valor || ''));
+    return Number.isFinite(data.getTime()) ? data.toISOString() : null;
+  };
+  const inicio = dataValida(entrada.inicio) || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const fim = dataValida(entrada.fim);
+  let query = COMANDOS_COLLECTION.where('criadoEm', '>=', inicio);
+  if (fim) query = query.where('criadoEm', '<=', fim);
+  const snap = await query
     .orderBy('criadoEm', 'desc')
     .limit(limite)
     .get();
@@ -2998,6 +3041,7 @@ async function listarComandosPendentes(limiteInformado) {
         criadoEm: c.criadoEm || null,
         entregueEm: c.entregueEm || null,
         executadoEm: c.executadoEm || null,
+        canceladoEm: c.canceladoEm || null,
         requerAdmin: c.requerAdmin === true,
         nomeComando: nomeSeguroDoComando(c),
       };
@@ -3899,7 +3943,7 @@ module.exports = {
   // falso e ser levado a sério, inclusive pra ENVELHECER a última batida,
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
-  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, listarComandosPendentes,
+  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, cancelarComandoPendente, listarComandosPendentes,
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,

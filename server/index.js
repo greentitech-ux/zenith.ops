@@ -5488,8 +5488,21 @@ app.get('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) =>
 
 app.get('/api/loja-status/comandos-pendentes', auth.requireMaster, async (req, res) => {
   try {
-    const comandos = await lojaStatus.listarComandosPendentes(req.query?.limite);
+    const comandos = await lojaStatus.listarComandosPendentes(req.query || {});
     res.json({ comandos });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// O X da fila cancela somente o que ainda está aguardando entrega. A senha do
+// Master é confirmada no servidor, e a transação em lojaStatus impede corrida
+// com o heartbeat da própria máquina.
+app.delete('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const comando = await lojaStatus.cancelarComandoPendente(req.params.id, req.user && req.user.email);
+    res.json({ ok: true, comando, mensagem: 'Comando removido da fila antes de chegar à máquina.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
