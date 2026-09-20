@@ -87,10 +87,11 @@ async function listAllUncached() {
 }
 // A coleção pode ter até 3.000 check-ins. Entrada, saída, aprovação,
 // correção e exclusão já chamam invalidar() logo após gravar, portanto o
-// cache não segura informação nova de quem acabou de operar. Os 5 minutos
-// protegem apenas contra releituras idênticas de telas abertas/atualizadas,
-// que antes relia toda a coleção a cada 30s e crescia junto com o histórico.
-const checkinCache = createCache(listAllUncached, 5 * 60 * 1000);
+// cache não segura informação nova de quem acabou de operar. Como o uso
+// previsto deste módulo é quase zero, um dia inteiro protege contra qualquer
+// releitura idêntica de telas abertas/atualizadas. Se a operação crescer,
+// este prazo pode ser reduzido sem mudar regra, dados ou permissões.
+const checkinCache = createCache(listAllUncached, 24 * 60 * 60 * 1000);
 const listAll = checkinCache.cached;
 
 async function getOne(id) {
