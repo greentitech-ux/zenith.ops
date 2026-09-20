@@ -67,7 +67,9 @@
   .admin-intro h2{font-size:18px;margin:8px 0 7px;letter-spacing:-.02em;}
   .admin-intro p{position:relative;z-index:1;max-width:650px;margin:0;color:var(--muted);font-size:12.5px;line-height:1.55;}
   .admin-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
-  .admin-stat{min-height:98px;padding:14px;border:1px solid var(--line);border-radius:13px;background:var(--panel);}
+  .admin-stat{min-height:98px;padding:14px;border:1px solid var(--line);border-radius:13px;background:var(--panel);text-align:left;cursor:pointer;transition:border-color .15s,transform .15s,background .15s;}
+  button.admin-stat{width:100%;font-family:inherit;color:inherit;}
+  .admin-stat:hover,.admin-stat.active{border-color:var(--accent);background:rgba(184,255,60,.06);transform:translateY(-1px);}
   .admin-stat .num{display:block;font:700 25px var(--mono);letter-spacing:-.07em;color:var(--text);}
   .admin-stat .lab{display:block;margin-top:7px;color:var(--muted);font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.05em;line-height:1.35;}
   .admin-stat.ok .num{color:var(--ok);}.admin-stat.warn .num{color:var(--warn);}.admin-stat.bad .num{color:var(--bad);}
@@ -211,6 +213,13 @@
   .user-sub .tags{max-width:none;}
   .user-detail{padding:4px 2px 16px 23px;border-bottom:1px solid #1a1f26;display:flex;flex-direction:column;gap:7px;font-size:12px;}
   .user-detail-linha b{color:var(--muted);font-weight:500;margin-right:4px;}
+  .master-nota{padding:9px 10px;border-radius:8px;background:rgba(242,179,61,.08);border:1px solid rgba(242,179,61,.22);color:var(--muted);line-height:1.45;}
+  @media(max-width:640px){
+    .panels-lado-a-lado{gap:12px;}.users-toolbar{align-items:stretch;}.users-toolbar input[type=search]{min-width:0;width:100%;}
+    .users-filtros{overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;}.users-filtros button.back{flex:none;}
+    .user-row{align-items:flex-start;gap:10px;padding:13px 2px;}.user-info{min-width:0;}.user-sub{gap:6px;}.user-sub .tags{width:100%;}
+    .btn-acoes{padding:8px 9px;font-size:11px;}.user-detail{padding-left:0;margin-left:21px;}.tags{max-width:100%;}
+  }
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -1063,7 +1072,7 @@ function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;
 // so rolando a tela; a barra de baixo do titulo resolve isso ----------
 const CARGO_LABEL = { loja:'🏬 loja', gerente:'👔 gerente', tecnico:'🔧 técnico', suporte:'🎧 suporte', manutencao:'🛠️ manutenção' };
 let FILTRO_USERS_BUSCA = '';
-let FILTRO_USERS_STATUS = ''; // '' = todos, 'ativos', 'desativados', 'bloqueados'
+  let FILTRO_USERS_STATUS = ''; // todos, ativos, online, revisão, desativados ou bloqueados
 
 function statusUsuario(u){
   if(u.role==='master') return 'ativos'; // Master nao tem active/locked - sempre ativo
@@ -1078,12 +1087,12 @@ function renderResumoAcessos(){
   const escopados = USERS.filter(u=>u.role==='master' || u.empresaId || (u.permissions?.unidades||[]).length).length;
   const paraRevisar = USERS.filter(u=>u.locked || (u.role!=='master' && !u.empresaId && !(u.permissions?.unidades||[]).length)).length;
   const cards = [
-    ['',''+USERS.length,'Acessos cadastrados'],
-    ['ok',''+ativos,'Acessos ativos'],
-    ['',''+online,'Conectados agora'],
-    [paraRevisar?'bad':'ok', paraRevisar ? ''+paraRevisar : ''+escopados, paraRevisar?'Precisam revisão':'Escopo definido'],
+    ['',''+USERS.length,'Acessos cadastrados',''],
+    ['ok',''+ativos,'Acessos ativos','ativos'],
+    ['',''+online,'Conectados agora','online'],
+    [paraRevisar?'bad':'ok', paraRevisar ? ''+paraRevisar : ''+escopados, paraRevisar?'Precisam revisão':'Escopo definido',paraRevisar?'revisar':''],
   ];
-  el.innerHTML = cards.map(([tom,num,rot])=>`<div class="admin-stat ${tom}"><span class="num">${num}</span><span class="lab">${rot}</span></div>`).join('');
+  el.innerHTML = cards.map(([tom,num,rot,filtro])=>`<button type="button" class="admin-stat ${tom} ${FILTRO_USERS_STATUS===filtro?'active':''}" onclick="filtrarStatusUsuarios('${filtro}')" title="Filtrar: ${rot}"><span class="num">${num}</span><span class="lab">${rot}</span></button>`).join('');
 }
 // busca em email, usuario, cargo, tags e nomes de secao/unidade liberadas -
 // mesmo criterio "todas as palavras precisam aparecer" usado na Central
@@ -1108,11 +1117,12 @@ function filtrarBuscaUsuarios(){
   FILTRO_USERS_BUSCA = document.getElementById('users-busca').value.trim().toLowerCase();
   renderUsers();
 }
-function filtrarStatusUsuarios(v){ FILTRO_USERS_STATUS = v; renderUsers(); }
+function precisaRevisaoUsuario(u){ return !!u.locked || (u.role!=='master' && !u.empresaId && !(u.permissions?.unidades||[]).length); }
+function filtrarStatusUsuarios(v){ FILTRO_USERS_STATUS = FILTRO_USERS_STATUS===v ? '' : v; renderUsers(); }
 function renderFiltroStatusUsuarios(apósBusca){
-  const contagens = { '':apósBusca.length, ativos:0, desativados:0, bloqueados:0 };
-  apósBusca.forEach(u=>{ contagens[statusUsuario(u)]++; });
-  const opts = [['','Todos'], ['ativos','🟢 Ativos'], ['desativados','⚪ Desativados'], ['bloqueados','🔴 Bloqueados']];
+  const contagens = { '':apósBusca.length, ativos:0, online:0, revisar:0, desativados:0, bloqueados:0 };
+  apósBusca.forEach(u=>{ contagens[statusUsuario(u)]++; if(u.online) contagens.online++; if(precisaRevisaoUsuario(u)) contagens.revisar++; });
+  const opts = [['','Todos'], ['ativos','🟢 Ativos'], ['online','● Conectados'], ['revisar','⚠ Revisar'], ['desativados','⚪ Desativados'], ['bloqueados','🔴 Bloqueados']];
   document.getElementById('users-filtros').innerHTML = opts.map(([v,l])=>
     `<button type="button" class="back${FILTRO_USERS_STATUS===v?' active':''}" onclick="filtrarStatusUsuarios('${v}')">${l} <span>${contagens[v]}</span></button>`
   ).join('');
@@ -1124,7 +1134,8 @@ function renderUsers(){
   const todosOrdenados = [...USERS].sort((a,b)=>a.email.localeCompare(b.email,'pt-BR',{sensitivity:'base'}));
   const apósBusca = todosOrdenados.filter(passaBuscaUsuario);
   renderFiltroStatusUsuarios(apósBusca);
-  const ordenados = FILTRO_USERS_STATUS ? apósBusca.filter(u=>statusUsuario(u)===FILTRO_USERS_STATUS) : apósBusca;
+  const ordenados = !FILTRO_USERS_STATUS ? apósBusca : apósBusca.filter(u=>
+    FILTRO_USERS_STATUS==='online' ? u.online : (FILTRO_USERS_STATUS==='revisar' ? precisaRevisaoUsuario(u) : statusUsuario(u)===FILTRO_USERS_STATUS));
   document.getElementById('users-contagem').textContent =
     `Mostrando ${ordenados.length} de ${USERS.length} acesso${USERS.length===1?'':'s'}`;
   const cardUsuario = (u) => {
@@ -1165,8 +1176,7 @@ function renderUsers(){
     if (horario && horario.ativo) tags.push(`<span class="badge horario" title="Acesso liberado só nesse intervalo, todo dia">🕐 ${horario.inicio}–${horario.fim}</span>`);
     tags.push(`<span class="badge ${u.online?'on':'off'}" style="cursor:pointer;" onclick="abrirSessoes('${u.id}')" title="${u.ultimaAtividadeEm ? 'Última atividade: '+formatarRelativo(u.ultimaAtividadeEm) : 'Nunca fez login'} - clique pra ver os locais">${u.online?'🟢':'⚪'} ${u.sessoesAtivas} ${u.sessoesAtivas===1?'local':'locais'}</span>`);
     const detalhe = isMaster
-      ? `<div class="user-detail-linha">${u.qaMaster ? '🧪 QA Master - 100% do acesso de um Master, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) ficam paradas esperando um Master de verdade aprovar (ver "🧪 Aprovações QA" no topo).' : 'Master - acesso total, sem restrições.'}</div>
-         <div class="user-detail-linha"><button type="button" class="link-btn" onclick="alternarSessaoLongaMaster('${u.id}', ${!u.sessaoLonga})">${u.sessaoLonga ? '🔓 desativar "sempre conectado"' : '🔒 manter sempre conectado (30 dias, não desloga sozinho)'}</button></div>`
+      ? `<div class="master-nota"><b>${u.qaMaster ? 'QA Master' : 'Master'}</b> · acesso global. Você pode editar o login, redefinir senha, consultar sessões e definir a duração da sessão em <b>Ações</b>. Permissões, empresa e cargos não aparecem porque um Master já tem acesso total.</div>`
       : `<div class="user-detail-linha"><b>Status:</b> ${status.texto}${u.locked ? ' (após 3 tentativas de senha erradas - use "Desbloquear" pra destravar sem mudar a senha)' : ''}</div>
          <div class="user-detail-linha"><b>Seções:</b> ${tagList(perms.sections)}</div>
          <div class="user-detail-linha"><b>Unidades:</b> ${tagList(perms.unidades, c=>UNIDADES_NOMES[c]||c)}</div>
@@ -1181,7 +1191,7 @@ function renderUsers(){
           <span class="tags">${tags.join('')}</span>
         </div>
       </div>
-      ${isMaster ? `<button type="button" class="btn-acoes" onclick="toggleDetalheUsuario('${u.id}')" title="Sessão sempre conectada">⚙️ Ações</button>` : `<button type="button" class="btn-acoes" onclick="abrirAcoes('${u.id}')">⚙️ Ações</button>`}
+      <button type="button" class="btn-acoes" onclick="abrirAcoes('${u.id}')">⚙️ Ações</button>
     </div>
     <div class="user-detail hidden" id="detalhe-${u.id}">${detalhe}</div>`;
   };
@@ -1235,6 +1245,16 @@ function abrirAcoes(id){
   const u = USERS.find(x=>x.id===id);
   if(!u) return;
   document.getElementById('acoes-titulo').textContent = u.email;
+  if(u.role==='master'){
+    document.getElementById('acoes-lista').innerHTML = `
+      <div class="master-nota">Conta Master: edição de identificação e segurança. O escopo global não pode ser limitado, desativado ou excluído por esta tela.</div>
+      <button type="button" onclick="fecharAcoes();abrirSessoes('${u.id}')">📍 Ver sessões e locais conectados</button>
+      <button type="button" onclick="fecharAcoes();definirUsername('${u.id}', '${escapeHtml(u.username||'')}')">🆔 ${u.username?'Editar usuário':'Definir usuário'}</button>
+      <button type="button" onclick="fecharAcoes();resetarSenha('${u.id}')">🔒 Redefinir senha</button>
+      <button type="button" onclick="fecharAcoes();alternarSessaoLongaMaster('${u.id}', ${!u.sessaoLonga})">${u.sessaoLonga?'🔓 Desativar sessão de 30 dias':'🔒 Manter conectado por 30 dias'}</button>`;
+    document.getElementById('acoes-overlay').classList.add('show');
+    return;
+  }
   document.getElementById('acoes-lista').innerHTML = `
     <button type="button" onclick="fecharAcoes();abrirMensagemDireta('${u.id}','${escapeHtml(u.email)}')">💬 Mandar mensagem</button>
     <button type="button" onclick="fecharAcoes();editarPermissoes('${u.id}')">🔑 Permissões e tags</button>
