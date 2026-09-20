@@ -26,6 +26,7 @@ const agenteAcoes = require('./agenteAcoes');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 const roteamentoTags = require('./roteamentoTags');
+const tarefas = require('./tarefas');
 
 // senha padrao que o Beniboy define quando a pessoa NAO lembra a senha atual
 // (2a vez que o mesmo acesso trava depois de ja ter sido desbloqueado por
@@ -129,7 +130,13 @@ Catálogo de ações cadastradas pelo Master (use o [id] exato ao chamar a ferra
 ${listaAcoes}`;
 }
 
-async function montarSystem(unidades, logado) {
+function hojeBrasil() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+async function montarSystem(unidades, logado, unidadesPorCodigo = {}) {
   const temFerramentaPedido = !!(logado && logado.temMonitor);
   const [blocoConhecimento, blocoAgente] = await Promise.all([montarBlocoConhecimento(), montarBlocoAgente(logado)]);
   const texto = `Você é o Beniboy, atendente virtual do chat de suporte do NoPulso.
@@ -164,6 +171,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 ## Ferramentas
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
 - consultar_ticket: andamento de um ticket pelo número.
+- criar_tarefa: quando uma pessoa logada e autorizada pedir uma tarefa para si. Não transforme esse pedido em ticket da Central. Sem unidade, a tarefa é pessoal; "hoje" usa a data de referência abaixo. O responsável é quem está falando; participantes só entram se estiverem no escopo dela.
 - consultar_meu_atendimento: consulta o protocolo DESTA conversa e os tickets que ela própria abriu. Use quando a pessoa perguntar pelo próprio protocolo, andamento ou número do ticket; não peça o número se ele já é o protocolo exibido no chat.
 - chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. ANTES de chamar, use registrar_nota_interna com um resumo (situacao PENDENTE) pra o humano já chegar sabendo. Avise que o time já foi chamado e responde ali mesmo na conversa.
 - bloquear_no_agregador: põe na fila do Cowork Agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel e confirma nessa conversa sozinho; você continua nela (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que já está sendo feito. Só chame com loja, app e - pra pausar item - o item em mãos.
@@ -176,11 +184,30 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 
 ## Unidades válidas pra ticket (use exatamente um destes nomes; se a pessoa falar parecido, escolha o mais próximo; se não der pra saber, pergunte)
 ${unidades.map((u) => `- ${u}`).join('\n')}
-${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Tem acesso ao Monitor - pode usar consultar_pedido.' : 'Sem acesso ao Monitor - não tente consultar pedido, use chamar_atendente se precisar.'}` : ''}${blocoConhecimento}${blocoAgente}`;
+${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Tem acesso ao Monitor - pode usar consultar_pedido.' : 'Sem acesso ao Monitor - não tente consultar pedido, use chamar_atendente se precisar.'}${logado.podeCriarTarefa ? ' Pode criar tarefas próprias pelo chat.' : ' Não tem permissão para criar novas tarefas.'}` : ''}
+
+## Data de referência
+Hoje no Brasil é ${hojeBrasil()}. Quando a pessoa disser "hoje", use esta data no formato AAAA-MM-DD.${logado && logado.podeCriarTarefa && !logado.isMaster && Array.isArray(logado.unidades) && logado.unidades.length ? `\nUnidades desta conta para uma tarefa: ${logado.unidades.map((codigo) => `${unidadesPorCodigo[codigo] || codigo} [${codigo}]`).join(', ')}.` : ''}${blocoConhecimento}${blocoAgente}`;
   return [{ type: 'text', text: texto, cache_control: { type: 'ephemeral' } }];
 }
 
 const TOOLS_BASE = [
+  {
+    name: 'criar_tarefa',
+    description: 'Cria uma tarefa no Meu Dia para a própria pessoa logada. Use quando ela pedir explicitamente uma tarefa. Não cria ticket da Central. O responsável é sempre quem está falando; participantes só são adicionados se estiverem no mesmo escopo de acesso.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        titulo: { type: 'string', description: 'Título curto da tarefa.' },
+        descricao: { type: 'string', description: 'Contexto ou resultado esperado, se informado.' },
+        prioridade: { type: 'string', enum: ['critica', 'alta', 'media', 'baixa'], description: 'Crítica equivale a SLA de 4 horas.' },
+        dataEntrega: { type: 'string', description: 'Previsão de conclusão em AAAA-MM-DD.' },
+        unidade: { type: 'string', description: 'Código da unidade entre colchetes no prompt. Opcional; sem unidade, a tarefa é pessoal.' },
+        participantes: { type: 'array', items: { type: 'string' }, description: 'Nomes, e-mails ou usernames de participantes. Opcional.' },
+      },
+      required: ['titulo'],
+    },
+  },
   {
     name: 'criar_ticket',
     description: 'Cria uma solicitação (ticket) na Central do NoPulso. Use somente depois que a pessoa confirmar o resumo do pedido.',
@@ -356,6 +383,10 @@ function montarTools(logado) {
   if (logado && logado.ehTimeSuporte) tools.push(TOOLS_BASE.find((tool) => tool.name === 'consultar_ticket'));
   if (logado && logado.temMonitor) tools.push(TOOL_CONSULTAR_PEDIDO);
   if (logado && logado.isMaster) tools.push(TOOL_EXECUTAR_ACAO_AGENTE);
+  if (!logado || !logado.podeCriarTarefa) {
+    const indiceCriarTarefa = tools.findIndex((tool) => tool.name === 'criar_tarefa');
+    if (indiceCriarTarefa >= 0) tools.splice(indiceCriarTarefa, 1);
+  }
   // quem tem loja no acesso resolve a propria impressora sem esperar humano
   if (logado && ((logado.unidades || []).length || logado.isMaster)) {
     tools.push(TOOL_ESTADO_IMPRESSORA, TOOL_RESETAR_IMPRESSORA);
@@ -395,7 +426,86 @@ function donoDoChat(chat, usuarios) {
   return (usuarios || []).find((u) => u && u.id === id) || null;
 }
 
-async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente) {
+function podeCriarTarefaNoChat(usuario) {
+  return !!usuario && usuario.active !== false && (usuario.role === 'master' || !!usuario.isAdmin
+    || users.ehCargoGerente(usuario.cargo) || (usuario.permissions?.sections || []).includes('tarefas'));
+}
+
+function textoNormalizado(valor) {
+  return String(valor || '').trim().toLocaleLowerCase('pt-BR')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+// É a mesma régua da tela Meu Dia: a pessoa vê a si, Masters, Admin da
+// própria empresa e quem compartilha ao menos uma unidade. Não basta o nome
+// aparecer no chat para ela virar participante de uma tarefa.
+function elegiveisParaTarefaDoChat(solicitante, todos) {
+  const minhas = new Set(solicitante.permissions?.unidades || []);
+  return (todos || []).filter((pessoa) => {
+    if (!pessoa || pessoa.active === false) return false;
+    if (pessoa.id === solicitante.id || solicitante.role === 'master' || pessoa.role === 'master') return true;
+    if (pessoa.isAdmin && pessoa.empresaId && pessoa.empresaId === solicitante.empresaId) return true;
+    return (pessoa.permissions?.unidades || []).some((codigo) => minhas.has(codigo));
+  });
+}
+
+function encontrarPessoaDaTarefa(termo, elegiveis) {
+  const procurado = textoNormalizado(termo);
+  if (!procurado) return null;
+  const campos = (pessoa) => [pessoa.nome, pessoa.name, pessoa.username, pessoa.email]
+    .map(textoNormalizado).filter(Boolean);
+  let encontradas = elegiveis.filter((pessoa) => campos(pessoa).includes(procurado));
+  if (encontradas.length !== 1) {
+    encontradas = elegiveis.filter((pessoa) => campos(pessoa).some((campo) => campo.includes(procurado)));
+  }
+  return encontradas.length === 1 ? encontradas[0] : null;
+}
+
+async function criarTarefaDoChat(input, chat, resultado, unidadesPorCodigo) {
+  if (!chat.logado || !chat.logado.id) return 'Para criar uma tarefa, entre no NoPulso e abra o chat novamente.';
+  const todos = await users.list();
+  // A conta é relida aqui: permissões alteradas depois de abrir o chat entram
+  // em vigor antes de qualquer gravação.
+  const solicitante = donoDoChat(chat, todos);
+  if (!podeCriarTarefaNoChat(solicitante)) return 'Essa conta não tem permissão para criar tarefas. Peça ao responsável para liberar a seção Meu Dia.';
+
+  const titulo = String(input.titulo || '').trim();
+  if (!titulo) return 'Informe um título para a tarefa.';
+  const unidade = String(input.unidade || '').trim() || null;
+  const minhasUnidades = new Set(solicitante.permissions?.unidades || []);
+  if (unidade && solicitante.role !== 'master' && !minhasUnidades.has(unidade)) {
+    return 'Essa unidade não faz parte do acesso da pessoa que pediu a tarefa.';
+  }
+
+  const elegiveis = elegiveisParaTarefaDoChat(solicitante, todos);
+  const pedidos = [...new Set((Array.isArray(input.participantes) ? input.participantes : []).map(String).filter(Boolean))].slice(0, 20);
+  const participantes = [];
+  for (const pedido of pedidos) {
+    const pessoa = encontrarPessoaDaTarefa(pedido, elegiveis);
+    if (!pessoa) return `Não consegui identificar com segurança o participante "${pedido}" dentro do acesso permitido. Peça o e-mail ou username dele.`;
+    if (pessoa.id !== solicitante.id && !participantes.some((x) => x.id === pessoa.id)) participantes.push(pessoa);
+  }
+  if (unidade) {
+    for (const pessoa of participantes) {
+      const alcanca = pessoa.role === 'master' || (pessoa.isAdmin && pessoa.empresaId && pessoa.empresaId === solicitante.empresaId)
+        || (pessoa.permissions?.unidades || []).includes(unidade);
+      if (!alcanca) return `${pessoa.username || pessoa.email} não tem acesso à unidade dessa tarefa.`;
+    }
+  }
+
+  const dataEntrega = /^\d{4}-\d{2}-\d{2}$/.test(String(input.dataEntrega || '')) ? String(input.dataEntrega) : null;
+  const criada = await tarefas.criar({
+    titulo, descricao: String(input.descricao || '').trim(), dataInicio: hojeBrasil(), dataEntrega,
+    unidade, unidadeNome: unidade ? (unidadesPorCodigo[unidade] || unidade) : null,
+    usuario: solicitante, responsavel: solicitante, colaboradores: participantes,
+    prioridade: input.prioridade, origem: 'beniboy',
+  });
+  resultado.tarefas.push(criada);
+  return `Tarefa #${criada.numeroTicket} criada: "${criada.titulo}". Responsável: ${criada.responsavelNome}. Participantes: ${participantes.length ? participantes.map((p) => p.nome || p.username || p.email).join(', ') : 'nenhum'}.`;
+}
+
+async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente, unidadesPorCodigo) {
+  if (nome === 'criar_tarefa') return criarTarefaDoChat(input, chat, resultado, unidadesPorCodigo || {});
   if (nome === 'criar_ticket') {
     const tipo = TIPOS_TICKET.includes(input.tipo) ? input.tipo : null;
     if (!tipo) return 'Erro: tipo inválido.';
@@ -801,7 +911,7 @@ async function escalarPorLimite(chat) {
 // Gera (e grava) a resposta do bot pra conversa. Retorna null quando o bot
 // nao deve/nao consegue falar; senao { chat, tickets, chamouAtendente }.
 // `unidades` = nomes validos pra abertura de ticket (vem do index.js).
-async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente } = {}) {
+async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente } = {}) {
   if (!ativo() || emAndamento.has(chatId)) return null;
   emAndamento.add(chatId);
   try {
@@ -812,9 +922,16 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
     if (msgs.filter((m) => m.bot).length >= MAX_RESPOSTAS_BOT) return escalarPorLimite(chat);
 
-    const resultado = { tickets: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', encerrar: null, agregador: null };
+    const resultado = { tickets: [], tarefas: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', encerrar: null, agregador: null };
+    // Conversas abertas antes desta versão não tinham podeCriarTarefa no
+    // retrato da sessão. Atualiza só esse sinal para que não seja necessário
+    // o colaborador abandonar um atendimento em andamento para criar a tarefa.
+    if (chat.logado?.id) {
+      const usuarioAtual = donoDoChat(chat, await users.list());
+      chat.logado.podeCriarTarefa = podeCriarTarefaNoChat(usuarioAtual);
+    }
     const mensagens = montarMensagens(chat);
-    const system = await montarSystem(unidades, chat.logado);
+    const system = await montarSystem(unidades, chat.logado, unidadesPorCodigo);
     const tools = montarTools(chat.logado);
     let resp = await getCliente().messages.create({
       model: MODELO, max_tokens: MAX_TOKENS, system, messages: mensagens,
@@ -830,7 +947,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
         if (bloco.type !== 'tool_use') continue;
         let saida;
         try {
-          saida = await executarTool(bloco.name, bloco.input || {}, chat, resultado, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente);
+          saida = await executarTool(bloco.name, bloco.input || {}, chat, resultado, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente, unidadesPorCodigo);
         } catch (err) {
           saida = `Erro ao executar: ${err.message}`;
         }

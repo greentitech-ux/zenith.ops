@@ -1401,6 +1401,10 @@ async function usuarioLogadoDoHeader(req) {
     id: user.id,
     username: user.username || user.email,
     isMaster,
+    // Só libera a mesma criação de tarefa que a tela Meu Dia já permite.
+    // Não dá acesso ao catálogo administrativo exclusivo do Master.
+    podeCriarTarefa: isMaster || !!user.isAdmin || users.ehCargoGerente(user.cargo)
+      || (user.permissions?.sections || []).includes('tarefas'),
     unidades: isMaster ? null : (user.permissions?.unidades || []),
     // secao 'monitor' OU tag de cargo "Gerente" liberam sozinhas a ferramenta
     // de consulta de pedido do Beniboy - qualquer uma das duas basta, pedido
@@ -13807,12 +13811,20 @@ async function acionarBeniboy(chatId) {
   try {
     const mapa = await construirUnidadesMapa();
     const unidades = [...new Set(Object.values(mapa))].sort();
-    const r = await suporteBot.responderConversa(chatId, { unidades, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente });
+    const r = await suporteBot.responderConversa(chatId, {
+      unidades, unidadesPorCodigo: mapa,
+      resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente,
+    });
     if (!r) return;
     broadcast('suporte-chat', { id: chatId }, 'suporte');
     for (const t of r.tickets || []) {
       broadcast('solicitacao-criada', t, 'solicitacoes');
       push.notifySolicitacao(`Ticket #${t.numeroTicket} · Nova solicitação (Beniboy · chat)`, `${t.titulo || ''} · ${t.unidadeNome || ''}`, t.id);
+    }
+    // Tarefa interna não é solicitação da Central. O evento do Meu Dia só
+    // atualiza quem pode vê-la, portanto não atravessa unidades.
+    for (const tarefa of r.tarefas || []) {
+      broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
     }
     // DIRECIONADO POR TAG (roteamentoTags.js): além do push geral acima, quem
     // tem a tag do assunto recebe no nome dela. É a diferença entre "chegou
