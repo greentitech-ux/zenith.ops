@@ -209,7 +209,9 @@
   .user-nome{font-size:13.5px;font-weight:600;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .user-nome:hover{color:var(--accent);}
   .user-sub{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;}
-  .user-username{font-family:var(--mono);font-size:11px;color:var(--muted);flex:none;}
+  /* O login continua salvo em minúsculas (regra técnica de autenticação), mas
+     na leitura operacional aparece em MAIÚSCULAS, como identificação. */
+  .user-username{font-family:var(--mono);font-size:11px;color:var(--muted);flex:none;text-transform:uppercase;letter-spacing:.035em;font-weight:700;}
   .user-sub .tags{max-width:none;}
   .user-detail{padding:4px 2px 16px 23px;border-bottom:1px solid #1a1f26;display:flex;flex-direction:column;gap:7px;font-size:12px;}
   .user-detail-linha b{color:var(--muted);font-weight:500;margin-right:4px;}
