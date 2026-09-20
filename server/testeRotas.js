@@ -2674,6 +2674,7 @@ setTimeout(async () => {
   // quem de fato recebe a cortesia (ver criar() em parque.js) ----
   let okGratuidadeMista = false;
   try {
+    const telaParque = require('fs').readFileSync(require('path').join(__dirname, 'public', 'parque-checkin.html'), 'utf8');
     const base = {
       unidade: '19821', unidadeNome: 'Dom Sao Miguel',
       responsavel: { nome: 'Responsavel Teste', contato: '11999999999' },
@@ -2721,7 +2722,10 @@ setTimeout(async () => {
       await parque.criar({ ...base, criancas: [{ nome: 'Beneficiaria3', meia: false, gratuita: true }] });
     } catch (e) { estourouCota = /vagas de cortesia/.test(e.message); }
 
-    okGratuidadeMista = precoOk && naoContaNaCota && estourouCota;
+    const escolhaVisivelNoLançamento = /Este termo inclui ingresso\(s\) de cortesia/.test(telaParque)
+      && /Cortesia neste ingresso/.test(telaParque)
+      && /resumo-ingressos/.test(telaParque);
+    okGratuidadeMista = precoOk && naoContaNaCota && estourouCota && escolhaVisivelNoLançamento;
   } catch (e) { okGratuidadeMista = false; console.log('  erro: ' + e.message); }
   if (!okGratuidadeMista) ruins += 1;
   console.log(`${okGratuidadeMista ? '✓' : '✗'} Parque: cortesia PCD/geral aceita 1 criança pagando junto com a beneficiária, sem furar a cota de 2/hora`);

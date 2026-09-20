@@ -79,6 +79,11 @@
   .crianca-linha-nasc>div{flex:1;min-width:0;}
   @media(min-width:440px){ .crianca-linha{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:end;} .crianca-linha-nasc{grid-column:2;} }
   .crianca-linha input{margin:0;}
+  .tipo-ingresso{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:10px 0 8px;}
+  .tipo-ingresso.ativo{border-color:var(--warn);background:rgba(242,179,61,.07);}
+  .tipo-ingresso small{display:block;color:var(--muted);font-size:11.5px;line-height:1.35;margin:5px 0 0 27px;}
+  .resumo-ingressos{font-size:12px;color:var(--warn);margin:7px 0 0;}
+  .crianca-gratuita-wrap{background:rgba(242,179,61,.08);border:1px solid rgba(242,179,61,.3);border-radius:6px;padding:7px 8px;}
   .btn-remover-crianca{background:none;border:1px solid var(--line);color:var(--bad);border-radius:8px;height:44px;width:38px;flex:none;cursor:pointer;font-size:14px;}
   .pagamento-linha{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px;}
   .pagamento-linha-campos{display:flex;gap:6px;align-items:end;}
@@ -216,6 +221,13 @@
 
     <div class="secao" data-etapa="2">
       <div class="secao-titulo">Crianças</div>
+      <div class="tipo-ingresso" id="tipo-ingresso-grupo">
+        <label style="display:flex;align-items:flex-start;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:0;">
+          <input type="checkbox" id="f-cortesia" style="width:auto;margin-top:2px;" onchange="toggleCortesia()">
+          <span><b>Este termo inclui ingresso(s) de cortesia</b><small>Marque somente quando houver cortesias. Em seguida, defina em cada criança se o ingresso é <b>cortesia</b> ou <b>pago</b>; todos permanecem no mesmo termo.</small></span>
+        </label>
+        <div class="resumo-ingressos hidden" id="resumo-ingressos"></div>
+      </div>
       <div id="lista-criancas"></div>
       <button type="button" class="btn-secundario" onclick="adicionarCrianca()">+ Adicionar criança</button>
       <div class="resumo">
@@ -255,10 +267,6 @@
 
     <div class="secao" id="secao-pagamento" data-etapa="4">
       <div class="secao-titulo">Pagamento</div>
-      <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;">
-        <input type="checkbox" id="f-cortesia" style="width:auto;" onchange="toggleCortesia()">
-        🎁 Entrada cortesia (não cobra)
-      </label>
       <!-- cortesia e renuncia de receita: exige justificativa e vira um
            card de aprovacao do Gerente/Master antes de liberar a entrada -->
       <div id="wrap-motivo-cortesia" class="hidden" style="background:var(--panel2);border:1px solid var(--warn);border-radius:8px;padding:10px 12px;margin-top:10px;">
@@ -866,6 +874,7 @@ function atualizarPreviewValor(){
       `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver ${niverLabel} (${niver})`:''} + meias`;
   }
   document.getElementById('preview-valor').textContent = fmtReal(total);
+  atualizarResumoIngressos();
   // roda junto com o preview porque ele já é chamado a cada mexida no
   // formulário (criança, meia, tempo, cortesia) - é o gancho natural pra
   // reavaliar se o termo aplicado ainda corresponde ao que está na tela
@@ -1048,6 +1057,21 @@ function modoGratuidadeAtivo(){
 function atualizarVisibilidadeGratuidade(){
   const ativo = modoGratuidadeAtivo();
   document.querySelectorAll('#lista-criancas .crianca-gratuita-wrap').forEach(w=>w.classList.toggle('hidden', !ativo));
+  document.getElementById('tipo-ingresso-grupo').classList.toggle('ativo', ativo);
+  atualizarResumoIngressos();
+}
+function atualizarResumoIngressos(){
+  const resumo = document.getElementById('resumo-ingressos');
+  if(!resumo) return;
+  const linhas = listaCriancasPreenchidas();
+  if(!modoGratuidadeAtivo()){
+    resumo.classList.add('hidden');
+    return;
+  }
+  const cortesias = linhas.filter(criancaEhGratuita).length;
+  const pagantes = linhas.length - cortesias;
+  resumo.textContent = `${cortesias} ingresso(s) de cortesia · ${pagantes} ingresso(s) pago(s). O pagamento abaixo cobrará somente os pagos.`;
+  resumo.classList.remove('hidden');
 }
 function adicionarCrianca(){
   CRIANCA_SEQ++;
@@ -1067,7 +1091,7 @@ function adicionarCrianca(){
     </label>
     <label class="crianca-gratuita-wrap hidden" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
       <input type="checkbox" class="crianca-gratuita" checked style="width:auto;" onchange="atualizarPreviewValor()">
-      🎁 Entra na gratuidade <span style="color:var(--muted);">(desmarque pra essa criança pagar normal, junto no mesmo termo)</span>
+      🎁 Cortesia neste ingresso <span style="color:var(--muted);">(desmarque para esta criança pagar normalmente, no mesmo termo)</span>
     </label>
   `;
   document.getElementById('lista-criancas').appendChild(div);
