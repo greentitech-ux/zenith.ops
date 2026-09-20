@@ -2182,6 +2182,8 @@ const COMANDO_INVENTARIO_ESTACAO = [
 const COMANDO_LIMPEZA_SEGURA = [
   '$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
   'if (-not $admin) { throw "Otimização segura exige o NOCZenith elevado (SYSTEM)." }',
+  '$espacoLivre = { @(Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.DeviceID) $([math]::Round($_.FreeSpace / 1GB, 2)) GB livre" }) -join ", " }',
+  '$antes = & $espacoLivre',
   '$apagados = 0; $falhas = 0; $pastas = @($env:TEMP, (Join-Path $env:WINDIR "Temp")) | Select-Object -Unique',
   'foreach ($pasta in $pastas) {',
   '  if (-not $pasta -or -not (Test-Path -LiteralPath $pasta)) { continue }',
@@ -2190,7 +2192,8 @@ const COMANDO_LIMPEZA_SEGURA = [
   '  }',
   '}',
   'try { Clear-RecycleBin -Force -ErrorAction Stop; $lixeira = "limpa" } catch { $lixeira = "não disponível/contém itens em uso" }',
-  '"OTIMIZAÇÃO SEGURA: $apagados item(ns) temporário(s) removido(s) · $falhas pulado(s) por uso/permissão · Lixeira: $lixeira. Nenhum programa, documento ou download foi removido."',
+  '$depois = & $espacoLivre',
+  '"OTIMIZAÇÃO SEGURA: $apagados item(ns) temporário(s) removido(s) · $falhas pulado(s) por uso/permissão · Lixeira: $lixeira. Espaço livre antes: $antes · depois: $depois. Nenhum programa, documento ou download foi removido."',
 ].join('\n');
 
 // REINICIAR a máquina. Fixo no código pelo mesmo motivo dos outros: uma

@@ -4939,6 +4939,7 @@ const EXECUTORES_QA = {
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
   'manutencao.reiniciarGsurfRsa': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_GSURF_RSA, { origem: 'manutencao-gsurf-rsa' }),
   'manutencao.encerrarGcomWcf': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoEncerrarGcomWcf, { origem: 'manutencao-gcom-wcf' }),
+  'manutencao.limpezaSegura': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_LIMPEZA_SEGURA, { origem: 'manutencao-limpeza-segura' }),
   'manutencao.destravarRede': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REDE_DESTRAVAR, { origem: 'manutencao-rede' }),
   'formularios.removerAssinatura': (p) => formularios.removerAssinatura(p.id, p.chave, p.porEmail),
   'manutencao.resetZebra': (p) => lojaStatus.enfileirarComandoEmAlvos(

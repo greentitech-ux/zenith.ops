@@ -14975,6 +14975,28 @@ setTimeout(async () => {
   console.log(`${okDiagnosticoReinicio ? '✓' : '✗'} NOC: diagnóstico de reinício encontra sinais de tela azul, disco/hardware e minidump sem alterar a máquina`);
 
   // ------------------------------------------------------------------
+  // Disco cheio: a primeira correção tem escopo deliberadamente pequeno.
+  // Mede antes/depois e só remove temporários e Lixeira; não pode virar
+  // uma automação que apaga arquivo de operação, programa ou documento.
+  let okLimpezaSegura = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const htmlLimpeza = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cmd = ls.COMANDO_LIMPEZA_SEGURA || '';
+    const conf = {
+      'mede o espaço livre antes e depois da limpeza': /\$antes/.test(cmd) && /\$depois/.test(cmd) && /Espaço livre antes/.test(cmd),
+      'limita a limpeza a temporários e Lixeira': /\$env:TEMP/.test(cmd) && /Join-Path \$env:WINDIR "Temp"/.test(cmd) && /Clear-RecycleBin/.test(cmd),
+      'não remove documentos, downloads, programas nem reinicia': !/Documents|Downloads|Program Files|shutdown|Restart-Computer|Stop-Process/i.test(cmd),
+      'a tela exige confirmação e descreve o escopo': /manutEnviar\('limpeza-segura'\)/.test(htmlLimpeza) && /Liberar espaço seguro/.test(htmlLimpeza) && /Não remove documentos/.test(htmlLimpeza),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okLimpezaSegura = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okLimpezaSegura = false; console.log('  erro: ' + e.message); }
+  if (!okLimpezaSegura) ruins += 1;
+  console.log(`${okLimpezaSegura ? '✓' : '✗'} NOC: libera espaço apenas em temporários e Lixeira, com medição antes/depois`);
+
+  // ------------------------------------------------------------------
   // BUSCA NA JANELA DE MANUTENCAO. Pedido do Master: "filtro de pesquisa
   // digitado, a fim de ser mais rapido digitando o nome da maquina e
   // aparece". Com o parque inteiro na lista, achar UMA maquina era rolar
