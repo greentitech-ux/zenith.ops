@@ -52,6 +52,14 @@
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px;}
   @media(max-width:640px){ .panel{padding:14px;} }
   .panel h2{font-size:13px;margin:0 0 14px;}
+  /* Administração é uma área única: esta página precisa manter o caminho de
+     volta para Usuários e o contexto de Empresas/Grupos sempre visíveis. */
+  .admin-nav{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;margin-bottom:4px;scrollbar-width:none;}
+  .admin-nav::-webkit-scrollbar{display:none;}
+  .admin-nav a{display:inline-flex;align-items:center;gap:7px;flex:none;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--muted);font:600 11px var(--mono);text-decoration:none;transition:.16s ease;}
+  .admin-nav a:hover{border-color:var(--accent);color:var(--text);transform:translateY(-1px);}
+  .admin-nav a.active{background:linear-gradient(135deg,rgba(184,255,60,.2),rgba(184,255,60,.06));border-color:var(--accent);color:var(--accent);box-shadow:0 8px 24px rgba(184,255,60,.08);}
+  #empresas,#grupos{scroll-margin-top:88px;}
   .tablewrap{overflow-x:auto;}
   table{width:100%;min-width:640px;border-collapse:collapse;font-size:12.5px;}
   thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9.5px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);}
@@ -157,6 +165,13 @@
 <div id="sem-acesso" class="empty hidden">Só o acesso Master pode gerenciar grupos.</div>
 
 <div id="root" class="hidden">
+  <nav class="admin-nav" aria-label="Administração">
+    <a href="/usuarios.html">← Usuários</a>
+    <a href="#empresas" data-admin-aba="empresas">🏢 Empresas e unidades</a>
+    <a href="#grupos" data-admin-aba="grupos">🏷️ Grupos operacionais</a>
+    <a href="/cofre.html">🔐 Cofre de acessos</a>
+    <a href="/central-alertas.html">🚨 Regras e alertas</a>
+  </nav>
   <div class="panel">
     <h2>🏪 Unidades</h2>
     <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">TODAS as unidades do sistema num lugar só - as fixas (loja com código Adyen/planilha, que nunca muda) e as cadastradas aqui em runtime (loja nova, escritório/administrativo...). Toda unidade pode ganhar um perfil (onde aparece, que tipo de solicitação aceita) igual o da MVPar - clique em ✏️ perfil pra configurar. Sem perfil nenhum, a unidade continua aparecendo em tudo, do jeito de sempre.</p>
@@ -187,7 +202,7 @@
        x Arcfood hoje; uma clínica ou escola amanhã). NÃO existe empresa
        "padrão": cada unidade tem que ser escolhida a dedo, pra loja nova
        nunca cair numa empresa por acidente. -->
-  <div class="panel">
+  <div class="panel" id="empresas">
     <h2>🏢 Empresas</h2>
     <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">O limite que separa um negócio do outro dentro do NoPulso - usuário de uma empresa nunca vê dado de outra, <b>nem o Admin dela</b> (a única exceção é o time de Suporte, que atravessa tudo de propósito). Cada unidade precisa ser <b>marcada</b> na empresa dona dela: unidade que ninguém marcou não entra em empresa nenhuma e só aparece pro Master e pro Suporte, até você decidir de quem ela é.</p>
     <div id="empresas-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
@@ -240,7 +255,7 @@
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;" id="ps-sem-regra"></p>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="grupos">
     <h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
       <span>Grupos cadastrados</span>
       <span style="display:flex;gap:4px;">
@@ -1495,6 +1510,16 @@ async function boot(){
   await carregarGrupos();
 }
 
+function atualizarAbaAdministracao(){
+  const aba = location.hash === '#empresas' ? 'empresas' : 'grupos';
+  document.querySelectorAll('[data-admin-aba]').forEach(link=>{
+    const ativa = link.dataset.adminAba === aba;
+    link.classList.toggle('active', ativa);
+    if(ativa) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+  });
+}
+window.addEventListener('hashchange', atualizarAbaAdministracao);
+atualizarAbaAdministracao();
 boot();
 </script>
 <script src="/notif-central.js"></script>
