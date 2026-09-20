@@ -15669,6 +15669,11 @@ function aquecerBoot(promessa, ms) {
             .catch((err) => console.error('Erro no push de comando sem admin:', err.message));
           continue;
         }
+        if (t.tipo === 'comando-travado') {
+          push.notifyComandoTravado(nome, t.codigo, t.nome, t.posto, t.motivo)
+            .catch((err) => console.error('Erro no push de comando travado:', err.message));
+          continue;
+        }
         // dispositivo de rede marcado (impressora/VM) sumiu/voltou (ver
         // varrerAlertas em lojaStatus.js) - pedido do Master, alarme por
         // equipamento específico, não pelo computador que o enxergou

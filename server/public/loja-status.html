@@ -521,7 +521,14 @@
   .cmd-tipo{font-size:11px;color:var(--text);line-height:1.35;}.cmd-hora{font:10px var(--mono);color:var(--muted);margin-top:4px;}
   .cmd-status{font:10px var(--mono);white-space:nowrap;text-transform:uppercase;}.cmd-status.pendente{color:var(--warn);}.cmd-status.entregue{color:var(--accent);}.cmd-status.executado{color:var(--ok);}.cmd-status.erro{color:var(--bad);}.cmd-status.cancelado{color:var(--muted);}
   .cmd-estado{display:grid;justify-items:end;gap:6px;text-align:right;}.cmd-cancelar{border:1px solid rgba(255,91,91,.55);background:rgba(255,91,91,.08);color:#ff8a8a;border-radius:7px;padding:4px 7px;font:10px var(--mono);cursor:pointer;}.cmd-cancelar:hover{background:rgba(255,91,91,.18);}.cmd-cancelar:disabled{opacity:.55;cursor:wait;}
-  @media(max-width:640px){.cmd-toolbar{padding:10px;}.cmd-periodos:before{width:100%;}.cmd-datas{width:100%;}.cmd-datas input{flex:1;min-width:0;}.cmd-linha{grid-template-columns:auto minmax(0,1fr) auto;gap:8px;}.cmd-tipo{grid-column:2;white-space:normal;font-size:10.5px;}.cmd-estado{grid-column:3;grid-row:1 / span 2;align-self:start;}.cmd-lista{max-height:400px;}}
+  @media(max-width:640px){
+    .cmd-toolbar{padding:10px;}.cmd-periodos:before{width:100%;}.cmd-datas{width:100%;}.cmd-datas input{flex:1;min-width:0;}
+    /* No telefone não há "coluna de tabela": destino vem primeiro, inteiro e
+       alinhado à esquerda. A ação e o estado viram linhas abaixo, sem brigar
+       pelo espaço horizontal nem esconder nome de unidade/máquina. */
+    .cmd-linha{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"indicador destino" "tipo tipo" "estado estado";gap:7px 9px;align-items:start;}
+    .cmd-indicador{grid-area:indicador;margin-top:4px;}.cmd-destino{grid-area:destino;min-width:0;}.cmd-tipo-bloco{grid-area:tipo;padding-left:18px;}.cmd-estado{grid-area:estado;display:flex;align-items:center;justify-items:normal;justify-content:space-between;gap:8px;text-align:left;padding-left:18px;border-top:1px solid var(--line);padding-top:8px;}.cmd-alvo{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;}.cmd-meta{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35;}.cmd-tipo{white-space:normal;font-size:10.5px;}.cmd-lista{max-height:400px;}
+  }
 </style>
 <link rel="stylesheet" href="/noc-workbench.css">
 <script src="/tema.js"></script>
@@ -594,7 +601,7 @@
         </div>
         <button type="button" class="btn-secundario" onclick="carregarComandosRecentes()">↻ Atualizar</button>
       </div>
-      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Acompanhe destino, ação, estado e horário sem expor PowerShell ou saída. O <b>✕ Cancelar</b> remove com segurança apenas comandos ainda na fila; comandos já entregues continuam protegidos contra cancelamento enganoso.</div>
+      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Acompanhe destino, ação, estado e horário sem expor PowerShell ou saída. O <b>✕ Cancelar</b> remove com segurança apenas comandos ainda na fila; comandos já entregues continuam protegidos contra cancelamento enganoso. Execuções sem retorno por mais de 10 minutos são marcadas como erro automaticamente.</div>
       <div class="cmd-lista" id="comandos-lista"></div>
     </div>
   </div>
@@ -2900,9 +2907,9 @@ function renderComandosRecentes(){
     const admin = c.requerAdmin ? ' · admin' : '';
     const podeCancelar = c.status==='pendente';
     return `<div class="cmd-linha ${classe}">
-      <span aria-hidden="true">${c.status==='erro'?'●':c.status==='executado'?'●':'◌'}</span>
-      <div><div class="cmd-alvo" title="${escapeHtml(c.nomeComputador || c.posto)}">${escapeHtml(c.nomeComputador || c.posto || 'Computador')}</div><div class="cmd-meta">${escapeHtml(unidade)} · ${escapeHtml(c.posto || '')}${admin}</div></div>
-      <div><div class="cmd-tipo">${escapeHtml(c.nomeComando || 'Comando operacional')}</div><div class="cmd-hora">${escapeHtml(fmtDataHora(quando))} · ${escapeHtml(tempoRelativo(quando))}</div></div>
+      <span class="cmd-indicador" aria-hidden="true">${c.status==='erro'?'●':c.status==='executado'?'●':'◌'}</span>
+      <div class="cmd-destino"><div class="cmd-alvo" title="${escapeHtml(c.nomeComputador || c.posto)}">${escapeHtml(c.nomeComputador || c.posto || 'Computador')}</div><div class="cmd-meta">${escapeHtml(unidade)} · ${escapeHtml(c.posto || '')}${admin}</div></div>
+      <div class="cmd-tipo-bloco"><div class="cmd-tipo">${escapeHtml(c.nomeComando || 'Comando operacional')}</div><div class="cmd-hora">${escapeHtml(fmtDataHora(quando))} · ${escapeHtml(tempoRelativo(quando))}</div></div>
       <div class="cmd-estado"><span class="cmd-status ${classe}">${status}</span>${podeCancelar?`<button type="button" class="cmd-cancelar" onclick="cancelarComandoFila('${escapeJs(c.id)}',this)" aria-label="Cancelar comando na fila" title="Cancelar antes da entrega">✕ Cancelar</button>`:''}</div>
     </div>`;
   }).join('');

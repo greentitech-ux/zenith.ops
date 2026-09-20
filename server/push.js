@@ -880,6 +880,31 @@ async function notifyComandoSemAdmin(unidadeNome, codigo, computadorNome, posto,
   }
 }
 
+// A fila não pode deixar uma execução sem resposta parecer ativa para sempre.
+// Este push é enviado uma única vez, quando a transação a fecha como erro.
+async function notifyComandoTravado(unidadeNome, codigo, computadorNome, posto, motivo) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const dados = {
+    title: '⚙️ Comando sem retorno',
+    body: `${prefixo}${unidadeNome || codigo}: ${motivo || 'a execução foi marcada como erro e a fila foi liberada.'}`,
+    tag: `noc-cmd-travado-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-comando-travado', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (comando sem retorno):', err.message);
+    }
+  }
+}
+
 async function notifyVmCaiu(unidadeNome, codigo, computadorNome, posto, vms) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const quais = (vms || []).slice(0, 4).map((v) => `${v.nome} (${v.estado})`).join(', ') || 'uma VM';
@@ -1584,7 +1609,7 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyRamAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyRamAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyComandoTravado, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyDispositivoOffline, notifyRedeUnidade, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,

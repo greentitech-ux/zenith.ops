@@ -7035,6 +7035,19 @@ setTimeout(async () => {
     const login3 = await bater({ souAdmin: false }); // login pega
     await ls.marcarComandoExecutado(cmdComum2.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
 
+    // EXECUÇÃO SEM RETORNO: depois da entrega, um agente travado não pode
+    // segurar a única vaga da máquina indefinidamente. A varredura fecha o
+    // registro como erro, libera a vaga e a resposta tardia não o ressuscita.
+    const cmdTravado = await ls.enfileirarComando(UNI, posto, 'echo travado', { origem: 'agente' });
+    await bater({ souAdmin: false });
+    dbA.collection('lojaStatusComandos').doc(cmdTravado.id).set({ entregueEm: new Date(Date.now() - 11 * 60 * 1000).toISOString() }, { merge: true });
+    ls.descartarEspelhoTeste();
+    const transTravado = (await ls.varrerAlertas()).filter((t) => t.codigo === UNI && t.tipo === 'comando-travado');
+    const cmdTravadoData = (await dbA.collection('lojaStatusComandos').doc(cmdTravado.id).get()).data();
+    const depoisTravado = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    let respostaTardiaTravado = false;
+    try { await ls.marcarComandoExecutado(cmdTravado.id, { resultado: 'tarde' }, { codigo: UNI, posto, token: tk }); } catch (e) { respostaTardiaTravado = /depois do limite/i.test(e.message); }
+
     // EXPIRACAO: comando-admin numa maquina sem executor elevado (instalada sem
     // Administrador). Envelhece a espera e a varredura desiste, liberando a vaga.
     const UNI2 = 'NOCADM2';
@@ -7067,9 +7080,12 @@ setTimeout(async () => {
       'entregue uma vez só (não reentrega no próximo beat)': !sys2.comandoPendente,
       // comando comum não muda de dono
       'comando comum continua indo pra instância de login': !!login2.comandoPendente && /comum/.test(login2.comandoPendente.comando),
-      'a sondagem só-admin da SYSTEM não rouba comando comum': !sondaSoAdmin.comandoPendente,
-      'o comando comum sobra pra login pegar': !!login3.comandoPendente && /comum2/.test(login3.comandoPendente.comando),
-      // expiração
+       'a sondagem só-admin da SYSTEM não rouba comando comum': !sondaSoAdmin.comandoPendente,
+       'o comando comum sobra pra login pegar': !!login3.comandoPendente && /comum2/.test(login3.comandoPendente.comando),
+       'comando entregue sem retorno vira erro, libera a vaga e não aceita resposta tardia':
+         transTravado.length === 1 && cmdTravadoData.status === 'erro' && !depoisTravado.comandoPendenteId
+         && /tempo limite de execução/i.test(cmdTravadoData.erro || '') && respostaTardiaTravado,
+       // expiração
       'comando-admin sem executor elevado expira e libera a vaga':
         transExp.length === 1 && !depoisExp.comandoPendenteId
         && cmdExpData.status === 'erro' && /sem o NOCZenith elevado|reinstale como administrador/i.test(cmdExpData.erro),

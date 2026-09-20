@@ -527,6 +527,14 @@ const EVENTOS_MAX = 200;
 // Alem disso, a maquina instalada SEM Administrador nunca tera SYSTEM: aqui a
 // gente desiste com mensagem clara em vez de segurar a vaga unica de comando.
 const COMANDO_ELEVACAO_TIMEOUT_MS = 15 * 60 * 1000;
+// Um comando já entregue não pode ficar "executando" para sempre: isso só
+// ocupa a vaga da máquina e mascara agente/processo travado. O catálogo não
+// usa tarefas longas; 10 min é uma margem ampla inclusive para winget. A
+// execução real não é interrompida pelo servidor: apenas fechamos a fila com
+// erro para não prometer uma conclusão que nunca voltou ao NOC.
+const COMANDO_EXECUCAO_TIMEOUT_MS = Number(process.env.LOJA_STATUS_COMANDO_EXECUCAO_TIMEOUT_MS) >= 60 * 1000
+  ? Number(process.env.LOJA_STATUS_COMANDO_EXECUCAO_TIMEOUT_MS)
+  : 10 * 60 * 1000;
 
 // historico de mudancas de IP por computador (pedido do Master: "preciso de
 // dados quando o IP da maquina mudar"). Cobre os DOIS IPs que o NOC enxerga:
@@ -2890,6 +2898,33 @@ async function marcarComandoExpiradoSemAdmin(comandoId, codigo, posto, msg) {
   cache.invalidar();
 }
 
+// Não há como cancelar com segurança um PowerShell que já chegou à máquina.
+// Mas, se ela não devolve resultado dentro do teto, o estado "entregue" deixa
+// de ser honesto. Fecha como erro e libera SOMENTE a vaga que ainda pertence
+// a este comando; uma resposta tardia é descartada por marcarComandoExecutado.
+async function marcarComandoTravado(comandoId, codigo, posto) {
+  const comandoRef = COMANDOS_COLLECTION.doc(String(comandoId || ''));
+  const computadorRef = COLLECTION.doc(docIdFor(codigo, posto));
+  let travou = false;
+  await db.runTransaction(async (tx) => {
+    const comandoSnap = await tx.get(comandoRef);
+    if (!comandoSnap.exists) return;
+    const comando = comandoSnap.data();
+    const entregueEm = new Date(comando.entregueEm || 0).getTime();
+    if (comando.status !== 'entregue' || !Number.isFinite(entregueEm) || Date.now() - entregueEm < COMANDO_EXECUCAO_TIMEOUT_MS) return;
+    const computadorSnap = await tx.get(computadorRef);
+    const agora = new Date().toISOString();
+    const erro = 'Tempo limite de execução atingido: o agente não devolveu resultado em 10 minutos. Verifique a máquina e envie novamente se necessário.';
+    tx.update(comandoRef, { status: 'erro', erro, executadoEm: agora });
+    if (computadorSnap.exists && computadorSnap.data().comandoPendenteId === String(comandoId)) {
+      tx.update(computadorRef, { comandoPendenteId: null });
+    }
+    travou = true;
+  });
+  if (travou) cache.invalidar();
+  return travou;
+}
+
 async function entregarComandoPendente(codigo, posto, opcoes) {
   const id = docIdFor(codigo, posto);
   const ref = COLLECTION.doc(id);
@@ -2964,6 +2999,14 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   const snap = await comandoRef.get();
   if (!snap.exists) throw new Error('Comando não encontrado.');
   const comando = snap.data();
+  // Resultado atrasado de uma execução que o servidor já classificou como
+  // travada não pode "ressuscitar" o comando nem liberar uma nova vaga da
+  // máquina. O agente recebe 409 e registra no log, sem expor saída na tela.
+  if (comando.status !== 'entregue') {
+    throw new Error(comando.status === 'erro'
+      ? 'O resultado chegou depois do limite e o comando já foi fechado como erro.'
+      : 'Este comando não está aguardando resultado.');
+  }
   // o resultado tem que vir DO computador certo (codigo/posto do comando) e
   // com o token dele - senao qualquer um que adivinhasse um comandoId forjava
   // o resultado (marcava 'executado' com saida falsa, escondendo se rodou de
@@ -3339,6 +3382,21 @@ async function varrerAlertas() {
           tipo: 'comando-sem-admin', motivo: msg,
         });
       }
+    }
+    // Comando que chegou ao agente mas não retornou: fecha a fila em vez de
+    // mantê-la indefinidamente em "executando". A função confirma o status e
+    // o horário no documento do comando dentro de transação antes de alterar.
+    if (candidato.comandoPendenteId && !candidato.comandoAguardandoElevacaoDesde) {
+      try {
+        const travou = await marcarComandoTravado(candidato.comandoPendenteId, candidato.codigo, candidato.posto);
+        if (travou) {
+          transicoes.push({
+            codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+            tipo: 'comando-travado',
+            motivo: 'O agente não devolveu resultado em 10 minutos; a fila foi liberada com erro.',
+          });
+        }
+      } catch (e) { /* a próxima varredura tenta novamente */ }
     }
     // máquina reiniciou/desligou (pedido do Master: "se ele foi reiniciado
     // ou desligado esse deve ser os alertas"). Quem detecta é o heartbeat,
@@ -3943,7 +4001,7 @@ module.exports = {
   // falso e ser levado a sério, inclusive pra ENVELHECER a última batida,
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
-  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, cancelarComandoPendente, listarComandosPendentes,
+  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, cancelarComandoPendente, listarComandosPendentes, marcarComandoTravado,
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,
