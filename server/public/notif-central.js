@@ -125,6 +125,8 @@
     .zn-notif .zn-corpo{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
     .zn-notif .zn-direcionado{font-size:11px;color:var(--accent);margin-top:6px;font-family:var(--mono);}
     .zn-notif button.zn-ok{margin-top:10px;width:100%;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+    .zn-notif-resumo{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 12px;box-shadow:0 8px 24px rgba(0,0,0,.4);color:var(--text);font:600 12px var(--sans);cursor:pointer;}
+    .zn-notif-resumo strong{color:var(--accent);}
     .zn-notif button.zn-tarefa{margin-top:10px;width:100%;background:#18331d;color:#d9ffc4;border:1px solid #5d8a2a;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
     @keyframes zn-notif-pulse{0%,100%{border-color:var(--warn);}50%{border-color:var(--accent);}}
     @keyframes zn-notif-in{from{opacity:0;transform:translateX(16px);}to{opacity:1;transform:translateX(0);}}
@@ -189,23 +191,45 @@
   // Dispensa LOCAL (fechar no X ou arrastar): o Master pediu que, fechado, o
   // aviso não volte a aparecer ao atualizar a página. Não marca como visto no
   // servidor - o ticket segue PENDENTE na Central; só o popup para de insistir
-  // neste navegador. Guardado por tipo:id, com poda de 30 dias pra não crescer.
+  // neste navegador. Fechar também silencia a central por 30 minutos: a fila
+  // continua pendente, mas não deve tomar a tela de quem está trabalhando.
   const CHAVE_NOTIF_DISP = 'nopulsoNotifDispensadas';
+  const CHAVE_NOTIF_PAUSA_ATE = 'nopulsoNotifSolicitacoesPausaAte';
+  const PAUSA_NOTIF_MS = 30 * 60 * 1000;
   function lerNotifDisp() { try { return JSON.parse(localStorage.getItem(CHAVE_NOTIF_DISP) || '{}') || {}; } catch (e) { return {}; } }
   function chaveNotif(card) { return card.tipo + ':' + card.id; }
-  function notifDispensada(card) { return !!lerNotifDisp()[chaveNotif(card)]; }
+  function notifDispensada(card) { const em = lerNotifDisp()[chaveNotif(card)]; return Number(em) > Date.now() - PAUSA_NOTIF_MS; }
+  function notificacoesPausadas() { try { return Number(localStorage.getItem(CHAVE_NOTIF_PAUSA_ATE) || 0) > Date.now(); } catch (e) { return false; } }
+  function pausarNotificacoes() { try { localStorage.setItem(CHAVE_NOTIF_PAUSA_ATE, String(Date.now() + PAUSA_NOTIF_MS)); } catch (e) {} }
   function dispensarNotif(card) {
     const m = lerNotifDisp(); m[chaveNotif(card)] = Date.now();
-    const limite = Date.now() - 30 * 864e5;
+    const limite = Date.now() - PAUSA_NOTIF_MS;
     for (const k in m) { if (m[k] < limite) delete m[k]; }
     try { localStorage.setItem(CHAVE_NOTIF_DISP, JSON.stringify(m)); } catch (e) { /* storage cheio/bloqueado */ }
   }
 
+  let notificacoesAgrupadas = 0;
+  function mostrarResumoNotificacoes() {
+    if (notificacoesPausadas()) return;
+    notificacoesAgrupadas += 1;
+    let resumo = document.getElementById('zn-notif-resumo');
+    if (!resumo) {
+      resumo = document.createElement('button');
+      resumo.type = 'button'; resumo.id = 'zn-notif-resumo'; resumo.className = 'zn-notif-resumo';
+      resumo.addEventListener('click', () => { location.href = '/central-historico.html'; });
+      wrap.appendChild(resumo);
+    }
+    resumo.innerHTML = `<span>🔔 <strong>+${notificacoesAgrupadas}</strong> ${notificacoesAgrupadas === 1 ? 'solicitação aguardando' : 'solicitações aguardando'}</span><span>Ver fila →</span>`;
+  }
+  function limparNotificacoesDaTela() { notificacoesAgrupadas = 0; wrap.replaceChildren(); }
+
   function mostrarNotificacaoSolicitacao(card) {
     if (card.notificacaoVista) return;
+    if (notificacoesPausadas()) return;
     if (notifDispensada(card)) return;
     const elId = 'zn-notif-' + card.tipo + '-' + card.id;
     if (document.getElementById(elId)) return;
+    if (wrap.querySelector('.zn-notif')) { mostrarResumoNotificacoes(); return; }
     const el = document.createElement('div');
     el.className = 'zn-notif';
     el.id = elId;
@@ -228,7 +252,8 @@
     el.querySelector('.zn-fechar').addEventListener('click', (event) => {
       event.stopPropagation();
       dispensarNotif(card);
-      el.remove();
+      pausarNotificacoes();
+      limparNotificacoesDaTela();
     });
     const criarTarefa = el.querySelector('.zn-tarefa');
     if (criarTarefa) criarTarefa.addEventListener('click', async () => {
@@ -246,7 +271,7 @@
     });
     // arrastar pro lado fecha como o X: dispensa local (não some a pendência
     // no servidor, só o popup para de voltar neste navegador)
-    arrastarParaFechar(el, () => dispensarNotif(card));
+    arrastarParaFechar(el, () => { dispensarNotif(card); pausarNotificacoes(); limparNotificacoesDaTela(); });
     wrap.appendChild(el);
     tocarSomSolicitacao();
   }

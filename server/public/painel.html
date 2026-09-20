@@ -247,6 +247,8 @@
   .notif-solicitacao .ns-corpo{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
   .notif-solicitacao .ns-direcionado{font-size:11px;color:var(--accent);margin-top:6px;font-family:var(--mono);}
   .notif-solicitacao button.ns-ok{margin-top:10px;width:100%;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .notif-solicitacao-resumo{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:9px 12px;box-shadow:0 8px 24px rgba(0,0,0,.4);color:var(--text);font:600 12px var(--sans);cursor:pointer;}
+  .notif-solicitacao-resumo strong{color:var(--accent);}
   @keyframes notif-pulse{0%,100%{border-color:var(--warn);}50%{border-color:var(--accent);}}
   @keyframes notif-in{from{opacity:0;transform:translateX(16px);}to{opacity:1;transform:translateX(0);}}
 </style>
@@ -517,13 +519,28 @@ function tocarSomNotificacao(){
 // alerta e' aviso, nao e' a pendencia.
 const TIPOS_ALERTA_SO_ENCERRA = ['quebra-caixa'];
 const soEncerra = (c) => TIPOS_ALERTA_SO_ENCERRA.indexOf(c && c.tipo) !== -1;
+const CHAVE_NOTIF_PAUSA_ATE = 'nopulsoNotifSolicitacoesPausaAte';
+const PAUSA_NOTIF_MS = 30 * 60 * 1000;
+let notificacoesAgrupadas = 0;
+function notificacoesPausadas(){ try{return Number(localStorage.getItem(CHAVE_NOTIF_PAUSA_ATE)||0)>Date.now();}catch(e){return false;} }
+function pausarNotificacoes(){ try{localStorage.setItem(CHAVE_NOTIF_PAUSA_ATE,String(Date.now()+PAUSA_NOTIF_MS));}catch(e){} }
+function mostrarResumoNotificacoes(wrap){
+  if(notificacoesPausadas()) return;
+  notificacoesAgrupadas += 1;
+  let resumo=document.getElementById('notif-solicitacao-resumo');
+  if(!resumo){ resumo=document.createElement('button'); resumo.type='button'; resumo.id='notif-solicitacao-resumo'; resumo.className='notif-solicitacao-resumo'; resumo.addEventListener('click',()=>{location.href='/central-historico.html';}); wrap.appendChild(resumo); }
+  resumo.innerHTML=`<span>🔔 <strong>+${notificacoesAgrupadas}</strong> ${notificacoesAgrupadas===1?'solicitação aguardando':'solicitações aguardando'}</span><span>Ver fila →</span>`;
+}
+function limparNotificacoesDaTela(wrap){ notificacoesAgrupadas=0; wrap.replaceChildren(); }
 
 function mostrarNotificacaoSolicitacao(card){
   if(!IS_MASTER_GLOBAL && !IS_ADMIN_GLOBAL) return;
   if(card.notificacaoVista) return;
+  if(notificacoesPausadas()) return;
   const wrap = document.getElementById('notif-solicitacao-wrap');
   const elId = 'notif-sol-'+card.tipo+'-'+card.id;
   if(document.getElementById(elId)) return;
+  if(wrap.querySelector('.notif-solicitacao')){ mostrarResumoNotificacoes(wrap); return; }
   const el = document.createElement('div');
   el.className = 'notif-solicitacao';
   el.id = elId;
@@ -542,13 +559,14 @@ function mostrarNotificacaoSolicitacao(card){
   });
   el.querySelector('.ns-fechar').addEventListener('click', (event)=>{
     event.stopPropagation();
-    el.remove();
+    pausarNotificacoes();
+    limparNotificacoesDaTela(wrap);
   });
   // arrastar pro lado só tira da tela, SEM marcar como vista (o alerta volta
   // na próxima visita, porque a solicitação continua pendente) - ver
   // ZenithArrastarParaFechar em notif-central.js. O `if` é proposital: se
   // aquele arquivo não tiver carregado, o toast segue funcionando sem o gesto
-  if (window.ZenithArrastarParaFechar) window.ZenithArrastarParaFechar(el);
+  if (window.ZenithArrastarParaFechar) window.ZenithArrastarParaFechar(el, ()=>{ pausarNotificacoes(); limparNotificacoesDaTela(wrap); });
   wrap.appendChild(el);
   tocarSomNotificacao();
 }
