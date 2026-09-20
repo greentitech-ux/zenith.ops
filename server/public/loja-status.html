@@ -674,7 +674,7 @@
   <div data-recolher>
   <div class="agente-titulo" data-recolher-titulo><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
-    Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos. A máquina <b>carimba, no topo-direito, o nome da loja + o nome do computador cadastrado no NOC</b> (na arte <b>vertical</b>, tipo Makeline, o carimbo vai centralizado embaixo). Deixe essa área do carimbo livre na arte — ela já vem reservada nas bases genéricas. Assim a mesma arte serve a loja inteira e cada máquina se identifica sozinha. A marca sai do <b>perfil da unidade</b> e o grupo sai do <b>cadastro de empresas</b> — unidade sem empresa cai na arte só da marca, nunca na logo de um grupo que não é o dela. Se não houver arte do grupo, cai na arte só da marca; sem essa, na <b>Todas as marcas</b>. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
+    Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos. A máquina coloca o <b>nome do computador na placa branca do card central</b>; o <b>nome da loja</b> fica no topo-direito na arte horizontal e centralizado embaixo na vertical (Makeline). Deixe esses slots livres nas bases genéricas. Assim a mesma arte serve a loja inteira e cada máquina se identifica sozinha. A marca sai do <b>perfil da unidade</b> e o grupo sai do <b>cadastro de empresas</b>. Um envio em massa mais novo <b>substitui também as artes individuais anteriores</b>; uma arte individual enviada depois vale só para aquela máquina até o próximo envio em massa. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
     <select id="pp-marca" style="max-width:200px;"><option value="">Todas as marcas (padrão)</option></select>
@@ -3778,12 +3778,12 @@ function renderPoliticaComputador(codigo, c){
     <button type="button" class="btn-mini ok" style="margin-top:8px;" onclick="salvarPoliticaComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar política</button>
     <div class="msg hidden" id="msg-politica" style="margin-top:6px;"></div>
     <!-- ARTE DESTA MAQUINA: cada computador pode ter a propria imagem (pedido
-         do Master). Ela ganha da arte do grupo/marca e NAO leva carimbo por
-         cima (ja vem pronta). Lembre de ligar tambem o "Papel de parede da
+         do Master). Ela ganha da arte em massa somente enquanto for a mais
+         recente e NAO leva carimbo por cima (ja vem pronta). Lembre de ligar tambem o "Papel de parede da
          rede" acima - e ele que faz a maquina aplicar. -->
     <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:10px;">
       <div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Papel de parede desta máquina</div>
-      <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">${c.papelDeParedeArte&&c.papelDeParedeArte.caminho?'Esta máquina tem arte própria (enviada '+escapeHtml(tempoRelativo(c.papelDeParedeArte.em))+'). Ela substitui a arte do grupo, sem carimbo por cima.':'Sem arte própria — usa a arte do grupo/marca (com o nome carimbado). Envie uma imagem só desta máquina se ela tiver arte pronta.'}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">${c.papelDeParedeArte&&c.papelDeParedeArte.caminho?'Esta máquina tem arte própria (enviada '+escapeHtml(tempoRelativo(c.papelDeParedeArte.em))+'). Ela vale até existir um envio em massa mais novo; como já vem pronta, não recebe carimbo por cima.':'Sem arte própria — usa a arte em massa do grupo/marca (com o nome carimbado). Envie uma imagem só desta máquina se ela tiver arte pronta.'}</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <input type="file" id="pp-maq-arquivo" accept="image/png,image/jpeg,image/webp" style="max-width:230px;">
         <button type="button" class="btn-mini ok" onclick="enviarArteMaquina('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Enviar arte desta máquina</button>

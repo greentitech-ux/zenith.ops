@@ -194,17 +194,35 @@ function comandoRemoverPrograma(nome) {
 // O degrau do meio e o que ja estava no ar antes desta mudanca; quem so tem
 // arte por marca continua funcionando igual.
 const chaveArte = (rede, marca) => `${rede}:${marca}`;
+
+// A precedência não é permanente pelo tipo de arte. Quem manda é o último
+// envio: uma arte em massa nova substitui as individuais antigas; se o Master
+// salvar uma arte individual depois dela, apenas aquela máquina volta a usar
+// a arte própria até o próximo envio em massa. `em` é gravado em todos os
+// uploads; `versao` mantém compatibilidade com artes antigas.
+function momentoDaArte(arte) {
+  return Number((arte && (arte.em || arte.versao)) || 0);
+}
+
+function maisRecenteEntreArtes(artes) {
+  return (artes || []).filter((arte) => arte && arte.caminho).reduce((melhor, arte) => {
+    if (!melhor) return arte;
+    // Empate preserva a ordem recebida: grupo > marca > parque.
+    return momentoDaArte(arte) > momentoDaArte(melhor) ? arte : melhor;
+  }, null);
+}
+
 async function papelDeParedeDe(codigo, posto) {
   const cfg = await getConfig();
-  // ARTE DESTA MAQUINA vem primeiro (pedido do Master: "cada computador tem
-  // sua arte"). Ela ja traz tudo pronto (loja, codigo, logos), entao o agente
-  // NAO carimba nada por cima - quem sinaliza isso e a rota GET, por header.
-  // Sai do espelho em memoria, sem custo de leitura (§3).
+  // A arte individual só ganha enquanto for MAIS NOVA que a massa. Isso evita
+  // uma personalização antiga prender uma máquina no visual anterior quando o
+  // Master publica uma campanha nova para todo o parque.
+  // Sai do espelho em memória, sem custo de leitura (§3).
+  let daMaquina = null;
   if (posto) {
     try {
       const doc = (await garantirEspelho()).get(docIdFor(codigo, posto));
-      const daMaquina = doc && doc.papelDeParedeArte && doc.papelDeParedeArte.caminho ? doc.papelDeParedeArte : null;
-      if (daMaquina) return { ...daMaquina, marca: null, rede: null, daMaquina: true };
+      daMaquina = doc && doc.papelDeParedeArte && doc.papelDeParedeArte.caminho ? doc.papelDeParedeArte : null;
     } catch (e) { /* sem espelho: cai no fluxo normal */ }
   }
   const doParque = cfg && cfg.papelDeParede && cfg.papelDeParede.caminho ? cfg.papelDeParede : null;
@@ -216,13 +234,21 @@ async function papelDeParedeDe(codigo, posto) {
   const rede = empresa && empresa.id ? String(empresa.id) : null;
   const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
   const temArte = (k) => (k && porMarca[k] && porMarca[k].caminho ? porMarca[k] : null);
-  if (marca) {
-    const doGrupo = rede ? temArte(chaveArte(rede, marca)) : null;
-    if (doGrupo) return { ...doGrupo, marca, rede };
-    const soMarca = temArte(marca);
-    if (soMarca) return { ...soMarca, marca, rede: null };
+  const doGrupo = marca && rede ? temArte(chaveArte(rede, marca)) : null;
+  const soMarca = marca ? temArte(marca) : null;
+  // Em empate, a ordem preserva a especificidade que já existia: grupo,
+  // marca e por último parque. Em envios diferentes, vence sempre o recente.
+  const massa = maisRecenteEntreArtes([doGrupo, soMarca, doParque]);
+  const massaComOrigem = !massa ? null
+    : massa === doGrupo ? { ...massa, marca, rede }
+      : massa === soMarca ? { ...massa, marca, rede: null }
+        : { ...massa, marca: null, rede: null };
+  if (daMaquina && (!massaComOrigem || momentoDaArte(daMaquina) > momentoDaArte(massaComOrigem))) {
+    // Arte exclusiva já vem pronta (loja/código/logos), portanto não recebe
+    // carimbo adicional. Ela só chega aqui quando foi salva após a massa.
+    return { ...daMaquina, marca: null, rede: null, daMaquina: true };
   }
-  return doParque ? { ...doParque, marca: null, rede: null } : null;
+  return massaComOrigem;
 }
 
 // Versao que o AGENTE compara pra decidir se reaplica.
@@ -1273,8 +1299,8 @@ function sanitizarPolitica(entrada) {
 // ARTE DE PAPEL DE PAREDE DESTA MAQUINA (pedido do Master, 15/09/2026: "cada
 // computador tem sua arte"). Guardada no doc do computador. Sobe a versao da
 // aplicacao (via politicaVersao) pra o agente rebaixar a imagem nova na
-// proxima consulta - mesmo motivo do versaoAplicacao. A arte da maquina ganha
-// da arte do grupo/marca (ver papelDeParedeDe).
+// proxima consulta - mesmo motivo do versaoAplicacao. A precedência final é
+// temporal: a arte individual vence somente até um envio em massa mais novo.
 async function definirArteDaMaquina(codigo, posto, arte) {
   const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data();
   if (!atual) throw new Error('Computador não encontrado.');
@@ -3885,7 +3911,7 @@ module.exports = {
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
-  sanitizarPolitica, definirPolitica, papelDeParedeDe, versaoAplicacao, chaveArte, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
+  sanitizarPolitica, definirPolitica, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,

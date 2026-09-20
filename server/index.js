@@ -1768,8 +1768,9 @@ app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (r
 // tem sua arte"). auth.requireAuth EXPLICITO: estas rotas estao ACIMA do
 // app.use('/api', auth.requireAuth) (pra conviver com a GET publica logo
 // acima), entao sem ele req.isMaster vinha vazio e o requireMaster barrava ate
-// o proprio Master. Sobe uma imagem so pra este computador; ela ganha da arte do
-// grupo/marca e o agente NAO carimba por cima (ver o header acima). Master-only.
+// o proprio Master. Sobe uma imagem só pra este computador; ela vale até um
+// envio em massa mais novo e o agente NÃO carimba por cima (ver o header acima).
+// Master-only.
 app.put('/api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte', auth.requireAuth, auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
   try {
     // trava de segurança: papel de parede entra na tela de 52 máquinas, então
