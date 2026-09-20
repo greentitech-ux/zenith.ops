@@ -498,10 +498,16 @@ const LIMIAR_OFFLINE_MS = 90 * 1000;
 // Pedido do usuário: conexão que cai e volta em 1-3 minutos NÃO é queda -
 // o painel continua acusando na hora (estado INDISPONÍVEL + evento no
 // histórico), mas o push CRÍTICO (o que dispara o alarme sonoro) só sai se
-// o silêncio passar deste teto. Env pra ajustar sem deploy.
-const CONFIRMACAO_QUEDA_MS = Number(process.env.LOJA_STATUS_CONFIRMACAO_QUEDA_MS) >= 0
-  ? Number(process.env.LOJA_STATUS_CONFIRMACAO_QUEDA_MS)
-  : 4 * 60 * 1000;
+// o silêncio passar deste teto. O mínimo de oito minutos é intencional: uma
+// ausência menor não permite separar Wi-Fi oscilando de máquina travada.
+// O ambiente pode AUMENTAR a janela, mas nunca reduzi-la a ponto de gerar
+// falso positivo.
+const CONFIRMACAO_QUEDA_MINIMA_MS = 8 * 60 * 1000;
+const CONFIRMACAO_QUEDA_CONFIGURADA_MS = Number(process.env.LOJA_STATUS_CONFIRMACAO_QUEDA_MS);
+const CONFIRMACAO_QUEDA_MS = Math.max(
+  CONFIRMACAO_QUEDA_MINIMA_MS,
+  Number.isFinite(CONFIRMACAO_QUEDA_CONFIGURADA_MS) ? CONFIRMACAO_QUEDA_CONFIGURADA_MS : 0,
+);
 // mesma ideia do CONFIRMACAO_QUEDA_MS acima, mas NÃO pode reusar o valor: a
 // varredura de dispositivos de rede (Varrer-RedeLocal, vigiaScript.js) roda
 // so 1x por HORA, e mesclarDispositivos ja marca ativo:false no primeiro
@@ -510,9 +516,12 @@ const CONFIRMACAO_QUEDA_MS = Number(process.env.LOJA_STATUS_CONFIRMACAO_QUEDA_MS
 // nao confirma nada. Exige ~2 ciclos de scan sem aparecer (2h, com folga de
 // jitter) antes de considerar queda de verdade - 1 scan perdido e normal
 // (cache ARP, DHCP renovando, impressora ociosa).
-const DISPOSITIVO_OFFLINE_LIMIAR_MS = Number(process.env.LOJA_STATUS_DISPOSITIVO_OFFLINE_MS) >= 0
-  ? Number(process.env.LOJA_STATUS_DISPOSITIVO_OFFLINE_MS)
-  : 2 * 60 * 60 * 1000;
+const DISPOSITIVO_OFFLINE_MINIMO_MS = 2 * 60 * 60 * 1000;
+const DISPOSITIVO_OFFLINE_CONFIGURADO_MS = Number(process.env.LOJA_STATUS_DISPOSITIVO_OFFLINE_MS);
+const DISPOSITIVO_OFFLINE_LIMIAR_MS = Math.max(
+  DISPOSITIVO_OFFLINE_MINIMO_MS,
+  Number.isFinite(DISPOSITIVO_OFFLINE_CONFIGURADO_MS) ? DISPOSITIVO_OFFLINE_CONFIGURADO_MS : 0,
+);
 // registro de atividades por computador: guarda as ultimas N transicoes
 // online<->offline (ver varrerAlertas), pra auditar quedas de conexao sem
 // depender de print. Capado pra o documento nao crescer sem limite.
@@ -3448,16 +3457,11 @@ async function varrerAlertas() {
         motivos: candidato.discoMotivos || [],
       });
     }
-    // Memória sob pressão precisa chegar rápido: não mata processo nem
-    // reinicia o PDV sozinho; apenas abre o alerta com a medição que justifica
-    // uma ação aprovada pelo operador.
+    // RAM continua registrada na telemetria e visível no NOC, mas não gera
+    // push. Memória baixa sozinha é um sinal ruidoso em PDVs e não comprova
+    // travamento; o Master pediu que deixe de interromper o celular.
     if (candidato.ramAlertaPendente) {
       await gravarEEspelhar(candidato.codigo, candidato.posto, { ramAlertaPendente: null });
-      transicoes.push({
-        codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
-        tipo: 'ram', nivel: candidato.ramAlertaPendente,
-        motivos: candidato.ramMotivos || [],
-      });
     }
     // VM DO HOST caiu (Executando -> Desligada/Salva). Quem detecta e' a
     // telemetria do host (registrarTelemetria); aqui e' so o aviso, de um
@@ -3620,6 +3624,7 @@ async function varrerAlertas() {
         codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline',
         celular: quedaDeCelular(doc), ehNotebook: !!doc.ehNotebook,
         reiniciando: reiniciandoPorNos, confirmada,
+        semSinalMs: Date.now() - doc.ultimoHeartbeatEm,
       });
     } else if (!online && doc.avisadoOffline && doc.quedaPushPendente
         && (Date.now() - (doc.offlineDesde || doc.ultimoHeartbeatEm)) >= CONFIRMACAO_QUEDA_MS) {
@@ -3629,6 +3634,7 @@ async function varrerAlertas() {
       transicoes.push({
         codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline-confirmada',
         celular: quedaDeCelular(doc), ehNotebook: !!doc.ehNotebook,
+        semSinalMs: Date.now() - (doc.offlineDesde || doc.ultimoHeartbeatEm),
       });
     } else if (online && doc.avisadoOffline) {
       // no retorno o doc ja tem o IP NOVO (o heartbeat que provou que voltou

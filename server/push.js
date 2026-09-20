@@ -1159,8 +1159,9 @@ async function notifyReinicioPendente(unidadeNome, codigo, computadorNome, posto
 // fazer alguém sair atrás de um problema que não existe. Some com o alarme
 // crítico também: ninguém precisa ser acordado por um reinício que nós
 // mesmos agendamos.
-async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, reiniciando) {
+async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, reiniciando, semSinalMs = 0) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const minutosSemSinal = Math.max(1, Math.round((Number(semSinalMs) || 0) / 60000));
   const dados = reiniciando ? {
     title: '🔄 Reiniciando (manutenção)',
     body: `${prefixo}${unidadeNome || codigo} saiu do ar pra reiniciar - foi o NOC que mandou. Volta em ~2 min; se não voltar, você é avisado.`,
@@ -1168,8 +1169,8 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, rei
     critical: false,
     url: '/loja-status.html',
   } : {
-    title: '🔴 Loja sem conexão',
-    body: `${prefixo}${unidadeNome || codigo} parou de responder - verifique a internet/computador da loja.`,
+    title: '⚠️ Computador sem resposta',
+    body: `${prefixo}${unidadeNome || codigo} está sem sinal há ${minutosSemSinal} min. Pode estar travado, desligado ou sem rede; confirme antes de agir.`,
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
     critical: true,
     url: '/loja-status.html',

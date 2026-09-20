@@ -15844,10 +15844,10 @@ function aquecerBoot(promessa, ms) {
         // em poucos minutos fica só no painel/histórico, sem apitar ninguém
         if (t.tipo === 'offline') {
           if (t.reiniciando || t.confirmada) {
-            push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto, t.reiniciando).catch((err) => console.error('Erro no push de loja offline:', err.message));
+            push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto, t.reiniciando, t.semSinalMs).catch((err) => console.error('Erro no push de loja offline:', err.message));
           }
         } else if (t.tipo === 'offline-confirmada') {
-          push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto, false).catch((err) => console.error('Erro no push de loja offline:', err.message));
+          push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto, false, t.semSinalMs).catch((err) => console.error('Erro no push de loja offline:', err.message));
         } else if (t.tipo === 'online' && !t.quedaCurta) {
           push.notifyLojaVoltou(nome, t.codigo, t.nome, t.posto, t.voltouDeReinicio).catch((err) => console.error('Erro no push de loja online:', err.message));
         }
