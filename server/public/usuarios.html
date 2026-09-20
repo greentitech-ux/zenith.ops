@@ -53,6 +53,34 @@
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px;}
   @media(max-width:640px){ .panel{padding:14px;} }
   .panel h2{font-size:13px;margin:0 0 14px;}
+  /* Administração não é uma tela comum: a navegação contextual deixa claro
+     se o Master está mexendo em pessoas, estrutura ou segurança. */
+  .admin-nav{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;margin-bottom:4px;scrollbar-width:none;}
+  .admin-nav::-webkit-scrollbar{display:none;}
+  .admin-nav a{display:inline-flex;align-items:center;gap:7px;flex:none;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--muted);font:600 11px var(--mono);text-decoration:none;transition:.16s ease;}
+  .admin-nav a:hover{border-color:var(--accent);color:var(--text);transform:translateY(-1px);}
+  .admin-nav a.active{background:linear-gradient(135deg,rgba(184,255,60,.2),rgba(184,255,60,.06));border-color:var(--accent);color:var(--accent);box-shadow:0 8px 24px rgba(184,255,60,.08);}
+  .admin-hero{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(260px,.65fr);gap:14px;margin:0 0 16px;}
+  .admin-intro{position:relative;overflow:hidden;padding:20px;border:1px solid #2f3a24;border-radius:14px;background:radial-gradient(circle at 100% 0,rgba(184,255,60,.14),transparent 46%),linear-gradient(135deg,#171d17,#12161b 70%);}
+  .admin-intro:after{content:'';position:absolute;width:140px;height:140px;border:1px solid rgba(184,255,60,.16);border-radius:50%;right:-58px;bottom:-80px;}
+  .admin-kicker{font:700 10px var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--accent);}
+  .admin-intro h2{font-size:18px;margin:8px 0 7px;letter-spacing:-.02em;}
+  .admin-intro p{position:relative;z-index:1;max-width:650px;margin:0;color:var(--muted);font-size:12.5px;line-height:1.55;}
+  .admin-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+  .admin-stat{min-height:98px;padding:14px;border:1px solid var(--line);border-radius:13px;background:var(--panel);}
+  .admin-stat .num{display:block;font:700 25px var(--mono);letter-spacing:-.07em;color:var(--text);}
+  .admin-stat .lab{display:block;margin-top:7px;color:var(--muted);font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.05em;line-height:1.35;}
+  .admin-stat.ok .num{color:var(--ok);}.admin-stat.warn .num{color:var(--warn);}.admin-stat.bad .num{color:var(--bad);}
+  .admin-section{display:flex;align-items:center;gap:10px;margin:26px 0 10px;}
+  .admin-section:after{content:'';height:1px;flex:1;background:var(--line);}
+  .admin-section span{font:700 10px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);white-space:nowrap;}
+  .admin-section b{color:var(--text);font-size:12px;letter-spacing:0;text-transform:none;}
+  @media(max-width:640px){
+    .admin-hero{grid-template-columns:1fr;}
+    .admin-intro{padding:16px;}.admin-intro h2{font-size:16px;}
+    .admin-cards{grid-template-columns:repeat(4,minmax(110px,1fr));overflow-x:auto;padding-bottom:2px;}
+    .admin-stat{min-width:110px;min-height:86px;padding:11px;}.admin-stat .num{font-size:21px;}
+  }
   .panels-lado-a-lado{display:flex;gap:16px;align-items:flex-start;}
   .panels-lado-a-lado > .panel{flex:1 1 0;min-width:0;}
   @media(max-width:1000px){ .panels-lado-a-lado{flex-direction:column;} }
@@ -214,6 +242,26 @@
 <div id="sem-acesso" class="empty hidden">Só o acesso Master pode gerenciar usuários.</div>
 
 <div id="root" class="hidden">
+  <nav class="admin-nav" aria-label="Administração">
+    <a class="active" href="/usuarios.html" aria-current="page">👥 Usuários</a>
+    <a href="/grupos.html#empresas">🏢 Empresas e unidades</a>
+    <a href="/grupos.html">🏷️ Grupos operacionais</a>
+    <a href="/cofre.html">🔐 Cofre de acessos</a>
+    <a href="/central-alertas.html">🚨 Regras e alertas</a>
+  </nav>
+
+  <section class="admin-hero" aria-label="Resumo da administração">
+    <div class="admin-intro">
+      <div class="admin-kicker">Administração · Controle de acesso</div>
+      <h2>Quem pode ver, agir e administrar cada operação.</h2>
+      <p>O acesso é organizado por empresa, unidade, módulo e função. Somente o Master mantém a visão global; os demais recebem estritamente o escopo que você liberar.</p>
+    </div>
+    <div class="admin-cards" id="admin-resumo-acessos" aria-live="polite">
+      <div class="admin-stat"><span class="num">—</span><span class="lab">Carregando acessos</span></div>
+    </div>
+  </section>
+
+  <div class="admin-section"><span>01 · <b>Gerenciar acessos</b></span></div>
   <div class="panels-lado-a-lado">
   <div class="panel">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -253,6 +301,7 @@
   </div>
   </div>
 
+  <div class="admin-section"><span>02 · <b>Operações administrativas</b></span></div>
   <div class="panel">
     <h2>Atualizar usuários (login) em massa</h2>
     <p style="font-size:12px;color:var(--muted);margin:-6px 0 12px;">Cole uma linha por acesso, no formato <code>email,usuário</code> (ex: copiado de uma planilha - vírgula ou tab entre as colunas). Aplica um por um e mostra o resultado de cada linha; se algum email não existir ou o usuário já estiver em uso, só aquela linha falha, o resto é aplicado normalmente.</p>
@@ -1021,6 +1070,21 @@ function statusUsuario(u){
   if(u.locked) return 'bloqueados';
   return u.active ? 'ativos' : 'desativados';
 }
+function renderResumoAcessos(){
+  const el = document.getElementById('admin-resumo-acessos');
+  if(!el) return;
+  const ativos = USERS.filter(u=>statusUsuario(u)==='ativos').length;
+  const online = USERS.filter(u=>u.online).length;
+  const escopados = USERS.filter(u=>u.role==='master' || u.empresaId || (u.permissions?.unidades||[]).length).length;
+  const paraRevisar = USERS.filter(u=>u.locked || (u.role!=='master' && !u.empresaId && !(u.permissions?.unidades||[]).length)).length;
+  const cards = [
+    ['',''+USERS.length,'Acessos cadastrados'],
+    ['ok',''+ativos,'Acessos ativos'],
+    ['',''+online,'Conectados agora'],
+    [paraRevisar?'bad':'ok', paraRevisar ? ''+paraRevisar : ''+escopados, paraRevisar?'Precisam revisão':'Escopo definido'],
+  ];
+  el.innerHTML = cards.map(([tom,num,rot])=>`<div class="admin-stat ${tom}"><span class="num">${num}</span><span class="lab">${rot}</span></div>`).join('');
+}
 // busca em email, usuario, cargo, tags e nomes de secao/unidade liberadas -
 // mesmo criterio "todas as palavras precisam aparecer" usado na Central
 function passaBuscaUsuario(u){
@@ -1055,6 +1119,7 @@ function renderFiltroStatusUsuarios(apósBusca){
 }
 
 function renderUsers(){
+  renderResumoAcessos();
   const container = document.getElementById('users-list');
   const todosOrdenados = [...USERS].sort((a,b)=>a.email.localeCompare(b.email,'pt-BR',{sensitivity:'base'}));
   const apósBusca = todosOrdenados.filter(passaBuscaUsuario);
