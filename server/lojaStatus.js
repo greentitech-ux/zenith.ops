@@ -1293,7 +1293,29 @@ async function tokenDoComputador(codigo, posto) {
 //                    que roda por servico ja elevado, nao passa por ai.
 //   alertarInstalacao  - o agente manda a lista de programas e o servidor
 //                    avisa quando aparece um que nao estava la antes.
+//   estacao            - perfil declarativo da Área de Trabalho. Nesta
+//                    primeira etapa ele apenas define o que foi aprovado e
+//                    permite inventariar; NÃO apaga, move ou fixa nada.
 // Tudo REVERSIVEL: desligar a chave devolve a maquina ao estado anterior.
+const ITENS_ESTACAO_APROVAVEIS = ['nopulso', 'anydesk', 'rdp-dominos'];
+function sanitizarEstacao(entrada) {
+  const e = entrada && typeof entrada === 'object' ? entrada : {};
+  const ativo = e.ativa === true;
+  const perfil = e.perfil === 'gerencia' ? 'gerencia' : 'nenhum';
+  const permitidos = Array.isArray(e.atalhosAprovados) ? e.atalhosAprovados : [];
+  const atalhosAprovados = [...new Set(permitidos.map((x) => String(x).trim().toLowerCase()))]
+    .filter((x) => ITENS_ESTACAO_APROVAVEIS.includes(x));
+  return {
+    ativa: ativo,
+    perfil: ativo ? perfil : 'nenhum',
+    // O primeiro envio é SEMPRE somente inventário. Uma etapa futura poderá
+    // aplicar a lista, mas nunca por acidente.
+    modo: 'inventario',
+    protegerAnydesk: ativo && e.protegerAnydesk !== false,
+    rdpDominosObrigatorio: ativo && e.rdpDominosObrigatorio === true,
+    atalhosAprovados,
+  };
+}
 function sanitizarPolitica(entrada) {
   const p = entrada && typeof entrada === 'object' ? entrada : {};
   return {
@@ -1301,6 +1323,7 @@ function sanitizarPolitica(entrada) {
     bloquearUsbStorage: !!p.bloquearUsbStorage,
     bloquearInstalacao: !!p.bloquearInstalacao,
     alertarInstalacao: !!p.alertarInstalacao,
+    estacao: sanitizarEstacao(p.estacao),
   };
 }
 
@@ -1327,13 +1350,30 @@ async function removerArteDaMaquina(codigo, posto) {
 }
 
 async function definirPolitica(codigo, posto, entrada) {
-  const politica = sanitizarPolitica(entrada);
   // a versao sobe a cada mudanca: e assim que o agente sabe que tem politica
   // nova pra aplicar sem precisar comparar campo a campo na maquina
   const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data() || {};
+  // As telas antigas de política ainda mandam só as quatro travas. Preservar
+  // o perfil de estação nesse caso evita que ajustar USB apague a aprovação
+  // de atalhos que o Master já registrou.
+  const temEstacao = entrada && typeof entrada === 'object' && Object.prototype.hasOwnProperty.call(entrada, 'estacao');
+  const politica = sanitizarPolitica({ ...(entrada || {}), estacao: temEstacao ? entrada.estacao : atual.politica?.estacao });
   const politicaVersao = Number(atual.politicaVersao || 0) + 1;
   await gravarEEspelhar(codigo, posto, { politica, politicaVersao });
   return { ...politica, politicaVersao };
+}
+
+// O perfil da estação tem rota própria para não zerar por engano as quatro
+// travas já existentes quando o Master só estiver organizando a Área de
+// Trabalho. É uma configuração, não uma execução remota.
+async function definirPerfilEstacao(codigo, posto, entrada) {
+  const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data();
+  if (!atual) throw new Error('Computador não encontrado.');
+  const politica = sanitizarPolitica(atual.politica);
+  politica.estacao = sanitizarEstacao(entrada);
+  const politicaVersao = Number(atual.politicaVersao || 0) + 1;
+  await gravarEEspelhar(codigo, posto, { politica, politicaVersao });
+  return { ...politica.estacao, politicaVersao };
 }
 
 // programas instalados: o agente manda a lista, o servidor guarda e diz o que
@@ -2085,6 +2125,32 @@ const COMANDO_DIAGNOSTICO_DESEMPENHO = [
   'if ($top) { $linhas.Add("MAIORES CONSUMOS:"); $linhas.AddRange(@($top)) }',
   '$inicio = Get-CimInstance Win32_StartupCommand -ErrorAction SilentlyContinue | Select-Object -First 15 | ForEach-Object { $_.Name }',
   'if ($inicio) { $linhas.Add("INICIALIZAÇÃO (amostra): " + (@($inicio) -join ", ")) }',
+  '$linhas -join "`n"',
+].join('\n');
+
+// Inventário inicial do perfil de estação. Deliberadamente não devolve nomes
+// de documentos nem caminhos de usuário: o Master precisa saber a situação
+// da Área de Trabalho, não copiar dados pessoais para o histórico do NOC.
+// Não cria, remove, move ou fixa item algum.
+const COMANDO_INVENTARIO_ESTACAO = [
+  '$linhas = New-Object System.Collections.Generic.List[string]',
+  '$areas = @($env:USERPROFILE + "\\Desktop", $env:PUBLIC + "\\Desktop") | Select-Object -Unique',
+  '$lnk=0; $url=0; $rdp=0; $outros=0',
+  'foreach ($area in $areas) {',
+  '  if (-not (Test-Path -LiteralPath $area)) { continue }',
+  '  foreach ($i in @(Get-ChildItem -LiteralPath $area -Force -ErrorAction SilentlyContinue)) {',
+  '    if ($i.PSIsContainer) { $outros++; continue }',
+  '    switch ($i.Extension.ToLowerInvariant()) { ".lnk" {$lnk++}; ".url" {$url++}; ".rdp" {$rdp++}; default {$outros++} }',
+  '  }',
+  '}',
+  '$linhas.Add("AREA DE TRABALHO: $lnk atalho(s), $url link(s) web, $rdp arquivo(s) RDP e $outros outro(s) item(ns).")',
+  '$anydesk = Get-ItemProperty "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*","HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "AnyDesk*" } | Select-Object -First 1',
+  '$linhas.Add("ANYDESK: " + $(if ($anydesk) { "instalado" } else { "nao encontrado" }))',
+  '$mstsc = Get-Command mstsc.exe -ErrorAction SilentlyContinue',
+  '$linhas.Add("RDP: " + $(if ($mstsc) { "cliente Windows disponivel" } else { "cliente Windows nao encontrado" }))',
+  '$np = @(Get-Item ($env:USERPROFILE + "\\Desktop\\NoPulso*.lnk"), ($env:APPDATA + "\\Microsoft\\Windows\\Start Menu\\Programs\\NoPulso*.lnk") -Force -ErrorAction SilentlyContinue).Count',
+  '$linhas.Add("NOPULSO: " + $(if ($np -gt 0) { "$np atalho(s) localizado(s)" } else { "atalho nao localizado" }))',
+  '$linhas.Add("RESULTADO: inventario somente-leitura; nenhuma alteracao foi feita.")',
   '$linhas -join "`n"',
 ].join('\n');
 
@@ -4043,12 +4109,12 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_LIMPEZA_SEGURA, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA,
   COMANDO_REDE_DESTRAVAR, COMANDO_RESET_SENHA,
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
-  sanitizarPolitica, definirPolitica, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
+  sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,

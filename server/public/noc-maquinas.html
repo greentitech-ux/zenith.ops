@@ -233,6 +233,27 @@
   </div>
 </div>
 
+<!-- Perfil de estação: a primeira etapa não altera arquivos. Ele registra a
+     regra do Master e, depois, permite pedir o inventário seguro. -->
+<div class="modal hidden" id="modal-estacao">
+  <div class="caixa" role="dialog" aria-modal="true" aria-labelledby="me-titulo">
+    <h2 id="me-titulo">🧭 Preparar estação de gerência</h2>
+    <div class="alvo" id="me-alvo"></div>
+    <p>Este piloto só registra os atalhos autorizados e permite inventariar a Área de Trabalho. Não apaga, move, instala ou fixa nada nesta etapa.</p>
+    <label><input type="checkbox" id="me-ativa" checked> Usar perfil de Gerência</label>
+    <label><input type="checkbox" id="me-nopulso" checked> NoPulso autorizado</label>
+    <label><input type="checkbox" id="me-anydesk" checked> Proteger AnyDesk</label>
+    <label><input type="checkbox" id="me-rdp" checked> Manter acesso RDP da Domino’s</label>
+    <label for="me-senha" style="margin-top:12px;">Sua senha de Master para salvar a política</label>
+    <input type="password" id="me-senha" autocomplete="new-password" placeholder="senha">
+    <div class="erro hidden" id="me-erro"></div>
+    <div class="linha-botoes">
+      <button type="button" class="btn-cancelar" onclick="fecharEstacao()">Cancelar</button>
+      <button type="button" class="btn-ok" id="me-confirmar" onclick="salvarEstacao()">Salvar perfil</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // O token do login mora no localStorage e TEM que ir em toda chamada de
 // /api/ - sem isso o servidor responde 401 e a pagina mostrava "Você não
@@ -359,6 +380,7 @@ function barraDisco(v){
 const chaveDe = (codigo, posto) => `${codigo}|${posto}`;
 let ALVO_REINICIO = null;
 let ALVO_OTIMIZACAO = null;
+let ALVO_ESTACAO = null;
 
 function abrirReiniciar(codigo, posto, nome, unidade){
   ALVO_REINICIO = { codigo, posto, nome, unidade };
@@ -376,6 +398,7 @@ function fecharReiniciar(){
 function abrirOtimizar(codigo, posto, nome, unidade, tarefa){
   const definicoes = {
     'diagnostico-desempenho': { titulo:'🔎 Diagnosticar desempenho', botao:'Diagnosticar', descricao:'Somente leitura: mede RAM, CPU, espaço em disco, processos com maior consumo e itens de inicialização. Não fecha programas nem altera configurações.' },
+    'inventario-estacao': { titulo:'📋 Inventariar estação', botao:'Inventariar', descricao:'Somente leitura: conta atalhos, links web, arquivos RDP e outros itens na Área de Trabalho; verifica NoPulso, AnyDesk e o cliente RDP. Não mostra documentos pessoais nem altera a máquina.' },
     'limpeza-segura': { titulo:'🧹 Limpeza segura de temporários', botao:'Limpar com segurança', descricao:'Remove somente arquivos temporários e Lixeira. Não toca em Downloads, Documentos, programas, PDV ou arquivos de operação. Exige o agente SYSTEM.' },
   };
   const d = definicoes[tarefa]; if(!d) return;
@@ -390,6 +413,44 @@ function abrirOtimizar(codigo, posto, nome, unidade, tarefa){
   document.getElementById('mo-senha').focus();
 }
 function fecharOtimizar(){ ALVO_OTIMIZACAO = null; document.getElementById('modal-otimizar').classList.add('hidden'); }
+function abrirEstacao(codigo, posto, nome, unidade, atual){
+  ALVO_ESTACAO = { codigo, posto, nome, unidade };
+  const e = (atual && typeof atual === 'object') ? atual : {};
+  document.getElementById('me-alvo').textContent = `${nome} · ${unidade}`;
+  document.getElementById('me-ativa').checked = e.ativa !== false;
+  const aprovados = Array.isArray(e.atalhosAprovados) ? e.atalhosAprovados : ['nopulso','anydesk','rdp-dominos'];
+  document.getElementById('me-nopulso').checked = aprovados.includes('nopulso');
+  document.getElementById('me-anydesk').checked = e.protegerAnydesk !== false;
+  document.getElementById('me-rdp').checked = e.rdpDominosObrigatorio !== false;
+  document.getElementById('me-senha').value = '';
+  const erro = document.getElementById('me-erro'); erro.classList.add('hidden'); erro.textContent = '';
+  document.getElementById('modal-estacao').classList.remove('hidden');
+  document.getElementById('me-senha').focus();
+}
+function fecharEstacao(){ ALVO_ESTACAO = null; document.getElementById('modal-estacao').classList.add('hidden'); }
+async function salvarEstacao(){
+  if(!ALVO_ESTACAO) return;
+  const senha = document.getElementById('me-senha').value;
+  const erro = document.getElementById('me-erro');
+  if(!senha){ erro.textContent='Digite sua senha de Master.'; erro.classList.remove('hidden'); return; }
+  const ativa = document.getElementById('me-ativa').checked;
+  const atalhosAprovados = [];
+  if(document.getElementById('me-nopulso').checked) atalhosAprovados.push('nopulso');
+  if(document.getElementById('me-anydesk').checked) atalhosAprovados.push('anydesk');
+  if(document.getElementById('me-rdp').checked) atalhosAprovados.push('rdp-dominos');
+  const botao = document.getElementById('me-confirmar'); botao.disabled=true; botao.textContent='salvando...';
+  try{
+    const a=ALVO_ESTACAO;
+    const r=await fetch(`/api/loja-status/${encodeURIComponent(a.codigo)}/computadores/${encodeURIComponent(a.posto)}/perfil-estacao`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ password:senha, ativa, perfil:'gerencia', protegerAnydesk:document.getElementById('me-anydesk').checked,
+        rdpDominosObrigatorio:document.getElementById('me-rdp').checked, atalhosAprovados }),
+    });
+    const d=await r.json(); if(!r.ok) throw new Error(d.error||'Não consegui salvar o perfil.');
+    fecharEstacao(); await carregar();
+  }catch(e){ erro.textContent=e.message; erro.classList.remove('hidden'); }
+  finally{ botao.disabled=false; botao.textContent='Salvar perfil'; }
+}
 // Enter na senha confirma; Esc fecha - a caixa é de um campo só
 document.addEventListener('keydown', (ev) => {
   if(!document.getElementById('modal-reiniciar').classList.contains('hidden')){
@@ -399,6 +460,10 @@ document.addEventListener('keydown', (ev) => {
   if(!document.getElementById('modal-otimizar').classList.contains('hidden')){
     if(ev.key === 'Escape') fecharOtimizar();
     if(ev.key === 'Enter' && document.activeElement === document.getElementById('mo-senha')) confirmarOtimizar();
+  }
+  if(!document.getElementById('modal-estacao').classList.contains('hidden')){
+    if(ev.key === 'Escape') fecharEstacao();
+    if(ev.key === 'Enter' && document.activeElement === document.getElementById('me-senha')) salvarEstacao();
   }
 });
 
@@ -459,6 +524,8 @@ async function confirmarOtimizar(){
     if(!d.enfileirados) throw new Error((d.recusados&&d.recusados[0]&&d.recusados[0].motivo)||'A máquina não aceitou a ação.');
     mostrarMsgCard(alvo, alvo.tarefa==='limpeza-segura'
       ? 'Limpeza segura enviada ao executor SYSTEM. O resultado aparecerá na ficha e na fila.'
+      : alvo.tarefa==='inventario-estacao'
+        ? 'Inventário da estação enviado. Ele não altera arquivos; o resumo aparecerá na ficha e na fila.'
       : 'Diagnóstico enviado. O resultado aparecerá na ficha e na fila.', 'ok');
   }catch(e){ erro.textContent=e.message; erro.classList.remove('hidden'); }
   finally{ botao.disabled=false; botao.textContent=texto; }
@@ -568,6 +635,11 @@ function cardHtml(c){
     const extras = [t.ip?`IP ${escapeHtml(t.ip)}`:null, t.nome?escapeHtml(t.nome):null].filter(Boolean).join(' · ');
     linha('Tailscale', estado + (extras?` <span class="sub">· ${extras}</span>`:''));
   }
+  const estacao = c.politica && c.politica.estacao;
+  if(estacao && estacao.ativa){
+    const itens = (estacao.atalhosAprovados || []).map((x) => ({ nopulso:'NoPulso', anydesk:'AnyDesk', 'rdp-dominos':'RDP Domino’s' }[x] || x)).join(' · ');
+    linha('Estação', `<b class="ok">Gerência</b> <span class="sub">· inventário · ${escapeHtml(itens || 'sem atalhos aprovados')}</span>`);
+  }
   if(c.ultimoComandoEm){
     const resultado = String(c.ultimoComandoErro || c.ultimoComandoResultado || 'sem texto de retorno').replace(/\s+/g,' ').slice(0, 360);
     linha('Última ação', `<b class="${c.ultimoComandoErro?'bad':'ok'}">${c.ultimoComandoErro?'erro':'concluída'}</b> <span class="sub">· ${escapeHtml(tempoRelativo(c.ultimoComandoEm))} · ${escapeHtml(resultado)}</span>`);
@@ -591,7 +663,11 @@ function cardHtml(c){
   const chave = chaveDe(c.codigo, c.posto);
   const idMsg = 'msg-' + chave.replace(/[^a-zA-Z0-9]/g,'_');
   const enviado = ENVIADOS.get(chave);
+  const estacaoAtual = c.politica && c.politica.estacao ? c.politica.estacao : null;
+  const estacaoJson = escapeJs(JSON.stringify(estacaoAtual || {}));
   const acoes = !podeComandar ? '' : `<div class="card-acoes">
+    <button type="button" class="btn-otimizar" onclick="abrirEstacao('${escapeJs(c.codigo)}','${escapeJs(c.posto)}','${escapeJs(c.nome)}','${escapeJs(c.unidadeNome||c.codigo)}', JSON.parse('${estacaoJson}'))">🧭 Perfil estação</button>${estacaoAtual && estacaoAtual.ativa ?
+      `<button type="button" class="btn-otimizar" onclick="abrirOtimizar('${escapeJs(c.codigo)}','${escapeJs(c.posto)}','${escapeJs(c.nome)}','${escapeJs(c.unidadeNome||c.codigo)}','inventario-estacao')">📋 Inventariar estação</button>` : ''}
     <button type="button" class="btn-otimizar" onclick="abrirOtimizar('${escapeJs(c.codigo)}','${escapeJs(c.posto)}','${escapeJs(c.nome)}','${escapeJs(c.unidadeNome||c.codigo)}','diagnostico-desempenho')">🔎 Diagnosticar</button>
     <button type="button" class="btn-otimizar" onclick="abrirOtimizar('${escapeJs(c.codigo)}','${escapeJs(c.posto)}','${escapeJs(c.nome)}','${escapeJs(c.unidadeNome||c.codigo)}','limpeza-segura')">🧹 Limpar temporários</button>${
     enviado

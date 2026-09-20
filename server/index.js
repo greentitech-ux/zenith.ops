@@ -5184,11 +5184,12 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'limpeza-segura'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
       'diagnostico-desempenho': { acao: 'manutencao.diagnosticoDesempenho', verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
+      'inventario-estacao': { acao: 'manutencao.inventarioEstacao', verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
       'limpeza-segura': { acao: 'manutencao.limpezaSegura', verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },
       // reinicia SO o servico do AnyDesk: leva segundos e nao derruba o
       // caixa, ao contrario de reiniciar a maquina inteira por causa de um
@@ -5493,6 +5494,20 @@ app.get('/api/loja-status/comandos-pendentes', auth.requireMaster, async (req, r
   try {
     const comandos = await lojaStatus.listarComandosPendentes(req.query || {});
     res.json({ comandos });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// PERFIL DA ESTAÇÃO: primeiro passo do piloto de organização. A lista é
+// declarativa e auditável; não aplica limpeza, não move arquivos e não fixa
+// atalhos. Toda alteração da configuração continua exigindo a senha Master.
+app.put('/api/loja-status/:codigo/computadores/:posto/perfil-estacao', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const perfil = await lojaStatus.definirPerfilEstacao(req.params.codigo, req.params.posto, req.body);
+    broadcast('loja-status-atualizado', { codigo: req.params.codigo, posto: req.params.posto });
+    res.json(perfil);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
