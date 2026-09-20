@@ -737,14 +737,6 @@
       const texto = input.value.trim();
       const arquivo = anexoInput.files[0];
       if (!texto && !arquivo) return;
-      // limpa JA - antes o campo so esvaziava no re-render de sucesso, e se o
-      // update ao vivo (que nao recria o input, de proposito) chegasse junto, a
-      // mensagem ia mas o texto ficava escrito na caixa. Limpar aqui resolve em
-      // qualquer caminho; a previa do anexo tambem sai.
-      input.value = '';
-      anexoInput.value = '';
-      const previaEl = corpo.querySelector('#szc-atend-previa');
-      if (previaEl) { previaEl.classList.remove('tem'); previaEl.innerHTML = ''; }
       const b = corpo.querySelector('#szc-atend-enviar');
       b.disabled = true;
       try {
@@ -754,13 +746,23 @@
         const r = await rawFetch(`/api/suporte-chats/${encodeURIComponent(chat.id)}/responder`, {
           method: 'POST', headers: authHeaders(), body: fd,
         });
-        if (r.ok) {
-          const atualizado = await r.json();
-          const i = ATEND.chats.findIndex((c) => c.id === atualizado.id);
-          if (i >= 0) ATEND.chats[i] = atualizado;
-          atendMarcarVisto(atualizado);
-          atendRenderConversa(atualizado);
-        }
+        const atualizado = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(atualizado.error || 'Não foi possível enviar a resposta.');
+
+        // So depois do servidor confirmar: se a rede/rota falhar, texto e
+        // arquivo permanecem intactos para a pessoa tentar novamente. A ordem
+        // tambem e importante: remove o rascunho persistido antes de redesenhar
+        // a conversa, impedindo que a previa do print recem-enviado volte.
+        window.zenithRascunhos?.limparCampoEnviado(input);
+        input.value = '';
+        limparAnexo(anexoInput, corpo.querySelector('#szc-atend-anexo-icone'));
+
+        const i = ATEND.chats.findIndex((c) => c.id === atualizado.id);
+        if (i >= 0) ATEND.chats[i] = atualizado;
+        atendMarcarVisto(atualizado);
+        atendRenderConversa(atualizado);
+      } catch (err) {
+        alert(err.message || 'Não foi possível enviar a resposta.');
       } finally { b.disabled = false; }
     };
     corpo.querySelector('#szc-atend-enviar').addEventListener('click', enviar);

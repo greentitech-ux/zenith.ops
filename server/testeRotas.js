@@ -22303,6 +22303,16 @@ setTimeout(async () => {
       // o widget é o que roda em TODAS as telas e do lado do visitante
       'o widget do Beniboy também limpa (no envio e ao tirar o anexo)':
         /limparAnexoEnviado\(inputEl\)/.test(semComentario(fs7.readFileSync(path7.join(dir7, 'suporte-chat.js'), 'utf8'))),
+      'o atendimento interno só limpa após o servidor confirmar (e não perde tentativa com erro)': (() => {
+        const src = semComentario(fs7.readFileSync(path7.join(dir7, 'suporte-chat.js'), 'utf8'));
+        const inicio = src.indexOf('const enviar = async () => {');
+        const fim = src.indexOf('\n    };', inicio);
+        const trecho = src.slice(inicio, fim > inicio ? fim : src.length);
+        const confirmou = trecho.indexOf("if (!r.ok) throw new Error(atualizado.error || 'Não foi possível enviar a resposta.');");
+        const limpaTexto = trecho.indexOf('limparCampoEnviado(input)');
+        const limpaAnexo = trecho.indexOf("limparAnexo(anexoInput, corpo.querySelector('#szc-atend-anexo-icone'))");
+        return confirmou >= 0 && limpaTexto > confirmou && limpaAnexo > confirmou;
+      })(),
       // ponto e check-in por foto: ali o rascunho restaurado dispara o
       // onchange sozinho, e isso REGISTRA um ponto que ninguém bateu
       'o ponto por foto limpa ANTES de registrar':

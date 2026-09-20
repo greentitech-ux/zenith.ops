@@ -15403,7 +15403,17 @@ app.get(/^(.*)\.html$/, (req, res, next) => {
 
 // `extensions: ['html']` serve a pagina depois do redirect: /atendimento
 // encontra atendimento.html, sem expor extensao em nenhum link do sistema.
-app.use(express.static(DIRETORIO_PUBLICO, { extensions: ['html'] }));
+app.use(express.static(DIRETORIO_PUBLICO, {
+  extensions: ['html'],
+  // O chat e carregado em todas as telas e sofreu correcao de estado no
+  // compositor. Nao deixar um aparelho continuar usando um bundle antigo:
+  // o navegador sempre revalida esse unico arquivo pequeno ao abrir a tela.
+  setHeaders(res, arquivo) {
+    if (path.basename(arquivo) === 'suporte-chat.js') {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+    }
+  },
+}));
 
 // ROTA DE API QUE NAO EXISTE RESPONDE JSON, nao a pagina 404 do Express.
 // Todo lugar do app faz `await resp.json()` na resposta - com HTML no corpo,
