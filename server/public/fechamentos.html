@@ -48,6 +48,17 @@
   .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
   .hidden{display:none!important;}
   .sub{color:var(--muted);font-size:12px;margin-top:4px;font-family:var(--mono);}
+  /* A tela passa a separar análise, unidades, lançamentos e rotinas Master.
+     As abas não mudam filtros nem cálculos: apenas dão uma jornada legível. */
+  .fech-workspace{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;}
+  .fech-tabs{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;max-width:100%;padding:2px 0;}
+  .fech-tabs::-webkit-scrollbar{display:none;}
+  .fech-tab{flex:none;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--muted);padding:9px 12px;font:600 11px var(--mono);cursor:pointer;transition:.16s ease;}
+  .fech-tab:hover{border-color:var(--accent);color:var(--text);}.fech-tab.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);box-shadow:0 7px 20px rgba(184,255,60,.14);}
+  .fech-tab-bloco.fech-tab-escondido{display:none!important;}
+  .fech-filtro-global{border-color:#2a3627;box-shadow:0 12px 28px rgba(0,0,0,.12);}
+  .fech-filtro-global:before{content:'CONTEXTO DE ANÁLISE';display:block;padding:12px 16px 0;color:var(--accent);font:700 10px var(--mono);letter-spacing:.09em;}
+  @media(max-width:640px){.fech-workspace{margin-bottom:10px;}.fech-tab{padding:9px 11px;font-size:10.5px;}.fech-filtro-global .controls{padding-top:9px;}.fech-filtro-global .controls>*{flex:none;}.fech-filtro-global .daterange{width:100%;}.fech-filtro-global .daterange input{min-width:0;flex:1;}}
 
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
   .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0;}
@@ -281,12 +292,22 @@
 
 <div id="root" class="hidden">
 
-<div class="kpis" id="kpis"></div>
+<div class="fech-workspace">
+  <div class="fech-tabs" role="tablist" aria-label="Áreas de fechamentos">
+    <button type="button" class="fech-tab active" data-fech-tab="visao" role="tab" aria-selected="true" onclick="selecionarAbaFechamentos('visao')">Visão geral</button>
+    <button type="button" class="fech-tab" data-fech-tab="unidades" role="tab" aria-selected="false" onclick="selecionarAbaFechamentos('unidades')">Unidades</button>
+    <button type="button" class="fech-tab" data-fech-tab="lancamentos" role="tab" aria-selected="false" onclick="selecionarAbaFechamentos('lancamentos')">Lançamentos</button>
+    <button type="button" class="fech-tab" data-fech-tab="pendencias" role="tab" aria-selected="false" onclick="selecionarAbaFechamentos('pendencias')">Pendências</button>
+    <button type="button" class="fech-tab hidden" id="fech-tab-admin" data-fech-tab="admin" role="tab" aria-selected="false" onclick="selecionarAbaFechamentos('admin')">Administração</button>
+  </div>
+</div>
+
+<section class="fech-tab-bloco" data-fech-tab-bloco="visao"><div class="kpis" id="kpis"></div></section>
 
 <!-- Migração de uma vez só da planilha aposentada do Grupo Bravo pro banco.
      Some sozinho quando não houver mais nada pra importar (ver
      carregarImportBravo) - é uma tarefa com fim, não um painel permanente. -->
-<div class="panel hidden" id="import-bravo-panel">
+<div class="panel hidden fech-tab-bloco" data-fech-tab-bloco="admin" id="import-bravo-panel">
   <h2><div class="title-group"><span>📥 Trazer o histórico da planilha pro NoPulso</span></div></h2>
   <div style="padding:12px 16px;">
     <div class="sub" style="margin-bottom:12px;">
@@ -315,12 +336,12 @@
 </div>
 
 
-<div class="panel hidden" id="edicoes-panel">
+<div class="panel hidden fech-tab-bloco" data-fech-tab-bloco="pendencias" id="edicoes-panel">
   <h2><div class="title-group"><span>Pedidos de correção de fechamento</span><span class="n" id="edicoes-count"></span></div></h2>
   <div id="edicoes-lista" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px;"></div>
 </div>
 
-<div class="panel">
+<div class="panel fech-filtro-global">
   <div class="controls">
     <div class="presets" id="presets"></div>
     <div class="daterange">
@@ -357,7 +378,7 @@
   </div>
 </div>
 
-<div class="panel">
+<div class="panel fech-tab-bloco" data-fech-tab-bloco="visao">
   <h2>
     <div class="title-group"><span>📊 Comparação com período anterior</span></div>
   </h2>
@@ -365,7 +386,7 @@
   <div id="comparativo-periodo-chart"></div>
 </div>
 
-<div class="panel" id="consolidado-mensal-panel">
+<div class="panel fech-tab-bloco" data-fech-tab-bloco="visao" id="consolidado-mensal-panel">
   <h2>
     <div class="title-group"><span>📅 Faturamento consolidado por mês</span><span class="n" id="consolidado-mensal-info"></span></div>
   </h2>
@@ -373,7 +394,7 @@
   <div class="tablewrap" id="consolidado-mensal-tabela"></div>
 </div>
 
-<div class="panel">
+<div class="panel fech-tab-bloco" data-fech-tab-bloco="visao">
   <h2>
     <div class="title-group"><span>Faturamento</span><span class="n" id="fat-info"></span></div>
   </h2>
@@ -398,7 +419,7 @@
 -->
 
 
-<div class="panel">
+<div class="panel fech-tab-bloco" data-fech-tab-bloco="unidades">
   <h2>
     <div class="title-group"><span>Comparativo por unidade</span><span class="n" id="unidades-count"></span></div>
     <div style="display:flex;gap:8px;">
@@ -423,7 +444,7 @@
      usou o sistema não é "atrasada", é ausente); e cada loja conta a partir
      do PRIMEIRO fechamento dela (loja que abriu no meio do mês não deve os
      dias de antes). -->
-<div class="panel">
+<div class="panel fech-tab-bloco" data-fech-tab-bloco="pendencias">
   <h2>
     <div class="title-group"><span>📅 Dias sem fechamento</span><span class="n" id="sem-fech-count"></span></div>
   </h2>
@@ -431,7 +452,7 @@
   <div id="sem-fech-lista"></div>
 </div>
 
-<div class="panel">
+<div class="panel fech-tab-bloco" data-fech-tab-bloco="lancamentos">
   <h2>
     <div class="title-group"><span>Fechamentos</span><span class="n" id="fechamentos-count"></span></div>
     <div style="display:flex;gap:8px;">
@@ -3668,6 +3689,23 @@ window.addEventListener('resize', ()=>{
   resizeTimer = setTimeout(renderChartAtual, 150);
 });
 
+// A aba organiza a leitura da mesma tela; filtros e dados continuam únicos.
+// Guardar a última escolha por navegador evita que o gestor sempre volte para
+// a visão geral ao checar a mesma fila de lançamentos.
+function selecionarAbaFechamentos(aba){
+  const permitidas = new Set(['visao','unidades','lancamentos','pendencias', ...(IS_MASTER ? ['admin'] : [])]);
+  if(!permitidas.has(aba)) aba = 'visao';
+  document.querySelectorAll('[data-fech-tab-bloco]').forEach(el=>{
+    el.classList.toggle('fech-tab-escondido', el.dataset.fechTabBloco !== aba);
+  });
+  document.querySelectorAll('[data-fech-tab]').forEach(btn=>{
+    const ativa = btn.dataset.fechTab === aba;
+    btn.classList.toggle('active', ativa);
+    btn.setAttribute('aria-selected', ativa ? 'true' : 'false');
+  });
+  try{ localStorage.setItem('nopulso-fechamentos-aba', aba); }catch(e){}
+}
+
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
@@ -3683,6 +3721,7 @@ async function boot(){
   document.getElementById('btn-sincronizar-completa').classList.toggle('hidden', !isMaster);
   document.getElementById('btn-pausa-sync').classList.toggle('hidden', !isMaster);
   document.getElementById('import-bravo-panel').classList.toggle('hidden', !isMaster);
+  document.getElementById('fech-tab-admin').classList.toggle('hidden', !isMaster);
 
   if(!secoes.includes('fechamentos')){
     document.getElementById('sem-acesso').classList.remove('hidden');
@@ -3697,6 +3736,9 @@ async function boot(){
     try{ GRUPOS_KPI = await fetch('/api/grupos').then(r=>r.json()); }catch(e){ GRUPOS_KPI = []; }
   }
   document.getElementById('root').classList.remove('hidden');
+  let abaInicial = 'visao';
+  try{ abaInicial = localStorage.getItem('nopulso-fechamentos-aba') || 'visao'; }catch(e){}
+  selecionarAbaFechamentos(abaInicial);
   // antes do primeiro render: a ordem/visibilidade salva no servidor manda
   await carregarPreferenciaColunas();
   await carregarPreferenciaColunasUnidades();

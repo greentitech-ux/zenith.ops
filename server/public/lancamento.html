@@ -122,6 +122,20 @@
   .resumo .dif.ok{color:var(--ok);} .resumo .dif.bad{color:var(--bad);}
   .btn-primary{width:100%;margin-top:16px;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .btn-primary:disabled{opacity:.5;cursor:default;}
+  /* Fluxo do fechamento: reduz a rolagem mental sem esconder a conferência.
+     A etapa selecionada é só navegação; o submit final mantém todas as
+     validações financeiras já existentes. */
+  .fech-fluxo{margin:2px 0 16px;padding:10px;border:1px solid #2a3627;border-radius:11px;background:linear-gradient(135deg,rgba(184,255,60,.08),rgba(184,255,60,.025));}
+  .fech-fluxo-passos{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .fech-fluxo-passo{border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--muted);padding:8px 7px;text-align:left;font:600 10px var(--mono);cursor:pointer;min-width:0;transition:.16s ease;}
+  .fech-fluxo-passo b{display:block;color:inherit;font-size:12px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .fech-fluxo-passo:hover{border-color:var(--accent);color:var(--text);}.fech-fluxo-passo.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);box-shadow:0 7px 18px rgba(184,255,60,.13);}
+  .fech-etapa-hidden{display:none!important;}
+  .fech-fluxo-acoes{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:16px;}
+  .fech-fluxo-acoes .btn-fluxo{font-family:var(--sans);font-size:13px;font-weight:650;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
+  .fech-fluxo-acoes .btn-fluxo.avancar{margin-left:auto;border-color:var(--accent);color:var(--accent);}
+  .fech-fluxo-resumo{margin:8px 1px 0;color:var(--muted);font:10.5px var(--mono);}
+  @media(max-width:520px){.fech-fluxo{padding:8px;position:sticky;top:64px;z-index:15;box-shadow:0 10px 22px rgba(0,0,0,.3);}.fech-fluxo-passos{gap:4px;}.fech-fluxo-passo{padding:7px 5px;font-size:8.5px;}.fech-fluxo-passo b{font-size:10px;}.fech-fluxo-resumo{font-size:9.5px;}.fech-fluxo-acoes{position:sticky;bottom:8px;padding:8px;background:rgba(11,13,16,.95);border:1px solid var(--line);border-radius:10px;z-index:12;}}
   .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
   /* conferencia de caixa na sangria: o esperado e a diferenca ficam ACIMA do
      botao, pra pessoa ver antes de salvar, nao depois */
@@ -241,8 +255,17 @@
 <div class="panel" id="painel-fechamento">
   <h2>Novo fechamento</h2>
   <form id="form-lancar">
+    <div class="fech-fluxo" aria-label="Etapas do fechamento">
+      <div class="fech-fluxo-passos" role="tablist">
+        <button type="button" class="fech-fluxo-passo active" data-fech-etapa-btn="1" onclick="irParaEtapaFechamento(1)"><b>1 · Base</b>Unidade e caixa</button>
+        <button type="button" class="fech-fluxo-passo" data-fech-etapa-btn="2" onclick="irParaEtapaFechamento(2)"><b>2 · Vendas</b>Canais e cartões</button>
+        <button type="button" class="fech-fluxo-passo" data-fech-etapa-btn="3" onclick="irParaEtapaFechamento(3)"><b>3 · Saídas</b>Depósitos e ajustes</button>
+        <button type="button" class="fech-fluxo-passo" data-fech-etapa-btn="4" onclick="irParaEtapaFechamento(4)"><b>4 · Conferir</b>KPIs e finalizar</button>
+      </div>
+      <div class="fech-fluxo-resumo" id="fech-fluxo-resumo">Etapa 1 de 4 · confirme a unidade, a data e o caixa.</div>
+    </div>
 
-    <div class="secao" data-recolher="nao">
+    <div class="secao" data-recolher="nao" data-fech-etapa="1">
       <div class="secao-titulo">Identificação</div>
       <label>Unidade</label>
       <select id="f-unidade" required></select>
@@ -259,7 +282,7 @@
       </div>
     </div>
 
-    <div class="secao" data-recolher="nao" id="secao-caixa">
+    <div class="secao" data-recolher="nao" data-fech-etapa="1" id="secao-caixa">
       <div class="secao-titulo">Caixa</div>
       <div class="grid2">
         <div>
@@ -285,7 +308,7 @@
       </div>
     </div>
 
-    <div class="secao" data-recolher="nao">
+    <div class="secao" data-recolher="nao" data-fech-etapa="2">
       <div class="secao-titulo">Canais de venda<span class="chip-foto hidden" id="chip-foto-canais"></span></div>
       <!-- so aparece pra loja cujo GRUPO tem lerCanaisPorImagem ligado (o
            Master ativa em /grupos.html) - ver atualizarBotaoLerCanais.
@@ -313,13 +336,13 @@
       <div class="sub hidden" id="canais-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
     </div>
 
-    <div class="secao" data-recolher="nao">
+    <div class="secao" data-recolher="nao" data-fech-etapa="2">
       <div class="secao-titulo">Formas de pagamento<span class="chip-foto hidden" id="chip-foto-formas"></span></div>
       <div class="grid2 grid-campos hidden" id="formas-extras-container" style="margin-top:6px;"></div>
       <div class="sub hidden" id="formas-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
     </div>
 
-    <div class="secao" data-recolher="nao" id="secao-maquininhas">
+    <div class="secao" data-recolher="nao" data-fech-etapa="2" id="secao-maquininhas">
       <div class="secao-titulo">Maquininhas (cartão) <span id="maq-total" style="color:var(--text);"></span></div>
       <div id="lista-maquinas"></div>
       <button type="button" class="btn-add" onclick="adicionarMaquina()">+ Adicionar maquininha</button>
@@ -332,7 +355,7 @@
          não nasce mais com uma linha vazia convidando a digitar - só o botão;
          (2) a explicação fica na própria seção, não num título que ninguém lê;
          (3) o aviso vermelho e a pergunta no envio (ver avisosMaquininhaPos). -->
-    <div class="secao hidden" data-recolher="nao" id="secao-maquininhas-pos">
+    <div class="secao hidden" data-recolher="nao" data-fech-etapa="2" id="secao-maquininhas-pos">
       <div class="secao-titulo">Maquininha POS 01 (vendas após meia-noite) <span id="maq-pos-total" style="color:var(--text);"></span></div>
       <div class="pos-explica">⚠️ <b>Só o que foi vendido DEPOIS da meia-noite.</b> A venda de cartão do dia inteiro vai em <b>Maquininha (cartão)</b>, na seção acima. O valor lançado aqui soma neste fechamento e é <b>descontado automaticamente no fechamento de amanhã</b> — se cair aqui por engano, o dia de amanhã fecha com diferença.</div>
       <div id="lista-maquinas-pos"></div>
@@ -340,18 +363,18 @@
       <button type="button" class="btn-add" onclick="adicionarMaquinaPos()">+ Adicionar maquininha POS</button>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-fech-etapa="3">
       <div class="secao-titulo">Saída de dinheiro (sangria/depósito) <span id="sangria-dia-total" style="color:var(--text);"></span></div>
       <div id="sangria-dia-info"><div style="color:var(--muted);font-size:12px;">Selecione unidade e data acima.</div></div>
     </div>
 
-    <div class="secao" data-recolher="nao" id="secao-saidas">
+    <div class="secao" data-recolher="nao" data-fech-etapa="3" id="secao-saidas">
       <div class="secao-titulo">Outras saídas de caixa <span id="saida-total" style="color:var(--text);"></span></div>
       <div id="lista-saidas"></div>
       <button type="button" class="btn-add" onclick="adicionarSaida()">+ Adicionar saída</button>
     </div>
 
-    <div class="secao" data-recolher="nao">
+    <div class="secao" data-recolher="nao" data-fech-etapa="4">
        <div class="secao-titulo">KPI's<span class="chip-foto hidden" id="chip-foto-kpis"></span></div>
        <div class="grid2 grid-campos hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
        <div class="sub hidden" id="kpis-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
@@ -368,13 +391,17 @@
       </div>
     </div>
 
-    <div class="secao" data-recolher="nao">
+    <div class="secao" data-recolher="nao" data-fech-etapa="4">
       <label id="label-observacao">Observação (opcional)</label>
       <textarea id="f-observacao" placeholder="qualquer detalhe do fechamento do dia"></textarea>
       <div id="aviso-observacao" class="hidden" style="color:var(--warn);font-size:12.5px;margin-top:6px;"></div>
     </div>
 
     <div class="msg hidden" id="msg"></div>
+    <div class="fech-fluxo-acoes" id="fech-fluxo-acoes">
+      <button type="button" class="btn-fluxo hidden" id="fech-fluxo-voltar" onclick="irParaEtapaFechamento(ETAPA_FECHAMENTO-1)">← Voltar</button>
+      <button type="button" class="btn-fluxo avancar" id="fech-fluxo-avancar" onclick="irParaEtapaFechamento(ETAPA_FECHAMENTO+1)">Avançar →</button>
+    </div>
     <button class="btn-primary" type="submit" id="btn-enviar">Lançar fechamento</button>
   </form>
 </div>
@@ -1924,6 +1951,37 @@ function opcoesUnidades(unidades){
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
 }
 
+let ETAPA_FECHAMENTO = 1;
+const ETAPAS_FECHAMENTO_TEXTO = {
+  1: 'Etapa 1 de 4 · confirme a unidade, a data e o caixa.',
+  2: 'Etapa 2 de 4 · informe vendas, pagamentos e maquininhas.',
+  3: 'Etapa 3 de 4 · confira depósitos, sangrias e outras saídas.',
+  4: 'Etapa 4 de 4 · revise os totais antes de lançar o fechamento.',
+};
+function irParaEtapaFechamento(etapa){
+  etapa = Math.max(1, Math.min(4, Number(etapa) || 1));
+  ETAPA_FECHAMENTO = etapa;
+  document.querySelectorAll('[data-fech-etapa]').forEach(el=>{
+    el.classList.toggle('fech-etapa-hidden', Number(el.dataset.fechEtapa) !== etapa);
+  });
+  document.querySelectorAll('[data-fech-etapa-btn]').forEach(btn=>{
+    const ativa = Number(btn.dataset.fechEtapaBtn) === etapa;
+    btn.classList.toggle('active', ativa);
+    btn.setAttribute('aria-current', ativa ? 'step' : 'false');
+  });
+  const resumo = document.getElementById('fech-fluxo-resumo');
+  if(resumo) resumo.textContent = ETAPAS_FECHAMENTO_TEXTO[etapa];
+  const voltar = document.getElementById('fech-fluxo-voltar');
+  const avancar = document.getElementById('fech-fluxo-avancar');
+  const enviar = document.getElementById('btn-enviar');
+  if(voltar) voltar.classList.toggle('hidden', etapa === 1);
+  if(avancar) avancar.classList.toggle('hidden', etapa === 4);
+  if(enviar) enviar.classList.toggle('hidden', etapa !== 4);
+  // Etapa nova começa no topo do conteúdo, não no meio da etapa anterior.
+  const alvo = document.querySelector(`[data-fech-etapa="${etapa}"]`);
+  if(alvo && document.activeElement?.tagName !== 'INPUT') alvo.scrollIntoView({ block:'start', behavior:'smooth' });
+}
+
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
@@ -1985,6 +2043,7 @@ async function boot(){
     // de troca nenhuma: a tela abre com unidade e data ja escolhidas, entao o
     // 'change'/'input' nunca dispara e o campo ficava vazio o dia inteiro
     await carregarCaixaInicial();
+    irParaEtapaFechamento(1);
   }
 
   if(podeSangria){
