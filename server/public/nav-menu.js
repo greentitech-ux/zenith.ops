@@ -137,14 +137,14 @@
   //     confunde quem esta lendo a hierarquia.
   // ---------------------------------------------------------------
   const VOLTAR = {
-    '/noc-rede.html': 'nav-loja-status',
-    '/noc-maquinas.html': 'nav-loja-status',
-    '/noc-incidentes.html': 'nav-loja-status',
-    '/vendas-recordes.html': 'nav-fechamentos-arcfood',
-    '/abastecimento-relatorios.html': 'nav-abastecimento',
-    '/entregas-regras.html': 'nav-entregas',
-    '/dashboard-atendimentos.html': 'nav-beniboy',
-    '/mensalistas.html': 'nav-parque',
+    '/noc-rede': 'nav-loja-status',
+    '/noc-maquinas': 'nav-loja-status',
+    '/noc-incidentes': 'nav-loja-status',
+    '/vendas-recordes': 'nav-fechamentos-arcfood',
+    '/abastecimento-relatorios': 'nav-abastecimento',
+    '/entregas-regras': 'nav-entregas',
+    '/dashboard-atendimentos': 'nav-beniboy',
+    '/mensalistas': 'nav-parque',
   };
 
   function itemPorId(id) {
@@ -189,7 +189,7 @@
       #nav-drawer-overlay.hidden{ display:none!important; }
 
       .nmz-topo{
-        padding:14px 14px 10px; border-bottom:1px solid var(--line,#232a33);
+        padding:16px 14px 12px; border-bottom:1px solid var(--line,#232a33);
         flex:none; display:flex; align-items:center; gap:10px;
       }
       /* logotipo NoPulso: "No" no texto normal + "Pulso" no acento, com a
@@ -211,22 +211,32 @@
       .nmz-fechar:hover{ color:var(--text,#e7ecf1); border-color:var(--accent,#b8ff3c); }
 
       .nmz-corpo{ flex:1 1 auto; overflow-y:auto; padding:8px; }
+      .nmz-busca{ margin:10px 8px 4px; position:relative; }
+      .nmz-busca input{ width:100%; height:36px; border-radius:9px;
+        border:1px solid var(--line,#232a33); background:var(--panel2,#181d24);
+        color:var(--text,#e7ecf1); padding:0 10px 0 31px; font:12px var(--sans,sans-serif); }
+      .nmz-busca input:focus{ outline:none; border-color:var(--accent,#b8ff3c); }
+      .nmz-busca::before{ content:'⌕'; position:absolute; left:10px; top:6px; color:var(--muted,#7d8896); font-size:18px; line-height:1; }
+      .nmz-contexto{ margin:0 8px 4px; padding:8px 10px; border:1px solid var(--line,#232a33);
+        border-radius:9px; background:linear-gradient(100deg,rgba(184,255,60,.10),transparent 65%);
+        font:10px var(--mono,monospace); color:var(--muted,#7d8896); }
+      .nmz-contexto b{ display:block; margin-top:2px; color:var(--text,#e7ecf1); font:600 11.5px var(--sans,sans-serif); }
 
       .nmz-grupo{
         display:flex; align-items:center; justify-content:space-between;
         font-family:var(--mono,monospace); font-size:9.5px; color:var(--muted,#7d8896);
         text-transform:uppercase; letter-spacing:.1em; font-weight:700;
-        padding:12px 10px 5px; cursor:pointer; user-select:none; transition:color .15s;
+        padding:14px 10px 6px; cursor:pointer; user-select:none; transition:color .15s;
       }
       .nmz-grupo:hover{ color:var(--text,#e7ecf1); }
       .nmz-grupo .nmz-seta{ font-size:9px; transition:transform .18s ease; opacity:.7; }
       .nmz-grupo.fechado .nmz-seta{ transform:rotate(-90deg); }
-      .nmz-wrap{ display:flex; flex-direction:column; gap:1px; overflow:hidden; }
+      .nmz-wrap{ display:flex; flex-direction:column; gap:2px; overflow:hidden; }
       .nmz-wrap.hidden{ display:none!important; }
 
       #nav-drawer a.nmz-item, #nav-drawer button.nmz-item{
         display:flex; align-items:center; gap:10px; width:100%; box-sizing:border-box;
-        padding:9px 10px; border-radius:9px; font-size:12.8px; line-height:1.25;
+        padding:10px 10px; border-radius:9px; font-size:12.8px; line-height:1.25;
         color:var(--text,#e7ecf1); text-decoration:none; position:relative;
         border:1px solid transparent; transition:background .13s, color .13s, border-color .13s;
       }
@@ -292,7 +302,8 @@
   function itemHtml(it) {
     // nasce escondido: quem libera e aplicarRegras(), depois do /api/me.
     // Assim ninguem ve por um instante um link que nao pode acessar.
-    return `<a class="nmz-item hidden" id="${it.id}" href="${esc(it.href)}">`
+    const rotaLimpa = it.href.replace(/\.html(?=\?|$)/, '');
+    return `<a class="nmz-item hidden" id="${it.id}" href="${esc(rotaLimpa)}">`
       + `<span class="nmz-ico">${it.icone}</span><span class="nmz-rot">${esc(it.rotulo)}</span></a>`;
   }
 
@@ -312,19 +323,40 @@
         </div>
         <button type="button" class="nmz-fechar" id="nmz-fechar" aria-label="Fechar menu" title="Fechar">✕</button>
       </div>
-      <div class="nmz-corpo">${corpo}</div>
+      <div class="nmz-corpo">
+        <div class="nmz-contexto"><span>SEU ESPAÇO OPERACIONAL</span><b id="nmz-contexto">Carregando permissões…</b></div>
+        <label class="nmz-busca"><input id="nmz-busca" type="search" placeholder="Buscar no menu" autocomplete="off" aria-label="Buscar no menu"></label>
+        <div id="nmz-itens">${corpo}</div>
+      </div>
       <div class="nmz-rodape">
-        <a class="nmz-item" id="nav-ajuda" href="/ajuda.html"><span class="nmz-ico">❓</span><span>Ajuda</span></a>
+        <a class="nmz-item" id="nav-ajuda" href="/ajuda"><span class="nmz-ico">❓</span><span>Ajuda</span></a>
         <a class="nmz-item nmz-suporte" href="https://wa.me/5581995148654" target="_blank" rel="noopener"><span class="nmz-ico">💬</span><span>Suporte (81) 99514-8654</span></a>
         <button type="button" class="nmz-item nmz-sair" id="nmz-sair"><span class="nmz-ico">🚪</span><span>Sair</span></button>
       </div>`;
 
     nav.querySelector('#nmz-fechar').addEventListener('click', fechar);
+    nav.querySelector('#nmz-busca').addEventListener('input', (ev) => filtrarMenu(ev.target.value));
     nav.querySelector('#nmz-sair').addEventListener('click', () => {
       if (typeof window.logout === 'function') return window.logout();
       localStorage.removeItem('authToken');
       location.href = '/';
     });
+  }
+
+  function filtrarMenu(texto) {
+    const termo = String(texto || '').trim().toLocaleLowerCase('pt-BR');
+    document.querySelectorAll('#nav-drawer a.nmz-item[id]').forEach((el) => {
+      const permitido = !el.dataset.semPermissao;
+      const bate = !termo || el.textContent.toLocaleLowerCase('pt-BR').includes(termo);
+      el.classList.toggle('hidden', !permitido || !bate);
+    });
+    document.querySelectorAll('#nav-drawer .nmz-grupo').forEach((g) => {
+      const wrap = document.querySelector(`#nav-drawer .nmz-wrap[data-grupo="${CSS.escape(g.dataset.grupo)}"]`);
+      const temItem = !!wrap && [...wrap.children].some((el) => !el.classList.contains('hidden'));
+      g.classList.toggle('hidden', !temItem);
+      if (termo && temItem) { g.classList.remove('fechado'); if (wrap) wrap.dataset.recolhido = ''; }
+    });
+    sincronizarRecolhido();
   }
 
   // Acha o botao hamburguer da pagina. Os nomes variam por motivo
@@ -344,7 +376,7 @@
     const a = document.createElement('a');
     a.className = 'nmz-voltar hidden';
     a.id = 'nmz-voltar';
-    a.href = pai.href;
+    a.href = pai.href.replace(/\.html(?=\?|$)/, '');
     a.title = 'Voltar para ' + pai.rotulo;
     a.setAttribute('aria-label', 'Voltar para ' + pai.rotulo);
     a.innerHTML = `<span class="nmz-vseta" aria-hidden="true">‹</span><span class="nmz-vrot">${esc(pai.rotulo)}</span>`;
@@ -409,7 +441,9 @@
       sec.itens.forEach((it) => {
         const el = document.getElementById(it.id);
         if (!el) return;
-        el.classList.toggle('hidden', !podeVer(it, ME));
+        const liberado = podeVer(it, ME);
+        el.dataset.semPermissao = liberado ? '' : '1';
+        el.classList.toggle('hidden', !liberado);
         if (it.alt) {
           const usaAlt = it.alt.quando(ME);
           const ico = el.querySelector('.nmz-ico');
@@ -439,6 +473,12 @@
       quem.textContent = papel ? `${nome} · ${papel}` : nome;
       quem.title = nome;
       quem.classList.add('maiusc');
+    }
+    const contexto = document.getElementById('nmz-contexto');
+    if (contexto) {
+      if (ME.role === 'master') contexto.textContent = 'Visão geral · todas as empresas';
+      else if (ME.isAdmin) contexto.textContent = 'Administração dentro do seu escopo';
+      else contexto.textContent = 'Somente unidades e módulos liberados';
     }
   }
 

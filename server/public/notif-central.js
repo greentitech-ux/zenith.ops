@@ -146,25 +146,35 @@
   document.body.appendChild(wrap);
 
   let audioCtx = null;
-  function tocarBeep(padrao) {
+  // O navegador só permite áudio depois da primeira interação. Armamos o
+  // contexto no primeiro toque/clique para que o próximo alerta não fique
+  // silencioso por bloqueio automático.
+  function prepararAudio() {
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { /* sem AudioContext: o alerta visual continua normal */ }
+  }
+  document.addEventListener('pointerdown', prepararAudio, { once:true, passive:true });
+  function tocarBeep(padrao) {
+    try {
+      prepararAudio();
       padrao.forEach(([delay, freq]) => {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        osc.type = 'sine'; osc.frequency.value = freq;
+        osc.type = 'triangle'; osc.frequency.value = freq;
         gain.gain.setValueAtTime(0.0001, audioCtx.currentTime + delay);
-        gain.gain.exponentialRampToValueAtTime(0.14, audioCtx.currentTime + delay + 0.03);
-        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + 0.42);
+        gain.gain.exponentialRampToValueAtTime(0.19, audioCtx.currentTime + delay + 0.035);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + 0.50);
         osc.connect(gain); gain.connect(audioCtx.destination);
         osc.start(audioCtx.currentTime + delay);
-        osc.stop(audioCtx.currentTime + delay + 0.46);
+        osc.stop(audioCtx.currentTime + delay + 0.54);
       });
     } catch (e) { /* navegador pode bloquear audio antes de alguma interacao - so nao toca */ }
   }
-  // Toque de chamada de embarque: três notas ascendentes, suaves e espaçadas.
-  // É uma assinatura de aviso de cabine, sem áudio externo ou beep agressivo.
-  const tocarSomSolicitacao = () => tocarBeep([[0, 659.25], [0.18, 830.61], [0.43, 1046.5]]);
+  // Chamada de embarque original: quatro notas ascendentes, mais próxima do
+  // aviso de aeroporto, mas sem depender de áudio externo ou protegido.
+  const tocarSomSolicitacao = () => tocarBeep([[0, 523.25], [0.20, 659.25], [0.42, 783.99], [0.66, 1046.5]]);
   const tocarSomFraude = () => tocarBeep([[0, 783.99], [0.18, 1046.5], [0.36, 1318.51]]);
   let repeticaoSomSolicitacao = null;
   function pararRepeticaoSomSolicitacao() {
@@ -174,12 +184,12 @@
   function iniciarRepeticaoSomSolicitacao() {
     tocarSomSolicitacao();
     pararRepeticaoSomSolicitacao();
-    // A cada 30s, enquanto o aviso estiver aberto. O navegador pode reduzir
+    // A cada 25s, enquanto o aviso estiver aberto. O navegador pode reduzir
     // timers em segundo plano, mas nunca cria mais de um ciclo por página.
     repeticaoSomSolicitacao = setInterval(() => {
       if (!wrap.querySelector('.zn-notif') || notificacoesPausadas()) return pararRepeticaoSomSolicitacao();
       tocarSomSolicitacao();
-    }, 30000);
+    }, 25000);
   }
 
   const ICONES_TIPO = { estorno: '💳', 'ajuste-fechamento': '🧾', compra: '🛒', manutencao: '🔧', 'suporte-ti': '💻', pagamento: '💸', nota: '📄', 'quebra-caixa': '⚠️', 'desvio-estoque': '📦⚠️' };

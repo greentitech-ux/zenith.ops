@@ -3236,24 +3236,25 @@ function mostrarNotificacaoChat(msg){
 // So mostra pra quem decide (Master/Admin) - quem so acompanha o proprio
 // pedido nao precisa ser "cobrado" pela propria solicitação ----------
 let AUDIO_CTX = null;
+function prepararAudioNotificacao(){ try{ AUDIO_CTX=AUDIO_CTX||new (window.AudioContext||window.webkitAudioContext)(); if(AUDIO_CTX.state==='suspended') AUDIO_CTX.resume(); }catch(e){} }
+document.addEventListener('pointerdown',prepararAudioNotificacao,{once:true,passive:true});
 function tocarSomNotificacao(){
   try{
-    AUDIO_CTX = AUDIO_CTX || new (window.AudioContext || window.webkitAudioContext)();
+    prepararAudioNotificacao();
     const tocarBeep = (delay, freq) => {
       const osc = AUDIO_CTX.createOscillator();
       const gain = AUDIO_CTX.createGain();
-      osc.type = 'sine'; osc.frequency.value = freq;
+      osc.type = 'triangle'; osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, AUDIO_CTX.currentTime + delay);
-      gain.gain.exponentialRampToValueAtTime(0.14, AUDIO_CTX.currentTime + delay + 0.03);
-      gain.gain.exponentialRampToValueAtTime(0.0001, AUDIO_CTX.currentTime + delay + 0.42);
+      gain.gain.exponentialRampToValueAtTime(0.19, AUDIO_CTX.currentTime + delay + 0.035);
+      gain.gain.exponentialRampToValueAtTime(0.0001, AUDIO_CTX.currentTime + delay + 0.50);
       osc.connect(gain); gain.connect(AUDIO_CTX.destination);
       osc.start(AUDIO_CTX.currentTime + delay);
-      osc.stop(AUDIO_CTX.currentTime + delay + 0.46);
+      osc.stop(AUDIO_CTX.currentTime + delay + 0.54);
     };
-    // Chamada de embarque: assinatura curta em três notas, suave no celular.
-    tocarBeep(0, 659.25);
-    tocarBeep(0.18, 830.61);
-    tocarBeep(0.43, 1046.5);
+    // Chamada de embarque original: quatro notas ascendentes.
+    tocarBeep(0, 523.25); tocarBeep(0.20, 659.25);
+    tocarBeep(0.42, 783.99); tocarBeep(0.66, 1046.5);
   }catch(e){ /* navegador pode bloquear audio antes de alguma interacao - so nao toca */ }
 }
 let REPETICAO_SOM_NOTIFICACAO = null;
@@ -3265,7 +3266,7 @@ function iniciarRepeticaoSomNotificacao(){
     const wrap=document.getElementById('notif-solicitacao-wrap');
     if(!wrap?.querySelector('.notif-solicitacao') || notificacoesPausadas()) return pararRepeticaoSomNotificacao();
     tocarSomNotificacao();
-  },30000);
+  },25000);
 }
 
 // ALERTA QUE SO ENCERRA. Pedido do Master, depois de a versao "insistente"
