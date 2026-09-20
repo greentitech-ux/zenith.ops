@@ -88,7 +88,8 @@
   .pcard-slot.full .pstats-row .pstat{max-width:none;text-align:center;}
   .pcard-slot .pcard{height:100%;box-sizing:border-box;}
   .pcard-drag{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:2;background:none;border:none;
-    color:var(--muted);font-size:13px;line-height:1;padding:4px 18px;cursor:grab;touch-action:none;user-select:none;}
+    color:var(--muted);font-size:13px;line-height:1;padding:4px 18px;cursor:grab;touch-action:none;user-select:none;display:none;}
+  .painel-grid.organizando .pcard-drag{display:block;}
   .pcard-drag:hover{color:var(--text);}
   .pcard-slot.arrastando{opacity:.65;}
   .pcard-slot.arrastando .pcard{outline:2px dashed var(--accent);}
@@ -220,6 +221,26 @@
      O mockup trazia 25s; numero de tela tem que bater com o codigo. */
   .painel-saudacao .ps-vivo{font-family:var(--mono);font-size:10.5px;color:var(--ok);white-space:nowrap;justify-self:center;}
   .painel-saudacao .ps-relogio{font-family:var(--mono);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;justify-self:end;}
+  /* Contexto e próximos passos: a grade abaixo é o retrato operacional; esta
+     faixa responde antes "qual é o meu escopo" e "o que posso fazer agora".
+     Assim o Master não confunde a visão global com a de uma unidade, e quem
+     opera uma única loja não recebe atalhos de administração ou de terceiros. */
+  .painel-contexto{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;
+    background:linear-gradient(120deg,var(--panel) 0%,var(--panel2) 100%);border:1px solid var(--line);
+    border-radius:14px;padding:16px 18px;margin-bottom:16px;}
+  .painel-contexto .pc-rotulo{font:700 10px var(--mono);letter-spacing:.11em;color:var(--accent);text-transform:uppercase;}
+  .painel-contexto h2{font-size:17px;margin:4px 0 0;letter-spacing:-.015em;}
+  .painel-contexto .pc-descricao{font-size:12px;color:var(--muted);line-height:1.45;margin:5px 0 0;max-width:700px;}
+  .pc-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+  .pc-tag{font:600 10.5px var(--mono);color:var(--muted);border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:5px 8px;white-space:nowrap;}
+  .pc-tag.global{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 36%,transparent);}
+  .pc-acoes{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;max-width:480px;}
+  .pc-acao{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);text-decoration:none;font:600 11.5px var(--sans);white-space:nowrap;transition:.15s;}
+  .pc-acao:hover{border-color:var(--accent);color:var(--accent);}
+  .pc-acao.principal{background:var(--accent);border-color:var(--accent);color:#0b0d10;}
+  .pc-acao.principal:hover{color:#0b0d10;filter:brightness(1.05);}
+  .btn-organizar{font-size:13px;width:auto;padding:0 10px;border-radius:8px;gap:6px;}
+  .btn-organizar.on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
   /* skeleton de carregamento - cartões fantasma com brilho passando, no lugar
      do "carregando..." solto. Passa a sensação de que o conteúdo já vem vindo */
   .painel-skeleton{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;}
@@ -237,6 +258,10 @@
     .painel-saudacao .ps-vivo{justify-self:start;}
     .painel-saudacao .ps-relogio{font-size:21px;}
     .painel-skeleton .pskel{height:150px;}
+    .painel-contexto{grid-template-columns:1fr;padding:14px;gap:12px;}
+    .painel-contexto h2{font-size:15px;}
+    .pc-acoes{justify-content:flex-start;max-width:none;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;}
+    .pc-acao{flex:none;}
   }
   .notif-solicitacao-wrap{position:fixed;top:14px;right:14px;z-index:10000;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 28px));max-height:calc(100vh - 28px);overflow-y:auto;padding-right:2px;}
   .notif-solicitacao{background:var(--panel);border:2px solid var(--warn);border-radius:12px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.55);animation:notif-in .18s ease,notif-pulse 1.6s ease-in-out infinite;}
@@ -271,6 +296,7 @@
       <div class="nav-actions">
         <button class="btn-notif" id="btn-notif" onclick="toggleNotifications()" title="Ativar notificações push">🔔</button>
         <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
+        <button class="btn-notif btn-organizar" id="btn-organizar" onclick="alternarOrganizacaoPainel()" title="Organizar cards">⠿ <span>Organizar</span></button>
         <div class="nav-divider"></div>
         <button class="btn-notif btn-sair" onclick="logout()" title="Sair" style="cursor:pointer;">🚪</button>
       </div>
@@ -292,6 +318,10 @@
   <div class="ps-vivo" id="ps-vivo" title="Os cards se atualizam sozinhos a cada 60 segundos, enquanto esta aba estiver visível">● ao vivo · 60s</div>
   <div class="ps-relogio" id="ps-relogio">--:--</div>
 </div>
+
+<!-- Contexto do acesso: montado a partir de /api/me. Não lista empresas ou
+     unidades fora da permissão; o Master recebe explicitamente a visão global. -->
+<section id="painel-contexto" class="painel-contexto hidden" aria-live="polite"></section>
 
 <!-- skeleton de carregamento: cartões fantasma com brilho, no lugar do texto
      "carregando..." - dá a sensação de que o conteúdo já está a caminho -->
@@ -476,6 +506,43 @@ let ME_GLOBAL = null;
 let IS_MASTER_GLOBAL = false;
 let IS_ADMIN_GLOBAL = false;
 let SECOES_GLOBAL = [];
+let PAINEL_ORGANIZANDO = false;
+
+function temSecaoPainel(secao){ return IS_MASTER_GLOBAL || SECOES_GLOBAL.includes(secao); }
+function escaparAttr(s){ return escapeHtml(s).replace(/`/g, '&#96;'); }
+function alternarOrganizacaoPainel(){
+  PAINEL_ORGANIZANDO = !PAINEL_ORGANIZANDO;
+  const grid = document.getElementById('painel-grid');
+  const botao = document.getElementById('btn-organizar');
+  grid?.classList.toggle('organizando', PAINEL_ORGANIZANDO);
+  botao?.classList.toggle('on', PAINEL_ORGANIZANDO);
+  if(botao){ botao.title = PAINEL_ORGANIZANDO ? 'Concluir organização dos cards' : 'Organizar cards'; botao.querySelector('span').textContent = PAINEL_ORGANIZANDO ? 'Concluir' : 'Organizar'; }
+}
+
+function montarContextoPainel(){
+  const el = document.getElementById('painel-contexto');
+  if(!el || !ME_GLOBAL) return;
+  const unidades = Array.isArray(ME_GLOBAL.permissions?.unidades) ? ME_GLOBAL.permissions.unidades : [];
+  const global = IS_MASTER_GLOBAL;
+  const cargo = global ? 'Master' : (IS_ADMIN_GLOBAL ? 'Administração' : (ME_GLOBAL.cargo || 'Operação'));
+  const escopo = global
+    ? 'Visão global das empresas, grupos e unidades cadastradas.'
+    : `Você vê apenas o que foi liberado para o seu acesso${ME_GLOBAL.empresaNome ? ` na ${escapeHtml(ME_GLOBAL.empresaNome)}` : ''}.`;
+  const tags = global
+    ? '<span class="pc-tag global">VISÃO GLOBAL</span><span class="pc-tag">gestão e configuração</span>'
+    : `<span class="pc-tag">${unidades.length === 1 ? '1 unidade liberada' : `${unidades.length} unidades liberadas`}</span><span class="pc-tag">acesso restrito ao seu escopo</span>`;
+  const acoes = [{ href:'/tarefas.html', icone:'✅', nome:'Meu Dia', principal:true }];
+  if(global){
+    acoes.push({ href:'/central-alertas.html', icone:'🚨', nome:'Alertas' }, { href:'/loja-status.html', icone:'📡', nome:'NOC' }, { href:'/usuarios.html', icone:'👤', nome:'Acessos' });
+  }else{
+    if(temSecaoPainel('solicitacoes') || temSecaoPainel('tecnico') || temSecaoPainel('manutencao')) acoes.push({ href:'/central-inicio.html', icone:'📋', nome:'Solicitações' });
+    if(temSecaoPainel('lancamento') || temSecaoPainel('sangria')) acoes.push({ href:'/lancamento.html', icone:'🧾', nome:'Fechamento' });
+    else if(temSecaoPainel('monitor')) acoes.push({ href:'/monitor.html', icone:'📈', nome:'Monitor' });
+    else if(temSecaoPainel('parque')) acoes.push({ href:'/parque.html', icone:'🎡', nome:'Parque' });
+  }
+  el.innerHTML = `<div><div class="pc-rotulo">Seu espaço operacional</div><h2>${escapeHtml(cargo)}</h2><p class="pc-descricao">${escopo}</p><div class="pc-tags">${tags}</div></div><div class="pc-acoes">${acoes.slice(0,4).map(a=>`<a class="pc-acao${a.principal?' principal':''}" href="${escaparAttr(a.href)}">${a.icone} ${escapeHtml(a.nome)}</a>`).join('')}</div>`;
+  el.classList.remove('hidden');
+}
 
 // ---------- notificacao de solicitacao NOVA: toca som e fica na tela ate
 // QUALQUER Master/Admin sinalizar (marcar-visto) - mesma logica de
@@ -1543,6 +1610,7 @@ async function boot(){
 
   SECOES_GLOBAL = secoes;
   montarSaudacao();
+  montarContextoPainel();
   document.getElementById('painel-loading').classList.add('hidden');
   await renderizarCards();
 }
