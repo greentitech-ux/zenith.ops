@@ -134,6 +134,10 @@
   .ficha dd .sub{color:var(--muted);}
   .ficha dd .ok{color:var(--ok);} .ficha dd .warn{color:var(--warn);} .ficha dd .bad{color:var(--bad);}
   .card-msg.ok{color:var(--ok);} .card-msg.err{color:var(--bad);}
+  .plano{margin-top:11px;padding:10px 11px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);}
+  .plano-titulo{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
+  .plano-item{font-size:11.5px;line-height:1.45;padding:6px 0;border-top:1px solid rgba(125,136,150,.16);}.plano-item:first-of-type{border-top:0;padding-top:0;}.plano-item b{color:var(--text);}.plano-item.agora b{color:var(--warn);}.plano-item.definitivo b{color:var(--accent);}
+  .btn-otimizar{font-family:var(--mono);font-size:11px;color:var(--accent);background:rgba(184,255,60,.06);border:1px solid rgba(184,255,60,.38);border-radius:12px;padding:6px 11px;cursor:pointer;white-space:nowrap;}.btn-otimizar:hover{background:rgba(184,255,60,.14);}.btn-otimizar:disabled{opacity:.5;cursor:default;}
 
   /* caixa da senha: a rota exige a senha do Master a cada envio (é a mesma
      trava do NOC), então ela não fica guardada em lugar nenhum */
@@ -208,6 +212,23 @@
     <div class="linha-botoes">
       <button type="button" class="btn-cancelar" onclick="fecharReiniciar()">Cancelar</button>
       <button type="button" class="btn-ok" id="mr-confirmar" onclick="confirmarReiniciar()">Reiniciar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ações de melhoria não usam prompt do navegador: senha fica mascarada e
+     só viaja para a rota protegida no instante da confirmação. -->
+<div class="modal hidden" id="modal-otimizar">
+  <div class="caixa" role="dialog" aria-modal="true" aria-labelledby="mo-titulo">
+    <h2 id="mo-titulo">🧰 Ação de melhoria</h2>
+    <div class="alvo" id="mo-alvo"></div>
+    <p id="mo-descricao"></p>
+    <label for="mo-senha">Sua senha de Master</label>
+    <input type="password" id="mo-senha" autocomplete="new-password" placeholder="senha">
+    <div class="erro hidden" id="mo-erro"></div>
+    <div class="linha-botoes">
+      <button type="button" class="btn-cancelar" onclick="fecharOtimizar()">Cancelar</button>
+      <button type="button" class="btn-ok" id="mo-confirmar" onclick="confirmarOtimizar()">Enviar ação</button>
     </div>
   </div>
 </div>
@@ -337,6 +358,7 @@ function barraDisco(v){
 // da ação já moram lá. Duplicar isso aqui seria duplicar a parte perigosa.
 const chaveDe = (codigo, posto) => `${codigo}|${posto}`;
 let ALVO_REINICIO = null;
+let ALVO_OTIMIZACAO = null;
 
 function abrirReiniciar(codigo, posto, nome, unidade){
   ALVO_REINICIO = { codigo, posto, nome, unidade };
@@ -351,11 +373,33 @@ function fecharReiniciar(){
   ALVO_REINICIO = null;
   document.getElementById('modal-reiniciar').classList.add('hidden');
 }
+function abrirOtimizar(codigo, posto, nome, unidade, tarefa){
+  const definicoes = {
+    'diagnostico-desempenho': { titulo:'🔎 Diagnosticar desempenho', botao:'Diagnosticar', descricao:'Somente leitura: mede RAM, CPU, espaço em disco, processos com maior consumo e itens de inicialização. Não fecha programas nem altera configurações.' },
+    'limpeza-segura': { titulo:'🧹 Limpeza segura de temporários', botao:'Limpar com segurança', descricao:'Remove somente arquivos temporários e Lixeira. Não toca em Downloads, Documentos, programas, PDV ou arquivos de operação. Exige o agente SYSTEM.' },
+  };
+  const d = definicoes[tarefa]; if(!d) return;
+  ALVO_OTIMIZACAO = { codigo, posto, nome, unidade, tarefa };
+  document.getElementById('mo-titulo').textContent = d.titulo;
+  document.getElementById('mo-alvo').textContent = `${nome} · ${unidade}`;
+  document.getElementById('mo-descricao').textContent = d.descricao;
+  document.getElementById('mo-senha').value = '';
+  const erro = document.getElementById('mo-erro'); erro.classList.add('hidden'); erro.textContent = '';
+  document.getElementById('mo-confirmar').textContent = d.botao;
+  document.getElementById('modal-otimizar').classList.remove('hidden');
+  document.getElementById('mo-senha').focus();
+}
+function fecharOtimizar(){ ALVO_OTIMIZACAO = null; document.getElementById('modal-otimizar').classList.add('hidden'); }
 // Enter na senha confirma; Esc fecha - a caixa é de um campo só
 document.addEventListener('keydown', (ev) => {
-  if(document.getElementById('modal-reiniciar').classList.contains('hidden')) return;
-  if(ev.key === 'Escape') fecharReiniciar();
-  if(ev.key === 'Enter' && document.activeElement === document.getElementById('mr-senha')) confirmarReiniciar();
+  if(!document.getElementById('modal-reiniciar').classList.contains('hidden')){
+    if(ev.key === 'Escape') fecharReiniciar();
+    if(ev.key === 'Enter' && document.activeElement === document.getElementById('mr-senha')) confirmarReiniciar();
+  }
+  if(!document.getElementById('modal-otimizar').classList.contains('hidden')){
+    if(ev.key === 'Escape') fecharOtimizar();
+    if(ev.key === 'Enter' && document.activeElement === document.getElementById('mo-senha')) confirmarOtimizar();
+  }
 });
 
 async function enviarTarefa(alvo, tarefa, senha){
@@ -399,6 +443,25 @@ async function confirmarReiniciar(){
   }finally{
     botao.disabled = false; botao.textContent = 'Reiniciar';
   }
+}
+
+async function confirmarOtimizar(){
+  if(!ALVO_OTIMIZACAO) return;
+  const alvo = ALVO_OTIMIZACAO;
+  const senha = document.getElementById('mo-senha').value;
+  const erro = document.getElementById('mo-erro');
+  if(!senha){ erro.textContent='Digite sua senha de Master.'; erro.classList.remove('hidden'); return; }
+  const botao=document.getElementById('mo-confirmar'); const texto=botao.textContent;
+  botao.disabled=true; botao.textContent='enviando...';
+  try{
+    const d=await enviarTarefa(alvo, alvo.tarefa, senha);
+    fecharOtimizar();
+    if(!d.enfileirados) throw new Error((d.recusados&&d.recusados[0]&&d.recusados[0].motivo)||'A máquina não aceitou a ação.');
+    mostrarMsgCard(alvo, alvo.tarefa==='limpeza-segura'
+      ? 'Limpeza segura enviada ao executor SYSTEM. O resultado aparecerá na ficha e na fila.'
+      : 'Diagnóstico enviado. O resultado aparecerá na ficha e na fila.', 'ok');
+  }catch(e){ erro.textContent=e.message; erro.classList.remove('hidden'); }
+  finally{ botao.disabled=false; botao.textContent=texto; }
 }
 
 async function abortarReinicio(codigo, posto){
@@ -453,6 +516,7 @@ function cardHtml(c){
 
   const motivos = (c.motivos||[]).length
     ? `<div class="motivos">${c.motivos.map(m=>`<div class="m-${c.nivel}">⚠️ ${escapeHtml(m)}</div>`).join('')}</div>` : '';
+  const plano = (c.planoOtimizar || []).length ? `<div class="plano"><div class="plano-titulo">Plano de melhoria</div>${c.planoOtimizar.map(p=>`<div class="plano-item ${escapeHtml(p.prioridade||'')}"><b>${escapeHtml(p.titulo)}</b><br><span style="color:var(--muted);">${escapeHtml(p.detalhe)}</span></div>`).join('')}</div>` : '';
 
   // o detalhe fica FECHADO: no celular, card curto é o que deixa a lista
   // rolável. Quem precisa do modelo/serial abre.
@@ -504,6 +568,10 @@ function cardHtml(c){
     const extras = [t.ip?`IP ${escapeHtml(t.ip)}`:null, t.nome?escapeHtml(t.nome):null].filter(Boolean).join(' · ');
     linha('Tailscale', estado + (extras?` <span class="sub">· ${extras}</span>`:''));
   }
+  if(c.ultimoComandoEm){
+    const resultado = String(c.ultimoComandoErro || c.ultimoComandoResultado || 'sem texto de retorno').replace(/\s+/g,' ').slice(0, 360);
+    linha('Última ação', `<b class="${c.ultimoComandoErro?'bad':'ok'}">${c.ultimoComandoErro?'erro':'concluída'}</b> <span class="sub">· ${escapeHtml(tempoRelativo(c.ultimoComandoEm))} · ${escapeHtml(resultado)}</span>`);
+  }
   if(c.abertoDesde) linha('Aberto', escapeHtml(tempoRelativo(c.abertoDesde)));
   linha('Última batida', `${escapeHtml(tempoRelativo(c.ultimoHeartbeatEm))}${c.tipo?` <span class="sub">· ${escapeHtml(c.tipo)}</span>`:''}`
     + (c.ehServidor?' <span class="sub">· servidor</span>':'') + (c.ehNotebook?' <span class="sub">· notebook</span>':''));
@@ -523,7 +591,9 @@ function cardHtml(c){
   const chave = chaveDe(c.codigo, c.posto);
   const idMsg = 'msg-' + chave.replace(/[^a-zA-Z0-9]/g,'_');
   const enviado = ENVIADOS.get(chave);
-  const acoes = !podeComandar ? '' : `<div class="card-acoes">${
+  const acoes = !podeComandar ? '' : `<div class="card-acoes">
+    <button type="button" class="btn-otimizar" onclick="abrirOtimizar('${escapeJs(c.codigo)}','${escapeJs(c.posto)}','${escapeJs(c.nome)}','${escapeJs(c.unidadeNome||c.codigo)}','diagnostico-desempenho')">🔎 Diagnosticar</button>
+    <button type="button" class="btn-otimizar" onclick="abrirOtimizar('${escapeJs(c.codigo)}','${escapeJs(c.posto)}','${escapeJs(c.nome)}','${escapeJs(c.unidadeNome||c.codigo)}','limpeza-segura')">🧹 Limpar temporários</button>${
     enviado
       ? `<button type="button" class="btn-reiniciar destaque" onclick="abortarReinicio('${escapeJs(c.codigo)}','${escapeJs(c.posto)}')">✋ Abortar reinício</button>`
       : `<button type="button" class="btn-reiniciar ${c.precisaReiniciar?'destaque':''}" onclick="abrirReiniciar('${escapeJs(c.codigo)}','${escapeJs(c.posto)}','${escapeJs(c.nome)}','${escapeJs(c.unidadeNome||c.codigo)}')">🔁 Reiniciar</button>`
@@ -543,7 +613,7 @@ function cardHtml(c){
     </div>
     ${barraDisco(c.volumeCritico)}
     ${chips.length?`<div class="chips">${chips.join('')}</div>`:''}
-    ${motivos}${semMedicao}${detalhe}${acoes}${podeComandar?msgEnviado:''}
+    ${motivos}${plano}${semMedicao}${detalhe}${acoes}${podeComandar?msgEnviado:''}
   </div>`;
 }
 

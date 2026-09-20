@@ -2070,6 +2070,41 @@ const COMANDO_LIMPAR_TRAVADOS = [
   '"Processos NOCZenith orfaos encerrados: $mortos"',
 ].join('\n');
 
+// Diagnóstico fechado de desempenho: apenas lê indicadores que ajudam a
+// decidir entre limpeza, reinício assistido ou upgrade. Não coleta linha de
+// comando, arquivos do usuário ou dados pessoais.
+const COMANDO_DIAGNOSTICO_DESEMPENHO = [
+  '$linhas = New-Object System.Collections.Generic.List[string]',
+  '$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue',
+  'if ($os) { $livre = [math]::Round($os.FreePhysicalMemory / 1MB, 2); $total = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2); $linhas.Add("RAM: $livre GB livres de $total GB") }',
+  '$cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property LoadPercentage -Average',
+  'if ($cpu.Count -gt 0 -and $null -ne $cpu.Average) { $linhas.Add("CPU agora: $([math]::Round($cpu.Average))%") }',
+  '$volumes = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Size) { "DISCO $($_.DeviceID): $([math]::Round($_.FreeSpace/1GB,1)) GB livres de $([math]::Round($_.Size/1GB,1)) GB" } }',
+  '$linhas.AddRange(@($volumes))',
+  '$top = Get-Process -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 6 | ForEach-Object { "$($_.ProcessName): $([math]::Round($_.WorkingSet64/1MB)) MB" }',
+  'if ($top) { $linhas.Add("MAIORES CONSUMOS:"); $linhas.AddRange(@($top)) }',
+  '$inicio = Get-CimInstance Win32_StartupCommand -ErrorAction SilentlyContinue | Select-Object -First 15 | ForEach-Object { $_.Name }',
+  'if ($inicio) { $linhas.Add("INICIALIZAÇÃO (amostra): " + (@($inicio) -join ", ")) }',
+  '$linhas -join "`n"',
+].join('\n');
+
+// Limpeza conservadora: só temporários do usuário e do Windows, mais Lixeira.
+// Não toca em Downloads, Documentos, aplicações da loja ou serviços. Arquivo
+// bloqueado é registrado como pulado e não faz o restante falhar.
+const COMANDO_LIMPEZA_SEGURA = [
+  '$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+  'if (-not $admin) { throw "Otimização segura exige o NOCZenith elevado (SYSTEM)." }',
+  '$apagados = 0; $falhas = 0; $pastas = @($env:TEMP, (Join-Path $env:WINDIR "Temp")) | Select-Object -Unique',
+  'foreach ($pasta in $pastas) {',
+  '  if (-not $pasta -or -not (Test-Path -LiteralPath $pasta)) { continue }',
+  '  Get-ChildItem -LiteralPath $pasta -Force -ErrorAction SilentlyContinue | ForEach-Object {',
+  '    try { Remove-Item -LiteralPath $_.FullName -Force -Recurse -ErrorAction Stop; $apagados++ } catch { $falhas++ }',
+  '  }',
+  '}',
+  'try { Clear-RecycleBin -Force -ErrorAction Stop; $lixeira = "limpa" } catch { $lixeira = "não disponível/contém itens em uso" }',
+  '"OTIMIZAÇÃO SEGURA: $apagados item(ns) temporário(s) removido(s) · $falhas pulado(s) por uso/permissão · Lixeira: $lixeira. Nenhum programa, documento ou download foi removido."',
+].join('\n');
+
 // REINICIAR a máquina. Fixo no código pelo mesmo motivo dos outros: uma
 // rota que aceitasse texto livre seria "rodar qualquer coisa em toda a
 // rede". O /t 120 não é enfeite - dá 2 minutos de aviso NA TELA DA LOJA
@@ -4008,7 +4043,7 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_LIMPEZA_SEGURA, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA,
   COMANDO_REDE_DESTRAVAR, COMANDO_RESET_SENHA,
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,

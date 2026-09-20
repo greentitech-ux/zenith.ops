@@ -5184,15 +5184,17 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'zebra', 'rede', 'reset-senha'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'limpeza-segura'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
+      'diagnostico-desempenho': { acao: 'manutencao.diagnosticoDesempenho', verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
+      'limpeza-segura': { acao: 'manutencao.limpezaSegura', verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },
       // reinicia SO o servico do AnyDesk: leva segundos e nao derruba o
       // caixa, ao contrario de reiniciar a maquina inteira por causa de um
       // servico so
-      anydesk: { acao: 'manutencao.reiniciarAnydesk', verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
-      gsurfRsa: { acao: 'manutencao.reiniciarGsurfRsa', verbo: 'Reiniciar o GSurfRSA Listener de', comando: lojaStatus.COMANDO_REINICIAR_GSURF_RSA, origem: 'manutencao-gsurf-rsa' },
+      anydesk: { acao: 'manutencao.reiniciarAnydesk', verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk', requerAdmin: true },
+      gsurfRsa: { acao: 'manutencao.reiniciarGsurfRsa', verbo: 'Reiniciar o GSurfRSA Listener de', comando: lojaStatus.COMANDO_REINICIAR_GSURF_RSA, origem: 'manutencao-gsurf-rsa', requerAdmin: true },
       // O comando aqui e uma FUNCAO porque muda de unidade pra unidade: leva
       // os IPs das Zebras DAQUELA loja. Os IPs saem de impressorasPraSondar,
       // que so devolve o que o Master marcou como impressora Zebra - e a
@@ -5200,7 +5202,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       // destrava a pilha de rede da MAQUINA (nao o roteador da loja - ver o
       // comentario do comando). Do mais leve pro mais pesado, e a placa so e
       // tocada se o resto nao resolveu.
-      rede: { acao: 'manutencao.destravarRede', verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede' },
+      rede: { acao: 'manutencao.destravarRede', verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede', requerAdmin: true },
       zebra: {
         acao: 'manutencao.resetZebra',
         verbo: 'Resetar as Zebras de',
@@ -5211,7 +5213,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
         acao: 'manutencao.resetarSenha',
         verbo: 'Resetar a senha do Windows de',
         comando: lojaStatus.COMANDO_RESET_SENHA,
-        origem: 'manutencao-reset-senha',
+        origem: 'manutencao-reset-senha', requerAdmin: true,
       },
     };
     const t = TAREFAS[tarefa];
@@ -5220,6 +5222,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     if (await desviarSeQaMaster(req, res, t.acao, resumo, { alvos, porEmail: req.user.email })) return;
     const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, {
       origem: t.origem,
+      requerAdmin: !!t.requerAdmin,
     });
     const ok = resultados.filter((r) => r.ok);
     console.log(`[NOC] ${req.user.email} ${t.origem} em ${ok.length}/${resultados.length} máquina(s)`);

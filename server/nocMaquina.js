@@ -157,6 +157,37 @@ function diagnosticoRam(ram) {
   };
 }
 
+// Plano curto e acionável para o card da máquina. Ele não executa nada: só
+// separa o que o NOC pode aliviar com segurança do que é limite físico e exige
+// troca/upgrade. Isso evita a falsa promessa de que "limpar" resolve 4 GB de
+// RAM ou SSD com falha prevista.
+function planoOtimizar(disco, ram, uptimeHoras) {
+  const plano = [];
+  const volumes = (disco && disco.volumes) || [];
+  const volumeApertado = volumes.reduce((piorVolume, volume) => (
+    piorVolume == null || (volume.livrePct != null && volume.livrePct < piorVolume.livrePct) ? volume : piorVolume
+  ), null);
+  if (!disco && !ram && uptimeHoras == null) {
+    return [{ prioridade: 'agora', tipo: 'diagnosticar', titulo: 'Coletar diagnóstico de desempenho', detalhe: 'Ainda não há telemetria suficiente para recomendar uma intervenção.' }];
+  }
+  if (ram && ram.totalGb <= 4) {
+    plano.push({ prioridade: 'definitivo', tipo: 'hardware', titulo: 'Ampliar RAM para pelo menos 8 GB', detalhe: `${ram.totalGb} GB instalados limitam o Windows; limpeza e reinício só aliviam temporariamente.` });
+  }
+  if (ram && ram.livreGb != null && (ram.livreGb < RAM_LIVRE_ATENCAO_GB || (ram.livreGb / ram.totalGb) * 100 < RAM_LIVRE_ATENCAO_PCT)) {
+    const principal = (ram.processos || [])[0];
+    plano.push({ prioridade: 'agora', tipo: 'diagnosticar', titulo: 'Identificar consumo de memória', detalhe: principal ? `${principal.nome} está entre os maiores consumos; diagnostique antes de fechar aplicações.` : 'Faça um diagnóstico antes de encerrar qualquer aplicação da operação.' });
+  }
+  if (volumeApertado && volumeApertado.livrePct != null && volumeApertado.livrePct < LIVRE_ATENCAO_PCT) {
+    plano.push({ prioridade: 'agora', tipo: 'limpar', titulo: 'Limpar arquivos temporários com segurança', detalhe: `${volumeApertado.letra} tem apenas ${volumeApertado.livrePct}% livre. A limpeza não toca em Downloads, documentos nem programas.` });
+  }
+  const discoRuim = (disco && disco.discos || []).some((d) => d.predicaoFalha || d.saude === 'ruim');
+  if (discoRuim) plano.push({ prioridade: 'definitivo', tipo: 'hardware', titulo: 'Trocar o disco e copiar dados', detalhe: 'O Windows/SMART indica risco de falha; limpeza não corrige defeito físico.' });
+  if (ciclosSemReiniciar(uptimeHoras) >= 1) {
+    plano.push({ prioridade: 'agora', tipo: 'reiniciar', titulo: 'Programar reinício assistido', detalhe: 'Sete dias ou mais sem reiniciar acumulam atualizações e memória fragmentada.' });
+  }
+  return plano.length ? plano.slice(0, 4) : [{ prioridade: 'ok', tipo: 'monitorar', titulo: 'Manter monitoramento', detalhe: 'Nenhuma intervenção preventiva é indicada pela última medição.' }];
+}
+
 function avaliarRam(ram) {
   if (!ram || ram.totalGb == null || ram.livreGb == null) return { nivel: 'ok', motivos: [] };
   const livrePct = Math.round((ram.livreGb / ram.totalGb) * 1000) / 10;
@@ -395,6 +426,7 @@ function panorama(docs) {
       // loja-status.html - aqui so' viaja junto.
       ram,
       ramDiagnostico: diagnosticoRam(ram),
+      planoOtimizar: planoOtimizar(disco, ram, d.uptimeHoras),
       ramMedidaEm: d.ramMedidaEm || null,
       ipLocal: d.ipLocal || null,
       ip: d.ip || null,
@@ -411,6 +443,11 @@ function panorama(docs) {
       ehServidor: !!d.ehServidor,
       ehNotebook: !!d.ehNotebook,
       anydeskId: d.anydeskId || null,
+      // Resultado curto da última ação do NOC. A tela de saúde mostra só um
+      // resumo, para confirmar a melhoria sem transformá-la em console.
+      ultimoComandoEm: d.ultimoComandoEm || null,
+      ultimoComandoResultado: d.ultimoComandoResultado || null,
+      ultimoComandoErro: d.ultimoComandoErro || null,
     };
   });
   const peso = (l) => (l.nivel === 'critico' ? 0 : (l.nivel === 'atencao' ? 1 : (l.temMedicao ? 3 : 2)));
@@ -473,7 +510,7 @@ function quedasDeVm(antesArr, depoisArr) {
 module.exports = {
   LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, RAM_LIVRE_CRITICA_GB, RAM_LIVRE_ATENCAO_GB, RAM_LIVRE_CRITICA_PCT, RAM_LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
   UPTIME_REINICIAR_DIAS,
-  sanitizarDisco, avaliarDisco, sanitizarRam, avaliarRam, diagnosticoRam, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
+  sanitizarDisco, avaliarDisco, sanitizarRam, avaliarRam, diagnosticoRam, planoOtimizar, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
   sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
   resumoDispositivos, discosComProblema, panorama,
 };
