@@ -3244,14 +3244,16 @@ function tocarSomNotificacao(){
       const gain = AUDIO_CTX.createGain();
       osc.type = 'sine'; osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, AUDIO_CTX.currentTime + delay);
-      gain.gain.exponentialRampToValueAtTime(0.25, AUDIO_CTX.currentTime + delay + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, AUDIO_CTX.currentTime + delay + 0.35);
+      gain.gain.exponentialRampToValueAtTime(0.14, AUDIO_CTX.currentTime + delay + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, AUDIO_CTX.currentTime + delay + 0.42);
       osc.connect(gain); gain.connect(AUDIO_CTX.destination);
       osc.start(AUDIO_CTX.currentTime + delay);
-      osc.stop(AUDIO_CTX.currentTime + delay + 0.4);
+      osc.stop(AUDIO_CTX.currentTime + delay + 0.46);
     };
-    tocarBeep(0, 880);
-    tocarBeep(0.18, 1160);
+    // Chamada de embarque: assinatura curta em três notas, suave no celular.
+    tocarBeep(0, 659.25);
+    tocarBeep(0.18, 830.61);
+    tocarBeep(0.43, 1046.5);
   }catch(e){ /* navegador pode bloquear audio antes de alguma interacao - so nao toca */ }
 }
 

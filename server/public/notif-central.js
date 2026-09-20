@@ -154,17 +154,17 @@
         const gain = audioCtx.createGain();
         osc.type = 'sine'; osc.frequency.value = freq;
         gain.gain.setValueAtTime(0.0001, audioCtx.currentTime + delay);
-        gain.gain.exponentialRampToValueAtTime(0.28, audioCtx.currentTime + delay + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + 0.35);
+        gain.gain.exponentialRampToValueAtTime(0.14, audioCtx.currentTime + delay + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + 0.42);
         osc.connect(gain); gain.connect(audioCtx.destination);
         osc.start(audioCtx.currentTime + delay);
-        osc.stop(audioCtx.currentTime + delay + 0.4);
+        osc.stop(audioCtx.currentTime + delay + 0.46);
       });
     } catch (e) { /* navegador pode bloquear audio antes de alguma interacao - so nao toca */ }
   }
-  // Chamada de cabine: duas notas claras, ascendentes e curtas. É menos
-  // agressivo que um beep de sistema e mantém o alerta reconhecível no app.
-  const tocarSomSolicitacao = () => tocarBeep([[0, 880], [0.23, 1174.66]]);
+  // Toque de chamada de embarque: três notas ascendentes, suaves e espaçadas.
+  // É uma assinatura de aviso de cabine, sem áudio externo ou beep agressivo.
+  const tocarSomSolicitacao = () => tocarBeep([[0, 659.25], [0.18, 830.61], [0.43, 1046.5]]);
   const tocarSomFraude = () => tocarBeep([[0, 783.99], [0.18, 1046.5], [0.36, 1318.51]]);
 
   const ICONES_TIPO = { estorno: '💳', 'ajuste-fechamento': '🧾', compra: '🛒', manutencao: '🔧', 'suporte-ti': '💻', pagamento: '💸', nota: '📄', 'quebra-caixa': '⚠️', 'desvio-estoque': '📦⚠️' };
