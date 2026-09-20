@@ -199,6 +199,9 @@ function toPublicUser(id, user) {
     cargo: user.role === 'master' ? null : user.cargo || null,
     qaMaster: user.role === 'master' ? !!user.qaMaster : null,
     qaUser: user.role === 'master' ? null : !!user.qaUser,
+    // Preferência puramente visual. O servidor continua resolvendo todas as
+    // autorizações a partir de role/permissions, nunca a partir deste campo.
+    perfilVisual: user.perfilVisual || null,
   };
 }
 

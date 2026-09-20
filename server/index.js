@@ -6,6 +6,12 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 
+// Arquivos visuais de pessoas não ficam em `public`: são imagens pessoais e
+// só podem ser entregues ao próprio acesso (ou ao Master autenticado).
+const PERFIS_VISUAIS_ARQUIVOS = Object.freeze({
+  'saltiverso-rayana': path.join(__dirname, 'perfis-visuais', 'rayana-saltiverso.png'),
+});
+
 const compression = require('compression');
 const db = require('./firestore'); // so pro contador de leituras (ver relatorioLeituras)
 const store = require('./store');
@@ -2285,6 +2291,7 @@ app.get('/api/me', async (req, res) => {
     username: req.user.username || null,
     role: req.user.role,
     cargo: req.user.cargo || null,
+    perfilVisual: req.user.perfilVisual || null,
     permissions: req.permissions,
     isAdmin: req.isAdmin,
     podeCatalogoEstoque: req.podeCatalogoEstoque,
@@ -8004,6 +8011,28 @@ app.post('/api/parque/checkins/:id/checkout', requireAnySection('parque', 'parqu
     broadcast('parque-checkin-atualizado', registro, 'parque');
     broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
     res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Tema pessoal é administrado pelo Master, mas é somente apresentação. Não
+// fica exposto sem login e não pode ser usado para mudar o escopo do acesso.
+app.get('/api/perfis-visuais/:perfil/imagem', (req, res) => {
+  const perfil = String(req.params.perfil || '');
+  const arquivo = PERFIS_VISUAIS_ARQUIVOS[perfil];
+  // Nem uma pessoa autenticada pode baixar a imagem de perfil de outra.
+  if (!arquivo || (!req.isMaster && req.user.perfilVisual !== perfil)) return res.sendStatus(404);
+  res.set('Cache-Control', 'private, max-age=604800');
+  res.type('png').sendFile(arquivo, (err) => {
+    if (err && !res.headersSent) res.sendStatus(err.code === 'ENOENT' ? 404 : 500);
+  });
+});
+
+app.put('/api/users/:id/perfil-visual', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.perfil-visual', `Editar perfil visual do acesso ${req.params.id}`, { id: req.params.id, perfilVisual: req.body?.perfilVisual })) return;
+    res.json(await users.updatePerfilVisual(req.params.id, req.body?.perfilVisual));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

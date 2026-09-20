@@ -65,6 +65,17 @@ function sanitizePermissions(input) {
 const HORA_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const USERNAME_RE = /^[a-z0-9._-]{2,30}$/;
 
+// A personalização é deliberadamente uma lista fechada de perfis que já
+// pertencem ao app. Assim não há URL externa, cobrança por geração de imagem
+// nem risco de um usuário apontar o perfil para conteúdo de terceiros.
+const PERFIS_VISUAIS_VALIDOS = ['', 'saltiverso-rayana'];
+
+function sanitizePerfilVisual(raw) {
+  const perfil = String(raw || '').trim();
+  if (!PERFIS_VISUAIS_VALIDOS.includes(perfil)) throw new Error('Perfil visual inválido.');
+  return perfil || null;
+}
+
 function sanitizeUsername(raw) {
   const u = String(raw || '').trim().toLowerCase();
   if (!u) return '';
@@ -234,6 +245,19 @@ async function updateUsername(id, username) {
   const usernameOk = sanitizeUsername(username);
   await garantirUsernameLivre(usernameOk, id);
   await ref.update({ username: usernameOk || null });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
+// Visual é uma preferência de apresentação. Não participa de permissões,
+// empresa, seção, cargo ou autenticação: trocar/remover nunca amplia acesso.
+async function updatePerfilVisual(id, perfilVisual) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  const perfil = sanitizePerfilVisual(perfilVisual);
+  await ref.update({ perfilVisual: perfil });
   invalidarUsuario(id);
   usersCache.invalidar();
   return toPublic(await ref.get());
@@ -715,6 +739,7 @@ function toPublic(doc) {
     cargos: data.role === 'master' ? [] : tagsDe(data),
     qaMaster: data.role === 'master' ? !!data.qaMaster : null,
     qaUser: data.role === 'master' ? null : !!data.qaUser,
+    perfilVisual: data.perfilVisual || null,
     createdAt: data.createdAt,
   };
 }
@@ -864,6 +889,7 @@ module.exports = {
   updateSessaoLonga,
   updateCargo,
   updateUsername,
+  updatePerfilVisual,
   updateUsernamesEmMassa,
   resetPassword,
   desbloquear,

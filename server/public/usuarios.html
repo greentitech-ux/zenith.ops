@@ -118,6 +118,9 @@
   .acoes-lista button:hover{border-color:var(--accent);}
   .acoes-lista button.danger{color:var(--bad);}
   .acoes-lista button.danger:hover{border-color:var(--bad);}
+  .perfil-opcao{display:block!important;padding:14px!important;line-height:1.4;}
+  .perfil-opcao strong{display:block;font-size:13px;}.perfil-opcao small{display:block;margin-top:3px;color:var(--muted);font-size:11px;}
+  .perfil-opcao.selecionado{border-color:var(--accent)!important;background:rgba(184,255,60,.08)!important;}
   .acoes-lista .acoes-sep{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 0;}
   .checks .group-heading{width:100%;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:6px;}
   .checks .group-heading:first-child{margin-top:0;}
@@ -1252,6 +1255,7 @@ function abrirAcoes(id){
       <div class="master-nota">Conta Master: edição de identificação e segurança. O escopo global não pode ser limitado, desativado ou excluído por esta tela.</div>
       <button type="button" onclick="fecharAcoes();abrirSessoes('${u.id}')">📍 Ver sessões e locais conectados</button>
       <button type="button" onclick="fecharAcoes();definirUsername('${u.id}', '${escapeHtml(u.username||'')}')">🆔 ${u.username?'Editar usuário':'Definir usuário'}</button>
+      <button type="button" onclick="fecharAcoes();editarPerfilVisual('${u.id}')">🎨 Personalização visual</button>
       <button type="button" onclick="fecharAcoes();resetarSenha('${u.id}')">🔒 Redefinir senha</button>
       <button type="button" onclick="fecharAcoes();alternarSessaoLongaMaster('${u.id}', ${!u.sessaoLonga})">${u.sessaoLonga?'🔓 Desativar sessão de 30 dias':'🔒 Manter conectado por 30 dias'}</button>`;
     document.getElementById('acoes-overlay').classList.add('show');
@@ -1264,6 +1268,7 @@ function abrirAcoes(id){
     ${u.locked ? `<button type="button" onclick="fecharAcoes();desbloquearAcesso('${u.id}')">🔓 Desbloquear (mantém a senha)</button>` : ''}
     <button type="button" onclick="fecharAcoes();resetarSenha('${u.id}')">🔒 Nova senha</button>
     <button type="button" onclick="fecharAcoes();definirUsername('${u.id}', '${escapeHtml(u.username||'')}')">🆔 ${u.username?'Editar usuário':'Definir usuário'}</button>
+    <button type="button" onclick="fecharAcoes();editarPerfilVisual('${u.id}')">🎨 Personalização visual${u.perfilVisual?' · ativa':''}</button>
     <div class="acoes-sep">Conta</div>
     <button type="button" class="danger" onclick="fecharAcoes();alternarAtivo('${u.id}', ${!u.active})">${u.active?'🚫 Desativar acesso':'✅ Reativar acesso'}</button>
     <button type="button" class="danger" onclick="fecharAcoes();excluirUsuario('${u.id}','${escapeHtml(u.email)}')">🗑️ Excluir acesso</button>
@@ -1271,6 +1276,26 @@ function abrirAcoes(id){
   document.getElementById('acoes-overlay').classList.add('show');
 }
 function fecharAcoes(){ document.getElementById('acoes-overlay').classList.remove('show'); }
+
+async function editarPerfilVisual(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  document.getElementById('acoes-titulo').textContent = 'Personalização · ' + (u.username || u.email);
+  document.getElementById('acoes-lista').innerHTML = `
+    <div class="master-nota">Escolha a aparência deste acesso. Isto não altera permissões, empresa, cargos nem sessões.</div>
+    <button type="button" class="perfil-opcao ${!u.perfilVisual?'selecionado':''}" onclick="salvarPerfilVisual('${u.id}',null)"><strong>Visual padrão</strong><small>Usa o design geral do NoPulso em todas as telas.</small></button>
+    <button type="button" class="perfil-opcao ${u.perfilVisual==='saltiverso-rayana'?'selecionado':''}" onclick="salvarPerfilVisual('${u.id}','saltiverso-rayana')"><strong>Saltiverso · Rayana</strong><small>Mostra a arte pessoal somente no balcão Saltiverso, após o login desse acesso.</small></button>
+    <button type="button" onclick="abrirAcoes('${u.id}')">← Voltar às ações</button>`;
+  document.getElementById('acoes-overlay').classList.add('show');
+}
+
+async function salvarPerfilVisual(id, perfilVisual){
+  const res = await fetch('/api/users/'+id+'/perfil-visual', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({perfilVisual})});
+  const data = await res.json();
+  if(!res.ok){ alert(data.error || 'Não foi possível salvar a personalização.'); return; }
+  await carregarUsuarios();
+  fecharAcoes();
+  alert(perfilVisual ? 'Personalização ativada. Ela aparecerá no próximo carregamento do Saltiverso dessa pessoa.' : 'Personalização removida.');
+}
 
 // ---------- mensagem direta pra uma pessoa - pedido do usuario: poder
 // AVISAR proativamente um funcionario (nao so responder quem chama no chat

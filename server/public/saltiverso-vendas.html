@@ -82,6 +82,13 @@
   .catalogo-linha:first-child{border-top:none;}
   .catalogo-linha .nome{flex:1;font-size:13px;}
   .catalogo-linha input.preco-edit{width:80px;padding:6px 8px;font-size:12.5px;}
+  .perfil-visual{display:none;position:relative;overflow:hidden;min-height:118px;margin:-4px 0 14px;border:1px solid #394d80;border-radius:12px;background:#10182b;color:#fff;isolation:isolate;}
+  .perfil-visual.ativo{display:flex;align-items:flex-end;}
+  .perfil-visual:before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(9,13,25,.96) 0%,rgba(9,13,25,.75) 46%,rgba(9,13,25,.08) 100%),var(--perfil-imagem) center 38%/cover no-repeat;z-index:-1;}
+  .perfil-visual-conteudo{padding:16px;max-width:70%;}
+  .perfil-visual-kicker{font:700 9px var(--mono);letter-spacing:.11em;text-transform:uppercase;color:#b8ff3c;}
+  .perfil-visual h2{margin:5px 0 3px;font-size:18px;}.perfil-visual p{margin:0;color:#dce4f4;font-size:12px;line-height:1.4;}
+  @media(max-width:440px){.perfil-visual{min-height:104px}.perfil-visual-conteudo{max-width:78%;padding:13px}.perfil-visual h2{font-size:16px;}}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -102,6 +109,14 @@
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
 <nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<section class="perfil-visual" id="perfil-visual" aria-live="polite">
+  <div class="perfil-visual-conteudo">
+    <div class="perfil-visual-kicker">Seu espaço Saltiverso</div>
+    <h2 id="perfil-visual-titulo"></h2>
+    <p>Seu acesso, suas permissões e o caixa continuam protegidos.</p>
+  </div>
+</section>
 
 <div id="sem-acesso" class="empty hidden">Você não tem acesso ao balcão do Saltiverso. Fale com o administrador (Master).</div>
 
@@ -218,6 +233,24 @@ function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
 function horaCurtaBrasilia(iso){ const d = new Date(iso); return isNaN(d.getTime()) ? '' : `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 
 function unidadeAtual(){ return document.getElementById('sv-unidade').value; }
+
+async function aplicarPerfilVisual(){
+  const el = document.getElementById('perfil-visual');
+  if(!ME || ME.perfilVisual !== 'saltiverso-rayana') return;
+  const nome = (ME.username || ME.email || 'Rayana').split('@')[0].replace(/[._-]+/g, ' ');
+  document.getElementById('perfil-visual-titulo').textContent = `Olá, ${nome.charAt(0).toUpperCase()+nome.slice(1)}!`;
+  try{
+    const token = localStorage.getItem('authToken');
+    const resp = await fetch('/api/perfis-visuais/saltiverso-rayana/imagem', {headers:{Authorization:'Bearer '+token}});
+    if(!resp.ok) throw new Error('imagem indisponível');
+    const blobUrl = URL.createObjectURL(await resp.blob());
+    el.style.setProperty('--perfil-imagem', `url("${blobUrl}")`);
+    el.classList.add('ativo');
+  }catch(_){
+    // A venda não depende da arte. Se a imagem falhar, a pessoa usa o visual
+    // padrão e continua trabalhando normalmente.
+  }
+}
 
 // ---------- catálogo (só bebida/meia) ----------
 async function carregarCatalogo(){
@@ -524,6 +557,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();
+  await aplicarPerfilVisual();
   IS_MASTER = ME.role==='master';
   PODE_CATALOGO = IS_MASTER || !!ME.podeCatalogoEstoque;
   // atendente comum recebe do servidor SÓ as próprias vendas (caixa cego -
