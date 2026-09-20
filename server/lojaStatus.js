@@ -811,6 +811,13 @@ const PERSIST_MS = Number(process.env.LOJA_STATUS_PERSIST_MS) >= 0
   ? Number(process.env.LOJA_STATUS_PERSIST_MS)
   : 5 * 60 * 1000;
 const ultimaGravacaoEm = new Map(); // docId -> quando foi gravado de verdade
+// Telemetria de RAM/Zebra pode chegar muito mais rápido do que uma mudança
+// real. A sonda continua rápida no computador; no Firestore gravamos o estado
+// novo na hora e, se nada mudou, só uma confirmação a cada 15 minutos.
+const TELEMETRIA_PERSIST_MS = Number(process.env.NOC_TELEMETRIA_PERSIST_MS) >= 0
+  ? Number(process.env.NOC_TELEMETRIA_PERSIST_MS)
+  : 15 * 60 * 1000;
+const ultimaTelemetriaGravacaoEm = new Map();
 
 // Depois de um restart, o ultimoHeartbeatEm gravado pode estar ate PERSIST_MS
 // atrasado - e a varredura anunciaria queda de maquina que nunca parou. Este
@@ -1652,11 +1659,15 @@ async function atualizarIpLocal(codigo, posto, ip, token) {
 // isolado do que nao pode quebrar.
 async function registrarTelemetria(codigo, posto, dados, token) {
   const id = docIdFor(codigo, posto);
-  const snap = await COLLECTION.doc(id).get();
-  const atual = snap.exists ? snap.data() : null;
+  // A telemetria rápida não pode reler o mesmo documento em toda sonda Zebra.
+  // O espelho é atualizado por cada escrita deste módulo; em caso de restart,
+  // garantirEspelho faz uma única leitura da coleção, não uma por equipamento.
+  const memoria = await garantirEspelho();
+  const atual = memoria.get(id) || null;
   if (!atual) throw new Error('Computador não encontrado.');
   exigirTokenSeTiver(atual, token);
   const agora = Date.now();
+  const confirmacaoDevida = agora - (ultimaTelemetriaGravacaoEm.get(id) || 0) >= TELEMETRIA_PERSIST_MS;
   // Telemetria autenticada e prova de vida do NOCZenith. Sem isso, uma
   // escrita atual de disco/rede podia coexistir com um ultimoHeartbeatEm
   // antigo por causa do intervalo de persistencia do heartbeat e o painel
@@ -1669,10 +1680,14 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   if (ram) {
     const antes = atual.ramNivel || 'ok';
     const depois = nocMaquina.avaliarRam(ram);
-    patch.ram = ram;
-    patch.ramMedidaEm = agora;
-    patch.ramNivel = depois.nivel;
-    patch.ramMotivos = depois.motivos;
+    const mudouRam = JSON.stringify(ram) !== JSON.stringify(atual.ram || null)
+      || antes !== depois.nivel || JSON.stringify(atual.ramMotivos || []) !== JSON.stringify(depois.motivos);
+    if (mudouRam || !atual.ramMedidaEm || confirmacaoDevida) {
+      patch.ram = ram;
+      patch.ramMedidaEm = agora;
+      patch.ramNivel = depois.nivel;
+      patch.ramMotivos = depois.motivos;
+    }
     // Primeiro alerta também vale: versões antigas já guardavam a leitura de
     // RAM, mas ainda não tinham ramNivel. Assim um PC já estrangulado não
     // fica silencioso até piorar mais uma vez.
@@ -1686,9 +1701,13 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   if (disco) {
     const antes = nocMaquina.avaliarDisco(atual.disco);
     const depois = nocMaquina.avaliarDisco(disco);
-    patch.disco = disco;
-    patch.discoNivel = depois.nivel;
-    patch.discoMotivos = depois.motivos;
+    const mudouDisco = JSON.stringify(disco) !== JSON.stringify(atual.disco || null)
+      || depois.nivel !== antes.nivel || JSON.stringify(atual.discoMotivos || []) !== JSON.stringify(depois.motivos);
+    if (mudouDisco || !atual.disco) {
+      patch.disco = disco;
+      patch.discoNivel = depois.nivel;
+      patch.discoMotivos = depois.motivos;
+    }
     // so vira evento/alerta quando o estado PIORA. Um HD com setor realocado
     // continua com setor realocado pra sempre - avisar a cada 6h treinaria
     // todo mundo a ignorar o aviso, que e exatamente o oposto do objetivo.
@@ -1709,7 +1728,7 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   // frota inteira em vez de uma fatia dela.
   const bootTelemetria = Number(dados && dados.bootEm) > 0 ? Number(dados.bootEm) : null;
   if (bootTelemetria) {
-    patch.bootEm = bootTelemetria;
+    if (bootTelemetria !== atual.bootEm) patch.bootEm = bootTelemetria;
     if (reiniciouDesde(atual.bootEm, bootTelemetria)) {
       patch.reinicioAvisoPendente = { em: bootTelemetria, inesperado: !!(dados && dados.desligamentoInesperado) };
       eventos = [...eventos, { tipo: 'reiniciou', em: agora, bootEm: bootTelemetria, inesperado: !!(dados && dados.desligamentoInesperado) }];
@@ -1719,12 +1738,12 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   // em maquina de atendimento quem bate o heartbeat e o navegador, entao a
   // telemetria e o unico canal que o agente tem pra contar isso
   const anydeskTelemetria = sanitizarEstadoAnydesk(dados && dados.anydeskServico);
-  if (anydeskTelemetria) patch.anydeskServico = anydeskTelemetria;
+  if (anydeskTelemetria && JSON.stringify(anydeskTelemetria) !== JSON.stringify(atual.anydeskServico || null)) patch.anydeskServico = anydeskTelemetria;
   const linkTelemetria = sanitizarLink(dados && dados.link);
   if (linkTelemetria) {
-    patch.link = linkTelemetria;
-    patch.linkEm = agora;
     if (!mesmoLink(atual.link, linkTelemetria)) {
+      patch.link = linkTelemetria;
+      patch.linkEm = agora;
       eventos = [...eventos, {
         tipo: 'link', em: agora,
         de: atual.link ? atual.link.tipo : null, para: linkTelemetria.tipo,
@@ -1741,12 +1760,16 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   // por semana (ver UPTIME_REINICIAR_DIAS)
   const uptimeHoras = nocMaquina.sanitizarUptime(dados && dados.uptimeHoras);
   if (uptimeHoras != null) {
-    patch.uptimeHoras = uptimeHoras;
-    patch.uptimeEm = agora;
+    const atualizarUptime = atual.uptimeHoras == null || !atual.uptimeEm
+      || (agora - atual.uptimeEm) >= TELEMETRIA_PERSIST_MS;
+    if (atualizarUptime) {
+      patch.uptimeHoras = uptimeHoras;
+      patch.uptimeEm = agora;
+    }
     const u = nocMaquina.avaliarUptime(uptimeHoras, atual.uptimeCicloAvisado);
     // grava o ciclo SEMPRE (não só quando avisa): é o que faz o contador
     // voltar a zero sozinho quando a máquina finalmente reinicia
-    patch.uptimeCicloAvisado = u.ciclo;
+    if (u.ciclo !== atual.uptimeCicloAvisado) patch.uptimeCicloAvisado = u.ciclo;
     if (u.avisarAgora) {
       eventos = [...eventos, { tipo: 'reiniciar', em: agora, detalhe: `ligado há ${u.dias} dias sem reiniciar` }];
       patch.eventos = eventos.slice(-EVENTOS_MAX);
@@ -1777,7 +1800,7 @@ async function registrarTelemetria(codigo, posto, dados, token) {
         depois[item.mac] = {
           ...(anterior || {}), ip: item.ip,
           ...(tinhaLeituraValida ? {} : { nivel: 'desconhecido', em: agora }),
-          tentativaSemRespostaEm: agora, semRespostaEm: agora,
+          tentativaSemRespostaEm: agora, semRespostaEm: (anterior && anterior.semRespostaEm) || agora,
         };
         continue;
       }
@@ -1789,8 +1812,18 @@ async function registrarTelemetria(codigo, posto, dados, token) {
       if (d.avisar) pendentes.push({ mac: item.mac, ip: item.ip, nivel: d.avisar.nivel, motivos: d.avisar.motivos });
       if (d.normalizou) pendentes.push({ mac: item.mac, ip: item.ip, nivel: 'ok', motivos: [], de: d.normalizou.de });
     }
-    patch.impressoras = depois;
-    patch.impressorasEm = agora;
+    // `em` e a hora da tentativa nao são estado operacional. Ignorá-los na
+    // comparação mantém a sonda a cada 50s, mas não cobra uma escrita a cada
+    // 50s enquanto Zebra, fila e papel seguem iguais.
+    const estadoImpressoras = (lista) => Object.fromEntries(Object.entries(lista || {}).map(([mac, item]) => [mac, {
+      ip: item.ip || null, nivel: item.nivel || null, motivos: item.motivos || [], fila: item.fila || null,
+      estado: item.estado || null, semRespostaEm: item.semRespostaEm || null,
+    }]));
+    const mudouImpressora = JSON.stringify(estadoImpressoras(depois)) !== JSON.stringify(estadoImpressoras(antes));
+    if (mudouImpressora || !atual.impressorasEm || confirmacaoDevida) {
+      patch.impressoras = depois;
+      patch.impressorasEm = agora;
+    }
     if (pendentes.length) {
       // igual disco/link: quem notifica e' a varredura periodica, num lugar
       // so - uma falha de push nunca pode derrubar o caminho do agente
@@ -1854,9 +1887,16 @@ async function registrarTelemetria(codigo, posto, dados, token) {
     }
   }
 
-  if (!Object.keys(patch).length) return { ok: false, motivo: 'nada útil na telemetria' };
-  await COLLECTION.doc(id).set(patch, { merge: true });
-  espelharEscrita(id, patch);
+  // `ultimoHeartbeatEm` mantém a presença viva no espelho, mas não deve ser
+  // sozinho motivo de cobrança. Todo outro campo acima só entra quando mudou.
+  const temMudancaReal = Object.keys(patch).some((campo) => campo !== 'ultimoHeartbeatEm');
+  if (temMudancaReal || confirmacaoDevida) {
+    await COLLECTION.doc(id).set(patch, { merge: true });
+    ultimaTelemetriaGravacaoEm.set(id, agora);
+    espelharEscrita(id, patch);
+  } else {
+    aplicarNoEspelho(id, patch);
+  }
   return {
     ok: true,
     disco: patch.discoNivel || null,
