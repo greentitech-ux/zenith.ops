@@ -14950,6 +14950,31 @@ setTimeout(async () => {
   console.log(`${okGcomWcf ? '✓' : '✗'} NOC: encerra somente GcomClient.WCF nas VMs GCOM; a própria VM o relança`);
 
   // ------------------------------------------------------------------
+  // Diagnóstico de reinício: o relato "o computador encontrou um problema e
+  // reiniciou" exige evidência (BugCheck/Kernel-Power/disco/WHEA), não chute
+  // por CPU alta. É propositalmente só leitura: olhar a causa não pode criar
+  // um segundo incidente na máquina que já está instável.
+  let okDiagnosticoReinicio = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const htmlDiag = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cmd = ls.COMANDO_DIAGNOSTICO_DESEMPENHO || '';
+    const conf = {
+      'consulta BugCheck, Kernel-Power, desligamento inesperado, disco e WHEA':
+        /Get-WinEvent/.test(cmd) && /41, 6008, 1001, 7, 51, 55, 129, 153/.test(cmd) && /WHEA/.test(cmd),
+      'inclui minidumps sem abrir nem copiar o conteúdo': /Minidump/.test(cmd) && /\.dmp/.test(cmd),
+      'mostra espaço livre e saúde do disco físico': /Win32_LogicalDisk/.test(cmd) && /Get-PhysicalDisk/.test(cmd),
+      'não reinicia, encerra processo ou inicia programa': !/shutdown|Stop-Process|Restart-Service|Start-Process/i.test(cmd),
+      'a tela permite pedir o diagnóstico para a máquina selecionada': /manutEnviar\('diagnostico-desempenho'\)/.test(htmlDiag) && /Diagnosticar falha/.test(htmlDiag),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDiagnosticoReinicio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDiagnosticoReinicio = false; console.log('  erro: ' + e.message); }
+  if (!okDiagnosticoReinicio) ruins += 1;
+  console.log(`${okDiagnosticoReinicio ? '✓' : '✗'} NOC: diagnóstico de reinício encontra sinais de tela azul, disco/hardware e minidump sem alterar a máquina`);
+
+  // ------------------------------------------------------------------
   // BUSCA NA JANELA DE MANUTENCAO. Pedido do Master: "filtro de pesquisa
   // digitado, a fim de ser mais rapido digitando o nome da maquina e
   // aparece". Com o parque inteiro na lista, achar UMA maquina era rolar

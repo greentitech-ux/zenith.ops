@@ -2119,21 +2119,34 @@ const COMANDO_LIMPAR_TRAVADOS = [
   '"Processos NOCZenith orfaos encerrados: $mortos"',
 ].join('\n');
 
-// Diagnóstico fechado de desempenho: apenas lê indicadores que ajudam a
-// decidir entre limpeza, reinício assistido ou upgrade. Não coleta linha de
-// comando, arquivos do usuário ou dados pessoais.
+// Diagnóstico fechado de desempenho e reinício inesperado: apenas lê
+// indicadores que ajudam a separar disco cheio, falha de hardware, tela azul
+// e queda de energia. Não coleta linha de comando, arquivos do usuário ou
+// dados pessoais; também não reinicia, encerra ou altera nada na máquina.
 const COMANDO_DIAGNOSTICO_DESEMPENHO = [
   '$linhas = New-Object System.Collections.Generic.List[string]',
+  '$linhas.Add("DIAGNÓSTICO SOMENTE-LEITURA: nenhuma alteração será feita.")',
   '$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue',
   'if ($os) { $livre = [math]::Round($os.FreePhysicalMemory / 1MB, 2); $total = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2); $linhas.Add("RAM: $livre GB livres de $total GB") }',
   '$cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property LoadPercentage -Average',
   'if ($cpu.Count -gt 0 -and $null -ne $cpu.Average) { $linhas.Add("CPU agora: $([math]::Round($cpu.Average))%") }',
   '$volumes = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Size) { "DISCO $($_.DeviceID): $([math]::Round($_.FreeSpace/1GB,1)) GB livres de $([math]::Round($_.Size/1GB,1)) GB" } }',
   '$linhas.AddRange(@($volumes))',
+  '$fisicos = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object { "DISCO FÍSICO: $($_.FriendlyName) · saúde $($_.HealthStatus) · operacional $($_.OperationalStatus)" })',
+  'if ($fisicos) { $linhas.AddRange($fisicos) }',
   '$top = Get-Process -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 6 | ForEach-Object { "$($_.ProcessName): $([math]::Round($_.WorkingSet64/1MB)) MB" }',
   'if ($top) { $linhas.Add("MAIORES CONSUMOS:"); $linhas.AddRange(@($top)) }',
-  '$inicio = Get-CimInstance Win32_StartupCommand -ErrorAction SilentlyContinue | Select-Object -First 15 | ForEach-Object { $_.Name }',
-  'if ($inicio) { $linhas.Add("INICIALIZAÇÃO (amostra): " + (@($inicio) -join ", ")) }',
+  '$desde = (Get-Date).AddDays(-7)',
+  '$linhas.Add("EVENTOS CRÍTICOS DOS ÚLTIMOS 7 DIAS:")',
+  'try {',
+  '  $eventos = @(Get-WinEvent -FilterHashtable @{ LogName = "System"; StartTime = $desde } -MaxEvents 300 -ErrorAction Stop | Where-Object { $_.Id -in @(41, 6008, 1001, 7, 51, 55, 129, 153) -or "$($_.ProviderName)" -match "WHEA" } | Select-Object -First 10)',
+  '  if (-not $eventos) { $linhas.Add("Nenhum BugCheck, Kernel-Power, disco/NTFS ou WHEA recente no log System.") }',
+  '  foreach ($ev in $eventos) { $msg = ("$($ev.Message)" -replace "\\s+", " ").Trim(); if ($msg.Length -gt 420) { $msg = $msg.Substring(0,420) + "…" }; $linhas.Add("[$($ev.TimeCreated.ToString(\"yyyy-MM-dd HH:mm\"))] ID $($ev.Id) · $($ev.ProviderName): $msg") }',
+  '} catch { $linhas.Add("Não consegui ler o log System: $($_.Exception.Message)") }',
+  'try {',
+  '  $dumps = @(Get-ChildItem -LiteralPath (Join-Path $env:WINDIR "Minidump") -Filter "*.dmp" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { "$($_.Name) · $($_.LastWriteTime.ToString(\"yyyy-MM-dd HH:mm\")) · $([math]::Round($_.Length/1MB,1)) MB" })',
+  '  $linhas.Add($(if ($dumps) { "MINIDUMPS (indício de tela azul): " + ($dumps -join " | ") } else { "MINIDUMPS: nenhum localizado." }))',
+  '} catch { $linhas.Add("MINIDUMPS: não foi possível verificar.") }',
   '$linhas -join "`n"',
 ].join('\n');
 
