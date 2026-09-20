@@ -916,9 +916,10 @@
     <div class="msg hidden" id="manut-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
-       <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
-       <button type="button" class="btn-ghost" id="manut-gsurf-rsa" onclick="manutEnviar('gsurfRsa')" title="Reinicia só o serviço GSurfRSA Listener (TEF), sem reiniciar o computador. Use apenas nas máquinas selecionadas que apresentam o erro de automação/TEF.">💳 Reiniciar GSurfRSA</button>
-      <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
+        <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
+        <button type="button" class="btn-ghost" id="manut-gsurf-rsa" onclick="manutEnviar('gsurfRsa')" title="Reinicia só o serviço GSurfRSA Listener (TEF), sem reiniciar o computador. Use apenas nas máquinas selecionadas que apresentam o erro de automação/TEF.">💳 Reiniciar GSurfRSA</button>
+       <button type="button" class="btn-ghost" id="manut-gcom-wcf" onclick="manutEnviar('gcomWcf')" title="Encerra somente GcomClient.WCF.exe nas VMs marcadas como GCOM; a própria VM o inicia novamente">🟥 Encerrar GCOM</button>
+       <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
       <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
       <button type="button" class="btn-ghost" id="manut-reset-senha" onclick="manutEnviar('reset-senha')" title="Reseta a senha do Windows para a senha padrão da loja - a máquina executa na próxima batida">🔑 Reset de Senha</button>
       <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar('abortar')" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
@@ -3091,6 +3092,7 @@ function atualizarContagemManut(){
   document.getElementById('manut-abortar').disabled = !n;
   document.getElementById('manut-anydesk').disabled = !n;
   document.getElementById('manut-gsurf-rsa').disabled = !n;
+  document.getElementById('manut-gcom-wcf').disabled = !n;
   document.getElementById('manut-zebra').disabled = !n;
   document.getElementById('manut-rede').disabled = !n;
   document.getElementById('manut-agendar').disabled = !n;
@@ -3211,6 +3213,7 @@ const MANUT_TAREFAS = {
   abortar: { botao: 'manut-abortar', rotulo: 'Abort' },
   anydesk: { botao: 'manut-anydesk', rotulo: 'Reinício do AnyDesk' },
   gsurfRsa: { botao: 'manut-gsurf-rsa', rotulo: 'Reinício do GSurfRSA Listener' },
+  gcomWcf: { botao: 'manut-gcom-wcf', rotulo: 'Encerramento do GcomClient.WCF' },
   zebra: { botao: 'manut-zebra', rotulo: 'Reset das Zebras' },
   rede: { botao: 'manut-rede', rotulo: 'Destrave da rede' },
   'reset-senha': { botao: 'manut-reset-senha', rotulo: 'Reset de Senha do Windows' },
@@ -3247,6 +3250,9 @@ async function manutEnviar(tarefa){
   }
   if(tarefa === 'gsurfRsa'){
     if(!confirm(`Reiniciar o serviço GSurfRSA Listener (TEF) em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO computador NÃO reinicia. A operação só é enviada às máquinas selecionadas e pode interromper uma transação TEF em andamento por alguns segundos.`)) return;
+  }
+  if(tarefa === 'gcomWcf'){
+    if(!confirm(`Encerrar GcomClient.WCF.exe em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO NOC não reinicia a VM nem tenta abrir o programa: apenas finaliza esse processo específico. A própria VM o inicia novamente pelo mecanismo padrão.`)) return;
   }
   const btn = document.getElementById(MANUT_TAREFAS[tarefa].botao);
   btn.disabled = true;

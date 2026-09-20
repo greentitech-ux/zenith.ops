@@ -14911,6 +14911,45 @@ setTimeout(async () => {
   console.log(`${okGsurfRsa ? '✓' : '✗'} NOC: reinicia o GSurfRSA Listener só nas máquinas TEF selecionadas`);
 
   // ------------------------------------------------------------------
+  // GCOM: a VM já reinicia o cliente sozinha. O NOC só pode encerrar o
+  // processo EXATO quando a máquina foi marcada explicitamente como GCOM;
+  // iniciar executável, reiniciar serviço ou Windows seria uma mudança de
+  // comportamento indevida para uma ação de destrave.
+  let okGcomWcf = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabGcom = { Authorization: 'Bearer ' + token };
+    const htmlGcom = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cmd = ls.COMANDO_ENCERRAR_GCOM_WCF || '';
+    const vm = await ls.cadastrarComputador('GCOMTESTE', 'VM GCOM', 'interno', true, true);
+    await ls.heartbeat('GCOMTESTE', vm.posto, { userAgent: 'NOCZenith/1.0' });
+    const alvo = [{ codigo: 'GCOMTESTE', posto: vm.posto }];
+    const semSenha = await postarJson('/api/loja-status/manutencao/reiniciar', { alvos: alvo, tarefa: 'gcomWcf' }, cabGcom);
+    const enviou = await postarJson('/api/loja-status/manutencao/reiniciar', {
+      alvos: alvo, tarefa: 'gcomWcf', password: process.env.MASTER_PASSWORD,
+    }, cabGcom);
+    const resp = enviou.status === 200 ? JSON.parse(enviou.corpo) : {};
+    const doc = (await ls.listar('GCOMTESTE')).find((c) => c.posto === vm.posto) || {};
+    const fila = doc.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${doc.comandoPendenteId}`) || {}) : {};
+    let recusouSemTag = false;
+    try { ls.comandoEncerrarGcomWcf({ temGcom: false }); } catch (e) { recusouSemTag = /Possui GCOM/.test(e.message); }
+    const conf = {
+      'o alvo é o processo exato, não um nome vindo da tela': /Get-Process -Name \$nome/.test(cmd) && /GcomClient\.WCF/.test(cmd),
+      'encerra o processo, mas não reinicia Windows, serviço ou executável': /Stop-Process/.test(cmd) && !/shutdown/i.test(cmd) && !/Restart-Service/.test(cmd) && !/Start-Process/.test(cmd),
+      'relata se o processo já não estava em execução ou se ainda ficou preso': /não estava em execução|nao estava em execução/.test(cmd) && /ainda em execução/.test(cmd),
+      'só VM marcada como Possui GCOM pode receber a ação': recusouSemTag,
+      'continua exigindo senha do Master': semSenha.status === 401 || semSenha.status === 400,
+      'a fila recebe a ação GCOM, sem reiniciar a VM': enviou.status === 200 && resp.tarefa === 'gcomWcf' && resp.enfileirados === 1 && /GcomClient\.WCF/.test(fila.comando || '') && !/shutdown/i.test(fila.comando || ''),
+      'a manutenção explica que a VM se reinicia sozinha': /manutEnviar\('gcomWcf'\)/.test(htmlGcom) && /própria VM o inicia novamente/.test(htmlGcom),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okGcomWcf = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okGcomWcf = false; console.log('  erro: ' + e.message); }
+  if (!okGcomWcf) ruins += 1;
+  console.log(`${okGcomWcf ? '✓' : '✗'} NOC: encerra somente GcomClient.WCF nas VMs GCOM; a própria VM o relança`);
+
+  // ------------------------------------------------------------------
   // BUSCA NA JANELA DE MANUTENCAO. Pedido do Master: "filtro de pesquisa
   // digitado, a fim de ser mais rapido digitando o nome da maquina e
   // aparece". Com o parque inteiro na lista, achar UMA maquina era rolar

@@ -2362,6 +2362,42 @@ const COMANDO_REINICIAR_GSURF_RSA = [
   '}',
 ].join('\n');
 
+// GcomClient.WCF e o cliente da GCOM que roda nas VMs marcadas como GCOM no
+// NOC. Em algumas delas ele fica travado, mas o proprio ambiente da VM ja tem
+// o mecanismo que o sobe de novo. Portanto esta manutencao NAO tenta iniciar
+// executavel, reiniciar servico ou reiniciar o Windows: encerra somente o
+// processo exato e devolve ao NOC se ele realmente saiu.
+//
+// O nome e fechado no codigo (nao vem da tela), para a acao nunca virar um
+// "encerrar qualquer processo" remoto.
+const COMANDO_ENCERRAR_GCOM_WCF = [
+  '$nome = "GcomClient.WCF"',
+  '$processos = @(Get-Process -Name $nome -ErrorAction SilentlyContinue)',
+  'if (-not $processos) {',
+  '  "GcomClient.WCF.exe não estava em execução nesta VM."',
+  '} else {',
+  '  $pids = @($processos | ForEach-Object { $_.Id })',
+  '  foreach ($p in $processos) {',
+  '    try { Stop-Process -Id $p.Id -Force -ErrorAction Stop }',
+  '    catch { "GcomClient.WCF.exe: FALHOU ao encerrar PID $($p.Id) - $($_.Exception.Message)"; exit 1 }',
+  '  }',
+  '  Start-Sleep -Milliseconds 800',
+  '  $restantes = @(Get-Process -Name $nome -ErrorAction SilentlyContinue)',
+  '  if ($restantes) {',
+  '    "GcomClient.WCF.exe: FALHOU - ainda em execução (PID(s): $(@($restantes | ForEach-Object { $_.Id }) -join \", \"))."',
+  '  } else {',
+  '    "GcomClient.WCF.exe encerrado (PID(s): $($pids -join \", \")). A reinicialização automática da VM assumirá daqui."',
+  '  }',
+  '}',
+].join('\n');
+
+function comandoEncerrarGcomWcf(doc) {
+  if (!doc || !doc.temGcom) {
+    throw new Error('esta máquina não está marcada como “Possui GCOM”; marque a VM antes de usar esta ação.');
+  }
+  return COMANDO_ENCERRAR_GCOM_WCF;
+}
+
 // RESET DA ZEBRA POR ZPL, sem ir na loja. Pedido do Master: "o mesmo botao
 // do AnyDesk, mas que faz o reset da impressora Zebra pelo ZPL - o codigo
 // executaria de acordo com a impressora Zebra que esteja com a tag que foi
@@ -4115,9 +4151,9 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, COMANDO_RESET_SENHA,
-  comandoResetZebra,
+  comandoResetZebra, comandoEncerrarGcomWcf,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
