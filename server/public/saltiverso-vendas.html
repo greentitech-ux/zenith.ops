@@ -131,6 +131,11 @@
     <button type="button" class="btn-secundario" id="btn-add-pagamento" onclick="adicionarPagamento()">+ Adicionar forma de pagamento</button>
     <div class="sub" id="pagamento-resumo" style="font-size:12px;color:var(--muted);margin-top:6px;"></div>
   </div>
+  <div id="wrap-cortesia" class="hidden" style="margin-top:14px;border:1px solid var(--warn);border-radius:10px;padding:12px;">
+    <b>🎁 Solicitação de cortesia</b>
+    <div class="sub" style="margin-top:4px;">Não entra no caixa nem baixa o estoque agora. A Gerente da unidade ou o Master precisa aprovar.</div>
+    <label>Motivo da cortesia</label><textarea id="cortesia-motivo" maxlength="300" placeholder="Ex.: reposição autorizada, ação promocional..."></textarea>
+  </div>
 
   <div class="msg hidden" id="msg-venda"></div>
   <button class="btn-primary" style="width:100%;margin-top:14px;" id="btn-confirmar-venda" onclick="confirmarVenda()" disabled>Confirmar venda</button>
@@ -142,9 +147,16 @@
   <div id="lista-vendas"><div class="empty">carregando...</div></div>
 </div>
 
+<div class="panel" id="painel-cortesias">
+  <h2>Solicitações de cortesia</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px;">Itens ficam aguardando e só saem do estoque após aprovação.</div>
+  <div id="lista-cortesias"><div class="empty">carregando...</div></div>
+</div>
+
 <div class="panel hidden" id="painel-catalogo">
   <h2>Gerenciar catálogo (bebidas/meias)</h2>
   <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">Só Master/quem tem a permissão de Catálogo de Estoque vê essa seção. Recebimento, contagem e diferenças ficam na página <a href="/estoque.html" style="color:var(--accent);">Estoque</a>.</div>
+  <button type="button" class="btn-secundario" style="margin-bottom:10px;" onclick="normalizarCortesias()">Corrigir itens “Cortesia” para R$ 0,00</button>
   <form id="form-novo-item">
     <div class="grid3">
       <div><label style="margin-top:0;">Nome</label><input type="text" id="ci-nome" required maxlength="120"></div>
@@ -221,17 +233,20 @@ function renderCatalogoGrid(){
   el.innerHTML = CATALOGO.map(i=>`
     <button type="button" class="item-btn" onclick="adicionarAoCarrinho('${i.id}')">
       <span class="nome">${escapeHtml(i.nome)}</span>
-      <span class="preco">${i.precoVenda>0 ? fmtReal(i.precoVenda) : 'sem preço'}</span>
+      <span class="preco">${ehItemCortesia(i) ? 'CORTESIA · R$ 0,00' : (i.precoVenda>0 ? fmtReal(i.precoVenda) : 'sem preço')}</span>
     </button>`).join('');
 }
 
 // ---------- carrinho ----------
 function adicionarAoCarrinho(itemId){
   const item = CATALOGO.find(i=>i.id===itemId);
-  if(!item || !(item.precoVenda>0)){ alert('Esse item não tem preço de venda cadastrado.'); return; }
+  if(!item || (!(item.precoVenda>0) && !ehItemCortesia(item))){ alert('Esse item não tem preço de venda cadastrado.'); return; }
+  if(CARRINHO.length && ehItemCortesia(item)!==carrinhoEhCortesia()){
+    alert('Itens de cortesia devem ser solicitados separadamente dos itens pagos.'); return;
+  }
   const linha = CARRINHO.find(l=>l.itemId===itemId);
   if(linha) linha.quantidade += 1;
-  else CARRINHO.push({ itemId, nome: item.nome, precoUnitario: item.precoVenda, quantidade: 1 });
+  else CARRINHO.push({ itemId, nome: item.nome, precoUnitario: ehItemCortesia(item)?0:item.precoVenda, cortesia:ehItemCortesia(item), quantidade: 1 });
   renderCarrinho();
 }
 function alterarQtdCarrinho(itemId, delta){
@@ -244,15 +259,19 @@ function alterarQtdCarrinho(itemId, delta){
 function calcularTotalCarrinho(){
   return CARRINHO.reduce((s,l)=>s+l.quantidade*l.precoUnitario, 0);
 }
+function ehItemCortesia(item){ return !!item && (item.cortesia===true || /\bcortesia\b/i.test(String(item.nome||''))); }
+function carrinhoEhCortesia(){ return CARRINHO.length>0 && CARRINHO.every(l=>l.cortesia===true); }
 function renderCarrinho(){
   const el = document.getElementById('carrinho-lista');
   const resumo = document.getElementById('carrinho-resumo');
   const wrapPag = document.getElementById('wrap-pagamentos');
+  const wrapCortesia = document.getElementById('wrap-cortesia');
   const btn = document.getElementById('btn-confirmar-venda');
   if(!CARRINHO.length){
     el.innerHTML = '<div class="empty">Carrinho vazio.</div>';
     resumo.style.display = 'none';
     wrapPag.classList.add('hidden');
+    wrapCortesia.classList.add('hidden');
     document.getElementById('lista-pagamentos').innerHTML = '';
     btn.disabled = true;
     return;
@@ -270,10 +289,13 @@ function renderCarrinho(){
   const total = calcularTotalCarrinho();
   resumo.style.display = '';
   document.getElementById('carrinho-total').textContent = fmtReal(total);
-  wrapPag.classList.remove('hidden');
+   const cortesia = carrinhoEhCortesia();
+   wrapPag.classList.toggle('hidden', cortesia);
+   wrapCortesia.classList.toggle('hidden', !cortesia);
   reconciliarPagamentos(total);
   atualizarBotaoPagamento(total);
-  btn.disabled = false;
+   btn.disabled = false;
+   btn.textContent = cortesia ? 'Enviar solicitação de cortesia' : 'Confirmar venda';
 }
 
 // ---------- pagamento (mesmo padrão do check-in do parque: divide em mais
@@ -350,6 +372,16 @@ async function confirmarVenda(){
   btn.disabled = true;
   try{
     const total = calcularTotalCarrinho();
+    const cortesia = carrinhoEhCortesia();
+    if(cortesia){
+      const motivo = document.getElementById('cortesia-motivo').value.trim();
+      if(!motivo) throw new Error('Informe o motivo da cortesia para enviar à Gerente/Master.');
+      const resp = await fetch('/api/saltiverso/cortesias', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ unidade:unidadeAtual(), unidadeNome:UNIDADES_NOMES[unidadeAtual()]||unidadeAtual(), itens:CARRINHO.map(l=>({itemId:l.itemId,quantidade:l.quantidade})), motivo }) });
+      const data = await resp.json(); if(!resp.ok) throw new Error(data.error||'Erro ao solicitar cortesia.');
+      CARRINHO=[]; document.getElementById('cortesia-motivo').value=''; renderCarrinho();
+      msg.textContent='Cortesia solicitada. A saída e o estoque serão registrados após aprovação da Gerente ou Master.'; msg.className='msg ok'; msg.classList.remove('hidden');
+      await carregarVendasDoDia(); return;
+    }
     const pagamentos = coletarPagamentos();
     const somaPg = pagamentos.reduce((s,p)=>s+p.valor,0);
     if(Math.abs(somaPg-total)>0.01) throw new Error('A soma das formas de pagamento precisa bater com o total.');
@@ -397,6 +429,20 @@ async function carregarVendasDoDia(){
     </div>`;
   }).join('');
 }
+async function carregarCortesias(){
+  const unidade=unidadeAtual(); if(!unidade) return;
+  const lista = await fetch(`/api/saltiverso/cortesias?unidade=${encodeURIComponent(unidade)}&data=${hojeBrasilia()}`).then(r=>r.json()).catch(()=>[]);
+  const el=document.getElementById('lista-cortesias');
+  if(!Array.isArray(lista)||!lista.length){ el.innerHTML='<div class="empty">Nenhuma solicitação hoje.</div>'; return; }
+  const podeDecidir = IS_MASTER || ME?.isAdmin || ME?.cargo==='gerente' || ME?.cargo==='assistente-gerente';
+  el.innerHTML=lista.map(c=>`<div class="card"><div class="linha1"><span>${escapeHtml((c.itens||[]).map(i=>`${i.quantidade}× ${i.nome}`).join(', '))}</span><span class="badge ${c.status==='PENDENTE'?'aguardando':'liberado'}">${escapeHtml(c.status.toLowerCase())}</span></div><div class="sub">${escapeHtml(c.motivo||'—')} · solicitado por ${escapeHtml(c.criadoPorEmail||'—')}</div>${c.status==='PENDENTE'&&podeDecidir?`<div style="margin-top:7px;"><button type="button" class="link-btn" style="color:var(--ok);" onclick="decidirCortesia('${c.id}',true)">✓ Aprovar</button><button type="button" class="link-btn" style="color:var(--bad);" onclick="decidirCortesia('${c.id}',false)">✕ Negar</button></div>`:''}</div>`).join('');
+}
+async function decidirCortesia(id, aprovada){
+  if(!confirm(aprovada?'Aprovar? A saída será registrada com R$ 0,00.':'Negar esta solicitação?')) return;
+  const resp=await fetch(`/api/saltiverso/cortesias/${id}/decidir`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({aprovada})});
+  const data=await resp.json(); if(!resp.ok){ alert(data.error||'Erro ao decidir.'); return; }
+  await Promise.all([carregarCortesias(),carregarVendasDoDia()]);
+}
 async function cancelarVenda(id){
   if(!confirm('Cancelar essa venda? Isso reverte a saída dela no estoque.')) return;
   const resp = await fetch(`/api/saltiverso/vendas/${id}`, { method:'DELETE' });
@@ -425,7 +471,7 @@ function renderCatalogoGerenciar(){
   el.innerHTML = CATALOGO.map(i=>`
     <div class="catalogo-linha">
       <span class="nome">${escapeHtml(i.nome)} <span style="color:var(--muted);">(${i.tipo})</span></span>
-      <input type="number" min="0.01" step="0.01" class="preco-edit" value="${i.precoVenda||''}" onchange="salvarPrecoItem('${i.id}', this.value)">
+      <input type="number" min="0" step="0.01" class="preco-edit" value="${ehItemCortesia(i)?0:(i.precoVenda||'')}" onchange="salvarPrecoItem('${i.id}', this.value)">
       <button type="button" class="link-btn" style="color:var(--bad);margin:0;" onclick="removerItemCatalogo('${i.id}')">✕</button>
     </div>`).join('');
 }
@@ -440,6 +486,13 @@ async function removerItemCatalogo(id){
   if(!confirm('Remover esse item do catálogo? Isso não apaga vendas/saídas já feitas com ele.')) return;
   await fetch(`/api/inventario/catalogo/${id}`, { method:'DELETE' });
   await carregarCatalogo();
+}
+async function normalizarCortesias(){
+  if(!IS_MASTER){ alert('A correção de preços de cortesia é exclusiva do Master.'); return; }
+  if(!confirm('Corrigir todos os itens com “Cortesia” no nome para R$ 0,00? Isso não altera vendas já registradas.')) return;
+  const resp=await fetch('/api/saltiverso/catalogo/normalizar-cortesias',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unidade:unidadeAtual()})});
+  const data=await resp.json(); if(!resp.ok){ alert(data.error||'Erro ao corrigir.'); return; }
+  alert(`${data.corrigidos||0} item(ns) corrigido(s) para R$ 0,00.`); await carregarCatalogo();
 }
 document.getElementById('form-novo-item').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
@@ -498,6 +551,7 @@ async function boot(){
   document.getElementById('root').classList.remove('hidden');
   await carregarCatalogo();
   await carregarVendasDoDia();
+  await carregarCortesias();
 }
 
 boot();

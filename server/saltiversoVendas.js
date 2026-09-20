@@ -23,6 +23,7 @@ const inventario = require('./inventario');
 const { FORMAS_PAGAMENTO_SPLIT } = require('./parque');
 
 const COLLECTION = db.collection('saltiversoVendas');
+const CORTESIAS = db.collection('saltiversoCortesias');
 const FUSO_BR = 'America/Sao_Paulo';
 
 function num(v) {
@@ -31,6 +32,11 @@ function num(v) {
 }
 function arred(v) {
   return Math.round((v + Number.EPSILON) * 100) / 100;
+}
+function itemEhCortesia(item) {
+  // Compatibilidade: os itens antigos foram cadastrados como “... Cortesia”
+  // por R$ 0,01. O nome também é reconhecido até a normalização do catálogo.
+  return item && (item.cortesia === true || /\bcortesia\b/i.test(String(item.nome || '')));
 }
 
 // venda é sempre "agora" (balcão, ponto de venda em tempo real) - diferente
@@ -80,6 +86,7 @@ async function criarVenda({ unidade, unidadeNome, itens, pagamentos, criadoPorId
   const itensOk = carrinho.map((linha) => {
     const item = catalogoPorId.get(linha.itemId);
     if (!item) throw new Error('Item não encontrado no catálogo dessa unidade.');
+    if (itemEhCortesia(item)) throw new Error(`"${item.nome}" é item de cortesia: envie uma solicitação para aprovação, não uma venda paga.`);
     if (!(item.precoVenda > 0)) throw new Error(`"${item.nome}" não tem preço de venda cadastrado.`);
     return { itemId: item.id, nome: item.nome, quantidade: linha.quantidade, precoUnitario: item.precoVenda };
   });
@@ -137,6 +144,69 @@ async function criarVenda({ unidade, unidadeNome, itens, pagamentos, criadoPorId
   await ref.set(registro);
   vendasCache.invalidar();
   return registro;
+}
+
+async function criarSolicitacaoCortesia({ unidade, unidadeNome, itens, motivo, criadoPorId, criadoPorEmail, origem = 'balcao' }) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  const carrinho = sanitizarCarrinho(itens);
+  const catalogo = await inventario.listCatalogo(unidade);
+  const porId = new Map(catalogo.map((i) => [i.id, i]));
+  const itensOk = carrinho.map((linha) => {
+    const item = porId.get(linha.itemId);
+    if (!item || !itemEhCortesia(item)) throw new Error('Cortesia só pode conter itens marcados como cortesia no catálogo.');
+    return { itemId: item.id, nome: item.nome, quantidade: linha.quantidade, precoUnitario: 0 };
+  });
+  const motivoOk = String(motivo || '').trim().slice(0, 300);
+  if (!motivoOk) throw new Error('Explique o motivo da cortesia para enviar à gerência.');
+  const ref = CORTESIAS.doc();
+  const registro = {
+    id: ref.id, unidade, unidadeNome: unidadeNome || unidade, data: hojeBrasiliaISO(), itens: itensOk,
+    total: 0, motivo: motivoOk, status: 'PENDENTE', origem,
+    criadoPorId: criadoPorId || null, criadoPorEmail: criadoPorEmail || null,
+    criadoEm: new Date().toISOString(), decididoEm: null, decididoPorId: null, decididoPorEmail: null,
+  };
+  await ref.set(registro);
+  return registro;
+}
+
+async function listarCortesias(unidade, data) {
+  const snap = await CORTESIAS.orderBy('criadoEm', 'desc').get();
+  return snap.docs.map((d) => d.data()).filter((c) => (!unidade || c.unidade === unidade) && (!data || c.data === data));
+}
+
+async function normalizarPrecosCortesia(unidade) {
+  const catalogo = await inventario.listCatalogo(unidade);
+  const alvos = catalogo.filter((item) => itemEhCortesia(item) && num(item.precoVenda) !== 0);
+  for (const item of alvos) {
+    // eslint-disable-next-line no-await-in-loop
+    await inventario.atualizarItem(item.id, { precoVenda: 0 });
+  }
+  return { corrigidos: alvos.length };
+}
+
+async function decidirCortesia(id, { aprovada, porId, porEmail }) {
+  const ref = CORTESIAS.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação de cortesia não encontrada.');
+  const atual = snap.data();
+  if (atual.status !== 'PENDENTE') throw new Error('Essa solicitação já foi decidida.');
+  const agora = new Date().toISOString();
+  if (!aprovada) {
+    await ref.update({ status: 'NEGADA', decididoEm: agora, decididoPorId: porId || null, decididoPorEmail: porEmail || null });
+    return { ...atual, status: 'NEGADA' };
+  }
+  const vendaRef = COLLECTION.doc();
+  const itensComSaida = [];
+  for (const item of atual.itens || []) {
+    // eslint-disable-next-line no-await-in-loop
+    const saida = await inventario.criarSaida({ unidade: atual.unidade, unidadeNome: atual.unidadeNome, itemId: item.itemId, tipo: 'VENDA', quantidade: item.quantidade, motivo: `Cortesia aprovada · ${atual.motivo}`, data: atual.data, valorUnitario: 0, vendaId: vendaRef.id, criadoPorId: atual.criadoPorId, criadoPorEmail: atual.criadoPorEmail });
+    itensComSaida.push({ ...item, saidaId: saida.id });
+  }
+  const venda = { id: vendaRef.id, unidade: atual.unidade, unidadeNome: atual.unidadeNome, data: atual.data, itens: itensComSaida, total: 0, pagamentos: [], cortesia: true, cortesiaId: atual.id, motivoCortesia: atual.motivo, cancelada: false, criadoPorId: atual.criadoPorId, criadoPorEmail: atual.criadoPorEmail, criadoEm: agora };
+  await vendaRef.set(venda);
+  await ref.update({ status: 'APROVADA', vendaId: venda.id, decididoEm: agora, decididoPorId: porId || null, decididoPorEmail: porEmail || null });
+  vendasCache.invalidar();
+  return { ...atual, status: 'APROVADA', vendaId: venda.id, venda };
 }
 
 // cancelamento e' sempre Master (mesmo criterio de DELETE /api/inventario/
@@ -205,6 +275,6 @@ async function resumoDoDia(unidade, data) {
 }
 
 module.exports = {
-  criarVenda, cancelarVenda, getOne, listAll, listVendasDoDia, resumoDoDia,
+  criarVenda, criarSolicitacaoCortesia, listarCortesias, decidirCortesia, normalizarPrecosCortesia, itemEhCortesia, cancelarVenda, getOne, listAll, listVendasDoDia, resumoDoDia,
   invalidar: () => vendasCache.invalidar(),
 };

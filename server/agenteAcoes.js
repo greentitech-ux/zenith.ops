@@ -31,6 +31,7 @@ const lojaStatus = require('./lojaStatus');
 const auth = require('./auth');
 const tarefas = require('./tarefas');
 const suporteChat = require('./suporteChat');
+const saltiversoVendas = require('./saltiversoVendas');
 const prioridades = require('./prioridades');
 
 const COLLECTION = db.collection('agenteAcoes');
@@ -159,7 +160,7 @@ const EXECUTORES_SISTEMA_VALIDOS = [
   // Cada um chama a MESMA função que a tela chama; nada de rota nova.
   'criar_tarefa', 'marcar_reuniao', 'concluir_tarefa', 'cancelar_tarefa',
   'desbloquear_usuario', 'resetar_senha_usuario', 'criar_usuario_copiando',
-  'responder_chat', 'noc_comando',
+  'responder_chat', 'noc_comando', 'solicitar_cortesia_saltiverso',
 ];
 
 // O que o Beniboy precisa coletar antes de chamar cada ação de sistema -
@@ -176,6 +177,7 @@ const PARAMETROS_EXECUTOR = {
   criar_usuario_copiando: 'modelo (e-mail ou username do usuário de referência, não pode ser Master), email e username do acesso novo - a senha é gerada aqui',
   responder_chat: 'chatId (id da conversa do suporte), texto (a mensagem, que sai como Suporte)',
   noc_comando: 'tarefa (reiniciar|abortar|anydesk|zebra|rede) e alvos (lista de {codigo, posto} dos computadores tipo interno)',
+  solicitar_cortesia_saltiverso: 'unidade (Saltiverso Patteo), itens (lista de {itemId, quantidade}) e motivo da cortesia; confirme os itens e o motivo antes de solicitar',
 };
 
 async function listUncached() {
@@ -434,6 +436,20 @@ async function nocComando(params) {
   return `${t.verbo} ${alvos.length} computador(es): ${ok} enfileirado(s) de ${resultados.length} encontrado(s) - executa no próximo contato do NOCZenith.${falhas.length ? ' Não entrou: ' + falhas.join(' · ') : ''}`;
 }
 
+// O Beniboy apenas SOLICITA. Nunca aprova nem dá baixa: a decisão continua
+// restrita à Gerente da unidade ou Master na tela do Saltiverso.
+async function solicitarCortesiaSaltiverso(params) {
+  const p = params || {};
+  const { usuario } = await resolverAtor(p);
+  const unidade = String(p.unidade || '').trim();
+  if (!unidade) throw new Error('Diga a unidade da cortesia (ex.: Saltiverso Patteo).');
+  const solicitacao = await saltiversoVendas.criarSolicitacaoCortesia({
+    unidade, unidadeNome: String(p.unidadeNome || unidade).trim(), itens: p.itens,
+    motivo: p.motivo, criadoPorId: usuario.id, criadoPorEmail: `${usuario.email} via Beniboy`, origem: 'beniboy',
+  });
+  return `Cortesia #${solicitacao.id} solicitada para ${unidade}. Ela aguarda aprovação da Gerente ou Master e ainda não baixou estoque.`;
+}
+
 const EXECUTORES_SISTEMA = {
   criar_usuario_zenith: criarUsuarioZenith,
   criar_tarefa: criarTarefa,
@@ -445,6 +461,7 @@ const EXECUTORES_SISTEMA = {
   criar_usuario_copiando: criarUsuarioCopiando,
   responder_chat: responderChat,
   noc_comando: nocComando,
+  solicitar_cortesia_saltiverso: solicitarCortesiaSaltiverso,
 };
 
 // dispatcher genérico - chamado tanto pela aprovação (EXECUTORES_QA em

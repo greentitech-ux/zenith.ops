@@ -9526,6 +9526,50 @@ app.post('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, re
   }
 });
 
+app.post('/api/saltiverso/catalogo/normalizar-cortesias', auth.requireMaster, async (req, res) => {
+  try {
+    const unidade = String(req.body?.unidade || '').trim();
+    if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
+    res.json(await saltiversoVendas.normalizarPrecosCortesia(unidade));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Cortesia nunca é lançada como venda de R$0,01: vira uma solicitação sem
+// baixa de estoque. Só depois da aprovação de Gerente/Master a saída R$0,00
+// é registrada, mantendo estoque e caixa auditáveis.
+app.post('/api/saltiverso/cortesias', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, itens, motivo } = req.body || {};
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const solicitacao = await saltiversoVendas.criarSolicitacaoCortesia({ unidade, unidadeNome, itens, motivo, criadoPorId: req.user.id, criadoPorEmail: req.user.email });
+    broadcast('saltiverso-cortesia-solicitada', solicitacao, 'parque-loja');
+    res.json(solicitacao);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/saltiverso/cortesias', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const todas = await saltiversoVendas.listarCortesias(unidade, req.query.data);
+    const gerencia = req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
+    res.json(gerencia ? todas : todas.filter((c) => c.criadoPorId === req.user.id));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/saltiverso/cortesias/:id/decidir', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const atual = (await saltiversoVendas.listarCortesias()).find((c) => c.id === req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Solicitação de cortesia não encontrada.' });
+    const podeDecidir = req.isMaster || req.isAdmin || (users.ehCargoGerente(req.user?.cargo) && (req.permissions.unidades || []).includes(atual.unidade));
+    if (!podeDecidir) return res.status(403).json({ error: 'Só a Gerente da unidade ou o Master pode decidir uma cortesia.' });
+    const resultado = await saltiversoVendas.decidirCortesia(req.params.id, { aprovada: req.body?.aprovada === true, porId: req.user.id, porEmail: req.user.email });
+    broadcast('saltiverso-cortesia-decidida', resultado, 'parque-loja');
+    if (resultado.venda) broadcast('saltiverso-venda-criada', resultado.venda, 'parque-loja');
+    res.json(resultado);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.get('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, res) => {
   const { unidade, data } = req.query;
   if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
