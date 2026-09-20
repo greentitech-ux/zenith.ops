@@ -310,7 +310,7 @@ function ehAdminCortesia(user) {
 // o card ainda esteja com o Master/Admin - a alcada seguinte e prestacao
 // de contas, nao trava a operacao
 function cortesiaBloqueiaEntrada(c) {
-  return c.metodoPagamento === 'cortesia' && !!c.cortesiaStatus
+  return temCortesiaGeral(c) && !!c.cortesiaStatus
     && ['PENDENTE', 'NEGADA'].includes(c.cortesiaStatus);
 }
 
@@ -319,7 +319,7 @@ async function decidirCortesia(id, { nivel, aprovado, motivo, porEmail }) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
   const atual = snap.data();
-  if (atual.metodoPagamento !== 'cortesia' || !atual.cortesiaStatus) {
+  if (!temCortesiaGeral(atual) || !atual.cortesiaStatus) {
     throw new Error('Esse check-in não tem cortesia pra decidir.');
   }
   const agora = new Date().toISOString();
@@ -458,9 +458,31 @@ function sanitizarCriancas(lista) {
       // extra que vai pagar, dentro de um check-in de cortesia PCD/geral
       // (ver criar()). Fora desses dois modos o campo fica ignorado.
       gratuita: !(c && c.gratuita === false),
+      // plano individual só existe nos novos termos mistos. É uma chave
+      // fechada e é revalidada contra a tabela no servidor antes de calcular.
+      plano: String((c && c.plano) || '').trim().slice(0, 30) || null,
     }))
     .filter((c) => c.nome)
     .slice(0, 30);
+}
+
+function planoIndividual(raw, tabela, tempoPadrao) {
+  const plano = String(raw || '').trim();
+  if (plano === 'cortesia') return { chave: plano, categoriaTempo: null, tempoMinutos: Number(tempoPadrao), gratuita: true, cortesiaGeral: true, valor: 0 };
+  if (plano === 'pcd-cortesia') return { chave: plano, categoriaTempo: plano, tempoMinutos: tempoDaCategoriaPcd(plano, tabela), gratuita: true, cortesiaGeral: false, valor: 0 };
+  if (plano === 'pcd30' || plano === 'pcd60') return { chave: plano, categoriaTempo: plano, tempoMinutos: tempoDaCategoriaPcd(plano, tabela), gratuita: false, cortesiaGeral: false, valor: valorUnitarioPcd(plano, tabela) };
+  const normal = /^normal:(\d+)$/.exec(plano);
+  if (!normal || !temposValidos(tabela).includes(Number(normal[1]))) throw new Error('Escolha um tipo de ingresso válido para cada criança.');
+  const tempoMinutos = Number(normal[1]);
+  return { chave: plano, categoriaTempo: null, tempoMinutos, gratuita: false, cortesiaGeral: false, valor: valorPorTempo(tempoMinutos, tabela) };
+}
+
+function temPlanoIndividual(criancas) {
+  return Array.isArray(criancas) && criancas.some((c) => String(c && c.plano || '').trim());
+}
+
+function temCortesiaGeral(c) {
+  return c && (c.temCortesiaGeral === true || c.metodoPagamento === 'cortesia');
 }
 
 // lista de minutos validos pra uma venda NOVA (check-in ou "adicionar
@@ -496,6 +518,81 @@ function validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos, cr
   return { tempo, criancasOk };
 }
 
+// Novo formato: um único responsável/termo pode comprar planos diferentes.
+// O documento continua sendo um atendimento só, mas cada criança recebe seu
+// próprio tempo e, depois do check-in, seu próprio horário final/check-out.
+// Registros antigos permanecem no caminho original abaixo.
+async function criarComPlanosIndividuais(args, tabela) {
+  const {
+    unidade, unidadeNome, responsavel, dataUtilizacao, horarioPrevisto,
+    observacao, adultoCortesia, quantAC, criancas, meiasExtras,
+    motivoCortesia, pagamentos, metodoPagamento, criadoPorId, criadoPorEmail,
+    colaboradorId, colaboradorNome, termoAssinado,
+  } = args;
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  if (!responsavel || !String(responsavel.nome || '').trim()) throw new Error('Informe o nome do responsável.');
+  if (!responsavel.contato || !String(responsavel.contato || '').trim()) throw new Error('Informe o contato do responsável.');
+  if (!dataUtilizacao || !/^\d{4}-\d{2}-\d{2}$/.test(dataUtilizacao)) throw new Error('Data de utilização inválida.');
+  const previsto = horarioPrevisto ? validarHorarioPrevisto(horarioPrevisto) : null;
+  const base = sanitizarCriancas(criancas);
+  if (!base.length) throw new Error('Cadastre pelo menos uma criança.');
+  const tempoPadrao = temposValidos(tabela).includes(Number(args.tempoMinutos)) ? Number(args.tempoMinutos) : temposValidos(tabela)[0];
+  const criancasOk = base.map((crianca) => {
+    const plano = planoIndividual(crianca.plano, tabela, tempoPadrao);
+    return {
+      ...crianca,
+      plano: plano.chave,
+      categoriaTempo: plano.categoriaTempo,
+      tempoMinutos: plano.tempoMinutos,
+      gratuita: plano.gratuita,
+      valorEntrada: plano.valor,
+    };
+  });
+  const temCortesia = criancasOk.some((c) => c.plano === 'cortesia');
+  if (temCortesia && !String(motivoCortesia || '').trim()) throw new Error('Cortesia exige justificativa: explique o motivo da entrada sem cobrança.');
+  const pcdCortesia = criancasOk.filter((c) => c.categoriaTempo === 'pcd-cortesia');
+  if (pcdCortesia.length) {
+    if (!previsto) throw new Error('Informe o horário previsto de entrada para aplicar a cortesia 5% PCD.');
+    const horaBucket = previsto.slice(0, 2);
+    const existentes = await listAll();
+    const usados = existentes.filter((c) => c.unidade === unidade && c.dataUtilizacao === dataUtilizacao
+      && String(c.horarioPrevisto || '').slice(0, 2) === horaBucket)
+      .reduce((soma, c) => soma + (c.criancas || []).filter((cr) => cr.categoriaTempo === 'pcd-cortesia' || (c.categoriaTempo === 'pcd-cortesia' && cr.gratuita !== false)).length, 0);
+    if (usados + pcdCortesia.length > PCD_CORTESIA_LIMITE_HORA) {
+      require('./push').notifyParquePcdCortesiaLimite({ unidade, unidadeNome: unidadeNome || unidade, horaBucket, dataUtilizacao }).catch(() => {});
+      throw new Error(`As ${PCD_CORTESIA_LIMITE_HORA} vagas de cortesia PCD desse horário (${horaBucket}:00–${horaBucket}:59) já foram usadas.`);
+    }
+  }
+  const meiasExtrasOk = Math.max(0, Math.min(30, num(meiasExtras)));
+  const valorMeiasCalc = PRECO_MEIA * (criancasOk.filter((c) => c.meia !== false && !c.gratuita).length + (criancasOk.some((c) => !c.gratuita) ? meiasExtrasOk : 0));
+  const valorFinal = criancasOk.reduce((s, c) => s + c.valorEntrada, 0) + valorMeiasCalc;
+  const pagamentosOk = valorFinal > 0 ? sanitizarPagamentos(pagamentos) : [];
+  if (valorFinal > 0 && !pagamentosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
+  const somaPagamentos = Math.round(pagamentosOk.reduce((s, p) => s + p.valor, 0) * 100) / 100;
+  if (valorFinal > 0 && Math.abs(somaPagamentos - valorFinal) > 0.01) throw new Error(`A soma das formas de pagamento (R$${somaPagamentos.toFixed(2)}) precisa bater com o valor total (R$${valorFinal.toFixed(2)}).`);
+  const ref = COLLECTION.doc();
+  const maiorTempo = Math.max(...criancasOk.map((c) => c.tempoMinutos));
+  const registro = {
+    id: ref.id, unidade, unidadeNome: unidadeNome || unidade,
+    colaboradorId: colaboradorId || criadoPorId, colaboradorNome: colaboradorNome || criadoPorEmail,
+    responsavel: {
+      nome: String(responsavel.nome).trim().slice(0, 150), cpf: String(responsavel.cpf || '').trim().slice(0, 20), contato: String(responsavel.contato).trim().slice(0, 30), email: String(responsavel.email || '').trim().slice(0, 150),
+      cep: separarCepEndereco(responsavel.cep, responsavel.endereco).cep.slice(0, 20), endereco: separarCepEndereco(responsavel.cep, responsavel.endereco).endereco.slice(0, 300), numero: String(responsavel.numero || '').trim().slice(0, 20), complemento: String(responsavel.complemento || '').trim().slice(0, 100),
+    },
+    dataUtilizacao, tempoMinutos: maiorTempo, planosIndividuais: true, minutosExtras: 0,
+    timeInicial: null, timeFinal: null, iniciado: false, horarioPrevisto: previsto, autoCheckin: false,
+    observacao: String(observacao || '').slice(0, 300), adultoCortesia: adultoCortesia === true, quantAC: adultoCortesia === true ? Math.max(0, Math.min(10, num(quantAC) || 1)) : 0,
+    criancas: criancasOk, pulseiras: criancasOk.length,
+    metodoPagamento: valorFinal === 0 ? (temCortesia ? 'cortesia' : 'gratuidade') : (pagamentosOk.length === 1 ? pagamentosOk[0].forma : 'misto'), pagamentos: pagamentosOk,
+    temCortesiaGeral: temCortesia, categoriaTempo: null, valorPulseira: null, meiasExtras: meiasExtrasOk, valorMeias: valorMeiasCalc, valor: valorFinal,
+    minutosAdicionados: 0, acrescimos: [], cortesiaStatus: temCortesia ? 'PENDENTE' : null, motivoCortesia: temCortesia ? String(motivoCortesia).trim().slice(0, 300) : null,
+    usou: args.usou !== false, termoAssinado: termoAssinado === true, criadoPorId, criadoPorEmail, criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString(),
+  };
+  await ref.set(registro);
+  parqueCache.invalidar();
+  return registro;
+}
+
 async function criar({
   unidade, unidadeNome, colaboradorId, colaboradorNome,
   responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto,
@@ -504,6 +601,7 @@ async function criar({
   termoAssinado,
 }) {
   const tabela = await getConfigPrecos();
+  if (temPlanoIndividual(criancas)) return criarComPlanosIndividuais({ unidade, unidadeNome, colaboradorId, colaboradorNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo, criadoPorId, criadoPorEmail, termoAssinado }, tabela);
   const categoriaPcd = CATEGORIAS_PCD.includes(categoriaTempo) ? categoriaTempo : null;
   // categoria oculta (Master desligou o botao) nao pode nascer numa venda
   // nova - mesma logica do tempo normal, ver temposValidos/validarPayload
@@ -670,6 +768,31 @@ async function checkin(id) {
       : 'Cortesia aguardando aprovação do Gerente da unidade ou do Master.');
   }
   const inicio = horaAgoraBrasilia();
+  // No termo com planos individuais, cada criança começa junto, mas termina
+  // de acordo com o ingresso que foi escolhido para ela. O timeFinal do
+  // atendimento fica como o último horário apenas para compatibilidade com
+  // telas/relatórios antigos.
+  if (atual.planosIndividuais) {
+    const criancas = (atual.criancas || []).map((crianca) => ({
+      ...crianca,
+      timeInicial: inicio,
+      timeFinal: somarMinutos(inicio, Number(crianca.tempoMinutos) || Number(atual.tempoMinutos) || 0),
+      checkoutEm: null,
+      checkoutAntecipado: false,
+      tempoRestanteMin: null,
+      checkoutAprovado: false,
+    }));
+    const finais = criancas.map((c) => c.timeFinal).sort();
+    await ref.update({
+      criancas,
+      timeInicial: inicio,
+      timeFinal: finais[finais.length - 1] || inicio,
+      iniciado: true,
+      checkinEm: new Date().toISOString(),
+    });
+    parqueCache.invalidar();
+    return getOne(id);
+  }
   const merge = {
     timeInicial: inicio,
     timeFinal: somarMinutos(inicio, atual.tempoMinutos + (atual.minutosExtras || 0) + (atual.minutosAdicionados || 0)),
@@ -947,6 +1070,30 @@ async function rodarAutoCheckins() {
     // cortesia sem aprovacao nao entra sozinha - o relogio so pode iniciar
     // depois que o Gerente/Master liberar
     if (cortesiaBloqueiaEntrada(c)) continue;
+    if (c.planosIndividuais) {
+      const criancas = (c.criancas || []).map((crianca) => ({
+        ...crianca,
+        timeInicial: c.horarioPrevisto,
+        timeFinal: somarMinutos(c.horarioPrevisto, Number(crianca.tempoMinutos) || Number(c.tempoMinutos) || 0),
+        checkoutEm: null,
+        checkoutAntecipado: false,
+        tempoRestanteMin: null,
+        checkoutAprovado: false,
+      }));
+      const finais = criancas.map((crianca) => crianca.timeFinal).sort();
+      const mergeIndividual = {
+        criancas,
+        timeInicial: c.horarioPrevisto,
+        timeFinal: finais[finais.length - 1] || c.horarioPrevisto,
+        iniciado: true,
+        autoCheckin: true,
+        checkinEm: new Date().toISOString(),
+      };
+      // eslint-disable-next-line no-await-in-loop
+      await doc.ref.update(mergeIndividual);
+      feitos.push({ ...c, ...mergeIndividual });
+      continue;
+    }
     const merge = {
       timeInicial: c.horarioPrevisto,
       timeFinal: somarMinutos(c.horarioPrevisto, c.tempoMinutos + (c.minutosExtras || 0) + (c.minutosAdicionados || 0)),
@@ -1163,6 +1310,83 @@ async function checkout(id, { motivo } = {}) {
     checkoutAprovadoEm: ehPcdCortesia ? new Date().toISOString() : null,
   };
   await ref.update(merge);
+  parqueCache.invalidar();
+  return getOne(id);
+}
+
+function validarIndiceCrianca(atual, indice) {
+  if (!atual.planosIndividuais) throw new Error('Este lançamento usa check-out único do grupo.');
+  const n = Number(indice);
+  if (!Number.isInteger(n) || n < 0 || n >= (atual.criancas || []).length) throw new Error('Criança não encontrada neste lançamento.');
+  return n;
+}
+
+// Check-out por criança para os novos termos mistos. Não altera o restante
+// do grupo e o eventual crédito continua vinculado ao responsável do termo.
+async function checkoutCrianca(id, indice, { motivo } = {}) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  const atual = snap.data();
+  if (!atual.iniciado) throw new Error('Esse check-in ainda não teve o check-in físico feito.');
+  const n = validarIndiceCrianca(atual, indice);
+  const criancas = [...(atual.criancas || [])];
+  const crianca = criancas[n];
+  if (crianca.checkoutEm) throw new Error('Esta criança já teve o check-out registrado.');
+  const agora = horaAgoraBrasilia();
+  const gratuita = crianca.gratuita === true || crianca.categoriaTempo === 'pcd-cortesia';
+  const restanteMin = gratuita ? 0 : Math.max(0, paraMinutos(crianca.timeFinal) - paraMinutos(agora));
+  criancas[n] = {
+    ...crianca,
+    checkoutEm: new Date().toISOString(),
+    checkoutAntecipado: !gratuita && restanteMin > 0,
+    tempoRestanteMin: restanteMin,
+    motivoCheckout: String(motivo || '').trim().slice(0, 300),
+    checkoutAprovado: gratuita,
+    checkoutAprovadoPorEmail: gratuita ? 'sistema (ingresso sem crédito)' : null,
+    checkoutAprovadoEm: gratuita ? new Date().toISOString() : null,
+  };
+  await ref.update({ criancas, atualizadoEm: new Date().toISOString() });
+  parqueCache.invalidar();
+  return getOne(id);
+}
+
+async function aprovarCheckoutCrianca(id, indice, { aprovadoPorEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  const atual = snap.data();
+  const n = validarIndiceCrianca(atual, indice);
+  const criancas = [...(atual.criancas || [])];
+  const crianca = criancas[n];
+  if (!crianca.checkoutEm) throw new Error('Esta criança não tem check-out pendente.');
+  if (crianca.checkoutAprovado) throw new Error('Este check-out já foi aprovado.');
+  criancas[n] = { ...crianca, checkoutAprovado: true, checkoutAprovadoPorEmail: aprovadoPorEmail, checkoutAprovadoEm: new Date().toISOString() };
+  await ref.update({ criancas, atualizadoEm: new Date().toISOString() });
+  parqueCache.invalidar();
+  if (crianca.tempoRestanteMin > 0 && atual.responsavel?.cpf) await registrarCredito(atual.responsavel.cpf, crianca.tempoRestanteMin, `${id}:${n}`);
+  return getOne(id);
+}
+
+async function retomarCheckoutCrianca(id, indice) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  const atual = snap.data();
+  const n = validarIndiceCrianca(atual, indice);
+  const criancas = [...(atual.criancas || [])];
+  const crianca = criancas[n];
+  if (!crianca.checkoutEm) throw new Error('Esta criança não está com check-out pendente.');
+  if (crianca.checkoutAprovado) throw new Error('Este check-out já foi aprovado e não pode mais ser desfeito.');
+  const agora = horaAgoraBrasilia();
+  criancas[n] = {
+    ...crianca,
+    timeFinal: somarMinutos(agora, crianca.tempoRestanteMin || 0),
+    checkoutEm: null, checkoutAntecipado: false, tempoRestanteMin: null,
+    motivoCheckout: null, checkoutAprovado: false, checkoutAprovadoPorEmail: null, checkoutAprovadoEm: null,
+  };
+  const finais = criancas.map((c) => c.timeFinal).filter(Boolean).sort();
+  await ref.update({ criancas, timeFinal: finais[finais.length - 1] || atual.timeFinal, atualizadoEm: new Date().toISOString() });
   parqueCache.invalidar();
   return getOne(id);
 }
@@ -1485,6 +1709,6 @@ module.exports = {
   adicionarTempo, relancar, visitaHojePorCpf, remover,
   decidirCortesia, encerrarCortesia, ehAdminCortesia,
   solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao, propostaMudaAlgo,
-  checkout, aprovarCheckout, retomarCheckout, creditoPorCpf, usarCredito,
+  checkout, aprovarCheckout, retomarCheckout, checkoutCrianca, aprovarCheckoutCrianca, retomarCheckoutCrianca, creditoPorCpf, usarCredito,
   invalidar: () => parqueCache.invalidar(),
 };

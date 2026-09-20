@@ -222,10 +222,8 @@
     <div class="secao" data-etapa="2">
       <div class="secao-titulo">Crianças</div>
       <div class="tipo-ingresso" id="tipo-ingresso-grupo">
-        <label style="display:flex;align-items:flex-start;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:0;">
-          <input type="checkbox" id="f-cortesia" style="width:auto;margin-top:2px;" onchange="toggleCortesia()">
-          <span><b>Este termo inclui ingresso(s) de cortesia</b><small>Marque somente quando houver cortesias. Em seguida, defina em cada criança se o ingresso é <b>cortesia</b> ou <b>pago</b>; todos permanecem no mesmo termo.</small></span>
-        </label>
+        <input type="checkbox" id="f-cortesia" class="hidden" aria-hidden="true">
+        <span><b>Ingresso individual por criança</b><small>Escolha o tempo e o tipo de cada criança: normal, PCD, PCD cortesia ou cortesia. Todas ficam no mesmo responsável e termo; só o check-out é individual.</small></span>
         <div class="resumo-ingressos hidden" id="resumo-ingressos"></div>
       </div>
       <div id="lista-criancas"></div>
@@ -787,8 +785,31 @@ function listaCriancasPreenchidas(){
   return [...document.querySelectorAll('#lista-criancas .crianca-linha')].filter(l=>l.querySelector('.crianca-nome').value.trim());
 }
 function criancaEhGratuita(linha){
+  const plano = linha.querySelector('.crianca-plano')?.value;
+  if(plano==='cortesia' || plano==='pcd-cortesia') return true;
   const chk = linha.querySelector('.crianca-gratuita');
   return !chk || chk.checked;
+}
+function detalhesPlanoIndividual(plano){
+  if(plano==='cortesia') return { gratuita:true, valor:0, label:'Cortesia' };
+  if(plano==='pcd-cortesia') return { gratuita:true, valor:0, label:TABELA_PRECOS.pcdCortesiaLabel||'PCD cortesia' };
+  if(plano==='pcd30' || plano==='pcd60'){
+    const p = (TABELA_PRECOS.pcd||[]).find(x=>x.chave===plano);
+    return { gratuita:false, valor:Number(p?.preco||0), label:p?.label||plano.toUpperCase() };
+  }
+  const m = /^normal:(\d+)$/.exec(plano||'');
+  const t = m && (TABELA_PRECOS.tempos||[]).find(x=>x.minutos===Number(m[1]));
+  return { gratuita:false, valor:t?Number(t.preco||0):0, label:t?.label||'Ingresso normal' };
+}
+function opcoesPlanoIndividual(selecionado){
+  const normais = (TABELA_PRECOS.tempos||[]).filter(t=>t.visivel!==false)
+    .map(t=>({ valor:`normal:${t.minutos}`, texto:`${t.label} · ${fmtReal(t.preco)}` }));
+  const pcd = (TABELA_PRECOS.pcd||[]).filter(p=>p.visivel!==false)
+    .map(p=>({ valor:p.chave, texto:`${p.label} · ${fmtReal(p.preco)}` }));
+  if(TABELA_PRECOS.pcdCortesiaVisivel!==false) pcd.push({ valor:'pcd-cortesia', texto:`${TABELA_PRECOS.pcdCortesiaLabel||'PCD cortesia'} · cortesia` });
+  const todos = [...normais, ...pcd, { valor:'cortesia', texto:'Cortesia · R$ 0,00' }];
+  const escolhido = todos.some(o=>o.valor===selecionado) ? selecionado : (normais[0]?.valor||'cortesia');
+  return todos.map(o=>`<option value="${o.valor}" ${o.valor===escolhido?'selected':''}>${escapeHtml(o.texto)}</option>`).join('');
 }
 // preco de quem fica de fora da gratuidade: tabela normal do MESMO tempo
 // contratado, nunca o preco fixo do PCD (que so vale pra quem de fato usa
@@ -821,6 +842,9 @@ function valorNiverPorCrianca(unit){
 // nao esta paga o preco cheio (ou o niver, se elegivel) - mesma logica do
 // servidor (ver valorEntradaCriancas em parque.js)
 function valorEntradasPreview(linhas){
+  if(linhas.some(l=>l.querySelector('.crianca-plano'))){
+    return linhas.reduce((soma,l)=>soma+detalhesPlanoIndividual(l.querySelector('.crianca-plano').value).valor,0);
+  }
   const gratuidadeAtiva = modoGratuidadeAtivo();
   const unit = valorUnitarioAtual();
   const unitPagante = valorUnitarioPagante();
@@ -836,6 +860,11 @@ function valorEntradasPreview(linhas){
 // (nao ligado a nenhuma crianca) so cobra se tiver alguem pagando nesse
 // check-in - senao (uso normal, ninguem desmarcou nada) continua de graca
 function contarMeiasCobrando(linhas){
+  if(linhas.some(l=>l.querySelector('.crianca-plano'))){
+    const optantes = linhas.filter(l=>l.querySelector('.crianca-meia').checked && !detalhesPlanoIndividual(l.querySelector('.crianca-plano').value).gratuita).length;
+    const temPagante = linhas.some(l=>!detalhesPlanoIndividual(l.querySelector('.crianca-plano').value).gratuita);
+    return optantes + (temPagante ? Math.max(0,num(document.getElementById('f-meias-extras').value)) : 0);
+  }
   const gratuidadeAtiva = modoGratuidadeAtivo();
   const optantes = linhas.filter(l=>{
     if(!l.querySelector('.crianca-meia').checked) return false;
@@ -854,6 +883,11 @@ function calcularTotalAtual(){
 }
 function atualizarPreviewValor(){
   const linhas = listaCriancasPreenchidas();
+  const temCortesiaGeral = linhas.some(l=>l.querySelector('.crianca-plano')?.value==='cortesia');
+  // Campo mantido oculto por compatibilidade com os fluxos legados; a
+  // escolha real de cortesia agora é feita na criança.
+  document.getElementById('f-cortesia').checked = temCortesiaGeral;
+  document.getElementById('wrap-motivo-cortesia').classList.toggle('hidden', !temCortesiaGeral);
   const n = linhas.length;
   const gratuidadeAtiva = modoGratuidadeAtivo();
   const unit = valorUnitarioAtual();
@@ -863,7 +897,12 @@ function atualizarPreviewValor(){
   const total = calcularTotalAtual();
   const niverLabel = TABELA_PRECOS.niverValorCheio > 0 ? `R$${TABELA_PRECOS.niverValorCheio}` : `${TABELA_PRECOS.niverDesconto}% off`;
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
-  if(gratuidadeAtiva){
+  if(linhas.some(l=>l.querySelector('.crianca-plano'))){
+    const itens = linhas.map(l=>detalhesPlanoIndividual(l.querySelector('.crianca-plano').value));
+    const gratuitas = itens.filter(i=>i.gratuita).length;
+    const pago = itens.filter(i=>!i.gratuita).map(i=>i.label).join(' + ');
+    document.getElementById('valor-detalhe').textContent = `${gratuitas?`${gratuitas} cortesia(s) · `:''}${pago||'sem cobrança'} + meias dos ingressos pagos`;
+  } else if(gratuidadeAtiva){
     const gratuitas = linhas.filter(criancaEhGratuita).length;
     const pagantes = n - gratuitas;
     document.getElementById('valor-detalhe').textContent = pagantes>0
@@ -886,7 +925,7 @@ function atualizarPreviewValor(){
   }
 }
 function toggleCortesia(){
-  const cortesia = document.getElementById('f-cortesia').checked;
+  const cortesia = [...document.querySelectorAll('.crianca-plano')].some(s=>s.value==='cortesia');
   document.getElementById('wrap-motivo-cortesia').classList.toggle('hidden', !cortesia);
   atualizarVisibilidadeGratuidade();
   atualizarPreviewValor();
@@ -1052,11 +1091,11 @@ let CRIANCA_SEQ = 0;
 // aniversariante, so que manual (nao por data de nascimento). Ver
 // gratuidadeAtiva em parque.js.
 function modoGratuidadeAtivo(){
-  return CATEGORIA_SELECIONADA==='pcd-cortesia' || document.getElementById('f-cortesia').checked;
+  return CATEGORIA_SELECIONADA==='pcd-cortesia' || [...document.querySelectorAll('.crianca-plano')].some(s=>detalhesPlanoIndividual(s.value).gratuita) || document.getElementById('f-cortesia').checked;
 }
 function atualizarVisibilidadeGratuidade(){
   const ativo = modoGratuidadeAtivo();
-  document.querySelectorAll('#lista-criancas .crianca-gratuita-wrap').forEach(w=>w.classList.toggle('hidden', !ativo));
+  document.querySelectorAll('#lista-criancas .crianca-gratuita-wrap').forEach(w=>w.classList.add('hidden'));
   document.getElementById('tipo-ingresso-grupo').classList.toggle('ativo', ativo);
   atualizarResumoIngressos();
 }
@@ -1064,13 +1103,13 @@ function atualizarResumoIngressos(){
   const resumo = document.getElementById('resumo-ingressos');
   if(!resumo) return;
   const linhas = listaCriancasPreenchidas();
-  if(!modoGratuidadeAtivo()){
+  if(!linhas.some(l=>l.querySelector('.crianca-plano')) && !modoGratuidadeAtivo()){
     resumo.classList.add('hidden');
     return;
   }
   const cortesias = linhas.filter(criancaEhGratuita).length;
   const pagantes = linhas.length - cortesias;
-  resumo.textContent = `${cortesias} ingresso(s) de cortesia · ${pagantes} ingresso(s) pago(s). O pagamento abaixo cobrará somente os pagos.`;
+  resumo.textContent = `${cortesias} ingresso(s) sem cobrança · ${pagantes} ingresso(s) pago(s). O pagamento abaixo cobrará somente os pagos.`;
   resumo.classList.remove('hidden');
 }
 function adicionarCrianca(){
@@ -1085,6 +1124,7 @@ function adicionarCrianca(){
       <div><label style="margin-top:0;">Nascimento</label><input type="text" class="crianca-nasc" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" oninput="mascararDataBR(this)"></div>
       <button type="button" class="btn-remover-crianca" onclick="document.getElementById('${id}').remove(); atualizarPreviewPulseiras();" title="Remover">✕</button>
     </div>
+    <div style="grid-column:1 / -1;"><label style="margin-top:0;">Ingresso desta criança</label><select class="crianca-plano" onchange="atualizarPreviewValor()">${opcoesPlanoIndividual(`normal:${TEMPO_SELECIONADO}`)}</select></div>
     <label class="crianca-meia-wrap" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
       <input type="checkbox" class="crianca-meia" style="width:auto;" onchange="atualizarPreviewValor()">
       🧦 Par de meia · R$25 <span style="color:var(--muted);">(marque se a criança precisa comprar o par de meia)</span>
@@ -1114,6 +1154,7 @@ function coletarCriancas(){
       dataNascimento: dataBRparaISO(div.querySelector('.crianca-nasc').value),
       meia: div.querySelector('.crianca-meia').checked,
       gratuita: chkGratuita ? chkGratuita.checked : true,
+      plano: div.querySelector('.crianca-plano')?.value || null,
     };
   }).filter(c=>c.nome);
 }
@@ -1161,8 +1202,8 @@ function fecharEsgotado(){
 }
 
 function statusCheckin(c){
-  if(c.metodoPagamento==='cortesia' && c.cortesiaStatus==='PENDENTE') return { classe:'aguardando', texto:'🎗 cortesia aguardando aprovação' };
-  if(c.metodoPagamento==='cortesia' && c.cortesiaStatus==='NEGADA') return { classe:'aguardando', texto:'🎗 cortesia negada' };
+  if((c.temCortesiaGeral || c.metodoPagamento==='cortesia') && c.cortesiaStatus==='PENDENTE') return { classe:'aguardando', texto:'🎗 cortesia aguardando aprovação' };
+  if((c.temCortesiaGeral || c.metodoPagamento==='cortesia') && c.cortesiaStatus==='NEGADA') return { classe:'aguardando', texto:'🎗 cortesia negada' };
   if(!c.iniciado) return { classe:'pendente-checkin', texto:'aguardando check-in' };
   if(c.checkoutEm && c.checkoutAprovado) return { classe:'liberado', texto:'check-out aprovado' };
   if(c.checkoutEm) return { classe:'aguardando', texto:'check-out pendente de aprovação' };
@@ -1187,7 +1228,7 @@ function ehAdminCortesiaLocal(){
   return u==='mv' || e.startsWith('mv@grupobravoempresarial');
 }
 function cortesiaHtml(c){
-  if(c.metodoPagamento!=='cortesia' || !c.cortesiaStatus) return '';
+  if(!(c.temCortesiaGeral || c.metodoPagamento==='cortesia') || !c.cortesiaStatus) return '';
   const s = c.cortesiaStatus;
   const linhas = {
     PENDENTE: `🎗 <b>Cortesia aguardando aprovação</b> — motivo: ${escapeHtml(c.motivoCortesia||'—')}`,
@@ -1250,6 +1291,29 @@ function aindaTemTempoPraCheckout(c){
   return finalChave > agoraChave;
 }
 
+function aindaTemTempoPraCheckoutCrianca(c, crianca){
+  if(!c.iniciado || !crianca?.timeFinal || crianca.checkoutEm) return false;
+  const agoraChave = hojeBrasilia() + horaCurtaBrasilia(agoraBrasilia());
+  return (c.dataUtilizacao + crianca.timeFinal.slice(0,5)) > agoraChave;
+}
+function planoCriancaLabel(cr){
+  if(cr.plano) return detalhesPlanoIndividual(cr.plano).label;
+  if(cr.categoriaTempo==='pcd-cortesia') return 'PCD cortesia';
+  if(cr.categoriaTempo) return String(cr.categoriaTempo).toUpperCase();
+  return `${cr.tempoMinutos||''} min`;
+}
+function acoesCheckoutIndividuais(c){
+  if(!c.planosIndividuais || !c.iniciado) return '';
+  return `<div class="sub" style="margin-top:9px;border-top:1px solid var(--line);padding-top:8px;"><b>Saída individual</b>${(c.criancas||[]).map((cr,i)=>{
+    const fim = cr.timeFinal ? ` · até ${cr.timeFinal.slice(0,5)}` : '';
+    const estado = cr.checkoutEm ? (cr.checkoutAprovado ? ' · saída aprovada' : ' · saída aguardando aprovação') : '';
+    const sair = aindaTemTempoPraCheckoutCrianca(c,cr) ? `<button type="button" class="link-btn" style="color:var(--warn);" onclick="checkoutCrianca('${c.id}',${i})">🚪 saída</button>` : '';
+    const voltar = cr.checkoutEm && !cr.checkoutAprovado ? `<button type="button" class="link-btn" style="color:var(--ok);" onclick="retomarCheckoutCrianca('${c.id}',${i})">↩ voltar</button>` : '';
+    const aprovar = cr.checkoutEm && !cr.checkoutAprovado && podeAprovarCheckout(c.unidade) ? `<button type="button" class="link-btn" style="color:var(--ok);" onclick="aprovarCheckoutCrianca('${c.id}',${i})">✓ aprovar</button>` : '';
+    return `<div style="margin-top:5px;">${escapeHtml(cr.nome||'Criança')} · ${escapeHtml(planoCriancaLabel(cr))}${fim}${estado} ${sair}${voltar}${aprovar}</div>`;
+  }).join('')}</div>`;
+}
+
 function renderLista(){
   const el = document.getElementById('lista-checkins');
   if(!CHECKINS.length){ el.innerHTML = '<div class="empty">Nenhum check-in ainda.</div>'; return; }
@@ -1268,15 +1332,16 @@ function renderLista(){
       <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''} · <b>${fmtReal(valorDoCheckin(c))}</b>${c.metodoPagamento?' ('+escapeHtml(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}</div>
       <div class="criancas">${escapeHtml(criancas)}</div>
       ${cortesiaHtml(c)}
+      ${acoesCheckoutIndividuais(c)}
       <div style="margin-top:8px;">
         <button type="button" class="link-btn" onclick="abrirVer('${c.id}')">👁 Ver</button>
         <a class="link-btn" href="/api/parque/checkins/${c.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">🖨️ Termo</a>
         ${!c.termoAssinado?`<button type="button" class="link-btn" onclick="marcarAssinadoId('${c.id}')">✔ Marcar assinado</button>`:''}
         ${(!c.iniciado && !(c.metodoPagamento==='cortesia' && ['PENDENTE','NEGADA'].includes(c.cortesiaStatus)))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="fazerCheckin('${c.id}')">▶ Fazer check-in</button>`:''}
-        ${(c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="abrirAddTempo('${c.id}')">➕ Adicionar tempo</button>`:''}
-        ${(c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--warn);" onclick="checkoutEmergencia('${c.id}')">🚪 Check-out</button>`:''}
-        ${(c.checkoutEm && !c.checkoutAprovado)?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="retomarCheckout('${c.id}')">↩ Voltar (criança retornou)</button>`:''}
-        ${(c.checkoutEm && !c.checkoutAprovado && podeAprovarCheckout(c.unidade))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="aprovarCheckout('${c.id}')">✓ Aprovar check-out</button>`:''}
+        ${(!c.planosIndividuais && c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="abrirAddTempo('${c.id}')">➕ Adicionar tempo</button>`:''}
+        ${(!c.planosIndividuais && c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--warn);" onclick="checkoutEmergencia('${c.id}')">🚪 Check-out</button>`:''}
+        ${(!c.planosIndividuais && c.checkoutEm && !c.checkoutAprovado)?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="retomarCheckout('${c.id}')">↩ Voltar (criança retornou)</button>`:''}
+        ${(!c.planosIndividuais && c.checkoutEm && !c.checkoutAprovado && podeAprovarCheckout(c.unidade))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="aprovarCheckout('${c.id}')">✓ Aprovar check-out</button>`:''}
         <button type="button" class="link-btn" onclick="abrirCorrecao('${c.id}')">🛠 Pedir correção</button>
       </div>
     </div>`;
@@ -1312,7 +1377,7 @@ function abrirVer(id){
   // uma linha por criança com o que foi cobrado dela - é onde se pega meia
   // esquecida e niver aplicado no nome errado
   const criancasHtml = (c.criancas||[]).length
-    ? (c.criancas||[]).map((cr,i)=>`${i+1}. <b>${escapeHtml(cr.nome||'(sem nome)')}</b>${cr.dataNascimento?` · nasc. ${fmtData((cr.dataNascimento||'').slice(0,10))}`:''} · ${cr.meia!==false?'🧦 com meia':'sem meia'}${cr.niver?' · 🎂 aniversariante':''}`).join('<br>')
+    ? (c.criancas||[]).map((cr,i)=>`${i+1}. <b>${escapeHtml(cr.nome||'(sem nome)')}</b>${cr.dataNascimento?` · nasc. ${fmtData((cr.dataNascimento||'').slice(0,10))}`:''} · ${cr.meia!==false?'🧦 com meia':'sem meia'}${cr.niver?' · 🎂 aniversariante':''}${c.planosIndividuais?` · <b>${escapeHtml(planoCriancaLabel(cr))}</b>${cr.timeFinal?` · até ${escapeHtml(cr.timeFinal.slice(0,5))}`:''}${cr.checkoutEm?` · ${cr.checkoutAprovado?'saída aprovada':'saída pendente'}`:''}`:''}`).join('<br>')
     : '—';
   // formas de pagamento: quando a venda foi dividida, o que interessa
   // conferir é CADA parcela contra o comprovante da maquininha
@@ -1513,6 +1578,32 @@ async function retomarCheckout(id){
   }catch(err){
     alert(err.message);
   }
+}
+async function checkoutCrianca(id, indice){
+  const c = CHECKINS.find(x=>x.id===id); const nome = c?.criancas?.[indice]?.nome || 'esta criança';
+  const motivo = prompt(`Motivo do check-out antecipado de ${nome}:`);
+  if(motivo===null) return;
+  try{
+    const res = await fetch(`/api/parque/checkins/${id}/criancas/${indice}/checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({motivo}) });
+    const data = await res.json(); if(!res.ok) throw new Error(data.error||'erro ao registrar saída');
+    await carregar();
+  }catch(err){ alert(err.message); }
+}
+async function aprovarCheckoutCrianca(id, indice){
+  if(!confirm('Aprovar esta saída? O tempo que sobrou vira crédito para o CPF do responsável.')) return;
+  try{
+    const res = await fetch(`/api/parque/checkins/${id}/criancas/${indice}/aprovar-checkout`, {method:'POST'});
+    const data = await res.json(); if(!res.ok) throw new Error(data.error||'erro ao aprovar');
+    await carregar();
+  }catch(err){ alert(err.message); }
+}
+async function retomarCheckoutCrianca(id, indice){
+  if(!confirm('A criança voltou a brincar? O tempo restante será retomado.')) return;
+  try{
+    const res = await fetch(`/api/parque/checkins/${id}/criancas/${indice}/retomar-checkout`, {method:'POST'});
+    const data = await res.json(); if(!res.ok) throw new Error(data.error||'erro ao retomar');
+    await carregar();
+  }catch(err){ alert(err.message); }
 }
 async function fazerCheckinUltimo(){
   if(!ULTIMO_CRIADO_ID) return;

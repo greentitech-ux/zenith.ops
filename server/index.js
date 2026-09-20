@@ -8009,6 +8009,21 @@ app.post('/api/parque/checkins/:id/checkout', requireAnySection('parque', 'parqu
   }
 });
 
+// Termos mistos têm relógio e saída por criança. A permissão é a mesma do
+// check-out do grupo: atendente da unidade pode registrar a saída, mas só a
+// gestão aprova crédito de tempo.
+app.post('/api/parque/checkins/:id/criancas/:indice/checkout', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    const atual = await parque.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const registro = await parque.checkoutCrianca(req.params.id, req.params.indice, { motivo: req.body.motivo });
+    broadcast('parque-checkin-atualizado', registro, 'parque');
+    broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 // so um Gerente da PROPRIA unidade (tag de cargo, ver users.js) ou
 // Master/Admin pode confirmar um check-out antecipado - e essa aprovacao
 // que efetivamente gera o credito de tempo (ver parque.aprovarCheckout)
@@ -8034,6 +8049,18 @@ app.post('/api/parque/checkins/:id/aprovar-checkout', requireAnySection('parque'
   }
 });
 
+app.post('/api/parque/checkins/:id/criancas/:indice/aprovar-checkout', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    const atual = await parque.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    if (!podeAprovarCheckoutParque(req, atual.unidade)) return res.status(403).json({ error: 'Só um Gerente da unidade (ou Master/Admin) pode aprovar o check-out.' });
+    const registro = await parque.aprovarCheckoutCrianca(req.params.id, req.params.indice, { aprovadoPorEmail: req.user.email });
+    broadcast('parque-checkin-atualizado', registro, 'parque');
+    broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 // desfaz um check-out ainda pendente (a crianca voltou a brincar) - retoma
 // o relogio com o tempo que sobrava, sem gerar credito nenhum
 app.post('/api/parque/checkins/:id/retomar-checkout', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
@@ -8050,6 +8077,18 @@ app.post('/api/parque/checkins/:id/retomar-checkout', requireAnySection('parque'
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+app.post('/api/parque/checkins/:id/criancas/:indice/retomar-checkout', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    const atual = await parque.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const registro = await parque.retomarCheckoutCrianca(req.params.id, req.params.indice);
+    broadcast('parque-checkin-atualizado', registro, 'parque');
+    broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // depois de enviado, um check-in nao pode mais ser mexido direto - correcao
