@@ -166,6 +166,21 @@
   // É uma assinatura de aviso de cabine, sem áudio externo ou beep agressivo.
   const tocarSomSolicitacao = () => tocarBeep([[0, 659.25], [0.18, 830.61], [0.43, 1046.5]]);
   const tocarSomFraude = () => tocarBeep([[0, 783.99], [0.18, 1046.5], [0.36, 1318.51]]);
+  let repeticaoSomSolicitacao = null;
+  function pararRepeticaoSomSolicitacao() {
+    if (repeticaoSomSolicitacao) clearInterval(repeticaoSomSolicitacao);
+    repeticaoSomSolicitacao = null;
+  }
+  function iniciarRepeticaoSomSolicitacao() {
+    tocarSomSolicitacao();
+    pararRepeticaoSomSolicitacao();
+    // A cada 30s, enquanto o aviso estiver aberto. O navegador pode reduzir
+    // timers em segundo plano, mas nunca cria mais de um ciclo por página.
+    repeticaoSomSolicitacao = setInterval(() => {
+      if (!wrap.querySelector('.zn-notif') || notificacoesPausadas()) return pararRepeticaoSomSolicitacao();
+      tocarSomSolicitacao();
+    }, 30000);
+  }
 
   const ICONES_TIPO = { estorno: '💳', 'ajuste-fechamento': '🧾', compra: '🛒', manutencao: '🔧', 'suporte-ti': '💻', pagamento: '💸', nota: '📄', 'quebra-caixa': '⚠️', 'desvio-estoque': '📦⚠️' };
   const LABELS_TIPO = { estorno: 'Estorno', 'ajuste-fechamento': 'Ajuste de fechamento', compra: 'Compra', manutencao: 'Manutenção', 'suporte-ti': 'Suporte TI', pagamento: 'Pagamento', nota: 'Nota fiscal', 'quebra-caixa': 'Quebra de caixa', 'desvio-estoque': 'Desvio de estoque' };
@@ -221,7 +236,7 @@
     }
     resumo.innerHTML = `<span>🔔 <strong>+${notificacoesAgrupadas}</strong> ${notificacoesAgrupadas === 1 ? 'solicitação aguardando' : 'solicitações aguardando'}</span><span>Ver fila →</span>`;
   }
-  function limparNotificacoesDaTela() { notificacoesAgrupadas = 0; wrap.replaceChildren(); }
+  function limparNotificacoesDaTela() { notificacoesAgrupadas = 0; pararRepeticaoSomSolicitacao(); wrap.replaceChildren(); }
 
   function mostrarNotificacaoSolicitacao(card) {
     if (card.notificacaoVista) return;
@@ -273,7 +288,7 @@
     // no servidor, só o popup para de voltar neste navegador)
     arrastarParaFechar(el, () => { dispensarNotif(card); pausarNotificacoes(); limparNotificacoesDaTela(); });
     wrap.appendChild(el);
-    tocarSomSolicitacao();
+    iniciarRepeticaoSomSolicitacao();
   }
 
   // marca como vista e navega pro card aberto no Histórico da Central. O
@@ -292,6 +307,7 @@
   function removerNotificacaoSolicitacao(tipo, id) {
     const el = document.getElementById('zn-notif-' + tipo + '-' + id);
     if (el) el.remove();
+    if (!wrap.querySelector('.zn-notif')) pararRepeticaoSomSolicitacao();
   }
 
   // paginas que ja tem a sua propria versao desse toast (painel.html e

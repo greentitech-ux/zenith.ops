@@ -503,6 +503,17 @@ function tocarSomNotificacao(){
     tocarBeep(0.43, 1046.5);
   }catch(e){ /* navegador pode bloquear audio antes de alguma interacao - so nao toca */ }
 }
+let REPETICAO_SOM_NOTIFICACAO = null;
+function pararRepeticaoSomNotificacao(){ if(REPETICAO_SOM_NOTIFICACAO) clearInterval(REPETICAO_SOM_NOTIFICACAO); REPETICAO_SOM_NOTIFICACAO=null; }
+function iniciarRepeticaoSomNotificacao(){
+  tocarSomNotificacao();
+  pararRepeticaoSomNotificacao();
+  REPETICAO_SOM_NOTIFICACAO=setInterval(()=>{
+    const wrap=document.getElementById('notif-solicitacao-wrap');
+    if(!wrap?.querySelector('.notif-solicitacao') || notificacoesPausadas()) return pararRepeticaoSomNotificacao();
+    tocarSomNotificacao();
+  },30000);
+}
 
 // ALERTA QUE SO ENCERRA. Pedido do Master, depois de a versao "insistente"
 // tornar o sistema inusavel no celular ("continua voltando a aparecer
@@ -533,7 +544,7 @@ function mostrarResumoNotificacoes(wrap){
   if(!resumo){ resumo=document.createElement('button'); resumo.type='button'; resumo.id='notif-solicitacao-resumo'; resumo.className='notif-solicitacao-resumo'; resumo.addEventListener('click',()=>{location.href='/central-historico.html';}); wrap.appendChild(resumo); }
   resumo.innerHTML=`<span>🔔 <strong>+${notificacoesAgrupadas}</strong> ${notificacoesAgrupadas===1?'solicitação aguardando':'solicitações aguardando'}</span><span>Ver fila →</span>`;
 }
-function limparNotificacoesDaTela(wrap){ notificacoesAgrupadas=0; wrap.replaceChildren(); }
+function limparNotificacoesDaTela(wrap){ notificacoesAgrupadas=0; pararRepeticaoSomNotificacao(); wrap.replaceChildren(); }
 
 function mostrarNotificacaoSolicitacao(card){
   if(!IS_MASTER_GLOBAL && !IS_ADMIN_GLOBAL) return;
@@ -570,7 +581,7 @@ function mostrarNotificacaoSolicitacao(card){
   // aquele arquivo não tiver carregado, o toast segue funcionando sem o gesto
   if (window.ZenithArrastarParaFechar) window.ZenithArrastarParaFechar(el, ()=>{ pausarNotificacoes(); limparNotificacoesDaTela(wrap); });
   wrap.appendChild(el);
-  tocarSomNotificacao();
+  iniciarRepeticaoSomNotificacao();
 }
 
 async function marcarVistoNotificacao(tipo, id){
@@ -581,6 +592,7 @@ async function marcarVistoNotificacao(tipo, id){
 function removerNotificacaoSolicitacao(tipo, id){
   const el = document.getElementById('notif-sol-'+tipo+'-'+id);
   if(el) el.remove();
+  if(!document.querySelector('#notif-solicitacao-wrap .notif-solicitacao')) pararRepeticaoSomNotificacao();
 }
 
 async function iniciarNotificacoesCentral(){
