@@ -6456,9 +6456,42 @@ app.get('/api/fechamentos/relatorio.pdf', requireSection('fechamentos'), async (
 // (ex: "qual foi o recorde só neste trimestre") ----------
 app.get('/api/fechamentos/recordes', requireSection('fechamentos'), async (req, res) => {
   try {
-    const janelaDias = Number(req.query.janela) > 0 ? Number(req.query.janela) : 30;
-    const fechamentos = await fechamentosFiltrados(req);
-    res.json(vendasRecordes.montar(fechamentos, { janelaDias }));
+    const janelaPedida = Number(req.query.janela);
+    const janelaDias = [7, 15, 30, 60, 90].includes(janelaPedida) ? janelaPedida : 30;
+    const inicioManual = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.inicio || '')) ? String(req.query.inicio) : null;
+    const fimManual = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.fim || '')) ? String(req.query.fim) : null;
+    const hoje = hojeBrasiliaISO();
+    // O seletor "7/15/30 dias" antes servia apenas para pintar o selo
+    // "recente"; os cards seguiam calculando recordes de meses atrás. Sem
+    // período manual, o atalho agora recorta o dado DE VERDADE, incluindo
+    // hoje. Se a pessoa escolheu datas, elas têm prioridade integral.
+    let inicio = inicioManual;
+    let fim = fimManual;
+    if (!inicioManual && !fimManual) {
+      const [ano, mes, dia] = hoje.split('-').map(Number);
+      const dataInicial = new Date(Date.UTC(ano, mes - 1, dia));
+      dataInicial.setUTCDate(dataInicial.getUTCDate() - (janelaDias - 1));
+      inicio = dataInicial.toISOString().slice(0, 10);
+      fim = hoje;
+    }
+
+    // Grupo não passa por fechamentosFiltrados: aquela função atende telas
+    // antigas em que o campo legado era BRAVO, enquanto Recordes trabalha com
+    // a rede canônica (GBE/ARCFOOD/ESTACAO). Assim uma empresa nunca ganha
+    // opção, nem dados, de outra por uma variação antiga desse campo.
+    const grupo = String(req.query.grupo || '').trim();
+    const reqComRecorte = Object.create(req);
+    reqComRecorte.query = { ...req.query, inicio: inicio || undefined, fim: fim || undefined };
+    delete reqComRecorte.query.grupo;
+    let fechamentos = await fechamentosFiltrados(reqComRecorte);
+    if (grupo && redes.REDES.some((r) => r.id === grupo)) {
+      fechamentos = fechamentos.filter((f) => redes.redeDaUnidade(f.unidade) === grupo);
+    }
+    const normalizados = fechamentos.map((f) => ({ ...f, grupo: redes.redeDaUnidade(f.unidade) }));
+    res.json({
+      ...vendasRecordes.montar(normalizados, { hoje, janelaDias }),
+      periodo: { inicio: inicio || null, fim: fim || null, origem: inicioManual || fimManual ? 'manual' : 'atalho' },
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

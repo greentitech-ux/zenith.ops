@@ -117,13 +117,12 @@
   <label for="f-grupo" id="f-grupo-label">Grupo</label>
   <select id="f-grupo">
     <option value="">Todos</option>
-    <option value="ARCFOOD">ARCFOOD</option>
-    <option value="BRAVO">Grupo Bravo (GBE)</option>
   </select>
   <label for="f-unidade">Unidade</label>
   <select id="f-unidade">
     <option value="">Todas</option>
   </select>
+  <span class="sub" id="periodo-ativo" aria-live="polite"></span>
 </div>
 
 <div class="panel">
@@ -175,6 +174,7 @@ function fmtDataDia(iso){ const n=nomeDia(iso); return fmtData(iso)+(n?' · '+n:
 function fmtSemana(s){ return s ? `${fmtData(s.inicio)} a ${fmtData(s.fim)}` : ''; }
 
 let DADOS = null;
+const ROTULO_GRUPO = { ARCFOOD:'ARCFOOD', GBE:'Grupo Bravo (GBE)', ESTACAO:'Estação da Comida' };
 
 // opcoes do seletor de Unidade vem da 1a carga (sem filtro nenhum, ja que os
 // selects comecam vazios/"Todas") - assim escolher um Grupo depois nao faz
@@ -182,7 +182,9 @@ let DADOS = null;
 let UNIDADES_CARREGADAS = false;
 function popularUnidades(unidades){
   const sel = document.getElementById('f-unidade');
+  const selGrupo = document.getElementById('f-grupo');
   const atual = sel.value;
+  const grupoAtual = selGrupo.value;
   const lista = [...(unidades||[])].sort((a,b)=>(a.unidadeNome||'').localeCompare(b.unidadeNome||'','pt-BR'));
   sel.innerHTML = '<option value="">Todas</option>' + lista.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidadeNome)}</option>`).join('');
 
@@ -192,7 +194,12 @@ function popularUnidades(unidades){
 
   // Grupo só faz sentido pra quem tem loja de MAIS DE UMA rede. Quem opera uma
   // rede só nunca vai filtrar por grupo — esconde o seletor pra não confundir.
-  const gruposDistintos = new Set(lista.map(u=>u.grupo).filter(Boolean));
+  const gruposDistintos = new Set(lista.map(u=>u.grupo).filter(g=>ROTULO_GRUPO[g]));
+  // Nunca deixe opções estáticas de outras empresas no HTML: a lista nasce
+  // exclusivamente dos dados que o servidor já recortou pelo acesso atual.
+  selGrupo.innerHTML = '<option value="">Todos</option>'
+    + [...gruposDistintos].map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(ROTULO_GRUPO[g])}</option>`).join('');
+  selGrupo.value = gruposDistintos.has(grupoAtual) ? grupoAtual : '';
   const mostraGrupo = gruposDistintos.size >= 2;
   document.getElementById('f-grupo-label').classList.toggle('hidden', !mostraGrupo);
   document.getElementById('f-grupo').classList.toggle('hidden', !mostraGrupo);
@@ -216,6 +223,10 @@ async function carregar(){
     return;
   }
   DADOS = await res.json();
+  const periodo = DADOS.periodo || {};
+  document.getElementById('periodo-ativo').textContent = periodo.inicio && periodo.fim
+    ? `${periodo.origem==='manual'?'período escolhido':'últimos '+document.getElementById('f-janela').value+' dias'}: ${fmtData(periodo.inicio)} a ${fmtData(periodo.fim)}`
+    : 'histórico completo';
   if(!UNIDADES_CARREGADAS){
     popularUnidades(DADOS.unidades);
     UNIDADES_CARREGADAS = true;
