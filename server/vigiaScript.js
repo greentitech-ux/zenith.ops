@@ -16,7 +16,7 @@
 // 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
 // da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
 // outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 77;
+const VERSAO_VIGIA = 78;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -428,8 +428,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '}',
     '# Grava o lancador .vbs ao lado do .ps1 e devolve $true se da pra usar.',
     '# Em loja com Windows Script Host desligado por politica o wscript nao',
-    '# existe/nao roda - nesse caso devolve $false e tudo segue como antes,',
-    '# chamando powershell.exe direto (pisca, mas funciona).',
+    '# existe/nao roda. Nao usamos powershell.exe direto como alternativa:',
+    '# isso pode deixar uma tela de erro aberta para a operacao. A falha fica',
+    '# somente no log local para o suporte corrigir a politica da maquina.',
     'function Gravar-Lancador {',
     '  try {',
     '    $wscript = Join-Path $env:SystemRoot "System32\\wscript.exe"',
@@ -450,7 +451,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    return (Test-Path $CaminhoLancador)',
     '  } catch { return $false }',
     '}',
-    '# a acao da tarefa: pelo lancador quando da, por powershell.exe quando nao da',
+    '# A tarefa SEMPRE usa o lancador invisivel. Sem ele, nao criamos uma tarefa',
+    '# que poderia expor uma janela de PowerShell ao operador.',
     'function Acao-DaTarefa($destino, $ehServico) {',
     '  $lancadorOk = Gravar-Lancador',
     '  if ($lancadorOk) {',
@@ -458,9 +460,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    if ($ehServico) { $arg += \' servico\' }',
     '    return (New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot "System32\\wscript.exe") -Argument $arg)',
     '  }',
-    '  $argPs = "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$destino`" -Loop"',
-    '  if ($ehServico) { $argPs += " -Servico" }',
-    '  return (New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argPs)',
+    '  throw "Nao foi possivel preparar o lancador invisivel do NOCZenith. Nenhuma janela sera aberta; verifique NOCZenith.log."',
     '}',
     '# Quem ja esta instalado migra sozinho pro lancador, sem reinstalar: a',
     '# tarefa do proprio usuario nao pede Administrador, e a de boot e mexida',
@@ -474,7 +474,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    if ($jaTem) { return }',
     '    $novaAcao = Acao-DaTarefa $PSCommandPath $Servico',
     '    if (-not ($novaAcao.Execute -match "wscript")) { return }',
-    '    Set-ScheduledTask -TaskName $nome -Action $novaAcao | Out-Null',
+    '    Set-ScheduledTask -TaskName $nome -Action $novaAcao -ErrorAction Stop | Out-Null',
     '    Escrever-Log "Tarefa $nome passou a subir pelo lancador sem janela - acabou o lampejo de console a cada disparo."',
     '  } catch { Escrever-Log "Nao consegui trocar a acao da tarefa pra sem janela: $($_.Exception.Message)" }',
     '}',
@@ -483,7 +483,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  try {',
     '    $tarefa = Get-ScheduledTask -TaskName $NomeTarefa -ErrorAction Stop',
     '    foreach ($g in $tarefa.Triggers) { if ($g.Repetition -and $g.Repetition.Interval) { return } }',
-    '    Set-ScheduledTask -TaskName $NomeTarefa -Trigger (Gatilhos-DaTarefa) | Out-Null',
+    '    Set-ScheduledTask -TaskName $NomeTarefa -Trigger (Gatilhos-DaTarefa) -ErrorAction Stop | Out-Null',
     '    Escrever-Log "Tarefa $NomeTarefa ganhou o gatilho de repeticao (5 min): se o agente cair, o agendador sobe de novo sozinho."',
     '  } catch { Escrever-Log "Nao consegui ajustar o gatilho da tarefa: $($_.Exception.Message)" }',
     '}',
@@ -1048,7 +1048,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '          $argLanc = \'"\' + $CaminhoLancador + \'" "\' + $PSCommandPath + \'"\'',
     '          if ($Servico) { $argLanc += \' servico\' }',
     '          Start-Process (Join-Path $env:SystemRoot "System32\\wscript.exe") -ArgumentList $argLanc',
-    '        } else { Start-Process powershell.exe -ArgumentList $argsNovo }',
+    '        } else { Escrever-Log "Atualizacao baixada, mas o lancador invisivel nao esta disponivel. A copia atual sera encerrada sem abrir console." }',
     '        Start-Sleep -Seconds 2',
     '        [Environment]::Exit(0)',
     '      } else {',
@@ -1557,7 +1557,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if ($capturar) { try { "1" | Set-Content -Path $CaminhoNoPulsoPrintGatilho -Force; Escrever-Log "NOC pediu captura agora." } catch {} }',
     '  $valorPrint = if ($habilitado) { "1" } else { "0" }',
     '  $valorAnterior = try { (Get-Content $CaminhoNoPulsoPrintAtivo -First 1 -ErrorAction Stop).Trim() } catch { "" }',
-    '  $valorPrint | Set-Content -Path $CaminhoNoPulsoPrintAtivo -Force',
+    '  try { [IO.File]::WriteAllText($CaminhoNoPulsoPrintAtivo, [string]$valorPrint) } catch { Escrever-Log "Nao consegui gravar estado do NoPulsoPrint: $($_.Exception.Message)" }',
     '  # le o estado ANTES de iniciar: se o runspace anterior morreu, Estado-',
     '  # NoPulsoPrint solta o global e o Iniciar logo abaixo recria',
     '  $estadoPrint = Estado-NoPulsoPrint',
@@ -2581,7 +2581,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      Unblock-File -Path $Destino -ErrorAction SilentlyContinue',
     '    }',
     '  } catch {',
-    '    Write-Host "Aviso: nao consegui usar a pasta fixa ($($_.Exception.Message)). Instalando do lugar atual."',
+    '    Escrever-Log "Aviso: nao consegui usar a pasta fixa ($($_.Exception.Message)). Instalando do lugar atual."',
     '    $Destino = $PSCommandPath',
     '  }',
     '  # IDENTIDADE + PASTA OCULTA. Pedido do Master: rodar sem janela (ja faz,',
@@ -2619,9 +2619,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      Escrever-Log "Pasta marcada como oculta e LEIA-NOCZenith.txt gravado."',
     '    } catch { Escrever-Log "Nao consegui ocultar/identificar a pasta: $($_.Exception.Message)" }',
     '  }',
-    '  # sobe pelo lancador sem janela quando da (ver Gravar-Lancador); onde o',
-    '  # Windows Script Host esta desligado, cai no powershell.exe de sempre.',
-    '  $acao = Acao-DaTarefa $Destino $false',
+    '  # Sobe somente pelo lancador invisivel. Se a politica do Windows bloqueou',
+    '  # o Windows Script Host, encerra sem expor erro ao operador; o suporte ve',
+    '  # a causa no log local.',
+    '  $acao = $null',
+    '  try { $acao = Acao-DaTarefa $Destino $false } catch { Escrever-Log "Nao foi possivel criar a acao invisivel: $($_.Exception.Message)"; [Environment]::Exit(0) }',
     '  # logon + repeticao a cada 5 min (ver Garantir-GatilhoDeRepeticao)',
     '  $gatilho = Gatilhos-DaTarefa',
     '  # ExecutionTimeLimit ZERO e o mais importante aqui: o padrao do Windows',
@@ -2631,16 +2633,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $config = $null',
     '  try { $config = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -MultipleInstances IgnoreNew } catch {}',
     '  try {',
-    '    if ($config) { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Settings $config -Force | Out-Null }',
-    '    else { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Force | Out-Null }',
+    '    if ($config) { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Settings $config -Force -ErrorAction Stop | Out-Null }',
+    '    else { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Force -ErrorAction Stop | Out-Null }',
     '    Escrever-Log "Instalado em $Destino - tarefa agendada \'$NomeTarefa\' criada (roda no proximo login desse usuario)."',
-    '    Write-Host "Instalado! O NOCZenith vai rodar sozinho a partir do proximo login."',
-    '    Write-Host "Ele agora roda de: $Destino"',
-    '    Write-Host "Pode APAGAR o arquivo que voce baixou - nao precisa mais dele."',
     '  } catch {',
     '    Escrever-Log "FALHA ao registrar a tarefa agendada: $($_.Exception.Message)"',
-    '    Write-Host "ERRO ao instalar a tarefa agendada: $($_.Exception.Message)"',
-    '    Write-Host "Rode o PowerShell como Administrador e tente de novo."',
     '  }',
     '  # ---- blindagem contra reinicio (precisa de Administrador). A tarefa de',
     '  # login acima so dispara quando ALGUEM loga - depois de um reinicio, a',
@@ -2656,34 +2653,32 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      $acaoBoot = Acao-DaTarefa $Destino $true',
     '      $gatilhoBoot = New-ScheduledTaskTrigger -AtStartup',
     '      $principalBoot = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest',
-    '      if ($config) { Register-ScheduledTask -TaskName ($NomeTarefa + "_Boot") -Action $acaoBoot -Trigger $gatilhoBoot -Principal $principalBoot -Settings $config -Force | Out-Null }',
-    '      else { Register-ScheduledTask -TaskName ($NomeTarefa + "_Boot") -Action $acaoBoot -Trigger $gatilhoBoot -Principal $principalBoot -Force | Out-Null }',
+    '      if ($config) { Register-ScheduledTask -TaskName ($NomeTarefa + "_Boot") -Action $acaoBoot -Trigger $gatilhoBoot -Principal $principalBoot -Settings $config -Force -ErrorAction Stop | Out-Null }',
+    '      else { Register-ScheduledTask -TaskName ($NomeTarefa + "_Boot") -Action $acaoBoot -Trigger $gatilhoBoot -Principal $principalBoot -Force -ErrorAction Stop | Out-Null }',
     '      Escrever-Log "Tarefa de BOOT criada (SYSTEM) - o NOCZenith volta sozinho depois de qualquer reinicio, mesmo sem login."',
-    '      Write-Host "Blindado contra reinicio: volta sozinho junto com o Windows, sem precisar de login."',
     '    } catch {',
     '      Escrever-Log "Nao consegui criar a tarefa de BOOT: $($_.Exception.Message)"',
-    '      Write-Host "AVISO: nao consegui criar a tarefa de boot ($($_.Exception.Message)). Depois de um reinicio, o NOCZenith so volta quando alguem fizer login."',
     '    }',
     '  } else {',
-    '    Write-Host ""',
-    '    Write-Host "AVISO: instalado SEM Administrador. Depois de um reinicio, o NOCZenith so volta quando alguem fizer login nessa maquina."',
-    '    Write-Host "Pra ele voltar sozinho apos reinicios, rode este mesmo comando num PowerShell aberto COMO ADMINISTRADOR."',
+    '    Escrever-Log "Instalado sem Administrador: apos reinicio, o NOCZenith volta no proximo login."',
     '  }',
-    '  try { Instalar-AppNoPulso; Write-Host "App NoPulso: o Chrome/Edge instala (e o Zenith Ops antigo sai) na proxima vez que abrir." } catch { Write-Host "AVISO: app NoPulso nao configurado ($($_.Exception.Message))." }',
+    '  try { Instalar-AppNoPulso } catch { Escrever-Log "App NoPulso nao configurado: $($_.Exception.Message)" }',
     '  # reinstalacao com o agente ja rodando: encerra a copia antiga ANTES de',
     '  # subir a nova - o -MultipleInstances IgnoreNew da tarefa nao alcanca este',
     '  # Start-Process, e ficavam duas (ver Garantir-InstanciaUnica). A de boot',
     '  # (SYSTEM) fica de fora: nao e desta sessao e o mutex dela e outro.',
     '  Encerrar-OutrasInstancias',
-    '  Write-Host "Iniciando agora tambem, nessa sessao..."',
     '  # PELA TAREFA, nao por Start-Process. Subindo por fora, o agente nao era',
     '  # a instancia da tarefa - o agendador achava a tarefa parada e o gatilho',
     '  # de 5 min disparava pra sempre, uma copia por cima da outra. Pela tarefa,',
     '  # o IgnoreNew descarta os disparos enquanto o agente viver.',
     '  $subiu = $false',
     '  try { Start-ScheduledTask -TaskName $NomeTarefa -ErrorAction Stop; $subiu = $true } catch { Escrever-Log "Start-ScheduledTask falhou: $($_.Exception.Message)" }',
-    '  if (-not $subiu) { Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Destino`" -Loop" }',
-    '  Read-Host "Pronto! Pode fechar essa janela (aperte Enter)"',
+    '  if (-not $subiu) { Escrever-Log "A tarefa nao iniciou agora; ela tentara no proximo logon. Nenhum PowerShell visivel sera aberto." }',
+    '  # O instalador pode ter sido aberto manualmente em um console. A operacao',
+    '  # nao precisa ficar exposta: o agente ja foi entregue para a tarefa e este',
+    '  # processo termina imediatamente, com detalhes apenas no NOCZenith.log.',
+    '  [Environment]::Exit(0)',
     '}',
     '',
   ];
@@ -2727,14 +2722,9 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
     // Sem essa frase, a pessoa gasta a tarde instalando o WMF 5.1 pra
     // descobrir que o agente morre no primeiro reboot.
     //
-    // $PSVersionTable e Write-Host existem no PS2, entao o proprio aviso
-    // roda onde o resto nao roda. Windows 8/8.1 tem PS3/PS4 e passa direto.
-    "if ($PSVersionTable.PSVersion.Major -lt 3) { Write-Host ''; "
-      + "Write-Host 'NOCZenith: este computador nao pode receber o agente.' -ForegroundColor Red; "
-      + "Write-Host (\"PowerShell \" + $PSVersionTable.PSVersion.ToString() + \" - o agente precisa da versao 3 ou mais nova.\"); "
-      + "Write-Host 'Isso e Windows 7 ou Server 2008 R2. Instalar o PowerShell novo NAO resolve: a tarefa agendada, o disco e a rede que o agente le sao recursos do Windows 8 / Server 2012 pra frente.'; "
-      + "Write-Host 'Essa maquina pode ser acompanhada pelo NOC SEM agente: marque ela como aparelho monitorado na ficha de outro computador da loja (a varredura de rede ja enxerga ela pelo MAC).' -ForegroundColor Yellow; "
-      + "Write-Host ''; Read-Host 'Pode fechar essa janela (aperte Enter)'; exit }",
+    // Em PowerShell 2.0 o agente nao consegue rodar. Fecha imediatamente, sem
+    // deixar uma janela de diagnostico exposta na tela da operacao.
+    "if ($PSVersionTable.PSVersion.Major -lt 3) { exit }",
     "$ErrorActionPreference='Stop'",
     // Windows antigo: TLS 1.2 ANTES do download - a 19855 morria aqui, antes
     // de baixar qualquer coisa (ver adaptarParaWindowsAntigo). Padrao: nada.
