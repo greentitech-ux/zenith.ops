@@ -71,14 +71,29 @@
   .rowacts{display:flex;gap:6px;flex-wrap:wrap;}
   .rowacts button{font-family:var(--sans);font-size:11px;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
   .rowacts button:hover{border-color:var(--accent);}
-  form.create{display:flex;flex-direction:column;gap:10px;max-width:560px;}
+  form.create{display:flex;flex-direction:column;gap:10px;max-width:760px;}
   form.create label{font-size:11.5px;color:var(--muted);}
   form.create input{width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;}
-  fieldset{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;}
+  fieldset{border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;background:var(--panel2);}
   legend{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;padding:0 6px;max-width:100%;overflow-wrap:break-word;}
-  .checks{display:flex;flex-wrap:wrap;gap:10px;}
-  .checks label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);white-space:nowrap;}
+  .checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:7px;}
+  .checks label{display:flex;align-items:center;gap:8px;min-width:0;padding:8px 9px;border:1px solid transparent;border-radius:7px;background:rgba(0,0,0,.12);font-size:12px;color:var(--text);line-height:1.25;white-space:normal;cursor:pointer;}
+  .checks label:hover{border-color:var(--line);}
+  .checks label:has(input:checked){border-color:rgba(184,255,60,.42);background:rgba(184,255,60,.06);}
   .checks input{width:auto;margin:0;}
+  .grupo-form-intro{font-size:11.5px;color:var(--muted);line-height:1.5;margin:-4px 0 2px;}
+  .grupo-acordeao{border:1px solid var(--line);border-radius:9px;background:var(--panel);overflow:hidden;}
+  .grupo-acordeao summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;cursor:pointer;font:600 12.5px var(--sans);list-style:none;}
+  .grupo-acordeao summary::-webkit-details-marker{display:none;}
+  .grupo-acordeao summary::after{content:'⌄';font:16px var(--mono);color:var(--muted);}
+  .grupo-acordeao[open] summary{border-bottom:1px solid var(--line);color:var(--accent);}
+  .grupo-acordeao[open] summary::after{content:'⌃';color:var(--accent);}
+  .grupo-acordeao fieldset{border:0;border-radius:0;background:transparent;}
+  .grupo-acordeao legend{display:none;}
+  .grupo-form-acoes{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .grupo-form-acoes small{font:10.5px var(--mono);color:var(--muted);}
+  .grupo-form-acoes .btn-add{width:auto;margin:0;padding:6px 9px;font-size:10.5px;}
+  @media(max-width:480px){.checks{grid-template-columns:1fr;}.checks label{font-size:12.5px;}.grupo-form-acoes .btn-add{width:auto;margin-top:0;padding:7px 9px;}}
   .unidades-secao{margin-top:14px;}
   .unidades-secao:first-child{margin-top:0;}
   .unidades-secao-titulo{font-family:var(--mono);font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--line);}
@@ -239,15 +254,17 @@
   <div class="panel">
     <h2>Criar novo grupo</h2>
     <form class="create" id="create-form">
+      <p class="grupo-form-intro">Configure primeiro as lojas e o formulário básico. As opções avançadas ficam recolhidas para a página não virar uma lista longa.</p>
       <label>Nome do grupo<input type="text" id="c-nome" placeholder="ex: Dominos - GBE" required></label>
 
       <fieldset>
-        <legend>Lojas desse grupo</legend>
+        <legend>1 · Lojas desse grupo</legend>
+        <div class="grupo-form-acoes"><small>Selecione as unidades que receberão este mesmo formulário.</small><span><button type="button" class="btn-add" onclick="marcarTodosChecks('c-unidades', true)">todas</button> <button type="button" class="btn-add" onclick="marcarTodosChecks('c-unidades', false)">limpar</button></span></div>
         <div id="c-unidades"></div>
       </fieldset>
 
       <fieldset>
-        <legend>Seções do lançamento (loja)</legend>
+        <legend>2 · Seções do lançamento</legend>
         <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);">
           <input type="checkbox" id="c-caixa-habilitado" style="width:auto;margin:0;" checked> Habilitar seção Caixa (caixa inicial/final, entrada em dinheiro, depósito)
         </label>
@@ -269,6 +286,8 @@
         </label>
       </fieldset>
 
+      <details class="grupo-acordeao">
+        <summary>3 · Canais de venda e leitura por foto</summary>
       <fieldset>
         <legend>Canais de venda extras (somam no Faturamento, além de Delivery/Carryout/Pickup/Loja)</legend>
         <div id="c-canais"></div>
@@ -286,23 +305,33 @@
         <textarea id="c-dica-leitura-canais" rows="6" maxlength="3000" placeholder="Ex: os canais saem nesta ordem: Delivery - Moto da empresa (sempre zero, não usar), Delivery - Moto Especi (esse é o Delivery que vale), CarryOut, Pick Up, Na loja." style="margin-left:22px;width:calc(100% - 22px);padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
         <button type="button" class="btn-add" style="margin-left:22px;" onclick="usarDicaExemplo('c-dica-leitura-canais')">Usar o exemplo acima</button>
       </fieldset>
+      </details>
 
+      <details class="grupo-acordeao">
+        <summary>4 · Formas de pagamento extras</summary>
       <fieldset>
         <legend>Formas de pagamento extras (somam no Total Declarado, além de Adyen/Ifood/99Food/Pix/Pix CNPJ/Outros)</legend>
         <div id="c-formas"></div>
         <button type="button" class="btn-add" onclick="adicionarKpi('c-formas')">+ Adicionar forma de pagamento</button>
       </fieldset>
+      </details>
 
+      <details class="grupo-acordeao">
+        <summary>5 · Indicadores (KPIs) extras</summary>
       <fieldset>
         <legend>KPI's extras (além de TC e Cancelados, que são fixos)</legend>
         <div id="c-kpis"></div>
         <button type="button" class="btn-add" onclick="adicionarKpi('c-kpis')">+ Adicionar KPI</button>
       </fieldset>
+      </details>
 
+      <details class="grupo-acordeao">
+        <summary>6 · Responsáveis e direcionamento</summary>
       <fieldset>
         <legend>Responsáveis (Master/Admin) - quem pede solicitação pra esse grupo pode direcionar pra um deles</legend>
         <div id="c-responsaveis"></div>
       </fieldset>
+      </details>
 
       <p class="err hidden" id="create-err"></p>
       <button type="submit" class="primary">Criar grupo</button>

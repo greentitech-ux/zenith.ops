@@ -53,6 +53,12 @@
   .painel-pedido{border-color:rgba(242,179,61,.5);}
   .painel-pedido.atrasado{border-color:rgba(255,107,107,.55);}
   .painel-pedido.tudo-feito{border-color:rgba(61,220,151,.45);}
+  .ps-cabecalho{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+  .ps-cabecalho h2{margin-bottom:2px;}
+  .ps-toggle{flex:none;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--accent);font:600 10.5px var(--mono);padding:8px 10px;cursor:pointer;white-space:nowrap;}
+  .ps-toggle:hover{border-color:var(--accent);}
+  .ps-conteudo.recolhido{display:none;}
+  .ps-resumo-master{font:11px var(--mono);color:var(--warn);margin-top:4px;}
   .ps-linha{border-top:1px solid var(--line);padding:10px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
   .ps-linha:first-child{border-top:0;}
   .ps-nome{flex:1 1 160px;min-width:0;font-size:13px;font-weight:600;}
@@ -204,10 +210,14 @@
      página que toda loja abre todo dia - é o único lugar onde um lembrete
      semanal tem chance de ser visto no dia certo. -->
 <div class="panel painel-pedido hidden" id="painel-pedido-semanal">
-  <h2 id="ps-titulo">📦 Pedido semanal</h2>
-  <div class="sub" id="ps-sub" style="margin:-2px 0 10px;"></div>
-  <div id="ps-lista"></div>
-  <div class="sub hidden" id="ps-instrucoes" style="margin-top:10px;"></div>
+  <div class="ps-cabecalho">
+    <div><h2 id="ps-titulo">📦 Pedido semanal</h2><div class="sub" id="ps-sub" style="margin:-2px 0 0;"></div><div class="ps-resumo-master hidden" id="ps-resumo-master"></div></div>
+    <button type="button" class="ps-toggle hidden" id="ps-toggle" onclick="alternarPedidoSemanal()" aria-expanded="true">Recolher ↑</button>
+  </div>
+  <div class="ps-conteudo" id="ps-conteudo">
+    <div id="ps-lista"></div>
+    <div class="sub hidden" id="ps-instrucoes" style="margin-top:10px;"></div>
+  </div>
 </div>
 
 <div class="panel" id="painel-sangria">
@@ -2099,6 +2109,28 @@ function renderPedidoSemanal(){
     ? `Todo ${dias[0].toLowerCase()} · anexe o pedido pra confirmar`
     : 'Anexe o pedido pra confirmar - cada loja tem o dia da regra dela';
 
+  // O Master acompanha muitas unidades: deixa a lista inteira disponível,
+  // mas permite recolhê-la sem esconder o número de pendências. A escolha é
+  // lembrada só nesta aba para não alterar a experiência da loja.
+  const toggle = document.getElementById('ps-toggle');
+  const conteudo = document.getElementById('ps-conteudo');
+  const resumoMaster = document.getElementById('ps-resumo-master');
+  if(IS_MASTER){
+    const pendentes = visiveis.filter(u=>u.estado!=='feito' || u.atraso).length;
+    const atrasados = visiveis.filter(u=>u.atraso).length;
+    resumoMaster.textContent = `${pendentes} pendente${pendentes===1?'':'s'}${atrasados ? ` · ${atrasados} atrasado${atrasados===1?'':'s'}` : ''}`;
+    resumoMaster.classList.remove('hidden');
+    toggle.classList.remove('hidden');
+    const recolhido = sessionStorage.getItem('nopulsoPedidoSemanalRecolhido') === '1';
+    conteudo.classList.toggle('recolhido', recolhido);
+    toggle.textContent = recolhido ? `Expandir (${pendentes}) ↓` : 'Recolher ↑';
+    toggle.setAttribute('aria-expanded', recolhido ? 'false' : 'true');
+  }else{
+    toggle.classList.add('hidden');
+    resumoMaster.classList.add('hidden');
+    conteudo.classList.remove('recolhido');
+  }
+
   // os elementos são identificados pelo ÍNDICE, não pelo código da unidade:
   // código aqui é coisa como "Domino's Carrinho Aeroporto Recife" - tem
   // espaço e apóstrofo, que quebram tanto o id do HTML quanto o onclick
@@ -2136,6 +2168,13 @@ function renderPedidoSemanal(){
   const textos = [...new Set(visiveis.map(u=>u.instrucoes).filter(Boolean))];
   inst.textContent = textos.join(' · ');
   inst.classList.toggle('hidden', !textos.length);
+}
+
+function alternarPedidoSemanal(){
+  const conteudo = document.getElementById('ps-conteudo');
+  const recolhido = !conteudo.classList.contains('recolhido');
+  sessionStorage.setItem('nopulsoPedidoSemanalRecolhido', recolhido ? '1' : '0');
+  renderPedidoSemanal();
 }
 
 // o botão tem dois papéis: sem arquivo escolhido ele ABRE o seletor; com
