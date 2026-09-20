@@ -22,7 +22,7 @@
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:640px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:820px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
   h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
   .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -97,6 +97,19 @@
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
   .resumo{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px;display:flex;flex-direction:column;gap:4px;}
   .resumo .linha{display:flex;justify-content:space-between;gap:8px;}
+  .etapas{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:14px 0 18px;}
+  .etapa-indicador{appearance:none;background:var(--panel2);border:1px solid var(--line);border-radius:9px;color:var(--muted);padding:8px 6px;text-align:left;cursor:pointer;min-height:54px;font-family:var(--sans);}
+  .etapa-indicador b{display:block;color:inherit;font-size:11px;line-height:1.15;}
+  .etapa-indicador span{display:block;font-family:var(--mono);font-size:9px;margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em;}
+  .etapa-indicador.ativa{border-color:var(--accent);background:rgba(184,255,60,.08);color:var(--text);}
+  .etapa-indicador.concluida{border-color:var(--ok);color:var(--ok);}
+  .etapa-escondida{display:none!important;}
+  .etapa-acoes{display:flex;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line);}
+  .etapa-acoes button{margin-top:0;}
+  .etapa-acoes .btn-secundario{width:auto;min-width:110px;}
+  .etapa-acoes .btn-primary{flex:1;}
+  .etapa-resumo{font-size:12px;color:var(--muted);margin:0 0 4px;}
+  @media(max-width:460px){.etapas{gap:4px}.etapa-indicador{padding:7px 4px;min-height:50px}.etapa-indicador b{font-size:10px}.etapa-indicador span{font-size:8px}.etapa-acoes .btn-secundario{min-width:86px;}}
 </style>
 <script src="/tema.js"></script>
 <script src="/data-br.js"></script>
@@ -125,9 +138,16 @@
 
 <div class="panel">
   <h2>Nova entrada</h2>
+  <p class="etapa-resumo" id="etapa-resumo">Etapa 1 de 4 · identificação do responsável</p>
   <form id="form-checkin">
+    <div class="etapas" aria-label="Etapas do lançamento">
+      <button type="button" class="etapa-indicador ativa" data-ir-etapa="1"><span>01</span><b>Responsável</b></button>
+      <button type="button" class="etapa-indicador" data-ir-etapa="2"><span>02</span><b>Entrada</b></button>
+      <button type="button" class="etapa-indicador" data-ir-etapa="3"><span>03</span><b>Termo</b></button>
+      <button type="button" class="etapa-indicador" data-ir-etapa="4"><span>04</span><b>Pagamento</b></button>
+    </div>
 
-    <div class="secao">
+    <div class="secao" data-etapa="1">
       <div class="secao-titulo">Identificação</div>
       <label>Unidade</label>
       <select id="f-unidade" required></select>
@@ -163,7 +183,7 @@
       </div>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-etapa="2">
       <div class="secao-titulo">Data e tempo</div>
       <label>Data de utilização</label>
       <input type="date" id="f-data" required onchange="atualizarPreviewValor()">
@@ -179,7 +199,7 @@
       </div>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-etapa="2">
       <div class="secao-titulo">Adulto Cortesia (A.C.)</div>
       <div class="sub" style="font-family:var(--sans);color:var(--muted);font-size:12px;margin-bottom:6px;">
         Marque quando um adulto tem direito a acompanhar (ex: acompanhante de criança autista, ou outro motivo justificado).
@@ -194,7 +214,7 @@
       </div>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-etapa="2">
       <div class="secao-titulo">Crianças</div>
       <div id="lista-criancas"></div>
       <button type="button" class="btn-secundario" onclick="adicionarCrianca()">+ Adicionar criança</button>
@@ -207,7 +227,7 @@
          foi preenchido (ele + crianças), e só depois de "Aplicar" a venda
          pode ser efetivada. A prévia sai de POST /api/parque/termo-previa.pdf,
          que monta o PDF a partir do formulário e NÃO cria nada. -->
-    <div class="secao" id="secao-termo">
+    <div class="secao" id="secao-termo" data-etapa="3">
       <div class="secao-titulo">Termo de responsabilidade</div>
       <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:8px;">
         Imprima, colha a assinatura do responsável e clique em <b>Aplicar</b>. O pagamento só libera depois disso.
@@ -226,14 +246,14 @@
       </div>
     </div>
 
-    <div id="wrap-cancelar-emissao" class="hidden" style="background:var(--panel2);border:1px solid var(--bad);border-radius:8px;padding:10px 12px;margin-top:10px;">
+    <div id="wrap-cancelar-emissao" data-etapa="3" class="hidden" style="background:var(--panel2);border:1px solid var(--bad);border-radius:8px;padding:10px 12px;margin-top:10px;">
       <label style="margin-top:0;">Por que a venda não foi concluída? (obrigatório)</label>
       <textarea id="f-motivo-cancelamento" placeholder="ex: cliente desistiu, criança passou mal, erro no cadastro..."></textarea>
       <div class="sub" style="font-size:12px;color:var(--muted);margin-top:4px;">Fica registrado com seu usuário, data e hora. O termo impresso deve ser inutilizado.</div>
       <button type="button" class="btn-primary" style="margin-top:8px;" onclick="confirmarCancelarEmissao()" id="btn-confirmar-cancelar">Confirmar cancelamento</button>
     </div>
 
-    <div class="secao" id="secao-pagamento">
+    <div class="secao" id="secao-pagamento" data-etapa="4">
       <div class="secao-titulo">Pagamento</div>
       <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;">
         <input type="checkbox" id="f-cortesia" style="width:auto;" onchange="toggleCortesia()">
@@ -263,13 +283,19 @@
       </div>
     </div>
 
-    <div class="secao">
+    <div class="secao" data-etapa="4">
       <label>Observação (opcional)</label>
       <textarea id="f-observacao"></textarea>
     </div>
 
-    <div class="msg hidden" id="msg"></div>
-    <button class="btn-primary" type="submit" id="btn-enviar">Registrar check-in</button>
+    <div data-etapa="4">
+      <div class="msg hidden" id="msg"></div>
+      <button class="btn-primary" type="submit" id="btn-enviar">Registrar check-in</button>
+    </div>
+    <div class="etapa-acoes">
+      <button type="button" class="btn-secundario hidden" id="btn-etapa-voltar" onclick="voltarEtapa()">← Voltar</button>
+      <button type="button" class="btn-primary" id="btn-etapa-avancar" onclick="avancarEtapa()">Continuar →</button>
+    </div>
   </form>
 </div>
 
@@ -1580,7 +1606,62 @@ function resetarForm(){
   document.getElementById('lista-pagamentos').innerHTML = '';
   adicionarPagamento();
   atualizarPreviewValor();
+  irParaEtapa(1, false);
 }
+
+// As etapas só reorganizam a mesma venda: IDs, cálculos, termo e API seguem
+// iguais, para não alterar preço, estoque ou a regra de assinatura.
+let ETAPA_ATUAL = 1;
+const ETAPAS_INFO = { 1: 'identificação do responsável', 2: 'tempo, horário e participantes', 3: 'termo de responsabilidade', 4: 'pagamento e confirmação' };
+function validarEtapa(etapa){
+  if(etapa === 1){
+    for(const id of ['f-unidade','f-nome','f-contato']){
+      const el = document.getElementById(id);
+      if(!el.checkValidity()){ el.reportValidity(); return false; }
+    }
+  }
+  if(etapa === 2){
+    for(const id of ['f-data','f-horario-previsto']){
+      const el = document.getElementById(id);
+      if(!el.checkValidity()){ el.reportValidity(); return false; }
+    }
+    if(!coletarCriancas().length){ alert('Cadastre pelo menos uma criança para continuar.'); return false; }
+    const invalidas = criancasComNascimentoInvalido('#lista-criancas .crianca-linha');
+    if(invalidas.length){ alert(`Data de nascimento inválida em: ${invalidas.join(', ')}.`); return false; }
+  }
+  if(etapa === 3 && !TERMO_APLICADO){ alert('Imprima, colha a assinatura e clique em “Aplicar termo assinado” antes de seguir ao pagamento.'); return false; }
+  return true;
+}
+function atualizarNavegacaoEtapas(){
+  document.querySelectorAll('[data-etapa]').forEach(el=>{
+    const n = Number(el.dataset.etapa);
+    el.classList.toggle('etapa-escondida', n !== ETAPA_ATUAL);
+  });
+  document.querySelectorAll('[data-ir-etapa]').forEach(btn=>{
+    const n = Number(btn.dataset.irEtapa);
+    btn.classList.toggle('ativa', n === ETAPA_ATUAL);
+    btn.classList.toggle('concluida', n < ETAPA_ATUAL);
+    btn.setAttribute('aria-current', n === ETAPA_ATUAL ? 'step' : 'false');
+  });
+  document.getElementById('etapa-resumo').textContent = `Etapa ${ETAPA_ATUAL} de 4 · ${ETAPAS_INFO[ETAPA_ATUAL]}`;
+  document.getElementById('btn-etapa-voltar').classList.toggle('hidden', ETAPA_ATUAL === 1);
+  document.getElementById('btn-etapa-avancar').classList.toggle('hidden', ETAPA_ATUAL === 4);
+}
+function irParaEtapa(destino, validar = true){
+  if(destino < 1 || destino > 4) return;
+  if(validar && destino > ETAPA_ATUAL && !validarEtapa(ETAPA_ATUAL)) return;
+  ETAPA_ATUAL = destino;
+  atualizarNavegacaoEtapas();
+  document.querySelector('.panel h2')?.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+function avancarEtapa(){ irParaEtapa(ETAPA_ATUAL + 1, true); }
+function voltarEtapa(){ irParaEtapa(ETAPA_ATUAL - 1, false); }
+document.querySelectorAll('[data-ir-etapa]').forEach(btn=>btn.addEventListener('click', ()=>{
+  const destino = Number(btn.dataset.irEtapa);
+  if(destino <= ETAPA_ATUAL) return irParaEtapa(destino, false);
+  for(let etapa=ETAPA_ATUAL; etapa<destino; etapa++) if(!validarEtapa(etapa)) return;
+  irParaEtapa(destino, false);
+}));
 
 document.getElementById('form-checkin').addEventListener('keydown', (ev)=>{
   if(ev.key !== 'Enter') return;
@@ -1805,6 +1886,7 @@ function atualizarGateTermo(){
     btnEnviar.disabled = true;
     btnEnviar.title = 'Aplique o termo assinado antes de efetivar a venda.';
   }
+  if(typeof atualizarNavegacaoEtapas === 'function') atualizarNavegacaoEtapas();
 }
 
 async function boot(){
@@ -1842,6 +1924,7 @@ async function boot(){
   // Pagamento tranca de novo (ver atualizarGateTermo)
   document.getElementById('form-checkin').addEventListener('input', atualizarGateTermo);
   atualizarGateTermo();
+  atualizarNavegacaoEtapas();
 
   document.getElementById('root').classList.remove('hidden');
   await carregar();
