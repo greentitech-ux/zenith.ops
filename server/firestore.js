@@ -60,22 +60,42 @@ const contextoRota = new AsyncLocalStorage();
 const LEITURAS = {
   desde: Date.now(),
   total: 0,
-  porColecao: new Map(), // nome -> { docs, consultas }
-  porRota: new Map(),    // "GET /api/x" -> { docs, consultas }
+  bytesEstimados: 0,
+  porColecao: new Map(), // nome -> { docs, consultas, bytesEstimados }
+  porRota: new Map(),    // "GET /api/x" -> { docs, consultas, bytesEstimados }
 };
 
-function acumular(mapa, chave, docs) {
-  const atual = mapa.get(chave) || { docs: 0, consultas: 0 };
+function acumular(mapa, chave, docs, bytesEstimados) {
+  const atual = mapa.get(chave) || { docs: 0, consultas: 0, bytesEstimados: 0 };
   atual.docs += docs;
   atual.consultas += 1;
+  atual.bytesEstimados += bytesEstimados;
   mapa.set(chave, atual);
 }
 
-function contar(colecao, docs) {
+function contar(colecao, docs, bytesEstimados = 0) {
   LEITURAS.total += docs;
-  acumular(LEITURAS.porColecao, colecao || 'desconhecida', docs);
+  LEITURAS.bytesEstimados += bytesEstimados;
+  acumular(LEITURAS.porColecao, colecao || 'desconhecida', docs, bytesEstimados);
   const ctx = contextoRota.getStore();
-  acumular(LEITURAS.porRota, (ctx && ctx.rota) || 'fora de rota (job/boot)', docs);
+  acumular(LEITURAS.porRota, (ctx && ctx.rota) || 'fora de rota (job/boot)', docs, bytesEstimados);
+}
+
+// O console de faturamento mostra o egresso total, mas nao qual leitura trouxe
+// documentos grandes. Isto estima o tamanho do JSON que a aplicacao recebeu
+// do Firestore. Nao e uma medicao de rede exata (protocolo e indices tambem
+// existem), mas ordena corretamente os maiores candidatos para reduzir a
+// transferencia. E calculado somente em memoria: nao cria leitura, escrita
+// nem log adicional no Firestore.
+function bytesDoSnapshot(snap) {
+  try {
+    const docs = snap && Array.isArray(snap.docs)
+      ? snap.docs
+      : (snap && typeof snap.data === 'function' && snap.exists ? [snap] : []);
+    return docs.reduce((total, doc) => total + Buffer.byteLength(JSON.stringify(doc.data()), 'utf8'), 0);
+  } catch (e) {
+    return 0; // diagnostico best-effort nunca pode afetar uma leitura real
+  }
 }
 
 // nome da colecao a partir do objeto em que .get() foi chamado. CollectionReference
@@ -103,7 +123,7 @@ function instrumentar(prototipo) {
     return resultado.then((snap) => {
       try {
         const docs = snap && Array.isArray(snap.docs) ? snap.docs.length : 1;
-        contar(colecaoDe(alvo), Math.max(docs, 1));
+        contar(colecaoDe(alvo), Math.max(docs, 1), bytesDoSnapshot(snap));
       } catch (e) { /* best-effort */ }
       return snap;
     });
@@ -126,14 +146,25 @@ try {
 // (GET /api/debug/leituras, so Master) devolve
 function relatorioLeituras() {
   const ordenar = (mapa) => [...mapa.entries()]
-    .map(([nome, v]) => ({ nome, docs: v.docs, consultas: v.consultas }))
-    .sort((a, b) => b.docs - a.docs);
+    .map(([nome, v]) => ({
+      nome,
+      docs: v.docs,
+      consultas: v.consultas,
+      bytesEstimados: v.bytesEstimados,
+      mbEstimados: Math.round(v.bytesEstimados / 1024 / 1024 * 100) / 100,
+    }))
+    // Volume primeiro: e ele que ajuda a explicar a cobranca de transferencia.
+    // Em empate, documentos lidos mantem a lista estavel e acionavel.
+    .sort((a, b) => b.bytesEstimados - a.bytesEstimados || b.docs - a.docs);
   const minutos = (Date.now() - LEITURAS.desde) / 60000;
   return {
     desde: new Date(LEITURAS.desde).toISOString(),
     minutos: Math.round(minutos * 10) / 10,
     total: LEITURAS.total,
     porHora: minutos > 0 ? Math.round(LEITURAS.total / minutos * 60) : 0,
+    bytesEstimados: LEITURAS.bytesEstimados,
+    mbEstimados: Math.round(LEITURAS.bytesEstimados / 1024 / 1024 * 100) / 100,
+    mbPorHoraEstimados: minutos > 0 ? Math.round(LEITURAS.bytesEstimados / 1024 / 1024 / minutos * 60 * 100) / 100 : 0,
     porColecao: ordenar(LEITURAS.porColecao),
     porRota: ordenar(LEITURAS.porRota),
   };
@@ -142,6 +173,7 @@ function relatorioLeituras() {
 function zerarLeituras() {
   LEITURAS.desde = Date.now();
   LEITURAS.total = 0;
+  LEITURAS.bytesEstimados = 0;
   LEITURAS.porColecao.clear();
   LEITURAS.porRota.clear();
 }

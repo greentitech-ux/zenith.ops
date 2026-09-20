@@ -85,7 +85,12 @@ async function listAllUncached() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').limit(3000).get();
   return snap.docs.map((d) => d.data());
 }
-const checkinCache = createCache(listAllUncached, 30 * 1000);
+// A coleção pode ter até 3.000 check-ins. Entrada, saída, aprovação,
+// correção e exclusão já chamam invalidar() logo após gravar, portanto o
+// cache não segura informação nova de quem acabou de operar. Os 5 minutos
+// protegem apenas contra releituras idênticas de telas abertas/atualizadas,
+// que antes relia toda a coleção a cada 30s e crescia junto com o histórico.
+const checkinCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = checkinCache.cached;
 
 async function getOne(id) {
