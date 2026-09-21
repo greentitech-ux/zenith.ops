@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 98;
+const VERSAO_VIGIA = 99;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1872,6 +1872,15 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# Antes de remover, copiamos os próprios atalhos para C:\\NoPulsoBackup.',
     '# Arquivos de trabalho (planilhas, documentos, fotos) nunca entram nesta',
     '# limpeza e não são apagados pelo agente.',
+    '# Chave de comparacao com o que o Master marcou na tela. A tela tira SO',
+    '# .lnk/.url/.rdp do nome (ver chaveVisual/normalizarNomeAtalho); tirar',
+    '# qualquer extensao aqui fazia "Degust.exe" virar "degust" de um lado e',
+    '# "degust.exe" do outro, e o item marcado nunca casava.',
+    'function Chave-Atalho($item) {',
+    '  $n = ([string]$item.Name).ToLowerInvariant()',
+    '  foreach ($e in @(".lnk", ".url", ".rdp")) { if ($n.EndsWith($e)) { return $n.Substring(0, $n.Length - $e.Length) } }',
+    '  return $n',
+    '}',
     'function Atalho-EstaAprovado($item, $permitidos) {',
     '  $nome = [IO.Path]::GetFileNameWithoutExtension([string]$item.Name).ToLowerInvariant()',
     '  $ext = [string]$item.Extension.ToLowerInvariant()',
@@ -1890,8 +1899,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if (($permitidos -contains "teamviewer") -and $nome -match "teamviewer") { return $true }',
     '  if (($permitidos -contains "suporte-linx-whatsapp") -and $nome -match "suporte.*linx.*(whats|zap)") { return $true }',
     '  if (($permitidos -contains "google-chrome") -and $nome -match "(google )?chrome") { return $true }',
+    '  # GcomClient, GcomDB, GcomService e GcomSuporte: uma marcacao so cobre os 4',
+    '  if (($permitidos -contains "gcom") -and $nome -match "^gcom") { return $true }',
     '  $personalizados = @($script:AtalhosPersonalizados | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
-    '  if ($personalizados -contains $nome) { return $true }',
+    '  if (($personalizados -contains $nome) -or ($personalizados -contains (Chave-Atalho $item))) { return $true }',
     '  return $false',
     '}',
     '',
@@ -1974,7 +1985,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $fontes = @($atuais)',
     '  foreach ($origem in @($desktopUsuario, $env:PUBLIC + "\\Desktop", $perfilUsuario + "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs", $env:ProgramData + "\\Microsoft\\Windows\\Start Menu\\Programs")) { if (Test-Path -LiteralPath $origem) { $fontes += @(Get-ChildItem -LiteralPath $origem -Filter "*.lnk" -File -Recurse -ErrorAction SilentlyContinue) } }',
     '  $selecionados = @(); $faltantes = @()',
-    '  foreach ($id in $permitidos) { $fonte = @($fontes | Where-Object { Atalho-EstaAprovado $_ @($id) } | Select-Object -First 1); if ($fonte.Count) { $selecionados += $fonte[0] } else { $faltantes += $id } }',
+    '  # Casa pelo id do catalogo OU pelo nome real do arquivo - a lista lida da',
+    '  # maquina manda nomes como "nopulso (2)", que regra nenhuma do catalogo pega.',
+    '  foreach ($id in $permitidos) { $fonte = @($fontes | Where-Object { (Atalho-EstaAprovado $_ @($id)) -or ((Chave-Atalho $_) -eq $id) } | Select-Object -First 1); if ($fonte.Count) { $selecionados += $fonte[0] } else { $faltantes += $id } }',
     '  # Antes, UM app marcado que nao existisse na maquina abortava a barra',
     '  # inteira e devolvia falha - o que impedia a politica de carimbar e punha',
     '  # a maquina pra reexecutar tudo a cada tick. Agora fixa o que existe e diz',
@@ -2047,7 +2060,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  foreach ($fonte in $fontes) {',
     '    if (-not $fonte.caminho -or -not (Test-Path -LiteralPath $fonte.caminho)) { continue }; $destinoRaiz = Join-Path $raiz $fonte.nome; New-Item -ItemType Directory -Path $destinoRaiz -Force | Out-Null',
     '    foreach ($item in @(Get-ChildItem -LiteralPath $fonte.caminho -Force -ErrorAction SilentlyContinue)) {',
-    '      if ($fonte.filtrar -and -not $item.PSIsContainer -and (Atalho-EstaAprovado $item $permitidos)) { continue }',
+    '      # pasta marcada tambem fica: a tela deixa marcar qualquer item lido, e',
+    '      # o que esta marcado permanece. Antes so arquivo escapava do arquivamento.',
+    '      if ($fonte.filtrar -and (Atalho-EstaAprovado $item $permitidos)) { continue }',
     '      $destino = Join-Path $destinoRaiz $item.Name; if (Test-Path -LiteralPath $destino) { $destino = Join-Path $destinoRaiz (([IO.Path]::GetFileNameWithoutExtension($item.Name)) + "_" + [Guid]::NewGuid().ToString("N").Substring(0,8) + $item.Extension) }',
     '      try { Move-Item -LiteralPath $item.FullName -Destination $destino -ErrorAction Stop; $manifesto.Add("MOVIDO: $($item.FullName) -> $destino") } catch { $manifesto.Add("PULADO: $($item.FullName) :: $($_.Exception.Message)") }',
     '    }',

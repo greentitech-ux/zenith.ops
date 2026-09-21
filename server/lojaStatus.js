@@ -1330,7 +1330,7 @@ async function tokenDoComputador(codigo, posto) {
 const ITENS_ESTACAO_APROVAVEIS = [
   'nopulso', 'anydesk', 'rdp-dominos', 'degust', 'gestor-pedidos-ifood',
   'gestor-pedidos-99food', 'gerenciadorlinxfood', 'advancedip', 'teamviewer',
-  'suporte-linx-whatsapp', 'google-chrome',
+  'suporte-linx-whatsapp', 'google-chrome', 'gcom',
 ];
 function normalizarNomeAtalho(valor) {
   const nome = String(valor || '').trim().toLocaleLowerCase('pt-BR')

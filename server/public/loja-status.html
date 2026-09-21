@@ -3896,6 +3896,7 @@ const ATALHOS_PADRAO_PDV = [
   ['gestor-pedidos-99food','Gestor de Pedidos 99Food'], ['gerenciadorlinxfood','GerenciadorLinxFood'],
   ['advancedip','Advanced IP Scanner'], ['teamviewer','TeamViewer'],
   ['suporte-linx-whatsapp','Suporte Linx WhatsApp'], ['google-chrome','Google Chrome'],
+  ['gcom','GCOM (Client, DB, Service, Suporte)'],
 ];
 // QUAL painel de estação está na tela. Os DOIS existem ao mesmo tempo: a aba
 // 📦 Programas clona o innerHTML da ficha (ver montarProgramas), e fechar a aba
@@ -3927,12 +3928,15 @@ function renderPoliticaComputador(codigo, c){
   const chaveVisual = (nome)=>String(nome||'').toLocaleLowerCase('pt-BR').replace(/\.(lnk|url|rdp)$/i,'').trim();
   const atalhosDetectadosHtml = atalhosDetectados.length
     ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:210px;overflow:auto;padding:2px 1px;">${atalhosDetectados.map(a=>{
-      const nome = chaveVisual(a.nome); const selecionavel=['atalho','link','rdp'].includes(a.tipo); const marcado = atalhosPersonalizados.includes(nome);
+      const nome = chaveVisual(a.nome); const selecionavel = true; const marcado = atalhosPersonalizados.includes(nome);
       return `<label class="btn-mini" style="cursor:${selecionavel?'pointer':'default'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:${selecionavel?'1':'.6'};" title="${escapeHtml(`${a.nome||''} · ${a.origem==='publica'?'Área Pública':'Usuário'}`)}"><input type="checkbox" data-estacao-atalho-custom="${escapeHtml(nome)}" ${marcado?'checked':''} ${selecionavel?'':'disabled'} style="width:auto;margin-right:4px;accent-color:var(--accent);">${escapeHtml(a.nome||'Item')} <small style="color:var(--muted);">${escapeHtml(a.tipo||'')}</small></label>`;
     }).join('')}</div>`
     : '<div style="font-size:11.5px;color:var(--muted);">Ainda não há uma leitura. Clique em “Ler atalhos atuais”; ela não altera a máquina.</div>';
   const barraTarefasHtml = barraTarefasDetectada.length
-    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:150px;overflow:auto;padding:2px 1px;">${barraTarefasDetectada.map(a=>`<span class="btn-mini" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default;">${escapeHtml(a.nome||'Item')}</span>`).join('')}</div>`
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:150px;overflow:auto;padding:2px 1px;">${barraTarefasDetectada.map(a=>{
+      const nome = chaveVisual(a.nome); const marcado = barraTarefasAprovada.includes(nome);
+      return `<label class="btn-mini" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(a.nome||'')}"><input type="checkbox" data-estacao-barra-custom="${escapeHtml(nome)}" ${marcado?'checked':''} style="width:auto;margin-right:4px;accent-color:var(--accent);">${escapeHtml(a.nome||'Item')}</label>`;
+    }).join('')}</div>`
     : '<div style="font-size:11.5px;color:var(--muted);">Aguardando a leitura da barra de tarefas.</div>';
   const aviso = c.tipo === 'interno' ? '' : '<div style="font-size:11px;color:var(--warn);margin-top:6px;">Pendrive e instalação precisam de Administrador na máquina - quem aplica é a tarefa de boot do NOCZenith.</div>';
   const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
@@ -3957,7 +3961,7 @@ function renderPoliticaComputador(codigo, c){
       <details open><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Área de Trabalho (${atalhosDetectados.length})</summary>
       ${atalhosDetectadosHtml}
       </details>
-      <details style="margin-top:9px;"><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Barra de tarefas atual (${barraTarefasDetectada.length})</summary>${barraTarefasHtml}<small style="display:block;color:var(--muted);margin-top:6px;">A lista acima define o padrão. Esta seção é apenas conferência da barra que a máquina informou.</small></details>
+      <details style="margin-top:9px;"><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Barra de tarefas atual (${barraTarefasDetectada.length})</summary>${barraTarefasHtml}<small style="display:block;color:var(--muted);margin-top:6px;">Marque aqui o que FICA fixado na barra. O que não estiver marcado (nem na coluna Barra acima) sai.</small></details>
       <label style="display:flex;gap:8px;align-items:flex-start;margin-top:9px;cursor:pointer;"><input type="checkbox" data-estacao="ocultarLixeira" ${estacao.ocultarLixeira?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Ocultar Lixeira da Área de Trabalho</b><small style="display:block;color:var(--muted);">Não esvazia a Lixeira nem apaga arquivos. Desmarcar volta a exibir o ícone.</small></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;"><input type="checkbox" data-estacao="aplicar" ${estacao.aplicar?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Aplicar lista aprovada</b><small style="display:block;color:var(--warn);">Guarda os atalhos atuais antes de retirar os não aprovados da Área de Trabalho e da barra clássica. Documentos e outros arquivos não são removidos.</small></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin-top:9px;cursor:pointer;"><input type="checkbox" data-estacao="arquivarDados" ${estacao.arquivarDados?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--bad);"><span style="font-size:12.5px;"><b>Arquivar dados do usuário e gerar ZIP</b><small style="display:block;color:var(--warn);">Move itens fora da lista da Área de Trabalho e todo o conteúdo de Downloads/Documentos para C:\\NoPulsoBackup\\Dados, depois cria ZIP. Windows e programas não entram.</small></span></label>
@@ -4035,7 +4039,12 @@ async function salvarPerfilEstacao(codigo, posto){
   const arquivarDados = aplicar && !!raiz?.querySelector('[data-estacao="arquivarDados"]')?.checked;
   const atalhosAprovados = [...(raiz?.querySelectorAll('[data-estacao-atalho]:checked')||[])].map(el=>el.dataset.estacaoAtalho);
   const atalhosPersonalizados = [...(raiz?.querySelectorAll('[data-estacao-atalho-custom]:checked')||[])].map(el=>el.dataset.estacaoAtalhoCustom);
-  const barraTarefasAprovada = [...(raiz?.querySelectorAll('[data-estacao-barra]:checked')||[])].map(el=>el.dataset.estacaoBarra);
+  // duas origens para a MESMA lista: os ids do catalogo (coluna "Barra") e os
+  // nomes reais marcados na leitura da maquina. O agente casa pelos dois.
+  const barraTarefasAprovada = [...new Set([
+    ...[...(raiz?.querySelectorAll('[data-estacao-barra]:checked')||[])].map(el=>el.dataset.estacaoBarra),
+    ...[...(raiz?.querySelectorAll('[data-estacao-barra-custom]:checked')||[])].map(el=>el.dataset.estacaoBarraCustom),
+  ])];
   const gerenciarBarraTarefas = aplicar && barraTarefasAprovada.length > 0;
   if(aplicar && !confirm(arquivarDados ? `Arquivar dados desta máquina? Itens fora da lista da Área de Trabalho e todo o conteúdo de Downloads/Documentos serão movidos para C:\\NoPulsoBackup\\Dados e compactados em ZIP.` : `Aplicar esta lista nesta máquina? Os atalhos fora dela serão primeiro copiados para C:\\NoPulsoBackup\\Atalhos e só depois removidos.`)) return;
   const senha = await pedirSenhaMaster('salvar a Área de Trabalho padronizada');
