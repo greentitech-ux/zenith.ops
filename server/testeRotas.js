@@ -12689,6 +12689,11 @@ setTimeout(async () => {
       'a aplicação e a barra usam o mesmo Desktop real que o inventário encontrou':
         /function Aplicar-BarraTarefas[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)[\s\S]*?foreach \(\$origem in @\(\$desktopUsuario/.test(psPp)
         && /function Aplicar-PerfilEstacao[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)[\s\S]*?\$areas = @\(\$desktopUsuario, \$env:PUBLIC/.test(psPp),
+      'autoatualização valida a sintaxe e preserva a última cópia válida antes de substituir':
+        /Language\.Parser\]::ParseInput\(\$novoConteudo/.test(psPp)
+        && /Atualizacao recusada: o arquivo novo tem erro de sintaxe/.test(psPp)
+        && /\.ultima-valida/.test(psPp)
+        && /Move-Item -LiteralPath \$arquivoNovo -Destination \$PSCommandPath/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
       'a máquina baixa a arte DELA, com o token dela': imgMaquina.status === 200,

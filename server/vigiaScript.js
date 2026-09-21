@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 94;
+const VERSAO_VIGIA = 95;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1055,9 +1055,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# mais nova que a que esse arquivo tem gravada. Se tiver, baixa o .ps1',
     '# novo (o MESMO conteudo que o botao "Baixar NOCZenith" gera hoje pra',
     '# esse computador), sobrescreve o proprio arquivo e reinicia rodando a',
-    '# versao nova - sem precisar reinstalar na mao. So sobrescreve se o',
-    '# conteudo baixado parecer valido (comeca com "# NOCZenith"), pra nunca',
-    '# gravar um arquivo vazio/quebrado por causa de uma falha de rede.',
+    '# versao nova - sem precisar reinstalar na mao. So sobrescreve depois de',
+    '# validar o arquivo inteiro com o parser do PowerShell e guarda a ultima',
+    '# copia valida, para um deploy ruim nunca mais derrubar o agente.',
     '$VersaoScript = ' + VERSAO_VIGIA,
     '$UrlVersao = "' + urlVersao + '"',
     '$UrlScriptProprio = "' + urlScriptProprio + '"',
@@ -1092,7 +1092,17 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      Escrever-Log "Versao nova disponivel ($($respVersao.versao), essa copia e $VersaoScript) - baixando..."',
     '      $novoConteudo = Invoke-RestMethod -Uri $UrlScriptProprio -Method Get -Headers $CabecalhosAgente -TimeoutSec 30',
     '      if ($novoConteudo -and ($novoConteudo -is [string]) -and $novoConteudo.StartsWith("# NOCZenith")) {',
-    '        Set-Content -Path $PSCommandPath -Value $novoConteudo -Encoding UTF8 -Force',
+    '        $tokensParser = $null; $errosParser = $null',
+    '        [void][System.Management.Automation.Language.Parser]::ParseInput($novoConteudo, [ref]$tokensParser, [ref]$errosParser)',
+    '        if ($errosParser -and $errosParser.Count -gt 0) {',
+    '          Escrever-Log "Atualizacao recusada: o arquivo novo tem erro de sintaxe ($($errosParser[0].Message)). A copia atual foi mantida."',
+    '          return',
+    '        }',
+    '        $arquivoNovo = $PSCommandPath + ".novo"',
+    '        $ultimaValida = $PSCommandPath + ".ultima-valida"',
+    '        Set-Content -Path $arquivoNovo -Value $novoConteudo -Encoding UTF8 -Force',
+    '        Copy-Item -LiteralPath $PSCommandPath -Destination $ultimaValida -Force -ErrorAction Stop',
+    '        Move-Item -LiteralPath $arquivoNovo -Destination $PSCommandPath -Force -ErrorAction Stop',
     '        Escrever-Log "Atualizado para versao $($respVersao.versao) - reiniciando."',
     '        # a instancia de boot renasce COMO instancia de boot - sem repassar o',
     '        # -Servico, a copia nova se acharia a de login e as duas iam trabalhar',
