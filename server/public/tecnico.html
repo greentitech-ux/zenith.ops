@@ -213,7 +213,10 @@
     <div class="sheet">
     <h3 id="d-titulo"></h3>
     <div class="sub" id="d-sub"></div>
-    <div id="d-descricao" style="font-size:13px;white-space:pre-wrap;margin-bottom:10px;"></div>
+    <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0 12px;">
+      <label style="margin:0 0 5px;">📌 Demanda aprovada <span style="text-transform:none;letter-spacing:0;">(o que precisa ser realizado)</span></label>
+      <div id="d-descricao" style="font-size:13px;white-space:pre-wrap;"></div>
+    </div>
     <!-- o chamado inteiro num arquivo só, com as fotos embutidas: é o que
          vai anexado na cobrança ou mandado pro franqueado, que não tem
          acesso ao NoPulso pra abrir o chamado aqui -->
@@ -266,15 +269,15 @@
       </div>
     </div>
 
-    <!-- evidencias: observacao (texto) + quantas fotos precisar, por linha -
-         mesmo jeito do "adicionar peca" -->
+    <!-- registro de execução: cada etapa marcada como feita exige descrição e
+         foto; continua aceitando evidência livre quando ainda está em curso -->
     <div id="bloco-evidencias" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
-      <label>📎 Evidências <span style="text-transform:none;letter-spacing:0;">(observação + fotos — quantas precisar por observação)</span></label>
+      <label>2. Execução e evidências <span style="text-transform:none;letter-spacing:0;">(registre cada etapa feita com descrição e foto)</span></label>
       <div id="lista-evidencias"></div>
       <div id="lista-ev-novas"></div>
       <div style="display:flex;gap:8px;">
-        <button type="button" class="btn-add" style="flex:1;" onclick="adicionarEvidencia()">+ Adicionar evidência</button>
-        <button type="button" class="btn-add hidden" style="flex:1;" id="btn-salvar-evidencias" onclick="salvarEvidencias()">💾 Salvar evidências</button>
+        <button type="button" class="btn-add" style="flex:1;" onclick="adicionarEvidencia()">+ Registrar etapa</button>
+        <button type="button" class="btn-add hidden" style="flex:1;" id="btn-salvar-evidencias" onclick="salvarEvidencias()">💾 Salvar registros</button>
       </div>
     </div>
 
@@ -356,10 +359,13 @@
 
     <!-- ABERTO: fazer check-in -->
     <div id="bloco-iniciar" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
-      <label>Itens de como está antes de mexer (descrição + foto)</label>
+      <label>1. Chegada ao local <span style="text-transform:none;letter-spacing:0;">(foto obrigatória; localização solicitada automaticamente)</span></label>
+      <input type="file" id="checkin-foto" accept="image/*" capture="environment">
+      <div class="sub" id="checkin-localizacao">Ao confirmar, o navegador pedirá sua localização. Se o aparelho não conseguir informar, isso ficará registrado sem impedir a visita.</div>
+      <label style="margin-top:10px;">Como está antes de mexer <span style="text-transform:none;letter-spacing:0;">(opcional: descrição + foto)</span></label>
       <div id="lista-itens-antes"></div>
       <button type="button" class="btn-add" onclick="adicionarItemAntes()">+ Adicionar item</button>
-      <button type="button" class="btn-primary" id="btn-iniciar" onclick="iniciarChamado()">📍 Fazer check-in / Iniciar chamado</button>
+      <button type="button" class="btn-primary" id="btn-iniciar" onclick="iniciarChamado()">📍 Confirmar chegada e iniciar</button>
     </div>
 
     <!-- INICIADO: concluir -->
@@ -368,9 +374,9 @@
       <label>Peças compradas (se precisou)</label>
       <div id="lista-pecas"></div>
       <button type="button" class="btn-add" onclick="adicionarPeca()">+ Adicionar peça</button>
-      <label>Observação (o que foi feito)</label>
+      <label>3. Resumo do que foi feito *</label>
       <textarea id="c-observacao" placeholder="descreva o serviço realizado"></textarea>
-      <label>Itens de como ficou depois (descrição + foto)</label>
+      <label>4. Resultado concluído * <span style="text-transform:none;letter-spacing:0;">(ao menos uma descrição com foto)</span></label>
       <div id="lista-itens-depois"></div>
       <button type="button" class="btn-add" onclick="adicionarItemDepois()">+ Adicionar item</button>
       <label>Assinatura de quem recebeu o serviço na loja</label>
@@ -382,6 +388,8 @@
 
     <!-- CONCLUIDO: so leitura -->
     <div id="bloco-concluido" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <div class="sub" style="margin-bottom:5px;">Check-in da visita</div>
+      <div id="v-checkin"></div>
       <div><b>Observação:</b> <span id="v-observacao"></span></div>
       <div id="v-pecas" style="margin-top:8px;"></div>
       <div class="sub" style="margin-top:10px;">Itens antes</div>
@@ -694,7 +702,7 @@ function abrirDetalhe(id){
   const ehRemoto = modalidadeDe(c)==='remoto';
   document.getElementById('d-titulo').textContent = c.titulo;
   document.getElementById('d-sub').innerHTML = `${c.numeroTicket!=null?`<span style="font-family:var(--mono);color:var(--accent);">Ticket #${c.numeroTicket}</span> · `:''}<span class="nome-unidade">${escapeHtml(c.unidadeNome||c.unidade)}</span> · ${fmtDataHora(c.criadoEm)}<div class="chips-linha">${chipModalidade(c)}${chipPrioridade(c)}${chipSla(c)}${c.resolvidoNaAbertura?'<span class="badge CONCLUIDO">✅ resolvido na abertura</span>':''}</div>`;
-  document.getElementById('d-descricao').textContent = c.descricao || '';
+  document.getElementById('d-descricao').textContent = c.descricao || 'Sem descrição registrada.';
   // link direto (abre em aba nova), então a autenticação vai no ?token= -
   // o interceptador de fetch não alcança um <a href>
   document.getElementById('d-relatorio').href = `/api/chamados/${c.id}/relatorio.pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
@@ -733,9 +741,14 @@ function abrirDetalhe(id){
 
   if(!ehRemoto && c.status==='ABERTO'){
     ITENS_ANTES = []; renderItensAntes();
+    document.getElementById('checkin-foto').value = '';
+    document.getElementById('checkin-localizacao').textContent = 'Ao confirmar, o navegador pedirá sua localização. Se o aparelho não conseguir informar, isso ficará registrado sem impedir a visita.';
   }
   if(!ehRemoto && c.status==='INICIADO'){
-    document.getElementById('c-iniciado-em').textContent = `Check-in feito em ${fmtDataHora(c.iniciadoEm)}`;
+    const chegou = c.checkin?.localizacaoStatus === 'registrada' ? ' · localização registrada' : ' · localização indisponível registrada';
+    const mapa = IS_MASTER && Number.isFinite(c.checkin?.localizacao?.lat) && Number.isFinite(c.checkin?.localizacao?.lng)
+      ? ` · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=${encodeURIComponent(`${c.checkin.localizacao.lat},${c.checkin.localizacao.lng}`)}">ver no mapa</a>` : '';
+    document.getElementById('c-iniciado-em').innerHTML = `✓ Check-in feito em ${escapeHtml(fmtDataHora(c.iniciadoEm))}${chegou}${mapa}`;
     PECAS = []; renderPecas();
     ITENS_DEPOIS = []; renderItensDepois();
     if(trocouRegistro) document.getElementById('c-observacao').value = '';
@@ -744,6 +757,13 @@ function abrirDetalhe(id){
     limparAssinatura('c-assinatura-canvas');
   }
   if(c.status==='CONCLUIDO'){
+    const checkinFoto = c.checkin?.foto
+      ? `<a href="/api/chamados/foto/${c.id}/checkinFoto/0?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">📷 ver foto da chegada</a>`
+      : '<span class="sub">sem foto de chegada (registro antigo)</span>';
+    const checkinLocal = c.checkin?.localizacaoStatus === 'registrada' ? '📍 localização registrada' : '📍 localização não disponível';
+    const mapa = IS_MASTER && Number.isFinite(c.checkin?.localizacao?.lat) && Number.isFinite(c.checkin?.localizacao?.lng)
+      ? ` · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=${encodeURIComponent(`${c.checkin.localizacao.lat},${c.checkin.localizacao.lng}`)}">abrir no mapa</a>` : '';
+    document.getElementById('v-checkin').innerHTML = `${escapeHtml(fmtDataHora(c.checkin?.em || c.iniciadoEm))} · ${checkinLocal} · ${checkinFoto}${mapa}`;
     document.getElementById('v-observacao').textContent = c.observacaoTecnico || '—';
     document.getElementById('v-pecas').innerHTML = (c.pecas||[]).length
       ? '<b>Peças:</b>' + c.pecas.map(p=>`<div>${escapeHtml(p.descricao)} - ${fmtMoney(p.valor)}${p.observacao?(' · '+escapeHtml(p.observacao)):''}</div>`).join('')
@@ -901,7 +921,7 @@ async function salvarEdicaoMaster(){
 // linhas NOVAS (ainda nao salvas) funcionam como o "adicionar peca": campo
 // de texto + 📷 que ACUMULA fotos (clicou de novo, soma mais) + remover
 let EV_NOVAS = [];
-function adicionarEvidencia(){ EV_NOVAS.push({ id: ++SEQ, descricao:'', files: [] }); renderEvidenciasNovas(); }
+function adicionarEvidencia(){ EV_NOVAS.push({ id: ++SEQ, descricao:'', files: [], concluida: true }); renderEvidenciasNovas(); }
 function removerEvidenciaNova(id){ EV_NOVAS = EV_NOVAS.filter(e=>e.id!==id); renderEvidenciasNovas(); }
 function fotosEvidencia(id, fileList){
   const ev = EV_NOVAS.find(e=>e.id===id);
@@ -917,10 +937,11 @@ function renderEvidenciasNovas(){
   document.getElementById('lista-ev-novas').innerHTML = EV_NOVAS.map(ev=>`
     <div style="border:1px dashed var(--line);border-radius:10px;padding:8px;margin-top:8px;">
       <div class="linha-item-foto">
-        <input type="text" value="${escapeHtml(ev.descricao)}" oninput="EV_NOVAS.find(x=>x.id===${ev.id}).descricao=this.value" placeholder="observação (ex: cabo rompido atrás do balcão)">
+        <input type="text" value="${escapeHtml(ev.descricao)}" oninput="EV_NOVAS.find(x=>x.id===${ev.id}).descricao=this.value" placeholder="o que foi feito nesta etapa">
         <label class="foto-btn ${ev.files.length?'tem-foto':''}" title="anexar fotos (pode várias)">${ev.files.length?('📷'+ev.files.length):'📷'}<input type="file" accept="image/*" multiple hidden onchange="fotosEvidencia(${ev.id}, this.files); this.value='';"></label>
         <button type="button" class="btn-remover" onclick="removerEvidenciaNova(${ev.id})">✕</button>
       </div>
+      <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:12px;margin:7px 0 0;"><input type="checkbox" ${ev.concluida?'checked':''} onchange="EV_NOVAS.find(x=>x.id===${ev.id}).concluida=this.checked"> ✓ Etapa concluída ${ev.concluida?'<span class="sub">(descrição e foto obrigatórias)</span>':'<span class="sub">(registro em andamento)</span>'}</label>
       ${ev.files.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">${ev.files.map((f,i)=>`<span class="badge" style="cursor:pointer;" title="remover" onclick="tirarFotoEvidencia(${ev.id},${i})">🖼 ${escapeHtml(f.name.slice(0,18))} ✕</span>`).join('')}</div>`:''}
     </div>`).join('');
   document.getElementById('btn-salvar-evidencias').classList.toggle('hidden', !EV_NOVAS.length);
@@ -930,7 +951,7 @@ function renderEvidenciasSalvas(c){
   document.getElementById('lista-evidencias').innerHTML = (c.evidencias||[]).map((ev,i)=>`
     <div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:6px;">
       <div style="display:flex;justify-content:space-between;gap:8px;">
-        <span style="font-size:12.5px;white-space:pre-wrap;">${escapeHtml(ev.descricao||'(sem observação)')}</span>
+        <span style="font-size:12.5px;white-space:pre-wrap;">${ev.concluida?'<span class="badge CONCLUIDO">✓ feito</span> ':''}${escapeHtml(ev.descricao||'(sem observação)')}</span>
         ${IS_MASTER?`<button type="button" class="btn-remover" title="remover evidência" onclick="removerEvidenciaSalva(${i})">✕</button>`:''}
       </div>
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${escapeHtml(ev.autorNome||ev.autorEmail||'—')} · ${fmtDataHora(ev.em)}</div>
@@ -947,7 +968,9 @@ async function salvarEvidencias(){
   try{
     for(const ev of pendentes){
       const fd = new FormData();
+      if(ev.concluida && (!ev.descricao.trim() || !ev.files.length)) throw new Error('Cada etapa marcada como feita precisa de descrição e pelo menos uma foto.');
       fd.append('descricao', ev.descricao);
+      fd.append('concluida', ev.concluida ? 'true' : 'false');
       ev.files.forEach(f=>fd.append('fotos', f));
       const resp = await fetch(`/api/chamados/${DETALHE_ATUAL.id}/evidencias`, { method:'POST', body: fd });
       const data = await resp.json();
@@ -1086,15 +1109,36 @@ async function enviarChatChamado(){
   }catch(err){ erroDetalhe(err.message); }
 }
 
+function obterLocalizacaoCheckin(){
+  if(!navigator.geolocation) return Promise.resolve(null);
+  return new Promise((resolve)=>{
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>resolve({ lat:pos.coords.latitude, lng:pos.coords.longitude, precisao:pos.coords.accuracy }),
+      ()=>resolve(null),
+      { enableHighAccuracy:true, timeout:12000, maximumAge:60000 }
+    );
+  });
+}
+
 async function iniciarChamado(){
   if(!DETALHE_ATUAL) return;
   const msg = document.getElementById('msg-detalhe');
   const btn = document.getElementById('btn-iniciar');
+  const fotoChegada = document.getElementById('checkin-foto').files[0];
+  if(!fotoChegada){
+    msg.textContent = 'Envie uma foto da chegada ao local para fazer o check-in.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return;
+  }
   msg.classList.add('hidden');
-  btn.disabled = true; btn.textContent = 'Enviando...';
+  btn.disabled = true; btn.textContent = 'Obtendo localização...';
   try{
+    const localizacao = await obterLocalizacaoCheckin();
+    document.getElementById('checkin-localizacao').textContent = localizacao
+      ? '✓ Localização registrada para a auditoria da visita.'
+      : '⚠ Não foi possível obter a localização; a indisponibilidade será registrada na auditoria.';
+    btn.textContent = 'Enviando check-in...';
     const fd = new FormData();
-    fd.append('payload', JSON.stringify({ itens: ITENS_ANTES.map(it=>({ descricao: it.descricao, temFoto: !!it.file })) }));
+    fd.append('payload', JSON.stringify({ itens: ITENS_ANTES.map(it=>({ descricao: it.descricao, temFoto: !!it.file })), localizacao }));
+    fd.append('fotoChegada', fotoChegada);
     ITENS_ANTES.forEach(it=>{ if(it.file) fd.append('fotosAntes', it.file); });
     const resp = await fetch(`/api/chamados/${DETALHE_ATUAL.id}/iniciar`, { method:'POST', body: fd });
     const data = await resp.json();
@@ -1104,7 +1148,7 @@ async function iniciarChamado(){
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }finally{
-    btn.disabled = false; btn.textContent = '📍 Fazer check-in / Iniciar chamado';
+    btn.disabled = false; btn.textContent = '📍 Confirmar chegada e iniciar';
   }
 }
 
@@ -1112,7 +1156,12 @@ async function concluirChamado(){
   if(!DETALHE_ATUAL) return;
   const msg = document.getElementById('msg-detalhe');
   const nomeAssinatura = document.getElementById('c-assinatura-nome').value.trim();
+  const observacao = document.getElementById('c-observacao').value.trim();
   if(!nomeAssinatura){ msg.textContent = 'Informe o nome de quem está assinando pela loja.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  if(!observacao){ msg.textContent = 'Descreva o que foi feito para concluir o chamado.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  if(!ITENS_DEPOIS.some(it=>it.descricao.trim() && it.file)){
+    msg.textContent = 'Registre ao menos um resultado concluído com descrição e foto.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return;
+  }
   if(assinaturaVazia('c-assinatura-canvas')){ msg.textContent = 'Colete a assinatura de quem recebeu o serviço.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
   if(!confirm('Tem certeza que deseja concluir esse chamado? Confira os itens/observações antes de continuar.')) return;
   const btn = document.getElementById('btn-concluir');
@@ -1121,7 +1170,7 @@ async function concluirChamado(){
   try{
     const fd = new FormData();
     fd.append('payload', JSON.stringify({
-      observacaoTecnico: document.getElementById('c-observacao').value,
+      observacaoTecnico: observacao,
       pecas: PECAS.map(p=>({ descricao:p.descricao, valor:p.valor, observacao:p.observacao })),
       itens: ITENS_DEPOIS.map(it=>({ descricao: it.descricao, temFoto: !!it.file })),
       assinaturaNomeLoja: nomeAssinatura,

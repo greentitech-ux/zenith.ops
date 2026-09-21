@@ -12435,13 +12435,20 @@ async function processarAssinatura(file, chamadoId, pastaStorage) {
 // usuarioLogadoDoHeader e de novo em loja-status.html - unica fonte agora)
 const ehTimeSuporte = auth.ehTimeSuporte;
 
+// Coordenadas de visita são dado sensível. A interface precisa saber se houve
+// check-in, mas latitude/longitude só seguem na resposta para um Master.
+function sanitizarChamadoTIParaResposta(chamado, isMaster) {
+  if (isMaster || !chamado?.checkin) return chamado;
+  return { ...chamado, checkin: { ...chamado.checkin, localizacao: undefined } };
+}
+
 app.get('/api/chamados', requireAnySection('tecnico', 'suporte'), async (req, res) => {
   const todos = auth.filtrarPorEmpresa(req, await chamadosTI.listAll());
-  if (req.isMaster || req.isAdmin) return res.json(todos);
+  if (req.isMaster || req.isAdmin) return res.json(todos.map((c) => sanitizarChamadoTIParaResposta(c, req.isMaster)));
   if (auth.hasSection(req, 'suporte')) {
-    return res.json(todos.filter((c) => chamadosTI.modalidadeDe(c) === 'remoto' || c.tecnicoId === req.user.id));
+    return res.json(todos.filter((c) => chamadosTI.modalidadeDe(c) === 'remoto' || c.tecnicoId === req.user.id).map((c) => sanitizarChamadoTIParaResposta(c, req.isMaster)));
   }
-  res.json(todos.filter((c) => c.tecnicoId === req.user.id));
+  res.json(todos.filter((c) => c.tecnicoId === req.user.id).map((c) => sanitizarChamadoTIParaResposta(c, req.isMaster)));
 });
 
 // abertura direta de chamado - SEMPRE nasce remoto (triagem), sem excecao;
@@ -12467,7 +12474,7 @@ app.post('/api/chamados', auth.requireAuth, async (req, res) => {
       criadoPorEmail: req.user.email,
     });
     broadcast('chamado-criado', { id: chamado.id }, 'tecnico');
-    res.json(chamado);
+    res.json(sanitizarChamadoTIParaResposta(chamado, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -14582,7 +14589,7 @@ app.post('/api/chamados/:id/concluir-remoto', requireAnySection('tecnico', 'supo
       ehGestor: req.isMaster || req.isAdmin,
     });
     broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
-    res.json(chamado);
+    res.json(sanitizarChamadoTIParaResposta(chamado, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -14598,7 +14605,7 @@ app.post('/api/chamados/:id/evoluir-nivel', requireAnySection('tecnico', 'suport
       ehGestor: req.isMaster || req.isAdmin,
     });
     broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
-    res.json(chamado);
+    res.json(sanitizarChamadoTIParaResposta(chamado, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -14617,7 +14624,7 @@ app.patch('/api/chamados/:id', auth.requireMaster, async (req, res) => {
   try {
     const chamado = await chamadosTI.reatribuir(req.params.id, { tecnicoId: req.body.tecnicoId, tecnicoEmail: req.body.tecnicoEmail });
     broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
-    res.json(chamado);
+    res.json(sanitizarChamadoTIParaResposta(chamado, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -14634,7 +14641,7 @@ app.patch('/api/chamados/:id/editar', auth.requireMaster, async (req, res) => {
       nivel: req.body.nivel,
     });
     broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
-    res.json(chamado);
+    res.json(sanitizarChamadoTIParaResposta(chamado, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -14784,9 +14791,10 @@ app.post('/api/chamados/:id/evidencias', requireAnySection('tecnico', 'suporte')
       fotos,
       autorEmail: req.user.email,
       autorNome: req.user.username || req.user.email,
+      concluida: req.body.concluida === 'true',
     });
     broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
-    res.json(chamado);
+    res.json(sanitizarChamadoTIParaResposta(chamado, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -14819,7 +14827,7 @@ app.get('/api/chamados/:id/relatorio.pdf', requireAnySection('tecnico', 'suporte
   try {
     const chamado = await chamadosTI.getOne(req.params.id);
     if (!chamado) return res.status(404).json({ error: 'Chamado não encontrado.' });
-    await chamadoRelatorio.gerarRelatorioPDF(res, chamado, { geradoPor: req.user.email });
+    await chamadoRelatorio.gerarRelatorioPDF(res, sanitizarChamadoTIParaResposta(chamado, req.isMaster), { geradoPor: req.user.email });
   } catch (err) {
     console.error('Erro ao gerar relatório do chamado:', err.message);
     // se o PDF ja comecou a sair, nao da pra trocar por JSON - o cliente
@@ -14829,15 +14837,24 @@ app.get('/api/chamados/:id/relatorio.pdf', requireAnySection('tecnico', 'suporte
   }
 });
 
-// check-in: tecnico chegou na loja, registra os itens (descricao + foto) de
-// como esta antes de mexer
-app.post('/api/chamados/:id/iniciar', requireSection('tecnico'), upload.array('fotosAntes', 6), async (req, res) => {
+// check-in: técnico chegou na loja. Foto de chegada é obrigatória; a
+// localização é coletada quando o dispositivo a disponibiliza e fica visível
+// apenas ao Master (a indisponibilidade também é registrada para auditoria).
+app.post('/api/chamados/:id/iniciar', requireSection('tecnico'), upload.fields([{ name: 'fotosAntes', maxCount: 6 }, { name: 'fotoChegada', maxCount: 1 }]), async (req, res) => {
   try {
     const payload = JSON.parse(req.body.payload || '{}');
-    const itensAntes = await processarItensComFoto(payload.itens, req.files, req.params.id, 'chamados-antes');
-    const chamado = await chamadosTI.iniciar(req.params.id, { itensAntes, tecnicoId: req.user.id });
+    const fotoChegadaFile = (req.files?.fotoChegada || [])[0];
+    if (!fotoChegadaFile) throw new Error('Registre uma foto da chegada ao local para fazer o check-in.');
+    const fotoChegadaPath = await storage.salvarArquivo(req.params.id, fotoChegadaFile, 'chamados-checkin');
+    const itensAntes = await processarItensComFoto(payload.itens, req.files?.fotosAntes, req.params.id, 'chamados-antes');
+    const chamado = await chamadosTI.iniciar(req.params.id, {
+      itensAntes,
+      fotoChegada: { nome: fotoChegadaFile.originalname, path: fotoChegadaPath, tipo: fotoChegadaFile.mimetype || 'application/octet-stream' },
+      localizacao: lerLocalizacaoDoBody(payload.localizacao || {}),
+      tecnicoId: req.user.id,
+    });
     broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
-    res.json(chamado);
+    res.json(sanitizarChamadoTIParaResposta(chamado, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -14859,7 +14876,7 @@ app.post('/api/chamados/:id/concluir', requireSection('tecnico'), upload.fields(
       assinatura,
     });
     broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
-    res.json(chamado);
+    res.json(sanitizarChamadoTIParaResposta(chamado, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -14869,9 +14886,11 @@ app.get('/api/chamados/foto/:chamadoId/:campo/:index', requireSection('tecnico')
   const chamado = await chamadosTI.getOne(req.params.chamadoId);
   if (!chamado) return res.sendStatus(404);
   if (!req.isMaster && chamado.tecnicoId !== req.user.id) return res.sendStatus(404);
-  const campo = ['itensAntes', 'itensDepois', 'assinatura'].includes(req.params.campo) ? req.params.campo : null;
+  const campo = ['itensAntes', 'itensDepois', 'assinatura', 'checkinFoto'].includes(req.params.campo) ? req.params.campo : null;
   if (!campo) return res.status(400).end();
-  const foto = campo === 'assinatura' ? chamado.assinatura : chamado[campo]?.[Number(req.params.index)]?.foto;
+  const foto = campo === 'assinatura' ? chamado.assinatura
+    : campo === 'checkinFoto' ? chamado.checkin?.foto
+      : chamado[campo]?.[Number(req.params.index)]?.foto;
   if (!foto) return res.sendStatus(404);
   storage.streamArquivo(foto.path, foto.tipo, res);
 });

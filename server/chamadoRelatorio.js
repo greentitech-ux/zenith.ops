@@ -70,6 +70,7 @@ async function baixarFotos(chamado) {
   (chamado.evidencias || []).forEach((e) => (e.fotos || []).forEach(juntar));
   (chamado.itensAntes || []).forEach((i) => juntar(i.foto));
   (chamado.itensDepois || []).forEach((i) => juntar(i.foto));
+  juntar(chamado.checkin?.foto);
   juntar(chamado.assinatura);
 
   const porCaminho = new Map();
@@ -207,7 +208,7 @@ function gerarPDF(res, chamado, { fotos, geradoPor, nomeArquivo }) {
   campo('Aberto em', `${fmtDataHora(chamado.criadoEm)}${chamado.criadoPorEmail ? ` · por ${chamado.criadoPorEmail}` : ''}`);
   campo('Responsável pelo atendimento', chamado.tecnicoEmail || chamado.tecnicoNome || '—');
   if (chamado.dataExecucao) campo('Data combinada de execução', fmtData(chamado.dataExecucao));
-  if (chamado.iniciadoEm) campo('Check-in na loja', fmtDataHora(chamado.iniciadoEm));
+  if (chamado.iniciadoEm) campo('Check-in na loja', `${fmtDataHora(chamado.iniciadoEm)}${chamado.checkin?.localizacaoStatus === 'registrada' ? ' · localização registrada' : ''}`);
   if (chamado.concluidoEm) {
     const tempo = duracao(chamado.iniciadoEm, chamado.concluidoEm);
     campo('Concluído em', `${fmtDataHora(chamado.concluidoEm)}${tempo ? ` · duração ${tempo}` : ''}`);
@@ -239,7 +240,7 @@ function gerarPDF(res, chamado, { fotos, geradoPor, nomeArquivo }) {
     evidencias.forEach((ev, i) => {
       garantirEspaco(40);
       doc.fontSize(10.5).fillColor('#111').font('Helvetica-Bold')
-        .text(`${i + 1}. ${ev.descricao || '(sem observação)'}`, x, doc.y, { width: largura });
+        .text(`${i + 1}. ${ev.concluida ? '[FEITO] ' : ''}${ev.descricao || '(sem observação)'}`, x, doc.y, { width: largura });
       doc.font('Helvetica').fontSize(8).fillColor('#7a838f')
         .text(`${ev.autorNome || ev.autorEmail || '—'} · ${fmtDataHora(ev.em)}`, x, doc.y);
       doc.moveDown(0.35);
@@ -249,6 +250,11 @@ function gerarPDF(res, chamado, { fotos, geradoPor, nomeArquivo }) {
   }
 
   // ---------- antes / depois (so presencial com check-in) ----------
+  if (chamado.checkin?.foto) {
+    titulo('Chegada ao local');
+    paragrafo('Foto registrada no check-in da visita.');
+    grade([chamado.checkin.foto]);
+  }
   const bloco = (rotulo, itens) => {
     if (!(itens || []).length) return;
     titulo(rotulo);

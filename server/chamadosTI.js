@@ -150,16 +150,26 @@ async function getOne(id) {
   return doc.exists ? doc.data() : null;
 }
 
-// check-in: tecnico chegou na loja, registra os itens de como esta antes de mexer
-async function iniciar(id, { itensAntes, tecnicoId }) {
+// check-in: tecnico chegou na loja. A foto de chegada e a localização compõem
+// a prova operacional da visita; os itens "antes" registram o estado inicial.
+async function iniciar(id, { itensAntes, fotoChegada, localizacao, tecnicoId }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Chamado não encontrado.');
   if (modalidadeDe(atual) !== 'presencial') throw new Error('Chamado remoto não tem check-in — use "Concluir atendimento remoto".');
   if (atual.tecnicoId !== tecnicoId) throw new Error('Esse chamado não é seu.');
   if (atual.status !== 'ABERTO') throw new Error('Esse chamado já foi iniciado.');
+  if (!fotoChegada || !fotoChegada.path) throw new Error('Registre uma foto da chegada ao local para fazer o check-in.');
   await COLLECTION.doc(id).update({
     status: 'INICIADO',
     itensAntes: sanitizarItensComFoto(itensAntes),
+    checkin: {
+      em: new Date().toISOString(),
+      foto: { nome: String(fotoChegada.nome || 'chegada'), path: fotoChegada.path, tipo: fotoChegada.tipo || 'application/octet-stream' },
+      // Não bloqueamos a visita se o navegador/ambiente não tiver GPS. O fato
+      // fica explícito no registro; nunca é confundido com localização válida.
+      localizacao: localizacao || null,
+      localizacaoStatus: localizacao ? 'registrada' : 'indisponivel',
+    },
     iniciadoEm: new Date().toISOString(),
   });
   chamadosCache.invalidar();
@@ -177,10 +187,16 @@ async function concluir(id, { itensDepois, observacaoTecnico, pecas, tecnicoId, 
   if (atual.status !== 'INICIADO') throw new Error('Precisa fazer o check-in antes de concluir.');
   if (!String(assinaturaNomeLoja || '').trim()) throw new Error('Informe o nome de quem está assinando pela loja.');
   if (!assinatura || !assinatura.path) throw new Error('Colete a assinatura de quem recebeu o serviço.');
+  const observacaoLimpa = String(observacaoTecnico || '').trim().slice(0, 2000);
+  const itensDepoisLimpos = sanitizarItensComFoto(itensDepois);
+  if (!observacaoLimpa) throw new Error('Descreva o que foi feito para concluir o chamado.');
+  if (!itensDepoisLimpos.some((item) => String(item.descricao || '').trim() && item.foto && item.foto.path)) {
+    throw new Error('Registre ao menos um resultado concluído com descrição e foto.');
+  }
   await COLLECTION.doc(id).update({
     status: 'CONCLUIDO',
-    itensDepois: sanitizarItensComFoto(itensDepois),
-    observacaoTecnico: String(observacaoTecnico || '').slice(0, 2000),
+    itensDepois: itensDepoisLimpos,
+    observacaoTecnico: observacaoLimpa,
     pecas: sanitizarPecas(pecas),
     assinaturaNomeLoja: String(assinaturaNomeLoja).trim().slice(0, 200),
     assinatura: { nome: String(assinatura.nome || ''), path: assinatura.path, tipo: assinatura.tipo || 'image/png' },
@@ -322,17 +338,21 @@ function sanitizarFotos(fotos) {
     .map((f) => ({ nome: String(f.nome || 'foto'), path: f.path, tipo: f.tipo || 'application/octet-stream' }));
 }
 
-async function adicionarEvidencia(id, { descricao, fotos, autorEmail, autorNome }) {
+async function adicionarEvidencia(id, { descricao, fotos, autorEmail, autorNome, concluida }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Chamado não encontrado.');
   const descricaoLimpa = String(descricao || '').trim().slice(0, 500);
   const fotosOk = sanitizarFotos(fotos);
   if (!descricaoLimpa && !fotosOk.length) throw new Error('Escreva a observação da evidência (e/ou anexe fotos).');
+  if (concluida && (!descricaoLimpa || !fotosOk.length)) {
+    throw new Error('Para marcar uma etapa como feita, informe a descrição e anexe ao menos uma foto.');
+  }
   const nova = {
     descricao: descricaoLimpa,
     fotos: fotosOk,
     autorEmail: autorEmail || null,
     autorNome: autorNome || null,
+    concluida: !!concluida,
     em: new Date().toISOString(),
   };
   await COLLECTION.doc(id).update({ evidencias: [...(atual.evidencias || []), nova] });
