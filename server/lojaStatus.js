@@ -1584,6 +1584,13 @@ async function windowsAntigoDoComputador(codigo, posto) {
   return snap.exists && !!snap.data().windowsAntigo;
 }
 
+// A marca e administrada explicitamente na ficha do computador. O agente usa
+// isso para nunca instalar PWA/atalho automaticamente em um servidor.
+async function ehServidorDoComputador(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  return snap.exists && !!snap.data().ehServidor;
+}
+
 // nome que o Master deu ao computador no NOC ("Caixa 1", "DOM-CR-ATM01") - vai
 // assado no .ps1 pro carimbo do papel de parede. Sem cadastro, cai no posto
 // (id interno) so pra nao carimbar vazio, mas o certo e o computador ter nome.
@@ -4175,5 +4182,5 @@ module.exports = {
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
 };

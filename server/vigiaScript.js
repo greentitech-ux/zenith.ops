@@ -13,10 +13,9 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-// 58 e nao 57: as duas pontas do merge tinham subido o numero (o 56 aqui, o 57
-// da mensagem em portugues do instalador). Ficar com um dos dois deixaria a
-// outra mudanca sem chegar nas maquinas que ja estao naquele numero.
-const VERSAO_VIGIA = 78;
+// 79: servidor nao recebe nem mantem o PWA/atalho automatico do NoPulso.
+// Sem o bump, os agentes ja instalados nunca baixariam essa regra.
+const VERSAO_VIGIA = 79;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -106,7 +105,7 @@ function adaptarParaWindowsAntigo(texto) {
   return out;
 }
 
-function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, unidadeNome, maquinaNome }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, ehServidor, unidadeNome, maquinaNome }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
   // segredo desse computador (ver lojaStatus.js) - vai assado no script e
@@ -205,6 +204,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# UiEstaAtiva no loop.',
     'param([switch]$Loop, [switch]$Servico)',
     '',
+    // Esta caracteristica vem do cadastro da maquina no NOC. Nao inferimos pelo
+    // nome nem pelo tipo: um "Caixa servidor" continua podendo ter o app se nao
+    // estiver expressamente marcado como servidor.
+    '$EhServidor = $' + (!!ehServidor),
+    '',
     '# ---- o APP "NoPulso" na maquina (pedido do Master, 12/09/2026) ----',
     '# Do jeito que ele faz na mao: abre o site no Chrome e "Instalar app" - vira',
     '# o app NoPulso (janela propria, icone, entrada em Programas instalados).',
@@ -257,8 +261,44 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  }',
     // dizer "gravada" quando nada foi gravado e' pior que nao dizer nada: o log
     // e' o unico lugar onde se descobre por que o icone nunca apareceu
-    '  if ($okPolitica -gt 0) { Escrever-Log "App NoPulso: politica de instalacao gravada em $okPolitica navegador(es) ($urlApp) - instala na proxima abertura." }',
+    '  if ($okPolitica -gt 0) { Escrever-Log "App NoPulso: politica de instalacao gravada em $okPolitica navegador(es) ($urlApp) - instala na proxima abertura."; Set-Content -Path (Join-Path $env:LOCALAPPDATA "NOCZenith\\app-nopulso-gerenciado.ativo") -Value $urlApp -Force -ErrorAction SilentlyContinue }',
     '  else { Escrever-Log "App NoPulso: nenhum navegador aceitou a politica (maquina gerenciada bloqueia HKCU\\Software\\Policies). O icone tem de ser criado na mao, em Chrome > Instalar app." }',
+    '}',
+    '',
+    // Servidor nao precisa de um PWA nem de icone na area de trabalho. So
+    // removemos quando ha prova de que foi criado pelo NOC: a politica de
+    // instalacao forcada, ou a marca que o proprio NOC gravou. Um atalho/app
+    // instalado manualmente nao tem essa prova e fica intacto.
+    'function Remover-AppAutomaticoNoPulso {',
+    '  if ($Servico) { return }',
+    '  $urlApp = "' + APP_BASE_URL + '/"',
+    '  $marcaGerenciada = Join-Path $env:LOCALAPPDATA "NOCZenith\\app-nopulso-gerenciado.ativo"',
+    '  $eraGerenciado = Test-Path $marcaGerenciada',
+    '  foreach ($raiz in @("HKCU:\\Software\\Policies\\Google\\Chrome", "HKCU:\\Software\\Policies\\Microsoft\\Edge")) {',
+    '    try {',
+    // Get-ItemPropertyValue so existe nas versoes novas do PowerShell. Servidor
+    // 2012 R2 tambem precisa conseguir limpar o app, entao lemos a propriedade
+    // pela forma compativel com PowerShell 2.0.
+    '      $registroPolitica = Get-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -ErrorAction SilentlyContinue',
+    '      $politica = [string]$registroPolitica.WebAppInstallForceList',
+    '      if ($politica -like "*$urlApp*") {',
+    '        Remove-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -Force -ErrorAction Stop',
+    '        $eraGerenciado = $true',
+    '        Escrever-Log "Servidor: politica de instalacao automatica do NoPulso removida em $raiz."',
+    '      }',
+    '    } catch { Escrever-Log "Servidor: nao consegui remover a politica do app em ${raiz}: $($_.Exception.Message)" }',
+    '  }',
+    '  if (-not $eraGerenciado) { Escrever-Log "Servidor: nenhum app/atalho automatico do NoPulso identificado; instalacoes manuais foram preservadas."; return }',
+    '  $chaves = @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")',
+    '  $apps = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match "^Zenith ?Ops$|^NoPulso(\\s*\\(\\d+\\))?$" -and $_.UninstallString -match "--uninstall-app-id=" })',
+    '  foreach ($app in $apps) {',
+    '    try { if ($app.UninstallString -match \'^"([^"]+)"\\s*(.*)$\') { Start-Process -FilePath $Matches[1] -ArgumentList ($Matches[2] + " --no-startup-window") -Wait -WindowStyle Hidden; Escrever-Log "Servidor: app automatico removido: $($app.DisplayName)" } } catch { Escrever-Log "Servidor: nao consegui remover app automatico $($app.DisplayName): $($_.Exception.Message)" }',
+    '  }',
+    '  foreach ($lnk in @("$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Zenith Ops.lnk", "$env:USERPROFILE\\Desktop\\Zenith Ops.lnk", "$env:PUBLIC\\Desktop\\Zenith Ops.lnk", "$env:USERPROFILE\\Desktop\\NoPulso*.lnk", "$env:PUBLIC\\Desktop\\NoPulso*.lnk")) {',
+    '    foreach ($item in @(Get-Item $lnk -Force -ErrorAction SilentlyContinue)) { try { Remove-Item $item -Force -ErrorAction Stop; Escrever-Log "Servidor: atalho automatico removido: $($item.Name)" } catch { Escrever-Log "Servidor: nao consegui remover atalho $($item.Name): $($_.Exception.Message)" } }',
+    '  }',
+    '  Remove-Item $marcaGerenciada -Force -ErrorAction SilentlyContinue',
+    '  Remove-Item (Join-Path $env:LOCALAPPDATA "NOCZenith\\app-nopulso-v*.ok") -Force -ErrorAction SilentlyContinue',
     '}',
     '',
     '$NomeTarefa = "' + nomeTarefa + '"',
@@ -2260,7 +2300,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '',
     'function Rodar-Loop {',
     '  # app NoPulso: uma vez por versao do vigia (o auto-update cai direto aqui, sem passar pela instalacao)',
-    '  if (-not $Servico) {',
+    '  if (-not $Servico -and $EhServidor) {',
+    '    try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "Remover-AppAutomaticoNoPulso falhou: $($_.Exception.Message)" }',
+    '  } elseif (-not $Servico) {',
     '    $marcaApp = Join-Path $env:LOCALAPPDATA ("NOCZenith\\app-nopulso-v" + $VersaoScript + ".ok")',
     '    if (-not (Test-Path $marcaApp)) { try { Instalar-AppNoPulso; Set-Content -Path $marcaApp -Value (Get-Date).ToString() } catch { Escrever-Log "Instalar-AppNoPulso falhou: $($_.Exception.Message)" } }',
     '  }',
@@ -2510,7 +2552,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '',
     'function Rodar-Loop {',
     '  # app NoPulso: uma vez por versao do vigia (o auto-update cai direto aqui, sem passar pela instalacao)',
-    '  if (-not $Servico) {',
+    '  if (-not $Servico -and $EhServidor) {',
+    '    try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "Remover-AppAutomaticoNoPulso falhou: $($_.Exception.Message)" }',
+    '  } elseif (-not $Servico) {',
     '    $marcaApp = Join-Path $env:LOCALAPPDATA ("NOCZenith\\app-nopulso-v" + $VersaoScript + ".ok")',
     '    if (-not (Test-Path $marcaApp)) { try { Instalar-AppNoPulso; Set-Content -Path $marcaApp -Value (Get-Date).ToString() } catch { Escrever-Log "Instalar-AppNoPulso falhou: $($_.Exception.Message)" } }',
     '  }',
@@ -2662,7 +2706,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  } else {',
     '    Escrever-Log "Instalado sem Administrador: apos reinicio, o NOCZenith volta no proximo login."',
     '  }',
-    '  try { Instalar-AppNoPulso } catch { Escrever-Log "App NoPulso nao configurado: $($_.Exception.Message)" }',
+    '  if ($EhServidor) { try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "App NoPulso automatico nao foi removido: $($_.Exception.Message)" } }',
+    '  else { try { Instalar-AppNoPulso } catch { Escrever-Log "App NoPulso nao configurado: $($_.Exception.Message)" } }',
     '  # reinstalacao com o agente ja rodando: encerra a copia antiga ANTES de',
     '  # subir a nova - o -MultipleInstances IgnoreNew da tarefa nao alcanca este',
     '  # Start-Process, e ficavam duas (ver Garantir-InstanciaUnica). A de boot',

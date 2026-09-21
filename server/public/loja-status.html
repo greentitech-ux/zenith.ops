@@ -3784,9 +3784,12 @@ function pedirSenhaMaster(acaoTexto){
     if(!ov || !inp){ resolve(null); return; }
     document.getElementById('senha-acao').textContent = acaoTexto || 'esta ação';
     inp.value = ''; erro.classList.add('hidden');
-    ov.classList.remove('hidden');
+    // A senha pode ser chamada de dentro de qualquer outro painel (política,
+    // detalhe da máquina, console etc.). Abrir pela pilha, e não só trocar a
+    // classe, garante que ela fique ACIMA de quem disparou a confirmação.
+    abrirOverlay('senha-overlay');
     setTimeout(()=>inp.focus(), 50);
-    const fechar = (val)=>{ ov.classList.add('hidden'); ok.onclick=null; cancel.onclick=null; inp.onkeydown=null; resolve(val); };
+    const fechar = (val)=>{ fecharOverlay('senha-overlay'); ok.onclick=null; cancel.onclick=null; inp.onkeydown=null; resolve(val); };
     ok.onclick = ()=>{ if(!inp.value){ erro.textContent='Digite sua senha.'; erro.classList.remove('hidden'); return; } fechar(inp.value); };
     cancel.onclick = ()=>fechar(null);
     inp.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); ok.onclick(); } else if(e.key==='Escape'){ e.preventDefault(); fechar(null); } };
