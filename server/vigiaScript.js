@@ -2965,10 +2965,12 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
   if (ehServidor) return comandoDireto;
 
   const elevador = [
-    "$ErrorActionPreference='Stop'",
+    "$ErrorActionPreference='Stop';",
     `try { $p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}' -PassThru -Wait -ErrorAction Stop; exit [int]$p.ExitCode }`,
     "catch { [Console]::Error.WriteLine('Instalacao NOCZenith nao foi autorizada no UAC. Nenhuma alteracao foi feita.'); exit 1 }",
-  ].join(';');
+  // "try { } catch { }" e' uma unica instrucao no PowerShell: nao pode haver
+  // ponto e virgula entre a chave e o catch, ou o parser acusa MissingCatch.
+  ].join(' ');
   const b64Elevador = Buffer.from(elevador, 'utf16le').toString('base64');
   return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64Elevador}`;
 }
