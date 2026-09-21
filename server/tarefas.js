@@ -580,6 +580,61 @@ async function adicionarComentario(id, { usuario, isMaster, isAdmin, unidades, t
   return getOne(id);
 }
 
+function hashLinkExterno(segredo) {
+  return crypto.createHash('sha256').update(String(segredo || '')).digest('hex');
+}
+
+async function criarLinkExterno(id, acesso) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Reunião não encontrada.');
+  const tarefa = snap.data();
+  if (!tarefa.ehReuniao) throw new Error('O link externo só pode ser criado para reuniões.');
+  if (!podeGerir(tarefa, acesso)) throw new Error('Só o responsável, quem criou ou o Admin pode compartilhar esta reunião.');
+  const segredo = crypto.randomBytes(32).toString('base64url');
+  const agora = new Date().toISOString();
+  await ref.update({ linkExterno: { hash: hashLinkExterno(segredo), ativo: true, criadoEm: agora, criadoPorNome: nomeUsuario(acesso.usuario) }, atualizadoEm: agora });
+  return { token: `${id}.${segredo}` };
+}
+
+async function encerrarLinkExterno(id, acesso) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Reunião não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Você não pode encerrar este link.');
+  const agora = new Date().toISOString();
+  await ref.update({ 'linkExterno.ativo': false, 'linkExterno.encerradoEm': agora, 'linkExterno.encerradoPorNome': nomeUsuario(acesso.usuario), atualizadoEm: agora });
+  return getOne(id);
+}
+
+async function reuniaoPorLinkExterno(token) {
+  const [id, segredo, sobra] = String(token || '').split('.');
+  if (!id || !segredo || sobra) return null;
+  const snap = await COLLECTION.doc(id).get();
+  if (!snap.exists) return null;
+  const tarefa = snap.data(); const link = tarefa.linkExterno || {};
+  const recebido = Buffer.from(hashLinkExterno(segredo));
+  const esperado = Buffer.from(String(link.hash || ''));
+  if (!tarefa.ehReuniao || !link.ativo || recebido.length !== esperado.length || !crypto.timingSafeEqual(recebido, esperado)) return null;
+  return tarefa;
+}
+
+function reuniaoPublica(tarefa) {
+  return { id: tarefa.id, titulo: tarefa.titulo, descricao: tarefa.descricao || '', data: tarefa.dataEntrega, hora: tarefa.horaInicio, duracaoMin: tarefa.duracaoMin, linkReuniao: tarefa.linkReuniao, comentarios: (tarefa.comentarios || []).map((c) => ({ id: c.id, texto: c.texto, porNome: c.porNome, em: c.em })) };
+}
+
+async function comentarPorLinkExterno(token, { nome, texto }) {
+  const tarefa = await reuniaoPorLinkExterno(token);
+  if (!tarefa) throw new Error('Este link foi encerrado ou não é válido.');
+  const autor = String(nome || '').trim().slice(0, 80);
+  const corpo = String(texto || '').trim().slice(0, 1000);
+  if (autor.length < 2) throw new Error('Informe seu nome.');
+  if (!corpo) throw new Error('Escreva um comentário.');
+  const agora = new Date().toISOString();
+  const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: corpo, porId: null, porNome: `${autor} · convidado externo`, externo: true, em: agora };
+  await COLLECTION.doc(tarefa.id).update({ comentarios: [...(tarefa.comentarios || []), comentario].slice(-100), atualizadoEm: agora });
+  return comentario;
+}
+
 async function concluir(id, { usuario, isMaster, isAdmin, unidades, observacao }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
@@ -588,7 +643,7 @@ async function concluir(id, { usuario, isMaster, isAdmin, unidades, observacao }
   if (!podeMoverStatus(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não concluir.');
   if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
   const agora = new Date().toISOString();
-  await ref.update({ status: 'CONCLUIDA', concluidaEm: agora, concluidaPorId: usuario.id, concluidaPorNome: nomeUsuario(usuario), observacaoConclusao: String(observacao || '').trim().slice(0, 1000), atualizadoEm: agora });
+  await ref.update({ status: 'CONCLUIDA', concluidaEm: agora, concluidaPorId: usuario.id, concluidaPorNome: nomeUsuario(usuario), observacaoConclusao: String(observacao || '').trim().slice(0, 1000), ...(tarefa.ehReuniao ? { 'linkExterno.ativo': false, 'linkExterno.encerradoEm': agora, 'linkExterno.encerradoPorNome': nomeUsuario(usuario) } : {}), atualizadoEm: agora });
   return getOne(id);
 }
 
@@ -711,7 +766,7 @@ async function cancelar(id, acesso, motivo) {
   if (!podeMoverStatus(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: não pode cancelá-la.');
   if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Só dá pra cancelar tarefa em aberto.');
   const agora = new Date().toISOString();
-  await ref.update({ status: 'CANCELADA', canceladaEm: agora, canceladaPorId: acesso.usuario.id, canceladaPorNome: nomeUsuario(acesso.usuario), motivoCancelamento: String(motivo || '').trim().slice(0, 300) || null, atualizadoEm: agora });
+  await ref.update({ status: 'CANCELADA', canceladaEm: agora, canceladaPorId: acesso.usuario.id, canceladaPorNome: nomeUsuario(acesso.usuario), motivoCancelamento: String(motivo || '').trim().slice(0, 300) || null, ...(tarefa.ehReuniao ? { 'linkExterno.ativo': false, 'linkExterno.encerradoEm': agora, 'linkExterno.encerradoPorNome': nomeUsuario(acesso.usuario) } : {}), atualizadoEm: agora });
   // reunião cancelada aqui tem que sumir da agenda de quem foi convidado -
   // senão o compromisso continua de pé e alguém entra numa sala vazia. Não
   // trava o cancelamento: já está gravado, isto é limpeza.
@@ -745,6 +800,7 @@ async function virarTarefa(id, acesso, { dataEntrega, prioridade } = {}) {
     // ficha viva: tarefa não tem sala, e um link de reunião velho no meio de
     // uma tarefa é convite pra alguém entrar numa sala que já acabou
     linkReuniao: null, linkOrigem: null, eventoGoogleId: null,
+    'linkExterno.ativo': false, 'linkExterno.encerradoEm': agora, 'linkExterno.encerradoPorNome': nomeUsuario(acesso.usuario),
     prioridade: prio, slaPrazo: prioridades.slaPrazo(prio, agora),
     dataEntrega: entrega,
     veioDeReuniao: {
@@ -917,4 +973,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

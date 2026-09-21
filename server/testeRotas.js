@@ -4133,7 +4133,7 @@ setTimeout(async () => {
     'rh-colaborador.html', 'solicitacao-publica.html', 'ticket-publico.html', 'assinar.html',
     // preencher.html: o solicitante preenche por um link, sem login - o
     // token de preenchimento na URL É a credencial (mesmo caso do assinar)
-    'preencher.html', 'fornecedor-cadastro.html',
+    'preencher.html', 'fornecedor-cadastro.html', 'reuniao-publica.html',
   ];
   const dirPublico = require('path').join(__dirname, 'public');
   const semToken = require('fs').readdirSync(dirPublico)

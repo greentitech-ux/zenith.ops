@@ -308,8 +308,11 @@ function pintarReuniao(){const cx=$('REUNIAODET');if(!O||!O.ehReuniao){cx.hidden
   const marca=O.linkOrigem==='google'?'📹 Reunião · Google Meet':'📹 Reunião';
   cx.innerHTML=`<div class="reuniao-quando"><b>${marca}</b>${quando?' · '+e(quando):''}</div>`
     +(link?`<div class="reuniao-acoes"><a class="btn-entrar" href="${e(link)}" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Entrar</a><button type="button" class="btn-icone" data-dica="Copiar link" aria-label="Copiar link" onclick="copiarLinkReuniao()">⧉</button><code class="reuniao-url">${e(link)}</code></div><div class="reuniao-aviso">${aviso}</div>`
-      :'<div class="reuniao-aviso">Esta reunião foi criada sem link.</div>')}
+      :'<div class="reuniao-aviso">Esta reunião foi criada sem link.</div>')
+    +(O.podeGerir?`<div class="reuniao-acoes" style="margin-top:9px">${O.linkExterno?.ativo?'<button type="button" class="btn danger" onclick="encerrarLinkConvidado()">Encerrar link de comentários</button><span class="reuniao-aviso">Link externo ativo</span>':'<button type="button" class="btn" onclick="criarLinkConvidado()">Compartilhar com convidado externo</button>'}</div>`:'')}
 async function copiarLinkReuniao(){const link=(O&&O.linkReuniao)||'';if(!link)return;try{await navigator.clipboard.writeText(link);alert('Link copiado.')}catch(x){prompt('Copie o link da reunião:',link)}}
+async function criarLinkConvidado(){if(!O)return;const id=O.id;try{const d=await req('/api/tarefas/'+id+'/link-externo',{});try{await navigator.clipboard.writeText(d.link);alert('Link externo copiado. O convidado poderá ver a reunião e comentar.')}catch(x){prompt('Copie o link para o convidado:',d.link)}await load();openT(id)}catch(x){alert(x.message)}}
+async function encerrarLinkConvidado(){if(!O||!confirm('Encerrar este link? O convidado não poderá mais abrir a reunião nem enviar comentários.'))return;const id=O.id;try{await req('/api/tarefas/'+id+'/link-externo',{},'DELETE');await load();openT(id)}catch(x){alert(x.message)}}
 // ---- O QUE SAI DA REUNIÃO ----
 // Reunião que não vira tarefa vira esquecimento: o combinado fica no
 // comentário e ninguém é dono de nada. Aqui quem estava na reunião escreve o

@@ -336,6 +336,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/loja-status/vigia-versao',
   '/api/loja-status/reparo-noczenith.ps1',
   '/assinar.html',
+  '/reuniao-publica.html',
 ]);
 // A MESMA lista vale SEM o ".html": `/atendimento` e `/atendimento.html`
 // servem a mesma pagina (ver o `extensions` do express.static la embaixo).
@@ -403,7 +404,7 @@ const ROTA_LOJA_CHAT_RESPONDER_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[
 // maquina, sem sessao de usuario. O token do agente continua obrigatorio.
 const ROTA_LOJA_TELEMETRIA_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/telemetria$/;
 function rotaPublicaSemDashboard(path) {
-  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
+  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/') || path.startsWith('/api/reunioes/publica/')
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
@@ -2341,6 +2342,28 @@ app.post('/api/push/migrar-subscricao', async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// Convite de reunião: o token aleatório é a única credencial. O convidado vê
+// somente os dados da reunião e comenta até o responsável encerrar o link.
+const comentariosExternosPorIp = new Map();
+function permitirComentarioExterno(ip) {
+  const agora = Date.now(); const chave = String(ip || 'desconhecido');
+  const recentes = (comentariosExternosPorIp.get(chave) || []).filter((t) => agora - t < 10 * 60 * 1000);
+  if (recentes.length >= 8) return false;
+  recentes.push(agora); comentariosExternosPorIp.set(chave, recentes); return true;
+}
+app.get('/api/reunioes/publica/:token', async (req, res) => {
+  const reuniao = await tarefas.reuniaoPorLinkExterno(req.params.token);
+  if (!reuniao) return res.status(410).json({ error: 'Este link foi encerrado ou não é válido.' });
+  res.json(tarefas.reuniaoPublica(reuniao));
+});
+app.post('/api/reunioes/publica/:token/comentarios', async (req, res) => {
+  try {
+    if (!permitirComentarioExterno(req.ip)) return res.status(429).json({ error: 'Muitos comentários enviados. Aguarde alguns minutos.' });
+    const comentario = await tarefas.comentarPorLinkExterno(req.params.token, { nome: req.body?.nome, texto: req.body?.texto });
+    res.status(201).json(comentario);
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
@@ -11266,6 +11289,21 @@ app.post('/api/tarefas/:id/comentarios', auth.requireAuth, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+app.post('/api/tarefas/:id/link-externo', auth.requireAuth, async (req, res) => {
+  try {
+    const criado = await tarefas.criarLinkExterno(req.params.id, acessoDasTarefas(req));
+    res.status(201).json({ link: `${APP_BASE_URL}/reuniao-publica.html?convite=${encodeURIComponent(criado.token)}` });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.delete('/api/tarefas/:id/link-externo', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.encerrarLinkExterno(req.params.id, acessoDasTarefas(req));
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
