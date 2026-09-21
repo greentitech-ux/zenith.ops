@@ -171,8 +171,12 @@
   <form id="palavra-recuperacao-form" class="auth-card">
     <div class="auth-marca"><span class="auth-wordmark" style="font-size:22px;">No<b>Pulso</b></span></div>
     <h1 style="text-align:center;">Proteja sua recuperação</h1>
-    <p style="font-size:12px;margin:2px 0 0;text-align:center;color:var(--muted);">Crie uma frase pessoal com ao menos duas palavras. Ela permite criar uma nova senha sem precisar receber código.</p>
-    <label>Frase de recuperação<input type="password" id="pr-frase" required minlength="10" autocomplete="new-password"></label>
+    <p style="font-size:12px;margin:2px 0 0;text-align:center;color:var(--muted);">Antes de continuar, crie sua frase pessoal de recuperação.</p>
+    <div class="info-box" style="margin-top:14px;">
+      Use pelo menos duas palavras que só você conheça, por exemplo: <b>café janela azul</b>.<br><br>
+      Se um dia esquecer a senha, essa frase libera a criação de uma nova — sem receber senha por chat, telefone ou WhatsApp. Ela é salva protegida: <b>nem o Master consegue vê-la depois</b>.
+    </div>
+    <label>Minha frase de recuperação<input type="password" id="pr-frase" required minlength="10" autocomplete="new-password" placeholder="Ex.: café janela azul"></label>
     <label>Confirmar frase<input type="password" id="pr-confirmar" required minlength="10" autocomplete="new-password"></label>
     <p id="pr-error" class="auth-error hidden"></p>
     <button type="submit" id="pr-btn">Salvar frase e continuar</button>
