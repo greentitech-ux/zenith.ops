@@ -12684,6 +12684,8 @@ setTimeout(async () => {
         /ROTA_LOJA_INVENTARIO_ATALHOS_RE\.test\(path\)/.test(indexPp)
         && indexPp.indexOf("app.post('/api/loja-status/:codigo/computadores/:posto/inventario-atalhos'")
           < indexPp.indexOf("app.use('/api', auth.requireAuth);"),
+      'somente o usuário logado inventaria atalhos e respeita Área de Trabalho redirecionada':
+        /function Enviar-InventarioAtalhos \{[\s\S]*?if \(\$Servico\) \{ return \$false \}[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
       'a máquina baixa a arte DELA, com o token dela': imgMaquina.status === 200,

@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 89;
+const VERSAO_VIGIA = 90;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1916,11 +1916,17 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# fica na pasta User Pinned\\TaskBar; apps UWP que o Windows não expõe ali',
     '# não são inventados nem removidos por este agente.',
     'function Enviar-InventarioAtalhos {',
+    '  # Somente a instância do usuário pode responder. A de boot roda como',
+    '  # SYSTEM e pode ganhar a corrida enviando duas listas vazias.',
+    '  if ($Servico) { return $false }',
     '  try {',
     '    $perfilUsuario = Resolver-PerfilDoOperador',
     '    if (-not $perfilUsuario) { Escrever-Log "Inventário visual aguardando: não há perfil de operador ativo."; return $false }',
     '    $area = New-Object System.Collections.Generic.List[object]; $barra = New-Object System.Collections.Generic.List[object]',
-    '    foreach ($par in @(@($perfilUsuario + "\\Desktop", "usuario"), @($env:PUBLIC + "\\Desktop", "publica"))) {',
+    '    # GetFolderPath respeita redirecionamento, OneDrive e o idioma do Windows.',
+    '    $desktopUsuario = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)',
+    '    if (-not $desktopUsuario) { $desktopUsuario = $perfilUsuario + "\\Desktop" }',
+    '    foreach ($par in @(@($desktopUsuario, "usuario"), @($env:PUBLIC + "\\Desktop", "publica"))) {',
     '      if (-not (Test-Path -LiteralPath $par[0])) { continue }',
     '      foreach ($i in @(Get-ChildItem -LiteralPath $par[0] -Force -ErrorAction SilentlyContinue)) {',
     '        $tipo = if ($i.PSIsContainer) { "pasta" } elseif ($i.Extension -ieq ".lnk") { "atalho" } elseif ($i.Extension -ieq ".url") { "link" } elseif ($i.Extension -ieq ".rdp") { "rdp" } elseif ($i.Extension -ieq ".exe") { "app" } else { "arquivo" }',
