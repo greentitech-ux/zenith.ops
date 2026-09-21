@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 97;
+const VERSAO_VIGIA = 98;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1877,7 +1877,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $ext = [string]$item.Extension.ToLowerInvariant()',
     '  if (($permitidos -contains "nopulso") -and $nome -match "nopulso|zenith ops") { return $true }',
     '  if (($permitidos -contains "anydesk") -and $nome -match "anydesk") { return $true }',
-    '  if (($permitidos -contains "rdp-dominos") -and $ext -eq ".rdp" -and $nome -match "domino|dominos") { return $true }',
+    '  # O RDP da Dominos na frota se chama PULSE e e um .lnk, nao um .rdp - a',
+    '  # regra antiga exigia as DUAS coisas (extensao .rdp E "domino" no nome),',
+    '  # entao ela nunca casava e o atalho era removido mesmo estando aprovado.',
+    '  # Agora basta ser um .rdp OU ter um dos nomes conhecidos.',
+    '  if (($permitidos -contains "rdp-dominos") -and ($ext -eq ".rdp" -or $nome -match "domino|dominos|pulse")) { return $true }',
     '  if (($permitidos -contains "degust") -and $nome -match "degust") { return $true }',
     '  if (($permitidos -contains "gestor-pedidos-ifood") -and $nome -match "gestor.*pedidos.*ifood") { return $true }',
     '  if (($permitidos -contains "gestor-pedidos-99food") -and $nome -match "gestor.*pedidos.*99") { return $true }',
@@ -1957,6 +1961,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     'function Aplicar-BarraTarefas($estacao) {',
     '  if (-not $estacao -or -not [bool]$estacao.ativa -or [string]$estacao.modo -ne "aplicar" -or -not [bool]$estacao.gerenciarBarraTarefas) { return $true }',
     '  $permitidos = @($estacao.barraTarefasAprovada | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
+    '  # Atalho-EstaAprovado le esta variavel de script. Antes ela so estava',
+    '  # preenchida porque o perfil rodava primeiro; agora a barra vem antes.',
+    '  $script:AtalhosPersonalizados = @($estacao.atalhosPersonalizados)',
     '  $perfilUsuario = Resolver-PerfilDoOperador',
     '  if (-not $perfilUsuario) { Escrever-Log "Barra de tarefas: aguardando perfil de operador ativo."; return $false }',
     '  $desktopUsuario = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)',
@@ -2141,8 +2148,12 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
-    '    $okEstacao = Aplicar-PerfilEstacao $pol.estacao',
+    '    # A BARRA VEM ANTES da limpeza de proposito: Aplicar-BarraTarefas procura',
+    '    # o .lnk de origem na propria Area de Trabalho (e no menu Iniciar). Na',
+    '    # ordem antiga, um app marcado SO em "Barra" era apagado da Area pela',
+    '    # limpeza e logo depois nao era encontrado pra fixar - sumia dos dois.',
     '    $okBarra = Aplicar-BarraTarefas $pol.estacao',
+    '    $okEstacao = Aplicar-PerfilEstacao $pol.estacao',
     '    $okArquivo = Arquivar-DadosDaEstacao $pol.estacao $versao',
     '    $okLixeira = Aplicar-VisibilidadeLixeira ([bool]$pol.estacao.ocultarLixeira)',
     '    # so marca como aplicada quando TUDO que aquela instancia podia fazer',
