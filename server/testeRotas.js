@@ -24133,6 +24133,35 @@ setTimeout(async () => {
   if (!okFormularioDuasColunas) ruins += 1;
   console.log(`${okFormularioDuasColunas ? '✓' : '✗'} Formulário no celular: 2 colunas iguais (o !important da fundação forçava 1)`);
 
+  // O acabamento do NOC virou a fundação visual do produto inteiro. A folha
+  // compartilhada não pode trazer framework, backdrop blur ou layout global:
+  // moderniza sem aumentar bundle e sem mandar em grids de cada formulário.
+  let okDesignGlobalNoc = false;
+  try {
+    const fsD = require('fs');
+    const pathD = require('path');
+    const fundacaoD = fsD.readFileSync(pathD.join(__dirname, 'public', 'ui-foundation.css'), 'utf8');
+    const temaD = fsD.readFileSync(pathD.join(__dirname, 'public', 'tema.js'), 'utf8');
+    const paginasD = fsD.readdirSync(pathD.join(__dirname, 'public')).filter((f) => f.endsWith('.html'));
+    const semTemaD = paginasD.filter((f) => !/tema\.js/.test(fsD.readFileSync(pathD.join(__dirname, 'public', f), 'utf8')));
+    const confD = {
+      'todas as páginas recebem a mesma fundação': paginasD.length >= 60 && semTemaD.length === 0,
+      'cards, formulários, tabelas e modais compartilham o acabamento do NOC':
+        /Linguagem visual NOC/.test(fundacaoD) && /\.panel, \.card/.test(fundacaoD)
+        && /input:not\(\[type="checkbox"\]\)/.test(fundacaoD)
+        && /:where\(thead th\)/.test(fundacaoD) && /\[role="dialog"\]/.test(fundacaoD),
+      'a versão muda para os navegadores carregarem o CSS novo': /ui-foundation\.css\?v=2/.test(temaD),
+      'sem biblioteca, blur ou fundo fixo pesado':
+        !/@import|backdrop-filter|background-attachment\s*:\s*fixed/i.test(fundacaoD),
+      'a fundação não impõe layout de grade': !/grid-template-columns\s*:/i.test(fundacaoD.split('Linguagem visual NOC')[1].split('Piso responsivo compartilhado')[0]),
+    };
+    const falhasD = Object.entries(confD).filter(([, v]) => !v).map(([n]) => n);
+    okDesignGlobalNoc = !falhasD.length;
+    if (falhasD.length) console.log(`  falhou em: ${falhasD.join(' · ')} (sem tema: ${semTemaD.join(', ')})`);
+  } catch (e) { okDesignGlobalNoc = false; console.log('  erro: ' + e.message); }
+  if (!okDesignGlobalNoc) ruins += 1;
+  console.log(`${okDesignGlobalNoc ? '✓' : '✗'} Design global: acabamento leve do NOC em todas as telas`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

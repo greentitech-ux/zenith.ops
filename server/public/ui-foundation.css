@@ -10,6 +10,11 @@
   --surface-selected: color-mix(in srgb, var(--accent, #b8ff3c) 14%, var(--panel, #12161b));
   --radius-control: 8px;
   --radius-panel: 12px;
+  --radius-card: 12px;
+  --shadow-panel: 0 1px 0 rgba(255,255,255,.025), 0 10px 28px rgba(0,0,0,.16);
+  --shadow-float: 0 20px 60px rgba(0,0,0,.42);
+  --control-bg: color-mix(in srgb, var(--panel2, #181d24) 88%, var(--bg, #0b0d10));
+  --header-bg: color-mix(in srgb, var(--bg, #0b0d10) 97%, var(--panel, #12161b));
 }
 
 :root[data-tema="claro"] {
@@ -17,9 +22,104 @@
   --focus-ring: var(--accent2, #0d7ac2);
   --surface-hover: color-mix(in srgb, var(--panel2, #edf1f5) 88%, var(--text, #17212b));
   --surface-selected: color-mix(in srgb, var(--accent, #5b8c00) 13%, var(--panel, #ffffff));
+  --shadow-panel: 0 1px 2px rgba(20,32,44,.06), 0 10px 28px rgba(20,32,44,.07);
+  --shadow-float: 0 22px 60px rgba(20,32,44,.18);
+  --control-bg: color-mix(in srgb, var(--panel2, #edf1f5) 82%, #fff);
+  --header-bg: color-mix(in srgb, var(--bg, #f5f7f9) 97%, var(--panel, #fff));
 }
 
 * { -webkit-tap-highlight-color: transparent; }
+
+/* Linguagem visual NOC -------------------------------------------------------
+ * Uma camada leve, comum às 63 telas. Não altera grids nem dimensões de negócio:
+ * só unifica superfície, profundidade, controles e hierarquia. Sem framework,
+ * imagem ou efeito contínuo — custo de renderização praticamente nulo. */
+html { color-scheme: dark; }
+:root[data-tema="claro"] { color-scheme: light; }
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background-color: var(--bg, #0b0d10);
+  background-image:
+    radial-gradient(circle at 8% -8%, color-mix(in srgb, var(--accent2, #5cc8ff) 5%, transparent), transparent 30rem),
+    radial-gradient(circle at 96% 0%, color-mix(in srgb, var(--accent, #b8ff3c) 4%, transparent), transparent 26rem);
+}
+
+/* Cabeçalhos permanecem compactos como no NOC, mas o conteúdo rolando por
+ * baixo não polui a leitura. O fallback sólido vem antes do color-mix. */
+:where(header, .topbar, .app-header, .page-header) {
+  background-color: var(--bg, #0b0d10);
+  background-color: var(--header-bg);
+  border-color: var(--line, #232a33);
+}
+
+:where(h1, h2, h3, .titulo, .title) { letter-spacing: -.015em; }
+:where(.eyebrow, .kicker, .label, .subtitulo, .meta) { letter-spacing: .035em; }
+
+/* Classes de superfície que se repetem nas telas. :where mantém especificidade
+ * zero: qualquer decisão local continua tendo prioridade. */
+:where(.panel, .card, .box, .bloco, .section, .uni-panel, .equip-tile,
+       .kpi-card, .tile, .stat-card, .summary-card) {
+  border-color: var(--line, #232a33);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-panel);
+}
+
+:where(.panel, .card, .uni-panel, .equip-tile, .kpi-card, .tile) {
+  transition: border-color .16s ease, background-color .16s ease,
+              box-shadow .16s ease, transform .16s ease;
+}
+
+:where(.card[onclick], .equip-tile, .kpi-card, .tile[onclick], [role="button"].card):hover {
+  border-color: color-mix(in srgb, var(--accent, #b8ff3c) 48%, var(--line, #232a33));
+  box-shadow: 0 1px 0 rgba(255,255,255,.03), 0 14px 34px rgba(0,0,0,.22);
+  transform: translateY(-1px);
+}
+
+/* Formulários: mesma leitura e foco do filtro do NOC. Não mudamos largura,
+ * grid ou altura definida pela própria página. */
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+  border-radius: var(--radius-control);
+  border-color: var(--line, #232a33);
+  background-color: var(--control-bg);
+  color: var(--text, #e7ecf1);
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--line, #232a33) 55%, var(--muted, #7d8896));
+}
+
+:where(input, select, textarea)::placeholder { color: var(--muted, #7d8896); opacity: .78; }
+
+:where(button, .btn, .button, [role="button"]) {
+  border-radius: var(--radius-control);
+  font-family: var(--sans, sans-serif);
+  transition: border-color .15s ease, color .15s ease, background-color .15s ease,
+              box-shadow .15s ease, transform .1s ease;
+}
+
+/* Tabelas ganham o contraste operacional do NOC sem forçar largura. */
+:where(table) { border-spacing: 0; }
+:where(thead th) {
+  background-color: var(--panel, #12161b);
+  color: var(--muted, #7d8896);
+  border-color: var(--line, #232a33);
+}
+:where(tbody td) { border-color: color-mix(in srgb, var(--line, #232a33) 74%, transparent); }
+:where(tbody tr) { transition: background-color .12s ease; }
+:where(tbody tr:hover) { background-color: color-mix(in srgb, var(--panel2, #181d24) 78%, transparent); }
+
+/* Modais e drawers parecem parte do mesmo produto, sem sombra em cada
+ * elemento interno. */
+:where(.modal, .sheet, .dialog, .drawer, .nav-drawer, [role="dialog"]) {
+  border-color: var(--line, #232a33);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-float);
+}
+:where(summary) { border-radius: var(--radius-control); }
+:where(hr) { border: 0; border-top: 1px solid var(--line, #232a33); }
 
 /* Piso responsivo compartilhado ------------------------------------------------
  * As telas do NoPulso têm layouts próprios, mas todas precisam obedecer a estas

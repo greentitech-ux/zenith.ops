@@ -42,7 +42,7 @@
     var css = document.createElement('link');
     css.id = 'nopulso-ui-foundation';
     css.rel = 'stylesheet';
-    css.href = '/ui-foundation.css';
+    css.href = '/ui-foundation.css?v=2';
     document.head.appendChild(css);
   })();
 
