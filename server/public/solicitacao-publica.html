@@ -111,7 +111,8 @@
       <input type="date" id="vencimento">
     </div>
 
-    <label>Observação</label>
+    <label id="observacao-label">Observação</label>
+    <div id="observacao-ajuda" class="ajuda hidden"></div>
     <textarea id="observacao" placeholder="detalhe o que precisa"></textarea>
 
     <label id="valor-label">Valor estimado (opcional)</label>
@@ -141,7 +142,7 @@
 const TIPOS_INFO = {
   compra: { label:'Compra', icone:'🛒', tituloLabel:'Título', tituloPlaceholder:'ex: comprar papel térmico', valorLabel:'Valor estimado (opcional)' },
   manutencao: { label:'Manutenção', icone:'🔧', tituloLabel:'Solicitação', tituloPlaceholder:'ex: ar-condicionado sem gelar', valorLabel:'Valor (opcional - orçamento de terceiro)' },
-  'suporte-ti': { label:'Suporte de TI', icone:'💻', tituloLabel:'Solicitação', tituloPlaceholder:'ex: impressora não liga', valorLabel:'Valor (opcional - orçamento de terceiro)' },
+  'suporte-ti': { label:'Suporte de TI', icone:'💻', tituloLabel:'Assunto da demanda', tituloPlaceholder:'ex: impressora do caixa não imprime', valorLabel:'Valor (opcional - orçamento de terceiro)' },
   pagamento: { label:'Pagamento (despesa)', icone:'💸', tituloLabel:'O que é a cobrança', tituloPlaceholder:'ex: fatura de gás de julho, boleto do fornecedor...', valorLabel:'Valor da cobrança (R$)' },
   nota: { label:'Solicitação de Nota', icone:'📄', tituloLabel:'Referente a quê', tituloPlaceholder:'ex: nota fiscal da compra de equipamentos', valorLabel:'Valor (opcional)' },
 };
@@ -176,6 +177,13 @@ function aplicarCamposTipo(){
   document.getElementById('titulo-label').textContent = info.tituloLabel + ' *';
   document.getElementById('titulo').placeholder = info.tituloPlaceholder;
   document.getElementById('valor-label').textContent = info.valorLabel;
+  const ehTi = TIPO_ATUAL==='suporte-ti';
+  const observacao = document.getElementById('observacao');
+  document.getElementById('observacao-label').textContent = ehTi ? 'Descreva a demanda de TI *' : 'Observação';
+  document.getElementById('observacao-ajuda').textContent = ehTi ? 'Informe o que está acontecendo, local ou equipamento afetado, desde quando e o impacto na operação.' : '';
+  document.getElementById('observacao-ajuda').classList.toggle('hidden', !ehTi);
+  observacao.placeholder = ehTi ? 'Ex.: caixa 2, impressora Zebra não imprime desde 14h; já reiniciei e o caixa está parado.' : 'detalhe o que precisa';
+  observacao.required = ehTi;
   document.getElementById('wrap-itens').classList.toggle('hidden', TIPO_ATUAL!=='compra');
   document.getElementById('wrap-fornecedor').classList.toggle('hidden', !['pagamento','nota'].includes(TIPO_ATUAL));
   document.getElementById('wrap-vencimento').classList.toggle('hidden', TIPO_ATUAL!=='pagamento');

@@ -100,6 +100,11 @@
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,.5);}
   .sheet h3{margin:0 0 4px;font-size:14px;}
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
+  .demanda-ti{background:linear-gradient(135deg,rgba(92,200,255,.10),rgba(184,255,60,.06));border:1px solid #24465b;border-radius:10px;padding:12px;}
+  .demanda-ti .demanda-ti-titulo{font:700 10px var(--mono);letter-spacing:.07em;color:var(--accent2);text-transform:uppercase;margin-bottom:6px;}
+  .demanda-ti .demanda-ti-assunto{font-size:14px;font-weight:700;margin-bottom:7px;}
+  .demanda-ti .demanda-ti-texto{white-space:pre-wrap;font-size:13px;line-height:1.45;color:var(--text);}
+  .demanda-ti .demanda-ti-ausente{font-size:12px;line-height:1.4;color:var(--warn);}
   .anexo-item{display:flex;align-items:center;gap:8px;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px;}
   .anexo-item a{color:var(--accent);text-decoration:none;}
   .triagem-nota{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:10px;}
@@ -1381,7 +1386,17 @@ function abrirDetalhe(tipo, id){
   if(ehBloqueioLogin(c) && c.status==='PENDENTE'){
     corpo += `<div style="color:var(--accent);font-weight:600;">🔓 Ao aprovar, o acesso é desbloqueado com a MESMA senha de sempre — a pessoa não precisa trocar nada. Não precisa escolher técnico. Se quiser, marque abaixo pra também pedir uma senha nova.</div>`;
   }
-  corpo += `<div><b>${escapeHtml(c.titulo)}</b></div>`;
+  if(c.tipo==='suporte-ti' && !ehBloqueioLogin(c)){
+    corpo += `<section class="demanda-ti">
+      <div class="demanda-ti-titulo">📌 Demanda de TI</div>
+      <div class="demanda-ti-assunto">${escapeHtml(c.titulo||'Sem assunto informado')}</div>
+      ${c.observacao
+        ? `<div class="demanda-ti-texto">${escapeHtml(c.observacao)}</div>`
+        : `<div class="demanda-ti-ausente">Sem detalhamento da demanda. Use ✏️ Editar para registrar o problema, o local/equipamento e o impacto na operação.</div>`}
+    </section>`;
+  } else {
+    corpo += `<div><b>${escapeHtml(c.titulo)}</b></div>`;
+  }
   // prioridade + SLA do ticket; Master/Admin re-prioriza na triagem (recalcula
   // o prazo a partir da criacao - rota PATCH /api/solicitacoes/:id/prioridade,
   // que so existe pros tipos da colecao de solicitacoes)
@@ -1402,7 +1417,7 @@ function abrirDetalhe(tipo, id){
       `<li>${escapeHtml(i.descricao)}${i.quantidade!=null && i.quantidade!=='' ? ` · qtd. ${escapeHtml(String(i.quantidade))}` : ''}</li>`
     ).join('')}</ul>`;
   }
-  if(c.observacao) corpo += `<div style="white-space:pre-wrap;">${escapeHtml(c.observacao)}</div>`;
+  if(c.observacao && !(c.tipo==='suporte-ti' && !ehBloqueioLogin(c))) corpo += `<div style="white-space:pre-wrap;">${escapeHtml(c.observacao)}</div>`;
   if(c.valorEstimado) corpo += `<div>Valor estimado: <b>${fmtMoney(c.valorEstimado)}</b></div>`;
   if(c.anexos && c.anexos.length){
     const rota = c.tipo==='ajuste-fechamento' ? `/api/fechamentos/edicoes/anexo/${c.id}`

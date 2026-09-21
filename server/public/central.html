@@ -234,7 +234,8 @@
           </div>
         </div>
         <div id="wrap-g-observacao">
-          <label>Observação</label>
+          <label id="g-observacao-label">Observação</label>
+          <div id="g-observacao-ajuda" class="sub hidden" style="margin:-1px 0 5px;"></div>
           <textarea id="g-observacao" placeholder="detalhe o que precisa"></textarea>
         </div>
         <div id="wrap-g-valor">
@@ -470,7 +471,7 @@ function selecionarTipo(tipo){
   const labels = {
     compra:['Título','O que precisa comprar','Valor estimado (opcional)'],
     manutencao:['Solicitação','O que precisa de manutenção','Valor (opcional - orçamento de terceiro)'],
-    'suporte-ti':['Solicitação','Qual o problema','Valor (opcional - orçamento de terceiro)'],
+    'suporte-ti':['Assunto da demanda','ex: impressora do caixa não imprime','Valor (opcional - orçamento de terceiro)'],
     pagamento:['O que é a cobrança','ex: fatura de gás de julho, boleto do fornecedor...','Valor da cobrança (R$)'],
     nota:['Referente a quê','ex: nota fiscal da compra de equipamentos','Valor (opcional)'],
   };
@@ -479,6 +480,18 @@ function selecionarTipo(tipo){
     document.getElementById('g-titulo').placeholder = labels[tipo][1];
     document.getElementById('g-valor-label').textContent = labels[tipo][2];
   }
+  // TI precisa de contexto acionável, não apenas de um título genérico. O
+  // mesmo campo observacao continua sendo usado no backend, preservando os
+  // tickets já existentes e os links públicos.
+  const obs = document.getElementById('g-observacao');
+  const obsLabel = document.getElementById('g-observacao-label');
+  const obsAjuda = document.getElementById('g-observacao-ajuda');
+  const ehTi = tipo==='suporte-ti';
+  obs.required = ehTi;
+  obsLabel.textContent = ehTi ? 'Descreva a demanda de TI *' : 'Observação';
+  obs.placeholder = ehTi ? 'O que está acontecendo, em qual equipamento/local, desde quando e qual impacto na operação?' : 'detalhe o que precisa';
+  obsAjuda.textContent = ehTi ? 'Inclua a demanda, local/equipamento afetado, mensagem de erro (se houver) e o que já foi tentado. Assim o técnico já recebe contexto para agir.' : '';
+  obsAjuda.classList.toggle('hidden', !ehTi);
   // compra: Itens > Valor > Observação (valor logo depois dos itens).
   // manutencao/suporte-ti: sem itens, Solicitação > Observação > Valor
   // (valor no fim, so pra quando vira orcamento de terceiro).
