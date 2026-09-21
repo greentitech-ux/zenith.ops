@@ -12,6 +12,20 @@ const { createCache } = require('./liveCache');
 const sessions = require('./sessions');
 
 const usersRef = db.collection('users');
+const recuperacoesSenhaRef = db.collection('recuperacoes_senha');
+const RECUPERACAO_TTL_MS = 10 * 60 * 1000;
+
+function normalizarPalavraRecuperacao(valor) {
+  return String(valor || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR');
+}
+
+function validarPalavraRecuperacao(valor) {
+  const frase = normalizarPalavraRecuperacao(valor);
+  if (frase.length < 10 || frase.split(' ').filter(Boolean).length < 2) {
+    throw new Error('Use uma frase de recuperação com ao menos 2 palavras e 10 caracteres.');
+  }
+  return frase;
+}
 
 const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'kpis', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao', 'tarefas', 'estacao-salao', 'estacao-caixa', 'estacao-fechamento'];
 
@@ -698,6 +712,71 @@ async function alterarSenhaPropria(id, senhaAtual, novaSenha, sessionIdAtual) {
   return { ok: true };
 }
 
+// A frase é escolhida pela própria pessoa enquanto está autenticada. Só o
+// hash vai ao Firestore; nem o Master consegue ler a frase depois de salva.
+async function definirPalavraRecuperacao(id, senhaAtual, palavra) {
+  const frase = validarPalavraRecuperacao(palavra);
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  const atual = snap.data();
+  if (!await bcrypt.compare(String(senhaAtual || ''), atual.passwordHash)) throw new Error('Senha atual incorreta.');
+  if (await bcrypt.compare(frase, atual.passwordHash)) throw new Error('A frase de recuperação não pode ser igual à senha.');
+  await ref.update({
+    palavraRecuperacaoHash: await bcrypt.hash(frase, 12),
+    palavraRecuperacaoDefinidaEm: new Date().toISOString(),
+  });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return { ok: true };
+}
+
+// Esta verificação acontece em uma rota própria do login, nunca no chat do
+// Beniboy. O token devolvido é aleatório, de uso único e dura só 10 minutos.
+async function iniciarRecuperacaoSenha(identifier, palavra) {
+  const alvo = await findByIdentifier(identifier);
+  if (!alvo || alvo.active === false || alvo.role === 'master' || !alvo.palavraRecuperacaoHash) return null;
+  const frase = normalizarPalavraRecuperacao(palavra);
+  if (!frase || !await bcrypt.compare(frase, alvo.palavraRecuperacaoHash)) return null;
+  const token = crypto.randomBytes(32).toString('base64url');
+  const id = crypto.createHash('sha256').update(token).digest('hex');
+  await recuperacoesSenhaRef.doc(id).set({
+    userId: alvo.id,
+    criadoEm: new Date().toISOString(),
+    expiraEmMs: Date.now() + RECUPERACAO_TTL_MS,
+    usadoEm: null,
+  });
+  return token;
+}
+
+async function concluirRecuperacaoSenha(token, novaSenha) {
+  if (!novaSenha || String(novaSenha).length < 8) throw new Error('A nova senha deve ter pelo menos 8 caracteres.');
+  const id = crypto.createHash('sha256').update(String(token || '')).digest('hex');
+  const ref = recuperacoesSenhaRef.doc(id);
+  let userId = null;
+  let usuario = null;
+  await db.runTransaction(async (tx) => {
+    const recuperacao = await tx.get(ref);
+    if (!recuperacao.exists) throw new Error('Essa recuperação não é válida. Inicie novamente.');
+    const dados = recuperacao.data();
+    if (dados.usadoEm || !dados.expiraEmMs || Number(dados.expiraEmMs) < Date.now()) {
+      throw new Error('Essa recuperação expirou. Inicie novamente.');
+    }
+    const userRef = usersRef.doc(dados.userId);
+    const user = await tx.get(userRef);
+    if (!user.exists || user.data().active === false) throw new Error('Esse acesso não está disponível para recuperação.');
+    const passwordHash = await bcrypt.hash(String(novaSenha), 12);
+    tx.update(userRef, { passwordHash, locked: false, failedAttempts: 0, precisaTrocarSenha: false, desbloqueadoPeloBotEm: null });
+    tx.update(ref, { usadoEm: new Date().toISOString() });
+    userId = user.id;
+    usuario = user.data().username || user.data().email || user.id;
+  });
+  invalidarUsuario(userId);
+  usersCache.invalidar();
+  await sessions.encerrarTodasDoUsuario(userId);
+  return { ok: true, usuario };
+}
+
 async function remove(id) {
   const ref = usersRef.doc(id);
   const snap = await ref.get();
@@ -718,6 +797,7 @@ function toPublic(doc) {
     active: data.active !== false,
     locked: !!data.locked,
     precisaTrocarSenha: !!data.precisaTrocarSenha,
+    temPalavraRecuperacao: !!data.palavraRecuperacaoHash,
     permissions: data.role === 'master' ? null : data.permissions || emptyPermissions(),
     horarioPermitido: data.role === 'master' ? null : data.horarioPermitido || { ativo: false, inicio: '', fim: '' },
     isAdmin: data.role === 'master' ? null : !!data.isAdmin,
@@ -894,6 +974,9 @@ module.exports = {
   resetPassword,
   desbloquear,
   alterarSenhaPropria,
+  definirPalavraRecuperacao,
+  iniciarRecuperacaoSenha,
+  concluirRecuperacaoSenha,
   remove,
   invalidar: () => usersCache.invalidar(),
 };

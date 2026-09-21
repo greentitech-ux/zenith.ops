@@ -96,6 +96,9 @@
   /* várias logos lado a lado (empresas do grupo, cadastradas em
      login-custom.html) - quebra linha sozinho quando não couber */
   .login-logos{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;}
+  .auth-link{display:block;margin:12px auto 0;border:0;background:none;color:var(--accent);font:600 12px var(--sans);cursor:pointer;text-decoration:underline;text-underline-offset:3px;}
+  .auth-link:hover{color:var(--text);}
+  .auth-voltar{margin-top:14px;text-align:center;color:var(--muted);font-size:12px;}
   /* ===== fim login: balão ===== */
 </style>
 <script src="/tema.js"></script>
@@ -122,6 +125,7 @@
     </label>
     <p id="auth-error" class="auth-error hidden"></p>
     <button type="submit" id="auth-btn">Entrar</button>
+    <button type="button" class="auth-link" onclick="abrirRecuperacao()">Esqueci minha senha</button>
     <p class="auth-suporte">Dúvidas ou problemas pra entrar? Suporte: <a href="https://wa.me/5581995148654" target="_blank" rel="noopener">(81) 99514-8654</a></p>
   </form>
 
@@ -136,6 +140,43 @@
       <img src="/grupo-bravo.png" alt="Grupo Bravo Empresarial">
     </div>
   </div>
+</section>
+
+<section id="recuperar-senha-screen" class="auth-screen hidden">
+  <form id="recuperar-senha-form" class="auth-card">
+    <div class="auth-marca"><span class="auth-wordmark" style="font-size:22px;">No<b>Pulso</b></span></div>
+    <h1 style="text-align:center;">Recuperar acesso</h1>
+    <p style="font-size:12px;margin:2px 0 0;text-align:center;color:var(--muted);">Informe seu login e a frase de recuperação que você mesmo criou.</p>
+    <label>Usuário ou email<input type="text" id="rs-identificador" required autocomplete="username"></label>
+    <label>Frase de recuperação<input type="password" id="rs-palavra" required autocomplete="off"></label>
+    <p id="rs-error" class="auth-error hidden"></p>
+    <button type="submit" id="rs-btn">Validar e criar nova senha</button>
+    <div class="auth-voltar"><button type="button" class="auth-link" onclick="voltarLogin()">Voltar ao login</button></div>
+  </form>
+</section>
+
+<section id="nova-senha-recuperacao-screen" class="auth-screen hidden">
+  <form id="nova-senha-recuperacao-form" class="auth-card">
+    <div class="auth-marca"><span class="auth-wordmark" style="font-size:22px;">No<b>Pulso</b></span></div>
+    <h1 style="text-align:center;">Crie uma nova senha</h1>
+    <p style="font-size:12px;margin:2px 0 0;text-align:center;color:var(--muted);">A recuperação foi confirmada. Esta etapa é única e expira em 10 minutos.</p>
+    <label>Nova senha<input type="password" id="nr-nova" required minlength="8" autocomplete="new-password"></label>
+    <label>Confirmar nova senha<input type="password" id="nr-confirmar" required minlength="8" autocomplete="new-password"></label>
+    <p id="nr-error" class="auth-error hidden"></p>
+    <button type="submit" id="nr-btn">Salvar nova senha</button>
+  </form>
+</section>
+
+<section id="palavra-recuperacao-screen" class="auth-screen hidden">
+  <form id="palavra-recuperacao-form" class="auth-card">
+    <div class="auth-marca"><span class="auth-wordmark" style="font-size:22px;">No<b>Pulso</b></span></div>
+    <h1 style="text-align:center;">Proteja sua recuperação</h1>
+    <p style="font-size:12px;margin:2px 0 0;text-align:center;color:var(--muted);">Crie uma frase pessoal com ao menos duas palavras. Ela permite criar uma nova senha sem precisar receber código.</p>
+    <label>Frase de recuperação<input type="password" id="pr-frase" required minlength="10" autocomplete="new-password"></label>
+    <label>Confirmar frase<input type="password" id="pr-confirmar" required minlength="10" autocomplete="new-password"></label>
+    <p id="pr-error" class="auth-error hidden"></p>
+    <button type="submit" id="pr-btn">Salvar frase e continuar</button>
+  </form>
 </section>
 
 <section id="trocar-senha-screen" class="auth-screen hidden">
@@ -225,6 +266,10 @@ document.getElementById('auth-form').addEventListener('submit', async (e)=>{
       mostrarTrocarSenha(data.token, senhaDigitada);
       return;
     }
+    if(data.user && !data.user.temPalavraRecuperacao){
+      mostrarPalavraRecuperacao(data.token, senhaDigitada, data.user);
+      return;
+    }
     location.href = paginaInicial(data.user);
   }catch(err){
     erroEl.textContent = err.message;
@@ -269,6 +314,7 @@ document.getElementById('trocar-senha-form').addEventListener('submit', async (e
     if(!res.ok) throw new Error(data.error || 'Não foi possível salvar a nova senha.');
     try{
       const me = await fetch('/api/me', { headers: { Authorization: 'Bearer '+form.dataset.token } }).then(r=>r.json());
+      if(!me.temPalavraRecuperacao){ mostrarPalavraRecuperacao(form.dataset.token, nova, me); return; }
       location.href = paginaInicial(me);
     }catch(e){ location.href = '/tarefas.html'; }
   }catch(err){
@@ -276,6 +322,42 @@ document.getElementById('trocar-senha-form').addEventListener('submit', async (e
     erroEl.classList.remove('hidden');
     btn.disabled = false; btn.textContent = 'Salvar e continuar';
   }
+});
+
+function esconderTelasAuth(){
+  ['auth-screen','trocar-senha-screen','recuperar-senha-screen','nova-senha-recuperacao-screen','palavra-recuperacao-screen'].forEach(id=>document.getElementById(id).classList.add('hidden'));
+}
+function abrirRecuperacao(){ esconderTelasAuth(); document.getElementById('recuperar-senha-screen').classList.remove('hidden'); document.getElementById('rs-identificador').focus(); }
+function voltarLogin(){ esconderTelasAuth(); document.getElementById('auth-screen').classList.remove('hidden'); document.getElementById('auth-password').value=''; document.getElementById('auth-password').focus(); }
+function mostrarPalavraRecuperacao(token, senhaAtual, user){
+  esconderTelasAuth();
+  const form=document.getElementById('palavra-recuperacao-form');
+  form.dataset.token=token; form.dataset.senhaAtual=senhaAtual; form.dataset.user=JSON.stringify(user||{});
+  document.getElementById('palavra-recuperacao-screen').classList.remove('hidden');
+  document.getElementById('pr-frase').focus();
+}
+document.getElementById('recuperar-senha-form').addEventListener('submit', async (e)=>{
+  e.preventDefault(); const btn=document.getElementById('rs-btn'), erro=document.getElementById('rs-error'); erro.classList.add('hidden'); btn.disabled=true; btn.textContent='Validando...';
+  try{
+    const res=await fetch('/api/auth/recuperar-senha/iniciar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier:document.getElementById('rs-identificador').value,palavraChave:document.getElementById('rs-palavra').value})});
+    const data=await res.json(); if(!res.ok) throw new Error(data.error||'Não foi possível validar.');
+    document.getElementById('nova-senha-recuperacao-form').dataset.token=data.token;
+    document.getElementById('rs-palavra').value=''; esconderTelasAuth(); document.getElementById('nova-senha-recuperacao-screen').classList.remove('hidden'); document.getElementById('nr-nova').focus();
+  }catch(err){erro.textContent=err.message;erro.classList.remove('hidden');btn.disabled=false;btn.textContent='Validar e criar nova senha';}
+});
+document.getElementById('nova-senha-recuperacao-form').addEventListener('submit', async (e)=>{
+  e.preventDefault(); const btn=document.getElementById('nr-btn'),erro=document.getElementById('nr-error'),nova=document.getElementById('nr-nova').value,confirmar=document.getElementById('nr-confirmar').value; erro.classList.add('hidden');
+  if(nova!==confirmar){erro.textContent='As senhas não coincidem.';erro.classList.remove('hidden');return;}
+  btn.disabled=true;btn.textContent='Salvando...';
+  try{const res=await fetch('/api/auth/recuperar-senha/concluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:e.target.dataset.token,novaSenha:nova})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Não foi possível salvar.');alert('Senha criada com sucesso. Entre com a nova senha.');voltarLogin();}
+  catch(err){erro.textContent=err.message;erro.classList.remove('hidden');btn.disabled=false;btn.textContent='Salvar nova senha';}
+});
+document.getElementById('palavra-recuperacao-form').addEventListener('submit', async (e)=>{
+  e.preventDefault(); const form=e.target,btn=document.getElementById('pr-btn'),erro=document.getElementById('pr-error'),frase=document.getElementById('pr-frase').value,confirmar=document.getElementById('pr-confirmar').value;erro.classList.add('hidden');
+  if(frase!==confirmar){erro.textContent='As frases não coincidem.';erro.classList.remove('hidden');return;}
+  btn.disabled=true;btn.textContent='Salvando...';
+  try{const res=await fetch('/api/me/palavra-recuperacao',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+form.dataset.token},body:JSON.stringify({senhaAtual:form.dataset.senhaAtual,palavraChave:frase})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Não foi possível salvar.');const user=JSON.parse(form.dataset.user||'{}');location.href=paginaInicial(user);}
+  catch(err){erro.textContent=err.message;erro.classList.remove('hidden');btn.disabled=false;btn.textContent='Salvar frase e continuar';}
 });
 
 // qualquer erro no login (senha errada, conta bloqueada, fora do horário,

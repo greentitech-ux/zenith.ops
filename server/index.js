@@ -457,6 +457,11 @@ const LEGACY_HMAC_KEY = process.env.ADYEN_HMAC_KEY || '';
 const LOGIN_FALHAS = new Map();
 const LOGIN_JANELA_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FALHAS = 10;
+// A frase de recuperação é um fator secreto; limita tentativas por IP+login
+// sem guardar a frase enviada. O banco também nunca recebe a frase em claro.
+const RECUPERACAO_FALHAS = new Map();
+const RECUPERACAO_JANELA_MS = 15 * 60 * 1000;
+const RECUPERACAO_MAX_FALHAS = 5;
 function chaveLogin(req) {
   const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
   const conta = String(req.body.identifier || req.body.email || '').trim().toLowerCase();
@@ -484,6 +489,48 @@ app.post('/api/auth/login', async (req, res) => {
       for (const [k, v] of LOGIN_FALHAS) { if (Date.now() - v.desdeMs >= LOGIN_JANELA_MS) LOGIN_FALHAS.delete(k); }
     }
     res.status(401).json({ error: err.message });
+  }
+});
+
+function chaveRecuperacao(req) {
+  const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+  const conta = String(req.body.identifier || '').trim().toLowerCase();
+  return `${ip}|${conta}`;
+}
+
+// Recuperação pública deliberadamente separada do chat: a frase nunca entra
+// no histórico do Beniboy, nem é enviada ao modelo de IA.
+app.post('/api/auth/recuperar-senha/iniciar', async (req, res) => {
+  const chave = chaveRecuperacao(req);
+  const falhas = RECUPERACAO_FALHAS.get(chave);
+  if (falhas && falhas.count >= RECUPERACAO_MAX_FALHAS && Date.now() - falhas.desdeMs < RECUPERACAO_JANELA_MS) {
+    return res.status(429).json({ error: 'Muitas tentativas. Aguarde 15 minutos e tente novamente.' });
+  }
+  try {
+    const token = await users.iniciarRecuperacaoSenha(req.body.identifier, req.body.palavraChave);
+    if (!token) throw new Error('Dados de recuperação inválidos.');
+    RECUPERACAO_FALHAS.delete(chave);
+    res.json({ token });
+  } catch (err) {
+    const atual = RECUPERACAO_FALHAS.get(chave);
+    if (!atual || Date.now() - atual.desdeMs >= RECUPERACAO_JANELA_MS) RECUPERACAO_FALHAS.set(chave, { count: 1, desdeMs: Date.now() });
+    else atual.count += 1;
+    res.status(400).json({ error: 'Não foi possível validar os dados de recuperação.' });
+  }
+});
+
+app.post('/api/auth/recuperar-senha/concluir', async (req, res) => {
+  try {
+    const resultado = await users.concluirRecuperacaoSenha(req.body.token, req.body.novaSenha);
+    push.notifySolicitacao(
+      '🔐 Senha redefinida por palavra-chave',
+      `${resultado.usuario} redefiniu a própria senha pela recuperação segura.`,
+      `recuperacao-senha-${resultado.usuario}`,
+      '/usuarios.html',
+    ).catch((e) => console.error('[recuperacao] falha ao avisar Master:', e.message));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Não foi possível redefinir a senha.' });
   }
 });
 
@@ -2315,6 +2362,7 @@ app.get('/api/me', async (req, res) => {
     podeBonifVerValorTotal: req.podeBonifVerValorTotal,
     podeBonifVerColaboradores: req.podeBonifVerColaboradores,
     precisaTrocarSenha: !!req.user.precisaTrocarSenha,
+    temPalavraRecuperacao: !!req.user.palavraRecuperacaoHash,
     isQaMaster: req.isQaMaster,
     isQaUser: req.isQaUser,
     ehTimeSuporte: ehSuporte,
@@ -2344,6 +2392,14 @@ app.get('/api/me', async (req, res) => {
 app.post('/api/me/senha', async (req, res) => {
   try {
     res.json(await users.alterarSenhaPropria(req.user.id, req.body.senhaAtual, req.body.novaSenha, req.sid));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/me/palavra-recuperacao', async (req, res) => {
+  try {
+    res.json(await users.definirPalavraRecuperacao(req.user.id, req.body.senhaAtual, req.body.palavraChave));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
