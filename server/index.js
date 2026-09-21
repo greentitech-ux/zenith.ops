@@ -5602,12 +5602,19 @@ app.put('/api/loja-status/:codigo/computadores/:posto/perfil-estacao', auth.requ
 app.post('/api/loja-status/:codigo/computadores/:posto/inventariar-atalhos', auth.requireMaster, async (req, res) => {
   try {
     if (!(await exigirSenhaDoMaster(req, res))) return;
-    const comando = await lojaStatus.enfileirarComando(req.params.codigo, req.params.posto, lojaStatus.COMANDO_INVENTARIO_ESTACAO, {
-      origem: 'noc-inventario-atalhos', solicitadoPor: req.user && req.user.email,
-    });
-    res.json({ ok: true, comandoId: comando.id, mensagem: 'Leitura solicitada. A lista aparece nesta ficha quando o NOCZenith responder.' });
+    const pedido = await lojaStatus.pedirInventarioAtalhos(req.params.codigo, req.params.posto);
+    res.json({ ok: true, ...pedido, mensagem: 'Leitura solicitada ao usuário logado. A lista aparece nesta ficha quando o NOCZenith responder.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/loja-status/:codigo/computadores/:posto/inventario-atalhos', async (req, res) => {
+  try {
+    const token = req.headers['x-noc-token'] || null;
+    res.json(await lojaStatus.registrarInventarioAtalhos(req.params.codigo, req.params.posto, req.body, token));
+  } catch (err) {
+    res.status(403).json({ error: err.message });
   }
 });
 

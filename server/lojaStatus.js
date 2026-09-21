@@ -1211,7 +1211,7 @@ const CAMPOS_SO_DO_DETALHE = [
   'eventos', 'ipHistorico', 'chatMensagens', 'dispositivos',
   'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
   'ultimoComandoTexto', 'ultimoComandoResultado', 'ultimoComandoErro',
-  'atalhosDesktop',
+  'atalhosDesktop', 'atalhosBarraTarefas',
 ];
 function resumoDe(doc) {
   const copia = { ...doc };
@@ -1327,6 +1327,8 @@ function sanitizarEstacao(entrada) {
     .filter((x) => ITENS_ESTACAO_APROVAVEIS.includes(x));
   const personalizados = Array.isArray(e.atalhosPersonalizados) ? e.atalhosPersonalizados : [];
   const atalhosPersonalizados = [...new Set(personalizados.map(normalizarNomeAtalho).filter(Boolean))].slice(0, 40);
+  const barraEntrada = Array.isArray(e.barraTarefasAprovada) ? e.barraTarefasAprovada : [];
+  const barraTarefasAprovada = [...new Set(barraEntrada.map(normalizarNomeAtalho).filter(Boolean))].slice(0, 40);
   return {
     ativa: ativo,
     perfil: ativo ? perfil : 'nenhum',
@@ -1341,6 +1343,7 @@ function sanitizarEstacao(entrada) {
     rdpDominosObrigatorio: ativo && e.rdpDominosObrigatorio === true,
     atalhosAprovados,
     atalhosPersonalizados,
+    barraTarefasAprovada,
   };
 }
 function sanitizarPolitica(entrada) {
@@ -1511,6 +1514,9 @@ async function configuracaoAgente(codigo, posto, token) {
   const capturarAgora = capturaPendente(atual);
   if (atual.noPulsoPrintCapturarEm) await gravarEEspelhar(codigo, posto, { noPulsoPrintCapturarEm: null });
   const politica = sanitizarPolitica(atual.politica);
+  // Pedido one-shot do Master: a instância do USUÁRIO logado lê a Área de
+  // Trabalho e a barra de tarefas. O serviço SYSTEM não consegue enxergá-las.
+  if (Number(atual.inventarioAtalhosPendenteEm || 0) > 0) politica.estacao.inventarioPendenteEm = Number(atual.inventarioAtalhosPendenteEm);
   // so resolve a arte quando a maquina de fato aplica papel de parede: quem
   // esta com a chave desligada nao paga leitura de config nem de unidades
   const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo, posto) : null;
@@ -1521,6 +1527,36 @@ async function configuracaoAgente(codigo, posto, token) {
     politicaVersao: Number(atual.politicaVersao || 0),
     versaoAplicacao: versaoAplicacao(atual.politicaVersao, arte),
   };
+}
+
+function sanitizarItensVisuais(entrada, limite = 100) {
+  const tipos = ['atalho', 'link', 'rdp', 'app', 'pasta', 'arquivo'];
+  const origens = ['usuario', 'publica', 'barra-tarefas'];
+  return (Array.isArray(entrada) ? entrada : []).map((item) => {
+    const nome = String(item && item.nome || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 120);
+    const tipo = String(item && item.tipo || '').toLowerCase();
+    const origem = String(item && item.origem || '').toLowerCase();
+    return nome && tipos.includes(tipo) && origens.includes(origem) ? { nome, tipo, origem } : null;
+  }).filter(Boolean).slice(0, limite);
+}
+
+async function pedirInventarioAtalhos(codigo, posto) {
+  const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data();
+  if (!atual) throw new Error('Computador não encontrado.');
+  const politicaVersao = Number(atual.politicaVersao || 0) + 1;
+  await gravarEEspelhar(codigo, posto, { inventarioAtalhosPendenteEm: Date.now(), politicaVersao });
+  return { codigo, posto, politicaVersao };
+}
+
+async function registrarInventarioAtalhos(codigo, posto, dados, token) {
+  const ref = COLLECTION.doc(docIdFor(codigo, posto));
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Computador não encontrado.');
+  exigirTokenSeTiver(snap.data(), token);
+  const areaTrabalho = sanitizarItensVisuais(dados && dados.areaTrabalho);
+  const barraTarefas = sanitizarItensVisuais(dados && dados.barraTarefas);
+  await gravarEEspelhar(codigo, posto, { atalhosDesktop: areaTrabalho, atalhosBarraTarefas: barraTarefas, atalhosDesktopEm: Date.now(), inventarioAtalhosPendenteEm: null });
+  return { ok: true, areaTrabalho: areaTrabalho.length, barraTarefas: barraTarefas.length };
 }
 
 // pedido de captura do Master vale 5 minutos: tempo de sobra pro agente
@@ -4236,5 +4272,5 @@ module.exports = {
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, pedirInventarioAtalhos, registrarInventarioAtalhos, noPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
 };

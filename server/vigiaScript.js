@@ -21,7 +21,8 @@
 // atalhos removidos antes da limpeza e recebendo alterações automaticamente.
 // 82: preserva também atalhos específicos inventariados na máquina (ex.: Linx).
 // 83: controla também a exibição da Lixeira pela política da estação.
-const VERSAO_VIGIA = 83;
+// 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
+const VERSAO_VIGIA = 84;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -150,6 +151,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   const urlPapelDeParede = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/papel-de-parede`;
   const urlTelemetria = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/telemetria`;
   const urlConfiguracaoAgente = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/configuracao-agente`;
+  const urlInventarioAtalhos = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/inventario-atalhos`;
   const urlVersao = `${APP_BASE_URL}/api/loja-status/vigia-versao`;
   const urlScriptProprio = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`;
   const nomeTarefa = 'NOCZenith_' + posto;
@@ -316,6 +318,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '$AgentToken = "' + tokenSeguro + '"',
     '$CabecalhosAgente = @{ "X-NOC-Token" = $AgentToken }',
     '$UrlConfiguracaoAgente = "' + urlConfiguracaoAgente + '"',
+    '$UrlInventarioAtalhos = "' + urlInventarioAtalhos + '"',
     '$UrlEstadoAgente = "' + urlEstadoAgente + '"',
     '$NoPulsoPrintAtivoInicial = $' + noPulsoPrintInicial,
     '',
@@ -1886,6 +1889,28 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  } catch { Escrever-Log "Perfil da estação: não consegui atualizar a Lixeira ($($_.Exception.Message))."; return $false }',
     '}',
     '',
+    '# Lê ícones no perfil visível do usuário. A barra de tarefas tradicional',
+    '# fica na pasta User Pinned\\TaskBar; apps UWP que o Windows não expõe ali',
+    '# não são inventados nem removidos por este agente.',
+    'function Enviar-InventarioAtalhos {',
+    '  if ($Servico) { return $false }',
+    '  try {',
+    '    $area = New-Object System.Collections.Generic.List[object]; $barra = New-Object System.Collections.Generic.List[object]',
+    '    foreach ($par in @(@($env:USERPROFILE + "\\Desktop", "usuario"), @($env:PUBLIC + "\\Desktop", "publica"))) {',
+    '      if (-not (Test-Path -LiteralPath $par[0])) { continue }',
+    '      foreach ($i in @(Get-ChildItem -LiteralPath $par[0] -Force -ErrorAction SilentlyContinue)) {',
+    '        $tipo = if ($i.PSIsContainer) { "pasta" } elseif ($i.Extension -ieq ".lnk") { "atalho" } elseif ($i.Extension -ieq ".url") { "link" } elseif ($i.Extension -ieq ".rdp") { "rdp" } elseif ($i.Extension -ieq ".exe") { "app" } else { "arquivo" }',
+    '        [void]$area.Add([PSCustomObject]@{ nome=$i.Name; tipo=$tipo; origem=$par[1] })',
+    '      }',
+    '    }',
+    '    $pastaBarra = $env:APPDATA + "\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar"',
+    '    if (Test-Path -LiteralPath $pastaBarra) { foreach ($i in @(Get-ChildItem -LiteralPath $pastaBarra -File -Force -ErrorAction SilentlyContinue)) { [void]$barra.Add([PSCustomObject]@{ nome=$i.Name; tipo="atalho"; origem="barra-tarefas" }) } }',
+    '    $corpo = @{ areaTrabalho=@($area | Select-Object -First 120); barraTarefas=@($barra | Select-Object -First 80) } | ConvertTo-Json -Depth 4',
+    '    Invoke-RestMethod -Uri $UrlInventarioAtalhos -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpo -TimeoutSec 20 | Out-Null',
+    '    Escrever-Log "Inventário visual enviado: $($area.Count) item(ns) da Área de Trabalho e $($barra.Count) da barra de tarefas."; return $true',
+    '  } catch { Escrever-Log "Falha ao enviar inventário visual: $($_.Exception.Message)"; return $false }',
+    '}',
+    '',
     'function Aplicar-PerfilEstacao($estacao) {',
     '  # A instância SYSTEM não enxerga a Área de Trabalho do operador. Ela',
     '  # marca a política como atendida no próprio contexto; o login aplica a',
@@ -1996,6 +2021,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // política e a imagem já existiam antes da atualização.
     '    $versao = "v$VersaoScript|$versaoServidor"',
     '    if ((Versao-PoliticaAplicada) -eq $versao) { return }',
+    '    if ($pol.estacao -and $pol.estacao.inventarioPendenteEm -and -not (Enviar-InventarioAtalhos)) { return }',
     '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
