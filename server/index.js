@@ -1408,6 +1408,7 @@ async function usuarioLogadoDoHeader(req) {
   return {
     id: user.id,
     username: user.username || user.email,
+    email: user.email || null,
     isMaster,
     // Só libera a mesma criação de tarefa que a tela Meu Dia já permite.
     // Não dá acesso ao catálogo administrativo exclusivo do Master.
@@ -1513,7 +1514,15 @@ app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), asyn
       const path = await storage.salvarArquivo(req.params.id, req.file, 'suporte-chat');
       anexo = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream', tamanho: req.file.size };
     }
-    const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'visitante', texto, token: req.body.token, anexo });
+    let chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'visitante', texto, token: req.body.token, anexo });
+    // Uma conversa pode ter sido aberta antes do login e sobrevivido no
+    // navegador. Na primeira mensagem autenticada, vincula o retrato mínimo
+    // da conta: assim o Beniboy consegue confirmar que a própria pessoa pede
+    // o desbloqueio, sem usar o texto livre do campo "contato" como prova.
+    const logado = await usuarioLogadoDoHeader(req);
+    if (logado && chat.logado?.id !== logado.id) {
+      chat = await suporteChat.atualizarLogado(chat.id, logado);
+    }
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     // notificacao no celular do time tambem em MENSAGEM nova (nao so na
     // abertura da conversa) - o atendente ve e responde de onde estiver

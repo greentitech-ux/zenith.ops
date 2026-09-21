@@ -662,17 +662,19 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     if (alvo) {
       if (alvo.role === 'master') return 'Não encontrei esse usuário (ou é o Master, que não desbloqueia por aqui) - chame um atendente.';
 
-      // confere identidade antes de mexer em QUALQUER acesso: quem esta no
-      // chat e do time (Master/Admin/secao suporte, ajudando outra pessoa) OU
-      // o contato informado no INICIO da conversa bate com o e-mail cadastrado
-      // desse acesso (autoatendimento). Sem essa checagem, qualquer visitante
-      // anonimo do widget publico poderia mexer no login de QUALQUER pessoa so
-      // sabendo o usuario dela.
+      // Confere identidade antes de mexer em QUALQUER acesso: quem está no
+      // chat é do time (Master/Admin/seção suporte), OU a sessão autenticada
+      // é exatamente do login pedido, OU o contato inicial bate com o e-mail.
+      // A sessão é a prova mais forte: antes o bot ignorava esse vínculo e
+      // enviava a própria pessoa para humano só porque o campo contato tinha
+      // telefone/apelido. Sem nenhuma dessas provas, visitante anônimo nunca
+      // consegue mexer em uma conta só sabendo o username.
       const staffAjudando = !!(chat.logado && chat.logado.ehTimeSuporte);
+      const propriaSessao = !!(chat.logado?.id && alvo.id && String(chat.logado.id) === String(alvo.id));
       const contatoBate = !!(chat.contato && alvo.email
         && String(chat.contato).trim().toLowerCase() === String(alvo.email).trim().toLowerCase());
-      if (!staffAjudando && !contatoBate) {
-        return 'Não consigo confirmar que é o dono desse acesso (o contato informado no início da conversa não bate com o e-mail cadastrado) - chame um atendente.';
+      if (!staffAjudando && !propriaSessao && !contatoBate) {
+        return 'Para proteger esse acesso, entre no NoPulso com a sua conta e mande a mensagem novamente, ou informe o e-mail cadastrado. Se não conseguir entrar, chame um atendente.';
       }
 
       if (!alvo.locked) return `O acesso de "${alvo.username || alvo.email}" não está bloqueado agora.`;

@@ -151,6 +151,20 @@ async function getComToken(id, token) {
   return chat;
 }
 
+// A conversa pública pode ter sido aberta antes do login e continuar salva no
+// aparelho. Quando a pessoa manda uma nova mensagem já autenticada, o servidor
+// atualiza somente o retrato mínimo da conta. Isso permite autoatendimento do
+// PRÓPRIO login (ex.: desbloqueio), sem transformar nome/telefone digitado no
+// chat em prova de identidade.
+async function atualizarLogado(id, logado) {
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  if (!logado || !logado.id) return chat;
+  await COLLECTION.doc(id).update({ logado, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
 // `bot: true` = mensagem do Beniboy (suporteBot.js): entra como 'suporte' na
 // conversa, mas NAO marca atendidoPorEmail - esse campo continua significando
 // "um humano assumiu" (e e o que faz o bot se calar)
@@ -638,7 +652,7 @@ async function finalizarOciosos() {
 }
 
 module.exports = {
-  criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
+  criar, getOne, getPublico, getComToken, atualizarLogado, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,

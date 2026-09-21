@@ -530,7 +530,12 @@
       fd.append('token', salvo.token);
       fd.append('texto', texto);
       if (arquivo) fd.append('anexo', arquivo);
-      const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/mensagem`, { method: 'POST', body: fd });
+      // Conversas antigas sobrevivem no aparelho. Reenvia a sessão atual em
+      // cada mensagem para o servidor poder reconhecer a própria pessoa no
+      // fluxo seguro de desbloqueio, sem nunca exigir login do visitante.
+      const authToken = localStorage.getItem('authToken');
+      const headers = authToken ? { Authorization: 'Bearer ' + authToken } : {};
+      const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/mensagem`, { method: 'POST', headers, body: fd });
       if (r.ok) {
         window.zenithRascunhos?.limparCampoEnviado(input);
         input.value = '';
