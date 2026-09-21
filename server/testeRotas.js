@@ -14148,7 +14148,9 @@ setTimeout(async () => {
     // normalize: pagador do Pix no additionalData (chave "pix.*Name")
     const nPix = nz.normalize({ pspReference: 'x', merchantReference: 'x', eventCode: 'AUTHORISATION', success: 'true', paymentMethod: 'pix', merchantAccountCode: 'DOM19911', amount: { value: 4200, currency: 'BRL' }, additionalData: { 'pix.payerName': 'Joana Prestes', shopperReference: 'DOM19911:' } });
     const nCartao = nz.normalize({ pspReference: 'y', merchantReference: 'y', eventCode: 'AUTHORISATION', success: 'true', paymentMethod: 'visa', merchantAccountCode: 'DOM19911', amount: { value: 4200, currency: 'BRL' }, additionalData: { cardHolderName: 'MARIA S SILVA', shopperName: '[first name=Maria, infix=null, last name=Silva, gender=null]' } });
+    const nContato = nz.normalize({ pspReference: 'z', merchantReference: 'z', eventCode: 'AUTHORISATION', success: 'true', paymentMethod: 'visa', merchantAccountCode: 'DOM19911', amount: { value: 4200, currency: 'BRL' }, additionalData: { shopperEmail: 'cliente@teste.com', shopperTelephone: '81999990000', shopperIP: '192.0.2.10', shopperCountry: 'BR', issuerCountry: 'US', fundingSource: 'CREDIT', totalFraudScore: '42', fraudResultType: 'RED', avsResult: 'No Match', cvcResult: '1 Match', threeDOffered: 'true', threeDAuthenticated: 'false', deviceType: 'Phone', browserCode: 'Chrome', alias: 'A123', 'deliveryAddress.street': 'Rua do Sol', 'deliveryAddress.houseNumberOrName': '123', 'deliveryAddress.city': 'Recife', 'deliveryAddress.stateOrProvince': 'PE', 'deliveryAddress.postalCode': '50000-000', 'deliveryAddress.country': 'BR' } });
     const srcStore = require('fs').readFileSync(__dirname + '/store.js', 'utf8');
+    const htmlMonitor = require('fs').readFileSync(__dirname + '/public/monitor.html', 'utf8');
     const conf = {
       'Pix: o card mostra o nome do cliente, não a conta da Adyen': pedido('pix-nome-1').cliente === 'Joana Prestes',
       'Pix: nome que só veio no estorno também entra (antes ficava "DOM19911:" pra sempre)': pedido('pix-nome-2').cliente === 'Carlos Meira',
@@ -14159,6 +14161,29 @@ setTimeout(async () => {
       // o webhook: o nome do pagador do Pix (Include Pix Payer info) vira nomeCliente
       'normalize lê o pagador do Pix no additionalData ("pix.payerName")': nPix.nomeCliente === 'Joana Prestes' && nPix.cardHolder === null,
       'normalize do cartão não mudou (shopperName limpo, cardHolder impresso)': nCartao.nomeCliente === 'Maria Silva' && nCartao.cardHolder === 'MARIA S SILVA',
+      'webhook guarda telefone, e-mail e endereço de entrega enviados pela Adyen':
+        nContato.telefoneCliente === '81999990000' && nContato.emailCliente === 'cliente@teste.com'
+        && nContato.enderecoCliente === 'Rua do Sol, 123 · Recife - PE · 50000-000 · BR'
+        && nContato.enderecoTipo === 'entrega',
+      'webhook guarda sinais explicáveis de risco sem transformar score sozinho em fraude':
+        nContato.scoreRiscoAdyen === 42 && nContato.resultadoRiscoAdyen === 'RED'
+        && nContato.shopperIp === '192.0.2.10' && nContato.paisCliente === 'BR'
+        && nContato.paisEmissor === 'US' && nContato.fonteCartao === 'CREDIT'
+        && nContato.resultadoAvs === 'No Match' && nContato.threeDAutenticado === 'false',
+      'Monitor mostra o endereço no detalhe, agrega entre eventos e deixa pesquisar':
+        /Endereço de \$\{d\.enderecoTipo===/.test(htmlMonitor)
+        && /if\(!rep\.enderecoCliente && t\.enderecoCliente\)/.test(htmlMonitor)
+        && /\(d\.enderecoCliente\|\|''\)\.toLowerCase\(\)\.includes\(q\)/.test(htmlMonitor),
+      'Raio-X mostra métricas, regras e reserva confirmação para chargeback':
+        /function raioXRisco\(pedido\)/.test(htmlMonitor)
+        && /\['Pedidos',pedidos\.length\].*\['Cartões',cartoes\.size\]/s.test(htmlMonitor)
+        && /um único dado nunca confirma fraude/.test(htmlMonitor)
+        && /chargebacks>0/.test(htmlMonitor),
+      'Monitor permite arrastar colunas, persiste a ordem e oferece restauração':
+        /data-col="data"/.test(htmlMonitor)
+        && /function configurarColunasArrastaveis\(\)/.test(htmlMonitor)
+        && /monitorOrdemColunasV1/.test(htmlMonitor)
+        && /function restaurarOrdemColunas\(\)/.test(htmlMonitor),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPixNome = !falhas.length;
@@ -17563,6 +17588,18 @@ setTimeout(async () => {
           return !!fn && /c\.fechamentos/.test(fn[0]) && /lançamento\(s\)/.test(fn[0])
             && /c\.podeExcluir/.test(fn[0]) && /unidades-duplicadas/.test(htmlG);
         })(),
+      'a pesquisa de unidades fica antes do alerta e filtra nome, código, seção ou grupo':
+        htmlG.indexOf('id="ue-busca"') < htmlG.indexOf('id="unidades-duplicadas"')
+        && /\[u\.nome,u\.codigo,u\.secao,u\.grupo\]\.join\(' '\)/.test(htmlG)
+        && /normalize\('NFD'\)/.test(htmlG),
+      'a pesquisa mostra a contagem e pode ser limpa sem recarregar a página':
+        /id="ue-busca-status"[^>]*aria-live="polite"/.test(htmlG)
+        && /id="ue-busca-limpar"/.test(htmlG)
+        && /campo\.value=''; campo\.focus\(\); renderUnidadesExtrasLista\(\)/.test(htmlG),
+      'ações dos grupos não interpolam cadastro dentro de onclick':
+        /data-grupo-id="\$\{escapeHtml\(String\(g\.id\)\)\}"/.test(htmlG)
+        && /document\.getElementById\('grupos-body'\)\.addEventListener\('click'/.test(htmlG)
+        && !/onclick="excluirGrupo\('\$\{g\.id\}/.test(htmlG),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okDuplicadaExcluir = !falhas.length;

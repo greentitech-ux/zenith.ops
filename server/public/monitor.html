@@ -74,6 +74,10 @@
   .alert .t1{font-size:13px;font-weight:600;} .alert .t2{font-size:12px;color:var(--muted);margin-top:2px;font-family:var(--mono);}
   table{border-collapse:collapse;font-size:11px;white-space:nowrap;width:100%;}
   thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);white-space:nowrap;}
+  #tx-table-wrap thead th[draggable="true"]{cursor:grab;user-select:none;}
+  #tx-table-wrap thead th[draggable="true"]::after{content:' ⋮⋮';opacity:.35;font-size:8px;}
+  #tx-table-wrap thead th.col-dragging{opacity:.4;}
+  #tx-table-wrap thead th.col-drop{box-shadow:inset 3px 0 0 var(--accent);color:var(--accent);}
   tbody td{padding:6px 10px;border-bottom:1px solid #1a1f26;white-space:nowrap;}
   tbody td.statuscell{white-space:normal;}
   tbody tr:hover{background:var(--panel2);cursor:pointer;}
@@ -278,10 +282,12 @@
       <div class="multiselect-panel" id="ms-unidade-panel"></div>
     </div>
     <input id="f-search" placeholder="Buscar pedido, cliente, últimos dígitos...">
+    <span style="font-size:10px;color:var(--muted);">↔ arraste os títulos</span>
+    <button type="button" class="multiselect-btn" onclick="restaurarOrdemColunas()" title="Voltar as colunas para a posição original">Restaurar colunas</button>
   </div>
   <div class="tablewrap" id="tx-table-wrap" style="max-height:518px;">
-    <table>
-      <thead><tr><th>Hora/Data</th><th>Unid.</th><th>Nome do Cliente</th><th class="statuscell">Status</th><th>Nome do Cartão</th><th>Método</th><th>Valor</th><th>Final do Cartão</th><th>Qtd. Pedidos</th><th>Aprovados</th><th>Recusados</th><th>Estornados</th><th>Fraude</th><th>Banco</th><th>Observação</th></tr></thead>
+    <table id="tx-table">
+      <thead><tr><th data-col="data">Hora/Data</th><th data-col="unidade">Unid.</th><th data-col="cliente">Nome do Cliente</th><th data-col="status" class="statuscell">Status</th><th data-col="titular">Nome do Cartão</th><th data-col="metodo">Método</th><th data-col="valor">Valor</th><th data-col="cartao">Final do Cartão</th><th data-col="pedidos">Qtd. Pedidos</th><th data-col="aprovados">Aprovados</th><th data-col="recusados">Recusados</th><th data-col="estornados">Estornados</th><th data-col="fraude">Fraude</th><th data-col="banco">Banco</th><th data-col="observacao">Observação</th></tr></thead>
       <tbody id="tx-body"></tbody>
     </table>
   </div>
@@ -348,6 +354,11 @@
     <div class="alerts" id="fraude-monitor" style="max-height:400px;"></div>
   </div>
 </div>
+
+<details class="panel" style="margin-top:16px;" id="regras-risco-panel">
+  <summary style="cursor:pointer;font-weight:700;font-size:13px;">🛡️ Regras claras do Raio-X de risco</summary>
+  <div id="regras-risco-lista" style="margin-top:12px;"></div>
+</details>
 
 <div class="panel hidden" id="refund-panel" style="margin-top:16px;">
   <h2>Solicitações de estorno <span class="n" id="refund-count"></span></h2>
@@ -1254,6 +1265,72 @@ function renderAlerts(rows){
 // "todas" ou uma unica) - guardamos os selecionados num Set; Set vazio = todas
 const SEL_STATUS = new Set();
 const SEL_UNIDADE = new Set();
+const COLUNAS_TX_PADRAO = ['data','unidade','cliente','status','titular','metodo','valor','cartao','pedidos','aprovados','recusados','estornados','fraude','banco','observacao'];
+const CHAVE_ORDEM_COLUNAS = 'monitorOrdemColunasV1';
+let COLUNA_ARRASTADA = null;
+
+function ordemColunasSalva(){
+  try{
+    const ordem=JSON.parse(localStorage.getItem(CHAVE_ORDEM_COLUNAS)||'null');
+    return Array.isArray(ordem) && ordem.length===COLUNAS_TX_PADRAO.length && COLUNAS_TX_PADRAO.every(c=>ordem.includes(c)) ? ordem : [...COLUNAS_TX_PADRAO];
+  }catch(_){ return [...COLUNAS_TX_PADRAO]; }
+}
+
+function aplicarOrdemColunas(){
+  const table=document.getElementById('tx-table');
+  if(!table) return;
+  const ordem=ordemColunasSalva();
+  const header=table.tHead?.rows?.[0];
+  if(header){
+    const porId=Object.fromEntries([...header.cells].map(c=>[c.dataset.col,c]));
+    ordem.forEach(id=>porId[id] && header.appendChild(porId[id]));
+  }
+  [...(table.tBodies[0]?.rows||[])].forEach(row=>{
+    if(row.cells.length!==COLUNAS_TX_PADRAO.length) return;
+    [...row.cells].forEach((cell,i)=>{ if(!cell.dataset.col) cell.dataset.col=COLUNAS_TX_PADRAO[i]; });
+    const porId=Object.fromEntries([...row.cells].map(c=>[c.dataset.col,c]));
+    ordem.forEach(id=>porId[id] && row.appendChild(porId[id]));
+  });
+}
+
+function configurarColunasArrastaveis(){
+  const header=document.querySelector('#tx-table thead tr');
+  if(!header) return;
+  [...header.cells].forEach(th=>{
+    th.draggable=true;
+    th.title=`Arraste para mudar a posição de “${th.textContent.trim()}”`;
+    th.addEventListener('dragstart',e=>{
+      COLUNA_ARRASTADA=th.dataset.col;
+      th.classList.add('col-dragging');
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('text/plain',COLUNA_ARRASTADA);
+    });
+    th.addEventListener('dragend',()=>{
+      COLUNA_ARRASTADA=null;
+      document.querySelectorAll('#tx-table th').forEach(c=>c.classList.remove('col-dragging','col-drop'));
+    });
+    th.addEventListener('dragover',e=>{ e.preventDefault(); th.classList.add('col-drop'); });
+    th.addEventListener('dragleave',()=>th.classList.remove('col-drop'));
+    th.addEventListener('drop',e=>{
+      e.preventDefault();
+      const origem=COLUNA_ARRASTADA||e.dataTransfer.getData('text/plain');
+      const destino=th.dataset.col;
+      const ordem=ordemColunasSalva();
+      const de=ordem.indexOf(origem), para=ordem.indexOf(destino);
+      if(de<0 || para<0 || de===para) return;
+      ordem.splice(de,1);
+      ordem.splice(para,0,origem);
+      localStorage.setItem(CHAVE_ORDEM_COLUNAS,JSON.stringify(ordem));
+      aplicarOrdemColunas();
+    });
+  });
+  aplicarOrdemColunas();
+}
+
+function restaurarOrdemColunas(){
+  localStorage.removeItem(CHAVE_ORDEM_COLUNAS);
+  aplicarOrdemColunas();
+}
 
 function setupMultiselect(key, allLabel, selectedSet){
   const wrap = document.getElementById('ms-'+key);
@@ -1402,8 +1479,84 @@ function contatoCompleto(d){
   const itens = [];
   if(d.telefoneCliente) itens.push(`<div class="row"><span>Telefone do cliente</span><b>${esc(d.telefoneCliente)}</b></div>`);
   if(d.emailCliente) itens.push(`<div class="row"><span>E-mail do cliente</span><b>${esc(d.emailCliente)}</b></div>`);
-  if(d.enderecoCliente) itens.push(`<div class="row" style="align-items:flex-start;gap:20px;"><span>Endereço de cobrança</span><b style="text-align:right;white-space:normal;max-width:62%;">${esc(d.enderecoCliente)}</b></div>`);
+  if(d.enderecoCliente) itens.push(`<div class="row" style="align-items:flex-start;gap:20px;"><span>Endereço de ${d.enderecoTipo==='cobranca'?'cobrança':'entrega'}</span><b style="text-align:right;white-space:normal;max-width:62%;">${esc(d.enderecoCliente)}</b></div>`);
   return itens.length ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);"><div class="eyebrow" style="margin-bottom:4px;">Contato informado pela Adyen</div>${itens.join('')}</div>` : '';
+}
+
+function normalizarIdentidadeRisco(v){
+  return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+}
+
+const REGRAS_RISCO = [
+  {id:'chargeback', pontos:100, titulo:'Chargeback', criterio:'1 ou mais', decisao:'Fraude confirmada pelo fluxo financeiro'},
+  {id:'cartoes', pontos:45, titulo:'Cartões diferentes', criterio:'3 ou mais na mesma identidade', decisao:'Forte indício; exige revisão'},
+  {id:'recusas', pontos:30, titulo:'Pedidos recusados', criterio:'3 ou mais', decisao:'Prioriza revisão'},
+  {id:'score-adyen', pontos:35, titulo:'Score da Adyen', criterio:'30 ou mais', decisao:'Prioriza revisão'},
+  {id:'ips', pontos:15, titulo:'IPs diferentes', criterio:'3 ou mais', decisao:'Sinal complementar'},
+  {id:'contatos', pontos:15, titulo:'E-mails, telefones ou endereços', criterio:'2 ou mais de cada tipo', decisao:'Sinal complementar'},
+  {id:'3ds', pontos:20, titulo:'3D Secure', criterio:'Oferecido e não autenticado', decisao:'Sinal complementar'},
+  {id:'avs-cvc', pontos:20, titulo:'AVS/CVC', criterio:'Falha ou divergência', decisao:'Sinal complementar'},
+];
+
+function renderRegrasRisco(){
+  const el=document.getElementById('regras-risco-lista');
+  if(!el) return;
+  el.innerHTML=`<div style="font-size:11.5px;color:var(--muted);margin-bottom:9px;">O placar organiza a fila; não condena sozinho. <b style="color:var(--text);">30 pontos = revisar, 60 = forte indício.</b> Só chargeback ou confirmação humana vira fraude confirmada.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px;">${REGRAS_RISCO.map(r=>`<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel2);"><div style="display:flex;justify-content:space-between;gap:8px;"><b style="font-size:12px;">${esc(r.titulo)}</b><span class="tag">+${r.pontos}</span></div><div style="font-size:10.5px;color:var(--muted);margin-top:4px;">${esc(r.criterio)} · ${esc(r.decisao)}</div></div>`).join('')}</div>`;
+}
+
+function raioXRisco(pedido){
+  if(!pedido) return '';
+  const unidade = String(pedido.unidade||'');
+  const nome = normalizarIdentidadeRisco(pedido.nomeCliente||pedido.cardHolder);
+  const email = normalizarIdentidadeRisco(pedido.emailCliente);
+  const telefone = String(pedido.telefoneCliente||'').replace(/\D/g,'');
+  const shopper = String(pedido.shopperReference||'').trim();
+  const relacionados = DATA.filter(t=>{
+    if(String(t.unidade||'')!==unidade) return false;
+    if(shopper && String(t.shopperReference||'')===shopper) return true;
+    if(email && normalizarIdentidadeRisco(t.emailCliente)===email) return true;
+    if(telefone && String(t.telefoneCliente||'').replace(/\D/g,'')===telefone) return true;
+    return !!nome && normalizarIdentidadeRisco(t.nomeCliente||t.cardHolder)===nome;
+  });
+  const porPedido = new Map();
+  relacionados.forEach(t=>{
+    const k=orderKeyOf(t), atual=porPedido.get(k);
+    if(!atual || (t.dataHora||'')>=(atual.dataHora||'')) porPedido.set(k,t);
+  });
+  const pedidos=[...porPedido.values()];
+  const unicos=(campo, normalizar=(v)=>String(v||'').trim().toLowerCase())=>new Set(relacionados.map(t=>normalizar(t[campo])).filter(Boolean));
+  const cartoes=unicos('last4'), ips=unicos('shopperIp'), emails=unicos('emailCliente'), telefones=unicos('telefoneCliente',v=>String(v||'').replace(/\D/g,'')), enderecos=unicos('enderecoCliente');
+  const aprovadas=pedidos.filter(t=>t.status==='APROVADO').length;
+  const recusadas=pedidos.filter(t=>t.status==='RECUSADO').length;
+  // olha todo o histórico do pedido: um evento posterior não pode apagar o
+  // fato de que houve chargeback.
+  const chargebacks=new Set(relacionados.filter(t=>/CHARGEBACK/.test(t.status||t.eventCode||'')).map(orderKeyOf)).size;
+  const scoreMax=Math.max(0,...relacionados.map(t=>Number(t.scoreRiscoAdyen)||0));
+  const sinais=[];
+  if(chargebacks) sinais.push({peso:100,texto:`${chargebacks} pedido(s) com chargeback — fraude confirmada pelo fluxo financeiro`});
+  if(cartoes.size>=3) sinais.push({peso:45,texto:`${cartoes.size} cartões diferentes para a mesma identidade`});
+  if(recusadas>=3) sinais.push({peso:30,texto:`${recusadas} pedidos recusados`});
+  if(scoreMax>=30) sinais.push({peso:35,texto:`score máximo da Adyen: ${scoreMax}`});
+  if(ips.size>=3) sinais.push({peso:15,texto:`${ips.size} IPs diferentes`});
+  if(emails.size>=2) sinais.push({peso:15,texto:`${emails.size} e-mails diferentes`});
+  if(telefones.size>=2) sinais.push({peso:15,texto:`${telefones.size} telefones diferentes`});
+  if(enderecos.size>=2) sinais.push({peso:15,texto:`${enderecos.size} endereços diferentes`});
+  if(relacionados.some(t=>String(t.threeDOferecido).toLowerCase()==='true' && String(t.threeDAutenticado).toLowerCase()==='false')) sinais.push({peso:20,texto:'3D Secure oferecido, mas não autenticado'});
+  if(relacionados.some(t=>/fail|failed|no match|not matched/i.test(`${t.resultadoAvs||''} ${t.resultadoCvc||''}`))) sinais.push({peso:20,texto:'AVS ou CVC retornou falha/divergência'});
+  const pontos=Math.min(100,sinais.reduce((n,s)=>n+s.peso,0));
+  const confirmado=chargebacks>0;
+  const nivel=confirmado?'confirmada':pontos>=60?'alto':pontos>=30?'revisar':'baixo';
+  const cor=confirmado||nivel==='alto'?'var(--bad)':nivel==='revisar'?'var(--warn)':'var(--ok)';
+  const rotulo=confirmado?'FRAUDE CONFIRMADA':nivel==='alto'?'FORTE INDÍCIO — REVISAR':nivel==='revisar'?'REVISAR':'BAIXO RISCO PELOS DADOS ATUAIS';
+  const metricas=[['Pedidos',pedidos.length],['Aprovados',aprovadas],['Recusados',recusadas],['Cartões',cartoes.size],['IPs',ips.size],['E-mails',emails.size],['Telefones',telefones.size],['Endereços',enderecos.size]];
+  return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);">
+    <div class="eyebrow" style="margin-bottom:6px;">Raio-X de risco · mesma identidade nesta unidade</div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap;">${metricas.map(([k,v])=>`<span class="tag">${k}: <b>${v}</b></span>`).join('')}</div>
+    <div style="margin-top:8px;color:${cor};font-weight:700;font-family:var(--mono);font-size:11px;">${rotulo}${confirmado?'':` · ${pontos}/100`}</div>
+    <div style="margin-top:5px;font-size:11px;color:var(--muted);line-height:1.5;">${sinais.length?sinais.map(s=>`• ${esc(s.texto)}`).join('<br>'):'Nenhuma regra objetiva disparou. Ausência de sinal não garante legitimidade.'}</div>
+    <div style="margin-top:5px;font-size:10.5px;color:var(--muted);">Regra: um único dado nunca confirma fraude. Chargeback confirma; os demais sinais apenas priorizam revisão humana.</div>
+  </div>`;
 }
 
 async function showClient(key, pedidoId, unidade){
@@ -1420,6 +1573,7 @@ async function showClient(key, pedidoId, unidade){
     <div class="row"><span>Fraude suspeita</span><b style="color:var(--bad)">${stats.fraude}</b></div>
     <div class="row"><span>Taxa de aprovação</span><b>${stats.taxaAprovacao}%</b></div>
     ${pedido ? contatoCompleto(pedido) : ''}
+    ${pedido ? raioXRisco(pedido) : ''}
     ${CURRENT_MODAL_PEDIDO ? `<button type="button" class="close" style="margin-top:10px;background:var(--panel2);border-color:#1e4a63;color:var(--accent);" onclick="abrirDisputaDoModal()">📎 Registrar observação / disputa deste pedido</button>` : ''}
     ${CURRENT_MODAL_PEDIDO ? `<button type="button" class="close" style="margin-top:8px;background:var(--panel2);border-color:#5c1e1e;color:var(--bad);" onclick="abrirAlertaLojaDoModal()">🚨 Alertar a loja pra conferir esse pedido</button>` : ''}
   `;
@@ -1756,7 +1910,8 @@ function removerOfferClosedSuperado(pedidos){
             if(!rep.cardHolder && t.cardHolder) rep.cardHolder = t.cardHolder;
             if(!rep.emailCliente && t.emailCliente) rep.emailCliente = t.emailCliente;
             if(!rep.telefoneCliente && t.telefoneCliente) rep.telefoneCliente = t.telefoneCliente;
-            if(!rep.enderecoCliente && t.enderecoCliente) rep.enderecoCliente = t.enderecoCliente;
+            if(!rep.enderecoCliente && t.enderecoCliente){ rep.enderecoCliente = t.enderecoCliente; rep.enderecoTipo = t.enderecoTipo; }
+            ['scoreRiscoAdyen','resultadoRiscoAdyen','shopperIp','paisCliente','paisEmissor','fonteCartao','resultadoAvs','resultadoCvc','threeDOferecido','threeDAutenticado','dispositivo','navegador','aliasCartao'].forEach(campo=>{ if(rep[campo]==null && t[campo]!=null) rep[campo]=t[campo]; });
             if(!rep.last4 && t.last4) rep.last4 = t.last4;
             if(!rep.bancoEmissor && t.bancoEmissor) rep.bancoEmissor = t.bancoEmissor;
       }
@@ -1928,6 +2083,7 @@ function removerOfferClosedSuperado(pedidos){
             }
             return linhaTransacao(d);
       }).join('') : '<tr><td colspan="15" class="empty">Nenhuma transação encontrada.</td></tr>';
+      aplicarOrdemColunas();
       if(COMENTARIO_EM_EDICAO){
         const input = document.getElementById('comentario-input');
         if(input){ input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
@@ -2094,6 +2250,8 @@ function connectStream(){
 
 function bootApp(){
   atualizarBtnSom();
+  renderRegrasRisco();
+  configurarColunasArrastaveis();
   loadAll().then(connectStream);
 
   // reavalia periodicamente pra remover o destaque "NOVO" depois da janela de

@@ -108,20 +108,33 @@ function contatoTexto(...valores) {
   return null;
 }
 
-// A Adyen entrega o endereco de cobranca como chaves billingAddress.* no
-// additionalData do webhook. Alguns fluxos internos usam o mesmo endereco
-// como objeto; aceitar os dois formatos evita perder o dado na ingestao.
-function enderecoCobranca(item, additional) {
-  const endereco = item.billingAddress || additional.billingAddress || {};
-  const campo = (nome) => contatoTexto(endereco[nome], additional[`billingAddress.${nome}`]);
-  const rua = campo('street');
-  const numero = campo('houseNumberOrName');
-  const cidade = campo('city');
-  const estado = campo('stateOrProvince');
-  const cep = campo('postalCode');
-  const pais = campo('country');
-  const linhaRua = [rua, numero].filter(Boolean).join(', ');
-  return [linhaRua, cidade, estado, cep, pais].filter(Boolean).join(' · ') || null;
+// O webhook padrao achata enderecos no additionalData, com chaves como
+// "deliveryAddress.street". Preferimos entrega (onde o pedido realmente vai)
+// e caimos pra cobranca quando ela for a unica enviada. Integracoes que
+// entregam o objeto direto no NotificationRequestItem tambem sao aceitas.
+function enderecoDoWebhook(additional, item) {
+  const ler = (prefixo, objeto) => {
+    const campo = (nome) => contatoTexto(
+      additional[`${prefixo}.${nome}`],
+      objeto && objeto[nome]
+    );
+    const street = campo('street');
+    const numero = campo('houseNumberOrName');
+    const complemento = campo('apartmentSuite');
+    const cidade = campo('city');
+    const estado = campo('stateOrProvince');
+    const cep = campo('postalCode');
+    const pais = campo('country');
+    const linha = [street, numero].filter(Boolean).join(', ');
+    const local = [cidade, estado].filter(Boolean).join(' - ');
+    const partes = [linha, complemento, local, cep, pais].filter(Boolean);
+    return partes.length ? partes.join(' · ').slice(0, 300) : null;
+  };
+  const entrega = ler('deliveryAddress', item.deliveryAddress);
+  if (entrega) return { enderecoCliente: entrega, enderecoTipo: 'entrega' };
+  const cobranca = ler('billingAddress', item.billingAddress);
+  if (cobranca) return { enderecoCliente: cobranca, enderecoTipo: 'cobranca' };
+  return { enderecoCliente: null, enderecoTipo: null };
 }
 
 function normalize(item) {
@@ -137,7 +150,8 @@ function normalize(item) {
     item.shopperTelephone,
     item.shopperTelephoneNumber
   );
-  const enderecoCliente = enderecoCobranca(item, additional);
+  const endereco = enderecoDoWebhook(additional, item);
+  const scoreRisco = Number(additional.totalFraudScore);
 
   return {
     pspReference: item.pspReference,
@@ -156,7 +170,23 @@ function normalize(item) {
     nomeCliente: shopperName(additional) || pixPagador(additional) || cardHolder, // nome do cliente que fez o pedido
     emailCliente,
     telefoneCliente,
-    enderecoCliente,
+    enderecoCliente: endereco.enderecoCliente,
+    enderecoTipo: endereco.enderecoTipo,
+    // Sinais usados no Raio-X de risco do Monitor. Sao fatos vindos da
+    // Adyen, nunca uma sentenca isolada de fraude.
+    scoreRiscoAdyen: Number.isFinite(scoreRisco) ? scoreRisco : null,
+    resultadoRiscoAdyen: contatoTexto(additional.fraudResultType),
+    shopperIp: contatoTexto(additional.shopperIP, additional.shopperIp),
+    paisCliente: contatoTexto(additional.shopperCountry),
+    paisEmissor: contatoTexto(additional.issuerCountry, additional.issuerCountryAlpha2),
+    fonteCartao: contatoTexto(additional.fundingSource),
+    resultadoAvs: contatoTexto(additional.avsResult, additional.avsResultRaw),
+    resultadoCvc: contatoTexto(additional.cvcResult, additional.cvcResultRaw),
+    threeDOferecido: contatoTexto(additional.threeDOffered),
+    threeDAutenticado: contatoTexto(additional.threeDAuthenticated),
+    dispositivo: contatoTexto(additional.deviceType),
+    navegador: contatoTexto(additional.browserCode),
+    aliasCartao: contatoTexto(additional.alias),
     shopperReference: additional.shopperReference || item.merchantAccountCode + ':' + (additional.shopperEmail || ''),
     unidade: normalizarCodigoUnidade(item.merchantAccountCode),
     dataHora: new Date().toISOString(), // Adyen nao manda timestamp do evento; usamos hora de recebimento
