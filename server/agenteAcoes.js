@@ -416,6 +416,7 @@ const TAREFAS_NOC = {
   reiniciar: { verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
   abortar: { verbo: 'Abortar o reinício de', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
   anydesk: { verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
+  'corrigir-memoria-limitada': { verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
   rede: { verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede' },
   zebra: { verbo: 'Resetar as Zebras de', comando: async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)), origem: 'manutencao-zebra' },
 };
@@ -424,11 +425,11 @@ async function nocComando(params) {
   const p = params || {};
   await resolverAtor(p);
   const t = TAREFAS_NOC[String(p.tarefa || '')];
-  if (!t) throw new Error('Tarefa do NOC inválida - use reiniciar, abortar, anydesk, zebra ou rede.');
+  if (!t) throw new Error('Tarefa do NOC inválida - use reiniciar, abortar, anydesk, zebra, rede ou corrigir-memoria-limitada.');
   const alvos = Array.isArray(p.alvos) ? p.alvos.filter((a) => a && a.codigo && a.posto) : [];
   if (!alvos.length) throw new Error('Diga quais computadores (lista de {codigo, posto}).');
   if (alvos.length > 200) throw new Error('Muitos alvos de uma vez - divida em lotes.');
-  const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, { origem: t.origem });
+  const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, { origem: t.origem, requerAdmin: !!t.requerAdmin });
   const ok = resultados.filter((r) => r.ok).length;
   // quem NÃO entrou diz por quê (sem agentToken, já tem comando pendente...)
   // - senão "0 de 1" vira adivinhação

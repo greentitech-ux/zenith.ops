@@ -939,6 +939,7 @@
        <button type="button" class="btn-ghost" id="manut-gcom-wcf" onclick="manutEnviar('gcomWcf')" title="Encerra somente GcomClient.WCF.exe nas VMs marcadas como GCOM; a própria VM o inicia novamente">🟥 Encerrar GCOM</button>
        <button type="button" class="btn-ghost" id="manut-diagnostico" onclick="manutEnviar('diagnostico-desempenho')" title="Lê eventos de tela azul, falha de disco/hardware, minidumps e consumo atual; não altera a máquina">🩺 Diagnosticar falha</button>
        <button type="button" class="btn-ghost" id="manut-limpeza-segura" onclick="manutEnviar('limpeza-segura')" title="Remove apenas temporários do Windows e do usuário, além da Lixeira; mede o espaço livre antes e depois; não reinicia a máquina">🧹 Liberar espaço seguro</button>
+       <button type="button" class="btn-ghost" id="manut-memoria-limitada" onclick="manutEnviar('corrigir-memoria-limitada')" title="Remove somente limites indevidos de memória na inicialização do Windows 64 bits; exige reinício e explica quando a causa é Windows 32 bits ou hardware">🧠 Corrigir memória limitada</button>
        <button type="button" class="btn-ghost" id="manut-remover-office" onclick="manutEnviar('remover-office')" title="Remove qualquer versão detectada do Microsoft Office/Microsoft 365; documentos do usuário são preservados">🗑️ Remover Office</button>
        <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
       <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
@@ -2184,6 +2185,7 @@ const PROG_MANUTENCOES = [
   ['gcomWcf','🟥 Encerrar GCOM','Finaliza somente o processo GcomClient.WCF; a VM o inicia novamente pelo mecanismo padrão.'],
   ['diagnostico-desempenho','🩺 Diagnosticar falha','Lê tela azul, disco, hardware, minidumps e consumo atual. Não altera a máquina.'],
   ['limpeza-segura','🧹 Liberar espaço seguro','Remove temporários e Lixeira, medindo antes e depois. Não toca em documentos, Downloads ou programas.'],
+  ['corrigir-memoria-limitada','🧠 Corrigir memória limitada','Em Windows 64 bits, remove somente limites indevidos da inicialização. Em Windows 32 bits ou com reserva de hardware, explica a causa sem forçar alteração. Exige reinício quando corrigir.', 'perigo'],
   ['remover-office','🗑️ Remover Office','Desinstala Office/Microsoft 365 detectado; preserva documentos do usuário.', 'perigo'],
   ['rede','🌐 Destravar a rede','Limpa DNS e renova DHCP; a conexão pode cair por alguns segundos.', 'perigo'],
   ['zebra','🖨️ Resetar Zebra','Limpa a fila e reinicia as Zebras cadastradas na unidade; o computador não é reiniciado.'],
@@ -3252,6 +3254,7 @@ function atualizarContagemManut(){
   document.getElementById('manut-gcom-wcf').disabled = !n;
   document.getElementById('manut-diagnostico').disabled = !n;
   document.getElementById('manut-limpeza-segura').disabled = !n;
+  document.getElementById('manut-memoria-limitada').disabled = !n;
   document.getElementById('manut-zebra').disabled = !n;
   document.getElementById('manut-rede').disabled = !n;
   document.getElementById('manut-agendar').disabled = !n;
@@ -3375,6 +3378,7 @@ const MANUT_TAREFAS = {
   gcomWcf: { botao: 'manut-gcom-wcf', rotulo: 'Encerramento do GcomClient.WCF' },
   'diagnostico-desempenho': { botao: 'manut-diagnostico', rotulo: 'Diagnóstico de falha' },
   'limpeza-segura': { botao: 'manut-limpeza-segura', rotulo: 'Liberação de espaço seguro' },
+  'corrigir-memoria-limitada': { botao: 'manut-memoria-limitada', rotulo: 'Correção de memória limitada' },
   'remover-office': { botao: 'manut-remover-office', rotulo: 'Remoção do Microsoft Office' },
   zebra: { botao: 'manut-zebra', rotulo: 'Reset das Zebras' },
   rede: { botao: 'manut-rede', rotulo: 'Destrave da rede' },
@@ -3418,6 +3422,9 @@ async function manutEnviar(tarefa){
   }
   if(tarefa === 'limpeza-segura'){
     if(!confirm(`Liberar espaço seguro em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO NOC remove apenas temporários do Windows, temporários do usuário e itens da Lixeira. Não remove documentos, Downloads, programas ou dados do sistema, e NÃO reinicia a máquina. O resultado informa o espaço livre antes e depois.`)) return;
+  }
+  if(tarefa === 'corrigir-memoria-limitada'){
+    if(!confirm(`Corrigir limite de memória em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nEm Windows 64 bits, o NOC remove apenas os limites removememory/truncatememory da inicialização, se existirem. A correção exige reiniciar a máquina.\n\nSe for Windows 32 bits ou reserva de hardware/BIOS, ele não força alteração: apenas informa a causa.`)) return;
   }
   if(tarefa === 'remover-office'){
     if(!confirm(`REMOVER o Microsoft Office/Microsoft 365 de ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nWord, Excel, Outlook, PowerPoint, Project e Visio detectados poderão ser desinstalados e os aplicativos abertos serão interrompidos. Documentos do usuário NÃO serão apagados.\n\nA remoção não reinicia sozinha; reinicie as máquinas depois da manutenção.`)) return;

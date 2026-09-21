@@ -5051,6 +5051,7 @@ const EXECUTORES_QA = {
   'manutencao.reiniciarGsurfRsa': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_GSURF_RSA, { origem: 'manutencao-gsurf-rsa' }),
   'manutencao.encerrarGcomWcf': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoEncerrarGcomWcf, { origem: 'manutencao-gcom-wcf' }),
   'manutencao.limpezaSegura': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_LIMPEZA_SEGURA, { origem: 'manutencao-limpeza-segura' }),
+  'manutencao.corrigirMemoriaLimitada': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, { origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true }),
   'manutencao.removerOffice': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REMOVER_OFFICE, { origem: 'manutencao-remover-office', requerAdmin: true }),
   'manutencao.destravarRede': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REDE_DESTRAVAR, { origem: 'manutencao-rede' }),
   'formularios.removerAssinatura': (p) => formularios.removerAssinatura(p.id, p.chave, p.porEmail),
@@ -5302,13 +5303,14 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
       'diagnostico-desempenho': { acao: 'manutencao.diagnosticoDesempenho', verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
       'inventario-estacao': { acao: 'manutencao.inventarioEstacao', verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
       'limpeza-segura': { acao: 'manutencao.limpezaSegura', verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },
+      'corrigir-memoria-limitada': { acao: 'manutencao.corrigirMemoriaLimitada', verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
       'remover-office': { acao: 'manutencao.removerOffice', verbo: 'Remover Microsoft Office de', comando: lojaStatus.COMANDO_REMOVER_OFFICE, origem: 'manutencao-remover-office', requerAdmin: true },
       // reinicia SO o servico do AnyDesk: leva segundos e nao derruba o
       // caixa, ao contrario de reiniciar a maquina inteira por causa de um

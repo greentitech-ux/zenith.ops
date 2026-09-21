@@ -2307,6 +2307,31 @@ const COMANDO_LIMPEZA_SEGURA = [
   '"OTIMIZAÇÃO SEGURA: $apagados item(ns) temporário(s) removido(s) · $falhas pulado(s) por uso/permissão · Lixeira: $lixeira. Espaço livre antes: $antes · depois: $depois. Nenhum programa, documento ou download foi removido."',
 ].join('\n');
 
+// Corrige SOMENTE limites deixados no carregamento do Windows (por exemplo,
+// "Memória máxima" no msconfig). Não tenta "forçar" RAM que um Windows de
+// 32 bits ou o hardware reservado para vídeo não pode entregar. Assim o
+// resultado explica a causa real antes de uma alteração e só pede reinício
+// quando um limite BCD foi realmente removido.
+const COMANDO_CORRIGIR_MEMORIA_LIMITADA = [
+  '$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+  'if (-not $admin) { throw "A correção de memória exige o NOCZenith elevado (SYSTEM)." }',
+  '$os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop',
+  '$pc = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop',
+  '$instalada = [math]::Round([double]$pc.TotalPhysicalMemory / 1GB, 2)',
+  '$utilizavel = [math]::Round([double]$os.TotalVisibleMemorySize / 1MB, 2)',
+  '$reservada = [math]::Max(0, [math]::Round($instalada - $utilizavel, 2))',
+  '$arquitetura = [string]$os.OSArchitecture',
+  '"MEMÓRIA: instalada $instalada GB · utilizável $utilizavel GB · diferença/reserva $reservada GB · Windows $arquitetura."',
+  'if ($arquitetura -notmatch "64") { "NÃO ALTERADO: este é um Windows 32 bits, que usa cerca de 3,5 GB no máximo. Para usar toda a RAM, instale Windows 64 bits."; exit 0 }',
+  '$bcdAntes = (& bcdedit /enum "{current}" 2>&1 | Out-String)',
+  '$temRemover = $bcdAntes -match "(?im)^\\s*removememory\\s+"',
+  '$temTruncar = $bcdAntes -match "(?im)^\\s*truncatememory\\s+"',
+  'if (-not $temRemover -and -not $temTruncar) { "NÃO ALTERADO: não há limite de memória no boot do Windows. A diferença exibida é reserva de hardware/BIOS ou módulo de RAM; verifique vídeo integrado, encaixe e diagnóstico da memória."; exit 0 }',
+  'if ($temRemover) { & bcdedit /deletevalue "{current}" removememory; if ($LASTEXITCODE -ne 0) { throw "Não foi possível remover o limite removememory." } }',
+  'if ($temTruncar) { & bcdedit /deletevalue "{current}" truncatememory; if ($LASTEXITCODE -ne 0) { throw "Não foi possível remover o limite truncatememory." } }',
+  '"CORRIGIDO: limite de inicialização removido. Reinicie a máquina para o Windows recalcular a memória utilizável."',
+].join('\n');
+
 // Remove suites e aplicativos do Office usando SOMENTE os desinstaladores
 // registrados pelo Windows. Cobre MSI (Office antigo), Click-to-Run (Office
 // moderno/Microsoft 365) e o pacote Microsoft Store. Não apaga pastas à mão,
@@ -4374,7 +4399,7 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, COMANDO_RESET_SENHA,
   comandoResetZebra, comandoEncerrarGcomWcf,
   ESTADOS, estadoDe, motivosDeDegradacao,
