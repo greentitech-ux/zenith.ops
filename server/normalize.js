@@ -98,11 +98,29 @@ function pixPagador(additional) {
   return null;
 }
 
+// Dados de contato enviados pela Adyen no webhook. Mantemos a leitura
+// tolerante a nomes legados, mas `shopperEmail` e `shopperTelephone` sao as
+// chaves configuradas pela integracao atual.
+function contatoTexto(...valores) {
+  for (const valor of valores) {
+    if (typeof valor === 'string' && valor.trim()) return valor.trim().slice(0, 180);
+  }
+  return null;
+}
+
 function normalize(item) {
   const additional = item.additionalData || {};
   const status = statusFromEvent(item);
   // mesma logica do Apps Script antigo: cardHolderName -> cardSummary -> null
   const cardHolder = additional.cardHolderName || additional.cardSummary || null;
+  const emailCliente = contatoTexto(additional.shopperEmail, item.shopperEmail);
+  const telefoneCliente = contatoTexto(
+    additional.shopperTelephone,
+    additional.shopperTelephoneNumber,
+    additional.telephoneNumber,
+    item.shopperTelephone,
+    item.shopperTelephoneNumber
+  );
 
   return {
     pspReference: item.pspReference,
@@ -119,6 +137,8 @@ function normalize(item) {
     bin: additional.cardBin || (additional.cardSummary ? null : null),
     cardHolder, // nome do cartao (impresso no cartao)
     nomeCliente: shopperName(additional) || pixPagador(additional) || cardHolder, // nome do cliente que fez o pedido
+    emailCliente,
+    telefoneCliente,
     shopperReference: additional.shopperReference || item.merchantAccountCode + ':' + (additional.shopperEmail || ''),
     unidade: normalizarCodigoUnidade(item.merchantAccountCode),
     dataHora: new Date().toISOString(), // Adyen nao manda timestamp do evento; usamos hora de recebimento
