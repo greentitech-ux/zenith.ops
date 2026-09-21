@@ -22904,7 +22904,8 @@ setTimeout(async () => {
       'a sala é pedida ao Calendar com conferenceData, e o convite vai junto':
         /conferenceSolutionKey: \{ type: 'hangoutsMeet' \}/.test(require('fs').readFileSync(__dirname + '/reuniaoGoogle.js', 'utf8'))
         && /conferenceDataVersion=1&sendUpdates=all/.test(require('fs').readFileSync(__dirname + '/reuniaoGoogle.js', 'utf8'))
-        && rg.CALENDAR_SCOPE === 'https://www.googleapis.com/auth/calendar.events',
+        && rg.CALENDAR_SCOPE === 'https://www.googleapis.com/auth/calendar.events'
+        && rg.USUARIO_DONO_PADRAO === 'admin@solutionstitech.com',
       'hora vira janela com fuso nomeado, e reunião que passa da meia-noite não termina antes de começar':
         rg.janela('2026-09-14', '16:00', 60).fim === '2026-09-14T17:00:00'
         && rg.janela('2026-09-14', '23:30', 90).fim === '2026-09-15T01:00:00',

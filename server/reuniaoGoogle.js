@@ -24,12 +24,17 @@ const API = 'https://www.googleapis.com/calendar/v3';
 // agenda de quem for convidado
 const FUSO = process.env.GOOGLE_MEET_FUSO || 'America/Sao_Paulo';
 const MAX_CONVIDADOS = 40;
+const USUARIO_DONO_PADRAO = 'admin@solutionstitech.com';
 
 // e-mail da pessoa do Workspace que a conta de serviço representa. Conta de
 // serviço não tem agenda própria: sem representar alguém, o Google recusa
 // criar o evento. É o único ajuste obrigatório pra ligar a integração.
 function usuarioDono() {
-  return String(process.env.GOOGLE_MEET_USUARIO || '').trim();
+  // Esta conta corporativa não é segredo. Deixá-la como padrão evita que uma
+  // sincronização de Blueprint precise tocar no ambiente do Render (onde
+  // ficam as credenciais sensíveis do Firebase). A variável continua podendo
+  // sobrescrever o dono em outro ambiente.
+  return String(process.env.GOOGLE_MEET_USUARIO || USUARIO_DONO_PADRAO).trim();
 }
 
 // a agenda onde o evento nasce. Por padrão a do próprio usuário representado
@@ -175,4 +180,4 @@ async function cancelarSala(eventoId) {
   }
 }
 
-module.exports = { criarSala, cancelarSala, configurado, janela, convidadosLimpos, linkDoMeet, esperarLinkDoMeet, CALENDAR_SCOPE };
+module.exports = { criarSala, cancelarSala, configurado, janela, convidadosLimpos, linkDoMeet, esperarLinkDoMeet, CALENDAR_SCOPE, USUARIO_DONO_PADRAO };

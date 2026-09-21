@@ -62,12 +62,17 @@ https://www.googleapis.com/auth/calendar.events
 
 | Variável | Valor | Obrigatória |
 |---|---|---|
-| `GOOGLE_MEET_USUARIO` | o e-mail do Workspace que a conta de serviço representa (ex.: `admin@solutionstitech.com`) | **sim** — é o que liga a integração |
+| `GOOGLE_MEET_USUARIO` | sobrescreve o usuário padrão `admin@solutionstitech.com` | não |
 | `GOOGLE_MEET_AGENDA` | id da agenda onde o evento nasce. Em branco = a agenda da própria pessoa (`primary`) | não |
 | `GOOGLE_MEET_FUSO` | em branco = `America/Sao_Paulo` | não |
 
 > Mudar variável de ambiente no Render **dispara deploy sozinho** — diferente
 > do push, que espera o seu Manual Deploy.
+
+O usuário, a agenda e o fuso usados na produção já têm padrões seguros no
+código. Portanto, não sincronize o Blueprint apenas para configurar o Meet:
+isso poderia iniciar uma instância nova sem os segredos Firebase marcados como
+`sync: false`.
 
 ---
 
