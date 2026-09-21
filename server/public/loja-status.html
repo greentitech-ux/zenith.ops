@@ -1602,12 +1602,19 @@ function equipTileHtml(codigo, c){
     : `<span class="btn-anydesk btn-anydesk-off" title="Sem AnyDesk cadastrado">🖥️</span>`;
   const marcadorGcom = c.temGcom ? '<span class="btn-anydesk" title="Possui GCOM">G</span>' : '';
   const marcadorServidor = c.ehServidor ? '<span class="btn-anydesk" title="Servidor">🗄️</span>' : '';
+  // O escudo e' prova operacional, nao apenas versao: aparece quando a
+  // instancia SYSTEM do NOC confirmou presenca recentemente. Sem escudo, a
+  // estacao pode estar atualizada mas ainda precisa rodar o comando com UAC.
+  const nocElevado = Number(c.nocElevadoEm) > Date.now() - (6 * 60 * 1000);
+  const marcadorNocElevado = nocElevado
+    ? '<span class="btn-anydesk" title="NOC elevado: tarefa SYSTEM confirmada recentemente">🛡️</span>'
+    : '';
   const marcadorQuedas = c.medeQuedas ? '<span class="btn-anydesk" title="Ponto de medição de quedas da unidade">📉</span>' : '';
   return `<div class="equip-tile status-${status}" data-codigo="${escapeHtml(codigo)}" data-posto="${escapeHtml(c.posto)}" onclick="abrirDetalheComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">
     <div class="equip-tile-head">
       <span class="status-dot ${status}"></span>
       <span class="equip-tile-nome" title="${unidadeOk}">${unidadeOk}</span>
-      ${marcadorServidor}${marcadorGcom}${marcadorQuedas}${btnAnydesk}
+      ${marcadorServidor}${marcadorNocElevado}${marcadorGcom}${marcadorQuedas}${btnAnydesk}
     </div>
     <div class="equip-tile-unidade" title="${nomeOk}">${nomeOk}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
@@ -1652,7 +1659,11 @@ function atualizarConteudoDetalhe(codigo, c){
   if(c.agenteVersao || c.agenteNoPulsoPrint){
     const print = c.agenteNoPulsoPrint || '';
     const corPrint = print === 'pronto' ? 'var(--ok)' : (print.startsWith('falhou') ? 'var(--bad)' : 'var(--muted)');
-    infoBits.push(`🤖 NOCZenith${c.agenteVersao ? ` v${escapeHtml(String(c.agenteVersao))}` : ''}${print ? ` · 📸 NoPulsoPrint: <b style="color:${corPrint};">${escapeHtml(print)}</b>` : ''}${c.agenteEstadoEm ? ` <span style="color:var(--muted);font-size:11px;">(${escapeHtml(tempoRelativo(c.agenteEstadoEm))})</span>` : ''}`);
+    const nocElevado = Number(c.nocElevadoEm) > Date.now() - (6 * 60 * 1000);
+    const seloElevado = nocElevado
+      ? ` · <b style="color:var(--ok);" title="A tarefa SYSTEM do NOC foi confirmada recentemente">🛡️ NOC elevado</b>`
+      : '';
+    infoBits.push(`🤖 NOCZenith${c.agenteVersao ? ` v${escapeHtml(String(c.agenteVersao))}` : ''}${seloElevado}${print ? ` · 📸 NoPulsoPrint: <b style="color:${corPrint};">${escapeHtml(print)}</b>` : ''}${c.agenteEstadoEm ? ` <span style="color:var(--muted);font-size:11px;">(${escapeHtml(tempoRelativo(c.agenteEstadoEm))})</span>` : ''}`);
   }
   if(c.tailscale){
     const t = c.tailscale;

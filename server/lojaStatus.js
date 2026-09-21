@@ -680,6 +680,10 @@ const CAMPOS_DO_HEARTBEAT = [
   // heartbeat escreve, e e' o que separa "a loja caiu" de "so o caminho ate
   // o servidor falhou" na hora que ela volta
   'agenteFalhasSeguidas',
+  // prova recente de que a instancia SYSTEM (_Boot) esta viva; sem preservar
+  // este campo, uma recarga do espelho poderia esconder o escudo por ate cinco
+  // minutos mesmo com a tarefa elevada rodando normalmente.
+  'nocElevadoEm',
 ];
 
 async function carregarEspelho() {
@@ -923,6 +927,16 @@ async function heartbeat(codigo, posto, info, token) {
     // silencio, por definicao, nada chega aqui.
     agenteFalhasSeguidas: falhasDeQuemBate(dados.rede),
   };
+
+  // A instancia _Boot so existe quando a instalacao conseguiu criar a tarefa
+  // agendada SYSTEM. Guardamos a ultima prova positiva, em vez de usar a
+  // versao do agente como chute: v87 pode ter sido autoatualizada numa maquina
+  // que ainda nao recebeu a reinstalacao com UAC.
+  //
+  // A instancia de login manda false e nao apaga esta prova. A de SYSTEM faz
+  // sua sondagem a cada 90s; o heartbeat ja e persistido no maximo a cada
+  // cinco minutos, portanto nao acrescenta escrita ao custo do NOC.
+  if (dados.souAdmin === true) patch.nocElevadoEm = Date.now();
 
   if (dados.tailscale !== undefined) {
     const tailscale = sanitizarTailscale(dados.tailscale);
