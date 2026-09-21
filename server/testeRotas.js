@@ -12672,7 +12672,7 @@ setTimeout(async () => {
       // só busca a política inteira quando o número muda.
       'o heartbeat leva a versão, e o agente interno reage a ela (antes só aplicava ao reiniciar)':
         typeof (await ls.heartbeat('PPDOM', 'PC1', { userAgent: 'NOCZenith/1.0' }, 'tokdom')).versaoAplicacao === 'string'
-        && /if \(\$null -ne \$resp\.versaoAplicacao -and "v\$VersaoScript\|\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
+        && /\$resp\.inventarioAtalhosPendenteEm -or \(\$null -ne \$resp\.versaoAplicacao -and "v\$VersaoScript\|\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
         && /try \{ Sincronizar-Politica \}/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',

@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 87;
+const VERSAO_VIGIA = 88;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -2586,7 +2586,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // sai de um arquivo ao lado do script. So quando os dois diferem e que o
     // agente busca a politica inteira - 1 leitura por mudanca REAL, em vez de
     // uma consulta a cada volta do laco.
-    '      if ($null -ne $resp.versaoAplicacao -and "v$VersaoScript|$($resp.versaoAplicacao)" -ne (Versao-PoliticaAplicada)) {',
+    '      if ($resp.inventarioAtalhosPendenteEm -or ($null -ne $resp.versaoAplicacao -and "v$VersaoScript|$($resp.versaoAplicacao)" -ne (Versao-PoliticaAplicada))) {',
     '        try { Sincronizar-Politica } catch { Escrever-Log "Politica nao sincronizou: $($_.Exception.Message)" }',
     '      }',
     '      if ($resp.comandoPendente) { Executar-ComandoPendente $resp.comandoPendente }',

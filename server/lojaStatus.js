@@ -1111,6 +1111,10 @@ async function heartbeat(codigo, posto, info, token) {
     noPulsoPrint: !!(atual && atual.noPulsoPrint),
     capturarAgora,
     versaoAplicacao: versaoAplicacao(atual && atual.politicaVersao, arteDaMaquina),
+    // Pedido one-shot também viaja no heartbeat. A versão da política é o
+    // gatilho normal, mas um marcador local antigo ou uma corrida entre as
+    // instâncias de login/SYSTEM não pode deixar a leitura presa para sempre.
+    inventarioAtalhosPendenteEm: Number(atual && atual.inventarioAtalhosPendenteEm || 0) || null,
   };
 }
 
