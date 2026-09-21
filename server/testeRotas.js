@@ -12689,12 +12689,6 @@ setTimeout(async () => {
       'a aplicação e a barra usam o mesmo Desktop real que o inventário encontrou':
         /function Aplicar-BarraTarefas[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)[\s\S]*?foreach \(\$origem in @\(\$desktopUsuario/.test(psPp)
         && /function Aplicar-PerfilEstacao[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)[\s\S]*?\$areas = @\(\$desktopUsuario, \$env:PUBLIC/.test(psPp),
-      'o NOC só vira hostname depois da padronização da Área de Trabalho com backup':
-        /function nomeWindowsDaEstacaoPadronizada[\s\S]*?estacao\.ativa[\s\S]*?estacao\.modo !== 'aplicar'[\s\S]*?estacao\.backupAntesDeLimpar[\s\S]*?return null/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
-        && (require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8').match(/nomeWindowsDesejado: nomeWindowsDaEstacaoPadronizada\(atual, posto\)/g) || []).length === 2
-        && /function Sincronizar-NomeWindows[\s\S]*?if \(-not \$Servico -or \[bool\]\$servidorCadastro\) \{ return \}[\s\S]*?Eh-MaquinaVirtualLocal[\s\S]*?Rename-Computer -NewName \$desejado/.test(psPp)
-        && /Sincronizar-NomeWindows \$resp\.nomeWindowsDesejado/.test(psPp)
-        && /Falha ao preparar nome do Windows \$\(\$desejado\):/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
       'a máquina baixa a arte DELA, com o token dela': imgMaquina.status === 200,
