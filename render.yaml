@@ -31,6 +31,15 @@ services:
         sync: false
       - key: FIREBASE_STORAGE_BUCKET
         sync: false
+      # Conta corporativa representada pela conta de serviço ao criar eventos
+      # e salas do Google Meet. Não são segredos; ficam no blueprint para que
+      # um novo deploy nunca publique o botão de reunião sem a integração.
+      - key: GOOGLE_MEET_USUARIO
+        value: admin@solutionstitech.com
+      - key: GOOGLE_MEET_AGENDA
+        value: primary
+      - key: GOOGLE_MEET_FUSO
+        value: America/Sao_Paulo
       - key: DASHBOARD_USER
         sync: false
       - key: DASHBOARD_PASSWORD

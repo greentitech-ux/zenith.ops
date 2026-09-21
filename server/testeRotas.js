@@ -22891,7 +22891,7 @@ setTimeout(async () => {
       // de UMA posição. A agenda usa a MESMA credencial: copiar o caminho
       // faria duas cópias que envelhecem separado.
       'a autenticação com o Google mora num módulo só, e o sheetsSync usa ele':
-        /function getAccessToken\(\) \{\n  return googleAuth\.tokenDeAcesso\(SHEETS_SCOPE/.test(sheets)
+        /function getAccessToken\(\) \{\r?\n  return googleAuth\.tokenDeAcesso\(SHEETS_SCOPE(?:,|\))/.test(sheets)
         && !/jwt\.sign/.test(sheets) && !/oauth2\.googleapis\.com/.test(sheets)
         && /module\.exports = \{ tokenDeAcesso, configurado, limparCache, TOKEN_URL \};/.test(gauth),
       'o cache é POR ESCOPO E USUÁRIO (pedir a agenda não derruba o token da planilha)':
