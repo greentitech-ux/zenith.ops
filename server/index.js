@@ -5620,14 +5620,13 @@ app.post('/api/loja-status/:codigo/computadores/:posto/inventario-atalhos', asyn
   }
 });
 
-// O X da fila cancela somente o que ainda está aguardando entrega. A senha do
-// Master é confirmada no servidor, e a transação em lojaStatus impede corrida
-// com o heartbeat da própria máquina.
+// O X cancela o que aguarda entrega e também permite arquivar como cancelado
+// um comando já fechado em erro. Executando/concluído continuam protegidos.
 app.delete('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) => {
   try {
     if (!(await exigirSenhaDoMaster(req, res))) return;
     const comando = await lojaStatus.cancelarComandoPendente(req.params.id, req.user && req.user.email);
-    res.json({ ok: true, comando, mensagem: 'Comando removido da fila antes de chegar à máquina.' });
+    res.json({ ok: true, comando, mensagem: comando.canceladoAposErro ? 'Comando com erro marcado como cancelado.' : 'Comando removido da fila antes de chegar à máquina.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

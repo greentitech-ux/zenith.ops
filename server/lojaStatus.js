@@ -3140,11 +3140,10 @@ async function detalharComando(comandoId) {
   };
 }
 
-// Cancela SOMENTE antes da entrega. Depois que o agente recebe um PowerShell,
-// não existe uma forma genérica e segura de "desexecutá-lo"; fingir que o X
-// parou algo em execução seria perigoso. A transação disputa a mesma vaga que
-// o heartbeat usa para entregar o comando, portanto ou o Master cancela ou a
-// máquina recebe — nunca os dois estados ao mesmo tempo.
+// Cancela antes da entrega OU arquiva como cancelado um comando que já fechou
+// em erro. Depois que o agente recebe um PowerShell ainda em execução, não há
+// forma genérica e segura de "desexecutá-lo"; fingir que o X parou algo seria
+// perigoso. O erro original permanece no documento para auditoria.
 async function cancelarComandoPendente(comandoId, porEmail) {
   const id = String(comandoId || '').trim();
   if (!id) throw new Error('Comando inválido.');
@@ -3154,7 +3153,7 @@ async function cancelarComandoPendente(comandoId, porEmail) {
     const snap = await tx.get(comandoRef);
     if (!snap.exists) throw new Error('Comando não encontrado.');
     const comando = snap.data();
-    if (comando.status !== 'pendente') {
+    if (!['pendente', 'erro'].includes(comando.status)) {
       throw new Error(comando.status === 'entregue'
         ? 'Este comando já foi entregue à máquina e não pode ser cancelado por aqui.'
         : 'Este comando já foi finalizado.');
@@ -3173,7 +3172,11 @@ async function cancelarComandoPendente(comandoId, porEmail) {
         ...(eraCabeca ? { comandoAguardandoElevacaoDesde: null } : {}),
       });
     }
-    const patch = { status: 'cancelado', canceladoEm: agora, canceladoPor: String(porEmail || '').slice(0, 160) || null };
+    const patch = {
+      status: 'cancelado', canceladoEm: agora,
+      canceladoPor: String(porEmail || '').slice(0, 160) || null,
+      canceladoAposErro: comando.status === 'erro',
+    };
     tx.update(comandoRef, patch);
     retorno = { id, ...patch, codigo: comando.codigo, posto: comando.posto };
   });

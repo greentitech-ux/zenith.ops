@@ -7051,6 +7051,8 @@ setTimeout(async () => {
     const depoisTravado = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
     let respostaTardiaTravado = false;
     try { await ls.marcarComandoExecutado(cmdTravado.id, { resultado: 'tarde' }, { codigo: UNI, posto, token: tk }); } catch (e) { respostaTardiaTravado = /depois do limite/i.test(e.message); }
+    const canceladoAposErro = await ls.cancelarComandoPendente(cmdTravado.id, 'master@teste.local');
+    const cmdTravadoCancelado = (await dbA.collection('lojaStatusComandos').doc(cmdTravado.id).get()).data();
 
     // EXPIRACAO: comando-admin numa maquina sem executor elevado (instalada sem
     // Administrador). Envelhece a espera e a varredura desiste, liberando a vaga.
@@ -7089,6 +7091,10 @@ setTimeout(async () => {
        'comando entregue sem retorno vira erro, libera a vaga e não aceita resposta tardia':
          transTravado.length === 1 && cmdTravadoData.status === 'erro' && !depoisTravado.comandoPendenteId
          && /tempo limite de execução/i.test(cmdTravadoData.erro || '') && respostaTardiaTravado,
+       'comando com erro pode ser cancelado sem apagar o erro original':
+         canceladoAposErro.canceladoAposErro === true && cmdTravadoCancelado.status === 'cancelado'
+         && /tempo limite de execução/i.test(cmdTravadoCancelado.erro || '')
+         && cmdTravadoCancelado.canceladoPor === 'master@teste.local',
        // expiração
       'comando-admin sem executor elevado expira e libera a vaga':
         transExp.length === 1 && !depoisExp.comandoPendenteId
