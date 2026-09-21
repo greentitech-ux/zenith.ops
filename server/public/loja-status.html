@@ -385,10 +385,14 @@
   .fantasmas-head:hover #fantasmas-acao,.fantasmas-head:focus-visible #fantasmas-acao{color:var(--accent);}
 
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
-  .prog-abas{display:flex;gap:6px;margin:4px 0 2px;}
-  .prog-aba{flex:1 1 0;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:8px;padding:8px 10px;font:inherit;font-size:12.5px;cursor:pointer;}
-  .prog-aba:hover{color:var(--text);border-color:var(--accent);}
-  .prog-aba.ativa{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:700;}
+  /* As abas de Programas reúnem inventário, comandos e estação. O contêiner
+     rola horizontalmente no celular em vez de esmagar quatro decisões numa
+     largura que não comporta seus nomes. */
+  .prog-abas{display:flex;gap:7px;margin:4px 0 12px;padding:3px;overflow-x:auto;overscroll-behavior-x:contain;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.025);scrollbar-width:thin;}
+  .prog-aba{flex:1 0 max-content;min-height:38px;border:1px solid transparent;background:transparent;color:var(--muted);border-radius:8px;padding:8px 12px;font:600 12.5px var(--sans);cursor:pointer;white-space:nowrap;transition:color .15s ease,background .15s ease,border-color .15s ease,transform .15s ease;}
+  .prog-aba:hover{color:var(--text);border-color:var(--line);background:var(--panel2);}
+  .prog-aba:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .prog-aba.ativa{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:800;box-shadow:0 3px 12px rgba(184,255,60,.18);}
   .prog-dia{font:10.5px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;}
   .prog-linha{display:flex;gap:8px;align-items:baseline;padding:6px 2px;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.4;}
   .prog-sinal{flex:none;font:11px var(--mono);width:16px;text-align:center;}
@@ -397,6 +401,18 @@
   .prog-linha.saiu span{color:var(--muted);}
   .prog-vazio{color:var(--muted);font-size:12.5px;padding:16px 2px;line-height:1.5;}
   .prog-rodape{color:var(--muted);font:11px var(--mono);margin-top:12px;}
+  .prog-manut-intro{display:flex;align-items:flex-start;gap:10px;padding:12px 13px;margin-bottom:12px;border:1px solid rgba(184,255,60,.24);border-radius:11px;background:linear-gradient(120deg,rgba(184,255,60,.10),rgba(184,255,60,.025));}
+  .prog-manut-intro b{display:block;font-size:13px;color:var(--text);margin-bottom:3px;}
+  .prog-manut-intro p{margin:0;color:var(--muted);font-size:11.5px;line-height:1.45;}
+  .prog-manut-grade{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;}
+  .prog-manut-card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--panel2);}
+  .prog-manut-card h4{margin:0;font-size:12.5px;line-height:1.25;color:var(--text);}
+  .prog-manut-card p{margin:0;min-height:3.1em;color:var(--muted);font-size:11px;line-height:1.4;}
+  .prog-manut-card button{width:100%;margin-top:auto;}
+  .prog-manut-card.perigo{border-color:rgba(255,91,91,.3);}
+  .prog-manut-card.perigo h4{color:var(--warn);}
+  .prog-manut-aviso{padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:12px;line-height:1.5;}
+  @media(max-width:520px){.prog-abas{margin-left:-4px;margin-right:-4px;border-radius:10px;}.prog-aba{flex-basis:auto;padding-inline:10px;font-size:12px;}.prog-manut-grade{grid-template-columns:1fr;}.prog-manut-card p{min-height:0;}}
   .overlay.hidden{display:none!important;}
   /* Painel aberto DE DENTRO de outro (Programas, Mensagem, Editar, Aparelho...)
      ficava ATRÁS de quem o chamou: todos são .overlay com o MESMO z-index, e
@@ -1154,10 +1170,11 @@
     <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
       <h3 id="prog-titulo" style="margin:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Programas</h3>
     </div>
-    <div class="prog-abas">
-      <button type="button" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
-      <button type="button" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
-      <button type="button" class="prog-aba" id="prog-aba-estacao" onclick="trocarAbaProgramas('estacao')">Área de Trabalho</button>
+    <div class="prog-abas" role="tablist" aria-label="Seções de programas e manutenção">
+      <button type="button" role="tab" aria-selected="true" aria-controls="prog-corpo" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-manutencao" onclick="trocarAbaProgramas('manutencao')">Manutenção</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-estacao" onclick="trocarAbaProgramas('estacao')">Área de Trabalho</button>
     </div>
     <div id="prog-acoes-master" class="hidden" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2,rgba(255,255,255,.03));">
       <div style="font-weight:700;font-size:13px;margin-bottom:7px;">Gerenciar por catálogo</div>
@@ -1177,7 +1194,7 @@
       </details>
     </div>
     <input type="search" id="prog-busca" placeholder="Buscar programa..." oninput="pintarProgramas()" style="margin:10px 0 6px;">
-    <div id="prog-corpo"></div>
+    <section id="prog-corpo" role="tabpanel" aria-live="polite"></section>
   </div></div>
 </div>
 <div class="overlay hidden" id="detalhe-comp-overlay">
@@ -1894,13 +1911,8 @@ function atualizarConteudoDetalhe(codigo, c){
     ${c.anydeskId ? `<a class="btn-icone" data-dica="Abrir no AnyDesk" aria-label="Abrir no AnyDesk" href="anydesk:${escapeHtml(c.anydeskId)}" onclick="cliqueAnydeskDetalhe(event,'${escapeJs(c.anydeskId)}')">🖥️</a>` : ''}
     <button type="button" class="btn-icone" data-dica="Mensagem na tela da loja" aria-label="Mensagem na tela da loja" onclick="abrirModalMensagem('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">💬</button>
     <button type="button" class="btn-icone" data-dica="Copiar o link desta máquina" aria-label="Copiar o link desta máquina" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗</button>
-    <button type="button" class="btn-icone" data-dica="Copiar o comando de instalação pro PowerShell da loja" aria-label="Copiar o comando de instalação pro PowerShell da loja" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋</button>
-    <button type="button" class="btn-icone" data-dica="Baixar o agente NOC-NoPulso" aria-label="Baixar o agente NOC-NoPulso" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
     ${c.noPulsoPrint ? `<button type="button" class="btn-icone" data-dica="Capturar a tela desta máquina agora" aria-label="Capturar a tela desta máquina agora" onclick="capturarAgora('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📸</button>` : ''}
-    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Diagnóstico de rede: ping por esta máquina" aria-label="Diagnóstico de rede: ping por esta máquina" onclick="abrirDiagnosticoPing('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">⌁</button>` : ''}
-    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Console PowerShell nesta máquina" aria-label="Console PowerShell" onclick="abrirConsoleNoc('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">⌨️</button>` : ''}
-    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Reiniciar este computador" aria-label="Reiniciar este computador" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁</button>` : ''}
-    <button type="button" class="btn-icone" data-dica="Programas desta máquina" aria-label="Programas desta máquina" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
+    <button type="button" class="btn-icone" data-dica="Programas, manutenção e Área de Trabalho" aria-label="Programas, manutenção e Área de Trabalho" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
     <button type="button" class="btn-icone perigo" data-dica="Remover do NOC" aria-label="Remover do NOC" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
   `;
   renderPoliticaComputador(codigo, c);
@@ -2010,9 +2022,11 @@ async function enviarConsoleNoc(){
 }
 
 // ================= PROGRAMAS DA MÁQUINA =================
-// Janela própria, com duas abas, porque são duas perguntas diferentes:
+// Janela própria, com quatro abas porque cada uma responde uma decisão distinta:
 //   "o que mudou aqui?"      -> Mudanças (o histórico entrou/saiu)
 //   "o que tem instalado?"   -> Instalados agora (a última varredura inteira)
+//   "como intervenho?"       -> Manutenção (comandos e recuperação do agente)
+//   "o que fica visível?"    -> Área de Trabalho (perfil da estação)
 // Nenhuma leitura nova no Firestore: o agente já manda a lista, o servidor já
 // a guarda, e a ficha da máquina já trouxe tudo (ver detalhar/listar).
 let PROG_ATUAL = null;
@@ -2141,15 +2155,77 @@ async function removerProgramaAtual(nome){
 }
 function trocarAbaProgramas(aba){
   PROG_ABA = aba;
-  document.getElementById('prog-aba-mudancas').classList.toggle('ativa', aba==='mudancas');
-  document.getElementById('prog-aba-atuais').classList.toggle('ativa', aba==='atuais');
-  document.getElementById('prog-aba-estacao').classList.toggle('ativa', aba==='estacao');
-  document.getElementById('prog-acoes-master').classList.toggle('hidden', aba==='estacao' || !IS_MASTER || PROG_ATUAL?.tipo !== 'interno');
+  ['mudancas','atuais','manutencao','estacao'].forEach(nome => {
+    const botao = document.getElementById(`prog-aba-${nome}`);
+    if(!botao) return;
+    const ativa = aba===nome;
+    botao.classList.toggle('ativa', ativa);
+    botao.setAttribute('aria-selected', String(ativa));
+    botao.tabIndex = ativa ? 0 : -1;
+  });
+  const mostraCatalogo = (aba==='mudancas' || aba==='atuais') && IS_MASTER && PROG_ATUAL?.tipo === 'interno';
+  document.getElementById('prog-acoes-master').classList.toggle('hidden', !mostraCatalogo);
+  document.getElementById('prog-busca').classList.toggle('hidden', aba==='manutencao' || aba==='estacao');
   pintarProgramas();
+}
+function abrirManutencaoDestaMaquina(codigo, posto, nome){
+  // A janela de manutenção já tem as confirmações, senha e aviso de dois
+  // minutos. Fechamos Programas antes para o retorno não deixar dois painéis
+  // sobrepostos; o detalhe continua a origem visual da ação.
+  fecharProgramas();
+  reiniciarDesteComputador(codigo, posto, nome);
+}
+function pintarManutencaoProgramas(corpo){
+  const c = PROG_ATUAL;
+  const nome = escapeHtml(c.nome || c.posto);
+  const codigo = escapeJs(c.codigo);
+  const posto = escapeJs(c.posto);
+  const tipo = escapeJs(c.tipo || 'atendimento');
+  const nomeJs = escapeJs(c.nome || c.posto);
+  const interno = c.tipo === 'interno';
+  const acoesInternas = interno ? `
+    <article class="prog-manut-card">
+      <h4>⌁ Diagnóstico de rede</h4>
+      <p>Executa ping a um IP privado a partir desta máquina. O resultado fica no histórico do NOC.</p>
+      <button type="button" class="btn-ghost" onclick="abrirDiagnosticoPing('${codigo}','${posto}','${nomeJs}')">Testar rede</button>
+    </article>
+    <article class="prog-manut-card">
+      <h4>⌨️ Console operacional</h4>
+      <p>Envia um único comando PowerShell, auditado e com confirmação de senha Master.</p>
+      <button type="button" class="btn-ghost" onclick="abrirConsoleNoc('${codigo}','${posto}','${nomeJs}')">Abrir console</button>
+    </article>
+    <article class="prog-manut-card perigo">
+      <h4>🔁 Reiniciar com aviso</h4>
+      <p>Abre a manutenção com esta máquina já selecionada. A loja recebe aviso de 2 minutos.</p>
+      <button type="button" class="btn-ghost" onclick="abrirManutencaoDestaMaquina('${codigo}','${posto}','${nomeJs}')">Preparar reinício</button>
+    </article>` : `
+    <article class="prog-manut-aviso">Este equipamento é de atendimento. Comandos de rede, console e reinício são exclusivos de computadores internos.</article>`;
+  corpo.innerHTML = `
+    <div class="prog-manut-intro">
+      <span aria-hidden="true">🛠️</span>
+      <div><b>Manutenção de ${nome}</b><p>Ferramentas operacionais centralizadas aqui. Cada ação preserva as confirmações e o registro no NOC.</p></div>
+    </div>
+    <div class="prog-manut-grade">
+      <article class="prog-manut-card">
+        <h4>📋 Instalar ou reparar o agente</h4>
+        <p>Copia o comando individual desta máquina para instalar com privilégio elevado e iniciar junto ao Windows.</p>
+        <button type="button" class="btn-primary" onclick="copiarComandoVigia('${codigo}','${posto}','${tipo}')">Copiar comando</button>
+      </article>
+      <article class="prog-manut-card">
+        <h4>🛡️ Baixar o agente</h4>
+        <p>Baixa o script individualizado para uso sem área de transferência ou por suporte local.</p>
+        <button type="button" class="btn-ghost" onclick="baixarVigia('${codigo}','${posto}','${tipo}')">Baixar script</button>
+      </article>
+      ${acoesInternas}
+    </div>`;
 }
 function pintarProgramas(){
   const corpo = document.getElementById('prog-corpo');
   if(!PROG_ATUAL){ corpo.innerHTML=''; return; }
+  if(PROG_ABA==='manutencao'){
+    pintarManutencaoProgramas(corpo);
+    return;
+  }
   if(PROG_ABA==='estacao'){
     // Reusa a mesma política e os mesmos botões da ficha do NOC: não há uma
     // segunda configuração concorrente. A aba só coloca o contexto "o que há
