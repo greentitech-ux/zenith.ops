@@ -12673,6 +12673,11 @@ setTimeout(async () => {
       'o heartbeat leva a versão, e o agente interno reage a ela (antes só aplicava ao reiniciar)':
         typeof (await ls.heartbeat('PPDOM', 'PC1', { userAgent: 'NOCZenith/1.0' }, 'tokdom')).versaoAplicacao === 'string'
         && /\$resp\.inventarioAtalhosPendenteEm -or \(\$null -ne \$resp\.versaoAplicacao -and "v\$VersaoScript\|\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
+        && (() => {
+          const inicio = psPp.indexOf('function Sincronizar-Politica');
+          return psPp.indexOf('Enviar-InventarioAtalhos', inicio)
+            < psPp.indexOf('if ((Versao-PoliticaAplicada) -eq $versao) { return }', inicio);
+        })()
         && /try \{ Sincronizar-Politica \}/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',

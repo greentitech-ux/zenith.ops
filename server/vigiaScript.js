@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 88;
+const VERSAO_VIGIA = 89;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -2063,8 +2063,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // A versão do agente faz este conserto tentar uma vez mesmo quando a
     // política e a imagem já existiam antes da atualização.
     '    $versao = "v$VersaoScript|$versaoServidor"',
-    '    if ((Versao-PoliticaAplicada) -eq $versao) { return }',
+    '    # O inventario e um pedido one-shot independente da versao da politica.',
+    '    # Ele precisa rodar ANTES do retorno por versao ja aplicada; do contrario',
+    '    # o heartbeat acorda a sincronizacao, mas ela sai sem ler os atalhos.',
     '    if ($pol.estacao -and $pol.estacao.inventarioPendenteEm -and -not (Enviar-InventarioAtalhos)) { return }',
+    '    if ((Versao-PoliticaAplicada) -eq $versao) { return }',
     '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
