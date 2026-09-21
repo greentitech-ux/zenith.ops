@@ -277,7 +277,9 @@
   .equip-tile-nome .icon-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0;flex:none;}
   .equip-tile-nome .icon-btn:hover{color:var(--accent);}
   .equip-tile-sub{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
-  .equip-tile-unidade{font-family:var(--mono);font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* A unidade identifica o card no topo. O nome da máquina fica sozinho na
+     linha de baixo, com a largura inteira e até duas linhas no celular. */
+  .equip-tile-unidade{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:normal;overflow-wrap:anywhere;line-height:1.35;}
   .equip-tile-ip{font-family:var(--mono);font-size:10.5px;color:var(--text);margin-top:4px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85;}
   .equip-tile-ip:hover{opacity:1;color:var(--accent);}
   .equip-tile-ip-copy{opacity:.6;font-size:9.5px;}
@@ -1590,6 +1592,7 @@ function metricasTileHtml(c){
 // o detalhe)
 function equipTileHtml(codigo, c){
   const nomeOk = escapeHtml(c.nome || '(sem nome)');
+  const unidadeOk = escapeHtml(UNIDADES_NOMES[codigo] || codigo);
   const status = statusDe(c);
   const statusTexto = textoDeEstado(c, status);
   const btnAnydesk = c.anydeskId
@@ -1601,10 +1604,10 @@ function equipTileHtml(codigo, c){
   return `<div class="equip-tile status-${status}" data-codigo="${escapeHtml(codigo)}" data-posto="${escapeHtml(c.posto)}" onclick="abrirDetalheComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">
     <div class="equip-tile-head">
       <span class="status-dot ${status}"></span>
-      <span class="equip-tile-nome" title="${nomeOk}">${nomeOk}</span>
+      <span class="equip-tile-nome" title="${unidadeOk}">${unidadeOk}</span>
       ${marcadorServidor}${marcadorGcom}${marcadorQuedas}${btnAnydesk}
     </div>
-    <div class="equip-tile-unidade" title="${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</div>
+    <div class="equip-tile-unidade" title="${nomeOk}">${nomeOk}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
     ${c.ipLocal ? `<div class="equip-tile-ip" title="Copiar IP local" onclick="event.stopPropagation();copiarIpLocal('${escapeJs(c.ipLocal)}')">🏠 ${escapeHtml(c.ipLocal)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
     ${c.anydeskId ? `<div class="equip-tile-ip" title="Copiar ID do AnyDesk" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">🖥️ ${escapeHtml(c.anydeskId)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
@@ -2749,6 +2752,7 @@ function adivinharDuplicado(fantasma, reaisDaUnidade){
 function fantasmaTileHtml(codigo, c, duplicadoDe){
   const status = statusDe(c);
   const statusTexto = textoDeEstado(c, status);
+  const unidadeOk = escapeHtml(UNIDADES_NOMES[codigo] || codigo);
   const bits = [];
   if(c.ip) bits.push(`🌐 ${escapeHtml(c.ip)}`);
   // tempoRelativo ja devolve com o "há" - repetir aqui dava "aberto há há 16min"
@@ -2759,10 +2763,10 @@ function fantasmaTileHtml(codigo, c, duplicadoDe){
   return `<div class="equip-tile status-${status}" data-codigo="${escapeHtml(codigo)}" data-posto="${escapeHtml(c.posto)}" onclick="abrirDetalheComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">
     <div class="equip-tile-head">
       <span class="status-dot ${status}"></span>
-      <span class="equip-tile-nome" style="color:var(--muted);font-weight:600;">(sem nome)</span>
+      <span class="equip-tile-nome" title="${unidadeOk}">${unidadeOk}</span>
       <span class="tipo-badge">${TIPO_COMPUTADOR_LABEL[c.tipo]||TIPO_COMPUTADOR_LABEL.atendimento}</span>
     </div>
-    <div class="equip-tile-unidade" title="${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</div>
+    <div class="equip-tile-unidade" title="Máquina ainda sem nome">(sem nome)</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
     ${bits.length ? `<div class="equip-tile-info">${bits.join(' · ')}</div>` : ''}
     ${dupHtml}

@@ -21334,6 +21334,22 @@ setTimeout(async () => {
   if (!okUnidadesDuasColunas) ruins += 1;
   console.log(`${okUnidadesDuasColunas ? '✓' : '✗'} NOC: "Por unidade" em duas colunas no celular (metade da rolagem, nome inteiro)`);
 
+  // Hierarquia do card no celular: unidade curta no cabeçalho com os ícones;
+  // nome da máquina na linha inteira abaixo, onde pode quebrar sem truncar.
+  let okHierarquiaCardNoc = false;
+  try {
+    const nocCard = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const fn = nocCard.match(/function equipTileHtml\(codigo, c\)\{[\s\S]*?\n\}/)?.[0] || '';
+    const fantasma = nocCard.match(/function fantasmaTileHtml\(codigo, c, duplicadoDe\)\{[\s\S]*?\n\}/)?.[0] || '';
+    okHierarquiaCardNoc = /equip-tile-nome[^>]*title="\$\{unidadeOk\}"[^>]*>\$\{unidadeOk\}/.test(fn)
+      && /equip-tile-unidade[^>]*title="\$\{nomeOk\}"[^>]*>\$\{nomeOk\}/.test(fn)
+      && /\.equip-tile-unidade\{[^}]*white-space:normal[^}]*overflow-wrap:anywhere/.test(nocCard)
+      && /equip-tile-nome[^>]*>\$\{unidadeOk\}/.test(fantasma)
+      && /equip-tile-unidade[^>]*>\(sem nome\)/.test(fantasma);
+  } catch (e) { okHierarquiaCardNoc = false; console.log('  erro: ' + e.message); }
+  if (!okHierarquiaCardNoc) ruins += 1;
+  console.log(`${okHierarquiaCardNoc ? '✓' : '✗'} NOC: unidade no topo e nome completo da máquina na linha larga de baixo`);
+
   // ------------------------------------------------------------------
   // ALERTA VINDO DE FORA (POST /api/bot/alerta). Pedido do Master
   // (13/09/2026): o agente que vigia o Gestor de Pedidos precisa avisar o
