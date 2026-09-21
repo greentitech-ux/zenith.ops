@@ -17,7 +17,9 @@
 // Sem o bump, os agentes ja instalados nunca baixariam essa regra.
 // 80: coleta o ID publico do AnyDesk pela propria instalacao e o envia na
 // telemetria; nao coleta senha, token ou configuracao de acesso remoto.
-const VERSAO_VIGIA = 80;
+// 81: aplica o perfil declarativo da Área de Trabalho, sempre salvando os
+// atalhos removidos antes da limpeza e recebendo alterações automaticamente.
+const VERSAO_VIGIA = 81;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1848,6 +1850,54 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  try { return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { return $false }',
     '}',
     '',
+    '# ---- perfil da Área de Trabalho -------------------------------------',
+    '# A lista vem do NOC e é deliberadamente pequena. Não há comando livre',
+    '# vindo da tela: só removemos .lnk/.url/.rdp que não estejam aprovados.',
+    '# Antes de remover, copiamos os próprios atalhos para C:\\NoPulsoBackup.',
+    '# Arquivos de trabalho (planilhas, documentos, fotos) nunca entram nesta',
+    '# limpeza e não são apagados pelo agente.',
+    'function Atalho-EstaAprovado($item, $permitidos) {',
+    '  $nome = [IO.Path]::GetFileNameWithoutExtension([string]$item.Name).ToLowerInvariant()',
+    '  $ext = [string]$item.Extension.ToLowerInvariant()',
+    '  if (($permitidos -contains "nopulso") -and $nome -match "nopulso|zenith ops") { return $true }',
+    '  if (($permitidos -contains "anydesk") -and $nome -match "anydesk") { return $true }',
+    '  if (($permitidos -contains "rdp-dominos") -and $ext -eq ".rdp" -and $nome -match "domino|dominos") { return $true }',
+    '  return $false',
+    '}',
+    '',
+    'function Aplicar-PerfilEstacao($estacao) {',
+    '  # A instância SYSTEM não enxerga a Área de Trabalho do operador. Ela',
+    '  # marca a política como atendida no próprio contexto; o login aplica a',
+    '  # mesma versão no perfil correto quando alguém entrar.',
+    '  if ($Servico) { return $true }',
+    '  if (-not $estacao -or -not [bool]$estacao.ativa -or [string]$estacao.modo -ne "aplicar") { return $true }',
+    '  $permitidos = @($estacao.atalhosAprovados | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
+    '  $areas = @($env:USERPROFILE + "\\Desktop", $env:PUBLIC + "\\Desktop") | Select-Object -Unique',
+    '  $remover = New-Object System.Collections.Generic.List[object]',
+    '  foreach ($area in $areas) {',
+    '    if (-not (Test-Path -LiteralPath $area)) { continue }',
+    '    foreach ($item in @(Get-ChildItem -LiteralPath $area -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @(".lnk", ".url", ".rdp") })) {',
+    '      if (-not (Atalho-EstaAprovado $item $permitidos)) { [void]$remover.Add($item) }',
+    '    }',
+    '  }',
+    '  if ($remover.Count -eq 0) { Escrever-Log "Perfil da estação: Área de Trabalho já está conforme a lista aprovada."; return $true }',
+    '  $unidadeBackup = if ($env:SystemDrive) { $env:SystemDrive } else { Split-Path -Qualifier $env:USERPROFILE }',
+    '  $raiz = Join-Path $unidadeBackup "NoPulsoBackup\\Atalhos"',
+    '  $pasta = Join-Path $raiz ((Get-Date).ToString("yyyy-MM-dd_HHmmss") + "_" + $env:COMPUTERNAME)',
+    '  try { New-Item -ItemType Directory -Path $pasta -Force -ErrorAction Stop | Out-Null } catch { Escrever-Log "Perfil da estação: backup não criado; nada foi removido ($($_.Exception.Message))."; return $false }',
+    '  $manifesto = New-Object System.Collections.Generic.List[string]',
+    '  foreach ($item in $remover) {',
+    '    $grupo = if ($item.DirectoryName -eq ($env:PUBLIC + "\\Desktop")) { "Publica" } else { "Usuario" }',
+    '    $destino = Join-Path (Join-Path $pasta $grupo) $item.Name',
+    '    try { New-Item -ItemType Directory -Path (Split-Path -Parent $destino) -Force -ErrorAction Stop | Out-Null; Copy-Item -LiteralPath $item.FullName -Destination $destino -Force -ErrorAction Stop; $manifesto.Add("COPIADO: $($item.FullName) -> $destino") } catch { Escrever-Log "Perfil da estação: não consegui salvar $($item.Name); limpeza cancelada ($($_.Exception.Message))."; return $false }',
+    '  }',
+    '  $falhouRemocao = $false',
+    '  foreach ($item in $remover) { try { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop; $manifesto.Add("REMOVIDO: $($item.FullName)") } catch { $falhouRemocao = $true; Escrever-Log "Perfil da estação: falha ao remover $($item.Name): $($_.Exception.Message)" } }',
+    '  try { Set-Content -LiteralPath (Join-Path $pasta "manifesto.txt") -Value $manifesto -Encoding UTF8 -Force -ErrorAction Stop } catch {}',
+    '  Escrever-Log "Perfil da estação: $($remover.Count) atalho(s) guardado(s) em $pasta e removido(s) conforme a lista aprovada."',
+    '  return (-not $falhouRemocao)',
+    '}',
+    '',
     '# ---- executa UM comando da fila e devolve o resultado ---------------',
     '# Uma funcao so, usada pelo caminho normal (heartbeat do loop) E pela',
     '# sondagem elevada (Sondar-ComandoAdmin) - o mesmo comando nao pode ter',
@@ -1927,6 +1977,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
+    '    $okEstacao = Aplicar-PerfilEstacao $pol.estacao',
     '    # so marca como aplicada quando TUDO que aquela instancia podia fazer',
     '    # deu certo - senao a de boot (que tem admin) nunca mais tentaria',
     '    if ($Servico -and -not ($okUsb -and $okInst)) { Escrever-Log "Politica: sem Administrador, HKLM nao aplicado - tentando de novo depois."; return }',
@@ -1934,7 +1985,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // SYSTEM nao tem area de trabalho). Se a gravacao falhou, NAO pode marcar
     // como aplicada: a versao ficaria carimbada e a maquina nunca mais tentaria
     // - a loja ficaria pra sempre sem o papel de parede, calada.
-    '    if (-not $Servico -and -not $okPapel) { Escrever-Log "Politica: papel de parede nao aplicou - tentando de novo na proxima mudanca."; return }',
+    '    if (-not $Servico -and -not ($okPapel -and $okEstacao)) { Escrever-Log "Politica: papel de parede ou perfil da estação não aplicou; tentando de novo na próxima consulta."; return }',
     '    Set-Content -Path (Caminho-PoliticaAplicada) -Value $versao -Force',
     '    Escrever-Log "Politica versao $versao aplicada."',
     '  } catch { Escrever-Log "Falha ao sincronizar a politica: $($_.Exception.Message)" }',

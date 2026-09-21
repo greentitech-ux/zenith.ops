@@ -3852,6 +3852,8 @@ function renderPoliticaComputador(codigo, c){
   el.classList.toggle('hidden', !IS_MASTER);
   if(!IS_MASTER) return;
   const pol = c.politica || {};
+  const estacao = pol.estacao || {};
+  const atalhosAprovados = Array.isArray(estacao.atalhosAprovados) ? estacao.atalhosAprovados : [];
   const aviso = c.tipo === 'interno' ? '' : '<div style="font-size:11px;color:var(--warn);margin-top:6px;">Pendrive e instalação precisam de Administrador na máquina - quem aplica é a tarefa de boot do NOCZenith.</div>';
   const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
   const sumiu = c.ultimoProgramaSumidoEm ? `<div style="font-size:11.5px;color:var(--bad);margin-top:8px;">🗑️ Programa desinstalado: <b>${escapeHtml(c.ultimoProgramaSumidoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaSumidoEm))}</div>` : '';
@@ -3863,6 +3865,17 @@ function renderPoliticaComputador(codigo, c){
     ${aviso}${novo}${sumiu}
     <button type="button" class="btn-mini ok" style="margin-top:8px;" onclick="salvarPoliticaComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar política</button>
     <div class="msg hidden" id="msg-politica" style="margin-top:6px;"></div>
+    <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:10px;">
+      <div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Área de trabalho padronizada</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">Defina os únicos atalhos permitidos. Quando a aplicação estiver ligada, cada alteração enviada aqui chega sozinha ao agente; antes de retirar qualquer atalho, ele salva uma cópia em <b>C:\\NoPulsoBackup\\Atalhos</b>.</div>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:7px;cursor:pointer;"><input type="checkbox" data-estacao="ativa" ${estacao.ativa?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Gerenciar atalhos desta máquina</b><small style="display:block;color:var(--muted);">Desligado: apenas mantém a configuração, sem tocar na Área de Trabalho.</small></span></label>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin:6px 0 8px;">
+        ${[['nopulso','NoPulso'],['anydesk','AnyDesk'],['rdp-dominos','RDP Dominos']].map(([id,nome])=>`<label class="btn-mini" style="cursor:pointer;"><input type="checkbox" data-estacao-atalho="${id}" ${atalhosAprovados.includes(id)?'checked':''} style="width:auto;margin-right:4px;accent-color:var(--accent);">${nome}</label>`).join('')}
+      </div>
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;"><input type="checkbox" data-estacao="aplicar" ${estacao.aplicar?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Aplicar lista aprovada</b><small style="display:block;color:var(--warn);">Remove somente atalhos (.lnk, .url e .rdp) fora da lista; documentos e outros arquivos não são removidos.</small></span></label>
+      <button type="button" class="btn-mini ok" style="margin-top:9px;" onclick="salvarPerfilEstacao('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar Área de Trabalho</button>
+      <div class="msg hidden" id="msg-estacao" style="margin-top:6px;"></div>
+    </div>
     <!-- ARTE DESTA MAQUINA: cada computador pode ter a propria imagem (pedido
          do Master). Ela ganha da arte em massa somente enquanto for a mais
          recente e NAO leva carimbo por cima (ja vem pronta). Lembre de ligar tambem o "Papel de parede da
@@ -3923,6 +3936,25 @@ async function salvarPoliticaComputador(codigo, posto){
     msg.className = 'msg'; msg.classList.remove('hidden');
     await carregar();
   }catch(e){ msg.textContent = e.message; msg.className = 'msg err'; msg.classList.remove('hidden'); }
+}
+
+async function salvarPerfilEstacao(codigo, posto){
+  const msg = document.getElementById('msg-estacao');
+  const ativa = !!document.querySelector('#detalhe-comp-politica [data-estacao="ativa"]')?.checked;
+  const aplicar = ativa && !!document.querySelector('#detalhe-comp-politica [data-estacao="aplicar"]')?.checked;
+  const atalhosAprovados = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-atalho]:checked')].map(el=>el.dataset.estacaoAtalho);
+  if(aplicar && !confirm(`Aplicar esta lista nesta máquina? Os atalhos fora dela serão primeiro copiados para C:\\NoPulsoBackup\\Atalhos e só depois removidos.`)) return;
+  const senha = await pedirSenhaMaster('salvar a Área de Trabalho padronizada');
+  if(senha===null) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/perfil-estacao`, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, backupAntesDeLimpar:true, atalhosAprovados, password:senha }) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui salvar.');
+    msg.textContent = aplicar ? 'Lista salva. O NOC faz backup dos atalhos que saírem e aplica a mudança automaticamente na próxima consulta.' : 'Lista salva como rascunho; nenhuma alteração será feita até marcar “Aplicar lista aprovada”.';
+    msg.className='msg'; msg.classList.remove('hidden');
+    await carregar();
+  }catch(e){ msg.textContent=e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 
 // "Capturar agora": gatilho sem teclado pro NoPulsoPrint (ver pedirCaptura no

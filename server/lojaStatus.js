@@ -1302,14 +1302,16 @@ async function tokenDoComputador(codigo, posto) {
 //                    que roda por servico ja elevado, nao passa por ai.
 //   alertarInstalacao  - o agente manda a lista de programas e o servidor
 //                    avisa quando aparece um que nao estava la antes.
-//   estacao            - perfil declarativo da Área de Trabalho. Nesta
-//                    primeira etapa ele apenas define o que foi aprovado e
-//                    permite inventariar; NÃO apaga, move ou fixa nada.
+//   estacao            - perfil declarativo da Área de Trabalho. Ao aplicar,
+//                    o agente salva uma cópia dos atalhos que sairão antes de
+//                    remover os que não foram aprovados. Uma nova alteração
+//                    sobe a versão e é aplicada automaticamente pelo agente.
 // Tudo REVERSIVEL: desligar a chave devolve a maquina ao estado anterior.
 const ITENS_ESTACAO_APROVAVEIS = ['nopulso', 'anydesk', 'rdp-dominos'];
 function sanitizarEstacao(entrada) {
   const e = entrada && typeof entrada === 'object' ? entrada : {};
   const ativo = e.ativa === true;
+  const aplicar = ativo && e.aplicar === true;
   const perfil = e.perfil === 'gerencia' ? 'gerencia' : 'nenhum';
   const permitidos = Array.isArray(e.atalhosAprovados) ? e.atalhosAprovados : [];
   const atalhosAprovados = [...new Set(permitidos.map((x) => String(x).trim().toLowerCase()))]
@@ -1317,9 +1319,12 @@ function sanitizarEstacao(entrada) {
   return {
     ativa: ativo,
     perfil: ativo ? perfil : 'nenhum',
-    // O primeiro envio é SEMPRE somente inventário. Uma etapa futura poderá
-    // aplicar a lista, mas nunca por acidente.
-    modo: 'inventario',
+    // O modo só muda com a confirmação explícita do Master. Isso impede que
+    // uma tela antiga, que não conhece `aplicar`, limpe atalhos por acidente.
+    modo: aplicar ? 'aplicar' : 'inventario',
+    aplicar,
+    backupAntesDeLimpar: aplicar && e.backupAntesDeLimpar !== false,
+    atualizarAutomaticamente: ativo,
     protegerAnydesk: ativo && e.protegerAnydesk !== false,
     rdpDominosObrigatorio: ativo && e.rdpDominosObrigatorio === true,
     atalhosAprovados,
