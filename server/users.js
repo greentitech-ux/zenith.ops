@@ -20,11 +20,13 @@ function normalizarPalavraRecuperacao(valor) {
 }
 
 function validarPalavraRecuperacao(valor) {
-  const frase = normalizarPalavraRecuperacao(valor);
-  if (frase.length < 10 || frase.split(' ').filter(Boolean).length < 2) {
-    throw new Error('Use uma frase de recuperação com ao menos 2 palavras e 10 caracteres.');
+  const palavra = normalizarPalavraRecuperacao(valor);
+  // Uma única palavra é mais simples para a operação memorizar e digitar.
+  // Aceitamos letras Unicode (inclui acentos), sem espaço, número ou símbolo.
+  if (!/^\p{L}{6,}$/u.test(palavra)) {
+    throw new Error('Use uma única palavra de recuperação com pelo menos 6 letras.');
   }
-  return frase;
+  return palavra;
 }
 
 const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'kpis', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao', 'tarefas', 'estacao-salao', 'estacao-caixa', 'estacao-fechamento'];
@@ -712,8 +714,8 @@ async function alterarSenhaPropria(id, senhaAtual, novaSenha, sessionIdAtual) {
   return { ok: true };
 }
 
-// A frase é escolhida pela própria pessoa enquanto está autenticada. Só o
-// hash vai ao Firestore; nem o Master consegue ler a frase depois de salva.
+// A palavra é escolhida pela própria pessoa enquanto está autenticada. Só o
+// hash vai ao Firestore; nem o Master consegue lê-la depois de salva.
 async function definirPalavraRecuperacao(id, senhaAtual, palavra) {
   const frase = validarPalavraRecuperacao(palavra);
   const ref = usersRef.doc(id);
@@ -974,6 +976,7 @@ module.exports = {
   resetPassword,
   desbloquear,
   alterarSenhaPropria,
+  validarPalavraRecuperacao,
   definirPalavraRecuperacao,
   iniciarRecuperacaoSenha,
   concluirRecuperacaoSenha,

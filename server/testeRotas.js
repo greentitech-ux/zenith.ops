@@ -24162,6 +24162,23 @@ setTimeout(async () => {
   if (!okDesignGlobalNoc) ruins += 1;
   console.log(`${okDesignGlobalNoc ? '✓' : '✗'} Design global: acabamento leve do NOC em todas as telas`);
 
+  let okPalavraRecuperacaoSimples = false;
+  try {
+    const usersP = require(__dirname + '/users.js');
+    const htmlP = require('fs').readFileSync(__dirname + '/public/index.html', 'utf8');
+    const aceita = ['girassol', 'coração'].every((v) => usersP.validarPalavraRecuperacao(v) === v);
+    const recusa = ['cafe', 'duas palavras', 'abc123', 'senha!'].every((v) => {
+      try { usersP.validarPalavraRecuperacao(v); return false; } catch (_) { return true; }
+    });
+    okPalavraRecuperacaoSimples = aceita && recusa
+      && /id="pr-frase"[^>]*minlength="6"/.test(htmlP)
+      && !/id="pr-confirmar"/.test(htmlP)
+      && /uma palavra com pelo menos 6 letras/.test(htmlP)
+      && /Salvar palavra e continuar/.test(htmlP);
+  } catch (e) { okPalavraRecuperacaoSimples = false; console.log('  erro: ' + e.message); }
+  if (!okPalavraRecuperacaoSimples) ruins += 1;
+  console.log(`${okPalavraRecuperacaoSimples ? '✓' : '✗'} Senha: recuperação pede uma única palavra com no mínimo 6 letras`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
