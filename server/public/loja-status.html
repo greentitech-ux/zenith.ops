@@ -3854,6 +3854,13 @@ const POLITICA_ITENS = [
   { campo:'bloquearInstalacao', rotulo:'🔒 Instalar exige Administrador', ajuda:'O Windows nega a elevação pedida por usuário comum. Atualização de Chrome/PDV (serviço já elevado) não passa por aí.' },
   { campo:'alertarInstalacao', rotulo:'📦 Avisar quando instalarem ou desinstalarem algo', ajuda:'A máquina manda a lista de programas e você recebe alerta do que entrou e do que saiu.' },
 ];
+const ATALHOS_PADRAO_PDV = [
+  ['nopulso','NoPulso'], ['anydesk','AnyDesk'], ['rdp-dominos','RDP Dominos'],
+  ['degust','Degust.exe'], ['gestor-pedidos-ifood','Gestor de Pedidos iFood'],
+  ['gestor-pedidos-99food','Gestor de Pedidos 99Food'], ['gerenciadorlinxfood','GerenciadorLinxFood'],
+  ['advancedip','Advanced IP Scanner'], ['teamviewer','TeamViewer'],
+  ['suporte-linx-whatsapp','Suporte Linx WhatsApp'], ['google-chrome','Google Chrome'],
+];
 function renderPoliticaComputador(codigo, c){
   const el = document.getElementById('detalhe-comp-politica');
   // painel opcional: se um dia ele sair do HTML, a ficha continua abrindo
@@ -3875,7 +3882,7 @@ function renderPoliticaComputador(codigo, c){
     }).join('')}</div>`
     : '<div style="font-size:11.5px;color:var(--muted);">Ainda não há uma leitura. Clique em “Ler atalhos atuais”; ela não altera a máquina.</div>';
   const barraTarefasHtml = barraTarefasDetectada.length
-    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:150px;overflow:auto;padding:2px 1px;">${barraTarefasDetectada.map(a=>{ const nome=chaveVisual(a.nome); return `<label class="btn-mini" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><input type="checkbox" data-estacao-barra="${escapeHtml(nome)}" ${barraTarefasAprovada.includes(nome)?'checked':''} style="width:auto;margin-right:4px;accent-color:var(--accent);">${escapeHtml(a.nome||'Item')}</label>`; }).join('')}</div>`
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:150px;overflow:auto;padding:2px 1px;">${barraTarefasDetectada.map(a=>`<span class="btn-mini" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default;">${escapeHtml(a.nome||'Item')}</span>`).join('')}</div>`
     : '<div style="font-size:11.5px;color:var(--muted);">Aguardando a leitura da barra de tarefas.</div>';
   const aviso = c.tipo === 'interno' ? '' : '<div style="font-size:11px;color:var(--warn);margin-top:6px;">Pendrive e instalação precisam de Administrador na máquina - quem aplica é a tarefa de boot do NOCZenith.</div>';
   const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
@@ -3892,16 +3899,17 @@ function renderPoliticaComputador(codigo, c){
       <div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Área de trabalho padronizada</div>
       <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">Defina os únicos atalhos permitidos. Quando a aplicação estiver ligada, cada alteração enviada aqui chega sozinha ao agente; antes de retirar qualquer atalho, ele salva uma cópia em <b>C:\\NoPulsoBackup\\Atalhos</b>.</div>
       <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:7px;cursor:pointer;"><input type="checkbox" data-estacao="ativa" ${estacao.ativa?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Gerenciar atalhos desta máquina</b><small style="display:block;color:var(--muted);">Desligado: apenas mantém a configuração, sem tocar na Área de Trabalho.</small></span></label>
-      <div style="display:flex;gap:7px;flex-wrap:wrap;margin:6px 0 8px;">
-        ${[['nopulso','NoPulso'],['anydesk','AnyDesk'],['rdp-dominos','RDP Dominos']].map(([id,nome])=>`<label class="btn-mini" style="cursor:pointer;"><input type="checkbox" data-estacao-atalho="${id}" ${atalhosAprovados.includes(id)?'checked':''} style="width:auto;margin-right:4px;accent-color:var(--accent);">${nome}</label>`).join('')}
+      <div style="display:grid;grid-template-columns:minmax(150px,1fr) 92px 92px;gap:5px 8px;align-items:center;margin:8px 0;max-width:620px;font-size:12px;">
+        <b>Aplicativo autorizado</b><b style="text-align:center;">Área</b><b style="text-align:center;">Barra</b>
+        ${ATALHOS_PADRAO_PDV.map(([id,nome])=>`<span>${nome}</span><label style="text-align:center;cursor:pointer;"><input type="checkbox" data-estacao-atalho="${id}" ${atalhosAprovados.includes(id)?'checked':''} aria-label="${nome} na Área de Trabalho" style="width:auto;accent-color:var(--accent);"></label><label style="text-align:center;cursor:pointer;"><input type="checkbox" data-estacao-barra="${id}" ${barraTarefasAprovada.includes(id)?'checked':''} aria-label="${nome} na Barra de tarefas" style="width:auto;accent-color:var(--accent);"></label>`).join('')}
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;"><b style="font-size:12px;">Itens atuais</b><button type="button" class="btn-mini" onclick="inventariarAtalhosComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">↻ Ler Área de Trabalho e barra</button>${c.atalhosDesktopEm?`<small style="color:var(--muted);">lido ${escapeHtml(tempoRelativo(c.atalhosDesktopEm))}</small>`:''}</div>
       <details open><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Área de Trabalho (${atalhosDetectados.length})</summary>
       ${atalhosDetectadosHtml}
       </details>
-      <details style="margin-top:9px;"><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Barra de tarefas (${barraTarefasDetectada.length})</summary>${barraTarefasHtml}<small style="display:block;color:var(--muted);margin-top:6px;">A seleção fica salva no perfil PDV; a aplicação automática da barra será ativada após validação do piloto.</small></details>
+      <details style="margin-top:9px;"><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Barra de tarefas atual (${barraTarefasDetectada.length})</summary>${barraTarefasHtml}<small style="display:block;color:var(--muted);margin-top:6px;">A lista acima define o padrão. Esta seção é apenas conferência da barra que a máquina informou.</small></details>
       <label style="display:flex;gap:8px;align-items:flex-start;margin-top:9px;cursor:pointer;"><input type="checkbox" data-estacao="ocultarLixeira" ${estacao.ocultarLixeira?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Ocultar Lixeira da Área de Trabalho</b><small style="display:block;color:var(--muted);">Não esvazia a Lixeira nem apaga arquivos. Desmarcar volta a exibir o ícone.</small></span></label>
-      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;"><input type="checkbox" data-estacao="aplicar" ${estacao.aplicar?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Aplicar lista aprovada</b><small style="display:block;color:var(--warn);">Remove somente atalhos (.lnk, .url e .rdp) fora da lista; documentos e outros arquivos não são removidos.</small></span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;"><input type="checkbox" data-estacao="aplicar" ${estacao.aplicar?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Aplicar lista aprovada</b><small style="display:block;color:var(--warn);">Guarda os atalhos atuais antes de retirar os não aprovados da Área de Trabalho e da barra clássica. Documentos e outros arquivos não são removidos.</small></span></label>
       <button type="button" class="btn-mini ok" style="margin-top:9px;" onclick="salvarPerfilEstacao('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar Área de Trabalho</button>
       <div class="msg hidden" id="msg-estacao" style="margin-top:6px;"></div>
     </div>
@@ -3975,12 +3983,13 @@ async function salvarPerfilEstacao(codigo, posto){
   const atalhosAprovados = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-atalho]:checked')].map(el=>el.dataset.estacaoAtalho);
   const atalhosPersonalizados = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-atalho-custom]:checked')].map(el=>el.dataset.estacaoAtalhoCustom);
   const barraTarefasAprovada = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-barra]:checked')].map(el=>el.dataset.estacaoBarra);
+  const gerenciarBarraTarefas = aplicar && barraTarefasAprovada.length > 0;
   if(aplicar && !confirm(`Aplicar esta lista nesta máquina? Os atalhos fora dela serão primeiro copiados para C:\\NoPulsoBackup\\Atalhos e só depois removidos.`)) return;
   const senha = await pedirSenhaMaster('salvar a Área de Trabalho padronizada');
   if(senha===null) return;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/perfil-estacao`, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, ocultarLixeira, backupAntesDeLimpar:true, atalhosAprovados, atalhosPersonalizados, barraTarefasAprovada, password:senha }) });
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, ocultarLixeira, backupAntesDeLimpar:true, atalhosAprovados, atalhosPersonalizados, barraTarefasAprovada, gerenciarBarraTarefas, password:senha }) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui salvar.');
     msg.textContent = aplicar ? 'Lista salva. O NOC faz backup dos atalhos que saírem e aplica a mudança automaticamente na próxima consulta.' : 'Lista salva como rascunho; nenhuma alteração será feita até marcar “Aplicar lista aprovada”.';

@@ -1308,7 +1308,12 @@ async function tokenDoComputador(codigo, posto) {
 //                    remover os que não foram aprovados. Uma nova alteração
 //                    sobe a versão e é aplicada automaticamente pelo agente.
 // Tudo REVERSIVEL: desligar a chave devolve a maquina ao estado anterior.
-const ITENS_ESTACAO_APROVAVEIS = ['nopulso', 'anydesk', 'rdp-dominos'];
+// Catálogo mantido pelo Master. São chaves, nunca caminhos ou comandos.
+const ITENS_ESTACAO_APROVAVEIS = [
+  'nopulso', 'anydesk', 'rdp-dominos', 'degust', 'gestor-pedidos-ifood',
+  'gestor-pedidos-99food', 'gerenciadorlinxfood', 'advancedip', 'teamviewer',
+  'suporte-linx-whatsapp', 'google-chrome',
+];
 function normalizarNomeAtalho(valor) {
   const nome = String(valor || '').trim().toLocaleLowerCase('pt-BR')
     .replace(/\.(lnk|url|rdp)$/i, '').replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ');
@@ -1344,6 +1349,9 @@ function sanitizarEstacao(entrada) {
     atalhosAprovados,
     atalhosPersonalizados,
     barraTarefasAprovada,
+    // Só quem salvou pela tela nova habilita a alteração da barra. Políticas
+    // antigas continuam sem tocar nos itens fixados.
+    gerenciarBarraTarefas: aplicar && e.gerenciarBarraTarefas === true,
   };
 }
 function sanitizarPolitica(entrada) {
