@@ -2175,6 +2175,43 @@ function abrirManutencaoDestaMaquina(codigo, posto, nome){
   fecharProgramas();
   reiniciarDesteComputador(codigo, posto, nome);
 }
+// Ações que antes apareciam só no rodapé da janela de manutenção em lote.
+// Aqui elas ficam no contexto da máquina aberta, mas continuam exigindo a
+// confirmação e a senha Master antes de entrar na mesma fila operacional.
+const PROG_MANUTENCOES = [
+  ['anydesk','🖥️ Reiniciar AnyDesk','Reinicia somente o serviço de acesso remoto; o computador e o caixa continuam ligados.'],
+  ['gsurfRsa','💳 Reiniciar GSurfRSA','Reinicia o Listener TEF desta máquina. Pode interromper uma transação em curso por alguns segundos.'],
+  ['gcomWcf','🟥 Encerrar GCOM','Finaliza somente o processo GcomClient.WCF; a VM o inicia novamente pelo mecanismo padrão.'],
+  ['diagnostico-desempenho','🩺 Diagnosticar falha','Lê tela azul, disco, hardware, minidumps e consumo atual. Não altera a máquina.'],
+  ['limpeza-segura','🧹 Liberar espaço seguro','Remove temporários e Lixeira, medindo antes e depois. Não toca em documentos, Downloads ou programas.'],
+  ['remover-office','🗑️ Remover Office','Desinstala Office/Microsoft 365 detectado; preserva documentos do usuário.', 'perigo'],
+  ['rede','🌐 Destravar a rede','Limpa DNS e renova DHCP; a conexão pode cair por alguns segundos.', 'perigo'],
+  ['zebra','🖨️ Resetar Zebra','Limpa a fila e reinicia as Zebras cadastradas na unidade; o computador não é reiniciado.'],
+  ['reset-senha','🔑 Reset de Senha','Redefine a senha do Windows para o padrão da loja.', 'perigo'],
+  ['abortar','🛑 Abortar reinício','Cancela somente um reinício que ainda esteja na contagem de dois minutos.'],
+];
+async function executarManutencaoDoPrograma(tarefa){
+  const c = PROG_ATUAL;
+  const item = PROG_MANUTENCOES.find(x=>x[0]===tarefa);
+  if(!c || !item || c.tipo !== 'interno') return;
+  const nome = c.nome || c.posto;
+  if(!confirm(`${item[1].replace(/^\S+\s/,'')} em ${nome}?\n\n${item[2]}\n\nA ação será registrada e enviada somente para esta máquina.`)) return;
+  const password = await pedirSenhaMaster(`autorizar: ${item[1].replace(/^\S+\s/,'')}`);
+  if(password === null) return;
+  const botoes = [...document.querySelectorAll(`[data-manut-programa="${tarefa}"]`)];
+  botoes.forEach(b=>b.disabled=true);
+  try{
+    const r = await fetch('/api/loja-status/manutencao/reiniciar', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({alvos:[{codigo:c.codigo,posto:c.posto}],tarefa,abortar:tarefa==='abortar',password}),
+    });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui enviar a manutenção.');
+    alert(d.pendenteAprovacao ? 'Enviado para aprovação do Master.' : `${item[1]} enfileirado. O resultado aparece na atividade desta máquina.`);
+    await carregar();
+  }catch(e){ alert(e.message); }
+  finally{ botoes.forEach(b=>b.disabled=false); }
+}
 function pintarManutencaoProgramas(corpo){
   const c = PROG_ATUAL;
   const nome = escapeHtml(c.nome || c.posto);
@@ -2198,7 +2235,11 @@ function pintarManutencaoProgramas(corpo){
       <h4>🔁 Reiniciar com aviso</h4>
       <p>Abre a manutenção com esta máquina já selecionada. A loja recebe aviso de 2 minutos.</p>
       <button type="button" class="btn-ghost" onclick="abrirManutencaoDestaMaquina('${codigo}','${posto}','${nomeJs}')">Preparar reinício</button>
-    </article>` : `
+    </article>
+    ${PROG_MANUTENCOES.map(([tarefa,titulo,descricao,classe])=>`<article class="prog-manut-card ${classe||''}">
+      <h4>${titulo}</h4><p>${descricao}</p>
+      <button type="button" class="btn-ghost" data-manut-programa="${tarefa}" onclick="executarManutencaoDoPrograma('${tarefa}')">Executar nesta máquina</button>
+    </article>`).join('')}` : `
     <article class="prog-manut-aviso">Este equipamento é de atendimento. Comandos de rede, console e reinício são exclusivos de computadores internos.</article>`;
   corpo.innerHTML = `
     <div class="prog-manut-intro">
