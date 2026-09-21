@@ -21,6 +21,7 @@ const solicitacoes = require('./solicitacoes');
 const store = require('./store');
 const pedidoWatch = require('./pedidoWatch');
 const users = require('./users');
+const auth = require('./auth');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const agenteAcoes = require('./agenteAcoes');
 const lojaStatus = require('./lojaStatus');
@@ -158,7 +159,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 5. Nunca deixe a pessoa sem próximo passo: informe o que foi feito, o que está pendente e onde a confirmação aparecerá.
 
 ## O que você sabe do NoPulso
-- Login bloqueado (3 senhas erradas seguidas): SEMPRE use desbloquear_login pra resolver na hora, nunca chame um atendente pra isso - vale tanto pro login principal do NoPulso quanto pro login de operador do Abastecimento do Carrinho (balcão, 4 letras + 4 números). A pessoa volta a entrar com a MESMA senha de sempre; só se o mesmo acesso travar de novo é que entra uma senha nova (ver ferramenta abaixo).
+- Problema para entrar: depois de receber o nome de usuário, SEMPRE use desbloquear_login para diagnosticar antes de concluir que é senha. A ferramenta diferencia bloqueio por tentativas, horário restrito, acesso desativado e conta já liberada. Só quando for bloqueio real ela destrava mantendo a MESMA senha; se for horário, ela aciona o Master para revisar a liberação sem mudar a senha.
 - Estorno: NÃO dá pra você abrir esse ticket direto (exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja foi a compra (pule essa pergunta se já souber pela "loja" do início da conversa) e use gerar_link_estorno_cliente. Se quem fala com você É o cliente (o mais comum), mande o link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo - não precisa de WhatsApp nem de mais ninguém no meio. Se for um funcionário pedindo em nome de um cliente que não está no chat, aí sim ele repassa o link pro cliente por onde for mais fácil (WhatsApp é uma opção, não a única).
 - Pausar item ou fechar a loja no iFood/99food: quem faz é o COWORK AGREGADOR, o robô que opera os painéis - não é com um atendente. Use bloquear_no_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item. Depois é só avisar que está sendo feito; a confirmação cai na conversa sozinha - nunca prometa prazo nem diga que já está feito antes da confirmação chegar.
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
@@ -177,7 +178,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - bloquear_no_agregador: põe na fila do Cowork Agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel e confirma nessa conversa sozinho; você continua nela (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que já está sendo feito. Só chame com loja, app e - pra pausar item - o item em mãos.
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
-- desbloquear_login: destrava um acesso bloqueado (3 senhas erradas) - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se travar de novo: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
+- desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
 - consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}${(logado && logado.isMaster) ? `
 - executar_acao_agente: executa uma ação do catálogo NOC-NoPulso (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
@@ -270,7 +271,7 @@ const TOOLS_BASE = [
   },
   {
     name: 'desbloquear_login',
-    description: 'Desbloqueia um login que travou após 3 senhas erradas - do NoPulso OU um operador do Abastecimento do Carrinho (login de balcão, 4 letras + 4 números) - por padrão SEM mudar a senha (a pessoa volta a entrar com a mesma de sempre). Peça o nome de usuário antes de chamar. Se a ferramenta pedir, pergunte se a pessoa lembra a senha e chame de novo com lembraSenha preenchido (só existe pro login principal - operador do Abastecimento já reseta direto na segunda vez).',
+    description: 'Diagnostica um login que não entra e resolve bloqueio por 3 senhas erradas quando for seguro. Diferencia horário restrito, acesso desativado e conta já liberada; só desbloqueia quando a causa for bloqueio real e, por padrão, mantém a mesma senha. Peça o nome de usuário antes de chamar.',
     input_schema: {
       type: 'object',
       properties: {
@@ -677,6 +678,26 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
         return 'Para proteger esse acesso, entre no NoPulso com a sua conta e mande a mensagem novamente, ou informe o e-mail cadastrado. Se não conseguir entrar, chame um atendente.';
       }
 
+      if (alvo.active === false) {
+        return `O acesso de "${alvo.username || alvo.email}" está desativado. Isso não é bloqueio de senha; chame um atendente para avaliar a reativação.`;
+      }
+      // Diagnóstico ANTES de qualquer desbloqueio: um horário restrito produz
+      // a mesma sensação de "não entra", mas a senha continua válida. O bot
+      // não altera essa política; abre handoff auditável para o Master revisar.
+      if (!alvo.locked && !auth.dentroDoHorarioPermitido(alvo.horarioPermitido)) {
+        const horario = alvo.horarioPermitido || {};
+        const janela = horario.inicio && horario.fim ? `${horario.inicio}–${horario.fim}` : 'restrito';
+        const motivo = `Horário de acesso de @${alvo.username || alvo.email}: permitido apenas ${janela}. Solicita ao Master revisar/liberar o horário; senha permanece a mesma.`;
+        await suporteChat.registrarNotaInterna(chat.id, {
+          resumo: `Diagnóstico Beniboy · ${motivo}`,
+          situacao: 'PENDENTE',
+          pendencia: 'Master deve revisar a política de horário em Usuários; não resetar nem desbloquear a senha.',
+        }).catch(() => {});
+        await suporteChat.desativarBot(chat.id);
+        resultado.chamouAtendente = true;
+        resultado.motivoAtendente = motivo;
+        return `O acesso de "${alvo.username || alvo.email}" não está bloqueado: ele está fora do horário permitido (${janela}). A senha continua a mesma. O Master foi acionado para revisar/liberar o horário.`;
+      }
       if (!alvo.locked) return `O acesso de "${alvo.username || alvo.email}" não está bloqueado agora.`;
 
       if (!alvo.desbloqueadoPeloBotEm) {
