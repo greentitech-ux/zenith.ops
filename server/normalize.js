@@ -108,6 +108,22 @@ function contatoTexto(...valores) {
   return null;
 }
 
+// A Adyen entrega o endereco de cobranca como chaves billingAddress.* no
+// additionalData do webhook. Alguns fluxos internos usam o mesmo endereco
+// como objeto; aceitar os dois formatos evita perder o dado na ingestao.
+function enderecoCobranca(item, additional) {
+  const endereco = item.billingAddress || additional.billingAddress || {};
+  const campo = (nome) => contatoTexto(endereco[nome], additional[`billingAddress.${nome}`]);
+  const rua = campo('street');
+  const numero = campo('houseNumberOrName');
+  const cidade = campo('city');
+  const estado = campo('stateOrProvince');
+  const cep = campo('postalCode');
+  const pais = campo('country');
+  const linhaRua = [rua, numero].filter(Boolean).join(', ');
+  return [linhaRua, cidade, estado, cep, pais].filter(Boolean).join(' · ') || null;
+}
+
 function normalize(item) {
   const additional = item.additionalData || {};
   const status = statusFromEvent(item);
@@ -121,6 +137,7 @@ function normalize(item) {
     item.shopperTelephone,
     item.shopperTelephoneNumber
   );
+  const enderecoCliente = enderecoCobranca(item, additional);
 
   return {
     pspReference: item.pspReference,
@@ -139,6 +156,7 @@ function normalize(item) {
     nomeCliente: shopperName(additional) || pixPagador(additional) || cardHolder, // nome do cliente que fez o pedido
     emailCliente,
     telefoneCliente,
+    enderecoCliente,
     shopperReference: additional.shopperReference || item.merchantAccountCode + ':' + (additional.shopperEmail || ''),
     unidade: normalizarCodigoUnidade(item.merchantAccountCode),
     dataHora: new Date().toISOString(), // Adyen nao manda timestamp do evento; usamos hora de recebimento
