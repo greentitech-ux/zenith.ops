@@ -376,6 +376,9 @@ const ROTA_LOJA_PAPEL_PAREDE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/
 // maquina, com o token dela - quem COMPARA e diz o que e novo e o servidor.
 const ROTA_LOJA_PROGRAMAS_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/programas$/;
 const ROTA_LOJA_ESTADO_AGENTE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/estado-agente$/;
+// A instância de login envia o inventário visual sem cookie de usuário, mas
+// autenticada pelo X-NOC-Token próprio da máquina.
+const ROTA_LOJA_INVENTARIO_ATALHOS_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/inventario-atalhos$/;
 // NOCZenith reporta o resultado de um comando do agente (ver
 // agenteAcoes.js/lojaStatus.js enfileirarComando) - mesmo motivo publico
 // do ip-local: quem chama e a maquina, sem sessao de usuario
@@ -405,7 +408,8 @@ function rotaPublicaSemDashboard(path) {
     || ROTA_LOJA_TELEMETRIA_RE.test(path) || ROTA_LOJA_CONFIG_AGENTE_RE.test(path)
     || ROTA_LOJA_PAPEL_PAREDE_RE.test(path)
     || ROTA_LOJA_PROGRAMAS_RE.test(path)
-    || ROTA_LOJA_ESTADO_AGENTE_RE.test(path);
+    || ROTA_LOJA_ESTADO_AGENTE_RE.test(path)
+    || ROTA_LOJA_INVENTARIO_ATALHOS_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -1768,6 +1772,18 @@ app.post('/api/loja-status/:codigo/computadores/:posto/estado-agente', async (re
 app.get('/api/loja-status/:codigo/computadores/:posto/configuracao-agente', async (req, res) => {
   try {
     res.json(await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null));
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+// Resposta do pedido one-shot de leitura da Área de Trabalho. Precisa ficar
+// antes do gate global de sessão: o NOCZenith não possui cookie do painel e a
+// autorização verdadeira continua sendo validada por registrarInventarioAtalhos.
+app.post('/api/loja-status/:codigo/computadores/:posto/inventario-atalhos', async (req, res) => {
+  try {
+    const token = req.headers['x-noc-token'] || null;
+    res.json(await lojaStatus.registrarInventarioAtalhos(req.params.codigo, req.params.posto, req.body, token));
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
@@ -5615,15 +5631,6 @@ app.post('/api/loja-status/:codigo/computadores/:posto/inventariar-atalhos', aut
     res.json({ ok: true, ...pedido, mensagem: 'Leitura solicitada ao usuário logado. A lista aparece nesta ficha quando o NOCZenith responder.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
-  }
-});
-
-app.post('/api/loja-status/:codigo/computadores/:posto/inventario-atalhos', async (req, res) => {
-  try {
-    const token = req.headers['x-noc-token'] || null;
-    res.json(await lojaStatus.registrarInventarioAtalhos(req.params.codigo, req.params.posto, req.body, token));
-  } catch (err) {
-    res.status(403).json({ error: err.message });
   }
 });
 

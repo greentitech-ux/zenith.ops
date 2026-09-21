@@ -12602,6 +12602,7 @@ setTimeout(async () => {
     const marcas = await pedir('/api/loja-status/papel-de-parede-marcas', cabPP);
     const psPp = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'PPDOM', posto: 'PC1', tipo: 'interno', agentToken: 'tokdom', maquinaNome: 'DOM-CR-ATM01' });
     const htmlPp = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const indexPp = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
 
     const conf = {
       // A ARTE CARREGA DUAS LOGOS (grupo + marca), e Domino's existe nas duas
@@ -12679,6 +12680,10 @@ setTimeout(async () => {
             < psPp.indexOf('if ((Versao-PoliticaAplicada) -eq $versao) { return }', inicio);
         })()
         && /try \{ Sincronizar-Politica \}/.test(psPp),
+      'o agente envia o inventário sem sessão do painel, autenticado pelo token da máquina':
+        /ROTA_LOJA_INVENTARIO_ATALHOS_RE\.test\(path\)/.test(indexPp)
+        && indexPp.indexOf("app.post('/api/loja-status/:codigo/computadores/:posto/inventario-atalhos'")
+          < indexPp.indexOf("app.use('/api', auth.requireAuth);"),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
       'a máquina baixa a arte DELA, com o token dela': imgMaquina.status === 200,
