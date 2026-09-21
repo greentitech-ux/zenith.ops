@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 90;
+const VERSAO_VIGIA = 91;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1949,11 +1949,13 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $permitidos = @($estacao.barraTarefasAprovada | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
     '  $perfilUsuario = Resolver-PerfilDoOperador',
     '  if (-not $perfilUsuario) { Escrever-Log "Barra de tarefas: aguardando perfil de operador ativo."; return $false }',
+    '  $desktopUsuario = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)',
+    '  if (-not $desktopUsuario) { $desktopUsuario = $perfilUsuario + "\\Desktop" }',
     '  $pasta = $perfilUsuario + "\\AppData\\Roaming\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar"',
     '  try { if (-not (Test-Path -LiteralPath $pasta)) { New-Item -ItemType Directory -Path $pasta -Force -ErrorAction Stop | Out-Null } } catch { Escrever-Log "Barra de tarefas: não consegui preparar a pasta ($($_.Exception.Message))."; return $false }',
     '  $atuais = @(Get-ChildItem -LiteralPath $pasta -File -Filter "*.lnk" -Force -ErrorAction SilentlyContinue)',
     '  $fontes = @($atuais)',
-    '  foreach ($origem in @($perfilUsuario + "\\Desktop", $env:PUBLIC + "\\Desktop", $perfilUsuario + "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs", $env:ProgramData + "\\Microsoft\\Windows\\Start Menu\\Programs")) { if (Test-Path -LiteralPath $origem) { $fontes += @(Get-ChildItem -LiteralPath $origem -Filter "*.lnk" -File -Recurse -ErrorAction SilentlyContinue) } }',
+    '  foreach ($origem in @($desktopUsuario, $env:PUBLIC + "\\Desktop", $perfilUsuario + "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs", $env:ProgramData + "\\Microsoft\\Windows\\Start Menu\\Programs")) { if (Test-Path -LiteralPath $origem) { $fontes += @(Get-ChildItem -LiteralPath $origem -Filter "*.lnk" -File -Recurse -ErrorAction SilentlyContinue) } }',
     '  $selecionados = @(); $faltantes = @()',
     '  foreach ($id in $permitidos) { $fonte = @($fontes | Where-Object { Atalho-EstaAprovado $_ @($id) } | Select-Object -First 1); if ($fonte.Count) { $selecionados += $fonte[0] } else { $faltantes += $id } }',
     '  if ($faltantes.Count) { Escrever-Log "Barra de tarefas: não encontrei atalho(s) para $($faltantes -join ", "); nada foi alterado."; return $false }',
@@ -1968,7 +1970,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if (-not $perfilUsuario) { Escrever-Log "Perfil da estação: aguardando perfil de operador ativo."; return $false }',
     '  $permitidos = @($estacao.atalhosAprovados | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
     '  $script:AtalhosPersonalizados = @($estacao.atalhosPersonalizados)',
-    '  $areas = @($perfilUsuario + "\\Desktop", $env:PUBLIC + "\\Desktop") | Select-Object -Unique',
+    '  $desktopUsuario = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)',
+    '  if (-not $desktopUsuario) { $desktopUsuario = $perfilUsuario + "\\Desktop" }',
+    '  $areas = @($desktopUsuario, $env:PUBLIC + "\\Desktop") | Select-Object -Unique',
     '  $remover = New-Object System.Collections.Generic.List[object]',
     '  foreach ($area in $areas) {',
     '    if (-not (Test-Path -LiteralPath $area)) { continue }',
