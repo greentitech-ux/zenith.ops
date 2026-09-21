@@ -48,9 +48,9 @@ const empresas = require('./empresas');
 const COLLECTION = db.collection('lojaStatus');
 // fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
 // cada comando enviado a um computador tipo 'interno', com resultado. O
-// doc do computador guarda só o ponteiro pro comando em aberto
-// (comandoPendenteId) - evita precisar de índice composto no Firestore pra
-// achar o comando certo: já sabemos o id exato na hora do heartbeat
+// O documento do computador guarda a fila ordenada e também o ponteiro para a
+// cabeça (comandoPendenteId). O ponteiro mantém o heartbeat barato; a fila
+// permite o Master preparar várias ações sem uma apagar a outra.
 const COMANDOS_COLLECTION = db.collection('lojaStatusComandos');
 const CONFIG_DOC = db.collection('lojaStatusConfig').doc('geral');
 // apelidos dos aparelhos da rede da loja, por unidade: { codigo: { mac: nome } }.
@@ -1683,7 +1683,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
     criadoEm: Date.now(),
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
-    comandoPendenteId: null,
+    comandoPendenteId: null, comandosFilaIds: [],
     // segredo do agente - vai assado no .ps1 desse computador (ver
     // garantirAgentToken/vigiaScript.js), nunca sai numa vista de leitura
     agentToken: gerarAgentToken(),
@@ -3057,6 +3057,16 @@ async function resolverIpImpressora(codigo, posto) {
   throw new Error('A impressora dessa unidade esta marcada, mas nenhum computador da loja viu o IP dela na ultima varredura de rede. Confira se ela esta ligada na rede.');
 }
 
+const LIMITE_COMANDOS_POR_MAQUINA = 20;
+function filaDeComandos(doc) {
+  const fila = Array.isArray(doc && doc.comandosFilaIds) ? doc.comandosFilaIds : [];
+  const atual = doc && doc.comandoPendenteId ? [doc.comandoPendenteId] : [];
+  return [...new Set([...fila, ...atual].map((id) => String(id || '').trim()).filter(Boolean))];
+}
+function proximoDaFila(fila, concluido) {
+  return fila.find((id) => id !== String(concluido || '')) || null;
+}
+
 async function enfileirarComando(codigo, posto, comando, opcoes) {
   const id = docIdFor(codigo, posto);
   const ref = COLLECTION.doc(id);
@@ -3069,7 +3079,8 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
   // a ponta. Maquina legada precisa reinstalar o NOCZenith uma vez pra
   // "entrar" no canal seguro antes de aceitar comando
   if (!atual.agentToken) throw new Error('Esse computador precisa reinstalar o NOCZenith (baixar de novo) pra habilitar comandos com segurança.');
-  if (atual.comandoPendenteId) throw new Error('Já existe um comando pendente/entregue pra esse computador - aguarde terminar antes de mandar outro.');
+  const filaAtual = filaDeComandos(atual);
+  if (filaAtual.length >= LIMITE_COMANDOS_POR_MAQUINA) throw new Error(`Esta máquina já tem ${LIMITE_COMANDOS_POR_MAQUINA} comandos na fila. Aguarde executar ou cancele algum pendente.`);
   const op = opcoes || {};
   // troca o placeholder ANTES de gravar: o que fica registrado (e o que o
   // Master ve no historico) e o comando de verdade que a maquina rodou
@@ -3102,7 +3113,14 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
     entregueEm: null, executadoEm: null, resultado: null, erro: null,
   };
   await comandoRef.set(registro);
-  await ref.set({ comandoPendenteId: comandoRef.id }, { merge: true });
+  await db.runTransaction(async (tx) => {
+    const comp = await tx.get(ref);
+    if (!comp.exists) throw new Error('Computador não encontrado.');
+    const fila = filaDeComandos(comp.data());
+    if (fila.length >= LIMITE_COMANDOS_POR_MAQUINA) throw new Error(`Esta máquina já tem ${LIMITE_COMANDOS_POR_MAQUINA} comandos na fila.`);
+    fila.push(comandoRef.id);
+    tx.update(ref, { comandosFilaIds: fila, comandoPendenteId: comp.data().comandoPendenteId || fila[0] });
+  });
   cache.invalidar();
   return registro;
 }
@@ -3144,10 +3162,16 @@ async function cancelarComandoPendente(comandoId, porEmail) {
     const agora = new Date().toISOString();
     const computadorRef = COLLECTION.doc(docIdFor(comando.codigo, comando.posto));
     const computador = await tx.get(computadorRef);
-    // Só limpa se esta ainda for a vaga ocupada por este comando. Isso preserva
-    // um comando novo enfileirado logo após o cancelamento de um antigo.
-    if (computador.exists && computador.data().comandoPendenteId === id) {
-      tx.update(computadorRef, { comandoPendenteId: null, comandoAguardandoElevacaoDesde: null });
+    // Retira só este item. Se ele era a cabeça, promove o próximo sem perder
+    // os demais comandos que o Master já deixou preparados.
+    if (computador.exists) {
+      const fila = filaDeComandos(computador.data()).filter((item) => item !== id);
+      const eraCabeca = computador.data().comandoPendenteId === id;
+      tx.update(computadorRef, {
+        comandosFilaIds: fila,
+        comandoPendenteId: eraCabeca ? (fila[0] || null) : computador.data().comandoPendenteId || (fila[0] || null),
+        ...(eraCabeca ? { comandoAguardandoElevacaoDesde: null } : {}),
+      });
     }
     const patch = { status: 'cancelado', canceladoEm: agora, canceladoPor: String(porEmail || '').slice(0, 160) || null };
     tx.update(comandoRef, patch);
@@ -3173,7 +3197,8 @@ async function marcarComandoExpiradoSemAdmin(comandoId, codigo, posto, msg) {
     // leitura da varredura e aqui, a instancia SYSTEM pode ter chegado
     const rs = await tx.get(ref);
     if (rs.exists && rs.data().comandoPendenteId === comandoId) {
-      tx.update(ref, { comandoPendenteId: null, comandoAguardandoElevacaoDesde: null });
+      const fila = filaDeComandos(rs.data()).filter((id) => id !== String(comandoId));
+      tx.update(ref, { comandosFilaIds: fila, comandoPendenteId: fila[0] || null, comandoAguardandoElevacaoDesde: null });
     }
     if (cs.exists && cs.data().status === 'pendente') {
       tx.update(comandoRef, { status: 'erro', erro: msg, executadoEm: new Date().toISOString() });
@@ -3201,7 +3226,8 @@ async function marcarComandoTravado(comandoId, codigo, posto) {
     const erro = 'Tempo limite de execução atingido: o agente não devolveu resultado em 10 minutos. Verifique a máquina e envie novamente se necessário.';
     tx.update(comandoRef, { status: 'erro', erro, executadoEm: agora });
     if (computadorSnap.exists && computadorSnap.data().comandoPendenteId === String(comandoId)) {
-      tx.update(computadorRef, { comandoPendenteId: null });
+      const fila = filaDeComandos(computadorSnap.data()).filter((id) => id !== String(comandoId));
+      tx.update(computadorRef, { comandosFilaIds: fila, comandoPendenteId: fila[0] || null, comandoAguardandoElevacaoDesde: null });
     }
     travou = true;
   });
@@ -3219,7 +3245,11 @@ async function entregarComandoPendente(codigo, posto, opcoes) {
     if (!comandoPendenteId) return null;
     const comandoRef = COMANDOS_COLLECTION.doc(comandoPendenteId);
     const comandoSnap = await tx.get(comandoRef);
-    if (!comandoSnap.exists) { tx.update(ref, { comandoPendenteId: null }); return null; }
+    if (!comandoSnap.exists) {
+      const fila = filaDeComandos(snap.data()).filter((item) => item !== String(comandoPendenteId));
+      tx.update(ref, { comandosFilaIds: fila, comandoPendenteId: fila[0] || null, comandoAguardandoElevacaoDesde: null });
+      return null;
+    }
     const comando = comandoSnap.data();
     if (comando.status !== 'pendente') return null;
     const opts = opcoes || {};
@@ -3244,7 +3274,8 @@ async function entregarComandoPendente(codigo, posto, opcoes) {
       texto = substituirSegredos(comando.comandoEntrega || comando.comando);
     } catch (e) {
       tx.update(comandoRef, { status: 'erro', erro: e.message, executadoEm: new Date().toISOString() });
-      tx.update(ref, { comandoPendenteId: null });
+      const fila = filaDeComandos(snap.data()).filter((item) => item !== String(comandoPendenteId));
+      tx.update(ref, { comandosFilaIds: fila, comandoPendenteId: fila[0] || null, comandoAguardandoElevacaoDesde: null });
       return null;
     }
     const patchEntrega = { status: 'entregue', entregueEm: new Date().toISOString() };
@@ -3336,8 +3367,11 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   } : null;
   const inventarioAtalhos = /inventario-estacao|noc-inventario-atalhos/.test(String(comando.origem || ''))
     ? atalhosDoInventario(patch.resultado) : null;
+  const filaRestante = filaDeComandos(compSnap.data() || {}).filter((id) => id !== String(comandoId));
   await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).set({
-    comandoPendenteId: null,
+    comandosFilaIds: filaRestante,
+    comandoPendenteId: filaRestante[0] || null,
+    comandoAguardandoElevacaoDesde: null,
     ultimoComandoEm: patch.executadoEm,
     ultimoComandoTexto: String(comando.comando || '').slice(0, 200),
     ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 2000) : null,
