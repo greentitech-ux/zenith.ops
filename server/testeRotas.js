@@ -24261,6 +24261,72 @@ setTimeout(async () => {
   if (!okPalavraRecuperacaoSimples) ruins += 1;
   console.log(`${okPalavraRecuperacaoSimples ? '✓' : '✗'} Senha: recuperação pede uma única palavra com no mínimo 6 letras`);
 
+  // Reparo universal do NOCZenith: precisa continuar publico e SEM segredo,
+  // pois e o caminho de recuperacao quando uma versao invalida derruba a
+  // propria autoatualizacao. O token e lido apenas da copia local da maquina.
+  let okReparoNocZenith = false;
+  try {
+    const fsR = require('fs');
+    const reparoR = require(__dirname + '/reparoNocZenithScript');
+    const vigiaR = require(__dirname + '/vigiaScript');
+    const scriptR = reparoR.montarScriptReparoNocZenith();
+    const comandoR = reparoR.montarComandoReparoNocZenith();
+    const b64ElevadorR = comandoR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)$/);
+    const elevadorR = b64ElevadorR ? Buffer.from(b64ElevadorR[1], 'base64').toString('utf16le') : '';
+    const b64InternoR = elevadorR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/);
+    const internoR = b64InternoR ? Buffer.from(b64InternoR[1], 'base64').toString('utf16le') : '';
+    const indexR = fsR.readFileSync(__dirname + '/index.js', 'utf8');
+    const iniR = indexR.indexOf('const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([');
+    const fimR = indexR.indexOf(']);', iniR);
+    const blocoPublicasR = iniR >= 0 && fimR > iniR ? indexR.slice(iniR, fimR) : '';
+    const respostaR = await pedir('/api/loja-status/reparo-noczenith.ps1');
+    const confR = {
+      'a rota de reparo passa pelo gate publico sem criar token':
+        blocoPublicasR.includes("'/api/loja-status/reparo-noczenith.ps1'")
+        && /app\.get\('\/api\/loja-status\/reparo-noczenith\.ps1'/.test(indexR)
+        && !/reparo-noczenith\.ps1[^]{0,500}garantirAgentToken/.test(indexR)
+        && respostaR.status === 200,
+      'a resposta nao fica em cache e o navegador nao tenta interpretar outro tipo':
+        /reparo-noczenith\.ps1[^]{0,500}Cache-Control', 'no-store'/.test(indexR)
+        && /reparo-noczenith\.ps1[^]{0,500}X-Content-Type-Options', 'nosniff'/.test(indexR)
+        && String(respostaR.headers['content-type'] || '').startsWith('text/plain')
+        && respostaR.headers['cache-control'] === 'no-store'
+        && respostaR.headers['x-content-type-options'] === 'nosniff',
+      'o script publicado e generico e acompanha a versao segura atual':
+        scriptR.includes(`param([int]$VersaoMinima = ${vigiaR.VERSAO_VIGIA})`)
+        && respostaR.corpo.includes(`param([int]$VersaoMinima = ${vigiaR.VERSAO_VIGIA})`)
+        && !/[a-f0-9]{48}/i.test(scriptR)
+        && !/garantirAgentToken/.test(scriptR),
+      'o token so pode ir ao HTTPS fixo do NoPulso e sem redirect':
+        scriptR.includes("$OrigemOficial = [Uri]'https://www.nopulso.com.br'")
+        && scriptR.includes('MaximumRedirection = 0')
+        && scriptR.includes("'X-NOC-Token' = $id.Token"),
+      'so copia canonica do perfil pode ser substituida':
+        scriptR.includes("AppData\\Local\\NOCZenith\\NOCZenith.ps1")
+        && scriptR.includes('$permitidos.ContainsKey($_)')
+        && scriptR.includes('[IO.File]::Replace($tmp, $caminho, $backup, $true)'),
+      'download passa por parser, versao e identidade antes da troca':
+        scriptR.includes('[System.Management.Automation.Language.Parser]::ParseFile')
+        && scriptR.includes('$novoId.Versao -lt $VersaoMinima')
+        && scriptR.includes('$id.Token, $novoId.Token')
+        && scriptR.includes('$id.UriLocal.PathAndQuery -ne $novoId.UriLocal.PathAndQuery'),
+      'o reparo nunca renomeia nem reinicia o computador':
+        !/Rename-Computer|Restart-Computer|shutdown\.exe/i.test(scriptR)
+        && /HOSTNAME PENDENTE/.test(scriptR),
+      'o comando de campo pede UAC e baixa apenas o reparo público sem expor token':
+        /Start-Process -FilePath 'powershell\.exe' -Verb RunAs/.test(elevadorR)
+        && /Reparo NOCZenith nao foi autorizado no UAC/.test(elevadorR)
+        && internoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
+        && /MaximumRedirection 0/.test(internoR)
+        && !/[a-f0-9]{48}/i.test(comandoR),
+    };
+    const falhasR = Object.entries(confR).filter(([, v]) => !v).map(([n]) => n);
+    okReparoNocZenith = !falhasR.length;
+    if (falhasR.length) console.log(`  falhou em: ${falhasR.join(' · ')}`);
+  } catch (e) { okReparoNocZenith = false; console.log('  erro: ' + e.message); }
+  if (!okReparoNocZenith) ruins += 1;
+  console.log(`${okReparoNocZenith ? '✓' : '✗'} NOCZenith: reparo universal seguro, publico e sem token`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

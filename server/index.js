@@ -119,6 +119,7 @@ const briefingEmail = require('./briefingEmail');
 const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
 const vigiaScript = require('./vigiaScript');
+const reparoNocZenithScript = require('./reparoNocZenithScript');
 const loginCustom = require('./loginCustom');
 
 const upload = multer({
@@ -333,6 +334,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/rh/campos-config-publico',
   '/api/loja-status/heartbeat',
   '/api/loja-status/vigia-versao',
+  '/api/loja-status/reparo-noczenith.ps1',
   '/assinar.html',
 ]);
 // A MESMA lista vale SEM o ".html": `/atendimento` e `/atendimento.html`
@@ -1754,6 +1756,16 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
 // autoatualizacao baixar e sobrescrever o proprio arquivo ----------
 app.get('/api/loja-status/vigia-versao', (req, res) => {
   res.json({ versao: vigiaScript.VERSAO_VIGIA });
+});
+
+// Resgate para agentes derrubados por uma versao invalida. E publico porque
+// o conteudo e totalmente generico: a identidade/token continua somente na
+// copia local da propria maquina. O script valida origem, parser, versao e
+// identidade antes de trocar qualquer arquivo e nunca altera hostname.
+app.get('/api/loja-status/reparo-noczenith.ps1', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.type('text/plain').send(reparoNocZenithScript.montarScriptReparoNocZenith());
 });
 
 // o agente (instancia de login) reporta a versao que roda DE FATO e em que pe
