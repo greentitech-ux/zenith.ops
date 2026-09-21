@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 96;
+const VERSAO_VIGIA = 97;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1968,7 +1968,13 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  foreach ($origem in @($desktopUsuario, $env:PUBLIC + "\\Desktop", $perfilUsuario + "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs", $env:ProgramData + "\\Microsoft\\Windows\\Start Menu\\Programs")) { if (Test-Path -LiteralPath $origem) { $fontes += @(Get-ChildItem -LiteralPath $origem -Filter "*.lnk" -File -Recurse -ErrorAction SilentlyContinue) } }',
     '  $selecionados = @(); $faltantes = @()',
     '  foreach ($id in $permitidos) { $fonte = @($fontes | Where-Object { Atalho-EstaAprovado $_ @($id) } | Select-Object -First 1); if ($fonte.Count) { $selecionados += $fonte[0] } else { $faltantes += $id } }',
-    '  if ($faltantes.Count) { Escrever-Log "Barra de tarefas: não encontrei atalho(s) para $($faltantes -join ", "); nada foi alterado."; return $false }',
+    '  # Antes, UM app marcado que nao existisse na maquina abortava a barra',
+    '  # inteira e devolvia falha - o que impedia a politica de carimbar e punha',
+    '  # a maquina pra reexecutar tudo a cada tick. Agora fixa o que existe e diz',
+    '  # o que faltou. Sem nenhum encontrado nao mexe: esvaziar a barra por nao',
+    '  # ter achado nada seria pior que deixar como esta.',
+    '  if ($faltantes.Count) { Escrever-Log "Barra de tarefas: não encontrei atalho(s) para $($faltantes -join ", ") - fixando os demais." }',
+    '  if (-not $selecionados.Count) { Escrever-Log "Barra de tarefas: nenhum atalho aprovado encontrado; barra mantida como está."; return $true }',
     '  $raiz = Join-Path $env:SystemDrive "NoPulsoBackup\\BarraDeTarefas"; $backup = Join-Path $raiz ((Get-Date).ToString("yyyy-MM-dd_HHmmss") + "_" + $env:COMPUTERNAME)',
     '  try { New-Item -ItemType Directory -Path $backup -Force -ErrorAction Stop | Out-Null; foreach ($item in $atuais) { Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $backup $item.Name) -Force -ErrorAction Stop } } catch { Escrever-Log "Barra de tarefas: backup falhou; nada foi alterado ($($_.Exception.Message))."; return $false }',
     '  try { foreach ($item in $atuais) { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop }; foreach ($fonte in $selecionados) { Copy-Item -LiteralPath $fonte.FullName -Destination (Join-Path $pasta $fonte.Name) -Force -ErrorAction Stop }; try { Start-Process -FilePath "ie4uinit.exe" -ArgumentList "-show" -WindowStyle Hidden -ErrorAction SilentlyContinue } catch {}; Escrever-Log "Barra de tarefas padronizada: $($selecionados.Count) atalho(s), backup em $backup."; return $true } catch { Escrever-Log "Barra de tarefas: falhou ao aplicar ($($_.Exception.Message))."; return $false }',
@@ -2018,7 +2024,17 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $perfil = Resolver-PerfilDoOperador; if (-not $perfil) { Escrever-Log "Arquivamento: aguardando perfil ativo."; return $false }',
     '  $raiz = Join-Path $env:SystemDrive ("NoPulsoBackup\\Dados\\" + (Get-Date -Format "yyyy-MM-dd_HHmmss") + "_" + $env:COMPUTERNAME)',
     '  $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory); if (-not $desktop) { $desktop = Join-Path $perfil "Desktop" }',
-    '  $fontes = @(@{nome="AreaDeTrabalho"; caminho=$desktop; filtrar=$true}, @{nome="Downloads"; caminho=(Join-Path $perfil "Downloads"); filtrar=$false}, @{nome="Documentos"; caminho=[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments); filtrar=$false})',
+    '  # As pastas de DADOS do perfil. Fora da lista ficam AppData e afins:',
+    '  # aplicativo instalado nao e dado do operador e mover quebraria a maquina.',
+    '  # GetFolderPath respeita redirecionamento e o idioma do Windows.',
+    '  $fontes = @(',
+    '    @{nome="AreaDeTrabalho"; caminho=$desktop; filtrar=$true},',
+    '    @{nome="Downloads"; caminho=(Join-Path $perfil "Downloads"); filtrar=$false},',
+    '    @{nome="Documentos"; caminho=[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments); filtrar=$false},',
+    '    @{nome="Imagens"; caminho=[Environment]::GetFolderPath([Environment+SpecialFolder]::MyPictures); filtrar=$false},',
+    '    @{nome="Videos"; caminho=[Environment]::GetFolderPath([Environment+SpecialFolder]::MyVideos); filtrar=$false},',
+    '    @{nome="Musica"; caminho=[Environment]::GetFolderPath([Environment+SpecialFolder]::MyMusic); filtrar=$false}',
+    '  )',
     '  $manifesto = New-Object System.Collections.Generic.List[string]; $permitidos = @($estacao.atalhosAprovados | ForEach-Object { ([string]$_).ToLowerInvariant() })',
     '  try { New-Item -ItemType Directory -Path $raiz -Force -ErrorAction Stop | Out-Null } catch { Escrever-Log "Arquivamento: backup não criado ($($_.Exception.Message))."; return $false }',
     '  foreach ($fonte in $fontes) {',
@@ -2029,7 +2045,17 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      try { Move-Item -LiteralPath $item.FullName -Destination $destino -ErrorAction Stop; $manifesto.Add("MOVIDO: $($item.FullName) -> $destino") } catch { $manifesto.Add("PULADO: $($item.FullName) :: $($_.Exception.Message)") }',
     '    }',
     '  }',
-    '  try { Set-Content -LiteralPath (Join-Path $raiz "manifesto.txt") -Value $manifesto -Encoding UTF8 -Force; if ([bool]$estacao.compactarBackup) { Compress-Archive -Path (Join-Path $raiz "*") -DestinationPath ($raiz + ".zip") -Force -ErrorAction Stop }; Set-Content -LiteralPath $marca -Value $raiz -Force; Escrever-Log "Arquivamento concluído: $raiz$(if ([bool]$estacao.compactarBackup) { ".zip" })"; return $true } catch { Escrever-Log "Arquivamento: ZIP/manifesto falhou ($($_.Exception.Message)). Dados já movidos permanecem em $raiz."; return $false }',
+    '  # O MOVIMENTO e a parte irreversivel: assim que termina, MARCA. Antes o',
+    '  # marcador so era escrito depois do ZIP - entao um Compress-Archive que',
+    '  # falhasse (Documentos acima de 2 GB, arquivo em uso, caminho longo)',
+    '  # deixava a maquina remontando a pasta a cada tick, criando pasta vazia',
+    '  # pra sempre, e a politica NUNCA carimbava. O ZIP e passo separado: se',
+    '  # falhar, os dados seguem inteiros na pasta e a maquina converge.',
+    '  try { Set-Content -LiteralPath (Join-Path $raiz "manifesto.txt") -Value $manifesto -Encoding UTF8 -Force -ErrorAction Stop } catch { Escrever-Log "Arquivamento: manifesto nao gravado ($($_.Exception.Message))." }',
+    '  Set-Content -LiteralPath $marca -Value $raiz -Force',
+    '  if (-not [bool]$estacao.compactarBackup) { Escrever-Log "Arquivamento concluído: $raiz"; return $true }',
+    '  try { Compress-Archive -Path (Join-Path $raiz "*") -DestinationPath ($raiz + ".zip") -Force -ErrorAction Stop; Escrever-Log "Arquivamento concluído: $raiz.zip (a pasta fica ate o ZIP ser enviado)"; return $true }',
+    '  catch { Escrever-Log "Arquivamento: ZIP falhou ($($_.Exception.Message)). Os dados estao INTEIROS em $raiz - compacte a mao; a maquina nao vai repetir o movimento."; return $true }',
     '}',
     '',
     '# ---- executa UM comando da fila e devolve o resultado ---------------',
