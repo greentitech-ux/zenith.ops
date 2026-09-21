@@ -11291,6 +11291,14 @@ app.post('/api/tarefas/:id/comentarios', auth.requireAuth, async (req, res) => {
   }
 });
 
+app.patch('/api/tarefas/:id/descricao', auth.requireMaster, async (req, res) => {
+  try {
+    const atualizada = await tarefas.atualizarDescricao(req.params.id, acessoDasTarefas(req), req.body?.descricao);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/tarefas/:id/link-externo', auth.requireAuth, async (req, res) => {
   try {
     const criado = await tarefas.criarLinkExterno(req.params.id, acessoDasTarefas(req));
