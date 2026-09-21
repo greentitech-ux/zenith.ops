@@ -1370,6 +1370,9 @@ function sanitizarEstacao(entrada) {
     // Só quem salvou pela tela nova habilita a alteração da barra. Políticas
     // antigas continuam sem tocar nos itens fixados.
     gerenciarBarraTarefas: aplicar && e.gerenciarBarraTarefas === true,
+    // Arquivamento pesado e' opt-in por máquina: nunca herda para o parque.
+    arquivarDados: aplicar && e.arquivarDados === true,
+    compactarBackup: aplicar && e.arquivarDados === true && e.compactarBackup !== false,
   };
 }
 function sanitizarPolitica(entrada) {

@@ -3950,6 +3950,7 @@ function renderPoliticaComputador(codigo, c){
       <details style="margin-top:9px;"><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Barra de tarefas atual (${barraTarefasDetectada.length})</summary>${barraTarefasHtml}<small style="display:block;color:var(--muted);margin-top:6px;">A lista acima define o padrão. Esta seção é apenas conferência da barra que a máquina informou.</small></details>
       <label style="display:flex;gap:8px;align-items:flex-start;margin-top:9px;cursor:pointer;"><input type="checkbox" data-estacao="ocultarLixeira" ${estacao.ocultarLixeira?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Ocultar Lixeira da Área de Trabalho</b><small style="display:block;color:var(--muted);">Não esvazia a Lixeira nem apaga arquivos. Desmarcar volta a exibir o ícone.</small></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;"><input type="checkbox" data-estacao="aplicar" ${estacao.aplicar?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Aplicar lista aprovada</b><small style="display:block;color:var(--warn);">Guarda os atalhos atuais antes de retirar os não aprovados da Área de Trabalho e da barra clássica. Documentos e outros arquivos não são removidos.</small></span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-top:9px;cursor:pointer;"><input type="checkbox" data-estacao="arquivarDados" ${estacao.arquivarDados?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--bad);"><span style="font-size:12.5px;"><b>Arquivar dados do usuário e gerar ZIP</b><small style="display:block;color:var(--warn);">Move itens fora da lista da Área de Trabalho e todo o conteúdo de Downloads/Documentos para C:\\NoPulsoBackup\\Dados, depois cria ZIP. Windows e programas não entram.</small></span></label>
       <button type="button" class="btn-mini ok" style="margin-top:9px;" onclick="salvarPerfilEstacao('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar Área de Trabalho</button>
       <div class="msg hidden" id="msg-estacao" style="margin-top:6px;"></div>
     </div>
@@ -4021,16 +4022,17 @@ async function salvarPerfilEstacao(codigo, posto){
   const ativa = !!raiz?.querySelector('[data-estacao="ativa"]')?.checked;
   const aplicar = ativa && !!raiz?.querySelector('[data-estacao="aplicar"]')?.checked;
   const ocultarLixeira = ativa && !!raiz?.querySelector('[data-estacao="ocultarLixeira"]')?.checked;
+  const arquivarDados = aplicar && !!raiz?.querySelector('[data-estacao="arquivarDados"]')?.checked;
   const atalhosAprovados = [...(raiz?.querySelectorAll('[data-estacao-atalho]:checked')||[])].map(el=>el.dataset.estacaoAtalho);
   const atalhosPersonalizados = [...(raiz?.querySelectorAll('[data-estacao-atalho-custom]:checked')||[])].map(el=>el.dataset.estacaoAtalhoCustom);
   const barraTarefasAprovada = [...(raiz?.querySelectorAll('[data-estacao-barra]:checked')||[])].map(el=>el.dataset.estacaoBarra);
   const gerenciarBarraTarefas = aplicar && barraTarefasAprovada.length > 0;
-  if(aplicar && !confirm(`Aplicar esta lista nesta máquina? Os atalhos fora dela serão primeiro copiados para C:\\NoPulsoBackup\\Atalhos e só depois removidos.`)) return;
+  if(aplicar && !confirm(arquivarDados ? `Arquivar dados desta máquina? Itens fora da lista da Área de Trabalho e todo o conteúdo de Downloads/Documentos serão movidos para C:\\NoPulsoBackup\\Dados e compactados em ZIP.` : `Aplicar esta lista nesta máquina? Os atalhos fora dela serão primeiro copiados para C:\\NoPulsoBackup\\Atalhos e só depois removidos.`)) return;
   const senha = await pedirSenhaMaster('salvar a Área de Trabalho padronizada');
   if(senha===null) return;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/perfil-estacao`, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, ocultarLixeira, backupAntesDeLimpar:true, atalhosAprovados, atalhosPersonalizados, barraTarefasAprovada, gerenciarBarraTarefas, password:senha }) });
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, ocultarLixeira, arquivarDados, compactarBackup:true, backupAntesDeLimpar:true, atalhosAprovados, atalhosPersonalizados, barraTarefasAprovada, gerenciarBarraTarefas, password:senha }) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui salvar.');
     msg.textContent = aplicar ? 'Lista salva. O NOC solicitou agora a leitura dos atalhos, faz backup do que sair e aplica a mudança automaticamente na próxima consulta.' : 'Lista salva como rascunho e a leitura dos atalhos foi solicitada; nenhuma alteração será feita até marcar “Aplicar lista aprovada”.';

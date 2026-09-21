@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 95;
+const VERSAO_VIGIA = 96;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -2008,6 +2008,30 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  return (-not $falhouRemocao)',
     '}',
     '',
+    '# Arquivamento completo, porém reversível: move os dados do perfil ativo',
+    '# para C:\\NoPulsoBackup e depois gera ZIP. Nunca toca Windows, Program',
+    '# Files, aplicativos instalados ou a pasta do próprio NOCZenith.',
+    'function Arquivar-DadosDaEstacao($estacao, [string]$versao) {',
+    '  if ($Servico -or -not $estacao -or -not [bool]$estacao.arquivarDados) { return $true }',
+    '  $marca = Join-Path (Split-Path -Parent $PSCommandPath) ("dados-arquivados-" + $versao.Replace("|", "_").Replace(":", "_") + ".ok")',
+    '  if (Test-Path -LiteralPath $marca) { return $true }',
+    '  $perfil = Resolver-PerfilDoOperador; if (-not $perfil) { Escrever-Log "Arquivamento: aguardando perfil ativo."; return $false }',
+    '  $raiz = Join-Path $env:SystemDrive ("NoPulsoBackup\\Dados\\" + (Get-Date -Format "yyyy-MM-dd_HHmmss") + "_" + $env:COMPUTERNAME)',
+    '  $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory); if (-not $desktop) { $desktop = Join-Path $perfil "Desktop" }',
+    '  $fontes = @(@{nome="AreaDeTrabalho"; caminho=$desktop; filtrar=$true}, @{nome="Downloads"; caminho=(Join-Path $perfil "Downloads"); filtrar=$false}, @{nome="Documentos"; caminho=[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments); filtrar=$false})',
+    '  $manifesto = New-Object System.Collections.Generic.List[string]; $permitidos = @($estacao.atalhosAprovados | ForEach-Object { ([string]$_).ToLowerInvariant() })',
+    '  try { New-Item -ItemType Directory -Path $raiz -Force -ErrorAction Stop | Out-Null } catch { Escrever-Log "Arquivamento: backup não criado ($($_.Exception.Message))."; return $false }',
+    '  foreach ($fonte in $fontes) {',
+    '    if (-not $fonte.caminho -or -not (Test-Path -LiteralPath $fonte.caminho)) { continue }; $destinoRaiz = Join-Path $raiz $fonte.nome; New-Item -ItemType Directory -Path $destinoRaiz -Force | Out-Null',
+    '    foreach ($item in @(Get-ChildItem -LiteralPath $fonte.caminho -Force -ErrorAction SilentlyContinue)) {',
+    '      if ($fonte.filtrar -and -not $item.PSIsContainer -and (Atalho-EstaAprovado $item $permitidos)) { continue }',
+    '      $destino = Join-Path $destinoRaiz $item.Name; if (Test-Path -LiteralPath $destino) { $destino = Join-Path $destinoRaiz (([IO.Path]::GetFileNameWithoutExtension($item.Name)) + "_" + [Guid]::NewGuid().ToString("N").Substring(0,8) + $item.Extension) }',
+    '      try { Move-Item -LiteralPath $item.FullName -Destination $destino -ErrorAction Stop; $manifesto.Add("MOVIDO: $($item.FullName) -> $destino") } catch { $manifesto.Add("PULADO: $($item.FullName) :: $($_.Exception.Message)") }',
+    '    }',
+    '  }',
+    '  try { Set-Content -LiteralPath (Join-Path $raiz "manifesto.txt") -Value $manifesto -Encoding UTF8 -Force; if ([bool]$estacao.compactarBackup) { Compress-Archive -Path (Join-Path $raiz "*") -DestinationPath ($raiz + ".zip") -Force -ErrorAction Stop }; Set-Content -LiteralPath $marca -Value $raiz -Force; Escrever-Log "Arquivamento concluído: $raiz$(if ([bool]$estacao.compactarBackup) { ".zip" })"; return $true } catch { Escrever-Log "Arquivamento: ZIP/manifesto falhou ($($_.Exception.Message)). Dados já movidos permanecem em $raiz."; return $false }',
+    '}',
+    '',
     '# ---- executa UM comando da fila e devolve o resultado ---------------',
     '# Uma funcao so, usada pelo caminho normal (heartbeat do loop) E pela',
     '# sondagem elevada (Sondar-ComandoAdmin) - o mesmo comando nao pode ter',
@@ -2093,6 +2117,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
     '    $okEstacao = Aplicar-PerfilEstacao $pol.estacao',
     '    $okBarra = Aplicar-BarraTarefas $pol.estacao',
+    '    $okArquivo = Arquivar-DadosDaEstacao $pol.estacao $versao',
     '    $okLixeira = Aplicar-VisibilidadeLixeira ([bool]$pol.estacao.ocultarLixeira)',
     '    # so marca como aplicada quando TUDO que aquela instancia podia fazer',
     '    # deu certo - senao a de boot (que tem admin) nunca mais tentaria',
@@ -2101,7 +2126,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // SYSTEM nao tem area de trabalho). Se a gravacao falhou, NAO pode marcar
     // como aplicada: a versao ficaria carimbada e a maquina nunca mais tentaria
     // - a loja ficaria pra sempre sem o papel de parede, calada.
-    '    if (-not $Servico -and -not ($okPapel -and $okEstacao -and $okBarra -and $okLixeira)) { Escrever-Log "Politica: papel de parede, perfil da estação, barra ou Lixeira não aplicou; tentando de novo na próxima consulta."; return }',
+    '    if (-not $Servico -and -not ($okPapel -and $okEstacao -and $okBarra -and $okArquivo -and $okLixeira)) { Escrever-Log "Politica: aguardando área de trabalho, backup ou ZIP."; return }',
     '    Set-Content -Path (Caminho-PoliticaAplicada) -Value $versao -Force',
     '    Escrever-Log "Politica versao $versao aplicada."',
     '  } catch { Escrever-Log "Falha ao sincronizar a politica: $($_.Exception.Message)" }',
