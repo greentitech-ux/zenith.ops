@@ -1211,6 +1211,7 @@ const CAMPOS_SO_DO_DETALHE = [
   'eventos', 'ipHistorico', 'chatMensagens', 'dispositivos',
   'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
   'ultimoComandoTexto', 'ultimoComandoResultado', 'ultimoComandoErro',
+  'atalhosDesktop',
 ];
 function resumoDe(doc) {
   const copia = { ...doc };
@@ -1308,6 +1309,14 @@ async function tokenDoComputador(codigo, posto) {
 //                    sobe a versão e é aplicada automaticamente pelo agente.
 // Tudo REVERSIVEL: desligar a chave devolve a maquina ao estado anterior.
 const ITENS_ESTACAO_APROVAVEIS = ['nopulso', 'anydesk', 'rdp-dominos'];
+function normalizarNomeAtalho(valor) {
+  const nome = String(valor || '').trim().toLocaleLowerCase('pt-BR')
+    .replace(/\.(lnk|url|rdp)$/i, '').replace(/[\r\n\t]/g, ' ').replace(/\s+/g, ' ');
+  // É uma chave de comparação, não um caminho nem um comando. O conjunto
+  // permitido inclui nomes comuns de aplicativos como "Linx", mas nunca
+  // barras, aspas ou curingas que alterariam o comportamento do PowerShell.
+  return /^[\p{L}\p{N} ._()\-]{1,80}$/u.test(nome) ? nome : null;
+}
 function sanitizarEstacao(entrada) {
   const e = entrada && typeof entrada === 'object' ? entrada : {};
   const ativo = e.ativa === true;
@@ -1316,6 +1325,8 @@ function sanitizarEstacao(entrada) {
   const permitidos = Array.isArray(e.atalhosAprovados) ? e.atalhosAprovados : [];
   const atalhosAprovados = [...new Set(permitidos.map((x) => String(x).trim().toLowerCase()))]
     .filter((x) => ITENS_ESTACAO_APROVAVEIS.includes(x));
+  const personalizados = Array.isArray(e.atalhosPersonalizados) ? e.atalhosPersonalizados : [];
+  const atalhosPersonalizados = [...new Set(personalizados.map(normalizarNomeAtalho).filter(Boolean))].slice(0, 40);
   return {
     ativa: ativo,
     perfil: ativo ? perfil : 'nenhum',
@@ -1328,6 +1339,7 @@ function sanitizarEstacao(entrada) {
     protegerAnydesk: ativo && e.protegerAnydesk !== false,
     rdpDominosObrigatorio: ativo && e.rdpDominosObrigatorio === true,
     atalhosAprovados,
+    atalhosPersonalizados,
   };
 }
 function sanitizarPolitica(entrada) {
@@ -2175,19 +2187,19 @@ const COMANDO_DIAGNOSTICO_DESEMPENHO = [
   '$linhas -join "`n"',
 ].join('\n');
 
-// Inventário inicial do perfil de estação. Deliberadamente não devolve nomes
-// de documentos nem caminhos de usuário: o Master precisa saber a situação
-// da Área de Trabalho, não copiar dados pessoais para o histórico do NOC.
-// Não cria, remove, move ou fixa item algum.
+// Inventário inicial do perfil de estação. Devolve SOMENTE os nomes dos
+// atalhos (.lnk/.url/.rdp), sem caminhos nem documentos do usuário. É assim
+// que o Master consegue aprovar o "Linx" de uma máquina específica sem
+// adivinhar seu nome ou liberar esse aplicativo nas demais. Não altera nada.
 const COMANDO_INVENTARIO_ESTACAO = [
   '$linhas = New-Object System.Collections.Generic.List[string]',
   '$areas = @($env:USERPROFILE + "\\Desktop", $env:PUBLIC + "\\Desktop") | Select-Object -Unique',
-  '$lnk=0; $url=0; $rdp=0; $outros=0',
+  '$lnk=0; $url=0; $rdp=0; $outros=0; $atalhos = New-Object System.Collections.Generic.List[object]',
   'foreach ($area in $areas) {',
   '  if (-not (Test-Path -LiteralPath $area)) { continue }',
   '  foreach ($i in @(Get-ChildItem -LiteralPath $area -Force -ErrorAction SilentlyContinue)) {',
   '    if ($i.PSIsContainer) { $outros++; continue }',
-  '    switch ($i.Extension.ToLowerInvariant()) { ".lnk" {$lnk++}; ".url" {$url++}; ".rdp" {$rdp++}; default {$outros++} }',
+  '    switch ($i.Extension.ToLowerInvariant()) { ".lnk" {$lnk++; [void]$atalhos.Add([PSCustomObject]@{ nome=$i.BaseName; extensao=".lnk"; origem=$(if ($area -eq ($env:PUBLIC + "\\Desktop")) { "publica" } else { "usuario" }) }) }; ".url" {$url++; [void]$atalhos.Add([PSCustomObject]@{ nome=$i.BaseName; extensao=".url"; origem=$(if ($area -eq ($env:PUBLIC + "\\Desktop")) { "publica" } else { "usuario" }) }) }; ".rdp" {$rdp++; [void]$atalhos.Add([PSCustomObject]@{ nome=$i.BaseName; extensao=".rdp"; origem=$(if ($area -eq ($env:PUBLIC + "\\Desktop")) { "publica" } else { "usuario" }) }) }; default {$outros++} }',
   '  }',
   '}',
   '$linhas.Add("AREA DE TRABALHO: $lnk atalho(s), $url link(s) web, $rdp arquivo(s) RDP e $outros outro(s) item(ns).")',
@@ -2197,6 +2209,8 @@ const COMANDO_INVENTARIO_ESTACAO = [
   '$linhas.Add("RDP: " + $(if ($mstsc) { "cliente Windows disponivel" } else { "cliente Windows nao encontrado" }))',
   '$np = @(Get-Item ($env:USERPROFILE + "\\Desktop\\NoPulso*.lnk"), ($env:APPDATA + "\\Microsoft\\Windows\\Start Menu\\Programs\\NoPulso*.lnk") -Force -ErrorAction SilentlyContinue).Count',
   '$linhas.Add("NOPULSO: " + $(if ($np -gt 0) { "$np atalho(s) localizado(s)" } else { "atalho nao localizado" }))',
+  '$atalhosJson = @($atalhos | Select-Object -First 80) | ConvertTo-Json -Compress',
+  '$linhas.Add("NOC_ATALHOS_JSON:$atalhosJson")',
   '$linhas.Add("RESULTADO: inventario somente-leitura; nenhuma alteracao foi feita.")',
   '$linhas -join "`n"',
 ].join('\n');
@@ -3176,6 +3190,24 @@ function substituirSegredos(texto, env = process.env) {
   });
 }
 
+// O inventário manda uma linha JSON delimitada dentro da saída normal do
+// comando. Persistimos apenas o nome, extensão e se veio da Área Pública ou
+// do usuário — nunca caminhos locais, parâmetros do atalho ou documentos.
+function atalhosDoInventario(resultado) {
+  const encontrado = String(resultado || '').match(/(?:^|\r?\n)NOC_ATALHOS_JSON:(.+?)(?:\r?\n|$)/);
+  if (!encontrado) return null;
+  try {
+    const bruto = JSON.parse(encontrado[1]);
+    const lista = Array.isArray(bruto) ? bruto : [bruto];
+    return lista.map((item) => {
+      const nome = normalizarNomeAtalho(item && item.nome);
+      const extensao = String(item && item.extensao || '').toLowerCase();
+      const origem = item && item.origem === 'publica' ? 'publica' : 'usuario';
+      return nome && ['.lnk', '.url', '.rdp'].includes(extensao) ? { nome, extensao, origem } : null;
+    }).filter(Boolean).slice(0, 80);
+  } catch (_) { return null; }
+}
+
 // o NOCZenith reporta o resultado (ver rota publica .../comando-resultado
 // em index.js) - fecha o ciclo e libera o computador pra aceitar um novo
 // comando
@@ -3219,12 +3251,15 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
     tipo: 'impressora-comando', em: Date.now(),
     detalhe: String(patch.erro || patch.resultado || 'reset enviado').slice(0, 200),
   } : null;
+  const inventarioAtalhos = /inventario-estacao|noc-inventario-atalhos/.test(String(comando.origem || ''))
+    ? atalhosDoInventario(patch.resultado) : null;
   await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).set({
     comandoPendenteId: null,
     ultimoComandoEm: patch.executadoEm,
     ultimoComandoTexto: String(comando.comando || '').slice(0, 200),
     ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 2000) : null,
     ultimoComandoErro: patch.erro ? String(patch.erro).slice(0, 500) : null,
+    ...(inventarioAtalhos ? { atalhosDesktop: inventarioAtalhos, atalhosDesktopEm: Date.now() } : {}),
     ...(eventoZebra ? { eventos: [...((compSnap.data() || {}).eventos || []), eventoZebra].slice(-EVENTOS_MAX) } : {}),
   }, { merge: true });
   cache.invalidar();

@@ -19,7 +19,8 @@
 // telemetria; nao coleta senha, token ou configuracao de acesso remoto.
 // 81: aplica o perfil declarativo da Área de Trabalho, sempre salvando os
 // atalhos removidos antes da limpeza e recebendo alterações automaticamente.
-const VERSAO_VIGIA = 81;
+// 82: preserva também atalhos específicos inventariados na máquina (ex.: Linx).
+const VERSAO_VIGIA = 82;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1862,6 +1863,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if (($permitidos -contains "nopulso") -and $nome -match "nopulso|zenith ops") { return $true }',
     '  if (($permitidos -contains "anydesk") -and $nome -match "anydesk") { return $true }',
     '  if (($permitidos -contains "rdp-dominos") -and $ext -eq ".rdp" -and $nome -match "domino|dominos") { return $true }',
+    '  $personalizados = @($script:AtalhosPersonalizados | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
+    '  if ($personalizados -contains $nome) { return $true }',
     '  return $false',
     '}',
     '',
@@ -1872,6 +1875,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if ($Servico) { return $true }',
     '  if (-not $estacao -or -not [bool]$estacao.ativa -or [string]$estacao.modo -ne "aplicar") { return $true }',
     '  $permitidos = @($estacao.atalhosAprovados | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
+    '  $script:AtalhosPersonalizados = @($estacao.atalhosPersonalizados)',
     '  $areas = @($env:USERPROFILE + "\\Desktop", $env:PUBLIC + "\\Desktop") | Select-Object -Unique',
     '  $remover = New-Object System.Collections.Generic.List[object]',
     '  foreach ($area in $areas) {',

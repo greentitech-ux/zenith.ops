@@ -3854,6 +3854,14 @@ function renderPoliticaComputador(codigo, c){
   const pol = c.politica || {};
   const estacao = pol.estacao || {};
   const atalhosAprovados = Array.isArray(estacao.atalhosAprovados) ? estacao.atalhosAprovados : [];
+  const atalhosPersonalizados = Array.isArray(estacao.atalhosPersonalizados) ? estacao.atalhosPersonalizados : [];
+  const atalhosDetectados = Array.isArray(c.atalhosDesktop) ? c.atalhosDesktop : [];
+  const atalhosDetectadosHtml = atalhosDetectados.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:210px;overflow:auto;padding:2px 1px;">${atalhosDetectados.map(a=>{
+      const nome = String(a.nome||'').toLowerCase(); const marcado = atalhosPersonalizados.includes(nome);
+      return `<label class="btn-mini" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(`${a.nome||''}${a.extensao||''} · ${a.origem==='publica'?'Área Pública':'Usuário'}`)}"><input type="checkbox" data-estacao-atalho-custom="${escapeHtml(nome)}" ${marcado?'checked':''} style="width:auto;margin-right:4px;accent-color:var(--accent);">${escapeHtml(a.nome||'Atalho')}<small style="margin-left:3px;color:var(--muted);">${escapeHtml(a.extensao||'')}</small></label>`;
+    }).join('')}</div>`
+    : '<div style="font-size:11.5px;color:var(--muted);">Ainda não há uma leitura. Clique em “Ler atalhos atuais”; ela não altera a máquina.</div>';
   const aviso = c.tipo === 'interno' ? '' : '<div style="font-size:11px;color:var(--warn);margin-top:6px;">Pendrive e instalação precisam de Administrador na máquina - quem aplica é a tarefa de boot do NOCZenith.</div>';
   const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
   const sumiu = c.ultimoProgramaSumidoEm ? `<div style="font-size:11.5px;color:var(--bad);margin-top:8px;">🗑️ Programa desinstalado: <b>${escapeHtml(c.ultimoProgramaSumidoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaSumidoEm))}</div>` : '';
@@ -3872,6 +3880,8 @@ function renderPoliticaComputador(codigo, c){
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin:6px 0 8px;">
         ${[['nopulso','NoPulso'],['anydesk','AnyDesk'],['rdp-dominos','RDP Dominos']].map(([id,nome])=>`<label class="btn-mini" style="cursor:pointer;"><input type="checkbox" data-estacao-atalho="${id}" ${atalhosAprovados.includes(id)?'checked':''} style="width:auto;margin-right:4px;accent-color:var(--accent);">${nome}</label>`).join('')}
       </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;"><b style="font-size:12px;">Atalhos encontrados nesta máquina</b><button type="button" class="btn-mini" onclick="inventariarAtalhosComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">↻ Ler atalhos atuais</button>${c.atalhosDesktopEm?`<small style="color:var(--muted);">lido ${escapeHtml(tempoRelativo(c.atalhosDesktopEm))}</small>`:''}</div>
+      ${atalhosDetectadosHtml}
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;"><input type="checkbox" data-estacao="aplicar" ${estacao.aplicar?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Aplicar lista aprovada</b><small style="display:block;color:var(--warn);">Remove somente atalhos (.lnk, .url e .rdp) fora da lista; documentos e outros arquivos não são removidos.</small></span></label>
       <button type="button" class="btn-mini ok" style="margin-top:9px;" onclick="salvarPerfilEstacao('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar Área de Trabalho</button>
       <div class="msg hidden" id="msg-estacao" style="margin-top:6px;"></div>
@@ -3943,17 +3953,32 @@ async function salvarPerfilEstacao(codigo, posto){
   const ativa = !!document.querySelector('#detalhe-comp-politica [data-estacao="ativa"]')?.checked;
   const aplicar = ativa && !!document.querySelector('#detalhe-comp-politica [data-estacao="aplicar"]')?.checked;
   const atalhosAprovados = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-atalho]:checked')].map(el=>el.dataset.estacaoAtalho);
+  const atalhosPersonalizados = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-atalho-custom]:checked')].map(el=>el.dataset.estacaoAtalhoCustom);
   if(aplicar && !confirm(`Aplicar esta lista nesta máquina? Os atalhos fora dela serão primeiro copiados para C:\\NoPulsoBackup\\Atalhos e só depois removidos.`)) return;
   const senha = await pedirSenhaMaster('salvar a Área de Trabalho padronizada');
   if(senha===null) return;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/perfil-estacao`, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, backupAntesDeLimpar:true, atalhosAprovados, password:senha }) });
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, backupAntesDeLimpar:true, atalhosAprovados, atalhosPersonalizados, password:senha }) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui salvar.');
     msg.textContent = aplicar ? 'Lista salva. O NOC faz backup dos atalhos que saírem e aplica a mudança automaticamente na próxima consulta.' : 'Lista salva como rascunho; nenhuma alteração será feita até marcar “Aplicar lista aprovada”.';
     msg.className='msg'; msg.classList.remove('hidden');
     await carregar();
+  }catch(e){ msg.textContent=e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+
+async function inventariarAtalhosComputador(codigo, posto){
+  const msg = document.getElementById('msg-estacao');
+  const senha = await pedirSenhaMaster('ler os atalhos atuais desta máquina');
+  if(senha===null) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/inventariar-atalhos`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:senha}) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui solicitar a leitura.');
+    msg.textContent = 'Leitura solicitada. Assim que o NOCZenith responder, abra novamente esta ficha para marcar os atalhos encontrados.';
+    msg.className='msg'; msg.classList.remove('hidden');
   }catch(e){ msg.textContent=e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 

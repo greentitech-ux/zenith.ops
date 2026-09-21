@@ -1685,6 +1685,7 @@ app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, 
     const r = await lojaStatus.registrarTelemetria(req.params.codigo, req.params.posto, {
       disco: req.body.disco, ram: req.body.ram, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
       statusImpressoras: req.body.statusImpressoras,
+      anydeskServico: req.body.anydeskServico, anydeskId: req.body.anydeskId,
     }, token);
     // a RESPOSTA leva quais impressoras aquele agente deve sondar no proximo
     // ciclo. Sem rota nova e sem requisicao extra: a telemetria ja acontece,
@@ -5590,6 +5591,21 @@ app.put('/api/loja-status/:codigo/computadores/:posto/perfil-estacao', auth.requ
     const perfil = await lojaStatus.definirPerfilEstacao(req.params.codigo, req.params.posto, req.body);
     broadcast('loja-status-atualizado', { codigo: req.params.codigo, posto: req.params.posto });
     res.json(perfil);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Lê os atalhos reais da Área de Trabalho para que o Master aprove apenas o
+// que existe naquela máquina (por exemplo, Linx em um PDV específico). A ação
+// é somente-leitura e o resultado fica na ficha assim que o agente responder.
+app.post('/api/loja-status/:codigo/computadores/:posto/inventariar-atalhos', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const comando = await lojaStatus.enfileirarComando(req.params.codigo, req.params.posto, lojaStatus.COMANDO_INVENTARIO_ESTACAO, {
+      origem: 'noc-inventario-atalhos', solicitadoPor: req.user && req.user.email,
+    });
+    res.json({ ok: true, comandoId: comando.id, mensagem: 'Leitura solicitada. A lista aparece nesta ficha quando o NOCZenith responder.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
