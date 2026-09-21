@@ -15025,6 +15025,45 @@ setTimeout(async () => {
   if (!okLimpezaSegura) ruins += 1;
   console.log(`${okLimpezaSegura ? '✓' : '✗'} NOC: libera espaço apenas em temporários e Lixeira, com medição antes/depois`);
 
+  // Remoção do Office em massa: usa os desinstaladores oficiais registrados,
+  // cobre MSI/Click-to-Run/Store e nunca apaga pastas ou documentos na mão.
+  let okRemoverOffice = false;
+  try {
+    const lsOffice = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const htmlOffice = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const indexOffice = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const cmd = lsOffice.COMANDO_REMOVER_OFFICE || '';
+    const conf = {
+      'detecta MSI 32/64 bits e Microsoft 365/Click-to-Run':
+        /WOW6432Node/.test(cmd) && /Microsoft 365 Apps/.test(cmd)
+        && /msiexec/.test(cmd) && /QuietUninstallString/.test(cmd),
+      'também remove a edição Microsoft Store pelo mecanismo oficial':
+        /Get-AppxPackage -AllUsers -Name Microsoft\.Office\.Desktop/.test(cmd)
+        && /Remove-AppxPackage/.test(cmd) && /Remove-AppxProvisionedPackage/.test(cmd),
+      'preserva componentes compartilhados e não apaga pastas/documentos':
+        /Database Engine/.test(cmd) && /Documentos do usuário não foram apagados/.test(cmd)
+        && !/Remove-Item|Program Files|Users\\/.test(cmd),
+      'exige agente elevado, não reinicia sozinho e informa resultado por componente':
+        /WindowsBuiltInRole/.test(cmd) && /Reinicie a máquina depois/.test(cmd)
+        && /REMOVIDOS:/.test(cmd) && /PULADOS:/.test(cmd) && /FALHAS:/.test(cmd)
+        && !/shutdown|Restart-Computer/.test(cmd),
+      'rota aceita somente a tarefa fixa e exige execução administrativa':
+        /'remover-office'\]/.test(indexOffice)
+        && /manutencao\.removerOffice/.test(indexOffice)
+        && /COMANDO_REMOVER_OFFICE/.test(indexOffice)
+        && /manutencao-remover-office', requerAdmin: true/.test(indexOffice),
+      'tela tem botão e confirmação que avisa impacto e preservação dos documentos':
+        /id="manut-remover-office"/.test(htmlOffice)
+        && /REMOVER o Microsoft Office\/Microsoft 365/.test(htmlOffice)
+        && /Documentos do usuário NÃO serão apagados/.test(htmlOffice),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okRemoverOffice = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okRemoverOffice = false; console.log('  erro: ' + e.message); }
+  if (!okRemoverOffice) ruins += 1;
+  console.log(`${okRemoverOffice ? '✓' : '✗'} NOC: remove qualquer Office pelos desinstaladores registrados, sem apagar documentos`);
+
   // ------------------------------------------------------------------
   // BUSCA NA JANELA DE MANUTENCAO. Pedido do Master: "filtro de pesquisa
   // digitado, a fim de ser mais rapido digitando o nome da maquina e

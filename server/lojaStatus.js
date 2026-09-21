@@ -2272,6 +2272,44 @@ const COMANDO_LIMPEZA_SEGURA = [
   '"OTIMIZAÇÃO SEGURA: $apagados item(ns) temporário(s) removido(s) · $falhas pulado(s) por uso/permissão · Lixeira: $lixeira. Espaço livre antes: $antes · depois: $depois. Nenhum programa, documento ou download foi removido."',
 ].join('\n');
 
+// Remove suites e aplicativos do Office usando SOMENTE os desinstaladores
+// registrados pelo Windows. Cobre MSI (Office antigo), Click-to-Run (Office
+// moderno/Microsoft 365) e o pacote Microsoft Store. Não apaga pastas à mão,
+// documentos do usuário nem runtimes compartilhados como Access Database
+// Engine e Visual C++. Reinício, quando necessário, fica para a manutenção.
+const COMANDO_REMOVER_OFFICE = [
+  '$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+  'if (-not $admin) { throw "A remoção do Office exige o NOCZenith elevado (SYSTEM)." }',
+  '$raizes = @("HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")',
+  '$todos = @(Get-ItemProperty -Path $raizes -ErrorAction SilentlyContinue)',
+  '$padrao = "(?i)^(Microsoft 365 Apps|Microsoft Office(?!.*(?:Database Engine|Shared|Proof|Language Pack|Telemetry|Click-to-Run Extensibility))|Microsoft (?:Word|Excel|PowerPoint|Outlook|Access|Publisher|OneNote|Project|Visio)\\b|Update for Microsoft Office)"',
+  '$alvos = @($todos | Where-Object { $_.DisplayName -match $padrao } | Sort-Object @{Expression={ if ($_.DisplayName -match "(?i)^Update for") { 1 } else { 0 } }}, DisplayName)',
+  '$removidos = New-Object System.Collections.Generic.List[string]',
+  '$pulados = New-Object System.Collections.Generic.List[string]',
+  '$falhas = New-Object System.Collections.Generic.List[string]',
+  'foreach ($item in $alvos) {',
+  '  $nome = [string]$item.DisplayName',
+  '  try {',
+  '    if ($item.UninstallString -match "(?i)msiexec(?:\\.exe)?") {',
+  '      $args = "/x $($item.PSChildName) /qn /norestart"',
+  '      $p = Start-Process -FilePath msiexec.exe -ArgumentList $args -Wait -PassThru -WindowStyle Hidden',
+  '    } elseif ($item.QuietUninstallString) {',
+  '      $p = Start-Process -FilePath cmd.exe -ArgumentList "/d", "/s", "/c", ([string]$item.QuietUninstallString) -Wait -PassThru -WindowStyle Hidden',
+  '    } else { $pulados.Add("$nome (sem modo silencioso)"); continue }',
+  '    if ($p.ExitCode -in @(0, 1641, 3010)) { $removidos.Add($nome) } else { $falhas.Add("$nome (código $($p.ExitCode))") }',
+  '  } catch { $falhas.Add("$nome ($($_.Exception.Message))") }',
+  '}',
+  '$store = @(Get-AppxPackage -AllUsers -Name Microsoft.Office.Desktop -ErrorAction SilentlyContinue)',
+  'foreach ($pacote in $store) { try { Remove-AppxPackage -Package $pacote.PackageFullName -AllUsers -ErrorAction Stop; $removidos.Add("Microsoft Office (Microsoft Store)") } catch { $falhas.Add("Microsoft Store ($($_.Exception.Message))") } }',
+  '$provisionados = @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq "Microsoft.Office.Desktop" })',
+  'foreach ($pacote in $provisionados) { try { Remove-AppxProvisionedPackage -Online -PackageName $pacote.PackageName -AllUsers -ErrorAction Stop | Out-Null } catch { $falhas.Add("Office provisionado ($($_.Exception.Message))") } }',
+  'if (-not $alvos.Count -and -not $store.Count -and -not $provisionados.Count) { "OK: nenhum Microsoft Office instalado foi encontrado."; exit 0 }',
+  '"OFFICE: $($removidos.Count) componente(s) removido(s), $($pulados.Count) pulado(s), $($falhas.Count) falha(s). Documentos do usuário não foram apagados. Reinicie a máquina depois da manutenção."',
+  'if ($removidos.Count) { "REMOVIDOS: " + ($removidos -join " | ") }',
+  'if ($pulados.Count) { "PULADOS: " + ($pulados -join " | ") }',
+  'if ($falhas.Count) { "FALHAS: " + ($falhas -join " | "); exit 1 }',
+].join('\n');
+
 // REINICIAR a máquina. Fixo no código pelo mesmo motivo dos outros: uma
 // rota que aceitasse texto livre seria "rodar qualquer coisa em toda a
 // rede". O /t 120 não é enfeite - dá 2 minutos de aviso NA TELA DA LOJA
@@ -4264,7 +4302,7 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, COMANDO_RESET_SENHA,
   comandoResetZebra, comandoEncerrarGcomWcf,
   ESTADOS, estadoDe, motivosDeDegradacao,

@@ -923,6 +923,7 @@
        <button type="button" class="btn-ghost" id="manut-gcom-wcf" onclick="manutEnviar('gcomWcf')" title="Encerra somente GcomClient.WCF.exe nas VMs marcadas como GCOM; a própria VM o inicia novamente">🟥 Encerrar GCOM</button>
        <button type="button" class="btn-ghost" id="manut-diagnostico" onclick="manutEnviar('diagnostico-desempenho')" title="Lê eventos de tela azul, falha de disco/hardware, minidumps e consumo atual; não altera a máquina">🩺 Diagnosticar falha</button>
        <button type="button" class="btn-ghost" id="manut-limpeza-segura" onclick="manutEnviar('limpeza-segura')" title="Remove apenas temporários do Windows e do usuário, além da Lixeira; mede o espaço livre antes e depois; não reinicia a máquina">🧹 Liberar espaço seguro</button>
+       <button type="button" class="btn-ghost" id="manut-remover-office" onclick="manutEnviar('remover-office')" title="Remove qualquer versão detectada do Microsoft Office/Microsoft 365; documentos do usuário são preservados">🗑️ Remover Office</button>
        <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
       <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
       <button type="button" class="btn-ghost" id="manut-reset-senha" onclick="manutEnviar('reset-senha')" title="Reseta a senha do Windows para a senha padrão da loja - a máquina executa na próxima batida">🔑 Reset de Senha</button>
@@ -3226,6 +3227,7 @@ const MANUT_TAREFAS = {
   gcomWcf: { botao: 'manut-gcom-wcf', rotulo: 'Encerramento do GcomClient.WCF' },
   'diagnostico-desempenho': { botao: 'manut-diagnostico', rotulo: 'Diagnóstico de falha' },
   'limpeza-segura': { botao: 'manut-limpeza-segura', rotulo: 'Liberação de espaço seguro' },
+  'remover-office': { botao: 'manut-remover-office', rotulo: 'Remoção do Microsoft Office' },
   zebra: { botao: 'manut-zebra', rotulo: 'Reset das Zebras' },
   rede: { botao: 'manut-rede', rotulo: 'Destrave da rede' },
   'reset-senha': { botao: 'manut-reset-senha', rotulo: 'Reset de Senha do Windows' },
@@ -3268,6 +3270,9 @@ async function manutEnviar(tarefa){
   }
   if(tarefa === 'limpeza-segura'){
     if(!confirm(`Liberar espaço seguro em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO NOC remove apenas temporários do Windows, temporários do usuário e itens da Lixeira. Não remove documentos, Downloads, programas ou dados do sistema, e NÃO reinicia a máquina. O resultado informa o espaço livre antes e depois.`)) return;
+  }
+  if(tarefa === 'remover-office'){
+    if(!confirm(`REMOVER o Microsoft Office/Microsoft 365 de ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nWord, Excel, Outlook, PowerPoint, Project e Visio detectados poderão ser desinstalados e os aplicativos abertos serão interrompidos. Documentos do usuário NÃO serão apagados.\n\nA remoção não reinicia sozinha; reinicie as máquinas depois da manutenção.`)) return;
   }
   const btn = document.getElementById(MANUT_TAREFAS[tarefa].botao);
   btn.disabled = true;
