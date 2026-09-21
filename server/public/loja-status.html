@@ -1667,7 +1667,7 @@ function atualizarConteudoDetalhe(codigo, c){
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
   if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
   if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
-  if(c.anydeskId) infoBits.push(`🖥️ AnyDesk: <b>${escapeHtml(c.anydeskId)}</b> <button type="button" class="btn-copiar-ip" title="Copiar ID do AnyDesk" onclick="copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">📋</button>`);
+  if(c.anydeskId) infoBits.push(`🖥️ AnyDesk: <b>${escapeHtml(c.anydeskId)}</b> <button type="button" class="btn-copiar-ip" title="Copiar ID do AnyDesk" onclick="copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">📋</button>${c.anydeskIdFonte === 'maquina' ? ' <span class="sub">· lido do AnyDesk desta máquina</span>' : ' <span class="sub">· referência cadastrada; aguardando leitura local</span>'}`);
   // quem ligou e pra que hora - a mesma informação que evita o chamado de
   // "o computador reiniciou sozinho de madrugada"
   const planoDet = planoReinicioDe(c);

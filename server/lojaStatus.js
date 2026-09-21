@@ -973,6 +973,17 @@ async function heartbeat(codigo, posto, info, token) {
   // degradacao - dado de fora nunca decide sozinho a cor do card.
   const anydeskOk = sanitizarEstadoAnydesk(dados.anydeskServico);
   if (anydeskOk) patch.anydeskServico = anydeskOk;
+  // O vigia interno inclui o ID que acabou de ler do executável AnyDesk na
+  // própria batida. Aceitamos a mesma regra da telemetria: máquina moderna
+  // precisa provar o token; legado sem token continua compatível até atualizar.
+  const anydeskIdHeartbeat = sanitizarAnydeskId(dados.anydeskId);
+  const leituraAnydeskAutenticada = !(atual && atual.agentToken) || tokensBatem(token, atual.agentToken);
+  if (anydeskIdHeartbeat && leituraAnydeskAutenticada
+    && (anydeskIdHeartbeat !== (atual && atual.anydeskId) || (atual && atual.anydeskIdFonte) !== 'maquina')) {
+    patch.anydeskId = anydeskIdHeartbeat;
+    patch.anydeskIdEm = Date.now();
+    patch.anydeskIdFonte = 'maquina';
+  }
   if (linkNovo) {
     patch.link = linkNovo;
     patch.linkEm = Date.now();
@@ -1779,16 +1790,24 @@ async function moverComputador(codigoAtual, posto, codigoNovo) {
   return semSegredo(registro);
 }
 
-// Master configura o ID do AnyDesk daquele computador pra acesso remoto
-// rapido - funciona mesmo se o computador nunca mandou heartbeat ainda, por
-// isso o merge:true (nao exige ja existir)
+// O valor digitado pelo Master fica apenas como referência de cadastro. Quando
+// a própria máquina já confirmou seu ID, uma edição manual jamais a substitui:
+// o botão de acesso deve apontar para o número que o AnyDesk local devolveu.
 async function definirAnydeskId(codigo, posto, anydeskId) {
   const id = docIdFor(codigo, posto);
   const limpo = sanitizarAnydeskId(anydeskId);
-  const patchAnydesk = { codigo, posto, anydeskId: limpo || null };
+  const snap = await COLLECTION.doc(id).get();
+  const atual = snap.exists ? snap.data() : null;
+  const patchAnydesk = { codigo, posto, anydeskIdManual: limpo || null, anydeskIdManualEm: Date.now() };
+  // Mantém compatibilidade para máquinas que ainda nunca falaram com o agente.
+  // Assim que o vigia fizer a leitura local, registrarTelemetria prevalece.
+  if (!atual || atual.anydeskIdFonte !== 'maquina') {
+    patchAnydesk.anydeskId = limpo || null;
+    patchAnydesk.anydeskIdFonte = limpo ? 'cadastro' : null;
+  }
   await COLLECTION.doc(id).set(patchAnydesk, { merge: true });
   espelharEscrita(id, patchAnydesk);
-  return { codigo, posto, anydeskId: limpo || null };
+  return { codigo, posto, anydeskId: (atual && atual.anydeskIdFonte === 'maquina') ? atual.anydeskId : (limpo || null), fonte: (atual && atual.anydeskIdFonte === 'maquina') ? 'maquina' : 'cadastro' };
 }
 
 // AnyDesk exibe um identificador público numérico. Aceitar somente esse
@@ -1927,9 +1946,10 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   const anydeskTelemetria = sanitizarEstadoAnydesk(dados && dados.anydeskServico);
   if (anydeskTelemetria && JSON.stringify(anydeskTelemetria) !== JSON.stringify(atual.anydeskServico || null)) patch.anydeskServico = anydeskTelemetria;
   const anydeskIdTelemetria = sanitizarAnydeskId(dados && dados.anydeskId);
-  if (anydeskIdTelemetria && anydeskIdTelemetria !== atual.anydeskId) {
+  if (anydeskIdTelemetria && (anydeskIdTelemetria !== atual.anydeskId || atual.anydeskIdFonte !== 'maquina')) {
     patch.anydeskId = anydeskIdTelemetria;
     patch.anydeskIdEm = agora;
+    patch.anydeskIdFonte = 'maquina';
   }
   const linkTelemetria = sanitizarLink(dados && dados.link);
   if (linkTelemetria) {

@@ -17,13 +17,15 @@
 // Sem o bump, os agentes ja instalados nunca baixariam essa regra.
 // 80: coleta o ID publico do AnyDesk pela propria instalacao e o envia na
 // telemetria; nao coleta senha, token ou configuracao de acesso remoto.
+// 102: descobre tambem instalacoes personalizadas pelo processo/serviço e faz
+// o heartbeat interno prevalecer sobre qualquer ID digitado no cadastro.
 // 81: aplica o perfil declarativo da Área de Trabalho, sempre salvando os
 // atalhos removidos antes da limpeza e recebendo alterações automaticamente.
 // 82: preserva também atalhos específicos inventariados na máquina (ex.: Linx).
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 101;
+const VERSAO_VIGIA = 102;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -702,11 +704,20 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# dado enviado ao NOC e o mesmo numero que aparece na tela do AnyDesk.',
     'function Medir-AnyDeskId {',
     '  try {',
-    '    $exe = @(\"${env:ProgramFiles(x86)}\\AnyDesk\\AnyDesk.exe\", \"$env:ProgramFiles\\AnyDesk\\AnyDesk.exe\", \"$env:ProgramData\\AnyDesk\\AnyDesk.exe\") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1',
-    '    if (-not $exe) {',
-    '      $u = Get-ItemProperty \'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\',\'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like \'AnyDesk*\' -and $_.InstallLocation } | Select-Object -First 1',
-    '      if ($u) { $c = Join-Path $u.InstallLocation \'AnyDesk.exe\'; if (Test-Path $c) { $exe = $c } }',
+    '    # Primeiro procura a cópia que está EFETIVAMENTE rodando ou instalada',
+    '    # como serviço. Isso cobre AnyDesk personalizado instalado fora de',
+    '    # Program Files, sem confiar no campo digitado no NOC.',
+    '    $candidatos = New-Object System.Collections.Generic.List[string]',
+    '    @(Get-Process -Name AnyDesk -ErrorAction SilentlyContinue | ForEach-Object { try { $_.Path } catch { $null } }) | ForEach-Object { if ($_) { [void]$candidatos.Add([string]$_) } }',
+    '    @(Get-WmiObject Win32_Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -like \'AnyDesk*\' -or $_.DisplayName -like \'AnyDesk*\' }) | ForEach-Object {',
+    '      $p = [string]$_.PathName',
+    '      if ($p -match \'^\\s*"([^\"]+AnyDesk\\.exe)"\') { [void]$candidatos.Add($matches[1]) }',
+    '      elseif ($p -match \'(?i)([A-Z]:\\[^\"]*?AnyDesk\\.exe)\') { [void]$candidatos.Add($matches[1]) }',
     '    }',
+    '    @("${env:ProgramFiles(x86)}\\AnyDesk\\AnyDesk.exe", "$env:ProgramFiles\\AnyDesk\\AnyDesk.exe", "$env:ProgramData\\AnyDesk\\AnyDesk.exe", "$env:LOCALAPPDATA\\AnyDesk\\AnyDesk.exe", "$env:APPDATA\\AnyDesk\\AnyDesk.exe") | ForEach-Object { if ($_) { [void]$candidatos.Add($_) } }',
+    '    $u = Get-ItemProperty \'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\',\'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like \'AnyDesk*\' }',
+    '    foreach ($i in @($u)) { if ($i.InstallLocation) { [void]$candidatos.Add((Join-Path $i.InstallLocation \'AnyDesk.exe\')) }; if ($i.DisplayIcon) { $icone = ([string]$i.DisplayIcon -replace \'^"|",?\\d+$\', \'\'); if ($icone) { [void]$candidatos.Add($icone) } } }',
+    '    $exe = @($candidatos | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique -First 1)[0]',
     '    if (-not $exe) { return $null }',
     '    $id = (((& $exe --get-id 2>&1) | Out-String).Trim() -replace \'\\D\', \'\')',
     '    if ($id -match \'^\\d{6,16}$\') { return $id }',
@@ -2673,6 +2684,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      if ($BootEm -ne $null) { $corpo.bootEm = $BootEm; $corpo.desligamentoInesperado = $DesligamentoInesperado }',
     '      if ($Link -ne $null) { $corpo.link = $Link }',
     '      if ($AnyDeskSvc -ne $null) { $corpo.anydeskServico = $AnyDeskSvc }',
+    '      if ($AnyDeskId) { $corpo.anydeskId = $AnyDeskId }',
     '      if ($Tailscale -ne $null) { $corpo.tailscale = $Tailscale }',
     '      $corpo = $corpo | ConvertTo-Json -Depth 4',
     '      $cronometro = [Diagnostics.Stopwatch]::StartNew()',
@@ -2790,6 +2802,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # do que o Windows ja sabe, e viajam na batida seguinte',
     '    if ($contador -eq 1 -or $contador % $TicksParaLink -eq 0) {',
     '      try { $AnyDeskSvc = Medir-AnyDesk } catch { $AnyDeskSvc = $null }',
+    '      try { $AnyDeskId = Medir-AnyDeskId } catch { $AnyDeskId = $null }',
     '      try { $Link = Medir-Link } catch { Escrever-Log "Falha ao medir o link: $($_.Exception.Message)" }',
     '    }',
     '    # saude do HD + varredura da rede local (ver nocMaquina.js). Vao numa',

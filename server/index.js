@@ -1636,6 +1636,10 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
       // e o redeDiagnostico.sanitizarAmostra, chamado la dentro.
       rede: req.body.rede,
+      // O agente interno mede o ID pelo próprio AnyDesk e o manda junto da
+      // batida autenticada. O backend só aceita esse dado como leitura local
+      // quando o token bate (a validação fica em lojaStatus.heartbeat).
+      anydeskId: req.body.anydeskId,
       tailscale: req.body.tailscale,
       // A instancia _Boot do NOCZenith roda como SYSTEM e usa estes dois
       // marcadores para receber SOMENTE comandos que exigem elevacao. Eles
