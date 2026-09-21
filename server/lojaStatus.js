@@ -1424,8 +1424,14 @@ async function definirPerfilEstacao(codigo, posto, entrada) {
   const politica = sanitizarPolitica(atual.politica);
   politica.estacao = sanitizarEstacao(entrada);
   const politicaVersao = Number(atual.politicaVersao || 0) + 1;
-  await gravarEEspelhar(codigo, posto, { politica, politicaVersao });
-  return { ...politica.estacao, politicaVersao };
+  // Salvar a regra e deixar a lista da tela antiga era enganoso: o Master
+  // acabava de escolher os atalhos, mas ainda precisava descobrir e apertar
+  // outro botão para ver o que realmente existe no perfil da loja. A mudança
+  // de política passa a pedir a leitura não destrutiva automaticamente. O
+  // agente só a responde quando houver uma sessão de operador acessível.
+  const inventarioAtalhosPendenteEm = politica.estacao.ativa ? Date.now() : null;
+  await gravarEEspelhar(codigo, posto, { politica, politicaVersao, inventarioAtalhosPendenteEm });
+  return { ...politica.estacao, politicaVersao, inventarioAtalhosPendenteEm };
 }
 
 // programas instalados: o agente manda a lista, o servidor guarda e diz o que

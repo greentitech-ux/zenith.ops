@@ -3910,6 +3910,10 @@ function renderPoliticaComputador(codigo, c){
   const barraTarefasAprovada = Array.isArray(estacao.barraTarefasAprovada) ? estacao.barraTarefasAprovada : [];
   const atalhosDetectados = Array.isArray(c.atalhosDesktop) ? c.atalhosDesktop : [];
   const barraTarefasDetectada = Array.isArray(c.atalhosBarraTarefas) ? c.atalhosBarraTarefas : [];
+  const inventarioPendente = Number(c.inventarioAtalhosPendenteEm || 0) > 0;
+  const estadoInventario = inventarioPendente
+    ? '<small style="color:var(--warn);">⏳ Leitura aguardando o NOCZenith no usuário logado.</small>'
+    : (c.atalhosDesktopEm ? `<small style="color:var(--muted);">lido ${escapeHtml(tempoRelativo(c.atalhosDesktopEm))}</small>` : '');
   const chaveVisual = (nome)=>String(nome||'').toLocaleLowerCase('pt-BR').replace(/\.(lnk|url|rdp)$/i,'').trim();
   const atalhosDetectadosHtml = atalhosDetectados.length
     ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:210px;overflow:auto;padding:2px 1px;">${atalhosDetectados.map(a=>{
@@ -3939,7 +3943,7 @@ function renderPoliticaComputador(codigo, c){
         <b>Aplicativo autorizado</b><b style="text-align:center;">Área</b><b style="text-align:center;">Barra</b>
         ${ATALHOS_PADRAO_PDV.map(([id,nome])=>`<span>${nome}</span><label style="text-align:center;cursor:pointer;"><input type="checkbox" data-estacao-atalho="${id}" ${atalhosAprovados.includes(id)?'checked':''} aria-label="${nome} na Área de Trabalho" style="width:auto;accent-color:var(--accent);"></label><label style="text-align:center;cursor:pointer;"><input type="checkbox" data-estacao-barra="${id}" ${barraTarefasAprovada.includes(id)?'checked':''} aria-label="${nome} na Barra de tarefas" style="width:auto;accent-color:var(--accent);"></label>`).join('')}
       </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;"><b style="font-size:12px;">Itens atuais</b><button type="button" class="btn-mini" onclick="inventariarAtalhosComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">↻ Ler Área de Trabalho e barra</button>${c.atalhosDesktopEm?`<small style="color:var(--muted);">lido ${escapeHtml(tempoRelativo(c.atalhosDesktopEm))}</small>`:''}</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;"><b style="font-size:12px;">Itens atuais</b><button type="button" class="btn-mini" onclick="inventariarAtalhosComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">↻ Ler Área de Trabalho e barra</button>${estadoInventario}</div>
       <details open><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Área de Trabalho (${atalhosDetectados.length})</summary>
       ${atalhosDetectadosHtml}
       </details>
@@ -4029,7 +4033,7 @@ async function salvarPerfilEstacao(codigo, posto){
       method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, ocultarLixeira, backupAntesDeLimpar:true, atalhosAprovados, atalhosPersonalizados, barraTarefasAprovada, gerenciarBarraTarefas, password:senha }) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui salvar.');
-    msg.textContent = aplicar ? 'Lista salva. O NOC faz backup dos atalhos que saírem e aplica a mudança automaticamente na próxima consulta.' : 'Lista salva como rascunho; nenhuma alteração será feita até marcar “Aplicar lista aprovada”.';
+    msg.textContent = aplicar ? 'Lista salva. O NOC solicitou agora a leitura dos atalhos, faz backup do que sair e aplica a mudança automaticamente na próxima consulta.' : 'Lista salva como rascunho e a leitura dos atalhos foi solicitada; nenhuma alteração será feita até marcar “Aplicar lista aprovada”.';
     msg.className='msg'; msg.classList.remove('hidden');
     await carregar();
   }catch(e){ msg.textContent=e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
@@ -4057,7 +4061,7 @@ async function inventariarAtalhosComputador(codigo, posto){
         return;
       }
     }
-    msg.textContent = 'A leitura continua pendente. Confirme que o NOCZenith v84 está ativo no usuário logado e tente novamente.';
+    msg.textContent = 'A leitura continua pendente. Confirme que o NOCZenith está ativo no usuário logado e tente novamente.';
     msg.className='msg err'; msg.classList.remove('hidden');
   }catch(e){ msg.textContent=e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
