@@ -29,12 +29,6 @@ const qaAprovacoes = require('./qaAprovacoes');
 const roteamentoTags = require('./roteamentoTags');
 const tarefas = require('./tarefas');
 
-// senha padrao que o Beniboy define quando a pessoa NAO lembra a senha atual
-// (2a vez que o mesmo acesso trava depois de ja ter sido desbloqueado por
-// ele) - literalmente os digitos de 1 a 8, pedido explicito do usuario;
-// obriga trocar por uma propria no primeiro login (ver users.resetPassword)
-const SENHA_PADRAO_BOT = '12345678';
-
 // O MODELO DO BENIBOY, e por que ele é uma env var.
 //
 // Ele roda em Opus 5, não em Haiku - vale conferir antes de decidir soltar a
@@ -185,7 +179,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - bloquear_no_agregador: põe na fila do Cowork Agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel e confirma nessa conversa sozinho; você continua nela (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que já está sendo feito. Só chame com loja, app e - pra pausar item - o item em mãos.
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
-- desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
+- desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você vai usar a última senha criada?" antes de chamar de novo com lembraSenha=true/false. Com true, só destrave; com false, registre que precisa criar senha nova e acione o Master. NUNCA peça, invente, revele, envie ou repasse senha em chat, telefone ou WhatsApp. O Master recebe o alerta e libera o fluxo seguro de criação de nova senha.${temFerramentaPedido ? `
 - consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}${(logado && logado.isMaster) ? `
 - executar_acao_agente: executa uma ação do catálogo NOC-NoPulso (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
@@ -283,7 +277,7 @@ const TOOLS_BASE = [
       type: 'object',
       properties: {
         username: { type: 'string', description: 'Nome de usuário (login curto) de quem está bloqueado.' },
-        lembraSenha: { type: 'boolean', description: 'Só preencha quando a ferramenta avisar que esse acesso já foi desbloqueado antes e travou de novo: true se a pessoa lembra a senha atual, false se não lembra.' },
+        lembraSenha: { type: 'boolean', description: 'Só preencha quando a ferramenta avisar que esse acesso já foi desbloqueado antes e travou de novo: true se a pessoa vai usar a última senha criada, false se ela só lembra de senha antiga ou não sabe a última.' },
       },
       required: ['username'],
     },
@@ -709,19 +703,42 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
 
       if (!alvo.desbloqueadoPeloBotEm) {
         await users.desbloquear(alvo.id, { viaBot: true });
+        const motivo = `Desbloqueio automático do login @${alvo.username || alvo.email}; senha preservada. Acompanhar se a pessoa volta a entrar.`;
+        await suporteChat.registrarNotaInterna(chat.id, {
+          resumo: `Diagnóstico Beniboy · ${motivo}`,
+          situacao: 'EM_ANDAMENTO',
+          pendencia: 'Apenas acompanhamento: nenhuma senha foi revelada ou alterada.',
+        }).catch(() => {});
+        resultado.alertaMaster = { tipo: 'desbloqueio', usuario: alvo.username || alvo.email, motivo };
         return `Pronto! O acesso de "${alvo.username || alvo.email}" foi desbloqueado - a pessoa já pode entrar de novo com a MESMA senha de sempre, sem trocar nada.`;
       }
       // esse mesmo acesso ja tinha sido desbloqueado por mim antes e travou de
       // novo - pode ser que a senha esteja mesmo errada
       if (input.lembraSenha == null) {
-        return 'Esse acesso já foi desbloqueado uma vez e travou de novo. Pergunte pra pessoa: "Você lembra da sua senha atual?" e chame essa mesma ferramenta de novo com lembraSenha=true (se lembrar) ou lembraSenha=false (se não lembrar - aí eu defino uma senha padrão pra ela cadastrar uma própria).';
+        return 'Esse acesso já foi desbloqueado uma vez e travou de novo. Pergunte: "Você vai usar a última senha criada?" Se sim, chame novamente com lembraSenha=true. Se ela só lembrar de uma senha antiga ou não souber a última, chame com lembraSenha=false para solicitar a criação segura de uma nova senha.';
       }
       if (input.lembraSenha) {
         await users.desbloquear(alvo.id, { viaBot: true });
+        const motivo = `Desbloqueio automático do login @${alvo.username || alvo.email}; pessoa confirmou que usará a última senha criada.`;
+        await suporteChat.registrarNotaInterna(chat.id, {
+          resumo: `Diagnóstico Beniboy · ${motivo}`,
+          situacao: 'EM_ANDAMENTO',
+          pendencia: 'Apenas acompanhamento: senha preservada e nunca exposta.',
+        }).catch(() => {});
+        resultado.alertaMaster = { tipo: 'desbloqueio', usuario: alvo.username || alvo.email, motivo };
         return `Desbloqueado de novo, mesma senha de sempre. Se travar outra vez, é bem provável que a senha esteja errada mesmo - vale perguntar de novo se lembra.`;
       }
-      await users.resetPassword(alvo.id, SENHA_PADRAO_BOT);
-      return `Prontinho! Defini a senha padrão "${SENHA_PADRAO_BOT}" pra esse acesso - a pessoa entra com ela e é OBRIGADA a cadastrar uma senha própria na hora. Avise a pessoa.`;
+      const motivo = `Login @${alvo.username || alvo.email} foi bloqueado novamente; a pessoa não tem a última senha criada (informou senha antiga ou não lembra). Solicita ao Master liberar a criação de nova senha, sem transmitir senha por chat, telefone ou WhatsApp.`;
+      await suporteChat.registrarNotaInterna(chat.id, {
+        resumo: `Diagnóstico Beniboy · ${motivo}`,
+        situacao: 'PENDENTE',
+        pendencia: 'Master deve validar e liberar a criação segura de nova senha; não definir nem transmitir senha temporária.',
+      }).catch(() => {});
+      await suporteChat.desativarBot(chat.id);
+      resultado.chamouAtendente = true;
+      resultado.motivoAtendente = motivo;
+      resultado.alertaMaster = { tipo: 'nova-senha', usuario: alvo.username || alvo.email, motivo };
+      return `A última senha não está disponível, então não vou criar nem enviar uma senha por aqui. O Master foi avisado para liberar a criação segura de uma nova senha.`;
     }
 
     // nao achou no login principal do NoPulso - tenta o login de operador do
@@ -737,14 +754,26 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
 
     if (!operador.desbloqueadoPeloBotEm) {
       await abastecimentoCarrinho.desbloquearOperador(operador.id, { viaBot: true });
+      const motivo = `Desbloqueio automático do operador ${operador.usuario}; senha preservada. Acompanhar se volta a entrar.`;
+      await suporteChat.registrarNotaInterna(chat.id, {
+        resumo: `Diagnóstico Beniboy · ${motivo}`,
+        situacao: 'EM_ANDAMENTO',
+        pendencia: 'Apenas acompanhamento: nenhuma senha foi revelada ou alterada.',
+      }).catch(() => {});
+      resultado.alertaMaster = { tipo: 'desbloqueio', usuario: operador.usuario, motivo };
       return `Pronto! O login de operador "${operador.usuario}" (Abastecimento do Carrinho) foi desbloqueado - a pessoa já pode entrar de novo com a MESMA senha de sempre. Se travar outra vez, é só me chamar de novo.`;
     }
-    // esse operador ja tinha travado uma vez depois de eu ja ter desbloqueado
-    // mantendo a senha - reseta direto pra uma nova (login de balcao, sem
-    // fluxo de troca propria: a pessoa so digita a que eu passar)
-    const novaSenhaOperador = String(Math.floor(1000 + Math.random() * 9000));
-    await abastecimentoCarrinho.desbloquearOperador(operador.id, { novaSenha: novaSenhaOperador });
-    return `Esse login de operador já tinha travado antes. Resetei a senha - a nova senha de "${operador.usuario}" é "${novaSenhaOperador}" (4 números). Informe essa senha pra pessoa digitar no login do Abastecimento do Carrinho.`;
+    const motivo = `Operador ${operador.usuario} bloqueou novamente após desbloqueio automático. Solicita ao Master validar e liberar a criação segura de nova senha; nenhuma senha foi transmitida.`;
+    await suporteChat.registrarNotaInterna(chat.id, {
+      resumo: `Diagnóstico Beniboy · ${motivo}`,
+      situacao: 'PENDENTE',
+      pendencia: 'Master deve validar a nova senha do operador sem enviá-la por chat, telefone ou WhatsApp.',
+    }).catch(() => {});
+    await suporteChat.desativarBot(chat.id);
+    resultado.chamouAtendente = true;
+    resultado.motivoAtendente = motivo;
+    resultado.alertaMaster = { tipo: 'nova-senha-operador', usuario: operador.usuario, motivo };
+    return 'Esse operador já bloqueou novamente. Não vou criar nem informar senha por aqui: o Master foi avisado para liberar a criação segura de uma nova senha.';
   }
   if (nome === 'gerar_link_estorno_cliente') {
     if (!resolverUnidadePublica || !linkEstornoCliente) return 'Sem acesso a essa ferramenta agora - chame um atendente.';
@@ -952,7 +981,7 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
     if (msgs.filter((m) => m.bot).length >= MAX_RESPOSTAS_BOT) return escalarPorLimite(chat);
 
-    const resultado = { tickets: [], tarefas: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', encerrar: null, agregador: null };
+    const resultado = { tickets: [], tarefas: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', alertaMaster: null, encerrar: null, agregador: null };
     // Conversas abertas antes desta versão não tinham podeCriarTarefa no
     // retrato da sessão. Atualiza só esse sinal para que não seja necessário
     // o colaborador abandonar um atendimento em andamento para criar a tarefa.

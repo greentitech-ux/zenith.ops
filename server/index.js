@@ -14060,6 +14060,19 @@ async function acionarBeniboy(chatId) {
         }).catch(() => {});
       }
     }
+    // Um desbloqueio automático não precisa tirar o Beniboy da conversa, mas
+    // precisa deixar o Master ciente. O caso que já escalou para humano recebe
+    // logo abaixo o alerta crítico próprio, evitando dois avisos para o mesmo
+    // pedido de nova senha/horário.
+    if (r.alertaMaster && !r.chamouAtendente) {
+      const a = r.alertaMaster;
+      push.notifySolicitacao(
+        a.tipo === 'desbloqueio' ? '🔓 Beniboy desbloqueou um acesso' : '🔐 Beniboy identificou acesso',
+        `${a.usuario || r.chat?.nome || 'Usuário'} · ${a.motivo || ''}`.slice(0, 150),
+        `beniboy-acesso-${chatId}`,
+        `/beniboy.html?chat=${encodeURIComponent(chatId)}`,
+      ).catch((e) => console.error('[suporteBot] falha ao avisar Master sobre acesso:', e.message));
+    }
     if (r.chamouAtendente) {
       push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico.html');
       // se a loja de onde veio essa conversa esta sem conexao, a causa real
