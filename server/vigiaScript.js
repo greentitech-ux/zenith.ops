@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 86;
+const VERSAO_VIGIA = 87;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -2904,7 +2904,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
 // pelo navegador). O X-NOC-Token autentica na rota mesmo em reinstalacao (quando
 // o computador ja tem segredo). Depois roda o arquivo (& $f), que se instala
 // como tarefa agendada apontando pra essa mesma pasta fixa.
-function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }) {
+function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo, ehServidor }) {
   const token = String(agentToken || '').replace(/[^a-f0-9]/gi, '');
   // encodeURIComponent NAO escapa o apostrofo ('), e a URL entra dentro de uma
   // string PowerShell de ASPAS SIMPLES ('...') abaixo - entao um codigo com
@@ -2950,7 +2950,27 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
   // existem la) e o comando chegava com -OutFile/-Path/& vazios (erro real da
   // loja). Assim cola e roda igual no PowerShell, no CMD ou no Executar.
   const b64 = Buffer.from(script, 'utf16le').toString('base64');
-  return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}`;
+  const comandoDireto = `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}`;
+
+  // Estacoes e PDVs precisam sempre da tarefa _Boot como SYSTEM: ela e' quem
+  // mantem o monitoramento e os comandos administrativos depois de reiniciar.
+  // Antes o botao apenas COPIAVA o instalador; se a pessoa abrisse o
+  // PowerShell normal (o mais comum), o instalador seguia sem elevacao e
+  // criava so a tarefa de login. Este invólucro abre a janela UAC do Windows e
+  // so entao executa o instalador real elevado. Nao tenta contornar UAC: se a
+  // confirmacao for cancelada, nao instala nem altera a maquina.
+  //
+  // Servidores e VMs marcados como servidor ficam exatamente como eram. Eles
+  // nao recebem uma solicitacao UAC nova nem uma janela extra na operacao.
+  if (ehServidor) return comandoDireto;
+
+  const elevador = [
+    "$ErrorActionPreference='Stop'",
+    `try { $p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}' -PassThru -Wait -ErrorAction Stop; exit [int]$p.ExitCode }`,
+    "catch { [Console]::Error.WriteLine('Instalacao NOCZenith nao foi autorizada no UAC. Nenhuma alteracao foi feita.'); exit 1 }",
+  ].join(';');
+  const b64Elevador = Buffer.from(elevador, 'utf16le').toString('base64');
+  return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64Elevador}`;
 }
 
 module.exports = { montarScriptVigia, montarComandoInstalacao, adaptarParaWindowsAntigo, VERSAO_VIGIA };

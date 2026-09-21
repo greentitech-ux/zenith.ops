@@ -13883,9 +13883,22 @@ setTimeout(async () => {
     const tipos = ['interno', 'atendimento', 'abastecimento'];
     const padrao = tipos.map((tipo) => vg.montarScriptVigia({ codigo: '19855', posto: 'BOS', tipo, agentToken: 'abc' }));
     const antigo = tipos.map((tipo) => vg.montarScriptVigia({ codigo: '19855', posto: 'BOS', tipo, agentToken: 'abc', windowsAntigo: true }));
-    const decod = (cmd) => Buffer.from(cmd.split(' ').pop(), 'base64').toString('utf16le');
+    // Estacoes agora usam um bootstrap que pede UAC e guarda o instalador real
+    // em um segundo EncodedCommand. Para testar o instalador, desembrulhamos
+    // essa camada; servidor/VM marcado continua com uma camada so.
+    const decod = (cmd) => {
+      let texto = Buffer.from(cmd.split(' ').pop(), 'base64').toString('utf16le');
+      const interno = texto.match(/EncodedCommand ([A-Za-z0-9+/=]+)/);
+      if (/Start-Process.+-Verb RunAs/.test(texto) && interno) {
+        texto = Buffer.from(interno[1], 'base64').toString('utf16le');
+      }
+      return texto;
+    };
+    const decodUmaCamada = (cmd) => Buffer.from(cmd.split(' ').pop(), 'base64').toString('utf16le');
     const cmdPadrao = decod(vg.montarComandoInstalacao({ codigo: '19855', posto: 'BOS', tipo: 'interno', agentToken: 'abc' }));
     const cmdAntigo = decod(vg.montarComandoInstalacao({ codigo: '19855', posto: 'BOS', tipo: 'interno', agentToken: 'abc', windowsAntigo: true }));
+    const cmdElevado = decodUmaCamada(vg.montarComandoInstalacao({ codigo: '19855', posto: 'PDV01', tipo: 'atendimento', agentToken: 'abc' }));
+    const cmdServidorSemUac = decodUmaCamada(vg.montarComandoInstalacao({ codigo: '19855', posto: 'BOS', tipo: 'interno', agentToken: 'abc', ehServidor: true }));
     const TLS = /\[Net\.ServicePointManager\]::SecurityProtocol\s*=\s*\[Net\.ServicePointManager\]::SecurityProtocol -bor 3072/;
     const tlsAntesDoRest = (src) => TLS.test(src) && src.search(TLS) < src.indexOf('Invoke-RestMethod');
 
@@ -13933,6 +13946,10 @@ setTimeout(async () => {
       'e a guarda vem antes até do TLS da versão antiga (no PS2 nada mais importa)':
         cmdAntigo.indexOf('$PSVersionTable.PSVersion.Major -lt 3') < cmdAntigo.indexOf('SecurityProtocol'),
       'a marca na ficha vale pro comando de instalação': marcou.status === 200 && tlsAntesDoRest(cmdRotaDecod),
+      'estação/PDV pede a elevação UAC do Windows antes de instalar, sem tentar burlar a confirmação':
+        /Start-Process.+-Verb RunAs/.test(cmdElevado) && /Instalacao NOCZenith nao foi autorizada/.test(cmdElevado),
+      'servidor/VM marcado continua com o instalador discreto, sem pedido UAC novo':
+        !/-Verb RunAs/.test(cmdServidorSemUac) && /Invoke-RestMethod/.test(cmdServidorSemUac),
       'e pra autoatualização (o agente baixa com o token dele e recebe a versão certa)':
         psAuto.status === 200 && tlsAntesDoRest(psAuto.corpo) && /function Agora-Ms/.test(psAuto.corpo),
       // pedido do Master (15/09): o carimbo do papel de parede tem que trazer o
@@ -13971,9 +13988,9 @@ setTimeout(async () => {
     const htmlB = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
     const conf = {
       'a rota do comando devolve se a máquina é Windows antigo':
-        /res\.json\(\{ comando: vigiaScript\.montarComandoInstalacao\([^)]*\), windowsAntigo \}\);/.test(idxB),
+        /montarComandoInstalacao\([^)]*ehServidor[^)]*\)[\s\S]{0,500}windowsAntigo/.test(idxB),
       'a tela lê esse campo da resposta (não de um flag repetido nela)':
-        /const \{ comando, windowsAntigo \} = await resp\.json\(\);/.test(htmlB),
+        /const \{ comando, windowsAntigo, elevacaoAutomatica \} = await resp\.json\(\);/.test(htmlB),
       // O SINTOMA: apertar Ctrl+V no BOS nao faz nada
       'em Windows antigo a instrução manda colar com o botão direito, e diz por quê':
         /BOTÃO DIREITO do mouse/.test(htmlB) && /não tem Ctrl\+V no PowerShell/.test(htmlB),

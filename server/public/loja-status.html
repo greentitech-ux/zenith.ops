@@ -3549,7 +3549,7 @@ async function copiarComandoVigia(codigo, posto, tipo, prefixo){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
     if(!resp.ok) throw new Error('Erro ao gerar o comando.');
-    const { comando, windowsAntigo } = await resp.json();
+    const { comando, windowsAntigo, elevacaoAutomatica } = await resp.json();
     // COMO COLAR MUDA POR MAQUINA. O console do Server 2012 R2 / Windows 8.1
     // (o BOS do Pulse) NAO tem Ctrl+V - isso so chegou no Windows 10. Quem
     // segue "cole com Ctrl+V" ali aperta e nao acontece NADA: sem erro, sem
@@ -3563,11 +3563,16 @@ async function copiarComandoVigia(codigo, posto, tipo, prefixo){
     // o passo-a-passo e o mesmo com ou sem area de transferencia - o que muda
     // e so de onde a pessoa copia. Antes o caminho do fallback perdia a
     // instrucao inteira e sobrava um comando solto sem explicacao
+    const elevacao = elevacaoAutomatica
+      ? '\n\n3) O Windows vai abrir a confirmação de Administrador (UAC). Clique em Sim e informe uma conta administradora, se ele pedir. '
+        + 'Essa confirmação cria a tarefa SYSTEM do NOCZenith; sem ela nenhuma alteração é feita.\n\n'
+        + 'Pronto - ele baixa, instala numa pasta fixa e já começa a rodar, inclusive após reiniciar sem depender de login.'
+      : '\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. '
+        + 'Não precisa clicar em nada nem baixar arquivo, e nada fica "solto" pra apagar depois.\n\n'
+        + 'Computador tipo servidor/VM: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão '
+        + 'bloqueada/desconectada (nunca "Sair").';
     const passos = 'No computador da loja:\n1) Abra o PowerShell (menu Iniciar > digite PowerShell)\n'
-      + comoColar + '\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. '
-      + 'Não precisa clicar em nada nem baixar arquivo, e nada fica "solto" pra apagar depois.\n\n'
-      + 'Computador tipo servidor/escritório: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão '
-      + 'bloqueada/desconectada (nunca "Sair").';
+      + comoColar + elevacao;
     let copiou = false;
     try { await navigator.clipboard.writeText(comando); copiou = true; } catch(e){ /* clipboard bloqueado (http/permissão) - mostra pra copiar na mão */ }
     if(copiou){
