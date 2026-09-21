@@ -1111,6 +1111,8 @@ async function heartbeat(codigo, posto, info, token) {
     noPulsoPrint: !!(atual && atual.noPulsoPrint),
     capturarAgora,
     versaoAplicacao: versaoAplicacao(atual && atual.politicaVersao, arteDaMaquina),
+    nomeWindowsDesejado: String(atual && atual.nome || posto || '').trim(),
+    ehServidor: !!(atual && atual.ehServidor),
     // Pedido one-shot também viaja no heartbeat. A versão da política é o
     // gatilho normal, mas um marcador local antigo ou uma corrida entre as
     // instâncias de login/SYSTEM não pode deixar a leitura presa para sempre.
@@ -1558,6 +1560,8 @@ async function configuracaoAgente(codigo, posto, token) {
     politica,
     politicaVersao: Number(atual.politicaVersao || 0),
     versaoAplicacao: versaoAplicacao(atual.politicaVersao, arte),
+    nomeWindowsDesejado: String(atual.nome || posto || '').trim(),
+    ehServidor: !!atual.ehServidor,
   };
 }
 

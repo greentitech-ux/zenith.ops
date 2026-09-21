@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 91;
+const VERSAO_VIGIA = 92;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -397,6 +397,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // nome da maquina e o posto (ATM01, Makeline, Dispatch...).
     '$NomeLojaArte = "' + unidadeNomePS + '"',
     '$NomeMaquinaArte = "' + maquinaNomePS + '"',
+    '$CaminhoNomeWindowsPendente = Join-Path (Split-Path -Parent $PSCommandPath) "nome-windows-pendente.txt"',
     // O serviço roda como SYSTEM e não consegue alterar o papel de parede da
     // sessão interativa. Não pode, portanto, compartilhar o mesmo marcador:
     // ele marcaria a política antes de o usuário aplicar a arte.
@@ -2022,6 +2023,35 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  }',
     '}',
     '',
+    '# O nome cadastrado no NOC é a fonte oficial das estações físicas. A troca',
+    '# é preparada pelo SYSTEM e passa a valer no próximo reinício programado;',
+    '# nunca reiniciamos a operação só para trocar o hostname.',
+    'function Eh-MaquinaVirtualLocal {',
+    '  try {',
+    '    $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop',
+    '    $assinatura = (([string]$cs.Manufacturer) + " " + ([string]$cs.Model)).ToLowerInvariant()',
+    '    return $assinatura -match "virtual|vmware|virtualbox|kvm|qemu|xen|parallels"',
+    '  } catch { return $false }',
+    '}',
+    '',
+    'function Sincronizar-NomeWindows($nomeDesejado, $servidorCadastro) {',
+    '  if (-not $Servico -or [bool]$servidorCadastro) { return }',
+    '  $desejado = ([string]$nomeDesejado).Trim().ToUpperInvariant()',
+    '  if (-not $desejado) { return }',
+    '  if ($desejado.Length -gt 15 -or $desejado -notmatch "^[A-Z0-9](?:[A-Z0-9-]{0,13}[A-Z0-9])?$" -or $desejado -match "^\\d+$") {',
+    '    Escrever-Log "Nome do Windows não alterado: nome do NOC inválido para hostname ($desejado). Use 1-15 letras, números ou hífen."; return',
+    '  }',
+    '  if ($env:COMPUTERNAME -ieq $desejado) { try { Remove-Item -LiteralPath $CaminhoNomeWindowsPendente -Force -ErrorAction SilentlyContinue } catch {}; return }',
+    '  if (Eh-MaquinaVirtualLocal) { Escrever-Log "Nome do Windows mantido: máquina virtual não é renomeada automaticamente."; return }',
+    '  $pendente = try { (Get-Content -LiteralPath $CaminhoNomeWindowsPendente -First 1 -ErrorAction Stop).Trim() } catch { "" }',
+    '  if ($pendente -ieq $desejado) { return }',
+    '  try {',
+    '    Rename-Computer -NewName $desejado -Force -ErrorAction Stop',
+    '    Set-Content -LiteralPath $CaminhoNomeWindowsPendente -Value $desejado -Force',
+    '    Escrever-Log "Nome do Windows preparado: $env:COMPUTERNAME -> $desejado. Passa a valer no próximo reinício."',
+    '  } catch { Escrever-Log "Falha ao preparar nome do Windows $desejado: $($_.Exception.Message)" }',
+    '}',
+    '',
     '# ---- sondagem de comando-admin pela instancia SYSTEM ---------------',
     '# Instalar/desinstalar exige Administrador. A instancia de LOGIN roda como',
     '# usuario comum, entao o servidor NAO entrega comando-admin pra ela (ver',
@@ -2038,6 +2068,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  try {',
     '    $corpo = @{ unidade = "' + codigoTextoPS + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (SYSTEM admin-poll)"; souAdmin = $true; soComandoAdmin = $true } | ConvertTo-Json',
     '    $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpo -TimeoutSec 10',
+    '    if ($resp) { try { Sincronizar-NomeWindows $resp.nomeWindowsDesejado ([bool]$resp.ehServidor) } catch { Escrever-Log "Nome do Windows não sincronizou: $($_.Exception.Message)" } }',
     '    if ($resp -and $resp.comandoPendente) { Executar-ComandoPendente $resp.comandoPendente }',
     '  } catch { Escrever-Log "Sondagem de comando-admin falhou: $($_.Exception.Message)" }',
     '}',
@@ -2062,6 +2093,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     'function Sincronizar-Politica {',
     '  try {',
     '    $cfg = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10',
+    '    try { Sincronizar-NomeWindows $cfg.nomeWindowsDesejado ([bool]$cfg.ehServidor) } catch { Escrever-Log "Nome do Windows não sincronizou: $($_.Exception.Message)" }',
     '    $pol = $cfg.politica',
     '    if (-not $pol) { return }',
     '    # versaoAplicacao (e nao politicaVersao) porque ela sobe TAMBEM quando',
@@ -2483,6 +2515,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    if (-not (Test-Path $marcaApp)) { try { Instalar-AppNoPulso; Set-Content -Path $marcaApp -Value (Get-Date).ToString() } catch { Escrever-Log "Instalar-AppNoPulso falhou: $($_.Exception.Message)" } }',
     '  }',
     '  Escrever-Log "NOCZenith iniciado (interno$(if ($Servico) { ", instancia de boot" })) - versao $VersaoScript - ' + codigoTextoPS + '/' + posto + '"',
+    '  if ($Servico) { try { Sincronizar-NomeWindows $NomeMaquinaArte $EhServidor } catch { Escrever-Log "Nome do Windows não sincronizou: $($_.Exception.Message)" } }',
     '  Reportar-IpLocal',
     '  Garantir-GatilhoDeRepeticao',
     '  Garantir-AcaoSemJanela',
@@ -2584,6 +2617,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      }',
     '    }',
     '    if ($resp) {',
+    '      try { Sincronizar-NomeWindows $resp.nomeWindowsDesejado ([bool]$resp.ehServidor) } catch { Escrever-Log "Nome do Windows não sincronizou: $($_.Exception.Message)" }',
     '      # O computador interno já recebe heartbeat pelo próprio agente; usa a',
     '      # resposta para aplicar a opção do print imediatamente, sem reinstalar.',
     '      if (-not $Servico -and $null -ne $resp.noPulsoPrint) {',
