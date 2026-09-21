@@ -12692,7 +12692,8 @@ setTimeout(async () => {
       'o NOC é a fonte do hostname das estações, sem renomear servidor ou VM':
         /nomeWindowsDesejado: String\(atual && atual\.nome \|\| posto/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
         && /function Sincronizar-NomeWindows[\s\S]*?if \(-not \$Servico -or \[bool\]\$servidorCadastro\) \{ return \}[\s\S]*?Eh-MaquinaVirtualLocal[\s\S]*?Rename-Computer -NewName \$desejado/.test(psPp)
-        && /Sincronizar-NomeWindows \$resp\.nomeWindowsDesejado/.test(psPp),
+        && /Sincronizar-NomeWindows \$resp\.nomeWindowsDesejado/.test(psPp)
+        && /Falha ao preparar nome do Windows \$\(\$desejado\):/.test(psPp),
       'máquina com a chave desligada não faz o heartbeat resolver arte (custo)':
         (await ls.heartbeat('PPDOM', 'PC2', { userAgent: 'NOCZenith/1.0' }, 'tokdesl')).versaoAplicacao === '3.0',
       'a máquina baixa a arte DELA, com o token dela': imgMaquina.status === 200,

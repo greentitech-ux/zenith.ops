@@ -23,7 +23,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 92;
+const VERSAO_VIGIA = 93;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -2049,7 +2049,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    Rename-Computer -NewName $desejado -Force -ErrorAction Stop',
     '    Set-Content -LiteralPath $CaminhoNomeWindowsPendente -Value $desejado -Force',
     '    Escrever-Log "Nome do Windows preparado: $env:COMPUTERNAME -> $desejado. Passa a valer no próximo reinício."',
-    '  } catch { Escrever-Log "Falha ao preparar nome do Windows $desejado: $($_.Exception.Message)" }',
+    '  } catch { Escrever-Log "Falha ao preparar nome do Windows $($desejado): $($_.Exception.Message)" }',
     '}',
     '',
     '# ---- sondagem de comando-admin pela instancia SYSTEM ---------------',
