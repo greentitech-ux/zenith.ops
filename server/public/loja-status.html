@@ -1607,6 +1607,7 @@ function equipTileHtml(codigo, c){
     <div class="equip-tile-unidade" title="${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
     ${c.ipLocal ? `<div class="equip-tile-ip" title="Copiar IP local" onclick="event.stopPropagation();copiarIpLocal('${escapeJs(c.ipLocal)}')">🏠 ${escapeHtml(c.ipLocal)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
+    ${c.anydeskId ? `<div class="equip-tile-ip" title="Copiar ID do AnyDesk" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">🖥️ ${escapeHtml(c.anydeskId)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
     ${metricasTileHtml(c)}
   </div>`;
 }
@@ -1636,6 +1637,7 @@ function atualizarConteudoDetalhe(codigo, c){
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
   if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
   if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
+  if(c.anydeskId) infoBits.push(`🖥️ AnyDesk: <b>${escapeHtml(c.anydeskId)}</b> <button type="button" class="btn-copiar-ip" title="Copiar ID do AnyDesk" onclick="copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">📋</button>`);
   // quem ligou e pra que hora - a mesma informação que evita o chamado de
   // "o computador reiniciou sozinho de madrugada"
   const planoDet = planoReinicioDe(c);

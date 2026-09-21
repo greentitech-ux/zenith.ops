@@ -15,7 +15,9 @@
 // do deploy).
 // 79: servidor nao recebe nem mantem o PWA/atalho automatico do NoPulso.
 // Sem o bump, os agentes ja instalados nunca baixariam essa regra.
-const VERSAO_VIGIA = 79;
+// 80: coleta o ID publico do AnyDesk pela propria instalacao e o envia na
+// telemetria; nao coleta senha, token ou configuracao de acesso remoto.
+const VERSAO_VIGIA = 80;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -688,6 +690,22 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  } catch { return $null }',
     '}',
     '',
+    '# ID publico do AnyDesk. Nao le configuracao, senha ou token: o unico',
+    '# dado enviado ao NOC e o mesmo numero que aparece na tela do AnyDesk.',
+    'function Medir-AnyDeskId {',
+    '  try {',
+    '    $exe = @(\"${env:ProgramFiles(x86)}\\AnyDesk\\AnyDesk.exe\", \"$env:ProgramFiles\\AnyDesk\\AnyDesk.exe\", \"$env:ProgramData\\AnyDesk\\AnyDesk.exe\") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1',
+    '    if (-not $exe) {',
+    '      $u = Get-ItemProperty \'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\',\'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like \'AnyDesk*\' -and $_.InstallLocation } | Select-Object -First 1',
+    '      if ($u) { $c = Join-Path $u.InstallLocation \'AnyDesk.exe\'; if (Test-Path $c) { $exe = $c } }',
+    '    }',
+    '    if (-not $exe) { return $null }',
+    '    $id = (((& $exe --get-id 2>&1) | Out-String).Trim() -replace \'\\D\', \'\')',
+    '    if ($id -match \'^\\d{6,16}$\') { return $id }',
+    '  } catch { Escrever-Log \"Falha ao ler ID do AnyDesk: $($_.Exception.Message)\" }',
+    '  return $null',
+    '}',
+    '',
     '# ---- saude do HD ----------------------------------------------------',
     '# Le o que o Windows ja sabe do disco (SMART + espaco livre). Nao roda',
     '# teste de superficie nem nada que segure a maquina: e leitura de',
@@ -1011,6 +1029,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # em maquina de atendimento quem bate o heartbeat e o navegador, entao',
     '    # a telemetria e o unico canal pra contar o estado do AnyDesk',
     '    try { $a = Medir-AnyDesk; if ($a -ne $null) { $corpo.anydeskServico = $a } } catch {}',
+    '    try { $adId = Medir-AnyDeskId; if ($adId) { $corpo.anydeskId = $adId } } catch {}',
     '    if ($corpo.Count -eq 0) { return }',
     '    # -Depth 5: sem isso o ConvertTo-Json (padrao 2) transforma a lista de',
     '    # discos/volumes em texto e o servidor recebe lixo',

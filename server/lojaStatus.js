@@ -1695,11 +1695,19 @@ async function moverComputador(codigoAtual, posto, codigoNovo) {
 // isso o merge:true (nao exige ja existir)
 async function definirAnydeskId(codigo, posto, anydeskId) {
   const id = docIdFor(codigo, posto);
-  const limpo = String(anydeskId || '').trim().slice(0, 40);
+  const limpo = sanitizarAnydeskId(anydeskId);
   const patchAnydesk = { codigo, posto, anydeskId: limpo || null };
   await COLLECTION.doc(id).set(patchAnydesk, { merge: true });
   espelharEscrita(id, patchAnydesk);
   return { codigo, posto, anydeskId: limpo || null };
+}
+
+// AnyDesk exibe um identificador público numérico. Aceitar somente esse
+// formato impede que uma telemetria/edição acabe gravando texto arbitrário
+// como link de acesso remoto. Senha nunca passa por este campo.
+function sanitizarAnydeskId(valor) {
+  const limpo = String(valor || '').replace(/\D/g, '').slice(0, 16);
+  return /^\d{6,16}$/.test(limpo) ? limpo : null;
 }
 
 // o script de vigia (roda nativo no Windows, fora do navegador - ver
@@ -1829,6 +1837,11 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   // telemetria e o unico canal que o agente tem pra contar isso
   const anydeskTelemetria = sanitizarEstadoAnydesk(dados && dados.anydeskServico);
   if (anydeskTelemetria && JSON.stringify(anydeskTelemetria) !== JSON.stringify(atual.anydeskServico || null)) patch.anydeskServico = anydeskTelemetria;
+  const anydeskIdTelemetria = sanitizarAnydeskId(dados && dados.anydeskId);
+  if (anydeskIdTelemetria && anydeskIdTelemetria !== atual.anydeskId) {
+    patch.anydeskId = anydeskIdTelemetria;
+    patch.anydeskIdEm = agora;
+  }
   const linkTelemetria = sanitizarLink(dados && dados.link);
   if (linkTelemetria) {
     if (!mesmoLink(atual.link, linkTelemetria)) {
