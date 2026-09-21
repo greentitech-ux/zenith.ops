@@ -20,7 +20,8 @@
 // 81: aplica o perfil declarativo da Área de Trabalho, sempre salvando os
 // atalhos removidos antes da limpeza e recebendo alterações automaticamente.
 // 82: preserva também atalhos específicos inventariados na máquina (ex.: Linx).
-const VERSAO_VIGIA = 82;
+// 83: controla também a exibição da Lixeira pela política da estação.
+const VERSAO_VIGIA = 83;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1868,6 +1869,23 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  return $false',
     '}',
     '',
+    '# A Lixeira é um ícone especial do Explorer, não um atalho .lnk. A chave',
+    '# abaixo só a oculta da Área de Trabalho deste usuário; não esvazia a',
+    '# Lixeira nem apaga arquivo algum. Desmarcar no NOC volta a mostrá-la.',
+    'function Aplicar-VisibilidadeLixeira($ocultar) {',
+    '  if ($Servico) { return $true }',
+    '  try {',
+    '    $guid = "{645FF040-5081-101B-9F08-00AA002F954E}"',
+    '    foreach ($chave in @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\NewStartPanel", "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\ClassicStartMenu")) {',
+    '      if (-not (Test-Path $chave)) { New-Item -Path $chave -Force -ErrorAction Stop | Out-Null }',
+    '      New-ItemProperty -Path $chave -Name $guid -Value $(if ($ocultar) { 1 } else { 0 }) -PropertyType DWord -Force -ErrorAction Stop | Out-Null',
+    '    }',
+    '    try { Start-Process -FilePath "ie4uinit.exe" -ArgumentList "-show" -WindowStyle Hidden -ErrorAction SilentlyContinue } catch {}',
+    '    Escrever-Log "Perfil da estação: Lixeira $(if ($ocultar) { "oculta" } else { "visível" })."',
+    '    return $true',
+    '  } catch { Escrever-Log "Perfil da estação: não consegui atualizar a Lixeira ($($_.Exception.Message))."; return $false }',
+    '}',
+    '',
     'function Aplicar-PerfilEstacao($estacao) {',
     '  # A instância SYSTEM não enxerga a Área de Trabalho do operador. Ela',
     '  # marca a política como atendida no próprio contexto; o login aplica a',
@@ -1982,6 +2000,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
     '    $okEstacao = Aplicar-PerfilEstacao $pol.estacao',
+    '    $okLixeira = Aplicar-VisibilidadeLixeira ([bool]$pol.estacao.ocultarLixeira)',
     '    # so marca como aplicada quando TUDO que aquela instancia podia fazer',
     '    # deu certo - senao a de boot (que tem admin) nunca mais tentaria',
     '    if ($Servico -and -not ($okUsb -and $okInst)) { Escrever-Log "Politica: sem Administrador, HKLM nao aplicado - tentando de novo depois."; return }',
@@ -1989,7 +2008,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // SYSTEM nao tem area de trabalho). Se a gravacao falhou, NAO pode marcar
     // como aplicada: a versao ficaria carimbada e a maquina nunca mais tentaria
     // - a loja ficaria pra sempre sem o papel de parede, calada.
-    '    if (-not $Servico -and -not ($okPapel -and $okEstacao)) { Escrever-Log "Politica: papel de parede ou perfil da estação não aplicou; tentando de novo na próxima consulta."; return }',
+    '    if (-not $Servico -and -not ($okPapel -and $okEstacao -and $okLixeira)) { Escrever-Log "Politica: papel de parede, perfil da estação ou Lixeira não aplicou; tentando de novo na próxima consulta."; return }',
     '    Set-Content -Path (Caminho-PoliticaAplicada) -Value $versao -Force',
     '    Escrever-Log "Politica versao $versao aplicada."',
     '  } catch { Escrever-Log "Falha ao sincronizar a politica: $($_.Exception.Message)" }',

@@ -1336,6 +1336,7 @@ function sanitizarEstacao(entrada) {
     aplicar,
     backupAntesDeLimpar: aplicar && e.backupAntesDeLimpar !== false,
     atualizarAutomaticamente: ativo,
+    ocultarLixeira: ativo && e.ocultarLixeira === true,
     protegerAnydesk: ativo && e.protegerAnydesk !== false,
     rdpDominosObrigatorio: ativo && e.rdpDominosObrigatorio === true,
     atalhosAprovados,
