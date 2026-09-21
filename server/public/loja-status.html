@@ -1157,6 +1157,7 @@
     <div class="prog-abas">
       <button type="button" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
       <button type="button" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
+      <button type="button" class="prog-aba" id="prog-aba-estacao" onclick="trocarAbaProgramas('estacao')">Área de Trabalho</button>
     </div>
     <div id="prog-acoes-master" class="hidden" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2,rgba(255,255,255,.03));">
       <div style="font-weight:700;font-size:13px;margin-bottom:7px;">Gerenciar por catálogo</div>
@@ -2131,11 +2132,25 @@ function trocarAbaProgramas(aba){
   PROG_ABA = aba;
   document.getElementById('prog-aba-mudancas').classList.toggle('ativa', aba==='mudancas');
   document.getElementById('prog-aba-atuais').classList.toggle('ativa', aba==='atuais');
+  document.getElementById('prog-aba-estacao').classList.toggle('ativa', aba==='estacao');
+  document.getElementById('prog-acoes-master').classList.toggle('hidden', aba==='estacao' || !IS_MASTER || PROG_ATUAL?.tipo !== 'interno');
   pintarProgramas();
 }
 function pintarProgramas(){
   const corpo = document.getElementById('prog-corpo');
   if(!PROG_ATUAL){ corpo.innerHTML=''; return; }
+  if(PROG_ABA==='estacao'){
+    // Reusa a mesma política e os mesmos botões da ficha do NOC: não há uma
+    // segunda configuração concorrente. A aba só coloca o contexto "o que há
+    // instalado" e "o que fica visível" no mesmo lugar.
+    const ficha = document.getElementById('detalhe-comp-politica');
+    const antes = ficha ? ficha.innerHTML : '';
+    if(ficha) renderPoliticaComputador(PROG_ATUAL.codigo, PROG_ATUAL);
+    const configuracao = ficha ? ficha.innerHTML.replace('id="msg-estacao"','id="prog-msg-estacao"') : '<div class="prog-vazio">A configuração desta máquina não está disponível.</div>';
+    if(ficha) ficha.innerHTML = antes;
+    corpo.innerHTML = `<div id="prog-estacao">${configuracao}</div>`;
+    return;
+  }
   const busca = (document.getElementById('prog-busca').value||'').trim().toLowerCase();
   const casa = (t)=> !busca || String(t).toLowerCase().includes(busca);
   const quando = PROG_ATUAL.programasEm ? `Última varredura ${tempoRelativo(PROG_ATUAL.programasEm)}.` : 'A máquina ainda não mandou a lista.';
@@ -3976,13 +3991,14 @@ async function salvarPoliticaComputador(codigo, posto){
 }
 
 async function salvarPerfilEstacao(codigo, posto){
-  const msg = document.getElementById('msg-estacao');
-  const ativa = !!document.querySelector('#detalhe-comp-politica [data-estacao="ativa"]')?.checked;
-  const aplicar = ativa && !!document.querySelector('#detalhe-comp-politica [data-estacao="aplicar"]')?.checked;
-  const ocultarLixeira = ativa && !!document.querySelector('#detalhe-comp-politica [data-estacao="ocultarLixeira"]')?.checked;
-  const atalhosAprovados = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-atalho]:checked')].map(el=>el.dataset.estacaoAtalho);
-  const atalhosPersonalizados = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-atalho-custom]:checked')].map(el=>el.dataset.estacaoAtalhoCustom);
-  const barraTarefasAprovada = [...document.querySelectorAll('#detalhe-comp-politica [data-estacao-barra]:checked')].map(el=>el.dataset.estacaoBarra);
+  const raiz = document.getElementById('prog-estacao') || document.getElementById('detalhe-comp-politica');
+  const msg = raiz?.querySelector('#prog-msg-estacao, #msg-estacao');
+  const ativa = !!raiz?.querySelector('[data-estacao="ativa"]')?.checked;
+  const aplicar = ativa && !!raiz?.querySelector('[data-estacao="aplicar"]')?.checked;
+  const ocultarLixeira = ativa && !!raiz?.querySelector('[data-estacao="ocultarLixeira"]')?.checked;
+  const atalhosAprovados = [...(raiz?.querySelectorAll('[data-estacao-atalho]:checked')||[])].map(el=>el.dataset.estacaoAtalho);
+  const atalhosPersonalizados = [...(raiz?.querySelectorAll('[data-estacao-atalho-custom]:checked')||[])].map(el=>el.dataset.estacaoAtalhoCustom);
+  const barraTarefasAprovada = [...(raiz?.querySelectorAll('[data-estacao-barra]:checked')||[])].map(el=>el.dataset.estacaoBarra);
   const gerenciarBarraTarefas = aplicar && barraTarefasAprovada.length > 0;
   if(aplicar && !confirm(`Aplicar esta lista nesta máquina? Os atalhos fora dela serão primeiro copiados para C:\\NoPulsoBackup\\Atalhos e só depois removidos.`)) return;
   const senha = await pedirSenhaMaster('salvar a Área de Trabalho padronizada');
@@ -3999,7 +4015,8 @@ async function salvarPerfilEstacao(codigo, posto){
 }
 
 async function inventariarAtalhosComputador(codigo, posto){
-  const msg = document.getElementById('msg-estacao');
+  const raiz = document.getElementById('prog-estacao') || document.getElementById('detalhe-comp-politica');
+  const msg = raiz?.querySelector('#prog-msg-estacao, #msg-estacao');
   const solicitadoEm = Date.now();
   const senha = await pedirSenhaMaster('ler os atalhos atuais desta máquina');
   if(senha===null) return;
@@ -4013,7 +4030,11 @@ async function inventariarAtalhosComputador(codigo, posto){
     for(let tentativa=0; tentativa<8; tentativa++){
       await new Promise(resolve=>setTimeout(resolve, 4000));
       const detalhe = await buscarDetalheComp(codigo, posto);
-      if(detalhe && Number(detalhe.atalhosDesktopEm||0) >= solicitadoEm){ atualizarDetalheSeAberto(); return; }
+      if(detalhe && Number(detalhe.atalhosDesktopEm||0) >= solicitadoEm){
+        atualizarDetalheSeAberto();
+        if(PROG_ATUAL && PROG_ABA==='estacao'){ PROG_ATUAL={...PROG_ATUAL,...detalhe}; pintarProgramas(); }
+        return;
+      }
     }
     msg.textContent = 'A leitura continua pendente. Confirme que o NOCZenith v84 está ativo no usuário logado e tente novamente.';
     msg.className='msg err'; msg.classList.remove('hidden');
