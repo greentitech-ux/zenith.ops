@@ -4195,19 +4195,34 @@ async function inventariarAtalhosComputador(codigo, posto){
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:senha}) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui solicitar a leitura.');
-    msg.textContent = 'Leitura solicitada ao usuário logado. A lista será atualizada aqui assim que o NOCZenith responder.';
+    // O agente só vê o pedido no PRÓXIMO batimento (login 20s, boot 25s) e ainda
+    // precisa varrer as pastas e responder. 32s de espera davam vermelho em
+    // máquina lenta com a leitura chegando logo depois - e o texto mandava
+    // "tentar de novo" sem dizer o que faltou. Agora espera ~76s e, se não vier,
+    // diz QUAL das duas coisas aconteceu com o dado que a ficha já tem: o agente
+    // bateu depois do pedido (vivo, mas ninguém pôde ler) ou não bateu (calado).
+    msg.textContent = 'Leitura solicitada. O NOCZenith vê o pedido no próximo batimento (até 25s) e responde em seguida.';
     msg.className='msg'; msg.classList.remove('hidden');
-    for(let tentativa=0; tentativa<8; tentativa++){
+    let ultimo = null;
+    for(let tentativa=0; tentativa<19; tentativa++){
       await new Promise(resolve=>setTimeout(resolve, 4000));
       const detalhe = await buscarDetalheComp(codigo, posto);
+      if(detalhe) ultimo = detalhe;
       if(detalhe && Number(detalhe.atalhosDesktopEm||0) >= solicitadoEm){
         atualizarDetalheSeAberto();
         if(PROG_ATUAL && PROG_ABA==='estacao'){ PROG_ATUAL={...PROG_ATUAL,...detalhe}; pintarProgramas(); }
         return;
       }
     }
-    msg.textContent = 'A leitura continua pendente. Confirme que o NOCZenith está ativo no usuário logado e tente novamente.';
-    msg.className='msg err'; msg.classList.remove('hidden');
+    const bateuDepois = !!(ultimo && Number(ultimo.ultimoHeartbeatEm||0) >= solicitadoEm);
+    if(!bateuDepois){
+      msg.textContent = `O NOCZenith não deu sinal desde o pedido (último sinal ${ultimo ? tempoRelativo(ultimo.ultimoHeartbeatEm) : 'desconhecido'}). A máquina está calada ou o agente parou - a leitura só chega quando ele voltar.`;
+      msg.className='msg err';
+    } else {
+      msg.textContent = 'O agente está batendo, mas não respondeu a leitura. Ela precisa de alguém logado no console da máquina (a instância de boot só lê com operador presente) ou de agente a partir da v101 - confira a versão na ficha. A lista atualiza sozinha quando a leitura vier.';
+      msg.className='msg';
+    }
+    msg.classList.remove('hidden');
   }catch(e){ msg.textContent=e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 
