@@ -387,6 +387,36 @@ async function atualizarExecucao(id, execucaoStatus, { porNome } = {}) {
   return getOne(id);
 }
 
+// Uma tarefa vinculada é a execução prática desta solicitação. Quando quem
+// recebeu a tarefa a encerra, os dois quadros precisam contar a mesma história:
+// aprovado (decisão) e finalizado (execução). Adiantamento continua fora:
+// exige prestação de contas própria.
+async function aprovarEFinalizarPorTarefa(id, { tarefaId, porId, porEmail, porNome, observacao } = {}) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  const atual = snap.data();
+  if (atual.tipo === 'adiantamento') throw new Error('Adiantamento só finaliza após a prestação de contas (nota e valor gasto).');
+  if (['REJEITADO', 'CONVERTIDO'].includes(atual.status)) throw new Error('Essa solicitação já foi encerrada e não pode ser finalizada pela tarefa.');
+  const agora = new Date().toISOString();
+  const autor = String(porNome || porEmail || 'Responsável pela tarefa').slice(0, 120);
+  const patch = {
+    status: 'APROVADO', execucaoStatus: 'FINALIZADO', execucaoPorNome: autor,
+    execucaoPorId: porId || null, execucaoFinalizadaEm: agora,
+    finalizadaPorTarefaId: String(tarefaId || '').slice(0, 120) || null,
+    finalizadaPorTarefaEm: agora,
+    finalizadaPorTarefaObservacao: String(observacao || '').trim().slice(0, 1000) || null,
+  };
+  if (atual.status === 'PENDENTE') {
+    patch.motivoDecisao = atual.motivoDecisao || 'Aprovada automaticamente ao concluir a tarefa vinculada.';
+    patch.decididoPorEmail = porEmail || autor;
+    patch.decididoEm = agora;
+  }
+  await ref.update(patch);
+  solicitacoesCache.invalidar();
+  return getOne(id);
+}
+
 // true se o ticket ainda tem alguma acao pendente (decidir OU avancar a
 // execucao) - mesmo espirito de refunds.podeAgirComLink
 function podeAgirComLink(registro) {
@@ -733,7 +763,7 @@ async function converterParaEstorno(id, dadosEstorno, porEmail) {
 module.exports = {
   TIPOS, MOTIVOS_ACESSO, STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, vincularChamado, update, remove,
   marcarNotificacaoVista, marcarComprada, desmarcarComprada, redirecionar, mudarTipo, converterParaEstorno,
-  atualizarExecucao, atualizarPrioridade, gerarTokenAcao, validarToken, decidirPorToken,
+  atualizarExecucao, aprovarEFinalizarPorTarefa, atualizarPrioridade, gerarTokenAcao, validarToken, decidirPorToken,
   buscarEstadoPorToken, podeDecidirComToken, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
   buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink, marcarCompradaComLink,
   atualizarAcessoChecklist, marcarAcessoConcluido, registrarPrestacaoContas, desfazerPrestacaoContas,

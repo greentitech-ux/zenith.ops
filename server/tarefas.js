@@ -170,6 +170,34 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
   const nasceEm = /^\d{4}-\d{2}-\d{2}T/.test(String(ticket.criadoEm || '')) ? String(ticket.criadoEm) : agora;
   const alteradas = [];
 
+  // Se o ticket nasceu ao converter uma tarefa manual, aquela tarefa É a
+  // execução original. Atualizá-la aqui evita duas cópias do mesmo trabalho e
+  // garante que Central e Meu Dia cheguem ao mesmo estado.
+  const origemId = tipo === 'solicitacao' ? String(ticket.origemTarefa?.id || '').trim() : '';
+  if (origemId) {
+    const origemRef = COLLECTION.doc(origemId);
+    const origemSnap = await origemRef.get();
+    if (origemSnap.exists) {
+      const atual = origemSnap.data();
+      const concluida = statusDoTicket(ticket) === 'CONCLUIDA';
+      const reaberta = !concluida && atual.status === 'CONCLUIDA';
+      const patch = {
+        solicitacaoId: ticket.id, numeroTicket: ticket.numeroTicket || atual.numeroTicket || null,
+        status: statusDoTicket(ticket), atualizadoEm: agora,
+        ...(concluida && !atual.concluidaEm ? {
+          concluidaEm: ticket.execucaoFinalizadaEm || agora,
+          concluidaPorId: ticket.execucaoPorId || null,
+          concluidaPorNome: ticket.execucaoPorNome || 'Responsável pela tarefa',
+          observacaoConclusao: ticket.finalizadaPorTarefaObservacao || atual.observacaoConclusao || '',
+        } : {}),
+        ...(reaberta ? { concluidaEm: null, concluidaPorId: null, concluidaPorNome: null, observacaoConclusao: null, reabertaEm: agora, reabertaPorNome: 'Central de Solicitações' } : {}),
+      };
+      await origemRef.update(patch);
+      alteradas.push({ ...atual, ...patch });
+    }
+    return alteradas;
+  }
+
   // Quem deixou de ser responsável não carrega um ticket antigo na fila.
   const masterIds = new Set(usuarios.filter((u) => u.role === 'master').map((u) => u.id));
   for (const doc of existentes.docs) {
@@ -196,9 +224,17 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       // lista e ordenada por ele, e corrigir data nao e "movimento" da tarefa
       const corrigeData = nasceEm !== atual.criadaEm || nasceEm.slice(0, 10) !== atual.dataInicio
         ? { criadaEm: nasceEm, dataInicio: nasceEm.slice(0, 10) } : null;
+      const concluida = statusDoTicket(ticket) === 'CONCLUIDA';
+      const reaberta = !concluida && atual.status === 'CONCLUIDA';
       await ref.update({ titulo: ticket.titulo || atual.titulo || ('Ticket #' + (ticket.numeroTicket || '')), numeroTicket: ticket.numeroTicket || atual.numeroTicket || null, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
         ...(corrigeData || {}),
-        ...(statusDoTicket(ticket) === 'CONCLUIDA' && !atual.concluidaEm ? { concluidaEm: agora, concluidaPorNome: ticket.execucaoPorNome || 'Suporte' } : {}) });
+        ...(concluida && !atual.concluidaEm ? {
+          concluidaEm: ticket.execucaoFinalizadaEm || agora,
+          concluidaPorId: ticket.execucaoPorId || null,
+          concluidaPorNome: ticket.execucaoPorNome || 'Suporte',
+          observacaoConclusao: ticket.finalizadaPorTarefaObservacao || atual.observacaoConclusao || '',
+        } : {}),
+        ...(reaberta ? { concluidaEm: null, concluidaPorId: null, concluidaPorNome: null, observacaoConclusao: null, reabertaEm: agora, reabertaPorNome: 'Central de Solicitações' } : {}) });
       if (corrigeData) alteradas.push({ ...atual, ...corrigeData });
       continue;
     }

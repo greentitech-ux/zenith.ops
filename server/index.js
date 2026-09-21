@@ -1242,6 +1242,7 @@ app.post('/api/central/:tipo/:id/decidir-publico', upload.single('comprovante'),
     const atualizado = await modulo.decidirComLink(req.params.id, payload.link, {
       acao: payload.acao, motivoDecisao: payload.motivoDecisao, comprovante, autorNome: payload.autorNome,
     });
+    if (req.params.tipo !== 'estorno') await sincronizarTarefasDoTicket(atualizado);
     broadcast(req.params.tipo === 'estorno' ? 'refund-request-changed' : 'solicitacao-decidida', atualizado, req.params.tipo === 'estorno' ? 'monitor' : 'solicitacoes');
     res.json({ ok: true, status: atualizado.status });
   } catch (err) {
@@ -1284,6 +1285,7 @@ app.post('/api/central/:tipo/:id/execucao-publico', async (req, res) => {
   try {
     const modulo = moduloTicket(req.params.tipo);
     const atualizado = await modulo.atualizarExecucaoComLink(req.params.id, req.body.link, req.body.execucaoStatus, { autorNome: req.body.autorNome });
+    if (req.params.tipo !== 'estorno') await sincronizarTarefasDoTicket(atualizado);
     broadcast(req.params.tipo === 'estorno' ? 'refund-request-changed' : 'solicitacao-decidida', atualizado, req.params.tipo === 'estorno' ? 'monitor' : 'solicitacoes');
     res.json({ ok: true, execucaoStatus: atualizado.execucaoStatus });
   } catch (err) {
@@ -10477,6 +10479,28 @@ function ticketPodeConcluirTarefa(ticket) {
   return ticket?.tipo === 'suporte-ti' || ticket?.status === 'APROVADO';
 }
 
+// Há dois jeitos válidos de uma tarefa apontar para a Central: ela pode ter
+// nascido do ticket (`vinculo`) ou ter sido convertida em solicitação depois
+// de já existir (`solicitacaoId`). Para o usuário são o mesmo trabalho.
+function solicitacaoIdDaTarefa(tarefa) {
+  if (tarefa?.vinculo?.tipo === 'solicitacao' && tarefa.vinculo.id) return String(tarefa.vinculo.id);
+  if (tarefa?.solicitacaoId) return String(tarefa.solicitacaoId);
+  const gerada = (tarefa?.gerou || []).find((item) => item?.tipo === 'solicitacao' && item.id);
+  return gerada ? String(gerada.id) : null;
+}
+
+async function finalizarSolicitacaoPelaTarefa(tarefa, req, observacao) {
+  const solicitacaoId = solicitacaoIdDaTarefa(tarefa);
+  if (!solicitacaoId) return null;
+  const registro = await solicitacoes.aprovarEFinalizarPorTarefa(solicitacaoId, {
+    tarefaId: tarefa.id, porId: req.user.id, porEmail: req.user.email,
+    porNome: req.user.username || req.user.nome || req.user.email, observacao,
+  });
+  await sincronizarTarefasDoTicket(registro, 'solicitacao');
+  broadcast('solicitacao-decidida', registro, 'solicitacoes');
+  return registro;
+}
+
 // QUEM PODE RECEBER uma tarefa de quem está criando. Uma função só, usada pra
 // montar a lista da tela E pra validar o que voltou dela - se fossem duas
 // regras, a tela ofereceria gente que o servidor recusa.
@@ -10975,18 +10999,18 @@ app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
         const tarefa = await tarefas.getOne(id);
         if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acesso)) throw new Error('Sem acesso a esta tarefa.');
         if (status === 'CONCLUIDA') {
-          if (tarefa.vinculo?.tipo === 'solicitacao') {
-            const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
-            if (!ticket || !ticketPodeConcluirTarefa(ticket) || ticket.tipo === 'adiantamento') throw new Error('O ticket vinculado ainda não pode ser finalizado.');
-            if (ticket.execucaoStatus !== 'FINALIZADO') await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
-            await sincronizarTarefasDoTicket(await solicitacoes.getOne(ticket.id), 'solicitacao');
+          if (!tarefas.podeMoverStatusTarefa(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não concluir.');
+          if (solicitacaoIdDaTarefa(tarefa)) {
+            await finalizarSolicitacaoPelaTarefa(tarefa, req, 'Conclusão em lote.');
           } else if (tarefa.vinculo?.tipo === 'estorno') {
             const ticket = await refunds.getOne(tarefa.vinculo.id);
             if (!ticket || ticket.status !== 'APROVADO') throw new Error('O estorno vinculado ainda não pode ser finalizado.');
             if (ticket.execucaoStatus !== 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
             await sincronizarTarefasDoTicket(await refunds.getOne(ticket.id), 'estorno');
           }
-          await tarefas.concluir(id, { ...acesso, observacao: 'Conclusão em lote.' });
+          // A sincronização acima já concluiu a tarefa vinculada. Só tarefas
+          // sem solicitação precisam da conclusão local aqui.
+          if (!solicitacaoIdDaTarefa(tarefa) && tarefa.vinculo?.tipo !== 'estorno') await tarefas.concluir(id, { ...acesso, observacao: 'Conclusão em lote.' });
         } else await tarefas.atualizarStatus(id, acesso, status);
         resultado.push({ id, ok: true });
       } catch (err) { resultado.push({ id, ok: false, erro: err.message }); }
@@ -11004,8 +11028,9 @@ app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
     if (!tarefas.podeParticiparTarefa(anterior, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
     // Reabrir uma tarefa ligada a ticket também reabre sua execução; assim a
     // Central e o Meu Dia não ficam mostrando estados contraditórios.
-    if (anterior.status === 'CONCLUIDA' && req.body?.status !== 'CONCLUIDA' && anterior.vinculo?.tipo === 'solicitacao') {
-      const ticket = await solicitacoes.getOne(anterior.vinculo.id);
+    const solicitacaoId = solicitacaoIdDaTarefa(anterior);
+    if (anterior.status === 'CONCLUIDA' && req.body?.status !== 'CONCLUIDA' && solicitacaoId) {
+      const ticket = await solicitacoes.getOne(solicitacaoId);
       if (ticket?.execucaoStatus === 'FINALIZADO') await solicitacoes.atualizarExecucao(ticket.id, req.body?.status === 'PENDENTE' ? 'PENDENTE' : 'EM_ANDAMENTO', { porNome: req.user.username || req.user.nome || 'Suporte' });
     } else if (anterior.status === 'CONCLUIDA' && req.body?.status !== 'CONCLUIDA' && anterior.vinculo?.tipo === 'estorno') {
       const ticket = await refunds.getOne(anterior.vinculo.id);
@@ -11134,19 +11159,12 @@ app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
     // não significa que a sessão está inválida.
     if (!String(req.body?.password || '')) return res.status(400).json({ error: 'Confirme sua senha para concluir a tarefa.' });
     if (!await auth.verifyPassword(req.user.id, req.body.password)) return res.status(400).json({ error: 'Senha incorreta.' });
-    // Concluir tarefa NUNCA decide/aprova um ticket. Só encerra a execução
-    // depois de aprovado; adiantamentos mantêm a prestação de contas própria.
-    if (tarefa.vinculo?.tipo === 'solicitacao') {
-      const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
-      if (!ticket) return res.status(404).json({ error: 'O ticket vinculado não foi encontrado.' });
-      if (!ticketPodeConcluirTarefa(ticket)) return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
-      if (ticket.tipo === 'adiantamento') return res.status(409).json({ error: 'Adiantamento só finaliza após a prestação de contas (nota e valor gasto).' });
-      if (ticket.execucaoStatus !== 'FINALIZADO') {
-        await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
-      }
-      const atualizado = await solicitacoes.getOne(ticket.id);
-      await sincronizarTarefasDoTicket(atualizado, 'solicitacao');
-      broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
+    if (!tarefas.podeMoverStatusTarefa(tarefa, acesso)) return res.status(403).json({ error: 'Você acompanha esta tarefa: pode comentar e anexar, mas não concluir.' });
+    if (solicitacaoIdDaTarefa(tarefa)) {
+      await finalizarSolicitacaoPelaTarefa(tarefa, req, req.body?.observacao);
+      const concluidaSincronizada = await tarefas.getOne(req.params.id, acesso);
+      broadcast('tarefas-atualizada', { id: concluidaSincronizada.id, unidade: concluidaSincronizada.unidade }, 'tarefas');
+      return res.json(concluidaSincronizada);
     } else if (tarefa.vinculo?.tipo === 'estorno') {
       const ticket = await refunds.getOne(tarefa.vinculo.id);
       if (!ticket) return res.status(404).json({ error: 'O ticket vinculado não foi encontrado.' });
