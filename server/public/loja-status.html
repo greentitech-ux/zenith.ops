@@ -3897,6 +3897,16 @@ const ATALHOS_PADRAO_PDV = [
   ['advancedip','Advanced IP Scanner'], ['teamviewer','TeamViewer'],
   ['suporte-linx-whatsapp','Suporte Linx WhatsApp'], ['google-chrome','Google Chrome'],
 ];
+// QUAL painel de estação está na tela. Os DOIS existem ao mesmo tempo: a aba
+// 📦 Programas clona o innerHTML da ficha (ver montarProgramas), e fechar a aba
+// não limpa esse clone. Pegar sempre o #prog-estacao fazia o salvar ler o clone
+// ESCONDIDO em vez dos checkboxes que o Master acabou de marcar na ficha - a
+// lista voltava sozinha para o que o clone tinha. Vale o painel visível.
+function raizEstacao(){
+  const candidatos = [document.getElementById('prog-estacao'), document.getElementById('detalhe-comp-politica')];
+  return candidatos.find((el) => el && el.offsetParent !== null) || candidatos.find(Boolean) || null;
+}
+
 function renderPoliticaComputador(codigo, c){
   const el = document.getElementById('detalhe-comp-politica');
   // painel opcional: se um dia ele sair do HTML, a ficha continua abrindo
@@ -4017,7 +4027,7 @@ async function salvarPoliticaComputador(codigo, posto){
 }
 
 async function salvarPerfilEstacao(codigo, posto){
-  const raiz = document.getElementById('prog-estacao') || document.getElementById('detalhe-comp-politica');
+  const raiz = raizEstacao();
   const msg = raiz?.querySelector('#prog-msg-estacao, #msg-estacao');
   const ativa = !!raiz?.querySelector('[data-estacao="ativa"]')?.checked;
   const aplicar = ativa && !!raiz?.querySelector('[data-estacao="aplicar"]')?.checked;
@@ -4042,7 +4052,7 @@ async function salvarPerfilEstacao(codigo, posto){
 }
 
 async function inventariarAtalhosComputador(codigo, posto){
-  const raiz = document.getElementById('prog-estacao') || document.getElementById('detalhe-comp-politica');
+  const raiz = raizEstacao();
   const msg = raiz?.querySelector('#prog-msg-estacao, #msg-estacao');
   const solicitadoEm = Date.now();
   const senha = await pedirSenhaMaster('ler os atalhos atuais desta máquina');
