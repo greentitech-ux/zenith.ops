@@ -12739,6 +12739,50 @@ setTimeout(async () => {
       // a barra: o custo e a loja piscar no meio do expediente
       'o agente inteiro não encerra Explorer em lugar nenhum':
         !/Stop-Process[^\n]*explorer/i.test(psPp) && !/Get-Process -Name explorer/.test(psPp),
+      // ---- a limpeza precisa enxergar PASTA e ARQUIVO -----------------
+      // Relato do Master (22/09): "apos rodar continuou com pastas que nao
+      // escolhi". A tela lista tudo e deixa marcar qualquer item; a limpeza
+      // pedia -File E filtrava .lnk/.url/.rdp, então pasta e planilha NUNCA
+      // saíam por mais que ele as deixasse desmarcadas. A tela prometia o que
+      // o agente não tinha como cumprir.
+      'a limpeza enxerga pasta e arquivo comum, não só atalho': (() => {
+        const fn = corpoPs('Aplicar-PerfilEstacao');
+        if (!fn) return false;
+        return /Get-ChildItem -LiteralPath \$area -Force/.test(fn)
+          && !/Get-ChildItem -LiteralPath \$area -File/.test(fn)
+          && !/Extension\.ToLowerInvariant\(\) -in @\("\.lnk"/.test(fn);
+      })(),
+      // desktop.ini é da PASTA, não do operador: leva junto o ícone e o nome
+      // da Área de Trabalho se for removido
+      'desktop.ini nunca entra na lista de remoção':
+        /\$protegidos = @\("desktop\.ini"\)/.test(corpoPs('Aplicar-PerfilEstacao'))
+        && /if \(\$protegidos -contains \(\[string\]\$item\.Name\)\.ToLowerInvariant\(\)\) \{ continue \}/.test(corpoPs('Aplicar-PerfilEstacao')),
+      // copiar pasta recursivamente pode levar minutos e gigabytes na máquina
+      // da loja; o próprio move já é o backup
+      'pasta sai de MOVE, arquivo de COPY':
+        /if \(\$item\.PSIsContainer\) \{ Move-Item -LiteralPath \$item\.FullName/.test(corpoPs('Aplicar-PerfilEstacao'))
+        && /else \{ Copy-Item -LiteralPath \$item\.FullName/.test(corpoPs('Aplicar-PerfilEstacao')),
+      // antes, UM item que não podia ser copiado cancelava a limpeza inteira
+      // (return $false) e a máquina nunca convergia
+      'item que falhou ao ser guardado não é removido, e não cancela o resto': (() => {
+        const fn = corpoPs('Aplicar-PerfilEstacao');
+        if (!fn) return false;
+        // só o caminho do Copy alimenta $guardados, e a remoção varre $guardados
+        return /\[void\]\$guardados\.Add\(\$item\)/.test(fn)
+          && /foreach \(\$item in \$guardados\) \{ try \{ Remove-Item/.test(fn)
+          && !/limpeza cancelada/.test(fn);
+      })(),
+      // O ERRO QUE ISSO EVITA: com a regra de catálogo valendo pra pasta,
+      // marcar "RDP Dominos" aprovaria a PASTA "Dominos Pizza" da Área de
+      // Trabalho - que não tem nada a ver com o RDP e ninguém pediu pra manter.
+      'regra de catálogo só vale pra atalho; pasta só fica se o Master marcou': (() => {
+        const fn = corpoPs('Atalho-EstaAprovado');
+        if (!fn) return false;
+        const iMarcado = fn.indexOf('$personalizados -contains (Chave-Atalho $item)');
+        const iTrava = fn.indexOf('if ($item.PSIsContainer -or ($ext -notin');
+        const iPrimeiraRegra = fn.indexOf('$permitidos -contains "nopulso"');
+        return iMarcado > 0 && iTrava > iMarcado && iPrimeiraRegra > iTrava;
+      })(),
       // ---- arrumar os ícones depois de limpar ----------------------------
       // Pedido do Master: "apos remover ele arrumar os icones na area de
       // trabalho". Tirar atalho deixa buraco na grade, porque o Windows guarda
@@ -22480,7 +22524,12 @@ setTimeout(async () => {
         suspeitos.length === 0 || (console.log(`  suspeitos: ${suspeitos.join(' · ')}`), false),
       // a própria linha que quebrou, pra não voltar em silêncio
       'a RAM entra no mesmo array do resto da ficha (infoBits)':
-        /if\(c\.ram && c\.ram\.totalGb != null\)\{\s*\n\s*infoBits\.push\(`🧠 <b>RAM:<\/b>/.test(noc),
+        // Estava presa a adjacencia: exigia o push na linha SEGUINTE ao if. O
+        // commit do inventario de hardware pos quatro linhas no meio (modulos,
+        // tipo, frequencia) e reprovou sem defeito nenhum - a RAM continua indo
+        // pro infoBits, que e o que esta asserção diz. O que importa e o push
+        // estar DENTRO do if, nao colado nele.
+        /if\(c\.ram && c\.ram\.totalGb != null\)\{[\s\S]{0,800}?infoBits\.push\(`🧠 <b>RAM:<\/b>/.test(noc),
       // a ordem importa: a ficha só aparece DEPOIS de montada, então qualquer
       // erro ao montar significa "cliquei e não aconteceu nada"
       'a ficha é montada antes de ser mostrada (por isso um erro ali some com ela)':
