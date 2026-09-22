@@ -7039,9 +7039,8 @@ setTimeout(async () => {
     const login3 = await bater({ souAdmin: false }); // login pega
     await ls.marcarComandoExecutado(cmdComum2.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
 
-    // EXECUÇÃO SEM RETORNO: depois da entrega, um agente travado não pode
-    // segurar a única vaga da máquina indefinidamente. A varredura fecha o
-    // registro como erro, libera a vaga e a resposta tardia não o ressuscita.
+    // EXECUÇÃO SEM RETORNO: timeout alerta, mas não promove o próximo comando.
+    // Sem prova de término, liberar permitiria duas execuções na mesma máquina.
     const cmdTravado = await ls.enfileirarComando(UNI, posto, 'echo travado', { origem: 'agente' });
     await bater({ souAdmin: false });
     dbA.collection('lojaStatusComandos').doc(cmdTravado.id).set({ entregueEm: new Date(Date.now() - 11 * 60 * 1000).toISOString() }, { merge: true });
@@ -7049,10 +7048,8 @@ setTimeout(async () => {
     const transTravado = (await ls.varrerAlertas()).filter((t) => t.codigo === UNI && t.tipo === 'comando-travado');
     const cmdTravadoData = (await dbA.collection('lojaStatusComandos').doc(cmdTravado.id).get()).data();
     const depoisTravado = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
-    let respostaTardiaTravado = false;
-    try { await ls.marcarComandoExecutado(cmdTravado.id, { resultado: 'tarde' }, { codigo: UNI, posto, token: tk }); } catch (e) { respostaTardiaTravado = /depois do limite/i.test(e.message); }
-    const canceladoAposErro = await ls.cancelarComandoPendente(cmdTravado.id, 'master@teste.local');
-    const cmdTravadoCancelado = (await dbA.collection('lojaStatusComandos').doc(cmdTravado.id).get()).data();
+    const respostaTardiaTravado = await ls.marcarComandoExecutado(cmdTravado.id, { resultado: 'tarde' }, { codigo: UNI, posto, token: tk });
+    const depoisDaConfirmacao = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
 
     // EXPIRACAO: comando-admin numa maquina sem executor elevado (instalada sem
     // Administrador). Envelhece a espera e a varredura desiste, liberando a vaga.
@@ -7088,13 +7085,12 @@ setTimeout(async () => {
       'comando comum continua indo pra instância de login': !!login2.comandoPendente && /comum/.test(login2.comandoPendente.comando),
        'a sondagem só-admin da SYSTEM não rouba comando comum': !sondaSoAdmin.comandoPendente,
        'o comando comum sobra pra login pegar': !!login3.comandoPendente && /comum2/.test(login3.comandoPendente.comando),
-       'comando entregue sem retorno vira erro, libera a vaga e não aceita resposta tardia':
-         transTravado.length === 1 && cmdTravadoData.status === 'erro' && !depoisTravado.comandoPendenteId
-         && /tempo limite de execução/i.test(cmdTravadoData.erro || '') && respostaTardiaTravado,
-       'comando com erro pode ser cancelado sem apagar o erro original':
-         canceladoAposErro.canceladoAposErro === true && cmdTravadoCancelado.status === 'cancelado'
-         && /tempo limite de execução/i.test(cmdTravadoCancelado.erro || '')
-         && cmdTravadoCancelado.canceladoPor === 'master@teste.local',
+       'timeout alerta e mantém a fila bloqueada até a máquina confirmar término':
+         transTravado.length === 1 && cmdTravadoData.status === 'entregue'
+         && depoisTravado.comandoPendenteId === cmdTravado.id
+         && !!cmdTravadoData.timeoutDetectadoEm && /fila permanece bloqueada/i.test(cmdTravadoData.avisoTimeout || ''),
+       'a resposta tardia autenticada encerra o comando e só então libera a vaga':
+         respostaTardiaTravado.status === 'executado' && !depoisDaConfirmacao.comandoPendenteId,
        // expiração
       'comando-admin sem executor elevado expira e libera a vaga':
         transExp.length === 1 && !depoisExp.comandoPendenteId
@@ -12721,11 +12717,11 @@ setTimeout(async () => {
       // só busca a política inteira quando o número muda.
       'o heartbeat leva a versão, e o agente interno reage a ela (antes só aplicava ao reiniciar)':
         typeof (await ls.heartbeat('PPDOM', 'PC1', { userAgent: 'NOCZenith/1.0' }, 'tokdom')).versaoAplicacao === 'string'
-        && /\$resp\.inventarioAtalhosPendenteEm -or \(\$null -ne \$resp\.versaoAplicacao -and "v\$VersaoScript\|\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
+        && /\$resp\.inventarioAtalhosPendenteEm -or \(\$null -ne \$resp\.versaoAplicacao -and -not \(Politica-EstaAplicada/.test(psPp)
         && (() => {
           const inicio = psPp.indexOf('function Sincronizar-Politica');
           return psPp.indexOf('Enviar-InventarioAtalhos', inicio)
-            < psPp.indexOf('if ((Versao-PoliticaAplicada) -eq $versao) { return }', inicio);
+            < psPp.indexOf('if (Politica-EstaAplicada $versaoServidor) { return }', inicio);
         })()
         && /try \{ Sincronizar-Politica \}/.test(psPp),
       'o agente envia o inventário sem sessão do painel, autenticado pelo token da máquina':
@@ -12860,7 +12856,7 @@ setTimeout(async () => {
       'a instância elevada aplica a política mesmo cedendo a vez': (() => {
         const fn = corpoPs('Sondar-ComandoAdmin');
         if (!fn) return false;
-        return /if \(\$resp -and \$null -ne \$resp\.versaoAplicacao[^\n]*-ne \(Versao-PoliticaAplicada\)\) \{ Sincronizar-Politica \}/.test(fn)
+        return /if \(\$resp -and \$null -ne \$resp\.versaoAplicacao[^\n]*Politica-EstaAplicada[^\n]*\) \{ Sincronizar-Politica \}/.test(fn)
           // tem que ser a instância de boot, e SÓ quando ela está cedendo
           && /if \(\$Servico\) \{ Sondar-ComandoAdmin \}/.test(psPp);
       })(),
@@ -13063,7 +13059,8 @@ setTimeout(async () => {
       'o agente compara a versão de aplicação, com queda pra política se o servidor for antigo':
         /\$versaoServidor = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
         && /\$versaoServidor = "\$\(\$cfg\.politicaVersao\)"/.test(psPp)
-        && /\$versao = "v\$VersaoScript\|\$versaoServidor"/.test(psPp),
+        && /\$versao = "p\|\$versaoServidor"/.test(psPp)
+        && /function Politica-EstaAplicada/.test(psPp),
       // agente novo = 52 maquinas baixando de novo; sem subir a versao,
       // ninguem baixa e a mudanca toda fica so no servidor
       'a versão do vigia subiu junto (senão nenhuma máquina pega o script novo)':

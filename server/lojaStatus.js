@@ -3312,9 +3312,9 @@ async function marcarComandoExpiradoSemAdmin(comandoId, codigo, posto, msg) {
 }
 
 // Não há como cancelar com segurança um PowerShell que já chegou à máquina.
-// Mas, se ela não devolve resultado dentro do teto, o estado "entregue" deixa
-// de ser honesto. Fecha como erro e libera SOMENTE a vaga que ainda pertence
-// a este comando; uma resposta tardia é descartada por marcarComandoExecutado.
+// Portanto timeout NÃO libera a vaga: sem confirmação de término, promover o
+// próximo comando poderia executar dois comandos ao mesmo tempo na máquina.
+// Erro devolvido normalmente pelo agente continua liberando a fila na hora.
 async function marcarComandoTravado(comandoId, codigo, posto) {
   const comandoRef = COMANDOS_COLLECTION.doc(String(comandoId || ''));
   const computadorRef = COLLECTION.doc(docIdFor(codigo, posto));
@@ -3325,13 +3325,13 @@ async function marcarComandoTravado(comandoId, codigo, posto) {
     const comando = comandoSnap.data();
     const entregueEm = new Date(comando.entregueEm || 0).getTime();
     if (comando.status !== 'entregue' || !Number.isFinite(entregueEm) || Date.now() - entregueEm < COMANDO_EXECUCAO_TIMEOUT_MS) return;
+    if (comando.timeoutDetectadoEm) return;
     const computadorSnap = await tx.get(computadorRef);
     const agora = new Date().toISOString();
-    const erro = 'Tempo limite de execução atingido: o agente não devolveu resultado em 10 minutos. Verifique a máquina e envie novamente se necessário.';
-    tx.update(comandoRef, { status: 'erro', erro, executadoEm: agora });
+    const erro = 'O agente não devolveu resultado em 10 minutos. A fila permanece bloqueada até esta máquina confirmar o término, evitando dois comandos simultâneos.';
+    tx.update(comandoRef, { timeoutDetectadoEm: agora, avisoTimeout: erro });
     if (computadorSnap.exists && computadorSnap.data().comandoPendenteId === String(comandoId)) {
-      const fila = filaDeComandos(computadorSnap.data()).filter((id) => id !== String(comandoId));
-      tx.update(computadorRef, { comandosFilaIds: fila, comandoPendenteId: fila[0] || null, comandoAguardandoElevacaoDesde: null });
+      tx.update(computadorRef, { comandoTravadoDesde: agora });
     }
     travou = true;
   });
@@ -3436,9 +3436,8 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   const snap = await comandoRef.get();
   if (!snap.exists) throw new Error('Comando não encontrado.');
   const comando = snap.data();
-  // Resultado atrasado de uma execução que o servidor já classificou como
-  // travada não pode "ressuscitar" o comando nem liberar uma nova vaga da
-  // máquina. O agente recebe 409 e registra no log, sem expor saída na tela.
+  // Mesmo após alerta de timeout, "entregue" permanece aguardando a resposta
+  // autenticada que comprova o término e pode liberar a próxima vaga.
   if (comando.status !== 'entregue') {
     throw new Error(comando.status === 'erro'
       ? 'O resultado chegou depois do limite e o comando já foi fechado como erro.'
@@ -3476,6 +3475,7 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
     comandosFilaIds: filaRestante,
     comandoPendenteId: filaRestante[0] || null,
     comandoAguardandoElevacaoDesde: null,
+    comandoTravadoDesde: null,
     ultimoComandoEm: patch.executadoEm,
     ultimoComandoTexto: String(comando.comando || '').slice(0, 200),
     ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 2000) : null,
@@ -3821,9 +3821,8 @@ async function varrerAlertas() {
         });
       }
     }
-    // Comando que chegou ao agente mas não retornou: fecha a fila em vez de
-    // mantê-la indefinidamente em "executando". A função confirma o status e
-    // o horário no documento do comando dentro de transação antes de alterar.
+    // Comando que chegou ao agente mas não retornou: alerta uma vez e mantém a
+    // fila bloqueada. Só a resposta autenticada da máquina libera o próximo.
     if (candidato.comandoPendenteId && !candidato.comandoAguardandoElevacaoDesde) {
       try {
         const travou = await marcarComandoTravado(candidato.comandoPendenteId, candidato.codigo, candidato.posto);
@@ -3831,7 +3830,7 @@ async function varrerAlertas() {
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
             tipo: 'comando-travado',
-            motivo: 'O agente não devolveu resultado em 10 minutos; a fila foi liberada com erro.',
+            motivo: 'O agente não devolveu resultado em 10 minutos; a fila foi bloqueada por segurança até a máquina confirmar o término.',
           });
         }
       } catch (e) { /* a próxima varredura tenta novamente */ }

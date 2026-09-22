@@ -26,7 +26,8 @@
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
 // 108: inventaria RAM, processador, placa-mae e BIOS para exibir na ficha.
-const VERSAO_VIGIA = 113;
+const VERSAO_VIGIA = 114;
+const VERSAO_VIGIA_ESTAVEL = 113;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -156,7 +157,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   const urlTelemetria = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/telemetria`;
   const urlConfiguracaoAgente = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/configuracao-agente`;
   const urlInventarioAtalhos = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/inventario-atalhos`;
-  const urlVersao = `${APP_BASE_URL}/api/loja-status/vigia-versao`;
+  // Identidade para rollout piloto; nao e segredo. A autenticacao das rotas
+  // sensiveis continua sendo feita pelo X-NOC-Token individual da maquina.
+  const urlVersao = `${APP_BASE_URL}/api/loja-status/vigia-versao?codigo=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlScriptProprio = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`;
   const nomeTarefa = 'NOCZenith_' + posto;
 
@@ -2400,7 +2403,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # Esta sondagem ja faz um heartbeat de 90 em 90s e a resposta ja traz a',
     '    # versaoAplicacao - entao a instancia elevada aplica a politica de graca,',
     '    # sem nenhuma requisicao a mais, e so quando a versao muda.',
-    '    if ($resp -and $null -ne $resp.versaoAplicacao -and "v$VersaoScript|$($resp.versaoAplicacao)" -ne (Versao-PoliticaAplicada)) { Sincronizar-Politica }',
+    '    if ($resp -and $null -ne $resp.versaoAplicacao -and -not (Politica-EstaAplicada "$($resp.versaoAplicacao)")) { Sincronizar-Politica }',
     '  } catch { Escrever-Log "Sondagem de comando-admin falhou: $($_.Exception.Message)" }',
     '}',
     '',
@@ -2421,6 +2424,16 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  try { return (Get-Content $arquivo -First 1).Trim() } catch { return "" }',
     '}',
     '',
+    '# A versao da politica e independente da versao do agente. Aceita tambem',
+    '# a marca legada v<agente>|<politica>, evitando reaplicar uma politica',
+    '# destrutiva apenas porque o NOCZenith recebeu uma atualizacao tecnica.',
+    'function Politica-EstaAplicada([string]$versaoServidor) {',
+    '  if (-not $versaoServidor) { return $false }',
+    '  $marca = Versao-PoliticaAplicada',
+    '  if (-not $marca) { return $false }',
+    '  return ($marca -eq "p|$versaoServidor" -or $marca -eq $versaoServidor -or $marca.EndsWith("|$versaoServidor"))',
+    '}',
+    '',
     'function Sincronizar-Politica {',
     '  try {',
     '    $cfg = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10',
@@ -2432,14 +2445,12 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # antigo nao manda o campo: cai no politicaVersao, como era.',
     '    $versaoServidor = "$($cfg.versaoAplicacao)"',
     '    if (-not $versaoServidor -or $versaoServidor -eq "") { $versaoServidor = "$($cfg.politicaVersao)" }',
-    // A versão do agente faz este conserto tentar uma vez mesmo quando a
-    // política e a imagem já existiam antes da atualização.
-    '    $versao = "v$VersaoScript|$versaoServidor"',
+    '    $versao = "p|$versaoServidor"',
     '    # O inventario e um pedido one-shot independente da versao da politica.',
     '    # Ele precisa rodar ANTES do retorno por versao ja aplicada; do contrario',
     '    # o heartbeat acorda a sincronizacao, mas ela sai sem ler os atalhos.',
     '    if ($pol.estacao -and $pol.estacao.inventarioPendenteEm -and -not (Enviar-InventarioAtalhos)) { return }',
-    '    if ((Versao-PoliticaAplicada) -eq $versao) { return }',
+    '    if (Politica-EstaAplicada $versaoServidor) { return }',
     '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
@@ -2971,7 +2982,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // sai de um arquivo ao lado do script. So quando os dois diferem e que o
     // agente busca a politica inteira - 1 leitura por mudanca REAL, em vez de
     // uma consulta a cada volta do laco.
-    '      if ($resp.inventarioAtalhosPendenteEm -or ($null -ne $resp.versaoAplicacao -and "v$VersaoScript|$($resp.versaoAplicacao)" -ne (Versao-PoliticaAplicada))) {',
+    '      if ($resp.inventarioAtalhosPendenteEm -or ($null -ne $resp.versaoAplicacao -and -not (Politica-EstaAplicada "$($resp.versaoAplicacao)"))) {',
     '        try { Sincronizar-Politica } catch { Escrever-Log "Politica nao sincronizou: $($_.Exception.Message)" }',
     '      }',
     '      if ($resp.comandoPendente) { Executar-ComandoPendente $resp.comandoPendente }',
@@ -3388,4 +3399,16 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
   return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64Elevador}`;
 }
 
-module.exports = { montarScriptVigia, montarComandoInstalacao, adaptarParaWindowsAntigo, VERSAO_VIGIA };
+function versaoVigiaOferecida(codigo, posto, env = process.env) {
+  const modo = String(env.NOC_VIGIA_ROLLOUT || 'piloto').trim().toLowerCase();
+  if (modo === 'todos') return VERSAO_VIGIA;
+  const chave = `${String(codigo || '').trim()}|${String(posto || '').trim()}`.toLowerCase();
+  const pilotos = String(env.NOC_VIGIA_PILOTOS || '')
+    .split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+  return chave && pilotos.includes(chave) ? VERSAO_VIGIA : VERSAO_VIGIA_ESTAVEL;
+}
+
+module.exports = {
+  montarScriptVigia, montarComandoInstalacao, adaptarParaWindowsAntigo,
+  versaoVigiaOferecida, VERSAO_VIGIA, VERSAO_VIGIA_ESTAVEL,
+};
