@@ -14486,6 +14486,98 @@ setTimeout(async () => {
   console.log(`${okPixNome ? '✓' : '✗'} Monitor: pedido Pix que mudou de status mostra o nome do cliente (não a conta da Adyen nem o nome do cartão)`);
 
   // ------------------------------------------------------------------
+  // PROCEDIMENTOS DE SOCORRO. Pedido do Master (22/09): "tudo que resolver um
+  // problema vamos criar um processo, organize o tipo da solução para não
+  // ficar um scroll imenso e ficar olhando um a um para saber o que faz".
+  //
+  // O que estas asserções travam é o que torna o catálogo USÁVEL na emergência,
+  // e cada uma já custou caro uma vez:
+  //   - cabe no console (o primeiro que montei tinha 23 mil caracteres);
+  //   - é uma linha só (bloco multi-linha embaralha ao colar);
+  //   - se eleva sozinho (meia hora perdida em "Acesso a um recurso CIM");
+  //   - não depende de rede (a máquina que precisa dele está sem DNS).
+  let okSocorro = false;
+  try {
+    const proc = require(__dirname + '/procedimentosSocorro.js');
+    const socRede = require(__dirname + '/socorroRedeScript.js');
+    const cabS = { Authorization: 'Bearer ' + token };
+    const respS = await pedir('/api/loja-status/procedimentos-socorro', cabS);
+    const semSessao = await pedir('/api/loja-status/procedimentos-socorro');
+    const corpoS = respS.status === 200 ? JSON.parse(respS.corpo) : {};
+    const cats = corpoS.categorias || [];
+    const todos = cats.reduce((a, c) => a.concat(c.procedimentos || []), []);
+    const dns = todos.find((p) => p.id === 'socorro-dns');
+    const srcIdxS = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlS = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    // O COMANDO E CODIFICADO, e olhar o texto cru da falso verde: foi assim
+    // que a sabotagem "passa a baixar o script de uma URL" escapou na
+    // primeira rodada. Toda asserção sobre o CONTEUDO abre o base64 antes.
+    const abrirComando = (cmd) => {
+      const utf16 = String(cmd).match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/);
+      if (utf16) return Buffer.from(utf16[1], 'base64').toString('utf16le');
+      const utf8 = String(cmd).match(/FromBase64String\('([A-Za-z0-9+/=]+)'\)/);
+      if (utf8) return Buffer.from(utf8[1], 'base64').toString('utf8');
+      return String(cmd);
+    };
+    const conf = {
+      'a rota responde agrupada por categoria, com procedimento dentro':
+        respS.status === 200 && cats.length >= 2 && todos.length >= 2
+        && cats.every((c) => c.id && c.rotulo && Array.isArray(c.procedimentos) && c.procedimentos.length),
+      // catálogo vazio é pior que nenhum: some a categoria em vez de mostrar (0)
+      'categoria sem procedimento não aparece':
+        proc.listarPorCategoria('https://x').every((c) => c.procedimentos.length > 0),
+      // "qual destes é o meu caso?" vem ANTES de "o que este comando executa"
+      'cada procedimento diz QUANDO usar, não só o que faz':
+        todos.every((p) => p.titulo && p.quando && p.faz && p.origem),
+      // O ERRO QUE ISSO EVITA: o primeiro comando que montei tinha 23.830
+      // caracteres (duplo -EncodedCommand em UTF-16 infla 7x). O console do
+      // Windows corta perto de 8191 - ele simplesmente não colava.
+      'todo comando cabe no console do Windows e é uma linha só':
+        todos.every((p) => p.comando && p.comando.length < 8191 && !p.comando.includes('\n')),
+      // a máquina que precisa do socorro de rede está SEM DNS: baixar de uma
+      // URL, como o reparo faz, seria pedir justamente o que falta
+      'o socorro de rede não baixa nada - o script vai dentro do comando':
+        !!dns && !/Invoke-WebRequest|Invoke-RestMethod|DownloadString|Start-BitsTransfer/i.test(abrirComando(dns.comando)),
+      // os dois comandos sao CODIFICADOS (um -EncodedCommand em UTF-16, o outro
+      // base64 de UTF-8), entao 'RunAs' nao aparece no texto visivel - olhar o
+      // comando cru dava falso negativo. O que vale e o conteudo decodificado.
+      // -Verb RunAs é o que ELEVA, e todo procedimento precisa ter. O IsInRole
+      // é só do socorro de rede, que evita abrir uma segunda janela quando já
+      // está elevado - o reparo sempre passa pelo UAC.
+      'o comando se eleva sozinho (sem isso o Master bate em PermissionDenied)':
+        todos.every((p) => /-Verb RunAs/.test(abrirComando(p.comando)))
+        && !!dns && /IsInRole/.test(abrirComando(dns.comando)),
+      // se o DNS atual resolve, mexer é quebrar nome interno de graça
+      'o socorro só troca o DNS quando o atual NÃO resolve':
+        /if \(\$dnsOk\) \{/.test(socRede.DIAGNOSTICO)
+        && socRede.DIAGNOSTICO.indexOf('if ($dnsOk) {') < socRede.DIAGNOSTICO.indexOf('Set-DnsClientServerAddress')
+        && /NADA foi alterado/.test(socRede.DIAGNOSTICO),
+      'o socorro diz como voltar ao DNS que estava lá':
+        /Pra voltar como estava/.test(socRede.DIAGNOSTICO) && /ResetServerAddresses/.test(socRede.DIAGNOSTICO),
+      // é tela de Master: diferente do reparo-noczenith.ps1, que é público
+      // porque o agente caído precisa baixar sozinho
+      'a rota fica atrás do login':
+        srcIdxS.indexOf("app.use('/api', auth.requireAuth);")
+          < srcIdxS.indexOf("app.get('/api/loja-status/procedimentos-socorro'")
+        && semSessao.status === 401,
+      // agrupado e FECHADO: é o que impede a lista de virar rolagem
+      'a tela agrupa por categoria e abre fechada':
+        /🧰 Procedimentos de socorro/.test(htmlS)
+        && /<details[^>]*><summary[^>]*>\$\{c\.icone\}/.test(htmlS)
+        && /carregarProcedimentosSocorro\(\);/.test(htmlS),
+      // a tela nunca monta texto de comando - mesma regra da Janela de Manutenção
+      'o texto do comando vem do servidor, não da tela':
+        !/powershell -NoProfile -ExecutionPolicy Bypass/.test(htmlS)
+        && /SOCORRO_PROCS\[id\]/.test(htmlS),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSocorro = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (http=${respS.status} semSessao=${semSessao.status} cats=${cats.length} procs=${todos.length} tamanhos=${todos.map((p) => (p.comando || '').length).join(',')})`);
+  } catch (e) { okSocorro = false; console.log('  erro: ' + e.message); }
+  if (!okSocorro) ruins += 1;
+  console.log(`${okSocorro ? '✓' : '✗'} NOC: procedimentos de socorro - agrupados, colam no console e se elevam sozinhos`);
+
+  // ------------------------------------------------------------------
   // O QUE O BENI VÊ DO NOC. A consulta do Cowork (consultar_noc) é o único
   // jeito de perguntar "quem já baixou a versão nova?" sem abrir a tela.
   //

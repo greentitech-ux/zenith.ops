@@ -121,6 +121,7 @@ const agenteAcoes = require('./agenteAcoes');
 const coworkApi = require('./coworkApi');
 const vigiaScript = require('./vigiaScript');
 const reparoNocZenithScript = require('./reparoNocZenithScript');
+const procedimentosSocorro = require('./procedimentosSocorro');
 const loginCustom = require('./loginCustom');
 
 const upload = multer({
@@ -1831,6 +1832,7 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
 // confere periodicamente pra saber se precisa baixar de novo; o .ps1 e o
 // mesmo conteudo tanto pro botao "Baixar NOCZenith" quanto pra
 // autoatualizacao baixar e sobrescrever o proprio arquivo ----------
+
 app.get('/api/loja-status/vigia-versao', (req, res) => {
   res.json({ versao: vigiaScript.VERSAO_VIGIA });
 });
@@ -2441,6 +2443,16 @@ app.post('/api/reunioes/publica/:token/comentarios', async (req, res) => {
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
 app.use('/api', auth.requireAuth);
+
+// PROCEDIMENTOS DE SOCORRO: o que se copia no NOC e cola NA MAQUINA quando
+// ela nao responde a comando nenhum (ver procedimentosSocorro.js). Autenticada
+// de proposito - diferente do reparo-noczenith.ps1, que e publico porque o
+// agente caido precisa baixar sozinho; aqui quem le e o painel do Master.
+app.get('/api/loja-status/procedimentos-socorro', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ categorias: procedimentosSocorro.listarPorCategoria(APP_BASE_URL) });
+});
+
 
 // preferencias de tela da PESSOA logada (ver preferencias.js) - hoje so o
 // seletor 🧩 Colunas do Fechamento usa. Fica no servidor, e nao no

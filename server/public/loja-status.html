@@ -894,6 +894,20 @@
       ⚠️ Máquina com NOCZenith instalado <b>sem Administrador</b> (versões antigas) só volta ao monitoramento quando <b>alguém fizer login no Windows</b> depois do reinício - foi isso que deixou o parque mudo em agosto.
       Pra ela voltar sozinha, reinstale uma vez pelo "📋 Copiar comando" num PowerShell <b>como Administrador</b> (v17+ cria a tarefa de boot).
     </div>
+    <!-- PROCEDIMENTOS DE SOCORRO. Pedido do Master: "tudo que resolver um
+         problema vamos criar um processo, organize o tipo da solucao para nao
+         ficar um scroll imenso". Dai: agrupado por categoria e FECHADO por
+         padrao. Cada item diz QUANDO usar antes do que faz - na emergencia a
+         pergunta e "qual destes e o meu caso?".
+         Isto NAO roda pelo agente: e o que se cola na maquina que nao responde
+         a comando nenhum (ver server/procedimentosSocorro.js). -->
+    <details style="margin:0 0 10px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel2);">
+      <summary style="cursor:pointer;font-weight:700;font-size:13px;">🧰 Procedimentos de socorro <span class="sub" style="font-weight:400;">· pra colar na máquina que não responde</span></summary>
+      <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0;">
+        Máquina muda no NOC não recebe comando - o agente dela não alcança o servidor. Estes são pra copiar aqui e colar lá, por AnyDesk ou presencialmente. Todos pedem o UAC sozinhos.
+      </div>
+      <div id="socorro-lista"><div class="sub">carregando…</div></div>
+    </details>
     <!-- BUSCA. Com o parque inteiro na lista, achar UMA maquina era rolar
          unidade por unidade. Casa com nome da maquina, unidade, posto e IP
          local - o Master costuma chegar pelo IP que viu no card. -->
@@ -3186,6 +3200,9 @@ function abrirManutencao(){
   document.getElementById('manut-status').classList.add('hidden');
   renderManutLista();
   renderManutDias();
+  // uma vez por sessao, e so ao abrir: o catalogo e texto fixo, nao ha por que
+  // buscar de novo a cada abertura da janela
+  carregarProcedimentosSocorro();
   abrirOverlay('manut-overlay');
 }
 function fecharManutencao(){ fecharOverlay('manut-overlay'); }
@@ -3718,6 +3735,53 @@ function copiarIpLocal(ip){
 // pra colar no PowerShell da loja. Baixa e instala contornando o Controle de
 // Aplicativo Inteligente do Windows 11 (que bloqueia .ps1 baixado pelo
 // navegador). Ver montarComandoInstalacao/rota comando-instalacao no servidor.
+// PROCEDIMENTOS DE SOCORRO. A lista vem do servidor (procedimentosSocorro.js)
+// pra o texto do comando ter UMA fonte - a tela nunca monta comando.
+let SOCORRO_CARREGADO = false;
+async function carregarProcedimentosSocorro(){
+  if(SOCORRO_CARREGADO) return;
+  const el = document.getElementById('socorro-lista');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/loja-status/procedimentos-socorro');
+    if(!r.ok) throw new Error('não consegui carregar os procedimentos.');
+    const { categorias } = await r.json();
+    if(!categorias || !categorias.length){ el.innerHTML = '<div class="sub">Nenhum procedimento cadastrado ainda.</div>'; SOCORRO_CARREGADO = true; return; }
+    SOCORRO_PROCS = {};
+    el.innerHTML = categorias.map((c)=>{
+      const itens = c.procedimentos.map((p)=>{
+        SOCORRO_PROCS[p.id] = p;
+        return `<div style="border-top:1px solid var(--line);padding:8px 0 6px;">
+          <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;">
+            <b style="font-size:12.5px;">${escapeHtml(p.titulo)}</b>
+            ${p.precisaAdmin ? '<span class="sub" style="font-size:10px;">pede Administrador</span>' : ''}
+          </div>
+          <div class="sub" style="margin:3px 0;"><b>Quando:</b> ${escapeHtml(p.quando)}</div>
+          <div class="sub" style="margin:3px 0;"><b>O que faz:</b> ${escapeHtml(p.faz)}</div>
+          ${p.cuidado ? `<div class="sub" style="margin:3px 0;color:var(--warn);"><b>Atenção:</b> ${escapeHtml(p.cuidado)}</div>` : ''}
+          <button type="button" class="btn-mini" style="margin-top:5px;" onclick="copiarProcedimentoSocorro('${escapeJs(p.id)}')">📋 Copiar comando</button>
+        </div>`;
+      }).join('');
+      return `<details style="margin-bottom:6px;"><summary style="cursor:pointer;font-size:12.5px;">${c.icone} ${escapeHtml(c.rotulo)} <span class="sub">(${c.procedimentos.length})</span></summary>${itens}</details>`;
+    }).join('');
+    SOCORRO_CARREGADO = true;
+  }catch(e){ el.innerHTML = '<div class="sub">' + escapeHtml(e.message) + '</div>'; }
+}
+let SOCORRO_PROCS = {};
+async function copiarProcedimentoSocorro(id){
+  const p = SOCORRO_PROCS[id];
+  if(!p) return;
+  const passos = 'No computador da loja:\n'
+    + '1) Abra o PowerShell (menu Iniciar > digite PowerShell)\n'
+    + '2) Cole (Ctrl+V) e aperte Enter\n'
+    + '3) Clique em Sim na confirmação do Windows (UAC) - o comando se eleva sozinho\n\n'
+    + 'A janela fica aberta com o resultado. Me mande essa tela se não resolver.';
+  let copiou = false;
+  try { await navigator.clipboard.writeText(p.comando); copiou = true; } catch(e){ /* clipboard bloqueado (http/permissão) */ }
+  if(copiou) alert(`"${p.titulo}" copiado! ✅\n\n${passos}`);
+  else prompt(`Copie este comando (Ctrl+C) e cole no PowerShell da loja:\n\n${passos}`, p.comando);
+}
+
 async function copiarComandoVigia(codigo, posto, tipo, prefixo){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
