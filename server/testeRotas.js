@@ -24615,7 +24615,15 @@ setTimeout(async () => {
     const reparoR = require(__dirname + '/reparoNocZenithScript');
     const vigiaR = require(__dirname + '/vigiaScript');
     const scriptR = reparoR.montarScriptReparoNocZenith();
-    const comandoR = reparoR.montarComandoReparoNocZenith();
+    const comandoR = reparoR.montarComandoReparoNocZenith('https://www.nopulso.com.br');
+    // o comando montado SEM base tem que cair no endereco antigo, nunca ficar vazio
+    const comandoPadraoR = reparoR.montarComandoReparoNocZenith();
+    const internoPadraoR = (() => {
+      const e = comandoPadraoR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)$/);
+      const el = e ? Buffer.from(e[1], 'base64').toString('utf16le') : '';
+      const i = el.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/);
+      return i ? Buffer.from(i[1], 'base64').toString('utf16le') : '';
+    })();
     const b64ElevadorR = comandoR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)$/);
     const elevadorR = b64ElevadorR ? Buffer.from(b64ElevadorR[1], 'base64').toString('utf16le') : '';
     const b64InternoR = elevadorR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/);
@@ -24664,6 +24672,26 @@ setTimeout(async () => {
         && internoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
         && /MaximumRedirection 0/.test(internoR)
         && !/[a-f0-9]{48}/i.test(comandoR),
+      // 22/09: numa maquina de loja o comando morreu em "O nome remoto nao pode
+      // ser resolvido: 'www.nopulso.com.br'". E justamente a maquina que mais
+      // precisa do reparo - o agente dela esta caido e nao ha outro caminho.
+      // O endereco antigo nunca pode ser desligado (§4), entao ele e a rede de
+      // seguranca: o comando tenta os DOIS.
+      'o comando tenta o endereço oficial E o adyen-monitor (loja com DNS restrito)':
+        internoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
+        && internoR.includes('https://adyen-monitor.onrender.com/api/loja-status/reparo-noczenith.ps1')
+        && /foreach \(\$u in \$us\)/.test(internoR)
+        && /if \(-not \$ok\) \{ throw/.test(internoR),
+      // o endereço NUNCA cravado (§4): sai do APP_BASE_URL de quem chama
+      'sem base informada o comando cai no endereço antigo, e não fica vazio':
+        internoPadraoR.includes('https://adyen-monitor.onrender.com/api/loja-status/reparo-noczenith.ps1')
+        && !internoPadraoR.includes('www.nopulso.com.br')
+        && !/const url = 'https:/.test(fsR.readFileSync(__dirname + '/reparoNocZenithScript.js', 'utf8')),
+      // portal cativo e proxy de loja devolvem pagina de erro com HTTP 200:
+      // aquilo seria salvo como .ps1 e EXECUTADO. Mesma trava do "# NOCZenith".
+      'o que foi baixado é conferido antes de executar':
+        internoR.includes("-notlike '# Reparo seguro do NOCZenith*'")
+        && internoR.indexOf('-notlike') < internoR.indexOf('& $f'),
     };
     const falhasR = Object.entries(confR).filter(([, v]) => !v).map(([n]) => n);
     okReparoNocZenith = !falhasR.length;
