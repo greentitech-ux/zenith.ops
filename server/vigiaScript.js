@@ -26,7 +26,7 @@
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
 // 108: inventaria RAM, processador, placa-mae e BIOS para exibir na ficha.
-const VERSAO_VIGIA = 111;
+const VERSAO_VIGIA = 112;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -3244,11 +3244,23 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if ($ehAdmin) {',
     '    try {',
     '      $acaoBoot = Acao-DaTarefa $Destino $true',
-    '      $gatilhoBoot = New-ScheduledTaskTrigger -AtStartup',
+    '      # -AtStartup SOZINHO so dispara em REINICIO. A tarefa de login tem o',
+    '      # gatilho de repeticao de 5 min desde sempre; esta nao tinha, e a',
+    '      # consequencia so apareceu em 22/09: na Dom Bessa, a GERENCIA (ligada ha',
+    '      # 1h, tinha reiniciado) ficou perfeita e a DISPATCH (ligada ha 11 DIAS)',
+    '      # nao. A instancia elevada simplesmente NUNCA tinha subido nela - e e ela',
+    '      # quem remove atalho de C:\\Users\\Public\\Desktop e executa comando-admin.',
+    '      # Com a repeticao, a elevada sobe sem esperar reinicio nenhum.',
+    '      $gatilhoBoot = @((New-ScheduledTaskTrigger -AtStartup)) + @((Gatilhos-DaTarefa)[1])',
     '      $principalBoot = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest',
     '      if ($config) { Register-ScheduledTask -TaskName ($NomeTarefa + "_Boot") -Action $acaoBoot -Trigger $gatilhoBoot -Principal $principalBoot -Settings $config -Force -ErrorAction Stop | Out-Null }',
     '      else { Register-ScheduledTask -TaskName ($NomeTarefa + "_Boot") -Action $acaoBoot -Trigger $gatilhoBoot -Principal $principalBoot -Force -ErrorAction Stop | Out-Null }',
-    '      Escrever-Log "Tarefa de BOOT criada (SYSTEM) - o NOCZenith volta sozinho depois de qualquer reinicio, mesmo sem login."',
+    '      # e SOBE AGORA. Sem isto a instalacao terminava com a tarefa criada e',
+    '      # parada, esperando o proximo reinicio do Windows - que numa maquina de',
+    '      # loja pode demorar semanas. O IgnoreNew do $config descarta o disparo se',
+    '      # ela ja estiver de pe, entao chamar isto e sempre seguro.',
+    '      try { Start-ScheduledTask -TaskName ($NomeTarefa + "_Boot") -ErrorAction Stop } catch { Escrever-Log "Tarefa de BOOT criada, mas nao iniciou agora ($($_.Exception.Message)) - ela sobe no proximo reinicio." }',
+    '      Escrever-Log "Tarefa de BOOT criada (SYSTEM) e iniciada - a instancia elevada nao depende mais de reinicio."',
     '    } catch {',
     '      Escrever-Log "Nao consegui criar a tarefa de BOOT: $($_.Exception.Message)"',
     '    }',

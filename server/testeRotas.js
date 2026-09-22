@@ -12758,6 +12758,35 @@ setTimeout(async () => {
       // a barra: o custo e a loja piscar no meio do expediente
       'o agente inteiro não encerra Explorer em lugar nenhum':
         !/Stop-Process[^\n]*explorer/i.test(psPp) && !/Get-Process -Name explorer/.test(psPp),
+      // ---- a instância elevada não pode depender de reinício -----------
+      // 22/09, Dom Bessa, as duas já na v111: a GERENCIA (ligada há 1h, tinha
+      // reiniciado) ficou PERFEITA e a DISPATCH (ligada há 11 DIAS) não.
+      //
+      // A tarefa de login sempre teve gatilho de repetição de 5 min. A de
+      // BOOT tinha só -AtStartup, e a instalação nunca a iniciava - então numa
+      // máquina que não reinicia a instância elevada simplesmente NUNCA subia.
+      // E é ela quem remove atalho de C:\Users\Public\Desktop e quem executa
+      // comando-admin. Máquina de loja fica semanas de pé.
+      'a tarefa de boot tem o gatilho de repetição, não só -AtStartup': (() => {
+        if (!/\$gatilhoBoot = @\(\(New-ScheduledTaskTrigger -AtStartup\)\) \+ @\(\(Gatilhos-DaTarefa\)\[1\]\)/.test(psPp)) return false;
+        // e o índice [1] de Gatilhos-DaTarefa é MESMO o de repetição
+        const g = corpoPs('Gatilhos-DaTarefa');
+        const iRep = g.indexOf('$gatilhoRepeticao');
+        const iLogon = g.indexOf('$gatilhoLogon');
+        return iLogon > 0 && iRep > iLogon
+          && /RepetitionInterval \(New-TimeSpan -Minutes 5\)/.test(g)
+          && /return @\(\$gatilhoLogon, \$gatilhoRepeticao\)/.test(g);
+      })(),
+      'a instalação sobe a tarefa de boot na hora, não só no próximo reinício': (() => {
+        const iReg = psPp.indexOf('Register-ScheduledTask -TaskName ($NomeTarefa + "_Boot")');
+        const iStart = psPp.indexOf('Start-ScheduledTask -TaskName ($NomeTarefa + "_Boot")');
+        return iReg > 0 && iStart > iReg;
+      })(),
+      // o gatilho repetido só é seguro porque o agendador descarta o disparo
+      // quando a tarefa já está de pé - senão seria uma cópia nova a cada 5min
+      'disparo repetido não empilha cópia (IgnoreNew nas duas tarefas)':
+        /New-ScheduledTaskSettingsSet[^\n]*-MultipleInstances IgnoreNew/.test(psPp)
+        && /Register-ScheduledTask -TaskName \(\$NomeTarefa \+ "_Boot"\)[^\n]*-Settings \$config/.test(psPp),
       // ---- quem tem Administrador precisa aplicar a política ----------
       // 22/09, DOM-BESSA-DISPATCH já na v110: Microsoft Edge e Advanced IP
       // Scanner continuaram na Área de Trabalho mesmo desmarcados. A ficha da
