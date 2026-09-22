@@ -12506,7 +12506,11 @@ setTimeout(async () => {
       'só reaplica quando a versão muda (não reescreve o registro a cada volta do laço)':
         /if \(\(Versao-PoliticaAplicada\) -eq \$versao\) \{ return \}/.test(psPol),
       'sem Administrador a instância de boot NÃO marca como aplicada (tenta de novo depois)':
-        /if \(\$Servico -and -not \(\$okUsb -and \$okInst\)\)/.test(psPol),
+        // presa ao texto EXATO da linha, esta asserção passou a reprovar quando o
+        // porteiro ficou MAIS rigoroso (ganhou $okEstacao e $okBarra) - sem defeito
+        // nenhum. O que importa é a regra: a trava de USB e a de instalação têm que
+        // estar no porteiro da instância de boot. Termo a mais é bem-vindo.
+        /if \(\$Servico -and -not \(\$okUsb -and \$okInst[^)]*\)\)/.test(psPol),
       'a tela do NOC tem as 4 chaves por máquina, só pro Master':
         // as 4 chaves saem do MESMO catálogo que o servidor sanitiza - se uma
         // sumir daqui, ela deixa de existir na tela sem ninguém notar
@@ -12610,8 +12614,15 @@ setTimeout(async () => {
     const corpoPs = (nome) => {
       const i = psPp.indexOf('function ' + nome);
       if (i < 0) return '';
-      const j = psPp.indexOf('\nfunction ', i + 1);
-      return psPp.slice(i, j < 0 ? psPp.length : j);
+      // O FIM E A CHAVE QUE FECHA A FUNCAO (linha com "}" na coluna 0), nao o
+      // "function" seguinte. Com o "function" seguinte, o comentario que explica
+      // a PROXIMA funcao entrava no corpo desta - e a asserção passava a falar de
+      // texto que não é dela. Foi assim que um comentário citando GetFolderPath
+      // reprovou a asserção do Aplicar-BarraTarefas sem nenhum defeito no agente.
+      const fim = psPp.indexOf('\n}\n', i);
+      const prox = psPp.indexOf('\nfunction ', i + 1);
+      const j = (fim >= 0 && (prox < 0 || fim < prox)) ? fim + 3 : (prox < 0 ? psPp.length : prox);
+      return psPp.slice(i, j);
     };
     const conf = {
       // A ARTE CARREGA DUAS LOGOS (grupo + marca), e Domino's existe nas duas
@@ -12728,6 +12739,71 @@ setTimeout(async () => {
       // a barra: o custo e a loja piscar no meio do expediente
       'o agente inteiro não encerra Explorer em lugar nenhum':
         !/Stop-Process[^\n]*explorer/i.test(psPp) && !/Get-Process -Name explorer/.test(psPp),
+      // ---- arrumar os ícones depois de limpar ----------------------------
+      // Pedido do Master: "apos remover ele arrumar os icones na area de
+      // trabalho". Tirar atalho deixa buraco na grade, porque o Windows guarda
+      // a POSIÇÃO de cada ícone e não reaproveita o lugar do que saiu.
+      // Reiniciar o Explorer resolveria e está PROIBIDO (piscava a tela da
+      // loja); o caminho é pedir o rearranjo à própria Área de Trabalho.
+      'os ícones são rearranjados sem reiniciar nada': (() => {
+        const fn = corpoPs('Organizar-IconesAreaDeTrabalho');
+        if (!fn) return false;
+        return /0x1016/.test(fn) && /SendMessageTimeout/.test(fn)
+          && /SHELLDLL_DefView/.test(fn) && /SysListView32/.test(fn)
+          && !/Stop-Process/.test(fn) && !/explorer/i.test(fn);
+      })(),
+      // o SYSTEM não alcança a Área de Trabalho do operador (sessão 0): pra ele
+      // sobra marcar alinhar-à-grade no hive, que vale no próximo logon
+      'sem sessão do operador, o rearranjo vira marca no registro (não some calado)': (() => {
+        const fn = corpoPs('Organizar-IconesAreaDeTrabalho');
+        return /if \(-not \$Servico\) \{/.test(fn) && /Bags\\1\\Desktop/.test(fn)
+          && /FFlags/.test(fn) && /-bor 0x5/.test(fn)
+          && /Raiz-RegistroDoOperador/.test(fn);
+      })(),
+      'o rearranjo só roda quando algo saiu de verdade (não mexe de graça)':
+        /if \(\$script:AreaMudou\) \{ try \{ \[void\]\(Organizar-IconesAreaDeTrabalho\)/.test(corpoPs('Sincronizar-Politica'))
+        && /\$script:AreaMudou = \$true/.test(corpoPs('Aplicar-PerfilEstacao'))
+        && /\$script:AreaMudou = \$true/.test(corpoPs('Arquivar-DadosDaEstacao'))
+        && /\$script:AreaMudou = \$false/.test(corpoPs('Organizar-IconesAreaDeTrabalho')),
+      // ---- o conserto que tinha ficado pela metade -------------------------
+      // A Área de Trabalho já saía do perfil do OPERADOR, mas Documentos,
+      // Imagens, Vídeos e Música continuavam no GetFolderPath do PROCESSO.
+      // Instalado pelo técnico logado como Administrador, o arquivamento movia
+      // os documentos DELE e deixava os do operador onde estavam.
+      'o arquivamento lê as pastas do perfil do operador, nunca do processo':
+        !/GetFolderPath/.test(corpoPs('Arquivar-DadosDaEstacao'))
+        && /Pasta-DeDados \$perfil "MyDocuments"/.test(corpoPs('Arquivar-DadosDaEstacao'))
+        && /Pasta-DeDados \$perfil \$null @\("Downloads"\)/.test(corpoPs('Arquivar-DadosDaEstacao')),
+      'GetFolderPath só entra quando o perfil resolvido é o do próprio processo': (() => {
+        const fn = corpoPs('Pasta-DeDados');
+        if (!/GetFolderPath/.test(fn)) return false;
+        const linhas = fn.split('\n');
+        const iGuard = linhas.findIndex((l) => /\$perfilUsuario\)\.TrimEnd[\s\S]*\$env:USERPROFILE\)\.TrimEnd/.test(l));
+        const iUso = linhas.findIndex((l) => /GetFolderPath/.test(l));
+        return iGuard >= 0 && iUso > iGuard;
+      })(),
+      'a pasta redirecionada pro OneDrive também é encontrada':
+        /Join-Path \(Join-Path \$perfilUsuario "OneDrive"\) \$n/.test(corpoPs('Pasta-DeDados')),
+      // mesma doença, outro lugar: HKCU: é o hive de QUEM RODA o agente
+      'a Lixeira é escondida no hive do operador, não no de quem roda o agente':
+        /Raiz-RegistroDoOperador/.test(corpoPs('Aplicar-VisibilidadeLixeira'))
+        && !/HKCU:/.test(corpoPs('Aplicar-VisibilidadeLixeira'))
+        && !/HKCU:/.test(corpoPs('Reconstruir-BarraTarefas')),
+      // Atalho-EstaAprovado lê $script:AtalhosPersonalizados. Sem carregar aqui,
+      // com arquivarDados ligado e modo != aplicar, o arquivamento decidia com a
+      // lista da política ANTERIOR e levava atalho marcado pra ficar.
+      'o arquivamento carrega os atalhos personalizados antes de decidir o que fica': (() => {
+        const fn = corpoPs('Arquivar-DadosDaEstacao');
+        const iCarga = fn.indexOf('$script:AtalhosPersonalizados = @($estacao.atalhosPersonalizados)');
+        // a CHAMADA, não a menção: o comentário logo acima da carga cita o nome
+        // da função e fazia o índice do 'uso' cair antes do da carga
+        const iUso = fn.indexOf('(Atalho-EstaAprovado $item $permitidos)');
+        return iCarga > 0 && iUso > iCarga;
+      })(),
+      // o movimento já aconteceu: se a marca não grava, a exceção derrubava o
+      // Sincronizar-Politica e no tick seguinte tudo era movido OUTRA vez
+      'falhar ao gravar o marcador não faz o arquivamento repetir o movimento':
+        /try \{ Set-Content -LiteralPath \$marca[^\n]*\} catch \{ Escrever-Log/.test(corpoPs('Arquivar-DadosDaEstacao')),
       'o pino "Remote Desktop Connection" / "Área de Trabalho Remota" conta como RDP Dominos':
         /rdp-dominos[^\n]*remote desktop\|trabalho remota\|mstsc/.test(psPp),
       'autoatualização valida a sintaxe e preserva a última cópia válida antes de substituir':
@@ -14163,7 +14239,13 @@ setTimeout(async () => {
     let parseOk = null;
     try {
       const fs = require('fs'); const { execFileSync } = require('child_process');
-      const pw = '/tmp/claude-0/-home-user-adyen-monitor/a18c6316-378b-5396-aa44-12a815dac3c3/scratchpad/pwsh/pwsh';
+      // Onde procurar o pwsh. O caminho fixo aqui era o scratchpad de UMA
+      // sessao antiga: fora dela o arquivo nao existe, entao este parse estava
+      // desligado sem ninguem notar (parseOk=null passa). Agora tenta PWSH_BIN,
+      // o PATH e os lugares usuais - e continua pulando quando nao ha pwsh.
+      const candidatosPw = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh'].filter(Boolean);
+      try { candidatosPw.push(require('child_process').execSync('command -v pwsh 2>/dev/null', { encoding: 'utf8' }).trim()); } catch (e) {}
+      const pw = candidatosPw.find((c) => c && fs.existsSync(c)) || '';
       if (fs.existsSync(pw)) {
         parseOk = scripts.every((sc, i) => {
           const f = `/tmp/_vg_${i}.ps1`; fs.writeFileSync(f, sc);
