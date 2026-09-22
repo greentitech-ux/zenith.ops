@@ -2302,11 +2302,16 @@ const COMANDO_DIAGNOSTICO_DESEMPENHO = [
   '$cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property LoadPercentage -Average',
   'if ($cpu.Count -gt 0 -and $null -ne $cpu.Average) { $linhas.Add("CPU agora: $([math]::Round($cpu.Average))%") }',
   '$volumes = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Size) { "DISCO $($_.DeviceID): $([math]::Round($_.FreeSpace/1GB,1)) GB livres de $([math]::Round($_.Size/1GB,1)) GB" } }',
-  '$linhas.AddRange(@($volumes))',
+  // [string[]] NAO e enfeite: List[string].AddRange so aceita
+  // IEnumerable[string], e @(...) no PowerShell produz object[], que NAO
+  // converte. Sem o cast, a PRIMEIRA linha de disco derruba o diagnostico
+  // inteiro com "Cannot convert argument collection" - e era isso que o
+  // Master via no cartao da maquina em vez do relatorio.
+  '$linhas.AddRange([string[]]@($volumes))',
   '$fisicos = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object { "DISCO FÍSICO: $($_.FriendlyName) · saúde $($_.HealthStatus) · operacional $($_.OperationalStatus)" })',
-  'if ($fisicos) { $linhas.AddRange($fisicos) }',
+  'if ($fisicos) { $linhas.AddRange([string[]]@($fisicos)) }',
   '$top = Get-Process -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 6 | ForEach-Object { "$($_.ProcessName): $([math]::Round($_.WorkingSet64/1MB)) MB" }',
-  'if ($top) { $linhas.Add("MAIORES CONSUMOS:"); $linhas.AddRange(@($top)) }',
+  'if ($top) { $linhas.Add("MAIORES CONSUMOS:"); $linhas.AddRange([string[]]@($top)) }',
   '$desde = (Get-Date).AddDays(-7)',
   '$linhas.Add("EVENTOS CRÍTICOS DOS ÚLTIMOS 7 DIAS:")',
   'try {',

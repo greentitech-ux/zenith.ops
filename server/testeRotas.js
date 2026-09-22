@@ -15925,8 +15925,52 @@ setTimeout(async () => {
       'mostra espaço livre e saúde do disco físico': /Win32_LogicalDisk/.test(cmd) && /Get-PhysicalDisk/.test(cmd),
       'não reinicia, encerra processo ou inicia programa': !/shutdown|Stop-Process|Restart-Service|Start-Process/i.test(cmd),
       'a tela permite pedir o diagnóstico para a máquina selecionada': /manutEnviar\('diagnostico-desempenho'\)/.test(htmlDiag) && /Diagnosticar falha/.test(htmlDiag),
+      // O DEFEITO QUE ISSO EVITA, e que ficou 
+      // meses verde aqui: as asserções acima só liam TEXTO, e o comando
+      // NUNCA rodou. List[string].AddRange exige IEnumerable[string], mas
+      // @(...) no PowerShell produz object[], que não converte - então a
+      // primeira linha de disco derrubava tudo e o Master via
+      // "Cannot convert argument collection" no cartão da máquina em vez do
+      // relatório. Agora o comando roda de verdade no pwsh, com os cmdlets
+      // do Windows dublados, e o teste confere a SAÍDA.
+      'o diagnóstico roda inteiro e devolve o relatório (não um erro)': (() => {
+        const cp0 = require('child_process'); const fs0 = require('fs'); const os0 = require('os');
+        const cand = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh'].filter(Boolean);
+        try { cand.push(cp0.execSync('command -v pwsh 2>/dev/null', { encoding: 'utf8' }).trim()); } catch (e) {}
+        const bin = cand.filter(Boolean).find((c) => { try { return fs0.statSync(c).isFile(); } catch (e) { return false; } });
+        if (!bin) return 'pular';
+        // dublês: não simulam o Windows, só fazem o comando PERCORRER os
+        // AddRange com dados de verdade (duas unidades, um disco, eventos)
+        const stubs = [
+          'function Get-CimInstance { param([Parameter(ValueFromRemainingArguments=$true)]$r)',
+          "  $a = ($r | Where-Object { $_ -is [string] }) -join ' '",
+          "  if ($a -match 'OperatingSystem') { [pscustomobject]@{ FreePhysicalMemory = 2097152; TotalVisibleMemorySize = 8388608 } }",
+          "  elseif ($a -match 'Processor') { [pscustomobject]@{ LoadPercentage = 37 } }",
+          "  elseif ($a -match 'LogicalDisk') { @([pscustomobject]@{ DeviceID='C:'; Size=500GB; FreeSpace=40GB }, [pscustomobject]@{ DeviceID='D:'; Size=100GB; FreeSpace=90GB }) }",
+          '  else { @() } }',
+          "function Get-PhysicalDisk { @([pscustomobject]@{ FriendlyName='ST500LM034'; HealthStatus='Warning'; OperationalStatus='OK' }) }",
+          'function Get-WinEvent { param([Parameter(ValueFromRemainingArguments=$true)]$r)',
+          "  @([pscustomobject]@{ Id=41; TimeCreated=(Get-Date); ProviderName='Microsoft-Windows-Kernel-Power'; Message='reinicializado sem ser desligado corretamente' }) }",
+        ].join('\n');
+        const arq = os0.tmpdir() + '/diag-desempenho-teste.ps1';
+        fs0.writeFileSync(arq, stubs + '\n' + cmd);
+        // spawnSync, nao execFileSync: a MethodException do PowerShell sai em
+        // STDERR e o script termina com codigo 0 assim mesmo. Com execFileSync
+        // eu lia so o stdout e o defeito passava despercebido - foi o que
+        // deixou a 3a sabotagem escapar.
+        const r0 = cp0.spawnSync(bin, ['-NoProfile', '-File', arq], { encoding: 'utf8', timeout: 30000 });
+        const saida = String(r0.stdout || '') + String(r0.stderr || '');
+        return !/MethodException|Cannot convert argument/.test(saida)
+          && /DISCO C:/.test(saida) && /DISCO D:/.test(saida)
+          && /DISCO F[ÍI]SICO: ST500LM034/.test(saida)
+          // o RÓTULO "MAIORES CONSUMOS:" e um Add que roda ANTES do AddRange,
+          // entao ele sobrevive ao defeito. O que prova o AddRange e a LINHA
+          // DE PROCESSO logo abaixo dele - "nome: N MB".
+          && /MAIORES CONSUMOS:\s*\n\S+: \d+ MB/.test(saida)
+          && /ID 41/.test(saida);
+      })(),
     };
-    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
     okDiagnosticoReinicio = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okDiagnosticoReinicio = false; console.log('  erro: ' + e.message); }
