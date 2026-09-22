@@ -12722,19 +12722,38 @@ setTimeout(async () => {
       // Os pinos vivem no registro (Taskband), nao na pasta - por isso trocar so
       // os .lnk deixava icone morto. Mas reiniciar o Explorer pra aplicar isso
       // apagava a tela da loja, abria janela de pasta e sumia com a barra, com
-      // o caixa aberto: o Master viu e mandou voltar. Agora so limpamos o
-      // registro; os pinos se acertam no proximo logon. Esta asserção existe
-      // pra ninguem devolver o Stop-Process achando que "conserta" o icone.
-      'os pinos são marcados no registro SEM matar o Explorer do operador':
-        (() => {
-          const fn = corpoPs('Reconstruir-BarraTarefas');
-          if (!fn) return false;
-          return /Taskband/.test(fn)
-            && /Remove-ItemProperty[^\n]*Favorites, FavoritesResolve/.test(fn)
-            && !/Stop-Process/.test(fn) && !/Get-Process -Name explorer/.test(fn)
-            && !/Register-ScheduledTask/.test(fn) && !/Start-Process[^\n]*explorer/.test(fn)
-            && /Reconstruir-BarraTarefas/.test(corpoPs('Aplicar-BarraTarefas'));
-        })(),
+      // o caixa aberto: o Master viu e mandou voltar.
+      //
+      // Decisão do Master (22/09): "só o desafixar já ajuda". Não há API pra
+      // FIXAR no Win10/11 - a única via é layout por política, que TRAVA a
+      // barra pro operador, e ele não quis. Então a barra só perde o que não
+      // está aprovado, pelo verbo do shell (o mesmo do botão direito), que
+      // acerta pasta e registro de uma vez, na hora, sem reiniciar nada.
+      'a barra é limpa pelo verbo de desafixar, não pelo registro': (() => {
+        const fn = corpoPs('Desafixar-DaBarra');
+        if (!fn) return false;
+        return /Shell\.Application/.test(fn) && /\$item\.Verbs\(\)/.test(fn) && /\$v\.DoIt\(\)/.test(fn)
+          && /Desafixar da barra de tarefas\|Unpin from taskbar/.test(fn)
+          && /Desafixar-DaBarra \$item\.FullName/.test(corpoPs('Aplicar-BarraTarefas'))
+          // o caminho velho não pode voltar: ele nunca convergia
+          && !/Reconstruir-BarraTarefas/.test(psPp)
+          && !/Remove-ItemProperty[^\n]*Favorites/.test(psPp);
+      })(),
+      // o COM conversa com o Explorer da PRÓPRIA sessão: SYSTEM e a instância
+      // do técnico que instalou não alcançam a barra do operador
+      'só a instância do operador tenta desafixar':
+        /if \(\$Servico -or \(\$operador -and \(\$operador -ine \$env:USERNAME\)\)\) \{ Escrever-Log/.test(corpoPs('Aplicar-BarraTarefas')),
+      // o agente NÃO mexe nos arquivos: quem desafixa é o shell. Copiar .lnk
+      // pra essa pasta nunca fixou nada, e apagar deixava ícone morto na barra
+      // apontando pra um arquivo que já tinha ido pro backup.
+      'o agente não apaga nem copia .lnk na pasta de pinos': (() => {
+        const fn = corpoPs('Aplicar-BarraTarefas');
+        if (!fn) return false;
+        return !/Remove-Item/.test(fn) && !/Copy-Item/.test(fn) && !/New-Item/.test(fn);
+      })(),
+      // esvaziar a barra por não ter achado nada seria pior que não mexer
+      'o aprovado é mantido item a item; a barra nunca é esvaziada de uma vez':
+        /if \(\(Atalho-EstaAprovado \$item \$permitidos\) -or \(\$permitidos -contains \(Chave-Atalho \$item\)\)\) \{ \$ficou \+= 1; continue \}/.test(corpoPs('Aplicar-BarraTarefas')),
       // nenhuma parte do agente pode matar processo do operador pra padronizar
       // a barra: o custo e a loja piscar no meio do expediente
       'o agente inteiro não encerra Explorer em lugar nenhum':
@@ -12830,9 +12849,11 @@ setTimeout(async () => {
         /Join-Path \(Join-Path \$perfilUsuario "OneDrive"\) \$n/.test(corpoPs('Pasta-DeDados')),
       // mesma doença, outro lugar: HKCU: é o hive de QUEM RODA o agente
       'a Lixeira é escondida no hive do operador, não no de quem roda o agente':
+        // a metade que olhava a Reconstruir-BarraTarefas saiu: aquela função
+        // não existe mais, e corpoPs('') passaria vazio - asserção que não
+        // pode falhar não é asserção
         /Raiz-RegistroDoOperador/.test(corpoPs('Aplicar-VisibilidadeLixeira'))
-        && !/HKCU:/.test(corpoPs('Aplicar-VisibilidadeLixeira'))
-        && !/HKCU:/.test(corpoPs('Reconstruir-BarraTarefas')),
+        && !/HKCU:/.test(corpoPs('Aplicar-VisibilidadeLixeira')),
       // Atalho-EstaAprovado lê $script:AtalhosPersonalizados. Sem carregar aqui,
       // com arquivarDados ligado e modo != aplicar, o arquivamento decidia com a
       // lista da política ANTERIOR e levava atalho marcado pra ficar.
