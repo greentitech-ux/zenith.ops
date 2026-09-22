@@ -133,7 +133,8 @@ async function despachar(nome, entrada, ator) {
     }));
     const noc = maquinas.filter((m) => !m.online || (m.degradacao || []).length).filter(combina).slice(0, limite).map((m) => ({
       unidade: m.nomeUnidade || m.codigo, codigo: m.codigo, posto: m.posto,
-      maquina: m.nomeComputador || m.hostname || null, online: !!m.online,
+      // mesmo defeito da consultar_noc: os dois campos nao existem no resumo
+      maquina: m.nome || null, online: !!m.online,
       estado: m.estado, degradacao: m.degradacao || [], ultimoContato: m.ultimoHeartbeatEm || null,
     }));
     return { geradoEm: new Date().toISOString(), filtros: { termo: p.termo || null, unidade: p.unidade || null }, tarefas: tarefasCompactas, solicitacoes: solicitacoesCompactas, alertasNoc: noc };
@@ -142,8 +143,15 @@ async function despachar(nome, entrada, ator) {
     const unidade = String(p.unidade || '').trim().toLocaleLowerCase('pt-BR');
     return (await lojaStatus.listarResumo()).filter((m) => !unidade || String(m.codigo || '').toLocaleLowerCase('pt-BR').includes(unidade) || String(m.nomeUnidade || '').toLocaleLowerCase('pt-BR').includes(unidade)).slice(0, 200).map((m) => ({
       codigo: m.codigo, posto: m.posto, unidade: m.nomeUnidade || m.codigo,
-      maquina: m.nomeComputador || m.hostname || null, online: !!m.online,
+      // O nome do computador vive em `nome`. nomeComputador e hostname nao
+      // existem no resumo, entao isto voltava null em TODAS as maquinas e a
+      // resposta saia sem dizer de qual computador estava falando.
+      maquina: m.nome || null, online: !!m.online,
       estado: m.estado, degradacao: m.degradacao || [], ultimoContato: m.ultimoHeartbeatEm || null,
+      // A versao do NOCZenith que a maquina reporta. Sem ela nao da pra
+      // responder "quem ja baixou a versao nova?" sem abrir a tela do NOC -
+      // e o resumo ja traz o campo, entao nao custa leitura nenhuma.
+      versaoAgente: m.agenteVersao || null,
     }));
   }
   const mapa = {

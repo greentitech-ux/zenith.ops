@@ -14359,6 +14359,66 @@ setTimeout(async () => {
   console.log(`${okPixNome ? '✓' : '✗'} Monitor: pedido Pix que mudou de status mostra o nome do cliente (não a conta da Adyen nem o nome do cartão)`);
 
   // ------------------------------------------------------------------
+  // O QUE O BENI VÊ DO NOC. A consulta do Cowork (consultar_noc) é o único
+  // jeito de perguntar "quem já baixou a versão nova?" sem abrir a tela.
+  //
+  // Ela projetava `m.nomeComputador || m.hostname` - dois campos que NÃO
+  // existem no resumo - então `maquina` vinha null em todas as 52, e a
+  // resposta não sabia de qual computador estava falando. E a versão do
+  // agente, que o resumo já carrega de graça, não era projetada: dava pra
+  // dizer quem estava online, nunca quem estava atualizado.
+  let okNocBeni = false;
+  try {
+    const cw = require(__dirname + '/coworkApi.js');
+    const lsB = require(__dirname + '/lojaStatus.js');
+    const UNIB = 'TESTE_NOC_BENI';
+    await lsB.cadastrarComputador(UNIB, 'PC da Cozinha', 'interno');
+    const postoB = (await lsB.listar()).find((c) => c.codigo === UNIB && c.nome === 'PC da Cozinha').posto;
+    const tkB = await lsB.garantirAgentToken(UNIB, postoB);
+    // a máquina reporta a versão do NOCZenith, do mesmo jeito que o agente faz
+    const respEstado = await postarJson(`/api/loja-status/${UNIB}/computadores/${postoB}/estado-agente`, { versao: 107 }, { 'x-noc-token': tkB });
+    const resumoB = (await lsB.listarResumo()).find((c) => c.codigo === UNIB && c.posto === postoB);
+    DOCS.set('users/mst-noc-beni', { email: 'master-noc@teste.local', role: 'master', active: true, nome: 'Master do NOC' });
+    const masterAntes = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'master-noc@teste.local';
+    let linha = null;
+    let erroBeni = null;
+    try {
+      const r = await cw.executar({ nome: 'consultar_noc', entrada: { unidade: UNIB } });
+      linha = (r.resultado || []).find((m) => m.codigo === UNIB && m.posto === postoB);
+    } catch (e) { erroBeni = e.message; } finally {
+      if (masterAntes === undefined) delete process.env.NOPULSO_AGENT_MASTER;
+      else process.env.NOPULSO_AGENT_MASTER = masterAntes;
+    }
+    const srcCw = require('fs').readFileSync(__dirname + '/coworkApi.js', 'utf8');
+    const conf = {
+      // esta vem PRIMEIRO de proposito: se o report de versao falhar, o teste
+      // aponta o report - e nao a projeção, que foi onde eu fui olhar quando
+      // vi versaoAgente null uma vez e perdi tempo no lugar errado.
+      'a máquina consegue reportar a versão do agente (HTTP 200)': respEstado.status === 200,
+      'a consulta responde (o Master do ambiente resolve)': !erroBeni && !!linha,
+      'a linha diz de QUAL computador está falando': !!linha && linha.maquina === 'PC da Cozinha',
+      'a linha leva a versão do NOCZenith que a máquina reportou': !!linha && linha.versaoAgente === 107,
+      // a prova de que o código antigo não podia funcionar: os campos que ele
+      // lia não existem no resumo
+      'os campos que não existem saíram da projeção': !/m\.nomeComputador|m\.hostname/.test(srcCw),
+      // a prova de que o código antigo NÃO podia funcionar, vinda do dado e
+      // não do texto: o resumo tem `nome` e `agenteVersao`, e não tem
+      // `nomeComputador` nem `hostname` - os dois que ele lia.
+      'o resumo tem nome e agenteVersao, e não tem nomeComputador nem hostname': (() => {
+        const doc = resumoB;
+        return !!doc && doc.nome === 'PC da Cozinha' && doc.agenteVersao === 107
+          && doc.nomeComputador === undefined && doc.hostname === undefined;
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okNocBeni = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (linha=${JSON.stringify(linha)} resumo=${JSON.stringify(resumoB)} estado=${respEstado.status}:${String(respEstado.corpo).slice(0,120)} erro=${erroBeni})`);
+  } catch (e) { okNocBeni = false; console.log('  erro: ' + e.message); }
+  if (!okNocBeni) ruins += 1;
+  console.log(`${okNocBeni ? '✓' : '✗'} Beni: a consulta do NOC diz o nome da máquina e a versão do NOCZenith`);
+
+  // ------------------------------------------------------------------
   // ACESSO REMOTO CONHECIDO. Pedido do Master: alerta que dispara pela propria
   // equipe vira ruido e faz o Master parar de olhar o que importa. O ID do
   // AnyDesk de QUEM ACESSA entra numa lista e aquele acesso deixa de tocar o
