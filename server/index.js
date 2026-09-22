@@ -118,6 +118,7 @@ const botIndicadores = require('./botIndicadores');
 const briefingEmail = require('./briefingEmail');
 const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
+const coworkApi = require('./coworkApi');
 const vigiaScript = require('./vigiaScript');
 const reparoNocZenithScript = require('./reparoNocZenithScript');
 const loginCustom = require('./loginCustom');
@@ -744,6 +745,64 @@ function exigirTokenBot(req, res, envVar = 'BOT_API_TOKEN') {
   if (!recebido || !senhasIguais(recebido, esperado)) { res.status(401).json({ error: 'Token inválido.' }); return false; }
   return true;
 }
+
+// API operacional única para Claude/Cowork. Fica antes do login humano e só
+// aceita Bearer próprio, desligando completamente se o token não existir.
+function exigirTokenAgente(req, res) {
+  if (!process.env.NOPULSO_AGENT_API_TOKEN) {
+    res.status(404).json({ error: 'API do agente desativada.' }); return false;
+  }
+  if (!coworkApi.tokenValido(req.headers.authorization || req.headers['x-agent-token'])) {
+    res.status(401).json({ error: 'Token do agente inválido.' }); return false;
+  }
+  return true;
+}
+
+app.get('/api/agent/tools', (req, res) => {
+  if (!exigirTokenAgente(req, res)) return;
+  res.json({ nome: 'NoPulso Agent API', versao: 1, ferramentas: coworkApi.listarFerramentas() });
+});
+
+app.post('/api/agent/execute', async (req, res) => {
+  if (!exigirTokenAgente(req, res)) return;
+  try {
+    res.json(await coworkApi.executar({
+      nome: req.body?.action, entrada: req.body?.input,
+      confirmar: req.body?.confirmar,
+      idempotencyKey: req.headers['idempotency-key'] || req.body?.idempotencyKey,
+    }));
+  } catch (err) {
+    res.status(err.code === 'CONFIRMACAO_NECESSARIA' ? 409 : 400).json({ error: err.message, code: err.code || 'ACAO_INVALIDA' });
+  }
+});
+
+// Remote MCP stateless: esta é a URL que entra como conector personalizado
+// no Beni Cowork. O segredo fica no caminho porque o cadastro de conector sem
+// OAuth não envia cabeçalho arbitrário; HTTPS protege o caminho em trânsito.
+app.post('/mcp/nopulso/:token', async (req, res) => {
+  if (!coworkApi.tokenValido(req.params.token)) return res.status(401).json({ error: 'Conector inválido.' });
+  const rpc = req.body || {};
+  const responder = (result) => res.json({ jsonrpc: '2.0', id: rpc.id, result });
+  try {
+    if (rpc.method === 'initialize') return responder({
+      protocolVersion: '2025-03-26', capabilities: { tools: { listChanged: false } },
+      serverInfo: { name: 'NoPulso - Beni Cowork', version: '1.0.0' },
+    });
+    if (rpc.method === 'notifications/initialized') return res.status(202).end();
+    if (rpc.method === 'ping') return responder({});
+    if (rpc.method === 'tools/list') return responder({ tools: coworkApi.ferramentasMcp() });
+    if (rpc.method === 'tools/call') {
+      const args = { ...(rpc.params?.arguments || {}) };
+      const idempotencyKey = args.idempotencyKey; const confirmar = args.confirmar;
+      delete args.idempotencyKey; delete args.confirmar;
+      const saida = await coworkApi.executar({ nome: rpc.params?.name, entrada: args, confirmar, idempotencyKey });
+      return responder({ content: [{ type: 'text', text: JSON.stringify(saida) }], isError: false });
+    }
+    return res.status(400).json({ jsonrpc: '2.0', id: rpc.id, error: { code: -32601, message: 'Método MCP não suportado.' } });
+  } catch (err) {
+    return responder({ content: [{ type: 'text', text: JSON.stringify({ error: err.message, code: err.code || 'ACAO_INVALIDA' }) }], isError: true });
+  }
+});
 app.post('/api/bot/solicitacoes', async (req, res) => {
   if (!exigirTokenBot(req, res)) return;
   try {

@@ -485,8 +485,24 @@ async function executarAcaoDoAgente(acaoId, parametros) {
   return executor(params);
 }
 
+// Entrada programatica para integracoes confiaveis (Claude/Cowork, por
+// exemplo). Continua limitada a esta lista fechada: a integracao nunca envia
+// JavaScript, PowerShell ou nome de funcao arbitrario. O gateway externo
+// resolve e fixa o Master em `porId` antes de chegar aqui.
+async function executarAcaoSistema(executorSistema, parametros) {
+  if (!EXECUTORES_SISTEMA_VALIDOS.includes(executorSistema)) {
+    throw new Error(`Ação de sistema não permitida: ${executorSistema}`);
+  }
+  const executor = EXECUTORES_SISTEMA[executorSistema];
+  if (!executor) throw new Error(`Ação de sistema indisponível: ${executorSistema}`);
+  // Todas as ações expostas ao gateway precisam comprovar novamente que o
+  // ator configurado ainda existe, está ativo e continua sendo Master.
+  await resolverAtor(parametros || {});
+  return executor(parametros || {});
+}
+
 module.exports = {
   TIPOS_ACAO, EXECUTORES_SISTEMA_VALIDOS, PARAMETROS_EXECUTOR, MODELOS_COMANDO, validarDados,
   listar, listarAtivas, obter, criar, atualizar, remover,
-  obterContexto, salvarContexto, executarAcaoDoAgente,
+  obterContexto, salvarContexto, executarAcaoDoAgente, executarAcaoSistema,
 };
