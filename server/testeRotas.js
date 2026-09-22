@@ -12604,6 +12604,15 @@ setTimeout(async () => {
     const htmlPp = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
     const indexPp = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
 
+    // corpo de UMA função do .ps1: da assinatura até a próxima declaração na
+    // coluna 0. Sem isso, toda asserção sobre função virava asserção sobre o
+    // arquivo inteiro.
+    const corpoPs = (nome) => {
+      const i = psPp.indexOf('function ' + nome);
+      if (i < 0) return '';
+      const j = psPp.indexOf('\nfunction ', i + 1);
+      return psPp.slice(i, j < 0 ? psPp.length : j);
+    };
     const conf = {
       // A ARTE CARREGA DUAS LOGOS (grupo + marca), e Domino's existe nas duas
       // redes: sem a chave por grupo, a Dom Carrão mostraria a logo do GBE.
@@ -12684,11 +12693,38 @@ setTimeout(async () => {
         /ROTA_LOJA_INVENTARIO_ATALHOS_RE\.test\(path\)/.test(indexPp)
         && indexPp.indexOf("app.post('/api/loja-status/:codigo/computadores/:posto/inventario-atalhos'")
           < indexPp.indexOf("app.use('/api', auth.requireAuth);"),
-      'somente o usuário logado inventaria atalhos e respeita Área de Trabalho redirecionada':
-        /function Enviar-InventarioAtalhos \{[\s\S]*?if \(\$Servico\) \{ return \$false \}[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)/.test(psPp),
-      'a aplicação e a barra usam o mesmo Desktop real que o inventário encontrou':
-        /function Aplicar-BarraTarefas[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)[\s\S]*?foreach \(\$origem in @\(\$desktopUsuario/.test(psPp)
-        && /function Aplicar-PerfilEstacao[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)[\s\S]*?\$areas = @\(\$desktopUsuario, \$env:PUBLIC/.test(psPp),
+      // v101: as DUAS instâncias inventariam (a de boot resolve o operador pelo
+      // console); sem operador presente ela não envia, e é isso que impede a
+      // corrida antiga de mandar listas vazias. Nenhuma confia no Desktop do
+      // PROCESSO: quando o agente roda como SYSTEM, esse Desktop é o do SYSTEM.
+      // Cada asserção olha SÓ o corpo da própria função. Com [\s\S]*? solto o
+      // regex atravessava o fim da função e ia achar a chamada em OUTRA mais
+      // abaixo: sabotar Aplicar-BarraTarefas passava no teste. Sabotagem só
+      // vale se a asserção estiver presa ao trecho que ela afirma.
+      'as duas instâncias inventariam, resolvendo as pastas pelo perfil do operador (não pelo processo)':
+        /Pastas-AreaDeTrabalho \$perfilUsuario/.test(corpoPs('Enviar-InventarioAtalhos'))
+        && !/if \(\$Servico\) \{ return \$false \}/.test(corpoPs('Enviar-InventarioAtalhos')),
+      'a limpeza e a barra usam a MESMA resolução de pastas que o inventário':
+        /Pastas-AreaDeTrabalho \$perfilUsuario/.test(corpoPs('Aplicar-BarraTarefas'))
+        && !/GetFolderPath|\$env:USERPROFILE/.test(corpoPs('Aplicar-BarraTarefas'))
+        && /\$areas = @\(Pastas-AreaDeTrabalho \$perfilUsuario\)/.test(corpoPs('Aplicar-PerfilEstacao')),
+      // os pinos vivem no registro (Taskband): trocar só a pasta deixava ícone
+      // fantasma com "Não é possível abrir este item". E nunca se mata o
+      // Explorer do operador sem antes ter PROVADO que consegue relançá-lo.
+      'os pinos da barra são reconstruídos no registro e o Explorer reiniciado - e nunca morto sem relançamento provado':
+        (() => {
+          const i = psPp.indexOf('function Reconstruir-BarraTarefas'); if (i < 0) return false;
+          const fn = psPp.slice(i, psPp.indexOf('\nfunction ', i + 10));
+          const reg = fn.indexOf('Register-ScheduledTask -TaskName $nomeT');
+          const prova = fn.indexOf('Start-ScheduledTask -TaskName $nomeT');
+          const mata = fn.indexOf('Stop-Process -Id $p.ProcessId');
+          return /Taskband/.test(fn) && /Remove-ItemProperty[^\n]*Favorites, FavoritesResolve/.test(fn)
+            && /New-ScheduledTaskPrincipal -UserId \$operador -LogonType Interactive/.test(fn)
+            && reg > 0 && prova > reg && mata > prova
+            && /Reconstruir-BarraTarefas/.test(corpoPs('Aplicar-BarraTarefas'));
+        })(),
+      'o pino "Remote Desktop Connection" / "Área de Trabalho Remota" conta como RDP Dominos':
+        /rdp-dominos[^\n]*remote desktop\|trabalho remota\|mstsc/.test(psPp),
       'autoatualização valida a sintaxe e preserva a última cópia válida antes de substituir':
         /Language\.Parser\]::ParseInput\(\$novoConteudo/.test(psPp)
         && /Atualizacao recusada: o arquivo novo tem erro de sintaxe/.test(psPp)
