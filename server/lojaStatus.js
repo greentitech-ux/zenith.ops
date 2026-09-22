@@ -1940,6 +1940,11 @@ async function registrarTelemetria(codigo, posto, dados, token) {
       patch.ramAlertaPendente = depois.nivel;
     }
   }
+  const hardware = nocMaquina.sanitizarHardware(dados && dados.hardware);
+  if (hardware && JSON.stringify(hardware) !== JSON.stringify(atual.hardware || null)) {
+    patch.hardware = hardware;
+    patch.hardwareMedidoEm = agora;
+  }
   const disco = nocMaquina.sanitizarDisco(dados && dados.disco);
   if (disco) {
     const antes = nocMaquina.avaliarDisco(atual.disco);

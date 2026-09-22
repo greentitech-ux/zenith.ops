@@ -1776,7 +1776,24 @@ function atualizarConteudoDetalhe(codigo, c){
   // acontece nada" no celular: a unica que abria era a que estava fora e
   // ainda nao tinha medida de RAM.
   if(c.ram && c.ram.totalGb != null){
-    infoBits.push(`🧠 <b>RAM:</b> ${c.ram.totalGb} GB${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}${c.ramMedidaEm ? ` <span class="sub">· medido ${formatarRelativo(c.ramMedidaEm)}</span>` : ''}`);
+    const mods = c.hardware && Array.isArray(c.hardware.memoria) ? c.hardware.memoria : [];
+    const tipos = [...new Set(mods.map(m=>m.tipo).filter(t=>t && t!=='Desconhecido'))];
+    const freqs = [...new Set(mods.map(m=>Number(m.frequenciaMhz)).filter(Number.isFinite))];
+    const detalhesRam = [tipos.join('/'), freqs.length === 1 ? `${freqs[0]} MHz` : (freqs.length > 1 ? `${Math.min(...freqs)}–${Math.max(...freqs)} MHz` : ''), mods.length ? `${mods.length} módulo(s)` : ''].filter(Boolean).join(' · ');
+    infoBits.push(`🧠 <b>RAM:</b> ${c.ram.totalGb} GB${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}${detalhesRam ? ` <span class="sub">· ${escapeHtml(detalhesRam)}</span>` : ''}${c.ramMedidaEm ? ` <span class="sub">· medido ${formatarRelativo(c.ramMedidaEm)}</span>` : ''}`);
+  }
+  if(c.hardware && c.hardware.processador){
+    const p = c.hardware.processador;
+    const detalhesCpu = [p.nucleos ? `${p.nucleos} núcleo(s)` : '', p.threads ? `${p.threads} thread(s)` : '', p.frequenciaMaxMhz ? `até ${(p.frequenciaMaxMhz/1000).toLocaleString('pt-BR',{maximumFractionDigits:2})} GHz` : ''].filter(Boolean).join(' · ');
+    infoBits.push(`⚙️ <b>Processador:</b> ${escapeHtml(p.nome || 'não identificado')}${detalhesCpu ? ` <span class="sub">· ${escapeHtml(detalhesCpu)}</span>` : ''}`);
+  }
+  if(c.hardware && c.hardware.placaMae){
+    const p = c.hardware.placaMae;
+    infoBits.push(`🔌 <b>Placa-mãe:</b> ${escapeHtml([p.fabricante,p.modelo].filter(Boolean).join(' · '))}`);
+  }
+  if(c.hardware && c.hardware.bios){
+    const b = c.hardware.bios;
+    infoBits.push(`🧩 <b>BIOS:</b> ${escapeHtml([b.fabricante,b.versao].filter(Boolean).join(' · '))}`);
   }
   // regra da casa: reiniciar 1x por semana (ver UPTIME_REINICIAR_DIAS)
   if(c.uptimeHoras != null){

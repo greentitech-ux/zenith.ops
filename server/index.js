@@ -1756,7 +1756,7 @@ app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, 
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
     const r = await lojaStatus.registrarTelemetria(req.params.codigo, req.params.posto, {
-      disco: req.body.disco, ram: req.body.ram, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
+      disco: req.body.disco, ram: req.body.ram, hardware: req.body.hardware, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
       statusImpressoras: req.body.statusImpressoras,
       anydeskServico: req.body.anydeskServico, anydeskId: req.body.anydeskId,
     }, token);
