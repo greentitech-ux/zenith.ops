@@ -5134,6 +5134,7 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // ação sobrevive até um restart do servidor (fica só o tipo+payload
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
+  'manutencao.resetarSenha': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoResetSenha(p.nomeConta), { origem: 'manutencao-reset-senha', requerAdmin: true }),
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
@@ -5393,6 +5394,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
     const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const nomeConta = tarefa === 'reset-senha' ? req.body.nomeConta : undefined;
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
@@ -5423,15 +5425,15 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       },
       'reset-senha': {
         acao: 'manutencao.resetarSenha',
-        verbo: 'Resetar a senha do Windows de',
-        comando: lojaStatus.COMANDO_RESET_SENHA,
+        verbo: `Remover a senha da conta ${nomeConta} em`,
+        comando: tarefa === 'reset-senha' ? lojaStatus.comandoResetSenha(nomeConta) : '',
         origem: 'manutencao-reset-senha', requerAdmin: true,
       },
     };
     const t = TAREFAS[tarefa];
     if (!(await exigirSenhaDoMaster(req, res))) return;
     const resumo = `${t.verbo} ${alvos.length} computador(es) do parque`;
-    if (await desviarSeQaMaster(req, res, t.acao, resumo, { alvos, porEmail: req.user.email })) return;
+    if (await desviarSeQaMaster(req, res, t.acao, resumo, { alvos, nomeConta, porEmail: req.user.email })) return;
     const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, {
       origem: t.origem,
       requerAdmin: !!t.requerAdmin,

@@ -943,7 +943,8 @@
        <button type="button" class="btn-ghost" id="manut-remover-office" onclick="manutEnviar('remover-office')" title="Remove qualquer versão detectada do Microsoft Office/Microsoft 365; documentos do usuário são preservados">🗑️ Remover Office</button>
        <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
       <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
-      <button type="button" class="btn-ghost" id="manut-reset-senha" onclick="manutEnviar('reset-senha')" title="Reseta a senha do Windows para a senha padrão da loja - a máquina executa na próxima batida">🔑 Reset de Senha</button>
+      <label for="manut-reset-conta">Conta para remover a senha</label><input id="manut-reset-conta" maxlength="20" placeholder="Ex.: SUPORTE" autocomplete="off">
+      <button type="button" class="btn-ghost" id="manut-reset-senha" onclick="manutEnviar('reset-senha')" title="Remove a senha da conta informada na próxima batida">🔑 Reset de Senha</button>
       <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar('abortar')" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
       <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar('reiniciar')">🔁 Reiniciar selecionados</button>
     </div>
@@ -2189,7 +2190,7 @@ const PROG_MANUTENCOES = [
   ['remover-office','🗑️ Remover Office','Desinstala Office/Microsoft 365 detectado; preserva documentos do usuário.', 'perigo'],
   ['rede','🌐 Destravar a rede','Limpa DNS e renova DHCP; a conexão pode cair por alguns segundos.', 'perigo'],
   ['zebra','🖨️ Resetar Zebra','Limpa a fila e reinicia as Zebras cadastradas na unidade; o computador não é reiniciado.'],
-  ['reset-senha','🔑 Reset de Senha','Redefine a senha do Windows para o padrão da loja.', 'perigo'],
+  ['reset-senha','🔑 Reset de Senha','Remove a senha da conta local informada. O Windows pode bloquear a remoção por política de senha.', 'perigo'],
   ['abortar','🛑 Abortar reinício','Cancela somente um reinício que ainda esteja na contagem de dois minutos.'],
 ];
 async function executarManutencaoDoPrograma(tarefa){
@@ -2197,7 +2198,9 @@ async function executarManutencaoDoPrograma(tarefa){
   const item = PROG_MANUTENCOES.find(x=>x[0]===tarefa);
   if(!c || !item || c.tipo !== 'interno') return;
   const nome = c.nome || c.posto;
-  if(!confirm(`${item[1].replace(/^\S+\s/,'')} em ${nome}?\n\n${item[2]}\n\nA ação será registrada e enviada somente para esta máquina.`)) return;
+  const nomeConta = tarefa === 'reset-senha' ? document.getElementById('prog-reset-conta').value.trim() : undefined;
+  if(tarefa === 'reset-senha' && !nomeConta){ alert('Informe o nome da conta do Windows.'); document.getElementById('prog-reset-conta').focus(); return; }
+  if(!confirm(`${item[1].replace(/^\S+\s/,'')} em ${nome}?\n\n${item[2]}${nomeConta ? `\nConta: ${nomeConta} (ficará sem senha).` : ''}\n\nA ação será registrada e enviada somente para esta máquina.`)) return;
   const password = await pedirSenhaMaster(`autorizar: ${item[1].replace(/^\S+\s/,'')}`);
   if(password === null) return;
   const botoes = [...document.querySelectorAll(`[data-manut-programa="${tarefa}"]`)];
@@ -2205,7 +2208,7 @@ async function executarManutencaoDoPrograma(tarefa){
   try{
     const r = await fetch('/api/loja-status/manutencao/reiniciar', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({alvos:[{codigo:c.codigo,posto:c.posto}],tarefa,abortar:tarefa==='abortar',password}),
+      body:JSON.stringify({alvos:[{codigo:c.codigo,posto:c.posto}],tarefa,nomeConta,abortar:tarefa==='abortar',password}),
     });
     const d = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error || 'Não consegui enviar a manutenção.');
@@ -2240,6 +2243,7 @@ function pintarManutencaoProgramas(corpo){
     </article>
     ${PROG_MANUTENCOES.map(([tarefa,titulo,descricao,classe])=>`<article class="prog-manut-card ${classe||''}">
       <h4>${titulo}</h4><p>${descricao}</p>
+      ${tarefa === 'reset-senha' ? '<label for="prog-reset-conta">Nome da conta do Windows</label><input id="prog-reset-conta" type="text" maxlength="20" placeholder="Ex.: SUPORTE ou DOMINO&#39;S" autocomplete="off" style="width:100%;box-sizing:border-box;margin:8px 0 12px;">' : ''}
       <button type="button" class="btn-ghost" data-manut-programa="${tarefa}" onclick="executarManutencaoDoPrograma('${tarefa}')">Executar nesta máquina</button>
     </article>`).join('')}` : `
     <article class="prog-manut-aviso">Este equipamento é de atendimento. Comandos de rede, console e reinício são exclusivos de computadores internos.</article>`;
@@ -3390,6 +3394,8 @@ async function manutEnviar(tarefa){
   if(tarefa === false || !MANUT_TAREFAS[tarefa]) tarefa = 'reiniciar';
   const alvos = [...MANUT_MARCADOS].map(k => { const [codigo, posto] = k.split('|'); return { codigo, posto }; });
   if(!alvos.length) return;
+  const nomeConta = tarefa === 'reset-senha' ? document.getElementById('manut-reset-conta').value.trim() : undefined;
+  if(tarefa === 'reset-senha' && !nomeConta){ alert('Informe o nome da conta do Windows.'); document.getElementById('manut-reset-conta').focus(); return; }
   const senha = document.getElementById('manut-senha').value;
   const st = document.getElementById('manut-status');
   if(!senha){ st.textContent = 'Digite sua senha de Master.'; st.className='msg err'; st.classList.remove('hidden'); return; }
@@ -3407,7 +3413,7 @@ async function manutEnviar(tarefa){
     if(!confirm(`Resetar as impressoras Zebra marcadas em ${unidades} unidade(s)?\n\nA fila da impressora é descartada e ela reinicia (volta em ~30s). O computador NÃO é tocado.\n\nSó vai pras impressoras marcadas como Zebra no cadastro de dispositivos.`)) return;
   }
   if(tarefa === 'reset-senha'){
-    if(!confirm(`Resetar a senha do Windows em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nA senha volta pra padrão da loja. Cada máquina executa na próxima batida (até ~25s).\n\nOs usuários precisarão fazer novo login com a senha nova.`)) return;
+    if(!confirm(`Remover a senha da conta "${nomeConta}" em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nA conta informada ficará sem senha. Cada máquina executa na próxima batida (até ~25s).\n\nO Windows pode bloquear a remoção por política de senha.`)) return;
   }
   if(tarefa === 'anydesk'){
     // confirmacao mais leve, e dizendo o que NAO acontece: a duvida de quem
@@ -3435,7 +3441,7 @@ async function manutEnviar(tarefa){
   try{
     const r = await fetch('/api/loja-status/manutencao/reiniciar', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ alvos, tarefa, abortar: tarefa === 'abortar', password: senha }),
+      body: JSON.stringify({ alvos, tarefa, nomeConta, abortar: tarefa === 'abortar', password: senha }),
     });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || 'Não consegui enviar.');

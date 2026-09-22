@@ -2726,46 +2726,28 @@ const COMANDO_ABORTAR_REINICIO = [
   'try { shutdown /a; "Reinicio abortado." } catch { "Nao havia reinicio em contagem." }',
 ].join('\n');
 
-const COMANDO_RESET_SENHA = [
-  '# Requer: agente rodando como SYSTEM (Boot NOCZenith) ou admin elevado',
-  'try {',
-  '  # Excluir contas de sistema e admin (em inglês E português)',
-  '  $usuariosExcluir = @("Administrator", "Administrador", "Guest", "Convidado", "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE", "DefaultAccount", "Público")',
-  '  $usuarios = Get-LocalUser | Where-Object { $_.Name -notin $usuariosExcluir }',
-  '  ',
-  '  # Preferir "User" se existir; senão pega o primeiro não-admin',
-  '  $usuario = $usuarios | Where-Object { $_.Name -eq "User" } | Select-Object -First 1',
-  '  if (-not $usuario) {',
-  '    $usuario = $usuarios | Select-Object -First 1',
-  '  }',
-  '  $usuario = $usuario | Select-Object -ExpandProperty Name',
-  '  ',
-  '  if ($usuario) {',
-  '    $charset = "abcdefghijklmnopqrstuvwxyz0123456789"',
-  '    $senha = ""',
-  '    1..16 | ForEach-Object { $senha += $charset.Substring((Get-Random -Maximum $charset.Length), 1) }',
-  '    ',
-  '    # Tenta 1: Set-LocalUser (PowerShell 5.1+, mais novo)',
-  '    try {',
-  '      $pass = ConvertTo-SecureString $senha -AsPlainText -Force',
-  '      Set-LocalUser -Name $usuario -Password $pass -ErrorAction Stop',
-  '      "✓ Senha resetada para $usuario. Nova: $senha"',
-  '    } catch {',
-  '      # Tenta 2: net user como fallback',
-  '      $resultado = & cmd /c "net user $usuario $senha" 2>&1',
-  '      if ($LASTEXITCODE -eq 0) {',
-  '        "✓ Senha resetada para $usuario. Nova: $senha"',
-  '      } else {',
-  '        "Erro: REQUER ADMIN - execute o agente NOCZenith como Administrador ou SYSTEM"',
-  '      }',
-  '    }',
-  '  } else {',
-  '    "Erro: nenhum usuario local encontrado para resetar."',
-  '  }',
-  '} catch {',
-  '  "Erro: $_"',
-  '}',
-].join('\n');
+// Nome tratado como dado literal: nunca interpolar em codigo PowerShell executavel.
+function comandoResetSenha(nomeConta) {
+  if (typeof nomeConta !== 'string' || !nomeConta.trim() || nomeConta.trim().length > 20 || /[\x00-\x1f\x7f"/\\[\]:;|=,+*?<>@]/.test(nomeConta)) {
+    throw new Error('Informe um nome de conta local válido (até 20 caracteres).');
+  }
+  const literal = nomeConta.trim().replace(/'/g, "''");
+  return [
+    "$usuario = '" + literal + "'",
+    'try {',
+    '  $conta = @(Get-LocalUser -ErrorAction Stop | Where-Object { $_.Name -eq $usuario })',
+    '  if ($conta.Count -ne 1) { throw "Conta local nao encontrada: $usuario" }',
+    '  if ($conta[0].SID.Value -match "-(500|501|503|504)$") { throw "Conta interna do Windows protegida." }',
+    '  if (-not $conta[0].Enabled) { throw "A conta esta desabilitada." }',
+    '  $pass = New-Object System.Security.SecureString',
+    '  Set-LocalUser -Name $conta[0].Name -Password $pass -ErrorAction Stop',
+    '  "Senha removida da conta $usuario."',
+    '} catch {',
+    '  "Erro ao remover a senha de ${usuario}: $_"',
+    '  exit 1',
+    '}',
+  ].join('\n');
+}
 
 // Dispara um comando fixo numa LISTA de alvos escolhida pelo painel (1
 // máquina, uma unidade inteira, ou várias unidades de uma vez). Mesma
@@ -4420,7 +4402,7 @@ module.exports = {
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
-  COMANDO_REDE_DESTRAVAR, COMANDO_RESET_SENHA,
+  COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
