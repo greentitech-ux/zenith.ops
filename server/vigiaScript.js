@@ -25,7 +25,7 @@
 // 83: controla também a exibição da Lixeira pela política da estação.
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
-const VERSAO_VIGIA = 103;
+const VERSAO_VIGIA = 104;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -2115,6 +2115,29 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  try { foreach ($item in $atuais) { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop }; foreach ($fonte in $selecionados) { Copy-Item -LiteralPath $fonte.FullName -Destination (Join-Path $pasta $fonte.Name) -Force -ErrorAction Stop }; try { Start-Process -FilePath "ie4uinit.exe" -ArgumentList "-show" -WindowStyle Hidden -ErrorAction SilentlyContinue } catch {}; Escrever-Log "Barra de tarefas padronizada: $($selecionados.Count) atalho(s), backup em $backup."; try { [void](Reconstruir-BarraTarefas) } catch { Escrever-Log "Barra de tarefas: reconstrucao dos pinos falhou ($($_.Exception.Message))." }; return $true } catch { Escrever-Log "Barra de tarefas: falhou ao aplicar ($($_.Exception.Message))."; return $false }',
     '}',
     '',
+    '# APARECER na Area de Trabalho. A limpeza so RETIRA: item marcado que nao',
+    '# estava lá nunca aparecia, e a tela promete "fica o que eu marquei".',
+    '# Nao inventa atalho: procura o .lnk que o instalador do programa deixou no',
+    '# menu Iniciar e copia. Sem achar, diz no log em vez de fingir que fez.',
+    'function Garantir-AtalhosNaArea($estacao, $perfilUsuario, $areas) {',
+    '  $permitidos = @($estacao.atalhosAprovados | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
+    '  if (-not $permitidos.Count) { return }',
+    '  $destino = @($areas | Where-Object { -not (Eh-AreaPublica $_) }) | Select-Object -First 1',
+    '  if (-not $destino) { return }',
+    '  $naArea = @()',
+    '  foreach ($a in $areas) { $naArea += @(Get-ChildItem -LiteralPath $a -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @(".lnk", ".url", ".rdp") }) }',
+    '  $fontes = @()',
+    '  foreach ($o in @(($perfilUsuario + "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs"), ($env:ProgramData + "\\Microsoft\\Windows\\Start Menu\\Programs"))) {',
+    '    if ($o -and (Test-Path -LiteralPath $o)) { $fontes += @(Get-ChildItem -LiteralPath $o -Filter "*.lnk" -File -Recurse -ErrorAction SilentlyContinue) }',
+    '  }',
+    '  foreach ($id in $permitidos) {',
+    '    if (@($naArea | Where-Object { Atalho-EstaAprovado $_ @($id) }).Count) { continue }',
+    '    $f = @($fontes | Where-Object { Atalho-EstaAprovado $_ @($id) } | Select-Object -First 1)',
+    '    if (-not $f.Count) { Escrever-Log "Área de Trabalho: $id está marcado, mas não achei atalho dele no menu Iniciar pra copiar."; continue }',
+    '    try { Copy-Item -LiteralPath $f[0].FullName -Destination (Join-Path $destino $f[0].Name) -Force -ErrorAction Stop; Escrever-Log "Área de Trabalho: $id não estava lá e foi copiado do menu Iniciar." }',
+    '    catch { Escrever-Log "Área de Trabalho: não consegui copiar $id ($($_.Exception.Message))." }',
+    '  }',
+    '}',
     'function Aplicar-PerfilEstacao($estacao) {',
     '  if (-not $estacao -or -not [bool]$estacao.ativa -or [string]$estacao.modo -ne "aplicar") { return $true }',
     '  $perfilUsuario = Resolver-PerfilDoOperador',
@@ -2124,6 +2147,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $areas = @(Pastas-AreaDeTrabalho $perfilUsuario)',
     '  $listaAreas = $areas -join " | "',
     '  Escrever-Log "Perfil da estação: olhando $($areas.Count) pasta(s) de Área de Trabalho - $listaAreas"',
+    '  # copia ANTES de montar a lista de remocao: o copiado esta aprovado, entao',
+    '  # a limpeza nao o retira - e nao depende do caminho de saida antecipada',
+    '  try { Garantir-AtalhosNaArea $estacao $perfilUsuario $areas } catch { Escrever-Log "Área de Trabalho: falha ao copiar marcados ($($_.Exception.Message))." }',
     '  $remover = New-Object System.Collections.Generic.List[object]',
     '  foreach ($area in $areas) {',
     '    if (-not (Test-Path -LiteralPath $area)) { continue }',

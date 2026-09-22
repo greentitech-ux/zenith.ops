@@ -12723,6 +12723,22 @@ setTimeout(async () => {
             && reg > 0 && prova > reg && mata > prova
             && /Reconstruir-BarraTarefas/.test(corpoPs('Aplicar-BarraTarefas'));
         })(),
+      // a limpeza só RETIRA: marcado que não estava na área nunca apareceria.
+      // Copia do menu Iniciar (onde o instalador deixou) ANTES de montar a
+      // lista de remoção - depois seria retirado no mesmo ciclo.
+      'item marcado que não está na Área de Trabalho é copiado do menu Iniciar':
+        /Copy-Item[^\n]*Join-Path \$destino/.test(corpoPs('Garantir-AtalhosNaArea'))
+        // as DUAS fontes: app instalado por usuário fica no menu Iniciar dele,
+        // app pra todos fica no ProgramData. Exigir só uma deixava metade quebrar
+        // em silêncio (foi o que a 3a sabotagem mostrou).
+        && /\$perfilUsuario \+ "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs"/.test(corpoPs('Garantir-AtalhosNaArea'))
+        && /\$env:ProgramData \+ "\\Microsoft\\Windows\\Start Menu\\Programs"/.test(corpoPs('Garantir-AtalhosNaArea'))
+        && (() => {
+          const fn = corpoPs('Aplicar-PerfilEstacao');
+          const copia = fn.indexOf('Garantir-AtalhosNaArea');
+          const lista = fn.indexOf('$remover = New-Object');
+          return copia > 0 && lista > copia;
+        })(),
       'o pino "Remote Desktop Connection" / "Área de Trabalho Remota" conta como RDP Dominos':
         /rdp-dominos[^\n]*remote desktop\|trabalho remota\|mstsc/.test(psPp),
       'autoatualização valida a sintaxe e preserva a última cópia válida antes de substituir':
