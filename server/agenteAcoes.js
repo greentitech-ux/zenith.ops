@@ -72,6 +72,44 @@ $cv = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion' 
 "Windows: $($cv.ProductName) | edicao $($cv.EditionID) | versao $($cv.DisplayVersion) | build $($cv.CurrentBuild).$($cv.UBR)"
 "Administrador: $admin"; "PROGRAMAS ($($p.Count)):"; $p | Select-Object -First 300; ''; "APPS DA LOJA ($($a.Count)):"; $a | Select-Object -First 200`;
 
+// REMOCAO DO EDGE - um unico texto, usado pela Limpeza E pela acao avulsa
+// "Remover o Microsoft Edge". Duas copias divergiriam na primeira correcao, e
+// esta ja teve tres: o UninstallString do registro nao serve (o setup do Edge
+// exige --uninstall --system-level --force-uninstall), o Windows 11 recente
+// recusa sem a destrava AllowUninstall, e o desinstalador DEIXA PARA TRAS o
+// atalho da area de trabalho, o do Iniciar e o pino da barra - foi o que o
+// Master viu na tela depois de a limpeza dizer OK.
+//
+// Espera $R (lista de saida) e $admin de quem usa. As duas chaves de registro
+// sao reversiveis: apagar EdgeUpdateDev e o valor em EdgeUpdate desfaz tudo.
+const TRECHO_EDGE = `# --- Microsoft Edge (decisao do Master 22/09) ---
+$edgeApp = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application','C:\\Program Files\\Microsoft\\Edge\\Application'
+$se = @(Get-ChildItem $edgeApp -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'Installer\\setup.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1)
+if (-not $se.Count) { $R.Add('NAO TINHA: Microsoft Edge') }
+elseif (-not $admin) { $R.Add('PULADO: Microsoft Edge - precisa de Administrador') }
+else {
+  try { $kd = 'HKLM:\\SOFTWARE\\Microsoft\\EdgeUpdateDev'; if (-not (Test-Path $kd)) { New-Item -Path $kd -Force -ErrorAction Stop | Out-Null }; New-ItemProperty -Path $kd -Name AllowUninstall -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null } catch {}
+  Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  try {
+    Start-Process -FilePath $se[0] -ArgumentList '--uninstall --system-level --force-uninstall' -Wait -WindowStyle Hidden
+    Start-Sleep -Seconds 3
+    if (@(Get-ChildItem $edgeApp -Directory -ErrorAction SilentlyContinue).Count) { $R.Add('FALHOU: Microsoft Edge - este Windows nao permite desinstalar') }
+    else { $R.Add('OK: Microsoft Edge') }
+  } catch { $R.Add("FALHOU: Microsoft Edge - $($_.Exception.Message)") }
+  # o icone orfao e pior que o programa: some da lista mas continua na tela
+  $lnks = @((Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk'), (Join-Path $env:PUBLIC 'Desktop\\Microsoft Edge.lnk'))
+  foreach ($u in @(Get-ChildItem "$env:SystemDrive\\Users" -Directory -ErrorAction SilentlyContinue)) {
+    $lnks += (Join-Path $u.FullName 'Desktop\\Microsoft Edge.lnk')
+    $lnks += (Join-Path $u.FullName 'AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk')
+    $lnks += (Join-Path $u.FullName 'AppData\\Roaming\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar\\Microsoft Edge.lnk')
+  }
+  $qtd = 0
+  foreach ($l in ($lnks | Select-Object -Unique)) { if (Test-Path $l) { try { Remove-Item -LiteralPath $l -Force -ErrorAction Stop; $qtd++ } catch {} } }
+  $R.Add("OK: $qtd atalho(s) do Edge removido(s)")
+  # sem isto o Windows Update traz o Edge de volta em poucos dias
+  try { $ku = 'HKLM:\\SOFTWARE\\Microsoft\\EdgeUpdate'; if (-not (Test-Path $ku)) { New-Item -Path $ku -Force -ErrorAction Stop | Out-Null }; New-ItemProperty -Path $ku -Name DoNotUpdateToEdgeWithChromium -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null; $R.Add('OK: reinstalacao automatica do Edge bloqueada') } catch { $R.Add("FALHOU: bloqueio de reinstalacao - $($_.Exception.Message)") }
+}`;
+
 const MODELO_LIMPEZA = `# Limpeza de programas basicos (NoPulso). Lista do Master. Mexe SO nestes nomes.
 $ErrorActionPreference = 'Continue'
 $R = New-Object System.Collections.Generic.List[string]
@@ -124,21 +162,7 @@ foreach ($n in 'TeamViewer','AteraAgent','Google Play Games','Microsoft Update H
     } catch { $R.Add("FALHOU: $($x.DisplayName) - $($_.Exception.Message)") }
   }
 }
-# 5) Edge (decisao do Master 22/09): o UninstallString nao basta, o setup dele
-#    exige --uninstall --system-level --force-uninstall. Windows 11 recente
-#    bloqueia a remocao - "FALHOU" ali e informacao, nao defeito.
-$edgeApp = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application','C:\\Program Files\\Microsoft\\Edge\\Application'
-$se = @(Get-ChildItem $edgeApp -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'Installer\\setup.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1)
-if (-not $se.Count) { $R.Add('NAO TINHA: Microsoft Edge') }
-elseif (-not $admin) { $R.Add('PULADO: Microsoft Edge - precisa de Administrador') }
-else {
-  try {
-    Start-Process -FilePath $se[0] -ArgumentList '--uninstall --system-level --force-uninstall' -Wait -WindowStyle Hidden
-    Start-Sleep -Seconds 3
-    if (@(Get-ChildItem $edgeApp -Directory -ErrorAction SilentlyContinue).Count) { $R.Add('FALHOU: Microsoft Edge - este Windows nao permite desinstalar') }
-    else { $R.Add('OK: Microsoft Edge') }
-  } catch { $R.Add("FALHOU: Microsoft Edge - $($_.Exception.Message)") }
-}
+${TRECHO_EDGE}
 "Administrador: $admin"; $R -join "\`n"`;
 
 // A senha NAO esta aqui: {{SEGREDO:ANYDESK_SENHA}} e' trocado pelo valor da
@@ -162,6 +186,32 @@ $id = ((& $exe --get-id 2>&1) | Out-String).Trim()
 if (-not $id) { "FALHOU: o AnyDesk nao respondeu ao --get-id (servico parado?)"; return }
 "OK: senha de acesso definida · AnyDesk ID: $id"`;
 
+// ACAO AVULSA "Remover o Microsoft Edge". Existe separada da Limpeza porque o
+// Master quis tirar SO o Edge de uma maquina, sem mexer nos outros 34 nomes.
+//
+// A TRAVA E O CORACAO DISTO. Em 22/09 a DOM-SM-DISPATCH tinha o chrome.exe no
+// disco, assinado e integro, e mesmo assim ele quebrava ao abrir (violacao de
+// acesso dentro do chrome.dll). Existir o arquivo NAO prova que a loja tem
+// navegador. Como a acao roda pelo agente - e a que exige Administrador roda
+// como SYSTEM, sem sessao grafica - nao da pra "abrir o Chrome e ver". O que
+// da pra fazer sem tela, e e o que esta aqui: contar os relatorios de falha
+// do Chrome das ultimas 24h em TODOS os perfis. Chrome que nao abre gera um
+// por tentativa; Chrome saudavel gera menos de um por dia.
+const MODELO_REMOVER_EDGE = `# Remover o Microsoft Edge (NoPulso). Mexe SO no Edge.
+$ErrorActionPreference = 'Continue'
+$R = New-Object System.Collections.Generic.List[string]
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$chrome = @(Get-ChildItem "$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe","\${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe","$env:SystemDrive\\Users\\*\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe" -ErrorAction SilentlyContinue | Select-Object -First 1)
+if (-not $chrome.Count) { "PULADO: esta maquina nao tem Chrome. Remover o Edge deixaria a loja sem navegador - o NoPulso roda no navegador."; return }
+$quebras = @(Get-ChildItem "$env:SystemDrive\\Users\\*\\AppData\\Local\\Google\\Chrome\\User Data\\Crashpad\\reports\\*" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddDays(-1) })
+if ($quebras.Count -ge 5) { "PULADO: o Chrome desta maquina quebrou $($quebras.Count) vezes nas ultimas 24h. Conserte o Chrome ANTES de tirar o Edge."; return }
+$R.Add("Chrome: $($chrome[0].VersionInfo.ProductVersion) | falhas em 24h: $($quebras.Count)")
+${TRECHO_EDGE}
+# A barra de tarefas so redesenha quando o Explorer recarrega. O pino ja foi
+# apagado do disco acima; a politica de estacao termina no proximo logon.
+$R.Add('AVISO: o icone some da barra no proximo logon do operador.')
+"Administrador: $admin"; $R -join "\`n"`;
+
 const MODELOS_COMANDO = [
   {
     id: 'inventario-programas',
@@ -177,6 +227,14 @@ const MODELOS_COMANDO = [
     requerAprovacao: true,
     requerAdmin: true,
     comando: MODELO_LIMPEZA,
+  },
+  {
+    id: 'remover-edge',
+    nome: 'Remover o Microsoft Edge',
+    descricao: 'REMOVE só o Microsoft Edge: desinstala pelo setup dele (o UninstallString do registro não funciona), apaga o atalho da Área de Trabalho, do Iniciar e o pino da barra em TODOS os perfis, e bloqueia a reinstalação automática pelo Windows Update. Precisa de Administrador. Ela se RECUSA a rodar em máquina sem Chrome, ou cujo Chrome esteja quebrando (5+ falhas em 24h) - sem navegador a loja não abre o NoPulso. Em Windows 11 recente a Microsoft pode bloquear a remoção: aí sai FALHOU, e isso é informação, não defeito. As duas chaves de registro são reversíveis.',
+    requerAprovacao: true,
+    requerAdmin: true,
+    comando: MODELO_REMOVER_EDGE,
   },
   {
     id: 'anydesk-senha-acesso',

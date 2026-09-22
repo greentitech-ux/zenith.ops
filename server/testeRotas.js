@@ -14558,11 +14558,16 @@ setTimeout(async () => {
     const lsL = require(__dirname + '/lojaStatus.js');
     const htmlL = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
     // o modelo é template literal: desfaz os escapes como o Node faria
-    const chave = 'const MODELO_LIMPEZA = ';
-    const ini = srcAcoes.indexOf(chave) + chave.length;
-    let i = ini + 1;
-    while (i < srcAcoes.length) { if (srcAcoes[i] === '\\') { i += 2; continue; } if (srcAcoes[i] === '`') break; i += 1; }
-    const modelo = new Function('return ' + srcAcoes.slice(ini, i + 1))();
+    // O modelo passou a interpolar ${TRECHO_EDGE} (fonte unica da remocao do
+    // Edge), entao render sem ele estoura "TRECHO_EDGE is not defined".
+    const bruto = (nome) => {
+      const chave = `const ${nome} = `;
+      const ini = srcAcoes.indexOf(chave) + chave.length;
+      let i = ini + 1;
+      while (i < srcAcoes.length) { if (srcAcoes[i] === '\\') { i += 2; continue; } if (srcAcoes[i] === '`') break; i += 1; }
+      return srcAcoes.slice(ini, i + 1);
+    };
+    const modelo = new Function('TRECHO_EDGE', 'return ' + bruto('MODELO_LIMPEZA'))(new Function('return ' + bruto('TRECHO_EDGE'))());
     const conf = {
       'a limpeza remove os seis que o Master pediu':
         ['Microsoft.Copilot', 'AteraAgent', 'Google Play Games', 'Microsoft OneDrive', 'Microsoft Edge', 'Microsoft Update Health Tools']
@@ -14724,6 +14729,155 @@ setTimeout(async () => {
   } catch (e) { okLote = false; console.log('  erro: ' + e.message); }
   if (!okLote) ruins += 1;
   console.log(`${okLote ? '✓' : '✗'} NOC: cancelar vários comandos da fila de uma vez`);
+
+  // ------------------------------------------------------------------
+  // REMOVER O EDGE como ação avulsa do catálogo. Pedido do Master (22/09):
+  // "quero remover o EDGE desinstalar e remover da area de trabalho" e depois
+  // "coloque no catalogo de acoes entao".
+  //
+  // O QUE ISTO TRAVA, e por que cada um custou caro:
+  //   - UM texto só pro Edge (TRECHO_EDGE), usado pela Limpeza E pela ação
+  //     avulsa: duas cópias divergiriam na primeira correção;
+  //   - o atalho sai junto com o programa - a Limpeza dizia OK e o ícone
+  //     continuava na tela do Master;
+  //   - e o PORTEIRO: a DOM-SM-DISPATCH tinha chrome.exe íntegro e assinado
+  //     que mesmo assim quebrava ao abrir. Tirar o Edge dali teria deixado a
+  //     loja sem navegador nenhum, e o NoPulso roda no navegador.
+  let okEdge = false;
+  try {
+    const srcE = require('fs').readFileSync(__dirname + '/agenteAcoes.js', 'utf8');
+    const bruto = (nome) => {
+      const chave = `const ${nome} = `;
+      const ini = srcE.indexOf(chave) + chave.length;
+      let i = ini + 1;
+      while (i < srcE.length) { if (srcE[i] === '\\') { i += 2; continue; } if (srcE[i] === '`') break; i += 1; }
+      return srcE.slice(ini, i + 1);
+    };
+    // PWSH_BIN, o PATH e os lugares usuais. Devolve undefined quando nao ha
+    // pwsh nesta maquina - e ai a assercao PULA, em vez de passar verde por
+    // ausencia de ferramenta.
+    const pwsh = () => {
+      const cp0 = require('child_process'); const fs0 = require('fs');
+      const cand = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh'].filter(Boolean);
+      try { cand.push(cp0.execSync('command -v pwsh 2>/dev/null', { encoding: 'utf8' }).trim()); } catch (e) {}
+      return cand.filter(Boolean).find((c) => { try { return fs0.statSync(c).isFile(); } catch (e) { return false; } });
+    };
+    const EDGE = new Function('return ' + bruto('TRECHO_EDGE'))();
+    const limpeza = new Function('TRECHO_EDGE', 'return ' + bruto('MODELO_LIMPEZA'))(EDGE);
+    const remover = new Function('TRECHO_EDGE', 'return ' + bruto('MODELO_REMOVER_EDGE'))(EDGE);
+    // o porteiro sozinho, rodado de verdade: mesma extração do harness
+    const porteiro = remover.split('\n').filter((l) => /\$chrome =|if \(-not \$chrome|\$quebras =|if \(\$quebras/.test(l)).join('\n');
+
+    const conf = {
+      // fonte única: o texto do Edge aparece inteiro nos DOIS modelos
+      'a remoção do Edge tem um texto só, usado pela Limpeza e pela ação avulsa':
+        EDGE.length > 400 && limpeza.includes(EDGE) && remover.includes(EDGE)
+        && /\$\{TRECHO_EDGE\}/.test(bruto('MODELO_LIMPEZA')) && /\$\{TRECHO_EDGE\}/.test(bruto('MODELO_REMOVER_EDGE')),
+      'o Edge sai pelo setup dele, com a destrava do Windows 11':
+        /-ArgumentList '--uninstall --system-level --force-uninstall'/.test(EDGE)
+        && /EdgeUpdateDev[\s\S]{0,200}AllowUninstall/.test(EDGE),
+      // O ERRO QUE ISSO EVITA: desinstalar e deixar o ícone órfão na tela.
+      //
+      // ASSERÇÃO DE COMPORTAMENTO, não de texto. A versão anterior só
+      // procurava os caminhos no fonte, e uma sabotagem que zerava a lista
+      // logo antes do laço de remoção passou VERDE: os caminhos continuavam
+      // escritos ali, só não removiam nada. Agora o bloco roda no pwsh contra
+      // arquivos de verdade e o teste confere que eles SUMIRAM.
+      'o atalho do Edge sai junto, em todos os perfis, e o pino da barra também': (() => {
+        if (!pwsh()) return 'pular';
+        const cp = require('child_process'); const fs2 = require('fs'); const os2 = require('os');
+        const linhas = EDGE.split('\n');
+        const a = linhas.findIndex((l) => l.includes("$lnks = @((Join-Path $env:ProgramData"));
+        const b = linhas.findIndex((l) => l.includes('atalho(s) do Edge removido'));
+        if (a < 0 || b < a) return false;
+        const bloco = linhas.slice(a, b + 1).join('\n');
+        // Em Linux a barra invertida é caractere comum de nome, então o
+        // Join-Path do próprio código cria os MESMOS alvos que ele procura -
+        // sem eu redigitar caminho nenhum, que seria outra chance de divergir.
+        const harness = [
+          '$R = New-Object System.Collections.Generic.List[string]',
+          "$base = Join-Path ([IO.Path]::GetTempPath()) ('edge-' + [Guid]::NewGuid().ToString('N').Substring(0,8))",
+          "$env:ProgramData = Join-Path $base 'pd'; $env:PUBLIC = Join-Path $base 'pub'",
+          "$u = @((Join-Path $base 'u1'), (Join-Path $base 'u2'))",
+          'New-Item -ItemType Directory -Path $env:ProgramData,$env:PUBLIC -Force | Out-Null',
+          'New-Item -ItemType Directory -Path $u -Force | Out-Null',
+          "$esperados = @((Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk'), (Join-Path $env:PUBLIC 'Desktop\\Microsoft Edge.lnk'))",
+          'foreach ($x in $u) {',
+          "  $esperados += (Join-Path $x 'Desktop\\Microsoft Edge.lnk')",
+          "  $esperados += (Join-Path $x 'AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk')",
+          "  $esperados += (Join-Path $x 'AppData\\Roaming\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar\\Microsoft Edge.lnk')",
+          '}',
+          'foreach ($e in $esperados) { New-Item -ItemType File -Path $e -Force | Out-Null }',
+          // um arquivo que NAO e do Edge: se o bloco apagar este, e faxina demais
+          "$inocente = Join-Path $base 'u1/Desktop\\Google Chrome.lnk'",
+          'New-Item -ItemType File -Path $inocente -Force | Out-Null',
+          'function Get-ChildItem { param([Parameter(ValueFromRemainingArguments=$true)]$r) $u | ForEach-Object { [pscustomobject]@{ FullName = $_ } } }',
+          bloco,
+          '$sobraram = @($esperados | Where-Object { Test-Path $_ }).Count',
+          '"qtd=$qtd sobraram=$sobraram inocente=" + (Test-Path $inocente)',
+        ].join('\n');
+        const arq = os2.tmpdir() + '/edge-atalhos.ps1';
+        fs2.writeFileSync(arq, harness);
+        const saida = String(cp.execFileSync(pwsh(), ['-NoProfile', '-File', arq], { encoding: 'utf8', timeout: 30000 }));
+        // 8 alvos criados, 8 removidos, nenhum sobrou, e o Chrome intacto
+        return /qtd=8 sobraram=0 inocente=True/.test(saida);
+      })(),
+      'a reinstalação automática pelo Windows Update fica bloqueada':
+        /DoNotUpdateToEdgeWithChromium/.test(EDGE),
+      // Procurar "requerAprovacao: true" no texto NAO basta: em objeto do
+      // JavaScript a ULTIMA chave repetida vence, entao acrescentar um
+      // "requerAprovacao: false" depois desliga a aprovacao com o "true"
+      // ainda escrito ali em cima - e a assercao antiga passava verde.
+      // Por isso conta as ocorrencias: uma so, e com o valor certo.
+      'a ação avulsa está no catálogo, exigindo aprovação e Administrador':
+        (() => {
+          const m = /\{\s*id: 'remover-edge',[\s\S]*?\n  \},/.exec(srcE);
+          if (!m) return false;
+          const umaVez = (chave, valor) => {
+            const todas = m[0].match(new RegExp(chave + ':\\s*(true|false)', 'g')) || [];
+            return todas.length === 1 && todas[0] === `${chave}: ${valor}`;
+          };
+          return umaVez('requerAprovacao', 'true') && umaVez('requerAdmin', 'true')
+            && /comando: MODELO_REMOVER_EDGE/.test(m[0]);
+        })(),
+      'os dois modelos cabem no limite de 8000': limpeza.length <= 8000 && remover.length <= 8000,
+      // o porteiro rodado DE VERDADE no PowerShell, com Get-ChildItem dublado
+      'o porteiro recusa máquina sem Chrome e máquina com Chrome quebrando': (() => {
+        const pwshBin = pwsh();
+        if (!pwshBin) return 'pular';
+        const cp = require('child_process'); const fs2 = require('fs');
+        const arq = require('os').tmpdir() + '/porteiro-edge.ps1';
+        const rodar = (nChrome, nQuebras) => {
+          const sb = [
+            '$R = New-Object System.Collections.Generic.List[string]',
+            'function Get-ChildItem {',
+            '  param([Parameter(ValueFromRemainingArguments=$true)]$rest)',
+            "  $alvo = ($rest | Where-Object { $_ -is [string] }) -join ' '",
+            `  if ($alvo -match 'Crashpad') { @(${nQuebras > 0 ? `1..${nQuebras} | ForEach-Object { [pscustomobject]@{ LastWriteTime = (Get-Date) } }` : ''}) }`,
+            `  elseif ($alvo -match 'chrome\\.exe') { @(${nChrome > 0 ? `1..${nChrome} | ForEach-Object { [pscustomobject]@{ VersionInfo = [pscustomobject]@{ ProductVersion = '153.0' } } }` : ''}) }`,
+            '  else { @() }',
+            '}',
+            porteiro,
+            "'PASSOU'",
+          ].join('\n');
+          fs2.writeFileSync(arq, '& ([scriptblock]::Create((Get-Content -Raw $args[0])))');
+          const alvo2 = arq + '.corpo.ps1';
+          fs2.writeFileSync(alvo2, sb);
+          return String(cp.execFileSync(pwshBin, ['-NoProfile', '-File', arq, alvo2], { encoding: 'utf8', timeout: 30000 }));
+        };
+        const ok0 = /PASSOU/.test(rodar(1, 0));
+        const ok4 = /PASSOU/.test(rodar(1, 4));
+        const bloq5 = /PULADO: o Chrome desta maquina quebrou 5/.test(rodar(1, 5)) && !/PASSOU/.test(rodar(1, 5));
+        const semChrome = /PULADO: esta maquina nao tem Chrome/.test(rodar(0, 0)) && !/PASSOU/.test(rodar(0, 0));
+        return ok0 && ok4 && bloq5 && semChrome;
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okEdge = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (edge=${EDGE.length} limpeza=${limpeza.length} remover=${remover.length})`);
+  } catch (e) { okEdge = false; console.log('  erro: ' + e.message); }
+  if (!okEdge) ruins += 1;
+  console.log(`${okEdge ? '✓' : '✗'} NOC: ação "Remover o Microsoft Edge" (com a trava do navegador da loja)`);
 
   // ------------------------------------------------------------------
   // PROCEDIMENTOS DE SOCORRO. Pedido do Master (22/09): "tudo que resolver um
