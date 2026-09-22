@@ -14287,12 +14287,43 @@ setTimeout(async () => {
     const ls = require(__dirname + '/lojaStatus.js');
     const srcIndex = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
     const htmlAr = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
-    const lista = [{ id: '123 456 789', nome: 'Sidney' }, { id: 'abc', nome: 'lixo' }, { id: '123456789', nome: 'repetido' }];
+    const lista = [{ id: '123 456 789', nome: 'Sidney' }, { id: 'abc', nome: 'lixo' }, { id: '12', nome: 'curto demais' }, { id: '123456789', nome: 'repetido' }];
     const saneada = ls.sanitizarAcessosConhecidos(lista);
     const casa = (d) => ls.acessoConhecidoDe(d, lista);
+    // PROVA DE COMPORTAMENTO. Ler o fonte nao basta: uma sabotagem que
+    // filtrava o historico passou pela leitura de texto sem ser vista. Aqui a
+    // rota roda de verdade, com o push trocado por um espiao.
+    const pushMod = require(__dirname + '/push.js');
+    const notifyAntes = pushMod.notifyAcessoRemotoDetectado;
+    const tocou = [];
+    let comportamento = { soConhecido: -1, comEstranho: -1, comNumeroMaior: -1 };
+    let eventosConhecido = [];
+    const cfgAntes = await ls.getConfig();
+    try {
+      pushMod.notifyAcessoRemotoDetectado = async (...a) => { tocou.push(a); };
+      await ls.setConfig({ pushAcessoRemoto: true, acessosConhecidos: [{ id: '123456789', nome: 'Sidney' }] });
+      const cabC = { Authorization: 'Bearer ' + token };
+      await postarJson('/api/loja-status/CONHECIDO_TESTE/computadores', { nome: 'PC Conhecido', tipo: 'interno' }, cabC);
+      const rotaC = '/api/loja-status/CONHECIDO_TESTE/computadores/principal/acesso-remoto';
+      await postarJson(rotaC, { detalhe: 'AnyDesk · incoming session from 123456789', sessao: true }, {});
+      const soConhecido = tocou.length;
+      await postarJson(rotaC, { detalhe: 'AnyDesk · incoming session from 555444333', sessao: true }, {});
+      const comEstranho = tocou.length;
+      // o ID cadastrado como PEDACO de um numero maior: e' outro acesso, tem
+      // que tocar o celular - senao bastaria um ID vizinho pra entrar calado
+      await postarJson(rotaC, { detalhe: 'AnyDesk · incoming session from 1234567890123', sessao: true }, {});
+      const comNumeroMaior = tocou.length;
+      comportamento = { soConhecido, comEstranho, comNumeroMaior };
+      const dC = JSON.parse((await pedir('/api/loja-status/CONHECIDO_TESTE/computadores/principal/detalhe', cabC)).corpo);
+      eventosConhecido = (dC.eventos || []).filter((e) => e.tipo === 'sessao-remota');
+    } finally {
+      pushMod.notifyAcessoRemotoDetectado = notifyAntes;
+      await ls.setConfig({ pushAcessoRemoto: cfgAntes.pushAcessoRemoto === true, acessosConhecidos: [] });
+    }
     const conf = {
       'o ID entra so com digito, sem repetir, e o invalido e descartado':
-        saneada.length === 1 && saneada[0].id === '123456789' && saneada[0].nome === 'Sidney',
+        saneada.length === 1 && saneada[0].id === '123456789' && saneada[0].nome === 'Sidney'
+        && !saneada.some((a) => a.id === '12'),
       'acesso de ID cadastrado e reconhecido na linha crua do log':
         !!casa('AnyDesk · incoming session from 123456789') && casa('AnyDesk · incoming session from 123456789').nome === 'Sidney',
       'acesso de ID nao cadastrado NAO e reconhecido': !casa('AnyDesk · incoming session from 555444333'),
@@ -14300,6 +14331,12 @@ setTimeout(async () => {
       // acesso de estranho - por isso a busca e ancorada em nao-digito
       'ID cadastrado nao casa quando e pedaco de um numero maior': !casa('AnyDesk · session 1234567890123 started'),
       'sem lista, nada e reconhecido': !ls.acessoConhecidoDe('incoming 123456789', []) && !ls.acessoConhecidoDe('incoming 123456789', null),
+      // as quatro de baixo passam pela ROTA de verdade, nao pelo fonte
+      'na rota: acesso de ID cadastrado nao toca o celular': comportamento.soConhecido === 0,
+      'na rota: acesso de ID estranho continua tocando o celular': comportamento.comEstranho === 1,
+      'na rota: ID cadastrado dentro de um numero maior NAO silencia o alerta': comportamento.comNumeroMaior === 2,
+      'na rota: o acesso conhecido continua no historico da maquina, com o ID':
+        eventosConhecido.length === 3 && eventosConhecido.some((e) => /123456789/.test(e.detalhe || '')),
       // o push e poupado; o evento ja foi gravado ANTES, e continua la
       'o push e poupado so quando o acesso e conhecido':
         /const conhecido = ehSessao[\s\S]{0,200}acessoConhecidoDe\(req\.body\.detalhe/.test(srcIndex)
@@ -14323,7 +14360,7 @@ setTimeout(async () => {
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAcessoConhecido = !falhas.length;
-    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (push=${JSON.stringify(comportamento)} eventos=${eventosConhecido.length})`);
   } catch (e) { okAcessoConhecido = false; console.log('  erro: ' + e.message); }
   if (!okAcessoConhecido) ruins += 1;
   console.log(`${okAcessoConhecido ? '✓' : '✗'} NOC: ID de AnyDesk conhecido não toca o celular, mas continua no histórico`);

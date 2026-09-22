@@ -73,6 +73,43 @@ async function getConfig() {
   configCacheEm = Date.now();
   return configCache;
 }
+// ACESSOS REMOTOS CONHECIDOS (pedido do Master): o ID do AnyDesk de quem
+// ACESSA - o computador da TI, nao o da loja. Cadastrado uma vez, vale pras 52
+// maquinas: quem acessa e a pessoa, nao a maquina acessada.
+//
+// O QUE ELE FAZ E O QUE NAO FAZ: silencia o PUSH, nunca o historico. O evento
+// continua na aba Atividades com o nome de quem e, senao a lista viraria um
+// jeito de entrar na loja sem deixar rastro - e o valor do NOC e justamente
+// saber quem entrou.
+//
+// ID do AnyDesk e' numero de 6 a 16 digitos (mesma faixa do Medir-AnyDeskId no
+// vigiaScript). Guarda so digito: o Master pode digitar "123 456 789".
+function idAnydeskLimpo(valor) {
+  const so = String(valor == null ? '' : valor).replace(/\D/g, '');
+  return /^\d{6,16}$/.test(so) ? so : null;
+}
+function sanitizarAcessosConhecidos(lista) {
+  const vistos = new Set();
+  return (Array.isArray(lista) ? lista : []).map((item) => {
+    const id = idAnydeskLimpo(item && item.id);
+    if (!id || vistos.has(id)) return null;
+    vistos.add(id);
+    return { id, nome: String((item && item.nome) || '').trim().slice(0, 60) };
+  }).filter(Boolean).slice(0, 60);
+}
+
+// O agente manda a linha CRUA do log do AnyDesk; o ID de quem conectou esta
+// dentro dela. Procura todo numero da faixa e casa com a lista - assim nao
+// depende do formato exato da frase, que muda entre versoes do AnyDesk.
+// Ancorado em nao-digito dos dois lados: sem isso, um ID cadastrado de 9
+// digitos casaria dentro de um numero de 12 e silenciaria acesso de estranho.
+function acessoConhecidoDe(detalhe, conhecidos) {
+  const lista = sanitizarAcessosConhecidos(conhecidos);
+  if (!lista.length) return null;
+  const numeros = new Set(String(detalhe || '').match(/\d{6,16}/g) || []);
+  return lista.find((c) => numeros.has(c.id)) || null;
+}
+
 async function setConfig(patch) {
   await CONFIG_DOC.set(patch, { merge: true });
   configCache = null;
@@ -4384,6 +4421,7 @@ module.exports = {
   // precisa comecar cada cenario do zero
   _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
+  sanitizarAcessosConhecidos, acessoConhecidoDe, idAnydeskLimpo,
   listarCatalogoProgramas, salvarCatalogoProgramas, comandoInstalarCatalogo, comandoRemoverPrograma, programaPodeSerRemovido,
   definirArteDaMaquina, removerArteDaMaquina,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,

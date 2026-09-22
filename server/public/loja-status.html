@@ -707,6 +707,21 @@
   </div>
   <!-- papel de parede do parque: UMA imagem pra rede toda; cada computador
        decide se aplica, na política do card dele -->
+  <!-- ACESSOS REMOTOS CONHECIDOS: o ID do AnyDesk de QUEM ACESSA (o computador
+       da TI), nao o da loja. Vale pras 52 maquinas de uma vez. Silencia o
+       push, nunca o historico - ver acessoConhecidoDe no lojaStatus.js. -->
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo><h2>🔕 Acessos remotos conhecidos</h2></div>
+  <div class="agente-sub">
+    O ID do AnyDesk de quem <b>acessa</b> — o seu computador, o do técnico — não o da loja. Cadastre uma vez e vale para todas as máquinas. Acesso vindo de um ID desta lista <b>não toca o celular</b>, mas continua no histórico da máquina, com o nome de quem é.
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+    <input id="ar-id" inputmode="numeric" maxlength="20" placeholder="ID do AnyDesk (só números)" style="flex:1 1 170px;min-width:0;">
+    <input id="ar-nome" maxlength="60" placeholder="De quem é (ex.: Sidney)" style="flex:1 1 150px;min-width:0;">
+    <button type="button" class="btn-ghost" onclick="adicionarAcessoConhecido()">Adicionar</button>
+  </div>
+  <div id="ar-lista" style="margin-bottom:18px;"></div>
+  </div>
   <div data-recolher>
   <div class="agente-titulo" data-recolher-titulo><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
@@ -4940,10 +4955,52 @@ function pintarBtnPushAr(){
   b.style.color = PUSH_AR ? 'var(--ok)' : 'var(--muted)';
 }
 async function carregarConfigPushAr(){
-  try{ const c = await fetch('/api/loja-status/config').then(r=>r.ok?r.json():{}); PUSH_AR = c.pushAcessoRemoto === true; }
-  catch(e){ PUSH_AR = false; }
+  try{
+    const c = await fetch('/api/loja-status/config').then(r=>r.ok?r.json():{});
+    PUSH_AR = c.pushAcessoRemoto === true;
+    ACESSOS_CONHECIDOS = Array.isArray(c.acessosConhecidos) ? c.acessosConhecidos : [];
+  }
+  catch(e){ PUSH_AR = false; ACESSOS_CONHECIDOS = []; }
   pintarBtnPushAr();
+  pintarAcessosConhecidos();
 }
+let ACESSOS_CONHECIDOS = [];
+function pintarAcessosConhecidos(){
+  const el = document.getElementById('ar-lista');
+  if(!el) return;
+  if(!ACESSOS_CONHECIDOS.length){ el.innerHTML = '<div class="sub">Nenhum ID cadastrado — todo acesso remoto alerta.</div>'; return; }
+  el.innerHTML = ACESSOS_CONHECIDOS.map((a)=>`<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;padding:7px 10px;margin-bottom:6px;background:var(--panel2);">
+    <span style="font-family:var(--mono);font-weight:700;">${escapeHtml(a.id)}</span>
+    <span class="sub" style="flex:1 1 auto;min-width:0;">${escapeHtml(a.nome||'sem nome')}</span>
+    <button type="button" class="btn-mini" onclick="removerAcessoConhecido('${escapeJs(a.id)}')">✕</button>
+  </div>`).join('');
+}
+async function salvarAcessosConhecidos(lista){
+  const senha = await pedirSenhaMaster('alterar a lista de acessos remotos conhecidos');
+  if(senha===null) return false;
+  try{
+    const c = await fetch('/api/loja-status/config', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acessosConhecidos: lista, password: senha }) }).then(r=>r.json());
+    if(c && c.error) throw new Error(c.error);
+    ACESSOS_CONHECIDOS = Array.isArray(c.acessosConhecidos) ? c.acessosConhecidos : [];
+    pintarAcessosConhecidos();
+    return true;
+  }catch(e){ alert('Não consegui salvar: ' + e.message); return false; }
+}
+async function adicionarAcessoConhecido(){
+  const id = (document.getElementById('ar-id').value||'').replace(/\D/g,'');
+  const nome = (document.getElementById('ar-nome').value||'').trim();
+  if(!/^\d{6,16}$/.test(id)){ alert('O ID do AnyDesk é um número de 6 a 16 dígitos.'); return; }
+  if(ACESSOS_CONHECIDOS.some(a=>a.id===id)){ alert('Esse ID já está cadastrado.'); return; }
+  if(await salvarAcessosConhecidos([...ACESSOS_CONHECIDOS, { id, nome }])){
+    document.getElementById('ar-id').value=''; document.getElementById('ar-nome').value='';
+  }
+}
+async function removerAcessoConhecido(id){
+  const a = ACESSOS_CONHECIDOS.find(x=>x.id===id);
+  if(!confirm(`Tirar ${a&&a.nome?a.nome:id} da lista? Acessos vindos desse ID voltam a alertar no celular.`)) return;
+  await salvarAcessosConhecidos(ACESSOS_CONHECIDOS.filter(x=>x.id!==id));
+}
+
 async function togglePushAcessoRemoto(){
   const novo = !PUSH_AR;
   if(novo && !confirm('Ligar o alerta de acesso remoto no celular?\n\nComo a TI usa AnyDesk/TeamViewer/DWService (que ficam conectados o tempo todo), isso pode gerar bastante notificação. O evento continua no histórico do computador de qualquer jeito.')) return;

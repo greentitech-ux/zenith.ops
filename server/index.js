@@ -1805,7 +1805,17 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
     // log da propria ferramenta) de servico conectado - e so a sessao vira
     // push. O batimento de nuvem, que era o que enchia o Master, nunca mais
     // toca o celular dele, mesmo com o toggle ligado.
-    if (ehSessao && await lojaStatus.pushAcessoRemotoAtivo()) {
+    // ACESSO CONHECIDO NAO TOCA O CELULAR. O evento ja foi gravado acima, no
+    // historico da maquina - e continua la, com o nome de quem e. So o push
+    // e' poupado: alerta que dispara pela propria equipe vira ruido e faz o
+    // Master parar de olhar justamente o que importa.
+    const conhecido = ehSessao
+      ? lojaStatus.acessoConhecidoDe(req.body.detalhe, (await lojaStatus.getConfig()).acessosConhecidos)
+      : null;
+    if (conhecido) {
+      console.log(`[NOC] acesso remoto conhecido (${conhecido.nome || conhecido.id}) em ${req.params.codigo}/${req.params.posto} - registrado sem push.`);
+    }
+    if (ehSessao && !conhecido && await lojaStatus.pushAcessoRemotoAtivo()) {
       const mapa = await construirUnidadesMapa();
       push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
         .catch((err) => console.error('Erro no push de acesso remoto:', err.message));
@@ -5862,6 +5872,14 @@ app.put('/api/loja-status/config', auth.requireMaster, async (req, res) => {
   try {
     const patch = {};
     if (req.body.pushAcessoRemoto !== undefined) patch.pushAcessoRemoto = req.body.pushAcessoRemoto === true;
+    // lista de IDs de AnyDesk da equipe: acesso vindo deles nao toca o celular.
+    // Pede a senha do Master porque mexer nela SILENCIA alerta de seguranca -
+    // um ID a mais aqui e um acesso que deixa de avisar. So quando a lista vem
+    // no corpo: o toggle de push continua sem senha, como sempre foi.
+    if (req.body.acessosConhecidos !== undefined) {
+      if (!(await exigirSenhaDoMaster(req, res))) return;
+      patch.acessosConhecidos = lojaStatus.sanitizarAcessosConhecidos(req.body.acessosConhecidos);
+    }
     res.json(await lojaStatus.setConfig(patch));
   } catch (err) {
     res.status(400).json({ error: err.message });
