@@ -12072,7 +12072,18 @@ setTimeout(async () => {
     const limpeza = modelos.find((m) => m.id === 'limpeza-programas-basicos') || {};
     const inventario = modelos.find((m) => m.id === 'inventario-programas') || {};
     const cmd = String(limpeza.comando || '');
-    const pedidos = ['Microsoft.Paint', 'Microsoft.Copilot', 'TeamViewer', 'Apresentações', 'AteraAgent', 'OneDrive', 'Planilhas', 'Textos', 'YouTube'];
+    // A lista do Master é CUMULATIVA: "nao e so com os que pedi agora e junto
+    // com os que ja tinha". Por isso os antigos continuam aqui embaixo, ao
+    // lado dos nativos que entraram em 22/09.
+    const pedidos = ['Microsoft.Paint', 'Microsoft.Copilot', 'TeamViewer', 'Apresentações', 'AteraAgent', 'OneDrive', 'Planilhas', 'Textos', 'YouTube',
+      'Microsoft.XboxGamingOverlay', 'Microsoft.ZuneVideo', 'Microsoft.BingNews', 'Microsoft.BingWeather', 'Microsoft.MicrosoftOfficeHub',
+      'Microsoft.Office.OneNote', 'Microsoft.WindowsMaps', 'Microsoft.MicrosoftSolitaireCollection', 'Microsoft.YourPhone'];
+    // O que a limpeza NUNCA pode levar junto. Store e App Installer porque são
+    // quem atualiza os apps; Captura porque o suporte pede print por ela;
+    // Fotos porque, sem ela e sem o Paint, a máquina não abre imagem nenhuma;
+    // Teams e Outlook porque quebram trabalho se o grupo usar.
+    const intocaveis = ['Microsoft.WindowsStore', 'Microsoft.DesktopAppInstaller', 'Microsoft.WindowsNotepad', 'Microsoft.WindowsCalculator',
+      'Microsoft.ScreenSketch', 'Microsoft.SecHealthUI', 'Microsoft.Windows.Photos', 'MSTeams', 'MicrosoftTeams', 'Microsoft.OutlookForWindows'];
     const validados = modelos.map((m) => { try { return ag.validarDados({ ...m, tipo: 'comando_maquina' }); } catch (e) { return null; } });
     const htmlN = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
     const fnNova = /function abrirModalNovaAcao\(\)\{[\s\S]*?\n\}/.exec(htmlN);
@@ -12081,11 +12092,20 @@ setTimeout(async () => {
     const conf = {
       'a rota é só do Master (sem login: 401; usuário comum do NOC: 403)': semLogin.status === 401 && comComum.status === 403 && comMaster.status === 200,
       'há os dois modelos: inventário (só lê) e limpeza': !!inventario.comando && !!limpeza.comando,
-      'cada modelo passa na validação da ação e cabe inteiro no teto de 4000':
-        validados.every((v, i) => v && v.comando === modelos[i].comando) && modelos.every((m) => m.comando.length <= 4000),
+      // O TETO SUBIU PRA 8000 em 22/09: a limpeza passou de 4000 quando o
+      // Master mandou incluir Play Games, Update Health Tools e o Edge. E o
+      // que importa aqui nunca foi o numero: e o modelo chegar INTEIRO.
+      // Antes a validacao truncava em silencio, e PowerShell cortado no meio
+      // roda pela metade - agora ela recusa e diz o tamanho.
+      'cada modelo passa na validação da ação e chega inteiro (nada truncado)':
+        validados.every((v, i) => v && v.comando === modelos[i].comando) && modelos.every((m) => m.comando.length <= 8000),
       'a limpeza cobre a lista do Master, nome por nome': pedidos.every((n) => cmd.includes(n)),
       // o que NAO pode ser removido nunca aparece no comando
       'a limpeza não encosta em Chrome, Drive, Gmail nem PDV': !/Google Chrome|Google Drive|Gmail|Bematech|Gcom|Gestor de Pedidos/i.test(cmd),
+      // o comentário do modelo CITA esses nomes pra explicar por que ficam -
+      // então a busca é pelo nome entre aspas, que é como ele entra na lista
+      'a limpeza não leva junto Store, Captura, Fotos, Teams nem Outlook':
+        intocaveis.every((n) => !cmd.includes(`'${n}'`)),
       'programa de máquina fica PULADO sem Administrador, com o motivo na saída':
         /IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/.test(cmd)
         && /if \(-not \$admin\) \{ \$R\.Add\("PULADO: \$n - precisa de Administrador/.test(cmd),
@@ -12093,6 +12113,14 @@ setTimeout(async () => {
         /"OK: /.test(cmd) && /"NAO TINHA: /.test(cmd) && /"FALHOU: /.test(cmd),
       'a limpeza nasce exigindo aprovação; o inventário não': limpeza.requerAprovacao === true && inventario.requerAprovacao === false,
       'o inventário só lê (nenhum Remove/Uninstall/Stop nele)': !/Remove-|Uninstall\b|Stop-Process|msiexec/.test(String(inventario.comando || '').replace(/Uninstall\\\*/g, '')),
+      // O inventario e quem responde "da pra padronizar o Iniciar nesta
+      // maquina?": ConfigureStartPins so existe do Windows 11 22H2 (build
+      // 22621) pra cima, e Home ignora politica. Sem edicao e build na saida a
+      // resposta seria chute - por isso eles vem antes da lista, na 1a linha.
+      'o inventário diz edição e build do Windows (é o que decide o Iniciar padronizado)':
+        /EditionID/.test(String(inventario.comando || ''))
+        && /CurrentBuild/.test(String(inventario.comando || ''))
+        && /^"Windows: /m.test(String(inventario.comando || '')),
       // a tela
       'o formulário de NOVA ação oferece o seletor de modelo; o de editar esconde':
         /id="acao-modelo"/.test(htmlN) && !!fnNova && /carregarModelosAcao\(\)/.test(fnNova[0]) && /acao-modelo-wrap'\)\.classList\.remove\('hidden'\)/.test(fnNova[0])
@@ -14515,6 +14543,187 @@ setTimeout(async () => {
   } catch (e) { okPixNome = false; console.log('  erro: ' + e.message); }
   if (!okPixNome) ruins += 1;
   console.log(`${okPixNome ? '✓' : '✗'} Monitor: pedido Pix que mudou de status mostra o nome do cliente (não a conta da Adyen nem o nome do cartão)`);
+
+  // ------------------------------------------------------------------
+  // LIMPEZA DE PROGRAMAS. Lista nova do Master (22/09): atera, copilot, Google
+  // Play Games, OneDrive, Microsoft Edge e Microsoft Update Health Tools.
+  //
+  // O Edge foi decisão dele DEPOIS de eu trazer o custo: o agente usa a
+  // política do Edge (junto com a do Chrome) pra instalar o app NoPulso, então
+  // nessas máquinas o app passa a depender só do Chrome. A trava da remoção
+  // AVULSA continua de pé - o que ele liberou foi este procedimento revisado.
+  let okLimpeza = false;
+  try {
+    const srcAcoes = require('fs').readFileSync(__dirname + '/agenteAcoes.js', 'utf8');
+    const lsL = require(__dirname + '/lojaStatus.js');
+    const htmlL = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    // o modelo é template literal: desfaz os escapes como o Node faria
+    const chave = 'const MODELO_LIMPEZA = ';
+    const ini = srcAcoes.indexOf(chave) + chave.length;
+    let i = ini + 1;
+    while (i < srcAcoes.length) { if (srcAcoes[i] === '\\') { i += 2; continue; } if (srcAcoes[i] === '`') break; i += 1; }
+    const modelo = new Function('return ' + srcAcoes.slice(ini, i + 1))();
+    const conf = {
+      'a limpeza remove os seis que o Master pediu':
+        ['Microsoft.Copilot', 'AteraAgent', 'Google Play Games', 'Microsoft OneDrive', 'Microsoft Edge', 'Microsoft Update Health Tools']
+          .every((n) => modelo.includes(n)),
+      // o setup do Edge não sai pelo UninstallString do registro
+      // -ArgumentList no padrao de proposito: as flags tambem aparecem no
+      // COMENTARIO do modelo que explica por que o Edge precisa delas, e a
+      // assercao sem ancora passava verde com o comando trocado por /S /silent
+      'o Edge sai pelo setup dele, não pelo UninstallString':
+        /-ArgumentList '--uninstall --system-level --force-uninstall'/.test(modelo)
+        && /Microsoft\\Edge\\Application/.test(modelo),
+      // Windows 11 recente bloqueia: a saída precisa dizer isso em vez de
+      // deixar o Master achando que removeu
+      'quando o Windows não deixa remover o Edge, a saída diz':
+        /este Windows nao permite desinstalar/.test(modelo)
+        && /Get-ChildItem \$edgeApp[\s\S]{0,200}Count\) \{ \$R\.Add\('FALHOU: Microsoft Edge/.test(modelo),
+      'o que é instalação de máquina fica PULADO sem Administrador':
+        /PULADO: \$n - precisa de Administrador/.test(modelo)
+        && /PULADO: Microsoft Edge - precisa de Administrador/.test(modelo),
+      // a remoção avulsa pelo painel continua barrando o Edge: o Master
+      // liberou ESTE procedimento, não remover componente do Windows a clique
+      'a trava da remoção avulsa do Edge continua de pé':
+        lsL.programaPodeSerRemovido('Microsoft Edge') === false
+        && lsL.programaPodeSerRemovido('Google Play Games') === true,
+      // O ERRO QUE ISSO EVITA: o comando era cortado em slice(0, 4000) sem
+      // avisar. PowerShell cortado no meio roda pela metade.
+      'comando grande demais é recusado, nunca truncado':
+        // \.slice pra nao casar com o COMENTARIO que explica o defeito antigo
+        // ("O slice(0, 4000) cortava em silencio") - foi o que me deu falso
+        // vermelho na primeira rodada
+        !/\.slice\(0, 4000\)/.test(srcAcoes)
+        && /O comando tem \$\{comando\.length\} caracteres e o limite é 8000/.test(srcAcoes),
+      'o modelo cabe no limite': modelo.length > 0 && modelo.length <= 8000,
+      // pedido do Master: "colocar ele em manutencao"
+      'as ações de comando aparecem na Janela de Manutenção':
+        /⚙️ Ações nas máquinas/.test(htmlL)
+        && /renderAcoesNaManutencao\(\);/.test(htmlL)
+        // a MESMA lista e o MESMO modal - nada duplicado
+        && /a\.tipo === 'comando_maquina' && a\.ativo/.test(htmlL)
+        && /manut-acoes-lista[\s\S]{0,4000}?abrirRodarAcao/.test(htmlL),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okLimpeza = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (modelo=${modelo.length} chars)`);
+  } catch (e) { okLimpeza = false; console.log('  erro: ' + e.message); }
+  if (!okLimpeza) ruins += 1;
+  console.log(`${okLimpeza ? '✓' : '✗'} NOC: limpeza de programas (com Edge, por decisão do Master) e ações na Manutenção`);
+
+  // ------------------------------------------------------------------
+  // CANCELAR VÁRIOS COMANDOS DE UMA VEZ. Pedido do Master (22/09): "opção de
+  // selecionar mais de um comando operacional que esteja com a tag cancelar
+  // para cancelar mais de 1 de uma única vez".
+  //
+  // Isto é um teste DE COMPORTAMENTO, não de texto: o código sai do HTML e
+  // roda aqui com fetch/confirm/senha de mentira. O que ele trava:
+  //   - a senha do Master é pedida UMA vez pro lote, não uma por comando
+  //     (senão o "de uma vez" não existe na prática);
+  //   - só vai pro servidor o que REALMENTE pode ser cancelado - marcar e
+  //     depois trocar de filtro não pode derrubar comando já executando;
+  //   - falha no meio do lote não some: o resto continua e o Master vê o
+  //     número dos dois lados.
+  let okLote = false;
+  try {
+    const htmlQ = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const mHelper = htmlQ.match(/const podeCancelarComando = [^\n]+/);
+    const ini = htmlQ.indexOf('// A barra do lote só aparece');
+    const fim = htmlQ.indexOf('async function carregarComandosRecentes');
+    if (!mHelper || ini < 0 || fim < 0 || fim < ini) throw new Error('não achei o bloco do cancelamento em lote no HTML');
+    const trecho = mHelper[0] + '\n' + htmlQ.slice(ini, fim);
+
+    // --- dublês. O elemento da barra guarda o innerHTML pra eu poder olhar.
+    const barra = { className: '', innerHTML: '' };
+    const doc = { getElementById: (id) => (id === 'comandos-lote' ? barra : null) };
+    const enviados = [];
+    let senhas = 0; let confirmou = 0; const avisos = [];
+    // Um id recusado pelo servidor, pra provar que o lote não para no primeiro
+    // erro. Ele é o do MEIO de propósito: com a recusa no último, um `break`
+    // no catch passaria despercebido - foi o que escapou na 1a sabotagem.
+    const fetchFalso = async (url, opc) => {
+      enviados.push({ url, body: JSON.parse(opc.body) });
+      if (url.includes('c2')) return { ok: false, json: async () => ({ error: 'já foi entregue' }) };
+      return { ok: true, json: async () => ({ ok: true }) };
+    };
+    const fabricar = (estado) => {
+      const ctx = new Function('document', 'fetch', 'confirm', 'alert', 'pedirSenhaMaster',
+        'renderComandosRecentes', 'carregarComandosRecentes', 'estado', `
+        let COMANDOS_RECENTES = estado.lista;
+        let COMANDOS_MARCADOS = estado.marcados;
+        let FILTRO_COMANDOS = estado.filtro;
+        ${trecho}
+        return { renderLoteComandos, marcarComandoLote, marcarTodosComandosLote,
+                 cancelarComandosSelecionados, podeCancelarComando,
+                 verMarcados: () => [...COMANDOS_MARCADOS] };
+      `);
+      return ctx(doc, fetchFalso, () => { confirmou += 1; return true; }, (m) => avisos.push(m),
+        async () => { senhas += 1; return 'senha-do-master'; },
+        () => {}, async () => {}, estado);
+    };
+
+    const lista = [
+      { id: 'c1', status: 'pendente', nomeComputador: 'PDV01' },
+      { id: 'c2', status: 'erro', nomeComputador: 'PDV02' },
+      { id: 'c3', status: 'pendente', nomeComputador: 'PDV03' },
+      { id: 'c4', status: 'entregue', nomeComputador: 'PDV04' },
+      { id: 'c5', status: 'executado', nomeComputador: 'PDV05' },
+    ];
+
+    // 1) marcar todos só pega os canceláveis (c1, c2, c3) - nunca o que já
+    //    está na máquina
+    const a = fabricar({ lista, marcados: new Set(), filtro: 'todos' });
+    a.marcarTodosComandosLote(true);
+    const soCancelaveis = JSON.stringify(a.verMarcados()) === JSON.stringify(['c1', 'c2', 'c3']);
+
+    // 2) o lote inteiro: uma senha, uma confirmação, três DELETEs
+    const b = fabricar({ lista, marcados: new Set(['c1', 'c2', 'c3']), filtro: 'todos' });
+    await b.cancelarComandosSelecionados(null);
+    const umaSenha = senhas === 1 && confirmou === 1;
+    const tresDeletes = enviados.length === 3
+      && enviados.every((e) => e.body.password === 'senha-do-master')
+      && ['c1', 'c2', 'c3'].every((id) => enviados.some((e) => e.url.endsWith('/' + id)));
+    // c2 foi recusado: o aviso tem os dois números e o nome da máquina, e o
+    // c3 (depois dele) precisa ter sido enviado assim mesmo
+    const contouParcial = avisos.length === 1 && /2 de 3 cancelados/.test(avisos[0]) && /PDV02/.test(avisos[0]);
+
+    // 3) marcado que DEIXOU de ser cancelável não vai pro servidor
+    enviados.length = 0; senhas = 0; confirmou = 0; avisos.length = 0;
+    const c = fabricar({ lista, marcados: new Set(['c4', 'c5']), filtro: 'todos' });
+    await c.cancelarComandosSelecionados(null);
+    const naoVazaExecutando = enviados.length === 0 && senhas === 0;
+
+    // 4) a barra não aparece com menos de dois canceláveis: com um só o ✕ da
+    //    linha já resolve
+    const d = fabricar({ lista, marcados: new Set(), filtro: 'todos' });
+    d.renderLoteComandos([lista[0]]);
+    const escondeComUm = !/visivel/.test(barra.className) && barra.innerHTML === '';
+    d.renderLoteComandos([lista[0], lista[1]]);
+    const apareceComDois = /visivel/.test(barra.className) && /Selecionar os 2 canceláveis/.test(barra.innerHTML);
+    // sem nada marcado o botão fica travado - não dá pra "cancelar 0"
+    const botaoTravadoVazio = /id="cmd-lote-botao"[^>]*disabled/.test(barra.innerHTML);
+
+    const conf = {
+      'selecionar todos pega só o que é cancelável': soCancelaveis,
+      'uma senha e uma confirmação pro lote inteiro': umaSenha,
+      'cada comando marcado vira um DELETE com a senha': tresDeletes,
+      'recusa no meio do lote não para o resto e aparece no resultado': contouParcial,
+      'marcado que já saiu da fila não é enviado': naoVazaExecutando,
+      'a barra some com um cancelável só': escondeComUm,
+      'a barra aparece a partir de dois': apareceComDois,
+      'sem seleção o botão do lote fica travado': botaoTravadoVazio,
+      // O return adiantado do filtro vazio pulava a barra e ela ficava na
+      // tela do filtro anterior. Aqui é asserção de TEXTO porque a função
+      // inteira não roda fora do navegador - mas ancorada na linha exata.
+      'filtro sem nenhum comando também apaga a barra':
+        /Nenhum comando neste filtro\.<\/div>'; renderLoteComandos\(\[\]\); return;/.test(htmlQ),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okLote = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okLote = false; console.log('  erro: ' + e.message); }
+  if (!okLote) ruins += 1;
+  console.log(`${okLote ? '✓' : '✗'} NOC: cancelar vários comandos da fila de uma vez`);
 
   // ------------------------------------------------------------------
   // PROCEDIMENTOS DE SOCORRO. Pedido do Master (22/09): "tudo que resolver um
