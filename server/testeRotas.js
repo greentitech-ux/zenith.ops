@@ -12758,6 +12758,39 @@ setTimeout(async () => {
       // a barra: o custo e a loja piscar no meio do expediente
       'o agente inteiro não encerra Explorer em lugar nenhum':
         !/Stop-Process[^\n]*explorer/i.test(psPp) && !/Get-Process -Name explorer/.test(psPp),
+      // ---- quem tem Administrador precisa aplicar a política ----------
+      // 22/09, DOM-BESSA-DISPATCH já na v110: Microsoft Edge e Advanced IP
+      // Scanner continuaram na Área de Trabalho mesmo desmarcados. A ficha da
+      // máquina explicou: "Administrador: False".
+      //
+      // Com usuário logado, a instância de boot (SYSTEM, a ÚNICA elevada)
+      // cede a vez e dá 'continue' - quem aplica a política é a de LOGIN, sem
+      // elevação. Atalho em C:\Users\Public\Desktop, que é onde todo
+      // instalador "para todos os usuários" põe o dele, não podia ser
+      // removido. E a falha devolvia $false, então o porteiro nunca carimbava
+      // a versão e a máquina reexecutava tudo a cada volta, pra sempre.
+      'a instância elevada aplica a política mesmo cedendo a vez': (() => {
+        const fn = corpoPs('Sondar-ComandoAdmin');
+        if (!fn) return false;
+        return /if \(\$resp -and \$null -ne \$resp\.versaoAplicacao[^\n]*-ne \(Versao-PoliticaAplicada\)\) \{ Sincronizar-Politica \}/.test(fn)
+          // tem que ser a instância de boot, e SÓ quando ela está cedendo
+          && /if \(\$Servico\) \{ Sondar-ComandoAdmin \}/.test(psPp);
+      })(),
+      // a sondagem JÁ fazia esse heartbeat de 90 em 90s: a política pega
+      // carona nele. Uma requisição nova por volta do laço seriam ~52 por
+      // 22s, o tipo de custo que a §3 existe pra impedir.
+      'a política pega carona no heartbeat que a sondagem já fazia': (() => {
+        const fn = corpoPs('Sondar-ComandoAdmin');
+        if (!fn) return false;
+        const chamadas = (fn.match(/Invoke-RestMethod/g) || []).length;
+        return chamadas === 1
+          && fn.indexOf('Invoke-RestMethod') < fn.indexOf('Sincronizar-Politica')
+          && /ProximaSondaAdminEm[^\n]*\+ 90000/.test(fn);
+      })(),
+      // falha na área pública é quase sempre privilégio, e repetir não
+      // resolve - o log diz isso pra ninguém caçar defeito onde não há
+      'o log separa falha de privilégio na área pública das outras':
+        /Eh-AreaPublica \$item\.FullName\) \{ " \(Area de Trabalho PUBLICA - precisa de Administrador/.test(corpoPs('Aplicar-PerfilEstacao')),
       // ---- a limpeza precisa enxergar PASTA e ARQUIVO -----------------
       // Relato do Master (22/09): "apos rodar continuou com pastas que nao
       // escolhi". A tela lista tudo e deixa marcar qualquer item; a limpeza

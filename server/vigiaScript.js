@@ -26,7 +26,7 @@
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
 // 108: inventaria RAM, processador, placa-mae e BIOS para exibir na ficha.
-const VERSAO_VIGIA = 110;
+const VERSAO_VIGIA = 111;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -2279,7 +2279,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      else { Copy-Item -LiteralPath $item.FullName -Destination $destino -Force -ErrorAction Stop; $manifesto.Add("COPIADO: $($item.FullName) -> $destino"); [void]$guardados.Add($item) }',
     '    } catch { $falhouRemocao = $true; Escrever-Log "Perfil da estação: não consegui guardar $($item.Name) ($($_.Exception.Message)) - ele fica onde está." }',
     '  }',
-    '  foreach ($item in $guardados) { try { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop; $manifesto.Add("REMOVIDO: $($item.FullName)") } catch { $falhouRemocao = $true; Escrever-Log "Perfil da estação: falha ao remover $($item.Name): $($_.Exception.Message)" } }',
+    '  # A origem importa no diagnostico: falha na area PUBLICA e quase sempre',
+    '  # falta de Administrador, e nao adianta repetir - quem resolve e a instancia',
+    '  # de boot (SYSTEM). Dizer isso no log evita procurar defeito onde nao ha.',
+    '  foreach ($item in $guardados) { try { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop; $manifesto.Add("REMOVIDO: $($item.FullName)") } catch { $falhouRemocao = $true; $ondeEsta = if (Eh-AreaPublica $item.FullName) { " (Area de Trabalho PUBLICA - precisa de Administrador; a instancia de boot faz isso)" } else { "" }; Escrever-Log "Perfil da estação: falha ao remover $($item.Name)$($ondeEsta): $($_.Exception.Message)" } }',
     '  try { Set-Content -LiteralPath (Join-Path $pasta "manifesto.txt") -Value $manifesto -Encoding UTF8 -Force -ErrorAction Stop } catch {}',
     '  $script:AreaMudou = $true',
     '  Escrever-Log "Perfil da estação: $($manifesto.Count) linha(s) de manifesto - $($remover.Count) item(ns) fora da lista aprovada, guardados em $pasta."',
@@ -2384,6 +2387,20 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $corpo = @{ unidade = "' + codigoTextoPS + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (SYSTEM admin-poll)"; souAdmin = $true; soComandoAdmin = $true } | ConvertTo-Json',
     '    $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpo -TimeoutSec 10',
     '    if ($resp -and $resp.comandoPendente) { Executar-ComandoPendente $resp.comandoPendente }',
+    '    # A LIMPEZA DA AREA PUBLICA PRECISA DE ADMINISTRADOR. Com usuario logado,',
+    '    # quem aplica a politica e a instancia de LOGIN, que roda SEM elevacao (a',
+    '    # ficha da maquina mostra "Administrador: False"). Atalho em',
+    '    # C:\\Users\\Public\\Desktop - Edge, Advanced IP Scanner e todo instalador',
+    '    # "para todos os usuarios" - nao podia ser removido, e o Master via item',
+    '    # desmarcado teimando na tela por mais que rodasse de novo.',
+    '    #',
+    '    # Pior: a falha de remocao devolve $false e o porteiro nunca carimba a',
+    '    # versao, entao a maquina reexecutava a politica inteira a cada volta.',
+    '    #',
+    '    # Esta sondagem ja faz um heartbeat de 90 em 90s e a resposta ja traz a',
+    '    # versaoAplicacao - entao a instancia elevada aplica a politica de graca,',
+    '    # sem nenhuma requisicao a mais, e so quando a versao muda.',
+    '    if ($resp -and $null -ne $resp.versaoAplicacao -and "v$VersaoScript|$($resp.versaoAplicacao)" -ne (Versao-PoliticaAplicada)) { Sincronizar-Politica }',
     '  } catch { Escrever-Log "Sondagem de comando-admin falhou: $($_.Exception.Message)" }',
     '}',
     '',
