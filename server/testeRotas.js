@@ -12758,6 +12758,37 @@ setTimeout(async () => {
       // a barra: o custo e a loja piscar no meio do expediente
       'o agente inteiro não encerra Explorer em lugar nenhum':
         !/Stop-Process[^\n]*explorer/i.test(psPp) && !/Get-Process -Name explorer/.test(psPp),
+      // ---- a instância de login precisa nascer elevada ------------------
+      // Relato do Master (22/09): "estou rodando no powershell admin por que
+      // nao fica como admin". A ficha da máquina respondia "Administrador:
+      // False" e todo comando que pede privilégio saía "PULADO: precisa de
+      // Administrador" - mesmo tendo instalado num PowerShell elevado.
+      //
+      // A causa: a tarefa de login era registrada SEM -Principal, e o
+      // Agendador usa RunLevel Limited nesse caso. Token restrito mesmo para
+      // quem é Administrador. A tarefa de BOOT sempre teve -RunLevel Highest;
+      // a de login, não - e é ela quem trabalha quando alguém está logado.
+      'a tarefa de login é registrada com RunLevel Highest quando dá': (() => {
+        if (!/New-ScheduledTaskPrincipal -UserId \(\[Security\.Principal\.WindowsIdentity\]::GetCurrent\(\)\.Name\) -LogonType Interactive -RunLevel Highest/.test(psPp)) return false;
+        // PRESO AO CAMINHO NORMAL. Com '-Principal' solto, a sabotagem que
+        // esvaziava o ramo principal passava batida: o ramo de reserva ainda
+        // mencionava o principal e a assercao ficava verde.
+        return /if \(\$config -and \$principalLogin\) \{ Register-ScheduledTask -TaskName \$NomeTarefa[^\n]*-Settings \$config -Principal \$principalLogin -Force/.test(psPp);
+      })(),
+      // só quando a instalação está elevada: aí sabemos que o usuário pode
+      'a elevação só é pedida quando a instalação rodou como Administrador':
+        /if \(\$ehAdmin\) \{ try \{ \$principalLogin = New-ScheduledTaskPrincipal/.test(psPp)
+        && psPp.indexOf('$ehAdmin = ([Security.Principal.WindowsPrincipal]') < psPp.indexOf('$principalLogin = New-ScheduledTaskPrincipal'),
+      // agente limitado é melhor que agente nenhum: se o principal falhar,
+      // registra como antes em vez de deixar a máquina sem agente
+      'principal que falha não impede a tarefa de ser criada':
+        /elseif \(\$config\) \{ Register-ScheduledTask -TaskName \$NomeTarefa[^\n]*-Settings \$config -Force/.test(psPp)
+        && /else \{ Register-ScheduledTask -TaskName \$NomeTarefa -Action \$acao -Trigger \$gatilho -Force/.test(psPp),
+      // sem isso o Master instala, vê "instalado" e só descobre que ficou
+      // limitado quando um comando falha lá na frente
+      'o log diz se a tarefa ficou elevada ou não':
+        /tarefa de login criada COM ELEVACAO/.test(psPp)
+        && /tarefa de login criada SEM elevacao/.test(psPp),
       // ---- a instância elevada não pode depender de reinício -----------
       // 22/09, Dom Bessa, as duas já na v111: a GERENCIA (ligada há 1h, tinha
       // reiniciado) ficou PERFEITA e a DISPATCH (ligada há 11 DIAS) não.

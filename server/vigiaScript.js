@@ -26,7 +26,7 @@
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
 // 108: inventaria RAM, processador, placa-mae e BIOS para exibir na ficha.
-const VERSAO_VIGIA = 112;
+const VERSAO_VIGIA = 113;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -3225,10 +3225,26 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  # as duas flags, notebook na tomada solta nem iniciava o monitoramento.',
     '  $config = $null',
     '  try { $config = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -MultipleInstances IgnoreNew } catch {}',
+    '  # ELEVACAO DA INSTANCIA DE LOGIN. Sem -Principal, o Agendador registra a',
+    '  # tarefa com RunLevel Limited: token RESTRITO mesmo quando quem instalou e',
+    '  # Administrador. Era por isso que instalar num PowerShell elevado nao',
+    '  # adiantava - a ficha seguia dizendo "Administrador: False" e todo comando',
+    '  # que pede privilegio saia "PULADO: precisa de Administrador".',
+    '  #',
+    '  # So com a instalacao ELEVADA: ai sabemos que este usuario realmente pode.',
+    '  # Tarefa agendada com Highest sobe sem prompt de UAC - e o unico jeito de a',
+    '  # instancia de login nascer elevada. Se o principal falhar, registra como',
+    '  # antes: agente limitado e melhor que agente nenhum.',
+    '  $ehAdmin = $false',
+    '  try { $ehAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch {}',
+    '  $principalLogin = $null',
+    '  if ($ehAdmin) { try { $principalLogin = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Highest } catch { Escrever-Log "Nao consegui preparar a elevacao da tarefa de login: $($_.Exception.Message)" } }',
     '  try {',
-    '    if ($config) { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Settings $config -Force -ErrorAction Stop | Out-Null }',
+    '    if ($config -and $principalLogin) { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Settings $config -Principal $principalLogin -Force -ErrorAction Stop | Out-Null }',
+    '    elseif ($config) { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Settings $config -Force -ErrorAction Stop | Out-Null }',
+    '    elseif ($principalLogin) { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Principal $principalLogin -Force -ErrorAction Stop | Out-Null }',
     '    else { Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Force -ErrorAction Stop | Out-Null }',
-    '    Escrever-Log "Instalado em $Destino - tarefa agendada \'$NomeTarefa\' criada (roda no proximo login desse usuario)."',
+    '    Escrever-Log $(if ($principalLogin) { "Instalado em $Destino - tarefa de login criada COM ELEVACAO (o agente roda como Administrador)." } else { "Instalado em $Destino - tarefa de login criada SEM elevacao: instale num PowerShell como Administrador pra o agente poder instalar/remover programa e limpar a area publica." })',
     '  } catch {',
     '    Escrever-Log "FALHA ao registrar a tarefa agendada: $($_.Exception.Message)"',
     '  }',
@@ -3239,8 +3255,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  # manutencao mataram os vigias um a um). A tarefa de BOOT roda como',
     '  # SYSTEM, sobe junto com o Windows sem depender de login, e cede a vez',
     '  # pra instancia de login quando ela existir (ver UiEstaAtiva).',
-    '  $ehAdmin = $false',
-    '  try { $ehAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch {}',
+    '  # $ehAdmin ja foi resolvido la em cima, junto do principal da tarefa de login',
     '  if ($ehAdmin) {',
     '    try {',
     '      $acaoBoot = Acao-DaTarefa $Destino $true',
