@@ -4,7 +4,7 @@ O NoPulso oferece uma entrada única, fechada e auditada para agentes:
 
 - `GET /api/agent/tools` — catálogo das ferramentas permitidas.
 - `POST /api/agent/execute` — executa uma ferramenta do catálogo.
-- `POST /mcp/nopulso/<NOPULSO_AGENT_API_TOKEN>` — conector MCP remoto do Beni Cowork.
+- `POST /mcp/nopulso` — conector MCP remoto do Beni Cowork; recebe o segredo no cabeçalho `x-agent-token`.
 
 ## Configuração no Render
 
@@ -16,7 +16,7 @@ Crie duas variáveis de ambiente e faça o deploy:
 
 O token não deve ser colocado no código, no chat ou no prompt. Configure-o como segredo no conector do Claude/Cowork. Para revogar todo acesso, remova ou troque `NOPULSO_AGENT_API_TOKEN`.
 
-No Claude/Cowork, adicione um conector personalizado chamado **NoPulso — Beni Cowork** com a URL `https://www.nopulso.com.br/mcp/nopulso/SEU_TOKEN`. A URL usa HTTPS e o token pode ser revogado no Render. Depois, habilite esse conector na conversa do Beni.
+No Claude/Cowork, adicione um conector personalizado chamado **NoPulso — Beni Cowork** com a URL `https://www.nopulso.com.br/mcp/nopulso`. Selecione **Sem login** e adicione o cabeçalho `x-agent-token` com o valor de `NOPULSO_AGENT_API_TOKEN`. O Claude guarda esse valor de forma segura. Depois, habilite o conector na conversa do Beni.
 
 ## Chamada
 

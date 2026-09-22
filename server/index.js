@@ -776,11 +776,12 @@ app.post('/api/agent/execute', async (req, res) => {
   }
 });
 
-// Remote MCP stateless: esta é a URL que entra como conector personalizado
-// no Beni Cowork. O segredo fica no caminho porque o cadastro de conector sem
-// OAuth não envia cabeçalho arbitrário; HTTPS protege o caminho em trânsito.
-app.post('/mcp/nopulso/:token', async (req, res) => {
-  if (!coworkApi.tokenValido(req.params.token)) return res.status(401).json({ error: 'Conector inválido.' });
+// Remote MCP stateless. O Cowork guarda `x-agent-token` como cabecalho
+// secreto; assim a chave nao aparece na URL nem nos access logs. A rota
+// antiga com token no caminho permanece temporariamente compativel.
+async function atenderMcpNoPulso(req, res) {
+  const recebido = req.headers['x-agent-token'] || req.headers.authorization || req.params.token;
+  if (!coworkApi.tokenValido(recebido)) return res.status(401).json({ error: 'Conector inválido.' });
   const rpc = req.body || {};
   const responder = (result) => res.json({ jsonrpc: '2.0', id: rpc.id, result });
   try {
@@ -802,7 +803,9 @@ app.post('/mcp/nopulso/:token', async (req, res) => {
   } catch (err) {
     return responder({ content: [{ type: 'text', text: JSON.stringify({ error: err.message, code: err.code || 'ACAO_INVALIDA' }) }], isError: true });
   }
-});
+}
+app.post('/mcp/nopulso', atenderMcpNoPulso);
+app.post('/mcp/nopulso/:token', atenderMcpNoPulso);
 app.post('/api/bot/solicitacoes', async (req, res) => {
   if (!exigirTokenBot(req, res)) return;
   try {
