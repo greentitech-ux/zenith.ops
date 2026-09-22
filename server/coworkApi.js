@@ -9,6 +9,7 @@ const solicitacoes = require('./solicitacoes');
 const formularios = require('./formularios');
 const tarefas = require('./tarefas');
 const lojaStatus = require('./lojaStatus');
+const googleGmail = require('./googleGmail');
 
 const AUDITORIA = db.collection('coworkApiAuditoria');
 const IDEMPOTENCIA = db.collection('coworkApiIdempotencia');
@@ -16,6 +17,9 @@ const IDEMPOTENCIA = db.collection('coworkApiIdempotencia');
 const FERRAMENTAS = Object.freeze({
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
   consultar_noc: { descricao: 'Consulta o estado atual e compacto dos computadores monitorados.', risco: 'leitura', obrigatorios: [] },
+  pesquisar_emails: { descricao: 'Pesquisa a caixa corporativa autorizada usando a sintaxe de busca do Gmail.', risco: 'leitura', obrigatorios: [] },
+  ler_email: { descricao: 'Lê uma mensagem específica encontrada pela pesquisa.', risco: 'leitura', obrigatorios: ['emailId'] },
+  enviar_email: { descricao: 'Envia e-mail pela caixa corporativa autorizada.', risco: 'alto', obrigatorios: ['para', 'assunto', 'texto'], confirmar: true },
   criar_tarefa: { descricao: 'Cria uma tarefa no Meu Dia.', risco: 'baixo', obrigatorios: ['titulo'] },
   criar_reuniao: { descricao: 'Cria reunião e, sem link informado, agenda no Google Meet.', risco: 'baixo', obrigatorios: ['titulo', 'dataEntrega', 'horaInicio'] },
   concluir_tarefa: { descricao: 'Marca uma tarefa como concluída.', risco: 'medio', obrigatorios: ['tarefaId'], confirmar: true },
@@ -34,6 +38,9 @@ function listarFerramentas() {
 
 const PROPRIEDADES_COMUNS = {
   termo: { type: 'string', description: 'Assunto, título ou texto para filtrar.' },
+  consulta: { type: 'string', description: 'Busca do Gmail, por exemplo: newer_than:7d is:unread.' },
+  emailId: { type: 'string' }, para: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+  assunto: { type: 'string' }, texto: { type: 'string' },
   unidade: { type: 'string', description: 'Código ou nome da unidade.' },
   unidadeNome: { type: 'string' }, titulo: { type: 'string' }, descricao: { type: 'string' },
   observacao: { type: 'string' }, prioridade: { type: 'string' }, dataEntrega: { type: 'string', description: 'AAAA-MM-DD' },
@@ -92,6 +99,9 @@ function validar(nome, entrada, confirmar) {
 
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
+  if (nome === 'pesquisar_emails') return googleGmail.pesquisar({ consulta: p.consulta, limite: p.limite });
+  if (nome === 'ler_email') return googleGmail.ler(p.emailId);
+  if (nome === 'enviar_email') return googleGmail.enviar({ para: p.para, assunto: p.assunto, texto: p.texto });
   if (nome === 'preparar_reuniao') {
     const acesso = { usuario: ator, isMaster: true, isAdmin: false, unidades: [] };
     const [listaTarefas, listaSolicitacoes, maquinas] = await Promise.all([
