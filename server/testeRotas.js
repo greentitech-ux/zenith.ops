@@ -12708,37 +12708,26 @@ setTimeout(async () => {
         /Pastas-AreaDeTrabalho \$perfilUsuario/.test(corpoPs('Aplicar-BarraTarefas'))
         && !/GetFolderPath|\$env:USERPROFILE/.test(corpoPs('Aplicar-BarraTarefas'))
         && /\$areas = @\(Pastas-AreaDeTrabalho \$perfilUsuario\)/.test(corpoPs('Aplicar-PerfilEstacao')),
-      // os pinos vivem no registro (Taskband): trocar só a pasta deixava ícone
-      // fantasma com "Não é possível abrir este item". E nunca se mata o
-      // Explorer do operador sem antes ter PROVADO que consegue relançá-lo.
-      'os pinos da barra são reconstruídos no registro e o Explorer reiniciado - e nunca morto sem relançamento provado':
+      // Os pinos vivem no registro (Taskband), nao na pasta - por isso trocar so
+      // os .lnk deixava icone morto. Mas reiniciar o Explorer pra aplicar isso
+      // apagava a tela da loja, abria janela de pasta e sumia com a barra, com
+      // o caixa aberto: o Master viu e mandou voltar. Agora so limpamos o
+      // registro; os pinos se acertam no proximo logon. Esta asserção existe
+      // pra ninguem devolver o Stop-Process achando que "conserta" o icone.
+      'os pinos são marcados no registro SEM matar o Explorer do operador':
         (() => {
-          const i = psPp.indexOf('function Reconstruir-BarraTarefas'); if (i < 0) return false;
-          const fn = psPp.slice(i, psPp.indexOf('\nfunction ', i + 10));
-          const reg = fn.indexOf('Register-ScheduledTask -TaskName $nomeT');
-          const prova = fn.indexOf('Start-ScheduledTask -TaskName $nomeT');
-          const mata = fn.indexOf('Stop-Process -Id $p.ProcessId');
-          return /Taskband/.test(fn) && /Remove-ItemProperty[^\n]*Favorites, FavoritesResolve/.test(fn)
-            && /New-ScheduledTaskPrincipal -UserId \$operador -LogonType Interactive/.test(fn)
-            && reg > 0 && prova > reg && mata > prova
+          const fn = corpoPs('Reconstruir-BarraTarefas');
+          if (!fn) return false;
+          return /Taskband/.test(fn)
+            && /Remove-ItemProperty[^\n]*Favorites, FavoritesResolve/.test(fn)
+            && !/Stop-Process/.test(fn) && !/Get-Process -Name explorer/.test(fn)
+            && !/Register-ScheduledTask/.test(fn) && !/Start-Process[^\n]*explorer/.test(fn)
             && /Reconstruir-BarraTarefas/.test(corpoPs('Aplicar-BarraTarefas'));
         })(),
-      // a limpeza só RETIRA: marcado que não estava na área nunca apareceria.
-      // Copia do menu Iniciar (onde o instalador deixou) ANTES de montar a
-      // lista de remoção - depois seria retirado no mesmo ciclo.
-      'item marcado que não está na Área de Trabalho é copiado do menu Iniciar':
-        /Copy-Item[^\n]*Join-Path \$destino/.test(corpoPs('Garantir-AtalhosNaArea'))
-        // as DUAS fontes: app instalado por usuário fica no menu Iniciar dele,
-        // app pra todos fica no ProgramData. Exigir só uma deixava metade quebrar
-        // em silêncio (foi o que a 3a sabotagem mostrou).
-        && /\$perfilUsuario \+ "\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs"/.test(corpoPs('Garantir-AtalhosNaArea'))
-        && /\$env:ProgramData \+ "\\Microsoft\\Windows\\Start Menu\\Programs"/.test(corpoPs('Garantir-AtalhosNaArea'))
-        && (() => {
-          const fn = corpoPs('Aplicar-PerfilEstacao');
-          const copia = fn.indexOf('Garantir-AtalhosNaArea');
-          const lista = fn.indexOf('$remover = New-Object');
-          return copia > 0 && lista > copia;
-        })(),
+      // nenhuma parte do agente pode matar processo do operador pra padronizar
+      // a barra: o custo e a loja piscar no meio do expediente
+      'o agente inteiro não encerra Explorer em lugar nenhum':
+        !/Stop-Process[^\n]*explorer/i.test(psPp) && !/Get-Process -Name explorer/.test(psPp),
       'o pino "Remote Desktop Connection" / "Área de Trabalho Remota" conta como RDP Dominos':
         /rdp-dominos[^\n]*remote desktop\|trabalho remota\|mstsc/.test(psPp),
       'autoatualização valida a sintaxe e preserva a última cópia válida antes de substituir':
@@ -14288,6 +14277,58 @@ setTimeout(async () => {
   console.log(`${okPixNome ? '✓' : '✗'} Monitor: pedido Pix que mudou de status mostra o nome do cliente (não a conta da Adyen nem o nome do cartão)`);
 
   // ------------------------------------------------------------------
+  // ACESSO REMOTO CONHECIDO. Pedido do Master: alerta que dispara pela propria
+  // equipe vira ruido e faz o Master parar de olhar o que importa. O ID do
+  // AnyDesk de QUEM ACESSA entra numa lista e aquele acesso deixa de tocar o
+  // celular - mas NUNCA sai do historico: a lista nao pode virar um jeito de
+  // entrar na loja sem deixar rastro.
+  let okAcessoConhecido = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const srcIndex = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlAr = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const lista = [{ id: '123 456 789', nome: 'Sidney' }, { id: 'abc', nome: 'lixo' }, { id: '123456789', nome: 'repetido' }];
+    const saneada = ls.sanitizarAcessosConhecidos(lista);
+    const casa = (d) => ls.acessoConhecidoDe(d, lista);
+    const conf = {
+      'o ID entra so com digito, sem repetir, e o invalido e descartado':
+        saneada.length === 1 && saneada[0].id === '123456789' && saneada[0].nome === 'Sidney',
+      'acesso de ID cadastrado e reconhecido na linha crua do log':
+        !!casa('AnyDesk · incoming session from 123456789') && casa('AnyDesk · incoming session from 123456789').nome === 'Sidney',
+      'acesso de ID nao cadastrado NAO e reconhecido': !casa('AnyDesk · incoming session from 555444333'),
+      // o erro caro: um ID de 9 digitos casando dentro de um de 13 silenciaria
+      // acesso de estranho - por isso a busca e ancorada em nao-digito
+      'ID cadastrado nao casa quando e pedaco de um numero maior': !casa('AnyDesk · session 1234567890123 started'),
+      'sem lista, nada e reconhecido': !ls.acessoConhecidoDe('incoming 123456789', []) && !ls.acessoConhecidoDe('incoming 123456789', null),
+      // o push e poupado; o evento ja foi gravado ANTES, e continua la
+      'o push e poupado so quando o acesso e conhecido':
+        /const conhecido = ehSessao[\s\S]{0,200}acessoConhecidoDe\(req\.body\.detalhe/.test(srcIndex)
+        && /if \(ehSessao && !conhecido && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIndex),
+      // a LINHA do registrarAcessoRemoto nao pode mencionar 'conhecido': filtrar
+      // o historico transformaria a lista num jeito de entrar sem deixar rastro
+      'o evento continua no historico (registrarAcessoRemoto roda antes e sem filtro)':
+        srcIndex.indexOf('lojaStatus.registrarAcessoRemoto') < srcIndex.indexOf('const conhecido = ehSessao')
+        && (() => {
+          const i = srcIndex.indexOf('lojaStatus.registrarAcessoRemoto');
+          const ini = srcIndex.lastIndexOf('\n', i) + 1;
+          return !/conhecido/.test(srcIndex.slice(ini, srcIndex.indexOf('\n', i)));
+        })(),
+      'mexer na lista pede a senha do Master (silenciar alerta e ato sensivel)':
+        /if \(req\.body\.acessosConhecidos !== undefined\) \{\s*\n\s*if \(!\(await exigirSenhaDoMaster\(req, res\)\)\) return;/.test(srcIndex),
+      'o toggle de push NAO passou a pedir senha':
+        /if \(req\.body\.pushAcessoRemoto !== undefined\) patch\.pushAcessoRemoto = req\.body\.pushAcessoRemoto === true;/.test(srcIndex),
+      'a tela tem onde cadastrar e diz que o histórico continua':
+        /adicionarAcessoConhecido\(\)/.test(htmlAr) && /removerAcessoConhecido\(/.test(htmlAr)
+        && /não toca o celular/.test(htmlAr) && /continua no histórico/.test(htmlAr),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAcessoConhecido = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAcessoConhecido = false; console.log('  erro: ' + e.message); }
+  if (!okAcessoConhecido) ruins += 1;
+  console.log(`${okAcessoConhecido ? '✓' : '✗'} NOC: ID de AnyDesk conhecido não toca o celular, mas continua no histórico`);
+
+  // ------------------------------------------------------------------
   // SENHA DO ANYDESK EM MASSA. Pedido do Master (07/09/2026): "colocar uma
   // senha de acesso no AnyDesk de todos os computadores". Vai pelo "Rodar em
   // massa" com um modelo de comando - mas a senha nao pode ficar no catalogo
@@ -14709,8 +14750,10 @@ setTimeout(async () => {
       'a versão do vigia subiu, senão as 52 máquinas não baixam a versão nova': vg.VERSAO_VIGIA >= 23,
       'o script continua começando com # NOCZenith (a trava do download)': script.startsWith('# NOCZenith'),
       // o push: so sessao toca o celular do Master
+      // o !conhecido entrou depois (ID de AnyDesk da equipe nao toca o celular);
+      // o ehSessao continua fixado aqui, que e a garantia original
       'só a sessão vira push; o serviço conectado nunca mais toca o celular':
-        /if \(ehSessao && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
+        /if \(ehSessao && !conhecido && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
       // presa ao HTML inline e ao rótulo em texto, esta asserção quebrou quando
       // os eventos viraram cardEvento() - sem nenhum defeito real. O que
       // importa não é a marcação: é a sessão sair em VERMELHO e o serviço
