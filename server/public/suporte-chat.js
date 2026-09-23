@@ -355,6 +355,76 @@
     localStorage.removeItem(LS_TOKEN);
   }
 
+  // ===================================================================
+  // RESPOSTA QUE CHEGA COM O CHAT MINIMIZADO
+  //
+  // O DEFEITO (Master, 23/09/2026): "em uma conversa após ser minimizada,
+  // quando respondemos ela não sobe na tela novamente, não gera pop-up ou
+  // alerta - fazendo com que a pessoa fique esperando uma resposta que já
+  // aconteceu".
+  //
+  // A causa era simples e completa: minimizar chamava pararPoll(), e o
+  // widget PARAVA de perguntar por mensagem nova. Sem consulta não há como
+  // saber que o Suporte respondeu - nem badge, nem som, nem nada. E depois
+  // de recarregar a página era pior: o poll nunca começava, porque só
+  // carregarConversa() o iniciava, e ele só roda quando o painel abre.
+  //
+  // Repare que o lado do ATENDIMENTO já fazia certo (a caixa abre sozinha
+  // quando o visitante escreve). Quem ficava no escuro era justamente a
+  // loja, que é quem está esperando.
+  const LS_VISITANTE_VISTO = 'szcVisitanteVisto:'; // + chatId -> "em" da última resposta já vista
+  let naoLidasVisitante = 0;
+
+  // "em" da resposta mais recente do outro lado (Suporte ou Beniboy). A
+  // mensagem da própria loja não conta - senão o widget se auto-avisaria a
+  // cada envio.
+  function ultimaRespostaEm(chat) {
+    let ultima = '';
+    for (const m of (chat && chat.mensagens) || []) {
+      if (m.de === 'visitante') continue;
+      if (String(m.em || '') > ultima) ultima = String(m.em || '');
+    }
+    return ultima;
+  }
+  function vistoAte(id) {
+    try { return localStorage.getItem(LS_VISITANTE_VISTO + id) || ''; } catch (e) { return ''; }
+  }
+  function marcarVisto(id, em) {
+    try { if (em) localStorage.setItem(LS_VISITANTE_VISTO + id, em); } catch (e) { /* aba anônima */ }
+  }
+  function contarRespostasNovas(chat, id) {
+    const desde = vistoAte(id);
+    return ((chat && chat.mensagens) || [])
+      .filter((m) => m.de !== 'visitante' && String(m.em || '') > desde).length;
+  }
+  // O badge é o mesmo elemento do lado do atendimento; só encosto nele
+  // quando esta tela NÃO é de atendente, pra os dois nunca disputarem o
+  // mesmo número.
+  function pintarBadgeVisitante(n) {
+    if (ATEND.ativo) return;
+    naoLidasVisitante = n;
+    badge.textContent = n;
+    badge.style.display = n ? 'block' : 'none';
+  }
+  // Bipe curto, não a sirene do alarme: isto aqui é "o Suporte respondeu",
+  // não "a loja caiu". Bloqueado pela política de autoplay? Tudo bem - o
+  // painel abrindo sozinho já resolve o aviso.
+  function bipeResposta() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const vol = ctx.createGain();
+      osc.connect(vol); vol.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      vol.gain.setValueAtTime(0.0001, ctx.currentTime);
+      vol.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+      vol.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+      osc.start(); osc.stop(ctx.currentTime + 0.36);
+      setTimeout(() => { try { ctx.close(); } catch (e) {} }, 700);
+    } catch (e) { /* sem áudio: o painel abre do mesmo jeito */ }
+  }
+
   async function dadosLogado() {
     const token = localStorage.getItem('authToken');
     if (!token) return null;
@@ -527,6 +597,9 @@
       if (r.status === 404) { limparChatSalvo(); renderFormInicial(await dadosLogado()); return; }
       const chat = await r.json();
       renderConversa(chat);
+      // painel aberto = a pessoa está lendo: nada fica "não lido", e o
+      // marcador avança pra a próxima resposta não reavisar do zero
+      if (aberto) { marcarVisto(salvo.id, ultimaRespostaEm(chat)); pintarBadgeVisitante(0); }
       iniciarPoll();
     } catch (e) { /* rede fora - tenta no proximo poll */ }
   }
@@ -565,9 +638,54 @@
     } finally { b.disabled = false; }
   }
 
+  // Consulta leve SÓ pra saber se respondeu: o painel está minimizado, então
+  // não há o que redesenhar - só avisar.
+  async function verificarRespostaNova() {
+    const salvo = chatSalvo();
+    if (!salvo) return;
+    try {
+      const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}?token=${encodeURIComponent(salvo.token)}`);
+      if (!r.ok) return;
+      const chat = await r.json();
+      // conversa encerrada não precisa mais ser vigiada
+      if (chat.status === 'RESOLVIDO' || chat.status === 'SEM_SOLUCAO') { pararPoll(); return; }
+      const novas = contarRespostasNovas(chat, salvo.id);
+      if (!novas) return;
+      pintarBadgeVisitante(novas);
+      // SOBE NA TELA. É o pedido explícito do Master, e é o comportamento
+      // que o lado do atendimento já tinha: quem está esperando não pode
+      // depender de reparar num balãozinho no canto.
+      aberto = true;
+      panel.classList.remove('szc-hidden');
+      atualizarNomeFlutuante();
+      renderConversa(chat);
+      marcarVisto(salvo.id, ultimaRespostaEm(chat));
+      pintarBadgeVisitante(0);
+      bipeResposta();
+    } catch (e) { /* rede fora - tenta no próximo ciclo */ }
+  }
+
+  // CADÊNCIA. Aberto, 5s (a pessoa está olhando). Minimizado, 20s - cada
+  // consulta é 1 leitura no Firestore (ver getPublico/getOne), e o
+  // CLAUDE.md §3 é claro sobre isso. 20s ainda é bem mais rápido que
+  // alguém perceber sozinho, e só roda enquanto existe conversa viva.
+  const POLL_BASE_MS = 5000;
+  const CICLOS_MINIMIZADO = 4; // 4 x 5s = 20s
+  let ciclo = 0;
   function iniciarPoll() {
     if (pollTimer) return;
-    pollTimer = setInterval(() => { if (aberto && chatSalvo()) carregarConversa(); }, 5000);
+    pollTimer = setInterval(() => {
+      if (!chatSalvo()) return;
+      if (aberto) { ciclo = 0; carregarConversa(); return; }
+      // MINIMIZADO: antes isto era `return` (pararPoll no clique), e era
+      // exatamente aí que a resposta se perdia.
+      ciclo += 1;
+      if (ciclo % CICLOS_MINIMIZADO !== 0) return;
+      // aba em segundo plano não gasta leitura: quando ela volta, o
+      // visibilitychange lá embaixo confere na hora
+      if (document.visibilityState !== 'visible') return;
+      verificarRespostaNova();
+    }, POLL_BASE_MS);
   }
   function pararPoll() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -577,13 +695,23 @@
     aberto = !aberto;
     panel.classList.toggle('szc-hidden', !aberto);
     atualizarNomeFlutuante();
-    if (!aberto) { pararPoll(); return; }
+    // MINIMIZOU: o poll CONTINUA (mais devagar) enquanto houver conversa
+    // viva. Parar aqui era o defeito - a resposta chegava e ninguém via.
+    if (!aberto) { if (!chatSalvo()) pararPoll(); return; }
+    pintarBadgeVisitante(0);
     // MASTER: o mesmo icone abre o ATENDIMENTO (lista de conversas) em
     // vez do formulario de visitante - so no Master
     if (ATEND.ehMaster) atendRenderLista();
     else carregarConversa();
   });
-  panel.querySelector('.szc-x').addEventListener('click', () => { aberto = false; panel.classList.add('szc-hidden'); pararPoll(); atualizarNomeFlutuante(); });
+  // o X fecha o painel, mas NÃO abandona a conversa: mesma razão do clique
+  // no balão acima - quem está esperando resposta continua sendo avisado
+  panel.querySelector('.szc-x').addEventListener('click', () => {
+    aberto = false;
+    panel.classList.add('szc-hidden');
+    if (!chatSalvo()) pararPoll();
+    atualizarNomeFlutuante();
+  });
   panel.querySelector('#szc-enviar-msg').addEventListener('click', enviarMensagem);
   panel.querySelector('#szc-nova-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') enviarMensagem(); });
 
@@ -1196,4 +1324,26 @@
     atualizarNomeFlutuante();
     carregarConversa();
   }
+
+  // CONVERSA VIVA E PAINEL FECHADO (o caso normal depois de recarregar a
+  // página): antes daqui NADA começava o poll - ele só nascia dentro de
+  // carregarConversa(), que por sua vez só roda quando o painel abre. Ou
+  // seja: a loja recarregava a tela e o widget ficava mudo pra sempre.
+  //
+  // Vale só pro lado do visitante; atendente tem o próprio laço (ATEND).
+  if (!ATEND.ativo && chatSalvo() && !aberto) {
+    iniciarPoll();
+    // confere UMA vez já na abertura da tela, sem esperar os 20s: a resposta
+    // pode ter chegado enquanto a página estava fechada
+    verificarRespostaNova();
+  }
+
+  // Aba que volta do segundo plano confere na hora. O laço pula os ciclos
+  // com a aba escondida (pra não gastar leitura à toa), então este é o
+  // ponto que devolve a resposta assim que a pessoa olha pra tela de novo.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (ATEND.ativo || aberto || !chatSalvo()) return;
+    verificarRespostaNova();
+  });
 })();

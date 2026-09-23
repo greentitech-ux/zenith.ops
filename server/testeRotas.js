@@ -27067,6 +27067,85 @@ $r | ConvertTo-Json -Depth 4 -Compress
   if (!okQA) ruins += 1;
   console.log(`${okQA ? '✓' : '✗'} Q.A: checklist de visita reproduz a nota das planilhas reais, e a porta é a tag de cargo`);
 
+  // ------------------------------------------------------------------
+  // CHAT MINIMIZADO: A RESPOSTA TEM QUE SUBIR NA TELA.
+  //
+  // Defeito relatado pelo Master (23/09/2026): "em uma conversa após ser
+  // minimizada, quando respondemos ela não sobe na tela novamente, não gera
+  // pop-up ou alerta - fazendo com que a pessoa fique esperando uma resposta
+  // que já aconteceu".
+  //
+  // A causa: minimizar chamava pararPoll(), e sem consulta não há como saber
+  // que o Suporte respondeu. Pior depois de recarregar a página - o poll só
+  // nascia dentro de carregarConversa(), que só roda quando o painel abre.
+  //
+  // Cada asserção aqui mira um pedaço do defeito que existiu de verdade.
+  let okChatMinimizado = false;
+  try {
+    const fsM = require('fs');
+    const widget = fsM.readFileSync(__dirname + '/public/suporte-chat.js', 'utf8');
+    const semComentarioM = widget.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+    const conf = {
+      // O DEFEITO EM SI: minimizar não pode mais desligar a vigilância
+      'minimizar não abandona a conversa':
+        /if \(!aberto\) \{ if \(!chatSalvo\(\)\) pararPoll\(\); return; \}/.test(semComentarioM)
+        && !/if \(!aberto\) \{ pararPoll\(\); return; \}/.test(semComentarioM),
+      'o X também não abandona':
+        /aberto = false;[\s\S]{0,200}if \(!chatSalvo\(\)\) pararPoll\(\);/.test(semComentarioM),
+      // o laço antigo só fazia algo com o painel aberto
+      'o laço continua valendo com o painel fechado':
+        !/setInterval\(\(\) => \{ if \(aberto && chatSalvo\(\)\) carregarConversa\(\); \}/.test(semComentarioM)
+        && /verificarRespostaNova\(\);/.test(semComentarioM),
+      // sobe na tela, e avisa
+      'a resposta faz o painel subir sozinho': (() => {
+        const i = semComentarioM.indexOf('async function verificarRespostaNova');
+        const trecho = semComentarioM.slice(i, i + 1400);
+        return i > 0
+          && /aberto = true;/.test(trecho)
+          && /panel\.classList\.remove\('szc-hidden'\);/.test(trecho)
+          && /bipeResposta\(\);/.test(trecho)
+          && /pintarBadgeVisitante\(/.test(trecho);
+      })(),
+      // a mensagem da PRÓPRIA loja não pode disparar aviso
+      'a própria mensagem da loja não conta como resposta':
+        /if \(m\.de === 'visitante'\) continue;/.test(semComentarioM)
+        && /m\.de !== 'visitante' && String\(m\.em \|\| ''\) > desde/.test(semComentarioM),
+      // depois de recarregar a página o widget nasce fechado - e era aí que
+      // ele ficava mudo pra sempre
+      'página recarregada com conversa viva volta a vigiar':
+        /if \(!ATEND\.ativo && chatSalvo\(\) && !aberto\) \{[\s\S]{0,200}iniciarPoll\(\);[\s\S]{0,200}verificarRespostaNova\(\);/.test(semComentarioM),
+      'aba que volta do segundo plano confere na hora':
+        /addEventListener\('visibilitychange'/.test(semComentarioM)
+        && /document\.visibilityState !== 'visible'/.test(semComentarioM),
+      // CLAUDE.md §3: cada consulta é 1 leitura (getPublico -> getOne, sem
+      // cache). Minimizado tem que ser mais espaçado que aberto, e conversa
+      // encerrada não pode ficar sendo vigiada pra sempre.
+      'minimizado consulta mais devagar que aberto':
+        /const CICLOS_MINIMIZADO = 4;/.test(semComentarioM)
+        && /ciclo % CICLOS_MINIMIZADO !== 0/.test(semComentarioM),
+      'conversa encerrada deixa de ser vigiada':
+        /chat\.status === 'RESOLVIDO' \|\| chat\.status === 'SEM_SOLUCAO'/.test(semComentarioM)
+        && /pararPoll\(\); return;/.test(semComentarioM),
+      // o badge é compartilhado com o lado do atendimento
+      'o badge do visitante não briga com o do atendimento':
+        /function pintarBadgeVisitante\(n\) \{\s*\n\s*if \(ATEND\.ativo\) return;/.test(widget),
+      // ler com o painel aberto marca como visto, senão reavisaria sempre
+      'ler com o painel aberto zera o não lido':
+        /if \(aberto\) \{ marcarVisto\(salvo\.id, ultimaRespostaEm\(chat\)\); pintarBadgeVisitante\(0\); \}/.test(semComentarioM),
+      // §5: não inventar estado novo - os terminais são os do suporteChat.js
+      'usa os status que já existem': (() => {
+        const sc = fsM.readFileSync(__dirname + '/suporteChat.js', 'utf8');
+        return /STATUS_TERMINAL = new Set\(\['RESOLVIDO', 'SEM_SOLUCAO'\]\)/.test(sc);
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okChatMinimizado = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okChatMinimizado = false; console.log('  erro: ' + e.message); }
+  if (!okChatMinimizado) ruins += 1;
+  console.log(`${okChatMinimizado ? '✓' : '✗'} Chat minimizado: a resposta do Suporte sobe na tela em vez de ficar esperando`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
