@@ -289,12 +289,21 @@ function textoDoPdf(b) {
       dentro.replace(/\\([()\\])/g, '$1') + ' ');
 }
 
-function pedir(caminho, headers = {}) {
+// GET que perde a conexão ANTES de qualquer resposta (ECONNRESET / socket
+// hang up) é repetido UMA vez. É o cliente HTTP do Node reaproveitando um
+// socket que o servidor acabou de fechar por keep-alive ocioso: aparecia como
+// http=0 em testes sem relação nenhuma com o que mudou (o do socorro do NOC
+// falhou assim em 2 de 6 rodadas de 23/09, e passou nas outras 4 com o mesmo
+// código). Rota que derruba a conexão de verdade cai nas duas tentativas.
+function pedir(caminho, headers = {}, tentativa = 1) {
   return new Promise((resolve) => {
     const req = http.request({ host: '127.0.0.1', port: 8899, path: caminho, headers }, (res) => {
       let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b, headers: res.headers }));
     });
-    req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
+    req.on('error', (e) => {
+      if (tentativa === 1 && (e.code === 'ECONNRESET' || /socket hang up/i.test(e.message))) return resolve(pedir(caminho, headers, 2));
+      resolve({ status: 0, corpo: `${e.code || ''} ${e.message}` });
+    });
     // 4s marcava timeout até em rota que respondia certo (relatório de
     // fechamentos em PDF passou a levar mais que isso no ambiente de teste,
     // sem nenhum travamento real - só devagar). 10s ainda pega rota
