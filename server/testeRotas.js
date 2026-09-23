@@ -19899,6 +19899,100 @@ $r | ConvertTo-Json -Compress
   if (!okSecaoMD) ruins += 1;
   console.log(`${okSecaoMD ? '✓' : '✗'} Meu Dia: a seção libera criar tarefa própria; sem ela a pessoa só responde o que recebeu`);
 
+  // ---- Meu Dia: REAGENDAR com motivo (pedido do Master, 23/09/2026) ----
+  // "Preciso poder reagendar tarefa, mudar a data quando entrar em pendente,
+  // para situações reais de não possibilidade." Tranca: motivo obrigatório,
+  // histórico + comentário, reunião muda dia E hora com o evento da agenda
+  // junto (e se a agenda recusar, NADA muda), o SLA original não é apagado,
+  // e só quem gere a tarefa reagenda.
+  let okReagendar = false;
+  try {
+    const cabM = { Authorization: 'Bearer ' + token };
+    const senhaRG = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-reag-fora', {
+      passwordHash: senhaRG, role: 'user', active: true, email: 'reag-fora@teste.local', username: 'reagfora',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabFora = { Authorization: 'Bearer ' + (await auth.login('reag-fora@teste.local', 'SenhaDeTeste!2026')).token };
+    const diaSp = (deltaDias) => new Date(Date.now() + deltaDias * 86400000).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const ontem = diaSp(-1); const amanha = diaSp(1); const depois = diaSp(3);
+    const idDe = (r) => (r.status === 200 ? JSON.parse(r.corpo).id : null);
+    const doc = (id) => DOCS.get('tarefas/' + id) || {};
+    const reag = (id, corpo, cab = cabM) => postarJson('/api/tarefas/' + id + '/reagendar', corpo, cab);
+
+    // tarefa comum, prazo vencido -> nasce PENDENTE
+    const t1 = idDe(await postarJson('/api/tarefas', { titulo: 'Visita técnica na loja', dataEntrega: ontem, dataInicio: ontem }, cabM));
+    const slaAntes = doc(t1).slaPrazo;
+    const semMotivo = await reag(t1, { dataEntrega: amanha, motivo: 'curto' });
+    const noPassado = await reag(t1, { dataEntrega: diaSp(-2), motivo: 'loja fechada no dia combinado' });
+    const mesmaData = await reag(t1, { dataEntrega: ontem, motivo: 'loja fechada no dia combinado' });
+    const deFora = await reag(t1, { dataEntrega: amanha, motivo: 'loja fechada no dia combinado' }, cabFora);
+    const intacta = doc(t1).dataEntrega === ontem && !(doc(t1).reagendamentos || []).length;
+    const ok1 = await reag(t1, { dataEntrega: depois, motivo: 'Loja fechada no dia combinado (reforma)' });
+    const d1 = doc(t1);
+    const hist1 = (d1.reagendamentos || [])[0] || {};
+    const com1 = (d1.comentarios || []).slice(-1)[0] || {};
+
+    // reunião com evento na agenda: a agenda recusa -> nada muda; aceita -> muda dia e hora
+    const rg = require(__dirname + '/reuniaoGoogle.js');
+    const moverOriginal = rg.moverSala;
+    const chamadas = [];
+    const t2 = idDe(await postarJson('/api/tarefas', { titulo: 'Entrevista candidato', dataEntrega: ontem, ehReuniao: true, horaInicio: '15:00', duracaoMin: 60, linkOrigem: 'colado', linkReuniao: 'https://meet.google.com/abc-defg-hij' }, cabM));
+    DOCS.set('tarefas/' + t2, { ...doc(t2), eventoGoogleId: 'evt-teste-1', linkOrigem: 'google' });
+    rg.moverSala = async () => { throw new Error('Google Agenda recusou mover a reunião: 403. Nada foi alterado.'); };
+    const recusou = await reag(t2, { dataEntrega: amanha, horaInicio: '10:30', motivo: 'Candidato pediu para remarcar' });
+    const naoMudou = doc(t2).dataEntrega === ontem && doc(t2).horaInicio === '15:00';
+    rg.moverSala = async (ev, x) => { chamadas.push({ ev, ...x }); return true; };
+    const semHora = await reag(t2, { dataEntrega: amanha, horaInicio: '25:00', motivo: 'Candidato pediu para remarcar' });
+    const ok2 = await reag(t2, { dataEntrega: amanha, horaInicio: '10:30', motivo: 'Candidato pediu para remarcar' });
+    rg.moverSala = moverOriginal;
+    const d2 = doc(t2);
+
+    // tarefa de TICKET: o status continua com o ticket
+    const t3 = idDe(await postarJson('/api/tarefas', { titulo: 'Tarefa de ticket', dataEntrega: ontem }, cabM));
+    DOCS.set('tarefas/' + t3, { ...doc(t3), vinculo: { id: 'tk-1', ticketTipo: 'solicitacao' }, status: 'PENDENTE' });
+    const ok3 = await reag(t3, { dataEntrega: amanha, motivo: 'Aguardando retorno do fornecedor' });
+
+    // ---- tela: as funções de SLA rodando isoladas ----
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const fn = (nome) => { const i = html.indexOf('function ' + nome + '('); const j = html.indexOf('\n}\n', i); return html.slice(i, j + 3); };
+    const tela = new Function('fmt', 'e', 'hoje', 'TAREFA_ABERTA', `${fn('prazoReagendado')}\n${fn('linhaSla')}\n${fn('tarefaVencida')}\nreturn { prazoReagendado, linhaSla, tarefaVencida };`)(
+      (x) => String(x), (x) => String(x), () => diaSp(0), new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']));
+    const slaVencido = new Date(Date.now() - 86400000).toISOString();
+    const semReag = { status: 'A_FAZER', slaPrazo: slaVencido, dataEntrega: ontem };
+    const comReag = { status: 'A_FAZER', slaPrazo: slaVencido, dataEntrega: depois, reagendadaPara: depois };
+    const reuReag = { status: 'A_FAZER', slaPrazo: slaVencido, dataEntrega: amanha, reagendadaPara: amanha + 'T10:30', duracaoMin: 60 };
+
+    const conf = {
+      'motivo é obrigatório, data no passado e mesma data são recusadas':
+        semMotivo.status === 400 && noPassado.status === 400 && mesmaData.status === 400,
+      'só quem gere a tarefa reagenda, e a recusa não muda nada': deFora.status === 400 && intacta,
+      'reagendar muda a data e tira de Pendentes': ok1.status === 200 && d1.dataEntrega === depois && d1.status === 'A_FAZER',
+      'o histórico guarda de/para/motivo/quem': hist1.de && hist1.de.dataEntrega === ontem && hist1.para.dataEntrega === depois
+        && /reforma/.test(hist1.motivo || '') && !!hist1.porNome,
+      'todo mundo da tarefa vê: comentário automático com o motivo': com1.sistema === true && /Reagendada de .* para .*reforma/.test(com1.texto || ''),
+      'o SLA original NÃO é apagado': d1.slaPrazo === slaAntes && d1.reagendadaPara === depois,
+      'reunião: se a agenda recusar, nada muda': recusou.status === 400 && /Google Agenda recusou/.test(recusou.corpo) && naoMudou,
+      'reunião: hora inválida é recusada': semHora.status === 400,
+      'reunião: muda dia E hora, e o evento da agenda anda junto':
+        ok2.status === 200 && d2.dataEntrega === amanha && d2.horaInicio === '10:30' && d2.reagendadaPara === amanha + 'T10:30'
+        && chamadas.length === 1 && chamadas[0].ev === 'evt-teste-1' && chamadas[0].dia === amanha && chamadas[0].hora === '10:30',
+      'tarefa de ticket: o status continua com o ticket': ok3.status === 200 && doc(t3).status === 'PENDENTE' && doc(t3).dataEntrega === amanha,
+      'TELA: sem reagendar, SLA vencido continua "atrasado"': /atrasado/.test(tela.linhaSla(semReag)) && tela.tarefaVencida(semReag) === true,
+      'TELA: reagendada, mostra o SLA original que estourou e mede pela data nova':
+        /SLA original/.test(tela.linhaSla(comReag)) && /estourou/.test(tela.linhaSla(comReag))
+        && /Reagendada para/.test(tela.linhaSla(comReag)) && !/late">atrasado/.test(tela.linhaSla(comReag)) && tela.tarefaVencida(comReag) === false,
+      'TELA: reunião reagendada mede pela hora nova': tela.prazoReagendado(reuReag) > new Date() && /às 10:30/.test(tela.linhaSla(reuReag)),
+      'TELA: o botão Reagendar existe e chama a rota': /onclick="abrirReagendar\(\)"/.test(html) && /'\/api\/tarefas\/'\+id\+'\/reagendar'/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okReagendar = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ok1=${ok1.status} ${ok1.corpo.slice(0, 160)} ok2=${ok2.status} ${ok2.corpo.slice(0, 160)} d1=${JSON.stringify({ s: d1.status, d: d1.dataEntrega, r: d1.reagendadaPara })} semMotivo=${semMotivo.corpo.slice(0, 100)} deFora=${deFora.status})`);
+  } catch (e) { okReagendar = false; console.log('  erro: ' + e.message); }
+  if (!okReagendar) ruins += 1;
+  console.log(`${okReagendar ? '✓' : '✗'} Meu Dia: reagendar com motivo (histórico, comentário, agenda junto) sem apagar o SLA original`);
+
   // ---- Meu Dia: cancelar (qualquer um) x excluir (só Master, ou pedido + aprovação) ----
   let okCancDel = false;
   try {

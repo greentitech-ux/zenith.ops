@@ -11543,6 +11543,20 @@ app.patch('/api/tarefas/:id/responsavel', auth.requireAuth, async (req, res) => 
   }
 });
 
+// reagendar com motivo (ver tarefas.reagendar): muda a data (e a hora da
+// reunião, com o evento da agenda), deixa histórico e comentário automático
+app.post('/api/tarefas/:id/reagendar', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.reagendar(req.params.id, acessoDasTarefas(req), {
+      dataEntrega: req.body?.dataEntrega, horaInicio: req.body?.horaInicio, motivo: req.body?.motivo,
+    });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.patch('/api/tarefas/:id/datas', auth.requireAuth, async (req, res) => {
   try {
     const atualizada = await tarefas.atualizarDatas(req.params.id, acessoDasTarefas(req), {

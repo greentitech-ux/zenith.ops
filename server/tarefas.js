@@ -552,6 +552,76 @@ async function atualizarDatas(id, acesso, { dataInicio, dataEntrega } = {}) {
   return getOne(id);
 }
 
+// REAGENDAR (pedido do Master, 23/09/2026): "preciso poder reagendar tarefa,
+// mudar a data quando entrar em pendente, para situações reais de não
+// possibilidade". Diferente de editar a previsão no campo de data:
+//  - exige MOTIVO - quem cobra precisa ver por que o combinado mudou;
+//  - fica no histórico (reagendamentos) e num comentário automático, pra
+//    todo mundo da tarefa saber sem abrir a ficha;
+//  - reunião muda dia E hora, e o evento do Google Agenda anda junto (se a
+//    agenda recusar, nada muda - senão a turma entra numa sala vazia);
+//  - o SLA ORIGINAL não é apagado: ele continua registrado, e a tela passa a
+//    medir "em prazo/atrasado" pela data reagendada. Estourou antes, fica
+//    dito que estourou - o reagendamento explica, não esconde.
+const MOTIVO_REAGENDAR_MIN = 10;
+const REAGENDAMENTOS_MAX = 30;
+function hojeEmSaoPaulo() { return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }); }
+async function reagendar(id, acesso, { dataEntrega, horaInicio, motivo } = {}) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Só quem gere a tarefa (responsável, quem criou ou Master) pode reagendar.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
+  const dia = String(dataEntrega || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) throw new Error('Informe a nova data.');
+  if (dia < hojeEmSaoPaulo()) throw new Error('A nova data não pode ser no passado.');
+  const texto = String(motivo || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+  if (texto.length < MOTIVO_REAGENDAR_MIN) throw new Error(`Explique o motivo do reagendamento (mínimo ${MOTIVO_REAGENDAR_MIN} letras).`);
+  let hora = tarefa.horaInicio || null;
+  if (tarefa.ehReuniao) {
+    hora = String(horaInicio || tarefa.horaInicio || '').trim();
+    if (!HORA_RE.test(hora)) throw new Error('Informe a nova hora da reunião no formato HH:MM.');
+  }
+  if (dia === (tarefa.dataEntrega || '') && (hora || null) === (tarefa.horaInicio || null)) {
+    throw new Error('A nova data é igual à atual.');
+  }
+  // reunião com evento na agenda: move ANTES de gravar - se o Google recusar,
+  // a exceção sobe e a tarefa fica exatamente como estava
+  if (tarefa.ehReuniao && tarefa.eventoGoogleId) {
+    await reuniaoGoogle.moverSala(tarefa.eventoGoogleId, { dia, hora, duracaoMin: tarefa.duracaoMin || 60 });
+  }
+  const agora = new Date().toISOString();
+  const quem = nomeUsuario(acesso.usuario);
+  const fmtData = (d, h) => (d ? d.split('-').reverse().join('/') : 'sem data') + (h ? ' ' + h : '');
+  const registro = {
+    de: { dataEntrega: tarefa.dataEntrega || null, horaInicio: tarefa.horaInicio || null },
+    para: { dataEntrega: dia, horaInicio: tarefa.ehReuniao ? hora : null },
+    motivo: texto, porId: acesso.usuario.id, porNome: quem, em: agora,
+  };
+  const comentario = {
+    id: crypto.randomBytes(8).toString('hex'), porId: acesso.usuario.id, porNome: quem, em: agora, sistema: true,
+    texto: `📅 Reagendada de ${fmtData(tarefa.dataEntrega, tarefa.ehReuniao ? tarefa.horaInicio : null)} para ${fmtData(dia, tarefa.ehReuniao ? hora : null)}. Motivo: ${texto}`,
+  };
+  const hojeSp = hojeEmSaoPaulo();
+  const patch = {
+    dataEntrega: dia,
+    // início depois do novo prazo viraria "previsão vencida" na hora
+    dataInicio: tarefa.dataInicio && tarefa.dataInicio > dia ? dia : (tarefa.dataInicio || null),
+    reagendamentos: [...(tarefa.reagendamentos || []), registro].slice(-REAGENDAMENTOS_MAX),
+    reagendadaPara: tarefa.ehReuniao ? `${dia}T${hora}` : dia,
+    comentarios: [...(tarefa.comentarios || []), comentario].slice(-100),
+    atualizadoEm: agora,
+  };
+  if (tarefa.ehReuniao) patch.horaInicio = hora;
+  // saiu de "Pendentes" de verdade: a tarefa que estava parada por prazo
+  // vencido volta pra fila certa da data nova. Tarefa de TICKET fica com o
+  // status que o ticket manda (PENDENTE ali é "aguardando decisão", não prazo)
+  // - a sincronização do ticket regravaria por cima de qualquer jeito.
+  if (tarefa.status === 'PENDENTE' && !(tarefa.vinculo && tarefa.vinculo.id)) patch.status = dia === hojeSp ? 'HOJE' : 'A_FAZER';
+  await ref.update(patch);
+  return getOne(id);
+}
+
 async function arquivarQuebrasAutomaticas() {
   const snap = await COLLECTION.get();
   const agora = new Date().toISOString();
@@ -1000,4 +1070,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

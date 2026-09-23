@@ -180,4 +180,28 @@ async function cancelarSala(eventoId) {
   }
 }
 
-module.exports = { criarSala, cancelarSala, configurado, janela, convidadosLimpos, linkDoMeet, esperarLinkDoMeet, CALENDAR_SCOPE, USUARIO_DONO_PADRAO };
+/**
+ * Move o evento pra outro dia/hora (reagendamento). Diferente do cancelar,
+ * AQUI falhar tem de parar tudo: reagendar no NoPulso e deixar a agenda de
+ * todo mundo no horario velho mandaria gente pra uma sala vazia. O convite
+ * atualizado sai pra todos (sendUpdates=all) - e a mesma sala do Meet.
+ */
+async function moverSala(eventoId, { dia, hora, duracaoMin }) {
+  if (!eventoId) return false;
+  if (!configurado()) throw new Error('Google Meet não está conectado: não dá pra mover o evento na agenda de quem participa.');
+  const token = await googleAuth.tokenDeAcesso(CALENDAR_SCOPE, { comoUsuario: usuarioDono(), ondeHabilitar: 'Google Calendar' });
+  const { inicio, fim } = janela(dia, hora, duracaoMin);
+  const url = `${API}/calendars/${encodeURIComponent(agenda())}/events/${encodeURIComponent(eventoId)}?sendUpdates=all`;
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start: { dateTime: inicio, timeZone: FUSO }, end: { dateTime: fim, timeZone: FUSO } }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(`Google Agenda recusou mover a reunião: ${data.error?.message || resp.status}. Nada foi alterado.`);
+  }
+  return true;
+}
+
+module.exports = { criarSala, cancelarSala, moverSala, configurado, janela, convidadosLimpos, linkDoMeet, esperarLinkDoMeet, CALENDAR_SCOPE, USUARIO_DONO_PADRAO };
