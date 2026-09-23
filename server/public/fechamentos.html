@@ -58,7 +58,7 @@
   .fech-tab-bloco.fech-tab-escondido{display:none!important;}
   .fech-filtro-global{border-color:#2a3627;box-shadow:0 12px 28px rgba(0,0,0,.12);}
   .fech-filtro-global:before{content:'CONTEXTO DE ANÁLISE';display:block;padding:12px 16px 0;color:var(--accent);font:700 10px var(--mono);letter-spacing:.09em;}
-  @media(max-width:640px){.fech-workspace{margin-bottom:10px;}.fech-tab{padding:9px 11px;font-size:10.5px;}.fech-filtro-global .controls{padding-top:9px;}.fech-filtro-global .controls>*{flex:none;}.fech-filtro-global .daterange{width:100%;}.fech-filtro-global .daterange input{min-width:0;flex:1;}}
+  @media(max-width:640px){.fech-workspace{margin-bottom:10px;}.fech-tab{padding:9px 11px;font-size:10.5px;}.fech-filtro-global .controls{padding-top:9px;}.fech-filtro-global .controls>*{flex:none;}/* o flex:none acima impede TODOS os filhos de encolher - e a fileira de períodos (Ontem…Ano) tem 383px de conteúdo numa tela de 390 com recuo, entao ela nao cabia e o botao Ano ficava fora da tela. Linha inteira propria + poder encolher = o flex-wrap dela finalmente vale. */.fech-filtro-global .presets{flex:1 1 100%;min-width:0;}.fech-filtro-global .daterange{width:100%;}.fech-filtro-global .daterange input{min-width:0;flex:1;}}
 
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
   .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0;}

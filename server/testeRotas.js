@@ -27280,6 +27280,64 @@ $r | ConvertTo-Json -Depth 4 -Compress
   if (!okChatMinimizado) ruins += 1;
   console.log(`${okChatMinimizado ? '✓' : '✗'} Chat minimizado: a resposta do Suporte sobe na tela em vez de ficar esperando`);
 
+  // ------------------------------------------------------------------
+  // MENU E LARGURA NO CELULAR.
+  //
+  // Dois defeitos reais que o Master mandou print (23/09/2026): a seção Q.A
+  // nova abria SEM MENU, e telas antigas estouravam a largura no celular.
+  //
+  // 1) MENU: o nav-menu.js cria o <nav> sozinho se faltar, mas o HAMBÚRGUER
+  //    ele PROCURA na página (.hamburger-btn / #btn-menu / #nav-toggle). Sem
+  //    ele a tela carrega o script, não dá erro nenhum no console, e mesmo
+  //    assim não abre menu - o próprio nav-menu.js conta que isso já tinha
+  //    acontecido antes, na Análise de Rede. Aconteceu de novo nas duas telas
+  //    de Q.A. Agora é teste.
+  //
+  // 2) LARGURA: o que a varredura visual pega por geometria, aqui fica
+  //    preso pela regra de CSS que causou - as duas são armadilhas de flex
+  //    que voltam fácil numa edição distraída.
+  let okMenuLargura = false;
+  try {
+    const fsN = require('fs');
+    const pathN = require('path');
+    const dirN = pathN.join(__dirname, 'public');
+    const telas = fsN.readdirSync(dirN).filter((f) => f.endsWith('.html'));
+    const comMenu = telas.filter((f) => /src="\/nav-menu\.js"/.test(fsN.readFileSync(pathN.join(dirN, f), 'utf8')));
+    // O BOTÃO, não a palavra: casar com "hamburger-btn" em qualquer lugar do
+    // arquivo passa pela regra do CSS (.hamburger-btn{...}) e o teste aprova
+    // uma tela que não tem botão nenhum. Foi o que aconteceu na verificação
+    // por sabotagem deste próprio bloco - tirei o botão e ele passou.
+    const TEM_BOTAO = /<button[^>]*(class="[^"]*\bhamburger-btn\b|id="btn-menu"|id="nav-toggle")/;
+    const semHamburguer = comMenu.filter((f) => !TEM_BOTAO.test(fsN.readFileSync(pathN.join(dirN, f), 'utf8')));
+    const usuarios = fsN.readFileSync(pathN.join(dirN, 'usuarios.html'), 'utf8');
+    const fechamentos = fsN.readFileSync(pathN.join(dirN, 'fechamentos.html'), 'utf8');
+
+    const conf = {
+      // quem carrega o menu tem que ter por onde abri-lo
+      'toda tela com nav-menu.js tem o botão que o abre': (() => {
+        if (semHamburguer.length) console.log(`  sem hambúrguer: ${semHamburguer.join(', ')}`);
+        return comMenu.length >= 50 && semHamburguer.length === 0;
+      })(),
+      'as duas telas de Q.A entraram nessa conta':
+        comMenu.includes('qa-visita.html') && comMenu.includes('qa-treinamento.html'),
+      // flex-direction:column faz align-items mandar na LARGURA. Com
+      // flex-start, cada painel cresce até o conteúdo mais largo (eram 535px
+      // numa tela de 390) e o excesso é CORTADO - o botão PDF e o filtro
+      // "Revisar" ficavam inalcançáveis no celular.
+      'usuarios: painel empilhado acompanha a largura da tela':
+        /@media\(max-width:1000px\)\{ \.panels-lado-a-lado\{flex-direction:column;align-items:stretch;\} \}/.test(usuarios),
+      // flex:none nos filhos de .controls impedia a fileira de períodos de
+      // encolher, então o flex-wrap dela nunca valia e o botão "Ano" saía
+      'fechamentos: a fileira de períodos pode quebrar linha':
+        /\.fech-filtro-global \.presets\{flex:1 1 100%;min-width:0;\}/.test(fechamentos),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMenuLargura = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okMenuLargura = false; console.log('  erro: ' + e.message); }
+  if (!okMenuLargura) ruins += 1;
+  console.log(`${okMenuLargura ? '✓' : '✗'} Menu e largura no celular: tela com nav-menu.js abre o menu, e painel empilhado não estoura`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

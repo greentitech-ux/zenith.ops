@@ -85,7 +85,13 @@
   }
   .panels-lado-a-lado{display:flex;gap:16px;align-items:flex-start;}
   .panels-lado-a-lado > .panel{flex:1 1 0;min-width:0;}
-  @media(max-width:1000px){ .panels-lado-a-lado{flex-direction:column;} }
+  /* align-items:flex-start acima faz sentido em LINHA (alinha os painéis pelo
+     topo). Ao virar COLUNA, a mesma propriedade passa a mandar no eixo
+     cruzado, que agora é a LARGURA - e cada painel cresce até o conteúdo mais
+     largo (535px numa tela de 390px), estourando pra fora da tela. Como o
+     body corta o excesso, o botão PDF e o filtro "Revisar" ficavam
+     inalcançáveis no celular. `stretch` devolve a largura da tela. */
+  @media(max-width:1000px){ .panels-lado-a-lado{flex-direction:column;align-items:stretch;} }
   .tablewrap{overflow-x:auto;}
   table{width:100%;min-width:640px;border-collapse:collapse;font-size:12.5px;}
   thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9.5px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);}

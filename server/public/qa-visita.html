@@ -69,6 +69,8 @@
      botao de verdade e o input fica escondido atras dele */
   .btn-foto{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:12.5px;cursor:pointer;color:var(--text);}
   .btn-foto input{display:none;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
   .hidden{display:none!important;}
   .visita-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer;}
   .visita-row:last-child{border-bottom:none;}
@@ -79,9 +81,19 @@
 <body>
 
 <header>
-  <div class="eyebrow">Q.A · Visita técnica</div>
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-    <h1 id="titulo">Visitas</h1>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <!-- SEM ESTE BOTÃO NÃO HÁ MENU. O nav-menu.js cria o <nav> sozinho se
+           faltar, mas o hambúrguer ele PROCURA na página
+           (.hamburger-btn/#btn-menu/#nav-toggle) - sem ele, a tela carrega o
+           script e mesmo assim não abre menu nenhum, sem erro no console.
+           Foi exatamente o que aconteceu aqui, e antes na Análise de Rede. -->
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">Q.A · Visita técnica</div>
+        <h1 id="titulo">Visitas</h1>
+      </div>
+    </div>
     <button class="btn-primary" id="btn-nova" onclick="abrirNova()">+ Visita</button>
   </div>
 </header>

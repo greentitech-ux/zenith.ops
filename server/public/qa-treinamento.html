@@ -25,14 +25,21 @@
   header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-16px -12px 16px;padding:12px;border-bottom:1px solid var(--line);}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;}
   .sub{color:var(--muted);font-size:12.5px;line-height:1.6;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
 </style>
 <script src="/tema.js"></script>
 </head>
 <body>
 
 <header>
-  <div class="eyebrow">Q.A · Treinamento</div>
-  <h1>Treinamento Q.A</h1>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">Q.A · Treinamento</div>
+      <h1>Treinamento Q.A</h1>
+    </div>
+  </div>
 </header>
 
 <!-- Tela ainda sem funcionalidade, e ela DIZ isso.
