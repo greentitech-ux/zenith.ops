@@ -6404,8 +6404,21 @@ setTimeout(async () => {
       'o aparelho sai marcado como zebra (é o que decide o chip na linha)': !!disp && disp.marca === 'zebra',
       'a ficha tem o chip de status sempre na linha, lendo impressoras{}':
         /disp-imp-chip/.test(html) && /c\.impressoras/.test(html),
+      // O chip saiu da linha e virou chipZebraHtml(), usado pela lista E pelo
+      // card do dispositivo (23/09). A guarda "só Zebra" ficou na chamada -
+      // a asserção segue a guarda, ancorada na linha exata, não um texto solto.
       "o chip só aparece pra Zebra (não inventa status pra outro aparelho)":
-        /d\.marca !== 'zebra'/.test(html),
+        /const impChip = d\.marca === 'zebra' \? chipZebraHtml\(estadoZebra\) : '';/.test(html),
+      // e o chip roda de verdade: cada nível vira a palavra e a cor certas
+      'o chip da Zebra traduz o nível lido (ok / atenção / parada / sem confirmação)': (() => {
+        const mZ = /function chipZebraHtml\(st\)\{[\s\S]*?\n\}/.exec(html);
+        if (!mZ) return false;
+        const chip = new Function('tempoRelativo', 'escapeHtml', mZ[0] + '\nreturn chipZebraHtml;')(() => 'há 1min', (v) => String(v));
+        return /OK/.test(chip({ nivel: 'ok', fila: 0 })) && /var\(--ok\)/.test(chip({ nivel: 'ok' }))
+          && /atenção/.test(chip({ nivel: 'atencao', motivos: ['Pouco papel'] }))
+          && /parada/.test(chip({ nivel: 'critico', motivos: ['Sem papel'] })) && /var\(--bad\)/.test(chip({ nivel: 'critico' }))
+          && /sem confirmação/.test(chip(null));
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okZebraFicha = !falhas.length;
@@ -14877,6 +14890,106 @@ setTimeout(async () => {
   console.log(`${okEdge ? '✓' : '✗'} NOC: ação "Remover o Microsoft Edge" (com a trava do navegador da loja)`);
 
   // ------------------------------------------------------------------
+  // DISPOSITIVO COM TIPO VIRA CARD. Pedido do Master (23/09): "apos colocar
+  // [o Tipo] podem virar Card automaticamente?" e "sempre usando o MAC como
+  // fixador, pois o IP pode mudar e preciso saber quando o IP daquele MAC
+  // mudar".
+  //
+  // O que trava, dos dois lados, rodando de verdade:
+  //   - so volta ao resumo o que tem TIPO - a lista inteira saiu de proposito
+  //     depois do estouro de banda de 20/08, e nao pode voltar por engano;
+  //   - o MAC e a identidade: o mesmo MAC visto por dois hosts vira UM card,
+  //     e o IP de antes aparece quando muda;
+  //   - o estado usa o MESMO limiar do alarme;
+  //   - o card nao pulsa (nao e ao vivo).
+  let okDispCard = false;
+  try {
+    const lsD = require(__dirname + '/lojaStatus.js');
+    const agora = Date.now();
+    const H = 60 * 60 * 1000;
+    const doc = {
+      codigo: 'Dominos Tirol', posto: 'host1', nome: 'DOM-TIROL-HOST01',
+      dispositivos: [
+        { mac: '00:15:5d:29:37:01', ip: '10.161.160.163', visto: agora, ativo: true, tipo: 'gcom', tipoRotulo: 'GCOM', apelido: 'GCOM19940',
+          ipHistorico: [{ de: '10.161.160.150', para: '10.161.160.160', em: agora - 5 * 24 * H }, { de: '10.161.160.160', para: '10.161.160.163', em: agora - 2 * H }] },
+        { mac: '00:15:5d:29:37:00', ip: '10.161.160.162', visto: agora - 30 * 60 * 1000, ativo: false, tipo: 'pulse', tipoRotulo: 'PULSE' },
+        { mac: 'aa:bb:cc:00:00:01', ip: '10.161.160.170', visto: agora - 3 * H, ativo: false, tipo: 'totem', tipoRotulo: 'Totem' },
+        // celular sem Tipo: NAO pode voltar ao resumo
+        { mac: '5a:11:22:33:44:55', ip: '10.161.160.199', visto: agora, ativo: true },
+      ],
+    };
+    const comTipo = lsD.dispositivosComTipoDe(doc, agora);
+    const porMac = Object.fromEntries(comTipo.map((d) => [d.mac, d]));
+    const resumo = lsD.resumoDe(doc);
+    const semTipo = lsD.resumoDe({ codigo: 'X', posto: 'p', dispositivos: [{ mac: '5a:00:00:00:00:01', ip: '1.1.1.1', visto: agora, ativo: true }] });
+    const muitos = lsD.dispositivosComTipoDe({ dispositivos: Array.from({ length: 50 }, (_, i) => ({ mac: `m${i}`, tipo: 'impressora', ativo: true, visto: agora })) }, agora);
+
+    // ---- a tela: extrai as funções e roda com dublês mínimos
+    const htmlD = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const ini = htmlD.indexOf('const ESTADO_DISP_PARA_STATUS');
+    const fim = htmlD.indexOf('function renderDispositivosCard');
+    if (ini < 0 || fim < ini) throw new Error('não achei o bloco dos cards de dispositivo no HTML');
+    const tela = new Function('COMPUTADORES', 'UNIDADES_NOMES', 'tempoRelativo', 'escapeHtml', 'escapeJs', 'chipZebraHtml',
+      htmlD.slice(ini, fim) + '\nreturn { dispositivosComTipoDaGrade, dispCardHtml };')(
+      [], {}, (t) => `há ${Math.round((Date.now() - t) / 60000)}min`,
+      (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
+      (v) => String(v == null ? '' : v).replace(/'/g, "\\'"),
+      () => '<span class="disp-imp-chip">🖨️ OK</span>');
+    const hostA = { codigo: 'Dominos Tirol', posto: 'a', nome: 'HOST-A', ipLocal: '10.161.160.164',
+      dispositivosComTipo: [
+        // o HOST-A viu a GCOM há 90min, ainda no IP antigo; o HOST-B a viu há
+        // 5min, já no novo. MAC igual, IP diferente: tem que ser UM card, no
+        // IP novo. Agrupar por IP (o erro que o Master quer evitar) daria dois.
+        { mac: '00:15:5D:29:37:01', ip: '10.161.160.160', visto: agora - 90 * 60 * 1000, estado: 'na-rede', tipo: 'gcom' },
+        // mesmo IP do HOST-B, que tem agente: já é card, não pode duplicar
+        { mac: 'cc:cc:cc:cc:cc:cc', ip: '10.161.160.180', visto: agora, estado: 'na-rede', tipo: 'totem' },
+      ] };
+    const hostB = { codigo: 'Dominos Tirol', posto: 'b', nome: 'HOST-B', ipLocal: '10.161.160.180',
+      dispositivosComTipo: [{ mac: '00:15:5d:29:37:01', ip: '10.161.160.163', visto: agora - 5 * 60 * 1000, estado: 'na-rede', tipo: 'gcom' }] };
+    // mesma MAC em OUTRA loja: são dois aparelhos, dois cards
+    const hostC = { codigo: 'Dominos Bessa', posto: 'c', nome: 'HOST-C',
+      dispositivosComTipo: [{ mac: '00:15:5d:29:37:01', ip: '192.168.0.9', visto: agora, estado: 'na-rede', tipo: 'gcom' }] };
+    const grade = tela.dispositivosComTipoDaGrade([hostA, hostB, hostC]);
+    const gcomTirol = grade.filter((x) => x.codigo === 'Dominos Tirol' && x.mac.toLowerCase() === '00:15:5d:29:37:01');
+    const card = tela.dispCardHtml({ ...porMac['00:15:5d:29:37:01'], codigo: 'Dominos Tirol', hostNome: 'HOST-A', hostPosto: 'a' });
+    const cardSemRede = tela.dispCardHtml({ ...porMac['aa:bb:cc:00:00:01'], codigo: 'Dominos Tirol', hostNome: 'HOST-A', hostPosto: 'a' });
+
+    const conf = {
+      // SERVIDOR
+      'o resumo leva só o que tem Tipo (o celular fica fora)': comTipo.length === 3 && !porMac['5a:11:22:33:44:55'],
+      'a lista inteira de dispositivos continua fora do resumo (banda)': resumo.dispositivos === undefined && Array.isArray(resumo.dispositivosComTipo),
+      'máquina sem nenhum dispositivo com Tipo não ganha campo novo': !('dispositivosComTipo' in semTipo),
+      'o estado usa o limiar do alarme: visto agora / 30min sem aparecer / 3h sem aparecer':
+        porMac['00:15:5d:29:37:01'].estado === 'na-rede'
+        && porMac['00:15:5d:29:37:00'].estado === 'sem-confirmacao'
+        && porMac['aa:bb:cc:00:00:01'].estado === 'sem-rede',
+      'a troca de IP que vai no card é a ÚLTIMA daquele MAC, com o IP de antes':
+        !!porMac['00:15:5d:29:37:01'].ipMudou
+        && porMac['00:15:5d:29:37:01'].ipMudou.de === '10.161.160.160'
+        && porMac['00:15:5d:29:37:01'].ipMudou.para === '10.161.160.163',
+      'tem teto por máquina (não vira a varredura inteira de novo)': muitos.length === 30,
+      // TELA
+      'o mesmo MAC visto por dois hosts vira UM card, com a leitura mais recente':
+        gcomTirol.length === 1 && gcomTirol[0].hostNome === 'HOST-B' && gcomTirol[0].ip === '10.161.160.163',
+      'o mesmo MAC em outra loja é outro aparelho: outro card': grade.some((x) => x.codigo === 'Dominos Bessa'),
+      'dispositivo no IP de um computador com agente não duplica o card': !grade.some((x) => x.mac === 'cc:cc:cc:cc:cc:cc'),
+      'o card mostra que o IP daquele MAC mudou, e qual era o de antes, destacado nas primeiras 24h':
+        /IP alterado/.test(card) && /antes 10\.161\.160\.160/.test(card) && /disp-card-ipmudou recente/.test(card),
+      'o card traz o MAC (a identidade) e o IP atual': /MAC 00:15:5d:29:37:01/.test(card) && /10\.161\.160\.163/.test(card),
+      'sumido há 3h aparece como "sem rede", com a mesma palavra do alerta': /sem rede · visto/.test(cardSemRede) && /status-offline/.test(cardSemRede),
+      // o card não pulsa: não é ao vivo
+      'a bolinha do card de dispositivo não pulsa': /\.disp-card \.status-dot\{animation:none;\}/.test(htmlD) && /class="equip-tile disp-card /.test(card),
+      'filtro que esconde todos os computadores não esconde os dispositivos':
+        /renderFantasmas\(\);[\s\S]{0,200}renderDispositivosCard\(\);[\s\S]*?const grid = document\.getElementById\('grid-equip'\)/.test(htmlD),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n]) => n);
+    okDispCard = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDispCard = false; console.log('  erro: ' + e.message); }
+  if (!okDispCard) ruins += 1;
+  console.log(`${okDispCard ? '✓' : '✗'} NOC: dispositivo com Tipo vira card, identificado pelo MAC, mostrando quando o IP muda`);
+
+  // ------------------------------------------------------------------
   // PROCEDIMENTOS DE SOCORRO. Pedido do Master (22/09): "tudo que resolver um
   // problema vamos criar um processo, organize o tipo da solução para não
   // ficar um scroll imenso e ficar olhando um a um para saber o que faz".
@@ -17413,7 +17526,7 @@ setTimeout(async () => {
       // COR pelo estado (ok/atencao/critico/sem leitura), sempre na linha da
       // Zebra. Quem so tem alarme de rede continua com o 🔔 seco.
       'o chip separa a Zebra (lê status) de quem só tem alarme de rede':
-        /d\.marca !== 'zebra'/.test(html) && /disp-imp-chip/.test(html) && /🖨️/.test(html),
+        /const impChip = d\.marca === 'zebra' \? chipZebraHtml\(estadoZebra\) : '';/.test(html) && /disp-imp-chip/.test(html) && /🖨️/.test(html),
       'tipo do aparelho aparece na propria linha': /d\.tipoRotulo \? `<span class="disp-tipo-chip"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);

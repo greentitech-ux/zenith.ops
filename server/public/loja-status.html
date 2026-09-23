@@ -291,6 +291,18 @@
   .ev-dot.warn{background:var(--warn);}
   .ev-corpo{flex:1;min-width:0;}.ev-topo{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}.ev-data{flex:none;color:var(--muted);font-size:10px;white-space:nowrap;}.ev-detalhe{margin-top:3px;line-height:1.45;word-break:break-word;color:var(--muted);}.ev-meta{margin-top:4px;font-size:10.5px;color:var(--muted);}.ev-agrupado{border-left:2px solid var(--warn);background:color-mix(in srgb,var(--warn) 5%,transparent);}
   .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);flex:none;}
+  /* CARD DE DISPOSITIVO COM TIPO (pedido do Master, 23/09). Mesmo desenho do
+     card de computador, com UMA diferença deliberada: a bolinha NÃO pulsa.
+     O pulso diz "ao vivo" - e dispositivo não é: não tem agente, quem o
+     enxerga é a varredura de rede do host, ~1x por hora. Pulsar aqui seria
+     mentir sobre o ritmo do dado. */
+  .disp-card .status-dot{animation:none;}
+  .disp-cards-titulo{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px;font-weight:700;margin:16px 0 8px;}
+  .disp-card-mac{font-family:var(--mono);font-size:10px;color:var(--muted);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .disp-card-mac:hover{color:var(--accent);}
+  .disp-card-ipmudou{font-family:var(--mono);font-size:10px;color:var(--muted);overflow-wrap:anywhere;line-height:1.35;}
+  .disp-card-ipmudou.recente{color:var(--warn);font-weight:700;}
+  .disp-card-host{font-family:var(--mono);font-size:9.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .equip-tile-status{font-family:var(--mono);font-size:10px;font-weight:700;}
   .equip-tile-status.online{color:var(--ok);}
   .equip-tile-status.offline{color:var(--bad);}
@@ -670,6 +682,14 @@
   </div>
 
   <div id="grid-equip" class="equip-grid"></div>
+
+  <!-- Dispositivos com Tipo viram card (pedido do Master, 23/09). Separados
+       da grade de computadores de propósito: não entram nos KPIs, e o ritmo
+       do dado é outro - ver renderDispositivosCard() -->
+  <div id="disp-cards-bloco" class="hidden">
+    <div class="disp-cards-titulo">📡 Dispositivos com tipo <span class="uni-panel-sub">identificados pelo MAC · vistos pela varredura de rede do host, cerca de 1x por hora</span></div>
+    <div id="grid-dispositivos" class="equip-grid"></div>
+  </div>
 
   <!-- Computadores que nunca foram cadastrados: o heartbeat bateu num posto
        que não existe no banco (link/atalho velho de um computador removido/
@@ -1879,28 +1899,7 @@ function atualizarConteudoDetalhe(codigo, c){
       // guarda por MAC (ver impressoras{} no lojaStatus.js). Só aparece pra
       // aparelho marcado como Zebra - é o único que responde o ~HS.
       const estadoZebra = d.marca === 'zebra' ? ((c.impressoras || {})[d.mac] || null) : null;
-      const impChip = (() => {
-        if (d.marca !== 'zebra') return '';
-        const st = estadoZebra;
-        let cor = 'var(--warn,#e0a800)', rotulo = 'sem confirmação', titulo = 'Impressora Zebra — ainda não houve uma leitura de status. Isso não significa que ela está desligada.';
-        if (st) {
-          const quando = st.em ? ` · lido ${tempoRelativo(st.em)}` : '';
-          if (st.nivel === 'ok') {
-            cor = 'var(--ok)'; rotulo = 'OK';
-            titulo = `Imprimindo normal${st.fila != null ? ` · fila ${st.fila}` : ''}${quando}`;
-          } else if (st.nivel === 'atencao') {
-            cor = 'var(--warn,#e0a800)'; rotulo = 'atenção';
-            titulo = `${(st.motivos || []).join(' · ') || 'Atenção'}${quando}`;
-          } else if (st.nivel === 'critico') {
-            cor = 'var(--bad)'; rotulo = 'parada';
-            titulo = `${(st.motivos || []).join(' · ') || 'Parou de imprimir'}${quando}`;
-          } else {
-            cor = 'var(--warn,#e0a800)'; rotulo = 'sem confirmação';
-            titulo = `Ainda não consegui confirmar o status pela porta da Zebra${st.semRespostaEm ? ` · última tentativa ${tempoRelativo(st.semRespostaEm)}` : quando}. Isso não prova que ela está offline.`;
-          }
-        }
-        return `<span class="disp-imp-chip" style="color:${cor};" title="${escapeHtml(titulo)}">🖨️ ${escapeHtml(rotulo)}</span>`;
-      })();
+      const impChip = d.marca === 'zebra' ? chipZebraHtml(estadoZebra) : '';
       // 📡 e' o ponto de medicao da loja: quem bate o olho na lista precisa
       // saber por qual aparelho a queda da unidade esta sendo contada
       const medidorChip = d.medidorQuedas
@@ -2653,6 +2652,109 @@ function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-uni
 // computadores de verdade (passaram pelo cadastro, tem nome) - os "fantasmas"
 // (heartbeat de posto nunca cadastrado, ver renderFantasmas) ficam de fora
 // dos KPIs/Por unidade/grade principal pra nao inflar as contagens
+// Status da Zebra (papel, cabeça, fila) - UM texto só, usado pela lista de
+// dispositivos da máquina E pelo card do dispositivo. Antes morava inline na
+// lista; o card copiaria e as duas versões divergiriam na primeira correção.
+function chipZebraHtml(st){
+  let cor = 'var(--warn,#e0a800)', rotulo = 'sem confirmação', titulo = 'Impressora Zebra — ainda não houve uma leitura de status. Isso não significa que ela está desligada.';
+  if (st) {
+    const quando = st.em ? ` · lido ${tempoRelativo(st.em)}` : '';
+    if (st.nivel === 'ok') {
+      cor = 'var(--ok)'; rotulo = 'OK';
+      titulo = `Imprimindo normal${st.fila != null ? ` · fila ${st.fila}` : ''}${quando}`;
+    } else if (st.nivel === 'atencao') {
+      cor = 'var(--warn,#e0a800)'; rotulo = 'atenção';
+      titulo = `${(st.motivos || []).join(' · ') || 'Atenção'}${quando}`;
+    } else if (st.nivel === 'critico') {
+      cor = 'var(--bad)'; rotulo = 'parada';
+      titulo = `${(st.motivos || []).join(' · ') || 'Parou de imprimir'}${quando}`;
+    } else {
+      cor = 'var(--warn,#e0a800)'; rotulo = 'sem confirmação';
+      titulo = `Ainda não consegui confirmar o status pela porta da Zebra${st.semRespostaEm ? ` · última tentativa ${tempoRelativo(st.semRespostaEm)}` : quando}. Isso não prova que ela está offline.`;
+    }
+  }
+  return `<span class="disp-imp-chip" style="color:${cor};" title="${escapeHtml(titulo)}">🖨️ ${escapeHtml(rotulo)}</span>`;
+}
+// ---------------------------------------------------------------------
+// DISPOSITIVO COM TIPO VIRA CARD. O servidor manda, dentro de cada máquina,
+// só os dispositivos que ALGUÉM categorizou (dispositivosComTipo) - ver
+// dispositivosComTipoDe no lojaStatus.js.
+//
+// O MAC é a identidade. A mesma Zebra pode ser vista por dois hosts da mesma
+// loja: aqui ela vira UM card, e vale a leitura mais recente. A chave é
+// unidade+MAC - o IP entra só como endereço de agora.
+//
+// Não duplica computador: quem já tem o NOCZenith já é card. O agente não
+// informa o próprio MAC, então o cruzamento é pelo IP local ATUAL na mesma
+// unidade - só para esconder o repetido; a identidade do card segue o MAC.
+const ESTADO_DISP_PARA_STATUS = { 'na-rede':'online', 'sem-confirmacao':'degradado', 'sem-rede':'offline' };
+function dispositivosComTipoDaGrade(computadores){
+  const lista = computadores || COMPUTADORES;
+  const ipsComAgente = new Set(lista.filter(c => c.nome && c.ipLocal).map(c => `${c.codigo}|${c.ipLocal}`));
+  const porChave = new Map();
+  lista.forEach(c => {
+    (c.dispositivosComTipo || []).forEach(d => {
+      if(!d || !d.mac) return;
+      if(d.ip && ipsComAgente.has(`${c.codigo}|${d.ip}`)) return;
+      const chave = `${c.codigo}|${String(d.mac).toLowerCase()}`;
+      const atual = porChave.get(chave);
+      if(atual && (atual.visto || 0) >= (d.visto || 0)) return;
+      porChave.set(chave, { ...d, codigo: c.codigo, hostNome: c.nome || null, hostPosto: c.posto, estadoZebra: d.marca === 'zebra' ? ((c.impressoras || {})[d.mac] || null) : null });
+    });
+  });
+  return [...porChave.values()];
+}
+function dispCardHtml(x){
+  const status = ESTADO_DISP_PARA_STATUS[x.estado] || 'nunca';
+  const nome = x.apelido || x.nome || x.fabricante || 'sem nome';
+  const unidade = UNIDADES_NOMES[x.codigo] || x.codigo;
+  const visto = x.visto ? tempoRelativo(x.visto) : 'nunca';
+  // Mesmas palavras que a tela e o alerta já usam: "sem rede" (título do
+  // push), "não apareceu na última varredura" (bolinha da lista).
+  const texto = x.estado === 'na-rede' ? `na rede · visto ${visto}`
+    : x.estado === 'sem-rede' ? `sem rede · visto ${visto}`
+    : `não apareceu na última varredura · visto ${visto}`;
+  // O pedido: "preciso saber quando o IP daquele MAC mudar". A última troca
+  // fica no card, com o IP de antes; nas primeiras 24h ela se destaca.
+  let ipMudou = '';
+  if(x.ipMudou && x.ipMudou.de){
+    const recente = x.ipMudou.em && (Date.now() - x.ipMudou.em) < 24*60*60*1000;
+    ipMudou = `<div class="disp-card-ipmudou${recente ? ' recente' : ''}" title="IP mudou de ${escapeHtml(x.ipMudou.de)} para ${escapeHtml(x.ipMudou.para || x.ip || '')}">↪ IP alterado ${escapeHtml(x.ipMudou.em ? tempoRelativo(x.ipMudou.em) : '')} · antes ${escapeHtml(x.ipMudou.de)}</div>`;
+  }
+  const zebra = x.marca === 'zebra' ? chipZebraHtml(x.estadoZebra) : '';
+  const sino = x.monitorar ? `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>` : '';
+  return `<div class="equip-tile disp-card status-${status}" data-codigo="${escapeHtml(x.codigo)}" data-mac="${escapeHtml(x.mac)}" onclick="abrirDetalheComputador('${escapeJs(x.codigo)}','${escapeJs(x.hostPosto)}')" title="Abrir ${escapeHtml(x.hostNome || 'o host')}, que enxerga este dispositivo">
+    <div class="equip-tile-head">
+      <span class="status-dot ${status}"></span>
+      <span class="equip-tile-nome" title="${escapeHtml(unidade)}">${escapeHtml(unidade)}</span>
+      ${sino}<span class="tipo-badge">${escapeHtml(x.tipoRotulo || x.tipo)}</span>
+    </div>
+    <div class="equip-tile-unidade" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>
+    <div class="equip-tile-status ${status}">${escapeHtml(texto)}</div>
+    ${zebra ? `<div>${zebra}</div>` : ''}
+    ${x.ip ? `<div class="equip-tile-ip" title="Copiar IP" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(x.ip)}','IP')">🌐 ${escapeHtml(x.ip)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
+    <div class="disp-card-mac" title="Copiar MAC" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(x.mac)}','MAC')">MAC ${escapeHtml(x.mac)} <span class="equip-tile-ip-copy">📋</span></div>
+    ${ipMudou}
+    ${x.hostNome ? `<div class="disp-card-host">visto por ${escapeHtml(x.hostNome)}</div>` : ''}
+  </div>`;
+}
+function renderDispositivosCard(){
+  const bloco = document.getElementById('disp-cards-bloco');
+  const grid = document.getElementById('grid-dispositivos');
+  if(!bloco || !grid) return;
+  let lista = dispositivosComTipoDaGrade();
+  // clique num KPI de computador (servidor/estação) é foco em computador
+  if(FILTRO_SERVIDOR) lista = [];
+  if(FILTRO_UNIDADE) lista = lista.filter(x => x.codigo === FILTRO_UNIDADE);
+  if(FILTRO_STATUS) lista = lista.filter(x => ESTADO_DISP_PARA_STATUS[x.estado] === FILTRO_STATUS);
+  if(FILTRO_TEXTO){
+    lista = lista.filter(x => `${x.apelido||''} ${x.nome||''} ${x.tipoRotulo||''} ${x.ip||''} ${x.mac||''} ${UNIDADES_NOMES[x.codigo]||x.codigo}`.toLowerCase().includes(FILTRO_TEXTO));
+  }
+  const ORDEM = { 'sem-rede':0, 'sem-confirmacao':1, 'na-rede':2 };
+  lista.sort((a,b) => (ORDEM[a.estado] ?? 9) - (ORDEM[b.estado] ?? 9) || (a.apelido||a.nome||'').localeCompare(b.apelido||b.nome||'', 'pt-BR'));
+  bloco.classList.toggle('hidden', !lista.length);
+  grid.innerHTML = lista.map(dispCardHtml).join('');
+}
 function computadoresReais(){ return COMPUTADORES.filter(c => c.nome); }
 
 function renderKpis(){
@@ -2923,6 +3025,9 @@ function render(){
   renderKpis();
   renderUnidades();
   renderFantasmas();
+  // antes do return adiantado lá embaixo: filtro que esconde todos os
+  // computadores não pode esconder junto os dispositivos da loja
+  renderDispositivosCard();
   if(ULTIMO_REDE_DADOS) renderRede(ULTIMO_REDE_DADOS);
   const grid = document.getElementById('grid-equip');
   let lista = computadoresReais();

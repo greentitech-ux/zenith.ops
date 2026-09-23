@@ -1279,9 +1279,50 @@ const CAMPOS_SO_DO_DETALHE = [
   'ultimoComandoTexto', 'ultimoComandoResultado', 'ultimoComandoErro',
   'atalhosDesktop', 'atalhosBarraTarefas',
 ];
+// DISPOSITIVO COM TIPO VIRA CARD. Pedido do Master (23/09): "apos colocar
+// [o Tipo] podem virar Card automaticamente? PULSE, ZEBRA, BEMATECH, TOTEM" e
+// "sempre usando o MAC como fixador, pois o IP pode mudar e preciso saber
+// quando o IP daquele MAC mudar".
+//
+// Por que so os COM TIPO: a lista de dispositivos saiu do resumo de proposito
+// (e a varredura inteira da rede - celular, TV, MAC aleatorio - e foi ela que
+// estourou os 5 GB do Render em 20/08). Tipo e o mesmo criterio que o
+// alarme de troca de IP ja usa pra "equipamento conhecido" (acompanhaIpPorMac),
+// entao so volta o punhado que alguem categorizou, com poucos campos.
+//
+// O MAC e a identidade; o IP e so o endereco de agora. Por isso vai junto a
+// ULTIMA troca registrada no ipHistorico daquele MAC (de, para, quando).
+//
+// estado usa o MESMO limiar do alarme (DISPOSITIVO_OFFLINE_LIMIAR_MS): quem
+// le o card e quem recebe o alerta tem que ver a mesma coisa. E nao e "ao
+// vivo": dispositivo nao tem agente, quem o enxerga e a varredura do host,
+// ~1x por hora - o card diz "visto ha X", nunca uma bolinha em tempo real.
+const DISPOSITIVOS_COM_TIPO_MAX = 30;
+function dispositivosComTipoDe(doc, agora) {
+  const lista = Array.isArray(doc && doc.dispositivos) ? doc.dispositivos : [];
+  const quando = agora || Date.now();
+  return lista
+    .filter((d) => d && d.mac && d.tipo)
+    .slice(0, DISPOSITIVOS_COM_TIPO_MAX)
+    .map((d) => {
+      const hist = Array.isArray(d.ipHistorico) ? d.ipHistorico : [];
+      const ultima = hist.length ? hist[hist.length - 1] : null;
+      const semVerHaMs = quando - (d.visto || 0);
+      const estado = d.ativo !== false ? 'na-rede'
+        : (semVerHaMs >= DISPOSITIVO_OFFLINE_LIMIAR_MS ? 'sem-rede' : 'sem-confirmacao');
+      return {
+        mac: d.mac, ip: d.ip || null, visto: d.visto || null, estado,
+        apelido: d.apelido || null, nome: d.nome || null, fabricante: d.fabricante || null,
+        tipo: d.tipo, tipoRotulo: d.tipoRotulo || null, monitorar: !!d.monitorar, marca: d.marca || null,
+        ipMudou: ultima && ultima.de ? { de: ultima.de, para: ultima.para || d.ip || null, em: ultima.em || null } : null,
+      };
+    });
+}
 function resumoDe(doc) {
   const copia = { ...doc };
   CAMPOS_SO_DO_DETALHE.forEach((campo) => { delete copia[campo]; });
+  const comTipo = dispositivosComTipoDe(doc);
+  if (comTipo.length) copia.dispositivosComTipo = comTipo;
   return copia;
 }
 async function listarResumo() {
@@ -4448,6 +4489,7 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
+  dispositivosComTipoDe, resumoDe,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf,
