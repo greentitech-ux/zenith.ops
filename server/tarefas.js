@@ -279,6 +279,27 @@ async function listarMinhas(acesso) {
     .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
 }
 
+// CONSULTAS DO CLAUDE/COWORK (coworkApi: listar_tarefas, consultar_ticket).
+// listarMinhas lê a coleção INTEIRA a cada chamada (concluídas de meses
+// inclusive) - o Cowork não precisa disso. Aqui:
+// - abertas: uma igualdade de status, com teto (CLAUDE.md §3: o Firestore
+//   cobra por documento devolvido);
+// - por número: "#12052" é o que a pessoa vê e fala; o id do documento é o
+//   que as ações pedem. Uma igualdade, 1 leitura por tarefa achada. O mesmo
+//   número pode estar em mais de uma tarefa (a cópia de um ticket da Central
+//   herda o número dele), então volta lista.
+const LIMITE_ABERTAS_AGENTE = 400;
+async function listarAbertas() {
+  const snap = await COLLECTION.where('status', 'in', [...STATUS_ABERTO]).limit(LIMITE_ABERTAS_AGENTE).get();
+  return snap.docs.map((d) => d.data());
+}
+async function porNumero(numero) {
+  const n = Number(String(numero == null ? '' : numero).replace(/\D/g, ''));
+  if (!n) return [];
+  const snap = await COLLECTION.where('numeroTicket', '==', n).limit(10).get();
+  return snap.docs.map((d) => d.data()).filter((t) => t.status !== 'ARQUIVADA');
+}
+
 // A tela decide o que desabilitar (prazo, participantes, remover, marcar passo)
 // por `podeGerir` - e esse campo NÃO existe no documento: listarMinhas calcula
 // e pendura. Quem responde com o documento cru devolve `podeGerir: undefined`,
@@ -1152,4 +1173,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, atualizarResumo, RESUMO_MAX, ehArquivoDeTranscricao, tipoDaTranscricao, textoDaTranscricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, listarAbertas, porNumero, LIMITE_ABERTAS_AGENTE, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, atualizarResumo, RESUMO_MAX, ehArquivoDeTranscricao, tipoDaTranscricao, textoDaTranscricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
