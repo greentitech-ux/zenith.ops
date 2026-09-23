@@ -26359,6 +26359,14 @@ $r | ConvertTo-Json -Compress
         /foregroundServiceType="specialUse"/.test(manifesto)
         && /startForeground\(/.test(servico),
       // rota nova de telemetria seria um segundo jeito de ser maquina
+      // o endereco antigo foi aposentado (CLAUDE.md §4): o agente nao pode
+      // nascer apontando pra ele. Na pratica o link de inscricao manda o
+      // endereco certo, mas aparelho aberto antes de inscrever cai no padrao
+      'o agente nao aponta pro endereco aposentado': (() => {
+        const kt = fsB.readFileSync(raiz + '/app/src/main/java/br/com/nopulso/agente/Identidade.kt', 'utf8');
+        return !kt.includes('adyen-monitor.onrender.com')
+          && /BASE_PADRAO = "https:\/\/www\.nopulso\.com\.br"/.test(kt);
+      })(),
       'o agente usa o heartbeat que ja existe, sem rota nova':
         /\/api\/loja-status\/heartbeat/.test(batida)
         && !/api\/agente-android\/(telemetria|batida)/.test(batida),

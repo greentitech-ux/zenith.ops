@@ -22,8 +22,15 @@ object Identidade {
   private const val K_TOKEN = "token"
   private const val K_BASE = "base"
 
-  /** Endereco padrao - o mesmo fallback do APP_BASE_URL do servidor. */
-  const val BASE_PADRAO = "https://adyen-monitor.onrender.com"
+  /**
+   * Endereco padrao - o MESMO fallback do APP_BASE_URL do servidor.
+   *
+   * Na pratica quase nunca e usado: o link de inscricao carrega o endereco
+   * dentro dele (b=), justamente pra um tablet inscrito hoje continuar
+   * apontando certo depois de uma troca de dominio (CLAUDE.md §4). Isto aqui
+   * so vale pra aparelho que abriu o app antes de ser inscrito.
+   */
+  const val BASE_PADRAO = "https://www.nopulso.com.br"
 
   private fun prefs(ctx: Context) =
     ctx.applicationContext.getSharedPreferences(ARQUIVO, Context.MODE_PRIVATE)
