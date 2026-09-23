@@ -897,11 +897,10 @@ function renderOperacaoAgora(){
       ? `<b>👨‍🍳 Pedido em preparo</b><span>O carrinho sabe que a loja viu o pedido de ${fmtHora(primeiroPedido.criadoEm)}. Registre o envio quando sair.</span>`
       : `<b>🛒 Novo pedido do carrinho</b><span>Pedido de ${fmtHora(primeiroPedido.criadoEm)} aguardando a loja visualizar e preparar.</span>`;
     estado.innerHTML += `<span class="operacao-itens">Pedido: ${resumoPedidoHtml(primeiroPedido)}</span>`;
-    // No tablet, o primeiro toque confirma que a loja assumiu o preparo e o
-    // carrinho é avisado imediatamente. Envio continua uma ação separada.
-    acao.innerHTML = emPreparo
-      ? `<button type="button" class="btn-acao envio operacao-acao" onclick="abrirForm('ENVIO')">Registrar envio</button>`
-      : `<button type="button" class="btn-acao pedido operacao-acao" onclick="marcarPreparo('${primeiroPedido.id}')">Marcar como em preparo</button>`;
+    // O painel não cria um caminho sem assinatura: envio rápido mantém o PIN
+    // de quem está na loja e espelha o pedido; para alterar itens, a pessoa
+    // usa o formulário normal, que também pede usuário e senha.
+    acao.innerHTML = `<button type="button" class="btn-acao envio operacao-acao" onclick="envioRapido('${primeiroPedido.id}')">⚡ Envio rápido — confirmar com senha</button>`;
   }else if(TEM_PEDIDO){
     estado.innerHTML = `<b>✅ Carrinho sem pendência de recebimento</b><span>Registre um pedido, uma contagem ou um remake quando houver movimento.</span>`;
     acao.innerHTML = `<button type="button" class="btn-acao pedido operacao-acao" onclick="abrirForm('PEDIDO')">Novo pedido</button>`;
