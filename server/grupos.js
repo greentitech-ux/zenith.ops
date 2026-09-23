@@ -111,6 +111,9 @@ function sanitizarCamposExtras(lista) {
       // (na dele e o "Valor Total Taxa de Entrega"). Marcar por nome no
       // codigo quebraria no dia em que alguem renomear o KPI (CLAUDE.md §1).
       if (k?.essencial != null) item.essencial = !!k.essencial;
+      // Difere de "essencial na foto": obrigatório bloqueia o fechamento
+      // até existir um valor; essencial só orienta a leitura do relatório.
+      if (k?.obrigatorio != null) item.obrigatorio = !!k.obrigatorio;
       // TC = quantidade de pedidos/clientes da loja. Cada franquia chama de um
       // jeito ("Total" nas Domino's, "C Total Clientes" na MilkyMoo,
       // "Quantidade de Pedidos" na maioria) - a marca diz QUAL KPI e o TC

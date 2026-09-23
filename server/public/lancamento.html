@@ -959,6 +959,7 @@ function renderKpisExtras(unidade){
   const aviso = algumTravado
     ? '<div class="sub" style="grid-column:1/-1;margin:0 0 2px;">🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados. Valor zerado no relatório fica em branco.</div>'
     : '';
+  const rotuloKpi = (k, extra = '') => `${escapeHtml(k.label)}${k.obrigatorio ? ' <span style="color:var(--bad)">*</span>' : ''}${extra}`;
   container.innerHTML = aviso + campos.map(k=>{
     const tipo = k.tipo || 'quantidade';
     // KPI de origem automatica: o valor vem do Carrinho, nao da loja. Com o
@@ -972,23 +973,23 @@ function renderKpisExtras(unidade){
         ? `<span class="sub" style="display:block;margin-top:3px;">Total registrado no Carrinho neste dia${REMAKES_DO_DIA.registros ? ` · ${REMAKES_DO_DIA.registros} registro(s)` : ''}.</span>`
         : '<span class="sub" style="display:block;margin-top:3px;">Não deu pra ler o Carrinho agora - digite o total do dia.</span>';
       const trava = carregado ? ' readonly title="Vem dos Remakes registrados no Carrinho durante o dia"' : '';
-      return `<div><label>🍕 ${escapeHtml(k.label)}</label><input type="number" step="1" inputmode="decimal" value="${valor}" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${carregado ? ' campo-automatico' : ''}"${trava}>${detalhe}</div>`;
+      return `<div><label>🍕 ${rotuloKpi(k)}</label><input type="number" step="1" inputmode="decimal" value="${valor}" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${carregado ? ' campo-automatico' : ''}"${trava}>${detalhe}</div>`;
     }
     if(tipo === 'arquivo'){
-      return `<div><label>${escapeHtml(k.label)}</label><input type="file" accept="image/*,application/pdf" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-arquivo"></div>`;
+      return `<div><label>${rotuloKpi(k)}</label><input type="file" accept="image/*,application/pdf" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-arquivo"></div>`;
     }
     if(tipo === 'tempo'){
-      return `<div><label>${escapeHtml(k.label)}</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
+      return `<div><label>${rotuloKpi(k)}</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
     }
     const bloq = travar(k);
     const classeExtra = bloq ? ' campo-automatico' : '';
     const roAttr = bloq ? ' readonly title="Preenchido pela foto do relatório - não editável"' : '';
     const marca = (algumTravado && !bloq && kpiOcrElegivel(k)) ? ' <span style="color:var(--muted);font-weight:400;">✏️</span>' : '';
     if(tipo === 'texto'){
-      return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
+      return `<div><label>${rotuloKpi(k, marca)}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
     }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
-    return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
+    return `<div><label>${rotuloKpi(k, marca)}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
   }).join('');
   // KPI moeda com "somar em" (ver grupos.html) precisa recalcular o preview
   // de Faturamento/Total Declarado a cada digitação, igual Canais/Formas ja
@@ -1016,6 +1017,13 @@ function segundosParaTempo(seg){
 }
 function lerKpisExtras(){
   const out = lerExtrasGrupo('kpi-extra-input');
+  // A leitura por foto deixa o zero visualmente em branco para não poluir a
+  // tela. Num KPI obrigatório, porém, o servidor precisa receber esse zero
+  // explícito para distinguir "leu zero" de "não foi informado".
+  const grupo = grupoKpiDaUnidade(document.getElementById('f-unidade').value);
+  (grupo?.kpisExtras || []).filter(k=>k.obrigatorio === true).forEach(k=>{
+    if(!String(out[k.campo] || '').trim() && LIDOS_PELA_FOTO.has(`kpi|${k.campo}`)) out[k.campo] = '0';
+  });
   document.querySelectorAll('.kpi-extra-tempo').forEach(el=>{
     out[el.dataset.extraCampo] = String(tempoParaSegundos(el.value));
   });
@@ -1044,7 +1052,9 @@ function atualizarAvisoKpisPendentes(){
   const pendentes = kpisPendentesNoFormulario();
   aviso.classList.toggle('hidden', !pendentes.length);
   if(pendentes.length){
-    aviso.innerHTML = `⚠️ <b>${pendentes.length} KPI(s) ainda não preenchido(s):</b> ${pendentes.map(k=>escapeHtml(k.label)).join(', ')}. Ao finalizar assim, a pendência ficará visível para a loja e para a gestão.`;
+    const obrigatorios = pendentes.filter(k=>k.obrigatorio === true);
+    const textoObrigatorio = obrigatorios.length ? ` <b>Obrigatório para fechar:</b> ${obrigatorios.map(k=>escapeHtml(k.label)).join(', ')}.` : '';
+    aviso.innerHTML = `⚠️ <b>${pendentes.length} KPI(s) ainda não preenchido(s):</b> ${pendentes.map(k=>escapeHtml(k.label)).join(', ')}.${textoObrigatorio}`;
   }
 }
 // soma os KPI's (sempre tipo moeda - unico que pode ter somaEm != 'nao', ver
@@ -1883,6 +1893,11 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
     if(!confirm(`ATENÇÃO — MAQUININHA POS 01\n\n${avisosPos.map(a=>'• '+a.texto).join('\n\n')}\n\nEsse valor é DESCONTADO automaticamente do fechamento de amanhã. Se estiver no lugar errado, amanhã fecha com diferença.\n\nConfirma que ${fmtMoney(totalPos)} foi vendido DEPOIS da meia-noite?`)) return;
   }
   const kpisPendentes = kpisPendentesNoFormulario();
+  const kpisObrigatoriosPendentes = kpisPendentes.filter(k=>k.obrigatorio === true);
+  if(kpisObrigatoriosPendentes.length){
+    alert(`Preencha o(s) KPI(s) obrigatório(s) antes de lançar o fechamento: ${kpisObrigatoriosPendentes.map(k=>k.label).join(', ')}.`);
+    return;
+  }
   if(kpisPendentes.length && !confirm(`ATENÇÃO — KPI'S NÃO PREENCHIDOS\n\nFalta informar: ${kpisPendentes.map(k=>k.label).join(', ')}.\n\nO fechamento pode ser enviado, mas essa pendência ficará registrada e aparecerá no relatório da loja e da gestão. Deseja finalizar mesmo assim?`)) return;
   if(!confirm('Tem certeza que deseja finalizar esse fechamento? Confira os valores antes de continuar - depois de lançado, qualquer correção precisa passar por aprovação do Master.')) return;
   const btn = document.getElementById('btn-enviar');

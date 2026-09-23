@@ -563,7 +563,7 @@ const DIRECOES_KPI = [
   ['menor-melhor', 'Ruim quando SOBE'],
   ['maior-melhor', 'Ruim quando CAI'],
 ];
-function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial, direcaoInicial, origemInicial, essencialInicial, ehTcInicial){
+function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial, direcaoInicial, origemInicial, essencialInicial, ehTcInicial, obrigatorioInicial){
   const container = document.getElementById(containerId);
   const ehKpi = containerId.includes('kpis');
   const ehCanal = containerId.includes('canais');
@@ -593,6 +593,9 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
       </label>
       <label title="Cada franquia chama a quantidade de pedidos de um jeito (Total, Quantidade de Pedidos, C Total Clientes). Marque aqui o KPI que é o TC desta franquia: é ele que vira 'TC total' no Comparativo por unidade e no relatório, e é ele que o briefing do assistente soma como pedidos do dia pra calcular o ticket médio (faturamento ÷ pedidos). Um por grupo. Sem marca, o sistema reconhece esses três nomes.">
         <input type="checkbox" class="kpi-ehtc-checkbox" ${ehTcInicial?'checked':''}> 🔢 este KPI é o TC (quantidade de pedidos/clientes do dia)
+      </label>
+      <label title="O fechamento não pode ser enviado enquanto este KPI estiver vazio. Zero é aceito quando for o valor real do dia.">
+        <input type="checkbox" class="kpi-obrigatorio-checkbox" ${obrigatorioInicial?'checked':''}> ✓ obrigatório para fechar
       </label>
     </div>` : '';
   const somaEmKpi = ehKpi ? `<label class="linha-kpi-soma-em">Somar em
@@ -680,6 +683,8 @@ function lerKpis(containerId){
         const chkTc = linha.querySelector('.kpi-ehtc-checkbox');
         item.ehTc = chkTc ? chkTc.checked : false;
         item.pedidos = item.ehTc;
+        const chkObrigatorio = linha.querySelector('.kpi-obrigatorio-checkbox');
+        item.obrigatorio = chkObrigatorio ? chkObrigatorio.checked : false;
       }
       return item;
     })
@@ -741,7 +746,8 @@ function tagsExtras(lista){
   return `<div class="tags">${(lista||[]).map(k=>{
     const sufixo = k.tipo ? ` <span style="opacity:.6;">· ${SUFIXO_TIPO_KPI[k.tipo]||k.tipo}</span>` : '';
     const soma = (k.somaEm && LABEL_SOMA_EM[k.somaEm]) ? ` <span style="opacity:.6;">→ ${LABEL_SOMA_EM[k.somaEm]}</span>` : '';
-    return `<span class="tag kpi">${escapeHtml(k.label)}${sufixo}${soma}</span>`;
+    const obrigatorio = k.obrigatorio ? ' <span style="opacity:.75;">· obrigatório</span>' : '';
+    return `<span class="tag kpi">${escapeHtml(k.label)}${sufixo}${soma}${obrigatorio}</span>`;
   }).join('') || '<span style="color:var(--muted);">nenhum</span>'}</div>`;
 }
 function nomeResponsavel(id){
@@ -871,7 +877,7 @@ function abrirEdicaoGrupo(id){
   document.getElementById('e-formas').innerHTML = '';
   (g.formasPagamentoExtras||[]).forEach(k=>adicionarKpi('e-formas', k.label, null, k.operacao, k.tambemNoOutroTotal, null, k.manual));
   document.getElementById('e-kpis').innerHTML = '';
-  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm, null, k.direcao, k.origem, k.essencial, k.ehTc));
+  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm, null, k.direcao, k.origem, k.essencial, k.ehTc, k.obrigatorio));
   responsaveisChecksHtml('e-responsaveis', new Set(g.responsaveis||[]));
   document.getElementById('grupo-err').classList.add('hidden');
   grupoOverlay.classList.add('show');
