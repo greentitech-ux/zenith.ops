@@ -1694,7 +1694,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // a entrega do comando/chat (ver lojaStatus.heartbeat); presenca/IP nao
     // dependem dele, pra maquina legada nao sumir do painel
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
       // medicao de link (ver redeDiagnostico.js). Vem do agente/navegador e
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
@@ -1713,7 +1713,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       souAdmin: req.body.souAdmin === true,
       soComandoAdmin: req.body.soComandoAdmin === true,
     }, token);
-    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao });
+    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1863,7 +1863,9 @@ app.post('/api/loja-status/:codigo/computadores/:posto/estado-agente', async (re
 
 app.get('/api/loja-status/:codigo/computadores/:posto/configuracao-agente', async (req, res) => {
   try {
-    res.json(await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null));
+    // o nome da loja vai junto pro modelo básico ("DOMINO'S · TIROL") - quem
+    // sabe o nome canônico é este arquivo, não o lojaStatus
+    res.json(await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null, { unidadeNome: nomeCanonicoUnidade(req.params.codigo) }));
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
@@ -1936,6 +1938,18 @@ app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (r
     // sendo carimbada (sem header). Ver Aplicar-PapelDeParede no vigiaScript.js.
     if (arte.daMaquina) res.set('X-NOC-Carimbo', 'nao');
     storage.streamArquivo(arte.caminho, arte.tipo || 'image/jpeg', res);
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+// LOGO do modelo básico (máquina sem arte): o servidor escolhe qual - o da
+// marca ou o do grupo DAQUELA unidade - e o agente só diz qual dos dois quer.
+app.get('/api/loja-status/:codigo/computadores/:posto/logo-carimbo/:tipo', async (req, res) => {
+  try {
+    const logo = await lojaStatus.logoCarimboDaMaquina(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null, req.params.tipo);
+    if (!logo) return res.sendStatus(404);
+    storage.streamArquivo(logo.caminho, logo.tipo || 'image/png', res);
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
@@ -5801,6 +5815,15 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
   const arte = (chave) => ({ temArte: !!(porMarca[chave] && porMarca[chave].caminho), em: (porMarca[chave] && porMarca[chave].em) || null });
   res.json({
     doParque: !!(cfg && cfg.papelDeParede && cfg.papelDeParede.caminho),
+    // logos do modelo básico (máquina sem arte): o que já subiu e o que falta
+    logosCarimbo: await (async () => {
+      const logos = (cfg && cfg.logosCarimbo) || {};
+      const info = (k) => ({ temLogo: !!(logos[k] && logos[k].caminho), em: (logos[k] && logos[k].em) || null });
+      return {
+        marcas: unidadesExtras.MARCAS_VALIDAS.map((id) => ({ id, label: unidadesExtras.MARCAS_LABEL[id] || id, ...info(lojaStatus.chaveLogoCarimbo('marca', id)) })),
+        grupos: (await empresas.listAtivas().catch(() => [])).map((e) => ({ id: String(e.id), label: e.nome, ...info(lojaStatus.chaveLogoCarimbo('grupo', String(e.id))) })),
+      };
+    })(),
     // a marca pura fica na lista de proposito: e a arte que vale pras duas
     // redes, util pra marca que so existe em uma delas (Saltiverso, Milky Moo)
     marcas: unidadesExtras.MARCAS_VALIDAS.map((id) => ({
@@ -5869,6 +5892,43 @@ app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo
     const porMarca = { ...((atual && atual.papelDeParedePorMarca) || {}), [chave]: arte };
     const cfg = await lojaStatus.setConfig({ papelDeParedePorMarca: porMarca });
     res.json({ chave, ...cfg.papelDeParedePorMarca[chave] });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+// LOGOS DO MODELO BÁSICO (Master). Um PNG por marca e um por grupo; a
+// máquina SEM ARTE monta o desenho com eles. A arte que o Master sobe acima
+// continua mandando - isto não substitui arte nenhuma.
+// Caminho de UM segmento (+ query), pelo mesmo motivo do -marcas.
+app.get('/api/loja-status/logo-carimbo', auth.requireMaster, async (req, res) => {
+  try {
+    const logo = await lojaStatus.logoCarimboSalvo(req.query.tipo, req.query.id);
+    if (!logo) return res.sendStatus(404);
+    storage.streamArquivo(logo.caminho, logo.tipo || 'image/png', res);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.put('/api/loja-status/logo-carimbo', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
+  try {
+    // cai na tela de toda máquina sem arte daquela marca/grupo: mesma trava
+    // de senha da arte
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
+    if (!/^image\/(png|jpeg)$/.test(req.file.mimetype || '')) return res.status(400).json({ error: 'O logo precisa ser PNG (de preferência com fundo transparente) ou JPG.' });
+    const { tipo, id } = req.body;
+    await lojaStatus.logoCarimboSalvo(tipo, id); // valida tipo/id ANTES de gravar arquivo no Storage
+    const logo = { caminho: null, tipo: req.file.mimetype, em: Date.now(), versao: Date.now() };
+    logo.caminho = await storage.salvarArquivo('parque', req.file, `logo-carimbo-${String(tipo)}-${String(id).replace(/[^\w-]/g, '_')}`);
+    res.json(await lojaStatus.definirLogoCarimbo(tipo, id, logo));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete('/api/loja-status/logo-carimbo', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    res.json(await lojaStatus.removerLogoCarimbo(req.body && req.body.tipo, req.body && req.body.id));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

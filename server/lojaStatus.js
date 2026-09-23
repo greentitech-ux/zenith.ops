@@ -302,6 +302,103 @@ function versaoAplicacao(politicaVersao, arte) {
   return `${Number(politicaVersao || 0)}.${(arte && arte.versao) || 0}`;
 }
 
+// LOGOS DO MODELO BÁSICO (pedido do Master, 23/09/2026). Máquina sem arte
+// nenhuma mostrava tela preta; agora o agente monta ali o mesmo desenho das
+// artes do grupo: logo do GRUPO em cima, logo da MARCA num cartão branco, o
+// nome da máquina e a linha "MARCA · UNIDADE". Os logos não existiam em
+// lugar nenhum do sistema - o Master sobe um PNG por marca e um por grupo
+// (config.logosCarimbo, chave "marca:<id>" / "grupo:<empresaId>").
+//
+// A ARTE continua mandando: isto só entra quando não há arte que sirva
+// (papelDeParedeDe devolve null) ou quando a tela está sem imagem nenhuma.
+//
+// NÃO passa pela versão da política (versaoAplicacao): subir um logo faria
+// TODA máquina sem arte reaplicar a política inteira - Área de Trabalho,
+// arquivamento, barra - por causa de um PNG. O heartbeat leva uma versão
+// própria (versaoModeloBasico) e o agente só redesenha o papel de parede.
+//
+// Custo (§3): getConfig tem cache de 30s, perfil e empresa saem dos caches de
+// unidades.js/empresas.js. Nenhuma leitura nova por heartbeat.
+const TIPOS_LOGO_CARIMBO = ['marca', 'grupo'];
+const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
+async function logosDaUnidade(codigo) {
+  const cfg = await getConfig();
+  const logos = (cfg && cfg.logosCarimbo) || {};
+  const perfilUnidade = await unidades.perfil(codigo).catch(() => null);
+  const marca = (perfilUnidade && perfilUnidade.marca) || null;
+  const empresa = await empresas.empresaDaUnidade(codigo).catch(() => null);
+  const rede = empresa && empresa.id ? String(empresa.id) : null;
+  const tem = (k) => (logos[k] && logos[k].caminho ? logos[k] : null);
+  const logoMarca = marca ? tem(chaveLogoCarimbo('marca', marca)) : null;
+  const logoGrupo = rede ? tem(chaveLogoCarimbo('grupo', rede)) : null;
+  const versao = Math.max(Number(logoMarca && logoMarca.versao) || 0, Number(logoGrupo && logoGrupo.versao) || 0);
+  return { marca, rede, logoMarca, logoGrupo, versao };
+}
+// só paga a resolução quando existe ALGUM logo cadastrado: o heartbeat roda a
+// cada 25s nas 52 máquinas e, sem logo, a resposta é sempre 0
+async function versaoLogosDe(codigo) {
+  const cfg = await getConfig();
+  const logos = (cfg && cfg.logosCarimbo) || {};
+  if (!Object.values(logos).some((l) => l && l.caminho)) return 0;
+  return (await logosDaUnidade(codigo)).versao;
+}
+
+// Master sobe/remove um logo. Remover grava null em vez de apagar a chave: o
+// set com merge não apaga campo de mapa, e null já é lido como "sem logo".
+async function validarAlvoLogo(tipo, id) {
+  const t = String(tipo || '');
+  const i = String(id || '');
+  if (!TIPOS_LOGO_CARIMBO.includes(t)) throw new Error('Tipo de logo inválido (marca ou grupo).');
+  if (t === 'marca' && !unidades.MARCAS_VALIDAS.includes(i)) throw new Error('Marca inválida.');
+  if (t === 'grupo' && !(await empresas.listAtivas().catch(() => [])).some((e) => String(e.id) === i)) throw new Error('Grupo inválido.');
+  return chaveLogoCarimbo(t, i);
+}
+async function definirLogoCarimbo(tipo, id, logo) {
+  const chave = await validarAlvoLogo(tipo, id);
+  const atual = await getConfig();
+  const mapa = { ...((atual && atual.logosCarimbo) || {}), [chave]: logo };
+  const cfg = await setConfig({ logosCarimbo: mapa });
+  return { chave, ...cfg.logosCarimbo[chave] };
+}
+async function removerLogoCarimbo(tipo, id) {
+  const chave = await validarAlvoLogo(tipo, id);
+  const atual = await getConfig();
+  const mapa = { ...((atual && atual.logosCarimbo) || {}), [chave]: null };
+  await setConfig({ logosCarimbo: mapa });
+  return { chave, removido: true };
+}
+async function logoCarimboSalvo(tipo, id) {
+  const chave = await validarAlvoLogo(tipo, id);
+  const l = ((await getConfig()).logosCarimbo || {})[chave];
+  return l && l.caminho ? l : null;
+}
+// o agente baixa o logo pela rota DA MÁQUINA: quem escolhe qual logo é o
+// servidor (marca e grupo da unidade), como na arte. O token é conferido no
+// espelho em memória - baixar dois logos não custa leitura (§3).
+async function logoCarimboDaMaquina(codigo, posto, token, tipo) {
+  const doc = (await garantirEspelho()).get(docIdFor(codigo, posto));
+  if (!doc) throw new Error('Computador não encontrado.');
+  exigirTokenSeTiver(doc, token);
+  const l = await logosDaUnidade(codigo);
+  return tipo === 'grupo' ? l.logoGrupo : tipo === 'marca' ? l.logoMarca : null;
+}
+
+// a MESMA conta no heartbeat e na configuração do agente: se as duas
+// divergissem, a máquina redesenharia a cada batida
+function versaoModeloBasicoDe(versaoLogos, doc) {
+  return `${Number(versaoLogos) || 0}|${String((doc && doc.nome) || '').trim()}`;
+}
+
+// "DOMINO'S · TIROL": o nome da loja já vem com o prefixo da marca ("Dom
+// Tirol", "Spo Praça Aero Recife"); tira o prefixo pra não repetir a marca.
+const PREFIXOS_MARCA = /^(dom|dominos|domino's|spo|spoleto|milky\s*moo|mm|s[aã]o\s*braz|sb|saltiverso|salti)\s+/i;
+function linhaDoCarimbo(marca, unidadeNome) {
+  const rotulo = marca ? (unidades.MARCAS_LABEL[marca] || marca) : '';
+  const loja = String(unidadeNome || '').trim();
+  const semPrefixo = rotulo ? (loja.replace(PREFIXOS_MARCA, '').trim() || loja) : loja;
+  return (rotulo ? `${rotulo} · ${semPrefixo}` : semPrefixo).toUpperCase();
+}
+
 async function pushAcessoRemotoAtivo() {
   const c = await getConfig();
   return c.pushAcessoRemoto === true; // default false
@@ -1150,6 +1247,11 @@ async function heartbeat(codigo, posto, info, token) {
   // pesquisar de tempos em tempos custaria milhares de leituras por dia (§3).
   const politicaLigada = !!(atual && atual.politica && atual.politica.papelDeParedeAtivo);
   const arteDaMaquina = politicaLigada ? await papelDeParedeDe(codigo, posto || 'principal') : null;
+  // versão do modelo básico: só pra quem NÃO tem arte (com arte, logo novo
+  // não muda nada na tela). Leva o nome da máquina junto: renomear no NOC
+  // redesenha o nome escrito na tela.
+  const versaoModeloBasico = arteDaMaquina ? null
+    : versaoModeloBasicoDe(await versaoLogosDe(codigo).catch(() => 0), atual);
   return {
     mensagemPendente,
     comandoPendente,
@@ -1159,6 +1261,7 @@ async function heartbeat(codigo, posto, info, token) {
     noPulsoPrint: !!(atual && atual.noPulsoPrint),
     capturarAgora,
     versaoAplicacao: versaoAplicacao(atual && atual.politicaVersao, arteDaMaquina),
+    versaoModeloBasico,
     // Pedido one-shot também viaja no heartbeat. A versão da política é o
     // gatilho normal, mas um marcador local antigo ou uma corrida entre as
     // instâncias de login/SYSTEM não pode deixar a leitura presa para sempre.
@@ -1626,7 +1729,7 @@ async function registrarProgramas(codigo, posto, lista, token) {
   return { novos, sumidos: sumidosAlerta, nome, primeira };
 }
 
-async function configuracaoAgente(codigo, posto, token) {
+async function configuracaoAgente(codigo, posto, token, { unidadeNome } = {}) {
   const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
   if (!snap.exists) throw new Error('Computador não encontrado.');
   const atual = snap.data();
@@ -1644,12 +1747,31 @@ async function configuracaoAgente(codigo, posto, token) {
   // so resolve a arte quando a maquina de fato aplica papel de parede: quem
   // esta com a chave desligada nao paga leitura de config nem de unidades
   const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo, posto) : null;
+  // o modelo básico vale pra quem não tem arte E pra tela sem imagem de quem
+  // está com a chave desligada - então resolve os logos nos dois casos
+  const logos = arte ? null : await logosDaUnidade(codigo).catch(() => null);
   return {
     noPulsoPrint: !!atual.noPulsoPrint,
     capturarAgora,
     politica,
     politicaVersao: Number(atual.politicaVersao || 0),
     versaoAplicacao: versaoAplicacao(atual.politicaVersao, arte),
+    // papel de parede ligado e NENHUMA arte que sirva pra esta máquina (nem
+    // dela, nem do grupo/marca, nem a padrão): o agente aplica só o carimbo
+    // (loja + máquina) na tela preta. Vai como campo próprio em vez de o
+    // agente deduzir pelo 404 da imagem: o 404 também sai quando o Storage
+    // falha a leitura, e aí uma arte que existe viraria tela preta.
+    papelDeParedeSemArte: !!politica.papelDeParedeAtivo && !arte,
+    versaoModeloBasico: arte ? null : versaoModeloBasicoDe(logos ? logos.versao : 0, atual),
+    // o que o modelo básico escreve e quais logos a máquina deve baixar (a
+    // imagem sai pela rota da própria máquina, com o token dela)
+    modeloBasico: arte ? null : {
+      maquina: String(atual.nome || '').trim() || posto,
+      linha: linhaDoCarimbo(logos && logos.marca, unidadeNome || codigo),
+      marcaRotulo: logos && logos.marca ? (unidades.MARCAS_LABEL[logos.marca] || logos.marca) : null,
+      logoMarca: !!(logos && logos.logoMarca),
+      logoGrupo: !!(logos && logos.logoGrupo),
+    },
   };
 }
 
@@ -4495,6 +4617,8 @@ module.exports = {
   comandoResetZebra, comandoEncerrarGcomWcf,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
+  logosDaUnidade, versaoLogosDe, versaoModeloBasicoDe, linhaDoCarimbo, chaveLogoCarimbo, TIPOS_LOGO_CARIMBO,
+  definirLogoCarimbo, removerLogoCarimbo, logoCarimboSalvo, logoCarimboDaMaquina,
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,

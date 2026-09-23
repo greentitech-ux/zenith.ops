@@ -26,7 +26,9 @@
 // 84: inventaria Área de Trabalho e barra de tarefas no perfil do usuário.
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
 // 108: inventaria RAM, processador, placa-mae e BIOS para exibir na ficha.
-const VERSAO_VIGIA = 114;
+// 115: maquina sem arte (ou tela sem imagem) ganha o modelo basico: logo do
+// grupo, logo da marca, nome da maquina e "MARCA · UNIDADE".
+const VERSAO_VIGIA = 115;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -153,6 +155,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   // unidade (ver papelDeParedeDe no lojaStatus.js). Vai com o token do
   // computador, igual a configuracao-agente.
   const urlPapelDeParede = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/papel-de-parede`;
+  // logos do modelo basico (maquina sem arte): /marca e /grupo. O servidor
+  // escolhe QUAL logo pela unidade, como na arte.
+  const urlLogoCarimbo = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/logo-carimbo`;
   const urlTelemetria = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/telemetria`;
   const urlConfiguracaoAgente = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/configuracao-agente`;
   const urlInventarioAtalhos = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/inventario-atalhos`;
@@ -392,6 +397,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '$EnderecoBase = "' + APP_BASE_URL + '"',
     '$UrlProgramas = "' + urlProgramas + '"',
     '$UrlPapelDeParede = "' + urlPapelDeParede + '"',
+    '$UrlLogoCarimbo = "' + urlLogoCarimbo + '"',
     // texto da segunda linha do carimbo: identifica a LOJA, que o hostname
     // sozinho nem sempre diz (o tecnico ve "D1-OPE-PDV01" e nao sabe qual Dom)
     '$UnidadePosto = "' + codigoTextoPS + ' / ' + posto + '"',
@@ -1815,11 +1821,223 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  } catch { Escrever-Log "Papel de parede: nao carimbou ($($_.Exception.Message)) - aplicando a arte sem carimbo."; return $origem }',
     '}',
     '',
-    'function Aplicar-PapelDeParede($ligado) {',
+    // SEM ARTE: O MODELO BASICO (pedido do Master, 23/09/2026).
+    // Maquina sem arte ficava com a tela preta e ninguem sabia em que
+    // computador estava - no AnyDesk, nas VMs, nos hosts. Aqui o agente monta
+    // o mesmo desenho das artes do grupo: logo do GRUPO em cima, logo da MARCA
+    // num cartao branco, o nome da maquina, a linha verde e "MARCA · UNIDADE".
+    // Logo que nao foi cadastrado nao e' inventado: sem o do grupo, o topo
+    // fica vazio; sem o da marca, o cartao leva o NOME da marca escrito.
+    // A ARTE continua mandando - isto so entra quando ela nao existe.
+    //
+    // Tamanho: a tela diz a ORIENTACAO certa (Makeline e' vertical), mas num
+    // PowerShell sem DPI ela devolve o tamanho encolhido pela escala (1920 a
+    // 150% vira 1280) e o texto sairia borrado. A placa de video conta pixel de
+    // verdade, mas pode nao saber que o monitor foi girado. Usa o pixel da placa
+    // quando ela e a tela concordam na proporcao; senao fica com a tela.
+    'function Tela-Logica {',
+    '  try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; return @([int]$b.Width, [int]$b.Height) } catch { return @(0, 0) }',
+    '}',
+    'function Tamanho-TelaPrincipal {',
+    '  $t = @(Tela-Logica); $w = [int]$t[0]; $h = [int]$t[1]',
+    '  try {',
+    '    $v = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | Where-Object { $_.CurrentHorizontalResolution -gt 0 -and $_.CurrentVerticalResolution -gt 0 })',
+    '    if ($v.Count -gt 0) {',
+    '      $pw = [int]$v[0].CurrentHorizontalResolution; $ph = [int]$v[0].CurrentVerticalResolution',
+    '      if ($w -gt 0 -and $h -gt 0 -and (($h -gt $w) -ne ($ph -gt $pw))) { $x = $pw; $pw = $ph; $ph = $x }',
+    '      $mesmaProporcao = ($w -le 0 -or $h -le 0) -or ([math]::Abs(($pw / $ph) - ($w / $h)) -lt 0.02)',
+    '      if ($mesmaProporcao -and $pw -ge $w) { $w = $pw; $h = $ph }',
+    '    }',
+    '  } catch {}',
+    '  if ($w -le 0 -or $h -le 0) { $w = 1920; $h = 1080 }',
+    '  return @($w, $h)',
+    '}',
+    'function Caminho-ModeloBasico { return (Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-modelo-basico.png") }',
+    // Baixa o logo que o servidor disse que existe. Falhou = $null, e quem
+    // chamou desiste desta vez (tenta de novo na proxima): aplicar sem o logo
+    // e se dar por aplicado deixaria o nome no lugar do logo ate a proxima
+    // troca de arte.
+    'function Baixar-LogoCarimbo([string]$tipo) {',
+    '  $arq = Join-Path (Split-Path -Parent $PSCommandPath) "logo-carimbo-$tipo.img"',
+    '  try { Invoke-WebRequest -Uri "$UrlLogoCarimbo/$tipo" -Headers $CabecalhosAgente -OutFile $arq -TimeoutSec 20 -UseBasicParsing | Out-Null } catch { Escrever-Log "Papel de parede: nao baixou o logo ($tipo): $($_.Exception.Message)"; return $null }',
+    '  if (-not (Test-Path -LiteralPath $arq)) { return $null }',
+    '  return $arq',
+    '}',
+    // Le sem prender o arquivo (FromFile trava ate o Dispose e a proxima
+    // descarga falharia por "arquivo em uso").
+    'function Abrir-ImagemSemTravar([string]$caminho) {',
+    '  $bytes = [System.IO.File]::ReadAllBytes($caminho)',
+    '  $ms = New-Object System.IO.MemoryStream(,$bytes)',
+    '  return [System.Drawing.Image]::FromStream($ms)',
+    '}',
+    'function Desenhar-ImagemNaCaixa($g, $img, $x, $y, $w, $h) {',
+    '  $esc = [math]::Min($w / $img.Width, $h / $img.Height)',
+    '  $dw = $img.Width * $esc; $dh = $img.Height * $esc',
+    '  $g.DrawImage($img, [single]($x + ($w - $dw) / 2), [single]($y + ($h - $dh) / 2), [single]$dw, [single]$dh)',
+    '}',
+    'function Texto-Centralizado($g, [string]$texto, $fonte, $cor, $cx, $y) {',
+    '  $tam = $g.MeasureString($texto, $fonte)',
+    '  $br = New-Object System.Drawing.SolidBrush($cor)',
+    '  try { $g.DrawString($texto, $fonte, $br, [single]($cx - $tam.Width / 2), [single]$y) } finally { $br.Dispose() }',
+    '}',
+    // Medidas no desenho de referencia (1920x1080, o das artes do grupo) e
+    // escaladas: na horizontal pelo lado que limita, na vertical (Makeline)
+    // pela largura - senao o bloco sairia minusculo no meio da tela em pe.
+    'function Desenhar-ModeloBasico([string]$saida, $modelo, $arqMarca, $arqGrupo) {',
+    '  Add-Type -AssemblyName System.Drawing -ErrorAction Stop',
+    '  $tam = @(Tamanho-TelaPrincipal); $W = [int]$tam[0]; $H = [int]$tam[1]',
+    '  if ($H -gt $W) { $e = $W / 1080.0 } else { $e = [math]::Min($W / 1920.0, $H / 1080.0) }',
+    '  $maq = ([string]$(if ($modelo -and $modelo.maquina) { $modelo.maquina } else { $NomeMaquinaArte })).ToUpper()',
+    '  $linha = [string]$(if ($modelo -and $modelo.linha) { $modelo.linha } else { ([string]$NomeLojaArte).ToUpper() })',
+    '  $rotuloMarca = [string]$(if ($modelo) { $modelo.marcaRotulo } else { "" })',
+    '  $temGrupo = [bool]$arqGrupo',
+    '  $temCartao = [bool]$arqMarca -or ($rotuloMarca -ne "")',
+    // blocos, de cima pra baixo (em px de referencia): logo do grupo 110,
+    // respiro 85, cartao 410, respiro 70, nome ~80, linha verde, unidade
+    '  $alturaBloco = 245.0; if ($temCartao) { $alturaBloco += 480 }; if ($temGrupo) { $alturaBloco += 195 }',
+    '  $y = ($H - $alturaBloco * $e) / 2.0; $cx = $W / 2.0',
+    '  $bmp = New-Object System.Drawing.Bitmap -ArgumentList $W, $H',
+    '  try {',
+    '    $g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '    try {',
+    '      $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+    '      $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic',
+    '      $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit',
+    '      $fundo = New-Object System.Drawing.Drawing2D.LinearGradientBrush((New-Object System.Drawing.Rectangle 0, 0, $W, $H), [System.Drawing.ColorTranslator]::FromHtml("#3a4550"), [System.Drawing.ColorTranslator]::FromHtml("#232a32"), [single]90)',
+    '      try { $g.FillRectangle($fundo, 0, 0, $W, $H) } finally { $fundo.Dispose() }',
+    '      if ($temGrupo) {',
+    '        $img = Abrir-ImagemSemTravar $arqGrupo',
+    '        try { Desenhar-ImagemNaCaixa $g $img ($cx - 170 * $e) $y (340 * $e) (110 * $e) } finally { $img.Dispose() }',
+    '        $y += 195 * $e',
+    '      }',
+    '      if ($temCartao) {',
+    '        $cw = 640 * $e; $ch = 410 * $e; $cxCartao = $cx - $cw / 2',
+    '        $sombra = Retangulo-RedondoCarimbo ([single]$cxCartao) ([single]($y + 8 * $e)) ([single]$cw) ([single]$ch) ([single](18 * $e))',
+    '        $brS = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(70, 0, 0, 0))',
+    '        try { $g.FillPath($brS, $sombra) } finally { $brS.Dispose(); $sombra.Dispose() }',
+    '        $cartao = Retangulo-RedondoCarimbo ([single]$cxCartao) ([single]$y) ([single]$cw) ([single]$ch) ([single](18 * $e))',
+    '        $brC = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml("#f4f5f2"))',
+    '        try { $g.FillPath($brC, $cartao) } finally { $brC.Dispose(); $cartao.Dispose() }',
+    '        if ($arqMarca) {',
+    '          $img = Abrir-ImagemSemTravar $arqMarca',
+    '          try { Desenhar-ImagemNaCaixa $g $img ($cxCartao + 60 * $e) ($y + 60 * $e) ($cw - 120 * $e) ($ch - 120 * $e) } finally { $img.Dispose() }',
+    '        } else {',
+    '          $fMarca = Nova-FonteCarimbo @("Segoe UI Black","Segoe UI Semibold","Arial") (84 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '          try { $t = $g.MeasureString($rotuloMarca, $fMarca); Texto-Centralizado $g $rotuloMarca $fMarca ([System.Drawing.ColorTranslator]::FromHtml("#1d2733")) $cx ($y + ($ch - $t.Height) / 2) } finally { $fMarca.Dispose() }',
+    '        }',
+    '        $y += 480 * $e',
+    '      }',
+    '      $fMaq = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (66 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '      try { $t = $g.MeasureString($maq, $fMaq); Texto-Centralizado $g $maq $fMaq ([System.Drawing.ColorTranslator]::FromHtml("#f4f6f8")) $cx $y; $y += $t.Height + 18 * $e } finally { $fMaq.Dispose() }',
+    '      $brV = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml("#3fae49"))',
+    '      try { $g.FillRectangle($brV, [single]($cx - 35 * $e), [single]$y, [single](70 * $e), [single]([math]::Max(2, 5 * $e))) } finally { $brV.Dispose() }',
+    '      $y += 26 * $e',
+    // letras espacadas como no modelo: o GDI+ nao tem espacamento de letra,
+    // entao vai um espaco fino (U+200A) entre elas
+    '      $espacada = ($linha.ToCharArray() | ForEach-Object { [string]$_ }) -join [string][char]0x200A',
+    '      $fLinha = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (25 * $e) ([System.Drawing.FontStyle]::Regular)',
+    '      try { Texto-Centralizado $g $espacada $fLinha ([System.Drawing.ColorTranslator]::FromHtml("#aab4bf")) $cx $y } finally { $fLinha.Dispose() }',
+    '    } finally { $g.Dispose() }',
+    '    $bmp.Save($saida, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '  } finally { $bmp.Dispose() }',
+    '  return $saida',
+    '}',
+    'function Novo-ModeloBasico($modelo) {',
+    '  $saida = Caminho-ModeloBasico',
+    '  $arqMarca = $null; $arqGrupo = $null',
+    '  if ($modelo -and $modelo.logoMarca) { $arqMarca = Baixar-LogoCarimbo "marca"; if (-not $arqMarca) { return $null } }',
+    '  if ($modelo -and $modelo.logoGrupo) { $arqGrupo = Baixar-LogoCarimbo "grupo"; if (-not $arqGrupo) { return $null } }',
+    '  try { return (Desenhar-ModeloBasico $saida $modelo $arqMarca $arqGrupo) }',
+    '  catch { Escrever-Log "Papel de parede: nao montei o modelo basico ($($_.Exception.Message))."; return $null }',
+    '}',
+    '',
+    // TELA SEM IMAGEM: vazia (o defeito de 14/09), apontando pra um arquivo
+    // local que sumiu (o Windows pinta o mesmo preto) ou ja com o nosso
+    // modelo basico (refaz, pra acompanhar logo ou nome novo). Caminho de rede
+    // (\\servidor\...) fora do ar nao conta: pode so estar longe agora, e a
+    // imagem e' de quem colocou.
+    'function Tela-SemImagem {',
+    '  $atual = ""',
+    '  try { $atual = [string](Get-ItemProperty -Path "HKCU:\\Control Panel\\Desktop" -Name Wallpaper -ErrorAction Stop).Wallpaper } catch {}',
+    '  if ($atual -eq "") { return $true }',
+    '  $atualExp = [Environment]::ExpandEnvironmentVariables($atual)',
+    '  if ($atualExp -eq (Caminho-ModeloBasico)) { return $true }',
+    '  return (-not $atualExp.StartsWith("\\\\") -and -not (Test-Path -LiteralPath $atualExp))',
+    '}',
+    'function Gravar-ModeloBasicoNaTela($modelo) {',
+    '  $arq = Novo-ModeloBasico $modelo',
+    '  if (-not $arq) { return $false }',
+    '  $chave = "HKCU:\\Control Panel\\Desktop"',
+    '  try {',
+    '    Set-ItemProperty -Path $chave -Name Wallpaper -Value $arq -ErrorAction Stop',
+    '    Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "6" -ErrorAction Stop',
+    '    Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
+    '  } catch { Escrever-Log "Papel de parede: o Windows negou a gravacao do modelo basico ($($_.Exception.Message))."; return $false }',
+    '  rundll32.exe user32.dll,UpdatePerUserSystemParameters 1, True | Out-Null',
+    '  return $true',
+    '}',
+    // O MODELO BASICO TEM VERSAO PROPRIA, fora da politica. Subir um logo
+    // pela versao da politica faria toda maquina sem arte reaplicar a politica
+    // inteira (Area de Trabalho, arquivamento, barra) por causa de um PNG. O
+    // heartbeat traz versaoModeloBasico e, quando ela muda, so isto roda: 1
+    // leitura da configuracao por mudanca REAL, e o papel de parede so e'
+    // trocado se a politica pede o modelo ou se a tela esta sem imagem.
+    //
+    // Falhou? Tenta de novo depois de 1h, nao a cada batida: a cada 25s seria
+    // 1 leitura do Firestore por maquina, o dia todo (§3).
+    'function Caminho-VersaoModeloBasico { return (Join-Path (Split-Path -Parent $PSCommandPath) "modelo-basico-versao.txt") }',
+    'function Versao-ModeloBasicoAplicada {',
+    '  $arq = Caminho-VersaoModeloBasico',
+    '  if (-not (Test-Path -LiteralPath $arq)) { return "" }',
+    '  try { return ([string](Get-Content -LiteralPath $arq -First 1)).Trim() } catch { return "" }',
+    '}',
+    '$script:ModeloBasicoFalhouEm = $null',
+    // recebe a configuracao JA baixada: quem chama pelo Sincronizar-Politica
+    // (quiosque, que nao tem heartbeat no agente) nao paga leitura a mais
+    'function Aplicar-ModeloBasicoDaConfig($cfg, [string]$versao) {',
+    '  if ($Servico) { return }   # SYSTEM nao tem area de trabalho',
+    '  if ($script:ModeloBasicoFalhouEm -and ((Get-Date) - $script:ModeloBasicoFalhouEm).TotalMinutes -lt 60) { return }',
+    '  $modelo = $cfg.modeloBasico',
+    '  $politicaPede = [bool]($cfg.politica -and $cfg.politica.papelDeParedeAtivo -and $cfg.papelDeParedeSemArte)',
+    '  if ($modelo -and ($politicaPede -or (Tela-SemImagem))) {',
+    '    if (-not (Gravar-ModeloBasicoNaTela $modelo)) { $script:ModeloBasicoFalhouEm = Get-Date; return }',
+    '    if ($politicaPede) { Set-Content -Path (Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-aplicado.txt") -Value (Get-Date).ToString() -Force -ErrorAction SilentlyContinue }',
+    '    Escrever-Log "Papel de parede: modelo basico aplicado (sem arte pra esta maquina)."',
+    '  }',
+    '  try { Set-Content -Path (Caminho-VersaoModeloBasico) -Value $versao -Force -ErrorAction Stop } catch { Escrever-Log "Papel de parede: nao gravei a versao do modelo basico ($($_.Exception.Message))." }',
+    '  $script:ModeloBasicoFalhouEm = $null',
+    '}',
+    'function Atualizar-ModeloBasico([string]$versao) {',
+    '  if ($Servico) { return }',
+    '  if ($script:ModeloBasicoFalhouEm -and ((Get-Date) - $script:ModeloBasicoFalhouEm).TotalMinutes -lt 60) { return }',
+    '  try { $cfg = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10 }',
+    '  catch { $script:ModeloBasicoFalhouEm = Get-Date; Escrever-Log "Papel de parede: modelo basico nao atualizou ($($_.Exception.Message))."; return }',
+    '  Aplicar-ModeloBasicoDaConfig $cfg $versao',
+    '}',
+    '',
+    'function Aplicar-PapelDeParede($ligado, $semArte = $false, $modelo = $null) {',
     '  if ($Servico) { return }   # SYSTEM nao tem area de trabalho',
     '  $bruto = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede.jpg"',
     '  $destino = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-nome.png"',
     '  $chave = "HKCU:\\Control Panel\\Desktop"',
+    '  $marca = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-aplicado.txt"',
+    // ligado e o servidor disse que nao ha arte pra esta maquina: vai o
+    // modelo basico, sem nem tentar baixar arte. Quando subirem uma arte, a
+    // versao de aplicacao muda e ela entra no lugar sozinha.
+    //
+    // Se o desenho falhar, NAO segura a politica: devolver $false faria ela
+    // se repetir a cada batida (com 1 leitura cada). Apaga a versao do modelo
+    // e a batida tenta de novo pelo Atualizar-ModeloBasico, de hora em hora.
+    '  if ($ligado -and $semArte) {',
+    '    if (Gravar-ModeloBasicoNaTela $modelo) {',
+    '      Set-Content -Path $marca -Value (Get-Date).ToString() -Force -ErrorAction SilentlyContinue',
+    '      Escrever-Log "Papel de parede: sem arte pra esta maquina - aplicado o modelo basico."',
+    '    } else {',
+    '      Remove-Item -LiteralPath (Caminho-VersaoModeloBasico) -Force -ErrorAction SilentlyContinue',
+    '      Escrever-Log "Papel de parede: sem arte e o modelo basico falhou - tenta de novo pela batida."',
+    '    }',
+    '    return $true',
+    '  }',
     '  if ($ligado) {',
     '    $semCarimbo = $false',
     // arte DESTA maquina vem com o header X-NOC-Carimbo: nao (ela ja tem loja,
@@ -1856,7 +2074,6 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     //    estava antes ninguem guardou;
     //  - caso contrario, nao toca em nada. Imagem de quem nunca pediu nada nao
     //    e' assunto do agente.
-    '  $marca = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-aplicado.txt"',
     '  try {',
     '    if ($ligado) {',
     '      Set-ItemProperty -Path $chave -Name Wallpaper -Value $destino -ErrorAction Stop',
@@ -1866,10 +2083,15 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
     '      Set-Content -Path $marca -Value (Get-Date).ToString() -Force -ErrorAction SilentlyContinue',
     '    } else {',
-    '      $atual = ""',
-    '      try { $atual = [string](Get-ItemProperty -Path $chave -Name Wallpaper -ErrorAction Stop).Wallpaper } catch {}',
     '      $nossa = Test-Path $marca',
-    '      if (-not $nossa -and $atual -ne "") { return $true }   # nao e nossa e nao esta apagada: nao mexe',
+    // Sem imagem e sem ter sido nossa: o modelo basico (no lugar do padrao
+    // do Windows que o conserto de 14/09 punha). Nao grava a marca de
+    // "aplicado" - nao e' a arte da politica, e sem a marca a proxima passada
+    // reconhece o modelo e so o refaz. Se ele falhar, segue pro padrao do
+    // Windows, como antes.
+    '      $semImagem = Tela-SemImagem',
+    '      if (-not $nossa -and -not $semImagem) { return $true }   # nao e nossa e tem imagem: nao mexe',
+    '      if (-not $nossa -and $modelo -and (Gravar-ModeloBasicoNaTela $modelo)) { Escrever-Log "Papel de parede: a tela estava sem imagem - aplicado o modelo basico."; return $true }',
     '      $padrao = Join-Path $env:SystemRoot "Web\\Wallpaper\\Windows\\img0.jpg"',
     '      if (Test-Path $padrao) {',
     '        Set-ItemProperty -Path $chave -Name Wallpaper -Value $padrao -ErrorAction Stop',
@@ -2447,8 +2669,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # Ele precisa rodar ANTES do retorno por versao ja aplicada; do contrario',
     '    # o heartbeat acorda a sincronizacao, mas ela sai sem ler os atalhos.',
     '    if ($pol.estacao -and $pol.estacao.inventarioPendenteEm -and -not (Enviar-InventarioAtalhos)) { return }',
+    // modelo basico antes do porteiro da politica: ele tem versao propria e
+    // precisa rodar mesmo com a politica ja aplicada (quiosque so passa aqui)
+    '    if (-not $Servico -and $null -ne $cfg.versaoModeloBasico -and "$($cfg.versaoModeloBasico)" -ne (Versao-ModeloBasicoAplicada)) { try { Aplicar-ModeloBasicoDaConfig $cfg "$($cfg.versaoModeloBasico)" } catch { Escrever-Log "Modelo basico nao sincronizou: $($_.Exception.Message)" } }',
     '    if (Politica-EstaAplicada $versaoServidor) { return }',
-    '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo)',
+    '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo) ([bool]$cfg.papelDeParedeSemArte) $cfg.modeloBasico',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
     '    # A BARRA VEM ANTES da limpeza de proposito: Aplicar-BarraTarefas procura',
@@ -2981,6 +3206,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // uma consulta a cada volta do laco.
     '      if ($resp.inventarioAtalhosPendenteEm -or ($null -ne $resp.versaoAplicacao -and -not (Politica-EstaAplicada "$($resp.versaoAplicacao)"))) {',
     '        try { Sincronizar-Politica } catch { Escrever-Log "Politica nao sincronizou: $($_.Exception.Message)" }',
+    '      }',
+    // modelo basico (maquina sem arte): versao propria, fora da politica -
+    // ver Atualizar-ModeloBasico. Servidor antigo nao manda o campo: nada roda.
+    '      if (-not $Servico -and $null -ne $resp.versaoModeloBasico -and "$($resp.versaoModeloBasico)" -ne (Versao-ModeloBasicoAplicada)) {',
+    '        try { Atualizar-ModeloBasico "$($resp.versaoModeloBasico)" } catch { Escrever-Log "Modelo basico nao sincronizou: $($_.Exception.Message)" }',
     '      }',
     '      if ($resp.comandoPendente) { Executar-ComandoPendente $resp.comandoPendente }',
     '      # 1o ciclo: so marca o que ja existe como "visto" (nao repopa o',

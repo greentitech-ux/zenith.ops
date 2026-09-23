@@ -12530,7 +12530,7 @@ setTimeout(async () => {
         && !(DOCS.get('lojaStatus/POL2__PC1') || {}).ultimoProgramaNovoEm,
       // agente: a divisão HKCU x HKLM é o coração disso
       'papel de parede é HKCU e NÃO roda na instância de boot (SYSTEM não tem área de trabalho)':
-        /function Aplicar-PapelDeParede\(\$ligado\) \{\n  if \(\$Servico\) \{ return \}/.test(psPol)
+        /function Aplicar-PapelDeParede\(\$ligado, \$semArte = \$false, \$modelo = \$null\) \{\n  if \(\$Servico\) \{ return \}/.test(psPol)
         && psPol.includes('HKCU:\\Control Panel\\Desktop'),
       'USB e instalação são HKLM e exigem Administrador':
         /function Aplicar-BloqueioUsb\(\$ligado\) \{\n  if \(-not \(Sou-Admin\)\) \{ return \$false \}/.test(psPol)
@@ -13062,7 +13062,8 @@ setTimeout(async () => {
       'a arte se ajusta à tela sem cortar laterais, logos ou identificação':
         /if \(\$ligado\) \{[\s\S]{0,700}Name WallpaperStyle -Value "6"/.test(psPp),
       'desligar so mexe se a imagem for nossa, ou se a tela estiver apagada':
-        /if \(-not \$nossa -and \$atual -ne ""\) \{ return \$true \}/.test(psPp)
+        /if \(-not \$nossa -and -not \$semImagem\) \{ return \$true \}/.test(psPp)
+        && /\$semImagem = Tela-SemImagem/.test(psPp)
         && psPp.includes('Web\\Wallpaper\\Windows\\img0.jpg'),
       'quem ligou o papel de parede deixa marca, pra saber que foi nosso':
         /papel-de-parede-aplicado\.txt/.test(psPp)
@@ -13135,6 +13136,357 @@ setTimeout(async () => {
   } catch (e) { okDiagPapel = false; console.log('  erro: ' + e.message); }
   if (!okDiagPapel) ruins += 1;
   console.log(`${okDiagPapel ? '✓' : '✗'} Papel de parede: diagnóstico "por que não subiu em todos?" (ligado/sem arte/offline por máquina)`);
+
+  // ------------------------------------------------------------------
+  // MODELO BÁSICO: MÁQUINA SEM ARTE (pedido do Master, 23/09/2026).
+  // "conseguiríamos rodar só o carimbo das máquinas na tela preta quando não
+  // tiver imagem? ... com a logo do grupo ou da unidade ... mantém o modelo de
+  // subir a arte do jeito que está".
+  //
+  // O que tranca:
+  //  - a ARTE continua mandando (máquina com arte nunca vê o modelo);
+  //  - logo novo NÃO mexe na versão da política (senão um PNG reaplicaria
+  //    Área de Trabalho/arquivamento/barra no parque inteiro);
+  //  - o agente só troca a tela que está SEM imagem, ou quando a política
+  //    pede e não há arte - imagem de quem pôs nunca é pisada;
+  //  - falha não vira laço de leitura (§3): retenta de hora em hora.
+  // As asserções do agente RODAM o PowerShell (pwsh) com o desenho e o
+  // registro do Windows simulados - texto no fonte não prova o fluxo.
+  let okModeloBasico = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const uni = require('/home/user/adyen-monitor/server/unidades.js');
+    const emp = require('/home/user/adyen-monitor/server/empresas.js');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const cab = { Authorization: 'Bearer ' + token };
+    const SENHA = process.env.MASTER_PASSWORD;
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const U = 'DOM19940'; // Dom Tirol: o nome canônico sai do index.js
+    DOCS.set('unidadesExtras/uniLcTirol', { id: 'uniLcTirol', codigo: U, nome: 'Dom Tirol', marca: 'dominos', areas: [], tiposSolicitacao: [] });
+    uni.invalidar();
+    // o grupo é o que o cadastro de empresas diz (a Dom Tirol já está na
+    // semente do Grupo Bravo); só cria um se não houver
+    let GRUPO = ((await emp.empresaDaUnidade(U)) || {}).id;
+    if (!GRUPO) {
+      DOCS.set('empresas/empLcBravo', { id: 'empLcBravo', nome: 'Grupo Bravo LC', ativa: true, tipoNegocio: 'alimentacao', unidades: [U] });
+      emp.invalidarCache();
+      GRUPO = 'empLcBravo';
+    }
+    GRUPO = String(GRUPO);
+    // sem arte NENHUMA no parque durante o teste (o bloco de arte acima subiu
+    // a do parque); o original volta no fim
+    const CFG_ID = 'lojaStatusConfig/geral';
+    const cfgOriginal = DOCS.get(CFG_ID) ? JSON.parse(JSON.stringify(DOCS.get(CFG_ID))) : null;
+    DOCS.set(CFG_ID, { ...(cfgOriginal || {}), papelDeParede: null, papelDeParedePorMarca: {}, logosCarimbo: {} });
+    await ls.setConfig({});
+
+    await ls.cadastrarComputador(U, 'PDV Tirol', 'interno');
+    await ls.cadastrarComputador(U, 'VM Tirol', 'interno');
+    const postoDe = async (nome) => (await ls.listar()).find((c) => c.codigo === U && c.nome === nome).posto;
+    const pOn = await postoDe('PDV Tirol');
+    const pOff = await postoDe('VM Tirol');
+    await ls.definirPolitica(U, pOn, { papelDeParedeAtivo: true });
+    const tkOn = await ls.garantirAgentToken(U, pOn);
+    const tkOff = await ls.garantirAgentToken(U, pOff);
+    const hb = async (p, tk) => ls.heartbeat(U, p, { userAgent: 'NOCZenith/1.0' }, tk);
+    const cfgRota = async (p, tk) => {
+      const r = await pedir(`/api/loja-status/${U}/computadores/${p}/configuracao-agente`, { 'x-noc-token': tk });
+      return r.status === 200 ? JSON.parse(r.corpo) : { erro: r.status };
+    };
+
+    const hbOn0 = await hb(pOn, tkOn);
+    const hbOff0 = await hb(pOff, tkOff);
+    const cfgOn0 = await cfgRota(pOn, tkOn);
+    const cfgOff0 = await cfgRota(pOff, tkOff);
+
+    // ---- logos ----
+    const semSenha = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'marca', id: 'dominos' }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const tipoRuim = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'loja', id: 'dominos', password: SENHA }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const marcaRuim = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'marca', id: 'pizzahut', password: SENHA }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const naoImagem = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'marca', id: 'dominos', password: SENHA }, { nome: 'd.txt', tipo: 'text/plain', buffer: Buffer.from('oi') }, 'imagem', cab, 'PUT');
+    const logoGrupoAntes = await pedir(`/api/loja-status/${U}/computadores/${pOn}/logo-carimbo/grupo`, { 'x-noc-token': tkOn });
+    const envMarca = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'marca', id: 'dominos', password: SENHA }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const hbOn1 = await hb(pOn, tkOn);
+    const hbOff1 = await hb(pOff, tkOff);
+    const cfgOn1 = await cfgRota(pOn, tkOn);
+    const logoMaq = await pedir(`/api/loja-status/${U}/computadores/${pOn}/logo-carimbo/marca`, { 'x-noc-token': tkOn });
+    const logoSemToken = await pedir(`/api/loja-status/${U}/computadores/${pOn}/logo-carimbo/marca`, {});
+    const logoMaster = await pedir('/api/loja-status/logo-carimbo?tipo=marca&id=dominos', cab);
+    const envGrupo = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'grupo', id: GRUPO, password: SENHA }, { nome: 'g.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const cfgOn2 = await cfgRota(pOn, tkOn);
+    const lista = await pedir('/api/loja-status/papel-de-parede-marcas', cab);
+    const listaJ = lista.status === 200 ? JSON.parse(lista.corpo) : {};
+    const remSemSenha = await enviarJson('DELETE', '/api/loja-status/logo-carimbo', { tipo: 'grupo', id: GRUPO }, cab);
+    const rem = await enviarJson('DELETE', '/api/loja-status/logo-carimbo', { tipo: 'grupo', id: GRUPO, password: SENHA }, cab);
+    const cfgOn3 = await cfgRota(pOn, tkOn);
+
+    // ---- com arte: a arte manda, o modelo some ----
+    await ls.definirArteDaMaquina(U, pOn, { caminho: 'x.png', tipo: 'image/png', versao: 7, em: Date.now() });
+    const hbOnArte = await hb(pOn, tkOn);
+    const cfgOnArte = await cfgRota(pOn, tkOn);
+
+    // ---- agente (pwsh) ----
+    const ps = vg.montarScriptVigia({ codigo: U, posto: pOn, tipo: 'interno', agentToken: tkOn, maquinaNome: 'PDV Tirol', unidadeNome: 'Dom Tirol' });
+    const ps2 = vg.montarScriptVigia({ codigo: U, posto: pOn, tipo: 'atendimento', agentToken: tkOn, maquinaNome: 'PDV Tirol', unidadeNome: 'Dom Tirol' });
+    const corpo = (fonte, nome) => {
+      const i = fonte.indexOf('function ' + nome);
+      if (i < 0) return '';
+      return fonte.slice(i, fonte.indexOf('\n}\n', i) + 3);
+    };
+    const pwshBin = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh']
+      .filter(Boolean).find((c) => { try { return require('fs').statSync(c).isFile(); } catch (e) { return false; } });
+    let ag = null;
+    if (pwshBin) {
+      const fs2 = require('fs'); const os2 = require('os'); const path2 = require('path');
+      const dir = fs2.mkdtempSync(path2.join(os2.tmpdir(), 'modelo-basico-'));
+      const funcs = ['Tamanho-TelaPrincipal', 'Caminho-ModeloBasico', 'Baixar-LogoCarimbo', 'Novo-ModeloBasico', 'Tela-SemImagem',
+        'Gravar-ModeloBasicoNaTela', 'Caminho-VersaoModeloBasico', 'Versao-ModeloBasicoAplicada', 'Aplicar-ModeloBasicoDaConfig',
+        'Atualizar-ModeloBasico', 'Aplicar-PapelDeParede'].map((n) => corpo(ps, n));
+      const harness = `
+$ErrorActionPreference = "Continue"
+$Servico = $false
+$UrlPapelDeParede = "http://x/arte"
+$UrlLogoCarimbo = "http://x/logo"
+$UrlConfiguracaoAgente = "http://x/cfg"
+$CabecalhosAgente = @{}
+$NomeMaquinaArte = "PDV Tirol"; $NomeLojaArte = "Dom Tirol"
+$script:ModeloBasicoFalhouEm = $null
+$global:LOG = New-Object System.Collections.ArrayList
+$global:REG = @{}
+$global:BAIXOU = New-Object System.Collections.ArrayList
+$global:DESENHOS = 0
+$global:CFG_LIDAS = 0
+function Escrever-Log($m) { [void]$global:LOG.Add([string]$m) }
+function Get-ItemProperty { param($Path, $Name, $ErrorAction) if (-not $global:REG.ContainsKey($Name)) { throw "sem valor" }; return [pscustomobject]@{ $Name = $global:REG[$Name] } }
+function Set-ItemProperty { param($Path, $Name, $Value, $ErrorAction, $Type) $global:REG[$Name] = $Value }
+function rundll32.exe { }
+function Invoke-WebRequest { param($Uri, $Headers, $OutFile, $TimeoutSec, [switch]$UseBasicParsing, [switch]$PassThru) [void]$global:BAIXOU.Add([string]$Uri); if ($global:FALHAR_DOWNLOAD) { throw "rede caiu" }; Set-Content -LiteralPath $OutFile -Value "img"; return [pscustomobject]@{ Headers = @{} } }
+function Invoke-RestMethod { param($Uri, $Headers, $TimeoutSec) $global:CFG_LIDAS++; if ($global:FALHAR_CFG) { throw "sem rede" }; return $global:CFG }
+function Carimbar-NomeNaArte($o, $d) { return $d }
+function Desenhar-ModeloBasico([string]$saida, $modelo, $arqMarca, $arqGrupo) { $global:DESENHOS++; $global:ULTIMO = @{ marca = [string]$arqMarca; grupo = [string]$arqGrupo; linha = [string]$modelo.linha }; if ($global:FALHAR_DESENHO) { throw "GDI+ falhou" }; Set-Content -LiteralPath $saida -Value "png"; return $saida }
+${funcs.join('\n')}
+function Tela-Logica { return @($global:TL[0], $global:TL[1]) }
+function Get-CimInstance { param($ClassName, $ErrorAction) return $global:CIM }
+$pasta = Split-Path -Parent $PSCommandPath
+$modeloArq = Join-Path $pasta "papel-de-parede-modelo-basico.png"
+$marca = Join-Path $pasta "papel-de-parede-aplicado.txt"
+$verArq = Join-Path $pasta "modelo-basico-versao.txt"
+function Zerar { $global:REG = @{}; $global:BAIXOU.Clear(); $global:DESENHOS = 0; $global:CFG_LIDAS = 0; $global:FALHAR_DOWNLOAD = $false; $global:FALHAR_DESENHO = $false; $global:FALHAR_CFG = $false; $script:ModeloBasicoFalhouEm = $null; Remove-Item -LiteralPath $marca, $verArq, $modeloArq -ErrorAction SilentlyContinue }
+$modelo = [pscustomobject]@{ maquina = "PDV Tirol"; linha = "DOMINO'S · TIROL"; marcaRotulo = "Domino's"; logoMarca = $true; logoGrupo = $false }
+$r = @{}
+$existente = Join-Path $pasta "foto-de-alguem.jpg"; Set-Content -LiteralPath $existente -Value "x"
+
+# 1. ligado e sem arte: modelo, sem baixar arte; so o logo que existe
+Zerar
+$ret = Aplicar-PapelDeParede $true $true $modelo
+$r.s1 = @{ ret = $ret; wall = $global:REG["Wallpaper"]; baixou = @($global:BAIXOU); marca = (Test-Path $marca); desenhos = $global:DESENHOS }
+# 2. ligado e sem arte, desenho falhou: nao segura a politica, nao mexe na tela, apaga a versao do modelo
+Zerar; Set-Content -LiteralPath $verArq -Value "1|x"; $global:FALHAR_DESENHO = $true
+$ret = Aplicar-PapelDeParede $true $true $modelo
+$r.s2 = @{ ret = $ret; temWall = $global:REG.ContainsKey("Wallpaper"); versao = (Test-Path $verArq) }
+# 3. ligado COM arte: o fluxo da arte de sempre, o modelo nem entra
+Zerar
+$ret = Aplicar-PapelDeParede $true $false $null
+$r.s3 = @{ ret = $ret; wall = $global:REG["Wallpaper"]; baixou = @($global:BAIXOU); desenhos = $global:DESENHOS }
+# 4. ligado sem arte, logo nao baixou: nao desenha sem o logo
+Zerar; $global:FALHAR_DOWNLOAD = $true
+$ret = Aplicar-PapelDeParede $true $true $modelo
+$r.s4 = @{ ret = $ret; desenhos = $global:DESENHOS; temWall = $global:REG.ContainsKey("Wallpaper") }
+# 5. desligado, tela vazia, nao e nossa: modelo, sem gravar a marca de aplicado
+Zerar; $global:REG["Wallpaper"] = ""
+$ret = Aplicar-PapelDeParede $false $false $modelo
+$r.s5 = @{ ret = $ret; wall = $global:REG["Wallpaper"]; marca = (Test-Path $marca) }
+# 6. desligado, imagem de alguem: nao mexe
+Zerar; $global:REG["Wallpaper"] = $existente
+$ret = Aplicar-PapelDeParede $false $false $modelo
+$r.s6 = @{ ret = $ret; wall = $global:REG["Wallpaper"]; desenhos = $global:DESENHOS }
+# 7. desligado, arquivo local que sumiu (tela preta igual): modelo
+Zerar; $global:REG["Wallpaper"] = (Join-Path $pasta "sumiu.jpg")
+$null = Aplicar-PapelDeParede $false $false $modelo
+$r.s7 = @{ wall = $global:REG["Wallpaper"] }
+# 8. desligado, caminho de rede fora do ar: nao e tela preta de certeza, nao mexe
+Zerar; $global:REG["Wallpaper"] = "\\\\servidor\\artes\\fundo.jpg"
+$null = Aplicar-PapelDeParede $false $false $modelo
+$r.s8 = @{ wall = $global:REG["Wallpaper"]; desenhos = $global:DESENHOS }
+# 9. desligado e era nossa: devolve o padrao do Windows (como sempre)
+Zerar; Set-Content -LiteralPath $marca -Value "x"; $global:REG["Wallpaper"] = $existente
+$env:SystemRoot = $pasta; New-Item -ItemType Directory -Force -Path (Join-Path $pasta "Web/Wallpaper/Windows") | Out-Null
+$img0 = Join-Path $pasta "Web\\Wallpaper\\Windows\\img0.jpg"; Set-Content -LiteralPath $img0 -Value "x"
+$null = Aplicar-PapelDeParede $false $false $modelo
+$r.s9 = @{ wall = $global:REG["Wallpaper"]; desenhos = $global:DESENHOS; marca = (Test-Path $marca) }
+# 10. batida: tela vazia -> modelo e grava a versao
+Zerar; $global:REG["Wallpaper"] = ""
+$global:CFG = [pscustomobject]@{ modeloBasico = $modelo; politica = [pscustomobject]@{ papelDeParedeAtivo = $false }; papelDeParedeSemArte = $false }
+Atualizar-ModeloBasico "5|PDV Tirol"
+$r.s10 = @{ wall = $global:REG["Wallpaper"]; versao = (Versao-ModeloBasicoAplicada) }
+# 11. batida: imagem de alguem -> nao mexe, mas grava a versao (nao repete)
+Zerar; $global:REG["Wallpaper"] = $existente
+Atualizar-ModeloBasico "5|PDV Tirol"
+$r.s11 = @{ wall = $global:REG["Wallpaper"]; versao = (Versao-ModeloBasicoAplicada); desenhos = $global:DESENHOS }
+# 12. batida: desenho falhou -> sem versao, e a proxima batida NAO le de novo (1h)
+Zerar; $global:REG["Wallpaper"] = ""; $global:FALHAR_DESENHO = $true
+Atualizar-ModeloBasico "5|PDV Tirol"
+$lidas1 = $global:CFG_LIDAS
+Atualizar-ModeloBasico "5|PDV Tirol"; Atualizar-ModeloBasico "5|PDV Tirol"
+$r.s12 = @{ versao = (Versao-ModeloBasicoAplicada); lidas1 = $lidas1; lidasDepois = $global:CFG_LIDAS }
+# 13. batida: politica pede e nao ha arte -> aplica mesmo com imagem, e grava a marca
+Zerar; $global:REG["Wallpaper"] = $existente
+$global:CFG = [pscustomobject]@{ modeloBasico = $modelo; politica = [pscustomobject]@{ papelDeParedeAtivo = $true }; papelDeParedeSemArte = $true }
+Atualizar-ModeloBasico "6|PDV Tirol"
+$r.s13 = @{ wall = $global:REG["Wallpaper"]; marca = (Test-Path $marca) }
+# 14. batida: o nosso modelo ja na tela conta como "sem imagem" (redesenha com logo novo)
+Zerar; Set-Content -LiteralPath $modeloArq -Value "velho"; $global:REG["Wallpaper"] = $modeloArq
+$global:CFG = [pscustomobject]@{ modeloBasico = $modelo; politica = [pscustomobject]@{ papelDeParedeAtivo = $false }; papelDeParedeSemArte = $false }
+Atualizar-ModeloBasico "7|PDV Tirol"
+$r.s14 = @{ desenhos = $global:DESENHOS }
+# 15. tamanho da tela
+$fazCim = { param($w, $h) ,@([pscustomobject]@{ CurrentHorizontalResolution = $w; CurrentVerticalResolution = $h }) }
+$global:TL = @(1280, 720); $global:CIM = & $fazCim 1920 1080; $a = @(Tamanho-TelaPrincipal)
+$global:TL = @(1080, 1920); $global:CIM = & $fazCim 1920 1080; $b = @(Tamanho-TelaPrincipal)
+$global:TL = @(0, 0); $global:CIM = @(); $c = @(Tamanho-TelaPrincipal)
+$global:TL = @(1280, 1024); $global:CIM = & $fazCim 1920 1080; $d = @(Tamanho-TelaPrincipal)
+$r.s15 = @{ dpi = "$($a[0])x$($a[1])"; emPe = "$($b[0])x$($b[1])"; nada = "$($c[0])x$($c[1])"; outroMonitor = "$($d[0])x$($d[1])" }
+$r.modeloArq = $modeloArq; $r.existente = $existente; $r.img0 = $img0
+$r | ConvertTo-Json -Depth 6 -Compress
+`;
+      const arq = path2.join(dir, 'h.ps1');
+      fs2.writeFileSync(arq, harness);
+      const out = require('child_process').spawnSync(pwshBin, ['-NoProfile', '-NonInteractive', '-File', arq], { encoding: 'utf8', timeout: 120000 });
+      try { ag = JSON.parse(String(out.stdout).trim().split('\n').pop()); } catch (e) { ag = { erro: (out.stdout || '') + (out.stderr || '') }; }
+      if (ag && ag.erro) console.log('  pwsh: ' + String(ag.erro).slice(0, 800));
+      else if (out.stderr && out.stderr.trim()) console.log('  pwsh stderr: ' + out.stderr.slice(0, 800));
+    }
+    const temPw = !!pwshBin;
+    const a = ag || {};
+    const lsTx = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+
+    const conf = {
+      // ---- servidor ----
+      'a linha da unidade sai sem repetir a marca ("DOMINO\'S · TIROL")':
+        ls.linhaDoCarimbo('dominos', 'Dom Tirol') === "DOMINO'S · TIROL"
+        && ls.linhaDoCarimbo('spoleto', 'Spo Praça Aero Recife') === 'SPOLETO · PRAÇA AERO RECIFE'
+        && ls.linhaDoCarimbo(null, 'Loja Nova') === 'LOJA NOVA',
+      'sem arte, a política ligada pede o modelo básico, com o nome canônico da loja':
+        cfgOn0.papelDeParedeSemArte === true && cfgOn0.modeloBasico && cfgOn0.modeloBasico.linha === "DOMINO'S · TIROL"
+        && cfgOn0.modeloBasico.maquina === 'PDV Tirol' && cfgOn0.modeloBasico.marcaRotulo === "Domino's",
+      'com a chave desligada o modelo também vai (é pra tela sem imagem), mas a política não pede':
+        cfgOff0.papelDeParedeSemArte === false && !!cfgOff0.modeloBasico,
+      'antes de qualquer logo, nenhum logo é prometido à máquina':
+        cfgOn0.modeloBasico && cfgOn0.modeloBasico.logoMarca === false && cfgOn0.modeloBasico.logoGrupo === false
+        && logoGrupoAntes.status === 404,
+      'o logo pede a senha do Master, só aceita marca/grupo que existem e só imagem':
+        semSenha.status === 400 && tipoRuim.status === 400 && marcaRuim.status === 400 && naoImagem.status === 400
+        && envMarca.status === 200 && envGrupo.status === 200,
+      // O RISCO QUE ISTO EVITA: logo pela versão da política = TODA máquina
+      // sem arte reaplicando Área de Trabalho, arquivamento e barra por um PNG.
+      'subir logo NÃO mexe na versão da política - só na versão do modelo básico':
+        hbOn1.versaoAplicacao === hbOn0.versaoAplicacao && hbOff1.versaoAplicacao === hbOff0.versaoAplicacao
+        && hbOn1.versaoModeloBasico !== hbOn0.versaoModeloBasico && hbOff1.versaoModeloBasico !== hbOff0.versaoModeloBasico
+        && hbOn0.versaoModeloBasico === '0|PDV Tirol',
+      // se as duas contas divergissem a máquina redesenharia a cada batida
+      'heartbeat e configuração dão a MESMA versão do modelo':
+        cfgOn1.versaoModeloBasico === hbOn1.versaoModeloBasico,
+      'a máquina baixa o logo DELA com o token; sem token é recusado':
+        cfgOn1.modeloBasico.logoMarca === true && logoMaq.status === 200 && logoSemToken.status === 403,
+      'o Master vê o logo e a lista diz o que já subiu':
+        logoMaster.status === 200
+        && (listaJ.logosCarimbo && listaJ.logosCarimbo.marcas || []).some((m) => m.id === 'dominos' && m.temLogo === true)
+        && (listaJ.logosCarimbo && listaJ.logosCarimbo.grupos || []).some((g) => g.id === GRUPO && g.temLogo === true),
+      'logo do grupo vale pra unidade do grupo; removido, some da máquina':
+        cfgOn2.modeloBasico.logoGrupo === true && remSemSenha.status === 400 && rem.status === 200
+        && cfgOn3.modeloBasico.logoGrupo === false && cfgOn3.modeloBasico.logoMarca === true,
+      'com arte, a arte manda: nem modelo nem versão do modelo':
+        cfgOnArte.modeloBasico === null && cfgOnArte.papelDeParedeSemArte === false && hbOnArte.versaoModeloBasico === null,
+      // ---- script ----
+      'o agente subiu de versão (senão nenhuma máquina pega o modelo)': vg.VERSAO_VIGIA >= 115,
+      'o logo sai da rota da PRÓPRIA máquina':
+        new RegExp(`\\$UrlLogoCarimbo = "[^"]*/api/loja-status/${U}/computadores/${pOn}/logo-carimbo"`).test(ps),
+      'o laço interno redesenha pela versão do modelo, só na instância de login':
+        /if \(-not \$Servico -and \$null -ne \$resp\.versaoModeloBasico -and "\$\(\$resp\.versaoModeloBasico\)" -ne \(Versao-ModeloBasicoAplicada\)\) \{/.test(ps),
+      // quiosque não tem heartbeat no agente: só passa pelo Sincronizar-Politica,
+      // e o gancho tem de vir ANTES do porteiro que sai com a política aplicada
+      'quiosque também recebe: o gancho vem antes do porteiro da política':
+        (() => { const c = corpo(ps2, 'Sincronizar-Politica'); const g = c.indexOf('Aplicar-ModeloBasicoDaConfig $cfg'); const p = c.indexOf('if (Politica-EstaAplicada $versaoServidor) { return }'); return g > 0 && p > g; })(),
+      'o desenho não trava o arquivo do logo nem usa JPEG':
+        /FromStream\(\$ms\)/.test(corpo(ps, 'Abrir-ImagemSemTravar')) && /ImageFormat\]::Png/.test(corpo(ps, 'Desenhar-ModeloBasico')),
+      // ---- agente rodando ----
+      'AGENTE: ligado sem arte aplica o modelo sem baixar arte, e só o logo que existe': !temPw ? 'pular'
+        : a.s1 && a.s1.ret === true && a.s1.wall === a.modeloArq && a.s1.marca === true && a.s1.desenhos === 1
+          && a.s1.baixou.length === 1 && a.s1.baixou[0] === 'http://x/logo/marca',
+      'AGENTE: desenho falhou não segura a política nem mexe na tela, e reabre a versão do modelo': !temPw ? 'pular'
+        : a.s2 && a.s2.ret === true && a.s2.temWall === false && a.s2.versao === false,
+      'AGENTE: com arte, o fluxo da arte é o de sempre (o modelo nem entra)': !temPw ? 'pular'
+        : a.s3 && a.s3.ret === true && /papel-de-parede-nome\.png$/.test(a.s3.wall) && a.s3.baixou[0] === 'http://x/arte' && a.s3.desenhos === 0,
+      'AGENTE: logo prometido que não baixou = não desenha sem ele': !temPw ? 'pular'
+        : a.s4 && a.s4.desenhos === 0 && a.s4.temWall === false,
+      'AGENTE: desligado + tela vazia = modelo, sem se declarar dono da tela': !temPw ? 'pular'
+        : a.s5 && a.s5.wall === a.modeloArq && a.s5.marca === false,
+      'AGENTE: imagem de quem pôs nunca é pisada': !temPw ? 'pular'
+        : a.s6 && a.s6.wall === a.existente && a.s6.desenhos === 0 && a.s11 && a.s11.wall === a.existente && a.s11.desenhos === 0,
+      'AGENTE: arquivo local que sumiu conta como tela preta; caminho de rede não': !temPw ? 'pular'
+        : a.s7 && a.s7.wall === a.modeloArq && a.s8 && a.s8.desenhos === 0 && /servidor/.test(a.s8.wall),
+      'AGENTE: desligar o que era nosso ainda devolve o padrão do Windows': !temPw ? 'pular'
+        : a.s9 && a.s9.wall === a.img0 && a.s9.desenhos === 0 && a.s9.marca === false,
+      'AGENTE: pela batida, tela vazia ganha o modelo e a versão fica gravada': !temPw ? 'pular'
+        : a.s10 && a.s10.wall === a.modeloArq && a.s10.versao === '5|PDV Tirol' && a.s11.versao === '5|PDV Tirol',
+      // §3: sem isso, desenho quebrado = 1 leitura do Firestore a cada 25s
+      'AGENTE: falhou = não grava versão e não relê a configuração a cada batida': !temPw ? 'pular'
+        : a.s12 && a.s12.versao === '' && a.s12.lidas1 === 1 && a.s12.lidasDepois === 1,
+      'AGENTE: política pedindo e sem arte, aplica e marca como nossa': !temPw ? 'pular'
+        : a.s13 && a.s13.wall === a.modeloArq && a.s13.marca === true,
+      'AGENTE: o modelo antigo na tela é redesenhado (logo novo chega)': !temPw ? 'pular'
+        : a.s14 && a.s14.desenhos === 1,
+      'AGENTE: tamanho em pixel de verdade, em pé no Makeline, e sem chute de outro monitor': !temPw ? 'pular'
+        : a.s15 && a.s15.dpi === '1920x1080' && a.s15.emPe === '1080x1920' && a.s15.nada === '1920x1080' && a.s15.outroMonitor === '1280x1024',
+      'custo: o heartbeat não resolve logo nenhum enquanto não existir logo':
+        /if \(!Object\.values\(logos\)\.some\(\(l\) => l && l\.caminho\)\) return 0;/.test(lsTx),
+    };
+    const pulou = Object.entries(conf).filter(([, v]) => v === 'pular').map(([n]) => n);
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okModeloBasico = !falhas.length;
+    if (pulou.length) console.log(`  (sem pwsh: ${pulou.length} asserção(ões) do agente puladas)`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (grupo=${GRUPO} envGrupo=${envGrupo.status} on2=${JSON.stringify(cfgOn2.modeloBasico)} rem=${rem.status}/${remSemSenha.status} on3=${JSON.stringify(cfgOn3.modeloBasico)} on0=${JSON.stringify(cfgOn0).slice(0, 300)} hb0=${JSON.stringify(hbOn0.versaoModeloBasico)} hb1=${JSON.stringify(hbOn1.versaoModeloBasico)} ag=${JSON.stringify(ag).slice(0, 900)})`);
+    for (const p of [pOn, pOff]) await ls.removerComputador(U, p);
+    if (cfgOriginal) DOCS.set(CFG_ID, cfgOriginal);
+    await ls.setConfig({});
+  } catch (e) { okModeloBasico = false; console.log('  erro: ' + e.message); }
+  if (!okModeloBasico) ruins += 1;
+  console.log(`${okModeloBasico ? '✓' : '✗'} Papel de parede: máquina sem arte ganha o modelo básico (logo do grupo + logo da marca + nome), sem pisar em imagem de ninguém`);
+
+  // ------------------------------------------------------------------
+  // "‹" DO CABEÇALHO ABRIA O CÓDIGO DO sw.js (celular, 23/09/2026).
+  // Tocar numa notificação abre a tela pelo service worker (openWindow /
+  // navigate), e aí o document.referrer da tela é o /sw.js. A seta de voltar
+  // aceitava qualquer endereço interno como "página anterior" e levava ao
+  // arquivo. RODA a função de verdade (extraída do nav-menu.js), com location
+  // simulado - texto no fonte não prova que o /sw.js foi recusado.
+  let okVoltarSw = false;
+  try {
+    const src = require('fs').readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
+    const i = src.indexOf('  function origemInternaSegura(valor) {');
+    const j = src.indexOf('\n  }\n', i);
+    const corpoFn = src.slice(i, j + 4);
+    const origemInternaSegura = new Function('location', `${corpoFn}; return origemInternaSegura;`)({ origin: 'https://www.nopulso.com.br', pathname: '/loja-status' });
+    const O = 'https://www.nopulso.com.br';
+    const conf = {
+      'a função foi achada no nav-menu.js': i > 0 && typeof origemInternaSegura === 'function',
+      'o referrer /sw.js (notificação) não vira "voltar"': origemInternaSegura(O + '/sw.js') === null,
+      'arquivo de qualquer tipo também não (manifest, ícone, script)':
+        origemInternaSegura(O + '/manifest.json') === null && origemInternaSegura(O + '/icon-192.png') === null
+        && origemInternaSegura(O + '/nav-menu.js') === null,
+      'rota de API não é tela': origemInternaSegura(O + '/api/me') === null,
+      'tela sem extensão e tela .html continuam valendo (com a query)':
+        origemInternaSegura(O + '/meu-dia') === '/meu-dia' && origemInternaSegura(O + '/painel.html?u=1') === '/painel.html?u=1',
+      'a mesma tela, a raiz e outro domínio continuam recusados':
+        origemInternaSegura(O + '/loja-status') === null && origemInternaSegura(O + '/') === null
+        && origemInternaSegura('https://exemplo.com/meu-dia') === null,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okVoltarSw = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okVoltarSw = false; console.log('  erro: ' + e.message); }
+  if (!okVoltarSw) ruins += 1;
+  console.log(`${okVoltarSw ? '✓' : '✗'} Menu: a seta "‹" nunca volta pra arquivo (o /sw.js da notificação abria o código no celular)`);
 
   // ------------------------------------------------------------------
   // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)

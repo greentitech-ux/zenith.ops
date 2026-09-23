@@ -379,6 +379,12 @@
       const u = new URL(valor, location.origin);
       if (u.origin !== location.origin || u.pathname === location.pathname) return null;
       if (u.pathname === '/' || u.pathname === '/index.html') return null;
+      // Só TELA: caminho sem extensão (/meu-dia) ou .html. Tocar numa
+      // notificação abre a tela pelo service worker, e aí o document.referrer
+      // é o /sw.js - o "‹" levava ao código do sw.js em vez de voltar (celular,
+      // 23/09/2026). Arquivo (.js, .json, .png...) e /api/ nunca são "volta".
+      if (u.pathname.startsWith('/api/')) return null;
+      if (/\.[a-z0-9]+$/i.test(u.pathname) && !/\.html$/i.test(u.pathname)) return null;
       return `${u.pathname}${u.search}`;
     } catch (e) { return null; }
   }

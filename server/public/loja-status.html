@@ -772,6 +772,20 @@
     <span class="msg hidden" id="msg-pp-diag"></span>
   </div>
   <div id="pp-diag" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
+  <!-- MODELO BÁSICO: máquina SEM arte (ou com a tela sem imagem) monta sozinha
+       logo do grupo + logo da marca + nome da máquina + "MARCA · UNIDADE".
+       A arte acima continua mandando: isto só entra onde ela não existe. -->
+  <h3 style="font-size:13px;margin:4px 0 6px;">Modelo básico — máquina sem arte</h3>
+  <div class="agente-sub">
+    Onde não há arte (e em máquina com a tela preta, sem imagem nenhuma), o agente monta sozinho: <b>logo do grupo</b> em cima, <b>logo da marca</b> num cartão branco, o <b>nome da máquina</b> e a linha <b>MARCA · UNIDADE</b>. A arte que você sobe acima continua valendo onde existe. Suba um PNG por marca (vai sobre o cartão branco) e um por grupo (vai sobre o fundo escuro — use a versão <b>clara</b>, de fundo transparente). Sem o logo da marca, o cartão leva o nome dela escrito; sem o do grupo, o topo fica vazio.
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+    <select id="lc-alvo" style="max-width:220px;"></select>
+    <input type="file" id="lc-arquivo" accept="image/png,image/jpeg" style="max-width:260px;">
+    <button type="button" class="btn-mini ok" onclick="enviarLogoCarimbo()">Enviar logo</button>
+    <span class="msg hidden" id="msg-lc"></span>
+  </div>
+  <div id="lc-lista" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
   </div>
   <div data-recolher>
   <div class="agente-titulo" data-recolher-titulo>
@@ -4216,7 +4230,84 @@ async function carregarMarcasPapelDeParede(){
       ? `Sem arte própria (caem na arte da marca ou na padrão): <b>${semArte.map(escapeHtml).join(' · ')}</b>`
       : 'Todas as combinações de grupo e marca com arte própria.';
     atualizarVerPapelDeParede();
+    renderLogosCarimbo(d.logosCarimbo);
   }catch(e){ /* a seção continua utilizável só com a arte padrão */ }
+}
+
+// ---- LOGOS DO MODELO BÁSICO (máquina sem arte) ----
+function renderLogosCarimbo(lc){
+  const sel = document.getElementById('lc-alvo');
+  const lista = document.getElementById('lc-lista');
+  if(!sel || !lista || !lc) return;
+  const itens = [
+    ...(lc.marcas||[]).map(m=>({ tipo:'marca', ...m })),
+    ...(lc.grupos||[]).map(g=>({ tipo:'grupo', ...g })),
+  ];
+  const marcado = sel.value;
+  const opc = (i)=>{ const v = `${i.tipo}:${i.id}`; return `<option value="${escapeHtml(v)}"${v===marcado?' selected':''}>${escapeHtml(i.label)}${i.temLogo?' ✓':''}</option>`; };
+  sel.innerHTML = `<optgroup label="Logo da marca">${itens.filter(i=>i.tipo==='marca').map(opc).join('')}</optgroup>`
+    + `<optgroup label="Logo do grupo">${itens.filter(i=>i.tipo==='grupo').map(opc).join('')}</optgroup>`;
+  const linha = (i)=>{
+    return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:3px 0;">`
+      + `<span style="min-width:150px;color:var(--text)">${escapeHtml(i.label)}</span>`
+      + (i.temLogo
+        ? `<span style="color:var(--ok)">✓ enviado</span> <button type="button" class="btn-mini" onclick="verLogoCarimbo('${escapeHtml(i.tipo)}','${escapeHtml(i.id)}')">👁 Ver</button> <button type="button" class="btn-mini" onclick="removerLogoCarimbo('${escapeHtml(i.tipo)}','${escapeHtml(i.id)}')">Remover</button>`
+        : `<span>falta</span>`)
+      + `</div>`;
+  };
+  lista.innerHTML = `<b style="color:var(--text)">Marcas</b>${itens.filter(i=>i.tipo==='marca').map(linha).join('')}`
+    + `<div style="margin-top:8px;"><b style="color:var(--text)">Grupos</b></div>${itens.filter(i=>i.tipo==='grupo').map(linha).join('')}`;
+}
+// a rota é só do Master: um <a href> não leva o token, então busca pelo
+// fetch (que leva) e abre a imagem numa aba
+async function verLogoCarimbo(tipo, id){
+  const aba = window.open('', '_blank');
+  try{
+    const r = await fetch(`/api/loja-status/logo-carimbo?tipo=${encodeURIComponent(tipo)}&id=${encodeURIComponent(id)}`);
+    if(!r.ok) throw new Error('Não achei esse logo.');
+    const url = URL.createObjectURL(await r.blob());
+    if(aba) aba.location.href = url; else window.open(url, '_blank');
+  }catch(e){ if(aba) aba.close(); alert(e.message); }
+}
+async function enviarLogoCarimbo(){
+  const input = document.getElementById('lc-arquivo');
+  const msg = document.getElementById('msg-lc');
+  msg.classList.add('hidden');
+  const arquivo = (input.files||[])[0];
+  const alvo = (document.getElementById('lc-alvo')||{}).value || '';
+  const [tipo, id] = alvo.split(':');
+  if(!tipo || !id){ msg.textContent='Escolha a marca ou o grupo.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  if(!arquivo){ msg.textContent='Escolha a imagem.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const senha = await pedirSenhaMaster('enviar o logo do modelo básico');
+  if(senha===null) return;
+  try{
+    const fd = new FormData();
+    fd.append('imagem', arquivo);
+    fd.append('password', senha);
+    fd.append('tipo', tipo);
+    fd.append('id', id);
+    const r = await fetch('/api/loja-status/logo-carimbo', { method:'PUT', body: fd });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui enviar.');
+    const rotulo = document.getElementById('lc-alvo').selectedOptions[0].textContent.replace(' ✓','');
+    await carregarMarcasPapelDeParede();
+    window.zenithRascunhos?.limparAnexoEnviado(input);
+    msg.textContent = `Logo de ${rotulo} enviado. As máquinas sem arte redesenham na próxima batida.`;
+    msg.className = 'msg'; msg.classList.remove('hidden');
+  }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+async function removerLogoCarimbo(tipo, id){
+  const msg = document.getElementById('msg-lc');
+  const senha = await pedirSenhaMaster('remover o logo do modelo básico');
+  if(senha===null) return;
+  try{
+    const r = await fetch('/api/loja-status/logo-carimbo', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tipo, id, password: senha }) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui remover.');
+    await carregarMarcasPapelDeParede();
+    msg.textContent = 'Logo removido. As máquinas sem arte redesenham na próxima batida.';
+    msg.className = 'msg'; msg.classList.remove('hidden');
+  }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 
 // "por que não subiu em todos?": lê o estado por máquina e resume — quantas vão
@@ -4235,8 +4326,8 @@ async function carregarDiagnosticoPapel(){
     const naoAplica = ['desligado','sem-marca','sem-arte'];
     const rotulo = {
       'desligado':'🖼️ desligado no card (ligue a política da máquina)',
-      'sem-marca':'sem marca no perfil da unidade (não casa arte de grupo/marca)',
-      'sem-arte':'sem arte pra essa marca/grupo (nem padrão)',
+      'sem-marca':'sem marca no perfil da unidade (não casa arte de grupo/marca) — fica com o modelo básico',
+      'sem-arte':'sem arte pra essa marca/grupo (nem padrão) — fica com o modelo básico',
       'offline':'offline (aplica quando a máquina voltar)',
     };
     const linhaMaq = (x)=>`${escapeHtml(x.nome)} <span style="color:var(--muted)">(${escapeHtml(x.codigo)})</span>`;
