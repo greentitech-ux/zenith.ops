@@ -5923,7 +5923,7 @@ setTimeout(async () => {
         return fabricar({ search: u.search, pathname: u.pathname })();
       };
     }
-    const linkReal = `https://adyen-monitor.onrender.com/preencher.html?token=${g.tokenPreenchimento}`;
+    const linkReal = `https://www.nopulso.com.br/preencher.html?token=${g.tokenPreenchimento}`;
     const lido = lerToken ? lerToken(linkReal) : null;
     // e o servidor tem que aceitar exatamente o que a página leu
     const abriu = await pedir(`/api/formularios-publico/preencher/${encodeURIComponent(lido || 'vazio')}`);
@@ -9191,6 +9191,49 @@ setTimeout(async () => {
   } catch (e) { okAvisoEndereco = false; console.log('  erro: ' + e.message); }
   if (!okAvisoEndereco) ruins += 1;
   console.log(`${okAvisoEndereco ? '\u2713' : '\u2717'} Mudanca de endereco: avisa quem entra pelo antigo, menos na maquina de loja`);
+
+  // ---------- Endereco antigo aposentado (23/09/2026) ----------
+  // Decisao do Master: o adyen-monitor.onrender.com saiu de uso e o endereco
+  // padrao passa a ser o oficial. Enquanto o subdominio do Render responder,
+  // ele fica SO onde ainda tem funcao, e isto tranca a lista: o aviso de
+  // "mudamos de endereco" (tema.js) e o reparo (plano B de DNS + reconhecer
+  // copia instalada antes da troca). Em qualquer outro arquivo, reprova.
+  let okEnderecoAntigo = false;
+  try {
+    const fsE = require('fs'), pathE = require('path');
+    const arquivos = [];
+    const varrer = (d) => {
+      for (const n of fsE.readdirSync(d)) {
+        if (n === 'node_modules' || n.startsWith('.')) continue;
+        const c = pathE.join(d, n);
+        if (fsE.statSync(c).isDirectory()) varrer(c);
+        else if (/\.(js|html|json|ps1)$/.test(n) && n !== 'testeRotas.js' && n !== 'package-lock.json') arquivos.push(c);
+      }
+    };
+    varrer(__dirname);
+    const comAntigo = arquivos.filter((a) => fsE.readFileSync(a, 'utf8').includes('adyen-monitor.onrender.com'));
+    const reparo = fsE.readFileSync(pathE.join(__dirname, 'reparoNocZenithScript.js'), 'utf8');
+    const linhasReparo = reparo.split('\n').filter((l) => l.includes('adyen-monitor.onrender.com'));
+    const tema = fsE.readFileSync(pathE.join(__dirname, 'public', 'tema.js'), 'utf8');
+    const idx = fsE.readFileSync(pathE.join(__dirname, 'index.js'), 'utf8');
+    const rota = await pedir('/api/meta/endereco');
+    const conf = {
+      'o endereço antigo só sobra no aviso de mudança e no reparo':
+        comAntigo.length === 2
+        && comAntigo.map((a) => pathE.relative(__dirname, a)).sort().join(',') === 'public/tema.js,reparoNocZenithScript.js'
+        && linhasReparo.every((l) => /\$HostsLegadosPermitidos = @\(|^const ENDERECO_RESERVA = |^\/\/ /.test(l.trim())),
+      'o endereço padrão é o oficial nos 3 lugares':
+        ['index.js', 'relatorioMV.js', 'vigiaScript.js'].every((f) => fsE.readFileSync(pathE.join(__dirname, f), 'utf8')
+          .includes("const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br')")),
+      'o aviso de mudança continua de pé (o host antigo ainda responde)':
+        /avisarEnderecoNovo\(\)/.test(tema) && rota.status === 200,
+    };
+    const ruinsE = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okEnderecoAntigo = !ruinsE.length;
+    if (ruinsE.length) console.log(`  falhou em: ${ruinsE.join(' · ')} (com o antigo: ${comAntigo.map((a) => pathE.relative(__dirname, a)).join(', ')})`);
+  } catch (e) { okEnderecoAntigo = false; console.log('  erro: ' + e.message); }
+  if (!okEnderecoAntigo) ruins += 1;
+  console.log(`${okEnderecoAntigo ? '\u2713' : '\u2717'} Endereço antigo aposentado: o padrão é o oficial, e o antigo só fica no aviso de mudança e no plano B do reparo`);
 
   // ---------- Painel: o desenho novo sem inventar dado ----------
   // O mockup 1b trazia "Meta do mes 71,2%" e "Faturamento hoje +8,4%" - dois
@@ -14491,8 +14534,8 @@ $r | ConvertTo-Json -Compress
           && /Chame SEM header nenhum/.test(s11)
           && /API credential/.test(s11);
       })(),
-      // o curl do print saiu com adyen-monitor.onrender.com; o endereço é o
-      // nopulso.com.br, e o documento tem que deixar isso sem margem
+      // o curl do print saiu com o endereço antigo (aposentado em 23/09); o
+      // endereço é o nopulso.com.br, e o documento tem que deixar isso sem margem
       'o endereço das chamadas é o nopulso.com.br, dito sem ambiguidade': (() => {
         const s1 = doc.slice(doc.indexOf('## 1.'), doc.indexOf('### 1.1'));
         return /\*\*O endereço é `https:\/\/www\.nopulso\.com\.br`\.\*\*/.test(s1)
@@ -14927,7 +14970,7 @@ $r | ConvertTo-Json -Compress
     const docs = [
       { codigo: 'A', posto: 'P1', nome: 'Migrada', agentToken: 't', agenteEndereco: OFICIAL, agenteVersao: 51 },
       { codigo: 'B', posto: 'P1', nome: 'Barra no fim', agentToken: 't', agenteEndereco: OFICIAL + '/', agenteVersao: 51 },
-      { codigo: 'C', posto: 'P1', nome: 'Ainda no velho', agentToken: 't', agenteEndereco: 'https://adyen-monitor.onrender.com', agenteVersao: 51 },
+      { codigo: 'C', posto: 'P1', nome: 'Ainda no velho', agentToken: 't', agenteEndereco: 'https://endereco-antigo.example', agenteVersao: 51 },
       { codigo: 'D', posto: 'P1', nome: 'Versao antiga', agentToken: 't', agenteVersao: 48 },
       { codigo: 'E', posto: 'P1', nome: 'Sem agente', agenteVersao: null },
     ];
@@ -14947,7 +14990,7 @@ $r | ConvertTo-Json -Compress
       'computador SEM agente não entra na conta (não há o que migrar nele)': r.total === 4,
       'máquina no endereço oficial conta como migrada, com ou sem barra no fim': r.migradas === 2,
       'quem ainda fala com o endereço antigo aparece na lista de pendentes':
-        r.pendentes.some((p) => p.codigo === 'C' && /adyen-monitor/.test(p.endereco || '')),
+        r.pendentes.some((p) => p.codigo === 'C' && /endereco-antigo/.test(p.endereco || '')),
       'versão antiga (que nem sabe reportar) conta como PENDENTE - o lado seguro do erro':
         r.pendentes.some((p) => p.codigo === 'D' && !p.endereco),
       'podeAposentar só fica true com ZERO pendentes':
@@ -14981,7 +15024,7 @@ $r | ConvertTo-Json -Compress
   try {
     delete require.cache[require.resolve('/home/user/adyen-monitor/server/vigiaScript.js')];
     const vgA = require('/home/user/adyen-monitor/server/vigiaScript.js');
-    const base = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
+    const base = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
     const tipos = ['interno', 'atendimento', 'caixa', 'quiosque'];
     const scripts = tipos.map((tipo) => vgA.montarScriptVigia({ codigo: 'DOM_19706', posto: 'PC1', tipo, agentToken: 'tok' }));
     const cmd = vgA.montarComandoInstalacao({ codigo: 'DOM_19706', posto: 'PC1', tipo: 'interno', agentToken: 'abc123' });
@@ -25872,7 +25915,7 @@ $r | ConvertTo-Json -Compress
     const vigiaR = require(__dirname + '/vigiaScript');
     const scriptR = reparoR.montarScriptReparoNocZenith();
     const comandoR = reparoR.montarComandoReparoNocZenith('https://www.nopulso.com.br');
-    // o comando montado SEM base tem que cair no endereco antigo, nunca ficar vazio
+    // o comando montado SEM base cai no endereco oficial, nunca fica vazio
     const comandoPadraoR = reparoR.montarComandoReparoNocZenith();
     const internoPadraoR = (() => {
       const e = comandoPadraoR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)$/);
@@ -25929,20 +25972,23 @@ $r | ConvertTo-Json -Compress
         && /MaximumRedirection 0/.test(internoR)
         && !/[a-f0-9]{48}/i.test(comandoR),
       // 22/09: numa maquina de loja o comando morreu em "O nome remoto nao pode
-      // ser resolvido: 'www.nopulso.com.br'". E justamente a maquina que mais
-      // precisa do reparo - o agente dela esta caido e nao ha outro caminho.
-      // O endereco antigo nunca pode ser desligado (§4), entao ele e a rede de
-      // seguranca: o comando tenta os DOIS.
-      'o comando tenta o endereço oficial E o adyen-monitor (loja com DNS restrito)':
+      // ser resolvido: 'www.nopulso.com.br'" - justamente a que mais precisava
+      // do reparo. O endereço antigo saiu de uso em 23/09, mas ainda responde
+      // (subdomínio do Render ligado): é o plano B, e o comando tenta os DOIS.
+      'o comando tenta o oficial E o antigo (loja com DNS restrito)':
         internoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
         && internoR.includes('https://adyen-monitor.onrender.com/api/loja-status/reparo-noczenith.ps1')
+        && internoR.indexOf('www.nopulso.com.br') < internoR.indexOf('adyen-monitor.onrender.com')
         && /foreach \(\$u in \$us\)/.test(internoR)
         && /if \(-not \$ok\) \{ throw/.test(internoR),
-      // o endereço NUNCA cravado (§4): sai do APP_BASE_URL de quem chama
-      'sem base informada o comando cai no endereço antigo, e não fica vazio':
-        internoPadraoR.includes('https://adyen-monitor.onrender.com/api/loja-status/reparo-noczenith.ps1')
-        && !internoPadraoR.includes('www.nopulso.com.br')
-        && !/const url = 'https:/.test(fsR.readFileSync(__dirname + '/reparoNocZenithScript.js', 'utf8')),
+      'sem base informada o comando cai no endereço OFICIAL primeiro, e não fica vazio':
+        internoPadraoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
+        && internoPadraoR.indexOf('www.nopulso.com.br') < internoPadraoR.indexOf('adyen-monitor.onrender.com'),
+      // o reparo ainda RECONHECE uma cópia instalada com o host antigo (é o que
+      // prova que ela é nossa), mas baixa sempre da origem oficial
+      'cópia antiga ainda é reconhecida, e o download sai do oficial':
+        /\$HostsLegadosPermitidos = @\([^)]*'adyen-monitor\.onrender\.com'\)/.test(scriptR)
+        && scriptR.includes('UriDownload = New-Object Uri($OrigemOficial, $uri.PathAndQuery)'),
       // portal cativo e proxy de loja devolvem pagina de erro com HTTP 200:
       // aquilo seria salvo como .ps1 e EXECUTADO. Mesma trava do "# NOCZenith".
       'o que foi baixado é conferido antes de executar':

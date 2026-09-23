@@ -33,7 +33,7 @@
 // o ZIP do arquivamento fora do laco principal.
 const VERSAO_VIGIA = 116;
 
-const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
 // qual pagina cada tipo de computador abre - mesmo mapeamento client-side
 // de loja-status.html (paginaDoTipo), usado so pra montar a URL que o

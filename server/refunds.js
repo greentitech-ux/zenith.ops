@@ -38,7 +38,7 @@ async function create({
   dataVenda, horaVenda, valorEstornar, nomeCliente, cpfCnpjCliente, telefoneCliente, anexos,
   pixChave, pixNomeTitular, pixBanco, observacaoCliente,
   requestedById, requestedByEmail, direcionadoParaId, direcionadoParaEmail,
-  numeroTicket, convertidoDeTipo, convertidoDeId, teste,
+  numeroTicket, convertidoDeTipo, convertidoDeId, origemTarefa, teste,
 }) {
   origem = ORIGENS.includes(origem) ? origem : 'interno';
 
@@ -79,6 +79,7 @@ async function create({
   const registro = {
     id: doc.id,
     numeroTicket: ticket,
+    origemTarefa: origemTarefa || null,
     // trilha de qual(is) tipo(s) esse ticket ja passou
     historicoTipos: [{ tipo: 'estorno', em: agora, porEmail: requestedByEmail || null }],
     // preenchido só quando esse registro NASCEU de uma conversão de outro

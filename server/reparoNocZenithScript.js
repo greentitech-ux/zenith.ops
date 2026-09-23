@@ -15,6 +15,8 @@ param([int]$VersaoMinima = __VERSAO_MINIMA__)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $OrigemOficial = [Uri]'https://www.nopulso.com.br'
+# o host antigo aqui so RECONHECE uma copia instalada antes de 23/09 como
+# nossa; o download sai sempre da $OrigemOficial
 $HostsLegadosPermitidos = @('www.nopulso.com.br', 'nopulso.com.br', 'adyen-monitor.onrender.com')
 $mutex = $null
 $mutexAdquirido = $false
@@ -288,24 +290,25 @@ function montarScriptReparoNocZenith() {
 // loja ou nome do computador: o resgate encontra uma instalação já existente
 // e preserva a identidade dela. O -EncodedCommand evita que $env:TEMP ou
 // outras variáveis sejam expandidas pelo PowerShell/CMD de fora.
-// O ENDERECO VEM DO APP_BASE_URL, nunca cravado (CLAUDE.md §4). E ele tenta
-// DOIS enderecos: o oficial e o adyen-monitor.onrender.com.
+// O ENDERECO VEM DO APP_BASE_URL (CLAUDE.md §4); sem ele, o oficial. E o
+// comando tenta um SEGUNDO endereco: o adyen-monitor.onrender.com.
 //
-// Isto nao e redundancia de luxo. Loja atras de rede restrita pode nao
-// resolver o dominio novo - foi o que aconteceu em 22/09 numa maquina:
-// "O nome remoto nao pode ser resolvido: 'www.nopulso.com.br'". E justamente
-// a maquina que mais precisa do reparo, porque o agente dela esta caido e nao
-// ha outro jeito de chegar nela. O endereco velho nunca pode ser desligado
-// (mesma §4), entao ele e a rede de seguranca natural.
+// O antigo saiu de uso em 23/09/2026, mas continua respondendo enquanto o
+// subdominio do Render estiver ligado - e aqui ele e a unica saida pra loja
+// atras de rede restrita que nao resolve o dominio novo. Foi o que aconteceu
+// em 22/09: "O nome remoto nao pode ser resolvido: 'www.nopulso.com.br'", na
+// maquina que mais precisava do reparo. Se o subdominio for desligado, esta
+// linha so acrescenta um erro a mais na mensagem - e ai pode sair.
 //
 // E confere o CONTEUDO antes de executar: portal cativo e proxy de loja
 // devolvem pagina de erro com HTTP 200, e aquilo seria salvo como .ps1 e
 // executado. Mesma trava do "# NOCZenith" do vigia, aplicada aqui.
-const ENDERECO_ANTIGO = 'https://adyen-monitor.onrender.com';
+const ENDERECO_OFICIAL = 'https://www.nopulso.com.br';
+const ENDERECO_RESERVA = 'https://adyen-monitor.onrender.com';
 const MARCA_REPARO = '# Reparo seguro do NOCZenith';
 function montarComandoReparoNocZenith(baseUrl) {
-  const oficial = String(baseUrl || ENDERECO_ANTIGO).replace(/\/+$/, '');
-  const bases = oficial === ENDERECO_ANTIGO ? [oficial] : [oficial, ENDERECO_ANTIGO];
+  const oficial = String(baseUrl || ENDERECO_OFICIAL).replace(/\/+$/, '');
+  const bases = oficial === ENDERECO_RESERVA ? [oficial] : [oficial, ENDERECO_RESERVA];
   const urls = bases.map((b) => b + '/api/loja-status/reparo-noczenith.ps1');
   const interno = [
     "$ErrorActionPreference='Stop'",

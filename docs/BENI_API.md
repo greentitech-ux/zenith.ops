@@ -35,11 +35,9 @@ mesmo lugar no fim. Chamar sem o `www` dá **403 de rede**, e 403 de rede se
 parece com bloqueio de permissão: você vai concluir que não tem acesso quando
 só errou o endereço.
 
-> `adyen-monitor.onrender.com` também responde e **nunca pode ser desligado** —
-> é por ele que os 52 agentes das lojas descobrem que existe versão nova. Mas
-> ele não é pra você: é o endereço antigo, e usar ele nas suas chamadas só
-> atrapalha a medição de quem já migrou. Se você se pegar montando um comando
-> com `onrender.com`, está errado.
+> O endereço antigo (`onrender.com`) foi aposentado em 23/09/2026:
+> ele não é pra você. Se você se pegar montando um comando com
+> `onrender.com`, está errado.
 
 **Antes de concluir qualquer coisa sobre um 403, confira o endereço que você
 mandou.** Só depois fale em bloqueio — e, se for bloqueio mesmo, é do
@@ -378,6 +376,8 @@ senha, tem token. Chamando sem ela você toma **400 "Senha incorreta."**:
 | `PUT /api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte` | enviar a arte própria de uma máquina |
 | `DELETE /api/loja-status/:codigo/computadores/:posto/papel-de-parede-arte` | remover a arte própria de uma máquina |
 | `PUT /api/loja-status/:codigo/computadores/:posto/politica` | salvar a política da máquina (papel de parede, USB, instalação) |
+| `PUT /api/loja-status/logo-carimbo` | subir o logo de uma marca ou grupo pro modelo básico (máquina sem arte) |
+| `DELETE /api/loja-status/logo-carimbo` | remover o logo de uma marca ou grupo do modelo básico |
 
 A senha volta **400 "Senha incorreta."**, e não 401, de propósito: senha de
 confirmação errada não é sessão inválida.

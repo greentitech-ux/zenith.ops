@@ -586,6 +586,7 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
         observacao: document.getElementById('e-observacao').value,
         password: document.getElementById('e-senha').value,
         direcionadoParaId, direcionadoParaEmail,
+        tarefaOrigemId: TAREFA_ORIGEM || null,
       })});
     } else if(TIPO_SELECIONADO === 'ajuste-fechamento'){
       const fechamentoId = document.getElementById('a-fechamento').value;
@@ -668,7 +669,8 @@ async function boot(){
   SECOES = IS_MASTER ? ['monitor','disputas','cofre','fechamentos','lancamento','sangria','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','inventario','parque','parque-checkin','festas'] : (ME.permissions?.sections||[]);
 
 
-  if(!SECOES.includes('solicitacoes')){
+  const PODE_TRIAGEM = IS_MASTER || SECOES.includes('solicitacoes') || SECOES.includes('suporte') || SECOES.includes('monitor');
+  if(!PODE_TRIAGEM){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
   }
@@ -687,7 +689,7 @@ async function boot(){
   // QA User sempre vê/cria todos os tipos (tudo que criar sai marcado TESTE)
   const tiposPermitidos = (IS_MASTER || ME.isQaUser) ? null : (ME.permissions?.tiposSolicitacao||[]);
   const tiposDisponiveis = Object.entries(TIPOS_INFO).filter(([tipo,info])=>
-    (!info.secaoNecessaria || SECOES.includes(info.secaoNecessaria)) && (!tiposPermitidos || !tiposPermitidos.length || tiposPermitidos.includes(tipo))
+    (!info.secaoNecessaria || SECOES.includes(info.secaoNecessaria) || SECOES.includes('suporte')) && (!tiposPermitidos || !tiposPermitidos.length || tiposPermitidos.includes(tipo))
   );
   document.getElementById('tipos-btns').innerHTML = tiposDisponiveis.map(([tipo,info])=>
     `<button type="button" class="tipo-btn" data-tipo="${tipo}" onclick="selecionarTipo('${tipo}')">${iconeTipo(tipo)} ${info.label}</button>`
@@ -709,11 +711,10 @@ function prepararDeTarefa(){
   const p = new URLSearchParams(location.search);
   TAREFA_ORIGEM = p.get('tarefa');
   if(!TAREFA_ORIGEM) return;
-  // Estorno e ajuste de fechamento dependem de dados próprios (pedido e
-  // fechamento). Uma tarefa vira os tipos genéricos da Central, que podem
-  // preservar seu protocolo, anexos e unidade sem inventar esses dados.
-  document.querySelectorAll('.tipo-btn[data-tipo="estorno"],.tipo-btn[data-tipo="ajuste-fechamento"]').forEach(b=>b.remove());
-  if(['estorno','ajuste-fechamento'].includes(TIPO_SELECIONADO)) selecionarTipo('compra');
+  // Ajuste de fechamento depende de escolher um fechamento real. Estorno pode
+  // ser promovido a partir da tarefa e preserva seu protocolo.
+  document.querySelectorAll('.tipo-btn[data-tipo="ajuste-fechamento"]').forEach(b=>b.remove());
+  if(TIPO_SELECIONADO==='ajuste-fechamento') selecionarTipo('compra');
   const unidade = p.get('unidade');
   const sel = document.getElementById('f-unidade');
   if(unidade && [...sel.options].some(o=>o.value===unidade)){ sel.value = unidade; carregarResponsaveis(); }

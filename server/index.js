@@ -765,12 +765,11 @@ app.get('/api/meta/unidades-publico', async (req, res) => {
   res.json(await listaUnidadesPublicas(req.query.area));
 });
 
-// Endereco oficial do app, pra tela avisar quem ainda entra pelo antigo.
-// Publica e sem Firestore: e so devolver o APP_BASE_URL que ja esta em
-// memoria, entao nao custa leitura nenhuma. Existe porque o tema.js e
-// servido como arquivo estatico e nao tem como saber o endereco sozinho -
-// e cravar o dominio novo no JS quebraria a regra de que APP_BASE_URL e a
-// UNICA fonte do endereco (ver CLAUDE.md secao 4).
+
+// Endereco oficial do app, pra tela avisar quem ainda entra pelo antigo
+// (o endereco antigo continua respondendo enquanto o subdominio
+// do Render estiver ligado). Publica e sem Firestore: devolve o APP_BASE_URL
+// que ja esta em memoria. O tema.js e estatico e nao sabe o endereco sozinho.
 app.get('/api/meta/endereco', (req, res) => {
   res.json({ oficial: APP_BASE_URL });
 });
@@ -797,7 +796,7 @@ app.get('/api/login-custom/logo/:id', async (req, res) => {
 // dominio publico do app - usado pra montar links completos (clicaveis fora
 // do NoPulso, ex: mandados pelo Beniboy no chat pro colaborador repassar pro
 // cliente por WhatsApp). Mesmo padrao ja usado em relatorioMV.js.
-const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
 // acha a loja que mais bate com o que o colaborador escreveu no chat (nome
 // solto, com ou sem acento/maiusculas - ex: "dom bessa", "Bessa") - usado
@@ -823,6 +822,28 @@ function linkEstornoCliente(codigo) {
   return `${APP_BASE_URL}/estorno-cliente.html?unidade=${encodeURIComponent(codigo)}`;
 }
 
+// Pedido externo não entra mais diretamente numa fila de solicitação. Ele
+// nasce como tarefa de triagem do Master, que pode resolver ali mesmo ou
+// promovê-lo para o tipo certo depois de conferir o contexto. Isso evita
+// cards financeiros/TI abertos por engano e mantém um único protocolo.
+async function masterDaTriagem() {
+  const lista = await users.list();
+  const emailPreferido = String(process.env.MASTER_EMAIL || '').trim().toLowerCase();
+  const masters = lista.filter((u) => u.active !== false && u.role === 'master');
+  const escolhido = masters.find((u) => String(u.email || '').trim().toLowerCase() === emailPreferido)
+    || masters.sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')))[0];
+  if (!escolhido) throw new Error('Nenhum Master ativo está disponível para receber a triagem.');
+  return escolhido;
+}
+
+async function criarTarefaDeTriagem({ titulo, descricao, unidade, unidadeNome, origem, anexos = [], triagem = null, usuario = null }) {
+  const responsavel = usuario || await masterDaTriagem();
+  return tarefas.criar({
+    titulo, descricao, unidade, unidadeNome, usuario: responsavel, responsavel,
+    origem, anexosIniciais: anexos, triagem,
+  });
+}
+
 app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, res) => {
   try {
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
@@ -841,14 +862,17 @@ app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, 
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype || 'application/octet-stream' });
     }
 
-    const registro = await refunds.create({
-      origem: 'cliente', unidade, unidadeNome, motivoEstorno, motivoOutro, valorVenda, formaPagamento,
-      bandeira, ultimos4, dataVenda, horaVenda, valorEstornar, nomeCliente, cpfCnpjCliente, telefoneCliente, anexos,
-      pixChave, pixNomeTitular, pixBanco, observacaoCliente,
+    const tarefa = await criarTarefaDeTriagem({
+      titulo: `Estorno (cliente) · ${nomeCliente || 'sem nome informado'}`,
+      descricao: `Pedido de estorno recebido pelo formulário público. Unidade: ${unidadeNome || unidade || 'não informada'}.`,
+      unidade, unidadeNome, origem: 'estorno-cliente', anexos,
+      triagem: { tipoSugerido: 'estorno', estorno: { origem: 'cliente', motivoEstorno, motivoOutro, valorVenda, formaPagamento,
+        bandeira, ultimos4, dataVenda, horaVenda, valorEstornar, nomeCliente, cpfCnpjCliente, telefoneCliente,
+        pixChave, pixNomeTitular, pixBanco, observacaoCliente } },
     });
-    broadcast('refund-requested', registro, 'monitor');
-    push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Pedido de estorno (cliente)`, `${unidadeNome} · R$ ${(Number(valorEstornar) || 0).toFixed(2)}`, registro.id);
-    res.json({ ok: true, id: registro.id });
+    broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
+    push.notifySolicitacao(`Ticket #${tarefa.numeroTicket} · Pedido de estorno (triagem)`, `${unidadeNome} · R$ ${(Number(valorEstornar) || 0).toFixed(2)}`, tarefa.id);
+    res.json({ ok: true, id: tarefa.id });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -884,17 +908,15 @@ app.post('/api/solicitacoes/publico', upload.array('anexos', 4), async (req, res
     }
 
     const quemPediu = [String(solicitanteNome || '').trim(), String(solicitanteContato || '').trim()].filter(Boolean).join(' · ');
-    const registro = await solicitacoes.create({
-      tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos,
-      ehOrcamento: false, fornecedor, vencimento,
-      criadoPorId: null,
-      criadoPorEmail: `Formulário público${quemPediu ? ' — ' + quemPediu : ''}`,
-      direcionadoParaId: null,
-      direcionadoParaEmail: null,
+    const tarefa = await criarTarefaDeTriagem({
+      titulo: titulo || `Pedido público · ${tipo}`,
+      descricao: [observacao, quemPediu && `Solicitante: ${quemPediu}`].filter(Boolean).join('\n\n'),
+      unidade, unidadeNome, origem: 'formulario-publico', anexos,
+      triagem: { tipoSugerido: tipo, formularioPublico: { valorEstimado, itens, fornecedor, vencimento, solicitanteNome, solicitanteContato } },
     });
-    broadcast('solicitacao-criada', registro, 'solicitacoes');
-    push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Nova solicitação (formulário público)`, `${registro.titulo || ''} · ${registro.unidadeNome || ''}`, registro.id);
-    res.json({ ok: true, id: registro.id });
+    broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
+    push.notifySolicitacao(`Ticket #${tarefa.numeroTicket} · Pedido recebido para triagem`, `${tarefa.titulo} · ${tarefa.unidadeNome || ''}`, tarefa.id);
+    res.json({ ok: true, id: tarefa.id });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5169,26 +5191,86 @@ function notificarSeDirecionadoAoMV(tipo, registroCru) {
 }
 
 // ---------- solicitacoes de estorno (usuario Leitor pede, Master aprova/rejeita) ----------
-app.post('/api/refund-requests', requireSection('monitor'), async (req, res) => {
+app.post('/api/refund-requests', auth.requireAuth, async (req, res) => {
   try {
-    const { pedidoId, unidade, unidadeNome, observacao, password, direcionadoParaId, direcionadoParaEmail } = req.body;
+    if (!req.isMaster && !ehTimeSuporte(req) && !(req.permissions?.sections || []).includes('monitor')) {
+      return res.status(403).json({ error: 'Somente Master ou Suporte pode decidir sobre esta solicitação.' });
+    }
+    const { pedidoId, unidade, unidadeNome, observacao, password, direcionadoParaId, direcionadoParaEmail, tarefaOrigemId,
+      origem, motivoEstorno, motivoOutro, valorVenda, formaPagamento, bandeira, ultimos4, dataVenda, horaVenda,
+      valorEstornar, nomeCliente, cpfCnpjCliente, telefoneCliente, pixChave, pixNomeTitular, pixBanco, observacaoCliente } = req.body;
     if (!req.isMaster && unidade && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const senhaOk = await auth.verifyPassword(req.user.id, password);
     if (!senhaOk) return res.status(401).json({ error: 'Senha incorreta.' });
 
+    // A tela de tarefa só libera a promoção para quem pode criar estornos. A
+    // validação aqui é a fonte de verdade e reaproveita o Ticket # da tarefa.
+    let origemTarefa = null;
+    let numeroTicketDaTarefa = null;
+    let dadosDaTriagem = null;
+    if (tarefaOrigemId) {
+      const preparada = await tarefas.prepararConversaoEmSolicitacao(String(tarefaOrigemId), acessoDasTarefas(req), 'estorno');
+      if (preparada.jaTemSolicitacao) {
+        if (preparada.tipoExistente !== 'estorno') {
+          return res.status(409).json({ error: 'Esta tarefa já foi convertida em uma solicitação. Abra o ticket vinculado para continuar.' });
+        }
+        const existente = await refunds.getOne(preparada.ticketId);
+        if (existente) return res.json(existente);
+        return res.status(409).json({ error: 'Esta tarefa já foi convertida; recarregue o Meu Dia para abrir o estorno vinculado.' });
+      }
+      if (preparada.tarefa.unidade && unidade !== preparada.tarefa.unidade) {
+        return res.status(400).json({ error: 'O estorno deve permanecer na mesma unidade da tarefa de origem.' });
+      }
+      origemTarefa = { id: preparada.tarefa.id, titulo: preparada.tarefa.titulo, criadoPorNome: preparada.tarefa.criadoPorNome, criadaEm: preparada.tarefa.criadaEm };
+      numeroTicketDaTarefa = preparada.numeroTicket;
+      dadosDaTriagem = preparada.tarefa.triagem?.estorno || null;
+    }
+
+    // Criar estorno é sempre uma decisão posterior à triagem. Sem tarefa de
+    // origem, este botão só coloca a demanda no Meu Dia do Master/Suporte.
+    // A senha permanece como confirmação para evitar tarefas por engano.
+    if (!tarefaOrigemId) {
+      const tarefa = await criarTarefaDeTriagem({
+        titulo: `Estorno · Pedido ${pedidoId || 'sem referência'}`,
+        descricao: `Pedido de estorno aguardando triagem.${observacao ? ` Motivo informado: ${observacao}` : ''}`,
+        unidade, unidadeNome, origem: 'estorno-interno',
+        triagem: { tipoSugerido: 'estorno', estorno: { pedidoId, observacao, requestedById: req.user.id,
+          requestedByEmail: req.user.email, direcionadoParaId, direcionadoParaEmail, teste: req.isQaMaster || req.isQaUser } },
+      });
+      broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
+      push.notifySolicitacao(`Ticket #${tarefa.numeroTicket} · Pedido de estorno (triagem)`, `${req.user.email} · ${unidade || ''}`, tarefa.id);
+      return res.json({ tarefa, triagem: true });
+    }
+
+    // Um formulário público já trouxe os dados do cliente. A conversão só os
+    // reaproveita quando o Master não os alterou na tela; nada é perdido nem
+    // precisa ser pedido uma segunda vez ao cliente.
+    const valorDaTriagem = (valor, campo) => (valor !== undefined && valor !== null && valor !== '') ? valor : dadosDaTriagem?.[campo];
     const registro = await refunds.create({
-      pedidoId,
-      unidade,
-      unidadeNome,
-      observacao,
-      requestedById: req.user.id,
-      requestedByEmail: req.user.email,
-      direcionadoParaId,
-      direcionadoParaEmail,
-      teste: req.isQaMaster || req.isQaUser,
+      pedidoId: valorDaTriagem(pedidoId, 'pedidoId'), unidade, unidadeNome,
+      observacao: valorDaTriagem(observacao, 'observacao'), origem: valorDaTriagem(origem, 'origem'),
+      motivoEstorno: valorDaTriagem(motivoEstorno, 'motivoEstorno'), motivoOutro: valorDaTriagem(motivoOutro, 'motivoOutro'),
+      valorVenda: valorDaTriagem(valorVenda, 'valorVenda'), formaPagamento: valorDaTriagem(formaPagamento, 'formaPagamento'),
+      bandeira: valorDaTriagem(bandeira, 'bandeira'), ultimos4: valorDaTriagem(ultimos4, 'ultimos4'),
+      dataVenda: valorDaTriagem(dataVenda, 'dataVenda'), horaVenda: valorDaTriagem(horaVenda, 'horaVenda'),
+      valorEstornar: valorDaTriagem(valorEstornar, 'valorEstornar'), nomeCliente: valorDaTriagem(nomeCliente, 'nomeCliente'),
+      cpfCnpjCliente: valorDaTriagem(cpfCnpjCliente, 'cpfCnpjCliente'), telefoneCliente: valorDaTriagem(telefoneCliente, 'telefoneCliente'),
+      pixChave: valorDaTriagem(pixChave, 'pixChave'), pixNomeTitular: valorDaTriagem(pixNomeTitular, 'pixNomeTitular'),
+      pixBanco: valorDaTriagem(pixBanco, 'pixBanco'), observacaoCliente: valorDaTriagem(observacaoCliente, 'observacaoCliente'),
+      requestedById: valorDaTriagem(null, 'requestedById') || req.user.id,
+      requestedByEmail: valorDaTriagem(null, 'requestedByEmail') || req.user.email,
+      direcionadoParaId: valorDaTriagem(direcionadoParaId, 'direcionadoParaId'), direcionadoParaEmail: valorDaTriagem(direcionadoParaEmail, 'direcionadoParaEmail'),
+      teste: valorDaTriagem(undefined, 'teste') || req.isQaMaster || req.isQaUser,
+      numeroTicket: numeroTicketDaTarefa, origemTarefa,
     });
+    if (tarefaOrigemId) {
+      await tarefas.registrarGerado(String(tarefaOrigemId), acessoDasTarefas(req), {
+        tipo: 'estorno', id: registro.id, numeroTicket: registro.numeroTicket, rotulo: 'Estorno na Central',
+      });
+      broadcast('tarefas-atualizada', { id: String(tarefaOrigemId), unidade: registro.unidade }, 'tarefas');
+    }
     broadcast('refund-requested', registro, 'monitor');
     broadcast('refund-requested', registro, 'solicitacoes');
     await sincronizarTarefasDoTicket(registro, 'estorno');
@@ -11161,7 +11243,8 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       eu: req.user.id,
       // os botões "criar solicitação/formulário" levam pras telas da Central e
       // de Formulários - sem a seção, o botão só levaria a um "sem acesso"
-      podeSolicitacao: req.isMaster || (req.permissions?.sections || []).includes('solicitacoes'),
+      podeSolicitacao: req.isMaster || (req.permissions?.sections || []).includes('solicitacoes') || (req.permissions?.sections || []).includes('monitor'),
+      podeEstorno: req.isMaster || (req.permissions?.sections || []).includes('monitor'),
       podeFormulario: req.isMaster || (req.permissions?.sections || []).includes('formularios'),
       podeAtribuir: podeDistribuirTarefas(req),
       podeCriar: podeCriarTarefaManual(req),
@@ -11772,8 +11855,11 @@ app.post('/api/tarefas/sincronizar-retroativo', auth.requireMaster, async (req, 
 
 // so que pra pedidos que nao tem uma secao propria ja existente. Aprovar um
 // pedido de Suporte de TI ja cria o Chamado (ver chamadosTI.js) ----------
-app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anexos', 4), async (req, res) => {
+app.post('/api/solicitacoes', auth.requireAuth, upload.array('anexos', 4), async (req, res) => {
   try {
+    if (!req.isMaster && !ehTimeSuporte(req) && !(req.permissions?.sections || []).includes('solicitacoes')) {
+      return res.status(403).json({ error: 'Somente Master ou Suporte pode decidir sobre esta solicitação.' });
+    }
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista, tarefaOrigemId } = payload;
     if (!req.isMaster && unidade && !(req.permissions.unidades || []).includes(unidade)) {
@@ -11801,6 +11887,9 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
       // Um reenvio depois de a Central já ter criado o ticket deve devolver o
       // mesmo registro, nunca abrir outro com o mesmo assunto/protocolo.
       if (preparada.jaTemSolicitacao) {
+        if (preparada.tipoExistente !== 'solicitacao') {
+          return res.status(409).json({ error: 'Esta tarefa já foi convertida em um estorno. Abra o ticket vinculado para continuar.' });
+        }
         const existente = await solicitacoes.getOne(preparada.tarefa.solicitacaoId);
         if (existente) return res.json(existente);
         return res.status(409).json({ error: 'Esta tarefa já foi convertida; recarregue o Meu Dia para abrir a solicitação vinculada.' });
@@ -14893,38 +14982,15 @@ app.post('/api/suporte-chats/:id/finalizar', auth.requireAuth, async (req, res) 
   }
 });
 
-// transforma a conversa num chamado REMOTO vinculado (registro/evidencia da
-// atuacao) - o responsavel e quem esta atendendo; se a atuacao ja acabou,
-// jaResolvido abre e fecha na hora
+// Chamado não pode mais nascer direto do chat: primeiro vira tarefa, onde
+// Master/Suporte decide se a situação justifica uma solicitação de Suporte TI.
+// Mantemos a rota para clientes antigos não conseguirem pular a triagem.
 app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, res) => {
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const chat = await suporteChat.getOne(req.params.id);
     if (!chat) return res.status(404).json({ error: 'Conversa não encontrada.' });
-    if (chat.chamadoId) return res.status(400).json({ error: 'Essa conversa já tem um chamado vinculado.' });
-    const chamado = await chamadosTI.create({
-      unidade: req.body.unidade || 'Suporte remoto',
-      unidadeNome: req.body.unidade || 'Suporte remoto',
-      titulo: `Chat do site · ${chat.nome}`,
-      descricao: `Contato: ${chat.contato}\n\nPrimeira mensagem: ${chat.mensagens?.[0]?.texto || ''}`,
-      modalidade: 'remoto',
-      prioridade: req.body.prioridade,
-      jaResolvido: !!req.body.jaResolvido,
-      observacaoResolucao: req.body.observacaoResolucao,
-      tecnicoId: req.user.id,
-      tecnicoEmail: req.user.email,
-      criadoPorEmail: req.user.email,
-      // o chamado herda o MESMO numero do protocolo da conversa (nao tira um
-      // novo da sequencia) - pedido explicito do usuario: "o numero do
-      // ticket sempre sera o mesmo do protocolo... o proximo ticket tem que
-      // ser na sequencia, nunca repetir"
-      numeroTicket: chat.numeroTicket,
-    });
-    await suporteChat.vincularChamado(chat.id, chamado.id);
-    await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'chamado-ti', ticketId: chamado.id, numero: chamado.numeroTicket });
-    broadcast('chamado-criado', { id: chamado.id }, 'tecnico');
-    broadcast('suporte-chat', { id: chat.id }, 'suporte');
-    res.json({ chamado });
+    return res.status(409).json({ error: 'Esta conversa precisa virar tarefa primeiro. Abra a tarefa e, se necessário, converta-a em Solicitação de Suporte de TI.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

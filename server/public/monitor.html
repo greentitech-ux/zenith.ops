@@ -732,6 +732,7 @@ document.getElementById('refund-form').addEventListener('submit', async (e)=>{
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || 'Não foi possível enviar a solicitação.');
     document.getElementById('refund-overlay').classList.remove('show');
+    if(data.triagem) alert(`Pedido encaminhado como tarefa de triagem (Ticket #${data.tarefa.numeroTicket}). Master ou Suporte decide depois se ele vira estorno.`);
     await refreshRefundRequests();
   }catch(err){
     errEl.textContent = err.message;
