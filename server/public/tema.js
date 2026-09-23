@@ -2037,4 +2037,91 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarZip);
     else iniciarZip();
   })();
+
+  // JANELA QUE NASCE ATRAS DE OUTRA. Toda tela da o MESMO z-index pra todo
+  // modal (.overlay{z-index:50}), entao quem decide quem fica na frente e a
+  // ORDEM NO HTML, nao a ordem em que abriram. Relato do Master no NOC: o
+  // "Confirme sua senha" do console PowerShell (#senha-overlay, declarado
+  // antes das janelas que o chamam) abria ATRAS do console - a caixa da senha
+  // ficava escondida pela janela que a pediu. O mesmo vale pra qualquer
+  // confirmacao aberta por cima de outra caixa, em qualquer pagina.
+  //
+  // Aqui, as caixas fixas VISIVEIS formam uma pilha na ordem em que abriram,
+  // e o z-index de cada uma e' a posicao nela - quem abriu por ultimo fica
+  // por cima, por construcao. Quando esconde, sai da pilha e o inline some.
+  // Vale pras 53 paginas sem cada uma precisar saber disso - a tela continua
+  // abrindo com classList.remove('hidden') / add('show') como sempre.
+  //
+  // O NOC (loja-status.html) tem uma pilha propria (abrirOverlay), mas so
+  // uma parte dos paineis passa por ela - os outros ainda trocam a classe na
+  // mao. Um painel de cada jeito e o bug volta: 51 da pilha do NOC contra 50
+  // do CSS. Por isso esta camada nao respeita z-index inline escrito pela
+  // tela: reaplica o dela em cima, sempre. As duas codificam a MESMA ordem
+  // (a de abertura), entao o resultado e igual e nunca briga.
+  // <dialog> com showModal() fica de fora: ja vai pra top layer sozinho.
+  (function empilharJanelas() {
+    var SELETOR = '.overlay,.popup-overlay,.modal-bg,[role="dialog"]';
+    // acima de tudo que as telas usam (o maior e' 100), abaixo das camadas
+    // fixas deste arquivo (aviso do AnyDesk, "app mudou", dica: 99998+)
+    var BASE = 500;
+    var pilha = [];
+
+    function ehCaixaFixa(el) {
+      if (!el || el.nodeType !== 1 || !el.matches || !el.matches(SELETOR)) return false;
+      var pos = getComputedStyle(el).position;
+      return pos === 'fixed' || pos === 'absolute';
+    }
+    function estaVisivel(el) {
+      var cs = getComputedStyle(el);
+      return cs.display !== 'none' && cs.visibility !== 'hidden';
+    }
+    // reindexa TODOS a cada mudanca: so empurrar o novo pra cima empata quando
+    // a pilha nao cresce (reabrir o de baixo com outro ja aberto), e empate
+    // volta a ser decidido pela ordem no HTML - o bug de novo
+    function reindexar() {
+      pilha = pilha.filter(function (el) { return el.isConnected; });
+      pilha.forEach(function (el, i) {
+        var z = String(BASE + i + 1);
+        // so escreve se mudou: escrever o mesmo valor dispararia outra
+        // mutacao de style e esta funcao de novo
+        if (el.style.zIndex !== z) el.style.zIndex = z;
+      });
+    }
+    function avaliar(el) {
+      if (!ehCaixaFixa(el)) return;
+      var visivel = estaVisivel(el);
+      var i = pilha.indexOf(el);
+      if (visivel && i < 0) {
+        pilha.push(el);
+      } else if (!visivel && i >= 0) {
+        pilha.splice(i, 1);
+        if (el.style.zIndex) el.style.zIndex = '';
+      } else if (!visivel) {
+        return; // escondida e fora da pilha: nada a fazer
+      }
+      // visivel e ja na pilha: a tela pode ter escrito um z-index proprio
+      // (abrirOverlay do NOC) - reindexar devolve o desta camada
+      reindexar();
+    }
+    function avaliarNo(no) {
+      if (!no || no.nodeType !== 1) return;
+      avaliar(no);
+      if (no.querySelectorAll) no.querySelectorAll(SELETOR).forEach(avaliar);
+    }
+    function iniciarEmpilhar() {
+      if (!document.documentElement) return;
+      avaliarNo(document.documentElement);
+      new MutationObserver(function (mudancas) {
+        mudancas.forEach(function (m) {
+          if (m.type === 'attributes') avaliar(m.target);
+          else m.addedNodes.forEach(avaliarNo);
+        });
+      }).observe(document.documentElement, {
+        childList: true, subtree: true,
+        attributes: true, attributeFilter: ['class', 'style', 'hidden'],
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarEmpilhar);
+    else iniciarEmpilhar();
+  })();
 })();
