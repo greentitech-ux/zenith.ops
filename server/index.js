@@ -69,6 +69,8 @@ const suporteChat = require('./suporteChat');
 const suporteChatPDF = require('./suporteChatPDF');
 const segurancaChat = require('./segurancaChat');
 const suporteBot = require('./suporteBot');
+const passkeys = require('./passkeys');
+const webauthn = require('@simplewebauthn/server');
 const agregadorFila = require('./agregadorFila');
 const roteamentoTags = require('./roteamentoTags');
 const agregadorCowork = require('./agregadorCowork');
@@ -473,6 +475,175 @@ function chaveLogin(req) {
   const conta = String(req.body.identifier || req.body.email || '').trim().toLowerCase();
   return `${ip}|${conta}`;
 }
+// ---------- ENTRAR COM A DIGITAL / O ROSTO (passkey, ver passkeys.js) -----
+// Quatro rotas: duas pra CADASTRAR o aparelho (com a pessoa já logada) e
+// duas pra ENTRAR com ele (públicas, como o login por senha).
+//
+// O desenho é sempre em dois tempos porque é assim que a prova funciona: o
+// servidor manda um desafio imprevisível, o aparelho assina esse desafio com
+// a chave privada e devolve; o servidor confere a assinatura com a chave
+// pública. Assinatura capturada não serve de novo - o desafio já foi
+// consumido (ver consumirDesafio).
+
+// 1) cadastrar: o app pede as opções, já logado
+app.post('/api/auth/passkey/registro/inicio', auth.requireAuth, async (req, res) => {
+  try {
+    const rpID = passkeys.rpIdDoPedido(req);
+    if (!rpID) return res.status(400).json({ error: 'Não consegui identificar o endereço do app.' });
+    const jaTem = await passkeys.listarDoUsuario(req.user.id);
+    const opcoes = await webauthn.generateRegistrationOptions({
+      rpName: 'NoPulso',
+      rpID,
+      userName: req.user.username || req.user.email,
+      userDisplayName: req.user.username || req.user.email,
+      // o navegador precisa disso pra não cadastrar DUAS vezes o mesmo
+      // aparelho - ele avisa a pessoa em vez de criar uma credencial órfã
+      excludeCredentials: jaTem.map((c) => ({ id: c.credentialID, transports: c.transports })),
+      authenticatorSelection: {
+        // "platform" = a biometria do próprio aparelho (Face ID, digital),
+        // não uma chavinha USB: é o que o Master pediu
+        authenticatorAttachment: 'platform',
+        // a credencial fica descobrível: é o que permite entrar SEM digitar
+        // usuário nenhum, só encostando o dedo
+        residentKey: 'preferred',
+        // exige o desbloqueio de verdade (dedo/rosto/PIN), não só a presença
+        userVerification: 'required',
+      },
+    });
+    const chave = passkeys.novaChaveDeSessao();
+    passkeys.guardarDesafio(chave, opcoes.challenge, req.user.id);
+    res.json({ chave, opcoes });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 2) cadastrar: o app devolve a resposta assinada do aparelho
+app.post('/api/auth/passkey/registro/fim', auth.requireAuth, async (req, res) => {
+  try {
+    const guardado = passkeys.consumirDesafio(String(req.body.chave || ''));
+    if (!guardado) return res.status(400).json({ error: 'Tentativa expirada. Toque em cadastrar de novo.' });
+    if (String(guardado.userId) !== String(req.user.id)) return res.status(403).json({ error: 'Essa tentativa é de outro acesso.' });
+    const rpID = passkeys.rpIdDoPedido(req);
+    const verificacao = await webauthn.verifyRegistrationResponse({
+      response: req.body.resposta,
+      expectedChallenge: guardado.desafio,
+      expectedOrigin: `https://${rpID}`,
+      expectedRPID: rpID,
+      requireUserVerification: true,
+    });
+    if (!verificacao.verified || !verificacao.registrationInfo) {
+      return res.status(400).json({ error: 'Não consegui confirmar esse aparelho.' });
+    }
+    const info = verificacao.registrationInfo;
+    const registro = await passkeys.salvar({
+      credentialID: info.credential.id,
+      publicKey: Buffer.from(info.credential.publicKey).toString('base64url'),
+      counter: info.credential.counter,
+      transports: info.credential.transports,
+      userId: req.user.id,
+      rpId: rpID,
+      origem: `https://${rpID}`,
+      userAgent: req.headers['user-agent'],
+    });
+    console.log(`[passkey] ${req.user.email} cadastrou ${registro.aparelho} em ${rpID}`);
+    res.json({ ok: true, aparelho: semSegredoDaPasskey(registro) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 3) entrar: público, como o login por senha. Não recebe usuário nenhum -
+// quem diz de quem é a credencial é o próprio aparelho (residentKey).
+app.post('/api/auth/passkey/login/inicio', async (req, res) => {
+  try {
+    const rpID = passkeys.rpIdDoPedido(req);
+    if (!rpID) return res.status(400).json({ error: 'Não consegui identificar o endereço do app.' });
+    const opcoes = await webauthn.generateAuthenticationOptions({
+      rpID,
+      userVerification: 'required',
+    });
+    const chave = passkeys.novaChaveDeSessao();
+    passkeys.guardarDesafio(chave, opcoes.challenge, null);
+    res.json({ chave, opcoes });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 4) entrar: confere a assinatura e emite a MESMA sessão do login normal
+app.post('/api/auth/passkey/login/fim', async (req, res) => {
+  const chaveTentativa = chaveLogin(req);
+  const falhas = LOGIN_FALHAS.get(chaveTentativa);
+  if (falhas && falhas.count >= LOGIN_MAX_FALHAS && Date.now() - falhas.desdeMs < LOGIN_JANELA_MS) {
+    return res.status(429).json({ error: 'Muitas tentativas de login. Aguarde 15 minutos e tente de novo.' });
+  }
+  try {
+    const guardado = passkeys.consumirDesafio(String(req.body.chave || ''));
+    if (!guardado) throw new Error('Tentativa expirada. Toque em entrar de novo.');
+    const resposta = req.body.resposta;
+    const credencial = await passkeys.acharPorCredentialID(resposta && resposta.id);
+    if (!credencial) throw new Error('Esse aparelho não está cadastrado neste acesso.');
+    const rpID = passkeys.rpIdDoPedido(req);
+    // credencial cadastrada em OUTRO endereço do app não vale aqui: o
+    // navegador nem a ofereceria, mas o servidor não confia nisso de graça
+    if (credencial.rpId && credencial.rpId !== rpID) throw new Error('Esse aparelho foi cadastrado em outro endereço do app.');
+    const verificacao = await webauthn.verifyAuthenticationResponse({
+      response: resposta,
+      expectedChallenge: guardado.desafio,
+      expectedOrigin: `https://${rpID}`,
+      expectedRPID: rpID,
+      requireUserVerification: true,
+      credential: {
+        id: credencial.credentialID,
+        publicKey: Buffer.from(credencial.publicKey, 'base64url'),
+        counter: credencial.counter || 0,
+        transports: credencial.transports || [],
+      },
+    });
+    if (!verificacao.verified) throw new Error('Não consegui confirmar a biometria.');
+    await passkeys.registrarUso(credencial.credentialID, verificacao.authenticationInfo.newCounter);
+    const result = await auth.loginComPasskey(credencial.userId, {
+      userAgent: req.headers['user-agent'],
+      ip: req.headers['x-forwarded-for'] || req.ip,
+    });
+    LOGIN_FALHAS.delete(chaveTentativa);
+    console.log(`[passkey] entrada por biometria: ${result.user.email} (${credencial.aparelho})`);
+    res.json(result);
+  } catch (err) {
+    const atual = LOGIN_FALHAS.get(chaveTentativa);
+    if (!atual || Date.now() - atual.desdeMs >= LOGIN_JANELA_MS) LOGIN_FALHAS.set(chaveTentativa, { count: 1, desdeMs: Date.now() });
+    else atual.count += 1;
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// a chave pública não é segredo, mas também não tem por que aparecer na
+// tela: a lista mostra só o que a pessoa usa pra reconhecer o aparelho
+function semSegredoDaPasskey(c) {
+  return { id: c.id, aparelho: c.aparelho, criadoEm: c.criadoEm, ultimoUsoEm: c.ultimoUsoEm, rpId: c.rpId };
+}
+
+// os aparelhos da PRÓPRIA pessoa (nunca os de outra)
+app.get('/api/auth/passkey', auth.requireAuth, async (req, res) => {
+  try {
+    const lista = await passkeys.listarDoUsuario(req.user.id);
+    res.json(lista.map(semSegredoDaPasskey));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/auth/passkey/:id', auth.requireAuth, async (req, res) => {
+  try {
+    await passkeys.remover(req.params.id, req.user.id);
+    console.log(`[passkey] ${req.user.email} removeu um aparelho`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/auth/login', async (req, res) => {
   const chave = chaveLogin(req);
   const falhas = LOGIN_FALHAS.get(chave);

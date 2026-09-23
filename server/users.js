@@ -785,6 +785,11 @@ async function remove(id) {
   if (!snap.exists) return;
   if (snap.data().role === 'master') throw new Error('O acesso Master não pode ser excluído.');
   await ref.delete();
+  // as passkeys do acesso vão junto: credencial órfã é um aparelho que
+  // continua tentando entrar por uma conta que não existe mais. Desativar é
+  // diferente - lá a trava do login já barra (ver loginComPasskey), e apagar
+  // obrigaria a recadastrar o celular ao reativar.
+  await require('./passkeys').removerTodasDoUsuario(id).catch(() => {});
   invalidarUsuario(id);
   usersCache.invalidar();
 }

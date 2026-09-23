@@ -96,8 +96,8 @@
   /* várias logos lado a lado (empresas do grupo, cadastradas em
      login-custom.html) - quebra linha sozinho quando não couber */
   .login-logos{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;}
-  .auth-link{display:block;margin:12px auto 0;border:0;background:none;color:var(--accent);font:600 12px var(--sans);cursor:pointer;text-decoration:underline;text-underline-offset:3px;}
-  .auth-link:hover{color:var(--text);}
+  .auth-link,.auth-card button.auth-link{display:block;width:auto;margin:12px auto 0;padding:0;border:0;border-radius:0;background:none;color:var(--accent);font:600 12px var(--sans);cursor:pointer;text-decoration:underline;text-underline-offset:3px;}
+  .auth-link:hover,.auth-card button.auth-link:hover{color:var(--text);}
   .auth-voltar{margin-top:14px;text-align:center;color:var(--muted);font-size:12px;}
   /* ===== fim login: balão ===== */
 </style>
@@ -125,6 +125,7 @@
     </label>
     <p id="auth-error" class="auth-error hidden"></p>
     <button type="submit" id="auth-btn">Entrar</button>
+    <button type="button" id="btn-biometria" class="auth-link hidden" onclick="entrarComBiometria()">🔒 Entrar com a digital ou o rosto</button>
     <button type="button" class="auth-link" onclick="abrirRecuperacao()">Esqueci minha senha</button>
     <p class="auth-suporte">Dúvidas ou problemas pra entrar? Suporte: <a href="https://wa.me/5581995148654" target="_blank" rel="noopener">(81) 99514-8654</a></p>
   </form>
@@ -180,6 +181,27 @@
     <p id="pr-error" class="auth-error hidden"></p>
     <button type="submit" id="pr-btn">Salvar palavra e continuar</button>
   </form>
+</section>
+
+<!-- ATIVAR A BIOMETRIA. Aparece uma vez, logo depois de entrar por senha, e
+     só em aparelho que tem Face ID/digital. É uma TELA com botão, e não um
+     "confirma?" automático, por dois motivos: o navegador exige um toque da
+     pessoa pra criar a credencial (um aviso automático seria recusado), e
+     ninguém deve ligar biometria sem ler o que está ligando. -->
+<section id="biometria-screen" class="auth-screen hidden">
+  <div class="auth-card">
+    <div class="auth-marca"><span class="auth-wordmark" style="font-size:26px;">No<b>Pulso</b></span></div>
+    <h1 style="text-align:center;">Entrar com a digital?</h1>
+    <p class="auth-eyebrow" style="text-align:center;margin-bottom:14px;">Neste aparelho</p>
+    <p style="font-size:13.5px;line-height:1.6;color:var(--muted);margin:0 0 16px;">
+      Da próxima vez você entra com a <b>digital ou o rosto</b>, sem digitar senha.
+      A chave fica guardada só neste aparelho — o NoPulso nunca recebe sua
+      biometria. Sua senha continua funcionando normalmente.
+    </p>
+    <p id="biometria-erro" class="auth-error hidden"></p>
+    <button type="button" id="biometria-btn-ativar">Ativar neste aparelho</button>
+    <button type="button" class="auth-link" id="biometria-btn-agora-nao">Agora não</button>
+  </div>
 </section>
 
 <section id="trocar-senha-screen" class="auth-screen hidden">
@@ -273,6 +295,9 @@ document.getElementById('auth-form').addEventListener('submit', async (e)=>{
       mostrarPalavraRecuperacao(data.token, senhaDigitada, data.user);
       return;
     }
+    // oferece a biometria uma vez por aparelho, DEPOIS de tudo que é
+    // obrigatório (trocar senha, palavra de recuperação) - nunca na frente
+    if(await talvezOferecerBiometria(data.token, data.user)) return;
     location.href = paginaInicial(data.user);
   }catch(err){
     erroEl.textContent = err.message;
@@ -281,6 +306,160 @@ document.getElementById('auth-form').addEventListener('submit', async (e)=>{
     abrirPopupSuporte(err.message);
   }
 });
+
+// ---------- ENTRAR COM A DIGITAL / O ROSTO (passkey, ver passkeys.js) -----
+// A chave privada fica no aparelho e nunca sai dele; o que vai e volta é uma
+// assinatura de um desafio de uso único. A biometria em si nunca chega ao
+// NoPulso - quem confere o dedo é o próprio celular.
+//
+// base64url na mão de propósito: são quatro linhas, e é o formato que o
+// WebAuthn usa em tudo. Carregar uma biblioteca só pra isso na TELA DE LOGIN
+// custaria download em toda entrada, inclusive na loja com internet ruim.
+function b64urlParaBytes(txt){
+  const b64 = String(txt||'').replace(/-/g,'+').replace(/_/g,'/');
+  const bin = atob(b64 + '='.repeat((4 - b64.length % 4) % 4));
+  const out = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function bytesParaB64url(buf){
+  let bin = '';
+  const bytes = new Uint8Array(buf);
+  for(let i=0;i<bytes.length;i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+// o que o servidor manda vem em base64url; o navegador exige bytes
+function prepararOpcoes(o, tipo){
+  const p = { ...o, challenge: b64urlParaBytes(o.challenge) };
+  if(tipo === 'registro'){
+    p.user = { ...o.user, id: b64urlParaBytes(o.user.id) };
+    if(o.excludeCredentials) p.excludeCredentials = o.excludeCredentials.map(c=>({ ...c, id: b64urlParaBytes(c.id) }));
+  } else if(o.allowCredentials){
+    p.allowCredentials = o.allowCredentials.map(c=>({ ...c, id: b64urlParaBytes(c.id) }));
+  }
+  return p;
+}
+function respostaParaJson(cred){
+  const r = cred.response;
+  const base = { id: cred.id, rawId: bytesParaB64url(cred.rawId), type: cred.type,
+    clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {} };
+  if(r.attestationObject){ // cadastro
+    return { ...base, response: {
+      clientDataJSON: bytesParaB64url(r.clientDataJSON),
+      attestationObject: bytesParaB64url(r.attestationObject),
+      transports: r.getTransports ? r.getTransports() : [],
+    } };
+  }
+  return { ...base, response: { // entrada
+    clientDataJSON: bytesParaB64url(r.clientDataJSON),
+    authenticatorData: bytesParaB64url(r.authenticatorData),
+    signature: bytesParaB64url(r.signature),
+    userHandle: r.userHandle ? bytesParaB64url(r.userHandle) : null,
+  } };
+}
+
+// O botão só aparece se o aparelho tiver biometria DE PLATAFORMA (Face ID,
+// digital) - mostrar "entrar com a digital" num desktop sem leitor seria
+// prometer o que não existe. Falha na checagem = botão continua escondido.
+async function mostrarBiometriaSeDisponivel(){
+  try{
+    if(!window.PublicKeyCredential || !window.isSecureContext) return;
+    if(!(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())) return;
+    document.getElementById('btn-biometria').classList.remove('hidden');
+  }catch(e){ /* sem biometria, a tela segue igual */ }
+}
+mostrarBiometriaSeDisponivel();
+
+async function entrarComBiometria(){
+  const erroEl = document.getElementById('auth-error');
+  const btn = document.getElementById('btn-biometria');
+  erroEl.classList.add('hidden');
+  btn.disabled = true;
+  try{
+    const r1 = await fetch('/api/auth/passkey/login/inicio', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    const d1 = await r1.json();
+    if(!r1.ok) throw new Error(d1.error || 'Não consegui começar.');
+    const cred = await navigator.credentials.get({ publicKey: prepararOpcoes(d1.opcoes, 'login') });
+    if(!cred) throw new Error('Nenhum aparelho cadastrado respondeu.');
+    const r2 = await fetch('/api/auth/passkey/login/fim', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ chave: d1.chave, resposta: respostaParaJson(cred) }),
+    });
+    const d2 = await r2.json();
+    if(!r2.ok) throw new Error(d2.error || 'Não consegui entrar com a biometria.');
+    localStorage.setItem('authToken', d2.token);
+    location.href = paginaInicial(d2.user);
+  }catch(err){
+    // a pessoa cancelar o Face ID não é erro: ela só desistiu
+    if(err && (err.name === 'NotAllowedError' || err.name === 'AbortError')){ btn.disabled = false; return; }
+    erroEl.textContent = err.message || 'Não consegui entrar com a biometria.';
+    erroEl.classList.remove('hidden');
+    btn.disabled = false;
+  }
+}
+
+// Oferece UMA vez por aparelho. "Agora não" vale 30 dias: perguntar a cada
+// login vira barulho, e perguntar nunca mais tranca quem mudou de ideia.
+const MARCA_OFERTA_BIOMETRIA = 'passkeyOferecidoAte';
+function ofertaAdiada(){
+  try{ return Number(localStorage.getItem(MARCA_OFERTA_BIOMETRIA) || 0) > Date.now(); }catch(e){ return false; }
+}
+function adiarOferta(dias){
+  try{ localStorage.setItem(MARCA_OFERTA_BIOMETRIA, String(Date.now() + dias*24*60*60*1000)); }catch(e){}
+}
+// devolve true quando ASSUMIU a tela (quem chamou não deve navegar)
+async function talvezOferecerBiometria(token, user){
+  try{
+    if(ofertaAdiada()) return false;
+    if(!window.PublicKeyCredential || !window.isSecureContext) return false;
+    if(!(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())) return false;
+    esconderTelasAuth();
+    const erro = document.getElementById('biometria-erro');
+    const btn = document.getElementById('biometria-btn-ativar');
+    erro.classList.add('hidden');
+    btn.disabled = false; btn.textContent = 'Ativar neste aparelho';
+    btn.onclick = async () => {
+      erro.classList.add('hidden');
+      btn.disabled = true; btn.textContent = 'Toque no sensor...';
+      try{
+        await cadastrarBiometria(token);
+        adiarOferta(3650); // ativou: não pergunta mais neste aparelho
+        location.href = paginaInicial(user);
+      }catch(e){
+        if(e && (e.name === 'NotAllowedError' || e.name === 'AbortError')){
+          btn.disabled = false; btn.textContent = 'Ativar neste aparelho'; return;
+        }
+        erro.textContent = e.message || 'Não consegui cadastrar este aparelho.';
+        erro.classList.remove('hidden');
+        btn.disabled = false; btn.textContent = 'Tentar de novo';
+      }
+    };
+    document.getElementById('biometria-btn-agora-nao').onclick = () => {
+      adiarOferta(30);
+      location.href = paginaInicial(user);
+    };
+    document.getElementById('biometria-screen').classList.remove('hidden');
+    return true;
+  }catch(e){ return false; }
+}
+
+// CADASTRAR ESTE APARELHO. Fica aqui, e não numa tela de Usuários, porque é
+// coisa da PRÓPRIA pessoa: cada uma cadastra o seu celular. Chamado logo
+// depois de entrar por senha, uma vez, e nunca de novo se ela recusar.
+async function cadastrarBiometria(token){
+  const cabecalho = { 'Content-Type':'application/json', Authorization: 'Bearer ' + token };
+  const r1 = await fetch('/api/auth/passkey/registro/inicio', { method:'POST', headers: cabecalho, body:'{}' });
+  const d1 = await r1.json();
+  if(!r1.ok) throw new Error(d1.error || 'Não consegui começar o cadastro.');
+  const cred = await navigator.credentials.create({ publicKey: prepararOpcoes(d1.opcoes, 'registro') });
+  const r2 = await fetch('/api/auth/passkey/registro/fim', {
+    method:'POST', headers: cabecalho,
+    body: JSON.stringify({ chave: d1.chave, resposta: respostaParaJson(cred) }),
+  });
+  const d2 = await r2.json();
+  if(!r2.ok) throw new Error(d2.error || 'Não consegui cadastrar este aparelho.');
+  return d2.aparelho;
+}
 
 // primeiro login apos o Master resetar a senha (ou conta recem-criada) -
 // obriga a trocar antes de liberar o resto do app. A senha atual ja foi
@@ -328,7 +507,7 @@ document.getElementById('trocar-senha-form').addEventListener('submit', async (e
 });
 
 function esconderTelasAuth(){
-  ['auth-screen','trocar-senha-screen','recuperar-senha-screen','nova-senha-recuperacao-screen','palavra-recuperacao-screen'].forEach(id=>document.getElementById(id).classList.add('hidden'));
+  ['auth-screen','trocar-senha-screen','recuperar-senha-screen','nova-senha-recuperacao-screen','palavra-recuperacao-screen','biometria-screen'].forEach(id=>document.getElementById(id).classList.add('hidden'));
 }
 function abrirRecuperacao(){ esconderTelasAuth(); document.getElementById('recuperar-senha-screen').classList.remove('hidden'); document.getElementById('rs-identificador').focus(); }
 function voltarLogin(){ esconderTelasAuth(); document.getElementById('auth-screen').classList.remove('hidden'); document.getElementById('auth-password').value=''; document.getElementById('auth-password').focus(); }

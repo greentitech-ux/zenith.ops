@@ -24327,6 +24327,123 @@ setTimeout(async () => {
   if (!okReparoNocZenith) ruins += 1;
   console.log(`${okReparoNocZenith ? '✓' : '✗'} NOCZenith: reparo universal seguro, publico e sem token`);
 
+  // ------------------------------------------------------------------
+  // ENTRAR COM A DIGITAL / O ROSTO (passkey).
+  //
+  // Master (22/09/2026): "para acessar o app, em caso de mobile habilitar
+  // acessar com a biometria ou facial".
+  //
+  // A conferência da assinatura é da biblioteca (@simplewebauthn/server) e
+  // não se testa de novo aqui. O que se prova é o LIGAMENTO, que é meu: um
+  // caminho de entrada novo não pode pular nenhuma trava que o login por
+  // senha aplica, o desafio não pode servir duas vezes, e a credencial de
+  // uma pessoa não pode ser apagada por outra.
+  let okPasskey = false;
+  try {
+    const pk = require(__dirname + '/passkeys.js');
+    const authMod = require(__dirname + '/auth.js');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlLogin = require('fs').readFileSync(__dirname + '/public/index.html', 'utf8');
+
+    // --- desafio: uso único e com validade ---
+    const chave = pk.novaChaveDeSessao();
+    pk.guardarDesafio(chave, 'desafio-1', 'u-pk');
+    const primeira = pk.consumirDesafio(chave);
+    const segunda = pk.consumirDesafio(chave);
+    const chaveOutra = pk.novaChaveDeSessao();
+
+    // --- as travas do login valem igual pela biometria ---
+    const base = { role: 'user', active: true, passwordHash: 'x', permissions: { sections: [] } };
+    DOCS.set('users/u-pk-ok', { ...base, id: 'u-pk-ok', email: 'pk-ok@teste.local', username: 'pkok' });
+    DOCS.set('users/u-pk-off', { ...base, id: 'u-pk-off', email: 'pk-off@teste.local', username: 'pkoff', active: false });
+    DOCS.set('users/u-pk-bloq', { ...base, id: 'u-pk-bloq', email: 'pk-bloq@teste.local', username: 'pkbloq', locked: true });
+    DOCS.set('users/u-pk-hora', { ...base, id: 'u-pk-hora', email: 'pk-hora@teste.local', username: 'pkhora',
+      horarioPermitido: { ativo: true, inicio: '03:00', fim: '03:01' } });
+
+    const entrou = await authMod.loginComPasskey('u-pk-ok', { userAgent: 'teste' }).then((r) => !!r.token).catch(() => false);
+    const erroDe = async (id) => { try { await authMod.loginComPasskey(id, {}); return null; } catch (e) { return e.message; } };
+    const desativado = await erroDe('u-pk-off');
+    const bloqueado = await erroDe('u-pk-bloq');
+    const foraDeHora = await erroDe('u-pk-hora');
+    const inexistente = await erroDe('u-nao-existe');
+
+    // --- a credencial é do dono, e só ele remove ---
+    DOCS.set('passkeys/cred-a', { id: 'cred-a', credentialID: 'cred-a', userId: 'u-pk-ok', publicKey: 'kkk', counter: 0, rpId: 'www.nopulso.com.br', aparelho: 'Android · Chrome', criadoEm: new Date().toISOString(), ultimoUsoEm: null });
+    const doDono = await pk.listarDoUsuario('u-pk-ok');
+    let recusouDeOutro = null;
+    try { await pk.remover('cred-a', 'u-pk-off'); } catch (e) { recusouDeOutro = e.message; }
+    const aindaExiste = !!DOCS.get('passkeys/cred-a');
+
+    // --- excluir o acesso leva as passkeys junto ---
+    const usersMod = require(__dirname + '/users.js');
+    DOCS.set('users/u-pk-apagar', { ...base, id: 'u-pk-apagar', email: 'pk-apagar@teste.local' });
+    DOCS.set('passkeys/cred-b', { id: 'cred-b', credentialID: 'cred-b', userId: 'u-pk-apagar', publicKey: 'k', counter: 0 });
+    await usersMod.remove('u-pk-apagar').catch(() => {});
+    const credencialOrfa = !!DOCS.get('passkeys/cred-b');
+
+    const conf = {
+      'o desafio serve UMA vez (assinatura capturada não entra de novo)':
+        !!primeira && primeira.desafio === 'desafio-1' && segunda === null,
+      'desafio que ninguém guardou não vale': pk.consumirDesafio(chaveOutra) === null,
+      'a chave do desafio é imprevisível': chave !== chaveOutra && chave.length >= 24,
+      'entrar pela biometria emite a MESMA sessão do login por senha': entrou === true,
+      'acesso desativado não entra nem pela digital': /desativado/i.test(desativado || ''),
+      'acesso bloqueado por senha errada não entra pela digital':
+        /bloqueado/i.test(bloqueado || ''),
+      'horário permitido vale igual pela digital': !!foraDeHora && foraDeHora !== null,
+      'conta que não existe não entra': /não encontrado/i.test(inexistente || ''),
+      'a pessoa vê só os aparelhos dela': doDono.length === 1 && doDono[0].id === 'cred-a',
+      'ninguém remove o aparelho de outra pessoa':
+        /outro acesso/i.test(recusouDeOutro || '') && aindaExiste,
+      'excluir o acesso apaga as passkeys (credencial órfã não fica tentando entrar)':
+        credencialOrfa === false,
+      // o cadastro é da pessoa logada; a entrada é pública, como o login
+      'cadastrar exige estar logado; entrar é público':
+        /app\.post\('\/api\/auth\/passkey\/registro\/inicio', auth\.requireAuth/.test(srcIdx)
+        && /app\.post\('\/api\/auth\/passkey\/registro\/fim', auth\.requireAuth/.test(srcIdx)
+        && /app\.post\('\/api\/auth\/passkey\/login\/inicio', async/.test(srcIdx)
+        && /app\.post\('\/api\/auth\/passkey\/login\/fim', async/.test(srcIdx),
+      // sem isso, um site parecido conseguiria usar a credencial
+      'a conferência exige verificação do usuário e o domínio certo':
+        (srcIdx.match(/requireUserVerification: true/g) || []).length >= 2
+        && /expectedRPID: rpID/.test(srcIdx)
+        && /expectedOrigin: `https:\/\/\$\{rpID\}`/.test(srcIdx)
+        && /userVerification: 'required'/.test(srcIdx),
+      'credencial de outro endereço do app é recusada no servidor':
+        /if \(credencial\.rpId && credencial\.rpId !== rpID\)/.test(srcIdx),
+      // a mesma trava de força bruta do login por senha
+      'a entrada por biometria também entra no limite de tentativas':
+        /const chaveTentativa = chaveLogin\(req\);/.test(srcIdx)
+        && /LOGIN_FALHAS\.delete\(chaveTentativa\)/.test(srcIdx),
+      'a chave pública não vai pra tela': /function semSegredoDaPasskey/.test(srcIdx)
+        && !/publicKey: c\.publicKey/.test(srcIdx),
+      // o botão não pode prometer o que o aparelho não tem
+      'o botão só aparece onde existe biometria de verdade':
+        /isUserVerifyingPlatformAuthenticatorAvailable\(\)/.test(htmlLogin)
+        && /id="btn-biometria" class="auth-link hidden"/.test(htmlLogin),
+      'cancelar o Face ID não vira mensagem de erro':
+        /err\.name === 'NotAllowedError' \|\| err\.name === 'AbortError'/.test(htmlLogin),
+      // a oferta não pode empurrar: uma vez por aparelho, e some por 30 dias
+      'a oferta aparece uma vez e respeita o "agora não"':
+        /const MARCA_OFERTA_BIOMETRIA = 'passkeyOferecidoAte';/.test(htmlLogin)
+        && /adiarOferta\(30\)/.test(htmlLogin) && /if\(ofertaAdiada\(\)\) return false;/.test(htmlLogin),
+      // achado ao colocar o terceiro botão no card: .auth-card button (0,1,1)
+      // vencia .auth-link (0,1,0), então "Esqueci minha senha" sempre foi um
+      // botão verde cheio igual ao Entrar. Com o de biometria seriam TRÊS
+      // iguais e nenhum principal.
+      'no card de login só o Entrar é botão cheio; o resto é link':
+        /\.auth-link,\.auth-card button\.auth-link\{/.test(htmlLogin)
+        && /\.auth-link:hover,\.auth-card button\.auth-link:hover\{/.test(htmlLogin),
+      'a tela nova entra na lista das que se escondem':
+        /'palavra-recuperacao-screen','biometria-screen'\]/.test(htmlLogin),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPasskey = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPasskey = false; console.log('  erro: ' + e.message); }
+  if (!okPasskey) ruins += 1;
+  console.log(`${okPasskey ? '✓' : '✗'} Passkey: entrar com digital/rosto sem pular nenhuma trava do login por senha`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

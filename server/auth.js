@@ -179,6 +179,40 @@ async function login(identifier, password, contexto = {}) {
   return { token, user: toPublicUser(doc.id, user) };
 }
 
+// ENTRADA POR PASSKEY (digital/rosto do aparelho, ver passkeys.js).
+//
+// Quem prova a identidade aqui é a assinatura da chave privada do aparelho,
+// conferida ANTES desta chamada - por isso não há senha nem hash nesta
+// função. O que ela faz é tudo o que vem DEPOIS da prova, e faz igual ao
+// login normal de propósito: as mesmas travas (acesso desativado, bloqueado,
+// horário permitido), a mesma sessão, o mesmo JWT, a mesma duração. Um
+// caminho de entrada que pula qualquer uma dessas travas vira a porta dos
+// fundos do app.
+//
+// Não zera failedAttempts: as senhas erradas continuam contando. Entrar pelo
+// dedo não é motivo pra perdoar tentativa de adivinhar a senha de alguém.
+async function loginComPasskey(userId, contexto = {}) {
+  const doc = await usersRef.doc(String(userId || '')).get();
+  if (!doc.exists) throw new Error('Acesso não encontrado.');
+  const user = doc.data();
+  if (user.active === false) throw new Error('Este acesso foi desativado.');
+  if (user.locked) throw new Error('Acesso bloqueado após tentativas de senha erradas. Fale com o Master.');
+  if (user.role !== 'master' && !dentroDoHorarioPermitido(user.horarioPermitido)) {
+    throw new Error(mensagemHorarioPermitido(user.horarioPermitido));
+  }
+  const sessaoLonga = !!user.sessaoLonga;
+  const sessao = await sessions.criar({
+    userId: doc.id,
+    userAgent: contexto.userAgent,
+    ip: contexto.ip,
+    duracaoMs: sessaoLonga ? DURACAO_SESSAO_LONGA_MS : undefined,
+  });
+  const token = jwt.sign({ sub: doc.id, role: user.role, sid: sessao.id }, JWT_SECRET, {
+    expiresIn: sessaoLonga ? JWT_EXPIRES_LONGO : JWT_EXPIRES_PADRAO,
+  });
+  return { token, user: toPublicUser(doc.id, user) };
+}
+
 // reautenticacao (ex: confirmar a senha antes de solicitar um estorno) - nao
 // gera token novo, so confirma que a senha bate com a conta logada
 async function verifyPassword(userId, password) {
@@ -500,6 +534,7 @@ function filtrarPorEmpresa(req, lista, campo = 'unidade') {
 module.exports = {
   ensureMaster,
   login,
+  loginComPasskey,
   verifyPassword,
   getUserById,
   toPublicUser,
