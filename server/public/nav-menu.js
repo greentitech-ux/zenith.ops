@@ -255,6 +255,11 @@
         border-radius:0 3px 3px 0; background:var(--accent,#b8ff3c);
       }
       #nav-drawer a.nmz-item.hidden, #nav-drawer .nmz-grupo.hidden{ display:none!important; }
+      /* Busca e permissão são estados diferentes. A busca não usa .hidden,
+         pois o observador de segurança repõe essa classe após cada mudança
+         de permissão e, antes, desfazia o resultado digitado pelo usuário. */
+      #nav-drawer .nmz-item[data-filtro-oculto="1"],
+      #nav-drawer .nmz-grupo[data-filtro-oculto="1"]{ display:none!important; }
 
       .nmz-rodape{
         flex:none; border-top:1px solid var(--line,#232a33); padding:8px;
@@ -344,16 +349,19 @@
   }
 
   function filtrarMenu(texto) {
-    const termo = String(texto || '').trim().toLocaleLowerCase('pt-BR');
-    document.querySelectorAll('#nav-drawer a.nmz-item[id]').forEach((el) => {
+    const normalizar = (valor) => String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+    const termo = normalizar(texto).trim();
+    // Inclui também Ajuda, Suporte e Sair do rodapé: durante a busca só fica
+    // na tela aquilo que realmente corresponde ao termo informado.
+    document.querySelectorAll('#nav-drawer .nmz-item').forEach((el) => {
       const permitido = !el.dataset.semPermissao;
-      const bate = !termo || el.textContent.toLocaleLowerCase('pt-BR').includes(termo);
-      el.classList.toggle('hidden', !permitido || !bate);
+      const bate = !termo || normalizar(el.textContent).includes(termo);
+      el.dataset.filtroOculto = !permitido || !bate ? '1' : '';
     });
     document.querySelectorAll('#nav-drawer .nmz-grupo').forEach((g) => {
       const wrap = document.querySelector(`#nav-drawer .nmz-wrap[data-grupo="${CSS.escape(g.dataset.grupo)}"]`);
-      const temItem = !!wrap && [...wrap.children].some((el) => !el.classList.contains('hidden'));
-      g.classList.toggle('hidden', !temItem);
+      const temItem = !!wrap && [...wrap.children].some((el) => !el.classList.contains('hidden') && el.dataset.filtroOculto !== '1');
+      g.dataset.filtroOculto = !temItem ? '1' : '';
       if (termo && temItem) { g.classList.remove('fechado'); if (wrap) wrap.dataset.recolhido = ''; }
     });
     sincronizarRecolhido();
@@ -523,6 +531,10 @@
       else if (ME.isAdmin) contexto.textContent = 'Administração dentro do seu escopo';
       else contexto.textContent = 'Somente unidades e módulos liberados';
     }
+    // A resposta de permissões pode chegar depois que a pessoa já digitou;
+    // reaplica a busca sem tocar no estado de autorização.
+    const busca = document.getElementById('nmz-busca');
+    if (busca) filtrarMenu(busca.value);
   }
 
   // Quao bem o href de um item descreve a tela aberta agora:
