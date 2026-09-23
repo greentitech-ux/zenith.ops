@@ -48,6 +48,17 @@
   .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
   .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  .conv-filtros{display:grid;grid-template-columns:minmax(240px,2fr) repeat(4,minmax(130px,1fr)) auto;gap:8px;align-items:end;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);}
+  .conv-filtro-campo{display:grid;gap:4px;min-width:0;}
+  .conv-filtro-campo label{font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  .conv-filtro-busca{position:relative;}
+  .conv-filtro-busca input{padding-left:31px;}
+  .conv-filtro-lupa{position:absolute;left:10px;bottom:11px;font-size:12px;opacity:.75;pointer-events:none;}
+  .conv-limpar{height:40px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--muted);font:12px var(--sans);cursor:pointer;white-space:nowrap;}
+  .conv-limpar:hover{border-color:var(--accent);color:var(--accent);}
+  .conv-filtro-resumo{font:10.5px var(--mono);color:var(--muted);margin-top:8px;min-height:15px;}
+  @media(max-width:1080px){.conv-filtros{grid-template-columns:repeat(2,minmax(0,1fr));}.conv-filtro-busca{grid-column:1/-1}.conv-limpar{min-height:40px;}}
+  @media(max-width:560px){.conv-filtros{grid-template-columns:1fr}.conv-filtro-busca{grid-column:auto}.conv-limpar{width:100%;}}
   .secao-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
   .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
   .badge.ABERTO{background:var(--warn-dim);color:var(--warn);}
@@ -112,6 +123,15 @@
       <span>Conversas por assunto <span class="sub" id="total-count" style="font-family:var(--mono);color:var(--muted);font-size:11px;"></span></span>
     </h2>
     <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:4px;">Reúne o chat do balãozinho de suporte, o chat de cada solicitação/ticket e o chat de cada chamado técnico — tudo agrupado pelo assunto da conversa.</div>
+    <div class="conv-filtros" aria-label="Filtros de conversas">
+      <div class="conv-filtro-campo conv-filtro-busca"><label for="f-conv-busca">Pesquisar</label><span class="conv-filtro-lupa">🔎</span><input id="f-conv-busca" type="search" autocomplete="off" placeholder="Assunto, pessoa ou mensagem…" oninput="aoFiltrarConversas()"></div>
+      <div class="conv-filtro-campo"><label for="f-conv-assunto">Assunto</label><select id="f-conv-assunto" onchange="aoFiltrarConversas()"><option value="">Todos</option></select></div>
+      <div class="conv-filtro-campo"><label for="f-conv-origem">Origem</label><select id="f-conv-origem" onchange="aoFiltrarConversas()"><option value="">Todas</option><option value="suporte">Widget site</option><option value="central">Solicitação/chamado</option></select></div>
+      <div class="conv-filtro-campo"><label for="f-conv-status">Situação</label><select id="f-conv-status" onchange="aoFiltrarConversas()"><option value="">Todas</option><option value="ABERTO">Em aberto</option><option value="FINALIZADO">Finalizadas</option></select></div>
+      <div class="conv-filtro-campo"><label for="f-conv-periodo">Período</label><select id="f-conv-periodo" onchange="aoFiltrarConversas()"><option value="">Todo período</option><option value="hoje">Hoje</option><option value="7">Últimos 7 dias</option><option value="30">Últimos 30 dias</option></select></div>
+      <button type="button" class="conv-limpar" onclick="limparFiltrosConversas()">Limpar</button>
+    </div>
+    <div class="conv-filtro-resumo" id="conv-filtro-resumo"></div>
   </div>
   <div id="grupos-wrap" class="kanban-board"></div>
   <div class="empty hidden" id="lista-vazia">Nenhuma conversa por enquanto.</div>
@@ -158,6 +178,45 @@ let ITENS = [];
 let DETALHE_ATUAL = null; // { origem, tipo, id, assunto, titulo, status }
 
 const ORIGEM_LABEL = { suporte: '💬 Widget site', central: '🎫 Solicitação/Chamado' };
+const semAcento = valor => String(valor==null?'':valor).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+function valorFiltro(id){ const el=document.getElementById(id); return el ? el.value : ''; }
+function diaBrasil(iso){
+  if(!iso) return '';
+  try{return new Intl.DateTimeFormat('en-CA',{timeZone:FUSO_BR,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso));}
+  catch(e){return String(iso).slice(0,10);}
+}
+function itensFiltrados(){
+  const busca = semAcento(valorFiltro('f-conv-busca')).trim();
+  const assunto = valorFiltro('f-conv-assunto');
+  const origem = valorFiltro('f-conv-origem');
+  const status = valorFiltro('f-conv-status');
+  const periodo = valorFiltro('f-conv-periodo');
+  const limite = Number(periodo) ? Date.now() - Number(periodo)*24*60*60*1000 : 0;
+  const hoje = diaBrasil(new Date().toISOString());
+  return ITENS.filter(it=>{
+    if(assunto && it.assunto!==assunto) return false;
+    if(origem && it.origem!==origem) return false;
+    if(status && it.status!==status) return false;
+    if(periodo==='hoje' && diaBrasil(it.atualizadoEm)!==hoje) return false;
+    if(limite && (!it.atualizadoEm || new Date(it.atualizadoEm).getTime() < limite)) return false;
+    if(!busca) return true;
+    const texto = [it.assunto,it.titulo,it.origem,it.status,it.ultimaMensagem?.de,it.ultimaMensagem?.texto].map(semAcento).join(' ');
+    return texto.includes(busca);
+  });
+}
+function montarFiltroAssuntos(){
+  const el = document.getElementById('f-conv-assunto');
+  if(!el) return;
+  const atual = el.value;
+  const assuntos = [...new Set(ITENS.map(it=>it.assunto).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  el.innerHTML = '<option value="">Todos</option>' + assuntos.map(a=>`<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
+  el.value = assuntos.includes(atual) ? atual : '';
+}
+function aoFiltrarConversas(){ renderLista(); }
+function limparFiltrosConversas(){
+  ['f-conv-busca','f-conv-assunto','f-conv-origem','f-conv-status','f-conv-periodo'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  renderLista();
+}
 
 function agruparPorAssunto(itens){
   const mapa = new Map();
@@ -171,8 +230,11 @@ function agruparPorAssunto(itens){
 }
 
 function renderLista(){
-  const grupos = agruparPorAssunto(ITENS);
-  document.getElementById('total-count').textContent = ITENS.length ? `· ${ITENS.length} conversa(s)` : '';
+  const visiveis = itensFiltrados();
+  const grupos = agruparPorAssunto(visiveis);
+  document.getElementById('total-count').textContent = ITENS.length ? `· ${visiveis.length} de ${ITENS.length} conversa(s)` : '';
+  const resumo = document.getElementById('conv-filtro-resumo');
+  if(resumo) resumo.textContent = visiveis.length===ITENS.length ? 'Mostrando todas as conversas.' : `${visiveis.length} conversa(s) encontrada(s) pelos filtros.`;
   document.getElementById('lista-vazia').classList.toggle('hidden', !!grupos.length);
   const wrap = document.getElementById('grupos-wrap');
   wrap.innerHTML = grupos.map(g=>{
@@ -202,6 +264,7 @@ function renderLista(){
 async function carregarLista(){
   try{
     ITENS = await fetch('/api/central-solucoes').then(r=>r.json());
+    montarFiltroAssuntos();
     renderLista();
   }catch(e){ /* rede fora - mantem lista anterior */ }
 }
