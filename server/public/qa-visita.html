@@ -63,6 +63,12 @@
   .linha{display:flex;gap:8px;flex-wrap:wrap;}
   .linha>*{flex:1;min-width:130px;}
   .vazio{color:var(--muted);font-size:12.5px;text-align:center;padding:22px 10px;}
+  .fotos{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+  .fotos img{width:66px;height:66px;object-fit:cover;border-radius:8px;border:1px solid var(--line);}
+  /* o input de arquivo nativo e feio e minusculo no celular; o label vira o
+     botao de verdade e o input fica escondido atras dele */
+  .btn-foto{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:12.5px;cursor:pointer;color:var(--text);}
+  .btn-foto input{display:none;}
   .hidden{display:none!important;}
   .visita-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer;}
   .visita-row:last-child{border-bottom:none;}
@@ -120,6 +126,10 @@
     <div class="sub" id="v-cabecalho" style="margin-top:7px;"></div>
   </div>
   <div id="v-setores"></div>
+  <div class="card hidden" id="v-laudo">
+    <a id="v-laudo-link" target="_blank" rel="noopener" class="btn-primary" style="display:block;text-align:center;text-decoration:none;">📄 Abrir o laudo em PDF</a>
+    <p class="sub" style="margin:8px 0 0;text-align:center;">Gerado na hora — uma ação corretiva respondida hoje já sai na próxima vez que você abrir.</p>
+  </div>
   <div class="card" id="v-fechar">
     <button class="btn-primary" style="width:100%;" onclick="concluir()">Concluir visita</button>
     <p class="sub" style="margin:8px 0 0;text-align:center;">Depois de concluída, o checklist não muda mais — só as ações corretivas.</p>
@@ -128,12 +138,18 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+// SEM ISSO A TELA DÁ 401 PRA TODO MUNDO, Master inclusive - e parece falta de
+// permissão, não falta de credencial. Já aconteceu duas vezes no app (ver a
+// trava no testeRotas.js, que foi quem pegou isto aqui).
+const AUTH_TOKEN = localStorage.getItem('authToken') || '';
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 let MODELOS = [];
 let VISITA = null;
 
 async function api(caminho, opcoes){
-  const r = await fetch(caminho, Object.assign({ headers: { 'Content-Type':'application/json' } }, opcoes||{}));
+  const r = await fetch(caminho, Object.assign({
+    headers: { 'Content-Type':'application/json', Authorization: 'Bearer ' + AUTH_TOKEN },
+  }, opcoes||{}));
   const t = await r.text();
   let d = null; try { d = t ? JSON.parse(t) : null; } catch(e){}
   if(!r.ok) throw new Error((d && d.error) || 'Falha na comunicação.');
@@ -206,6 +222,10 @@ function pintarVisita(){
   $('v-cabecalho').textContent = [v.data, v.horario, v.representanteLoja, v.nutricionista].filter(Boolean).join(' · ');
   const concluida = v.status === 'CONCLUIDA';
   $('v-fechar').classList.toggle('hidden', concluida);
+  $('v-laudo').classList.toggle('hidden', !concluida);
+  // o navegador abre o PDF numa aba nova e não manda header nenhum: o token
+  // vai na URL, igual à foto do chat da Central (requireAuth aceita os dois)
+  $('v-laudo-link').href = `/api/qualidade/visitas/${encodeURIComponent(v.id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
 
   $('v-setores').innerHTML = (v.modeloSnap.setores||[]).map((s)=>{
     const extras = (v.extras||{})[s.id] || [];
@@ -249,6 +269,13 @@ function pintarItem(item, concluida){
         <div><label>Responsável</label><input value="${escapeHtml(r.responsavel||'')}" onchange="salvarAcao('${escapeHtml(item.id)}','responsavel',this.value)"></div>
         <div><label>Prazo</label><input type="date" value="${escapeHtml(r.prazo||'')}" onchange="salvarAcao('${escapeHtml(item.id)}','prazo',this.value)"></div>
       </div>
+      <label>Fotos</label>
+      <div class="fotos">
+        ${(r.fotos||[]).map((f,ix)=>`<img src="/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/item/${encodeURIComponent(item.id)}/foto/${ix}?token=${encodeURIComponent(AUTH_TOKEN)}" alt="${escapeHtml(f.nome||'foto')}">`).join('')}
+      </div>
+      ${concluida ? '' : `<label class="btn-foto" style="margin-top:7px;">📷 Tirar foto
+        <input type="file" accept="image/*" capture="environment" onchange="enviarFoto('${escapeHtml(item.id)}', this)">
+      </label>`}
     </div>` : ''}
   </div>`;
 }
@@ -292,6 +319,27 @@ async function recarregar(setorAberto){
   abertos.forEach(id => { const e = document.getElementById(id); if(e) e.classList.add('aberto'); });
   if(setorAberto){ const e = document.getElementById('setor-'+setorAberto); if(e) e.classList.add('aberto'); }
 }
+async function enviarFoto(itemId, input){
+  const arquivo = input.files && input.files[0];
+  if(!arquivo) return;
+  const corpo = new FormData();
+  corpo.append('foto', arquivo);
+  try{
+    // sem Content-Type de proposito: o navegador precisa pôr o boundary do
+    // multipart sozinho, e fixar 'application/json' aqui quebraria o upload
+    const r = await fetch(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/item/${encodeURIComponent(itemId)}/foto`,
+      { method:'POST', body: corpo, headers: { Authorization: 'Bearer ' + AUTH_TOKEN } });
+    if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Falha ao enviar a foto.'); }
+    // helper da casa (tema.js): limpa o campo E o rascunho guardado. Limpar
+    // só o value deixaria a MESMA foto pendurada e ela subiria de novo no
+    // próximo apontamento - foi por isso que essa função passou a existir.
+    // Depois do sucesso, de propósito: upload que falhou tem que poder
+    // tentar de novo com a foto ainda ali.
+    window.zenithRascunhos?.limparAnexoEnviado(input);
+    await recarregar();
+  }catch(e){ alert(e.message); }
+}
+
 async function concluir(){
   if(!confirm('Concluir a visita? Depois disso o checklist não muda mais.')) return;
   try{ await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/concluir`, { method:'POST', body:'{}' }); await recarregar(); }

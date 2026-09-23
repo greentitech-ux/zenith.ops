@@ -340,6 +340,24 @@ function travarSeConcluida(visita) {
   }
 }
 
+// ESCREVE O MAPA INTEIRO de respostas, e não só a chave que mudou.
+//
+// O Firestore de verdade faz merge PROFUNDO - set({respostas:{x:1}},{merge})
+// preserva respostas.y. Mas essa é uma semântica sutil pra apoiar o dado que
+// vira laudo assinado, e ela não é óbvia pra quem lê o código depois. Como
+// estas funções JÁ leram o documento (precisam do estado anterior de
+// qualquer jeito), reescrever o mapa não custa leitura nenhuma e o
+// comportamento fica explícito - igual em qualquer implementação.
+//
+// O preço: duas pessoas respondendo A MESMA visita ao mesmo tempo, a última
+// escrita ganha. Uma visita tem uma responsável técnica andando pela loja,
+// então isso não acontece hoje; se um dia a loja responder o "espaço
+// cliente" em paralelo, aqui é onde isso precisa virar transação.
+async function gravarResposta(id, visita, itemId, valor) {
+  const respostas = { ...(visita.respostas || {}), [itemId]: valor };
+  await COLLECTION.doc(String(id)).set({ respostas }, { merge: true });
+}
+
 async function responderItem(id, itemId, { resposta, observacao, especificacoes }, email) {
   const snap = await COLLECTION.doc(String(id)).get();
   if (!snap.exists) throw new Error('Visita não encontrada.');
@@ -365,7 +383,7 @@ async function responderItem(id, itemId, { resposta, observacao, especificacoes 
     respondidoEm: new Date().toISOString(),
     respondidoPorEmail: email || null,
   };
-  await COLLECTION.doc(String(id)).set({ respostas: { [itemId]: nova } }, { merge: true });
+  await gravarResposta(id, visita, itemId, nova);
   cacheLista.invalidar();
   return nova;
 }
@@ -387,7 +405,7 @@ async function adicionarPontoDeCheck(id, setorId, texto, email) {
   const lista = (visita.extras || {})[setorId] || [];
   if (lista.length >= 30) throw new Error('Limite de pontos de check extras neste setor.');
   const ponto = { id: `extra-${novoId().slice(0, 8)}`, texto: limpo, criadoEm: new Date().toISOString(), criadoPorEmail: email || null };
-  await COLLECTION.doc(String(id)).set({ extras: { [setorId]: [...lista, ponto] } }, { merge: true });
+  await COLLECTION.doc(String(id)).set({ extras: { ...(visita.extras || {}), [setorId]: [...lista, ponto] } }, { merge: true });
   cacheLista.invalidar();
   return ponto;
 }
@@ -414,9 +432,51 @@ async function salvarAcaoCorretiva(id, itemId, { acaoCorretiva, responsavel, pra
     patch.verificadoEm = corrigido === null ? null : new Date().toISOString();
     patch.verificadoPorEmail = corrigido === null ? null : (email || null);
   }
-  await COLLECTION.doc(String(id)).set({ respostas: { [itemId]: patch } }, { merge: true });
+  await gravarResposta(id, visita, itemId, patch);
   cacheLista.invalidar();
   return patch;
+}
+
+// ---------------------------------------------------------------------
+// FOTO DO APONTAMENTO.
+//
+// O relatório do São Braz é, na prática, um álbum: a foto é a prova do que
+// foi visto, e é ela que faz a loja reconhecer o problema sem discussão.
+//
+// A foto NUNCA entra no Firestore (CLAUDE.md §3) - vai pro Storage e no
+// documento fica só o caminho. Uma foto de celular tem 3-5 MB; seis delas
+// num documento estourariam o teto de 1 MiB do Firestore e, pior, seriam
+// relidas a cada abertura da visita.
+const MAX_FOTOS_POR_ITEM = 6;
+
+async function anexarFoto(id, itemId, foto) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  const atual = (visita.respostas || {})[itemId] || {};
+  const fotos = atual.fotos || [];
+  if (fotos.length >= MAX_FOTOS_POR_ITEM) {
+    throw new Error(`Limite de ${MAX_FOTOS_POR_ITEM} fotos por apontamento.`);
+  }
+  const nova = {
+    nome: String(foto.nome || 'foto').slice(0, 120),
+    path: String(foto.path || ''),
+    tipo: String(foto.tipo || 'image/jpeg'),
+    em: new Date().toISOString(),
+  };
+  if (!nova.path) throw new Error('Falha ao guardar a foto.');
+  await gravarResposta(id, visita, itemId, { ...atual, fotos: [...fotos, nova] });
+  cacheLista.invalidar();
+  return nova;
+}
+
+async function fotoDe(id, itemId, indice) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const fotos = ((snap.data().respostas || {})[itemId] || {}).fotos || [];
+  const foto = fotos[Number(indice)];
+  if (!foto) throw new Error('Foto não encontrada.');
+  return foto;
 }
 
 async function concluirVisita(id, email) {
@@ -510,4 +570,5 @@ module.exports = {
   listarModelos, modeloPorId, salvarModelo, retratoDoModelo,
   criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
   salvarAcaoCorretiva, concluirVisita, listarVisitas, apontamentosDe,
+  MAX_FOTOS_POR_ITEM, anexarFoto, fotoDe,
 };

@@ -26481,6 +26481,55 @@ $r | ConvertTo-Json -Compress
         && q.pesoDoItem({ criticidade: 'imprescindivel' }, true) === 3,
       // a rota tem que existir de verdade, não só o módulo
       'a rota de visitas responde': (await pedir('/api/qualidade/visitas', token ? { Authorization: 'Bearer ' + token } : {})).status !== 404,
+      // PONTA A PONTA: abre visita, responde os 38, conclui e baixa o laudo.
+      // É o caminho inteiro que a nutricionista percorre - e o único jeito de
+      // provar que o PDF sai de verdade, e não só que a função existe.
+      'a visita fecha e o laudo sai em PDF': await (async () => {
+        const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
+        // postarJson devolve { status, corpo } - o corpo é texto
+        const json = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
+        const criada = json(await postarJson('/api/qualidade/visitas', { loja: 'TESTE QA', data: '2026-09-23' }, cabQ));
+        if (!criada || !criada.id) return false;
+        for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
+          await postarJson(`/api/qualidade/visitas/${criada.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
+        }
+        // um não conforme, pra o laudo ter apontamento de verdade
+        await postarJson(`/api/qualidade/visitas/${criada.id}/item/estrados-prateleiras`, { resposta: 'nao-conforme', observacao: 'Caixa no chão.' }, cabQ);
+        await postarJson(`/api/qualidade/visitas/${criada.id}/item/estrados-prateleiras/acao`, { acaoCorretiva: 'Subir em estrado.', responsavel: 'Gerente', prazo: '2026-10-01' }, cabQ);
+        const fim = json(await postarJson(`/api/qualidade/visitas/${criada.id}/concluir`, {}, cabQ));
+        if (!fim || fim.status !== 'CONCLUIDA') return false;
+        // 37 de 38 = 9,73 (trunca)
+        if (fim.nota !== 9.73) return false;
+        const pdf = await pedirBinario(`/api/qualidade/visitas/${criada.id}/pdf`, cabQ);
+        // %PDF nos primeiros bytes: a rota respondendo 200 com JSON de erro
+        // passaria num teste de status, e o laudo estaria quebrado
+        return pdf.status === 200 && pdf.buffer.slice(0, 4).toString() === '%PDF' && pdf.buffer.length > 1000;
+      })(),
+      // concluída não aceita mais resposta - agora pela ROTA, não só no módulo
+      'depois de concluída, a rota recusa alterar o checklist': await (async () => {
+        const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
+        const json = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
+        const criada = json(await postarJson('/api/qualidade/visitas', { loja: 'TESTE TRAVA' }, cabQ));
+        for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
+          await postarJson(`/api/qualidade/visitas/${criada.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
+        }
+        await postarJson(`/api/qualidade/visitas/${criada.id}/concluir`, {}, cabQ);
+        const depois = await postarJson(`/api/qualidade/visitas/${criada.id}/item/unhas`, { resposta: 'nao-conforme' }, cabQ);
+        return depois.status === 400 && /concluída/.test(depois.corpo);
+      })(),
+      // foto vai pro Storage; documento guarda só o caminho (§3)
+      'a foto vai pro Storage, nunca pro Firestore':
+        /storage\.salvarArquivo\(req\.params\.id, req\.file, 'qualidade'\)/.test(idxQ)
+        && /path: String\(foto\.path \|\| ''\)/.test(fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8'))
+        && !/base64/.test(fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8')),
+      // §2: relatório tem hex próprio, o CSS do app não alcança o PDF
+      'o laudo usa hex próprio, e não token de CSS': (() => {
+        const rep = fsQ.readFileSync(__dirname + '/qualidadeReport.js', 'utf8');
+        // só o CÓDIGO: o comentário no topo cita var(--accent) justamente
+        // pra explicar por que ele não pode aparecer aqui
+        const semComentario = rep.replace(/\/\/[^\n]*/g, '');
+        return !/var\(--/.test(semComentario) && /const COR = \{/.test(rep);
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okQA = !falhas.length;

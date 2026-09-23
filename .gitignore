@@ -6,3 +6,5 @@ server/data/*.json
 
 # fotos da varredura visual (MBs, mudam a cada commit) - referencia e local
 docs/varredura/
+
+docs/exemplo-laudo-qa.pdf

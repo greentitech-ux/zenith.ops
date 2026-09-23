@@ -124,6 +124,7 @@ const coworkApi = require('./coworkApi');
 const vigiaScript = require('./vigiaScript');
 const agenteAndroid = require('./agenteAndroid');
 const qualidade = require('./qualidade');
+const qualidadeReport = require('./qualidadeReport');
 const reparoNocZenithScript = require('./reparoNocZenithScript');
 const procedimentosSocorro = require('./procedimentosSocorro');
 const loginCustom = require('./loginCustom');
@@ -4682,6 +4683,46 @@ app.post('/api/qualidade/visitas/:id/setor/:setorId/ponto', auth.requireAuth, as
 app.post('/api/qualidade/visitas/:id/item/:itemId/acao', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
   try { res.json(await qualidade.salvarAcaoCorretiva(req.params.id, req.params.itemId, req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// FOTO DO APONTAMENTO. Reaproveita o mesmo `upload` (memória) dos outros
+// anexos; o arquivo vai pro Storage e no documento fica só o caminho
+// (CLAUDE.md §3 - foto no Firestore estouraria o documento e seria relida a
+// cada abertura da visita).
+app.post('/api/qualidade/visitas/:id/item/:itemId/foto', auth.requireAuth, upload.single('foto'), async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhuma foto enviada.' });
+    const caminho = await storage.salvarArquivo(req.params.id, req.file, 'qualidade');
+    res.json(await qualidade.anexarFoto(req.params.id, req.params.itemId, {
+      nome: req.file.originalname, path: caminho, tipo: req.file.mimetype,
+    }));
+  } catch (err) { res.status(400).json({ error: storage.erroDeUpload ? storage.erroDeUpload(err) : err.message }); }
+});
+
+app.get('/api/qualidade/visitas/:id/item/:itemId/foto/:indice', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try {
+    const foto = await qualidade.fotoDe(req.params.id, req.params.itemId, req.params.indice);
+    storage.streamArquivo(foto.path, foto.tipo, res);
+  } catch (err) { res.status(404).json({ error: err.message }); }
+});
+
+// O LAUDO (ver qualidadeReport.js) - o equivalente do PPTX que hoje e' montado
+// a mao depois da visita. Gerado sob demanda e nunca gravado: assim uma acao
+// corretiva respondida hoje ja aparece no proximo download, sem versao velha
+// circulando por ai.
+app.get('/api/qualidade/visitas/:id/pdf', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try {
+    const visita = await qualidade.obterVisita(req.params.id);
+    const nome = `visita-qa-${String(visita.loja || visita.unidade || 'unidade').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${visita.data || ''}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${nome}"`);
+    await qualidadeReport.gerarPdf(visita, qualidade.apontamentosDe(visita), res);
+  } catch (err) {
+    if (!res.headersSent) res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/api/qualidade/visitas/:id/concluir', auth.requireAuth, async (req, res) => {
