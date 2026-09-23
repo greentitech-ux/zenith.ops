@@ -9154,12 +9154,50 @@ setTimeout(async () => {
   if (!okBeniboy) ruins += 1;
   console.log(`${okBeniboy ? '\u2713' : '\u2717'} Beniboy: um desenho so pros 6 lugares, a linha sempre inteira e a marca batendo junto`);
 
+  // ---------- Aviso de mudanca de endereco ----------
+  // Quem entra pelo endereco antigo precisa saber que o app mudou de casa.
+  // O perigo esta em ONDE esse aviso aparece: index.html na raiz e
+  // abastecimento.html sao as telas que fazem heartbeat pelo navegador na
+  // maquina de loja. localStorage e por origem - um clique ali apaga o
+  // zenithMonitorFixo, a maquina esquece a unidade e a loja acusa offline.
+  // Este teste existe pra ninguem tirar essa trava sem perceber.
+  let okAvisoEndereco = false;
+  try {
+    const fsE = require('fs'), pathE = require('path');
+    const tema = fsE.readFileSync(pathE.join(__dirname, 'public', 'tema.js'), 'utf8');
+    const idx = fsE.readFileSync(pathE.join(__dirname, 'index.js'), 'utf8');
+
+    const rota = await pedir('/api/meta/endereco');
+    let corpoRota = {};
+    try { corpoRota = JSON.parse(rota.corpo); } catch (e) { /* fica vazio */ }
+
+    const conf = {
+      'a rota devolve o endereco oficial (e e publica, sem Firestore)':
+        rota.status === 200 && typeof corpoRota.oficial === 'string' && /^https?:\/\//.test(corpoRota.oficial),
+      'o destino vem do APP_BASE_URL, nao de dominio cravado no JS':
+        /res\.json\(\{ oficial: APP_BASE_URL \}\)/.test(idx)
+        && !/nopulso\.com\.br/.test(tema),
+      'as telas de heartbeat da loja ficam de fora':
+        /TELAS_DE_HEARTBEAT\s*=\s*\['\/', '\/index\.html', '\/abastecimento\.html'\]/.test(tema)
+        && /TELAS_DE_HEARTBEAT\.indexOf\(location\.pathname\) !== -1\) return;/.test(tema),
+      'so aparece pra quem esta logado (cliente em pagina publica nao ve)':
+        /if \(!localStorage\.getItem\('authToken'\)\) return;/.test(tema),
+      'e some sozinho quando ja se esta no endereco certo':
+        /destino\.origin === location\.origin\) return;/.test(tema),
+    };
+    const ruinsE = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okAvisoEndereco = !ruinsE.length;
+    if (ruinsE.length) console.log(`  falhou em: ${ruinsE.join(' · ')}`);
+  } catch (e) { okAvisoEndereco = false; console.log('  erro: ' + e.message); }
+  if (!okAvisoEndereco) ruins += 1;
+  console.log(`${okAvisoEndereco ? '\u2713' : '\u2717'} Mudanca de endereco: avisa quem entra pelo antigo, menos na maquina de loja`);
+
   // ---------- Endereco antigo aposentado (23/09/2026) ----------
-  // Decisao do Master: o adyen-monitor.onrender.com saiu de uso. O endereco
-  // padrao passa a ser o oficial, o aviso de "mudamos de endereco" (que so
-  // aparecia no host antigo) saiu com a rota dele, e o endereco antigo nao
-  // aparece em mais nenhum codigo que RODA - com UMA excecao, trancada aqui:
-  // a lista do reparo que reconhece copia instalada antes da troca.
+  // Decisao do Master: o adyen-monitor.onrender.com saiu de uso e o endereco
+  // padrao passa a ser o oficial. Enquanto o subdominio do Render responder,
+  // ele fica SO onde ainda tem funcao, e isto tranca a lista: o aviso de
+  // "mudamos de endereco" (tema.js) e o reparo (plano B de DNS + reconhecer
+  // copia instalada antes da troca). Em qualquer outro arquivo, reprova.
   let okEnderecoAntigo = false;
   try {
     const fsE = require('fs'), pathE = require('path');
@@ -9180,21 +9218,22 @@ setTimeout(async () => {
     const idx = fsE.readFileSync(pathE.join(__dirname, 'index.js'), 'utf8');
     const rota = await pedir('/api/meta/endereco');
     const conf = {
-      'o endereço antigo só sobra no reparo (reconhecer cópia antiga)':
-        comAntigo.length === 1 && /reparoNocZenithScript\.js$/.test(comAntigo[0])
-        && linhasReparo.every((l) => /\$HostsLegadosPermitidos = @\(|^\/\/ /.test(l.trim())),
+      'o endereço antigo só sobra no aviso de mudança e no reparo':
+        comAntigo.length === 2
+        && comAntigo.map((a) => pathE.relative(__dirname, a)).sort().join(',') === 'public/tema.js,reparoNocZenithScript.js'
+        && linhasReparo.every((l) => /\$HostsLegadosPermitidos = @\(|^const ENDERECO_RESERVA = |^\/\/ /.test(l.trim())),
       'o endereço padrão é o oficial nos 3 lugares':
         ['index.js', 'relatorioMV.js', 'vigiaScript.js'].every((f) => fsE.readFileSync(pathE.join(__dirname, f), 'utf8')
           .includes("const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br')")),
-      'o aviso de mudança de endereço saiu, e a rota dele também':
-        !/avisarEnderecoNovo|HOST_ANTIGO/.test(tema) && !/\/api\/meta\/endereco/.test(idx) && rota.status !== 200,
+      'o aviso de mudança continua de pé (o host antigo ainda responde)':
+        /avisarEnderecoNovo\(\)/.test(tema) && rota.status === 200,
     };
     const ruinsE = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okEnderecoAntigo = !ruinsE.length;
     if (ruinsE.length) console.log(`  falhou em: ${ruinsE.join(' · ')} (com o antigo: ${comAntigo.map((a) => pathE.relative(__dirname, a)).join(', ')})`);
   } catch (e) { okEnderecoAntigo = false; console.log('  erro: ' + e.message); }
   if (!okEnderecoAntigo) ruins += 1;
-  console.log(`${okEnderecoAntigo ? '\u2713' : '\u2717'} Endereço antigo aposentado: só o oficial, sem aviso de mudança e sem segundo endereço`);
+  console.log(`${okEnderecoAntigo ? '\u2713' : '\u2717'} Endereço antigo aposentado: o padrão é o oficial, e o antigo só fica no aviso de mudança e no plano B do reparo`);
 
   // ---------- Painel: o desenho novo sem inventar dado ----------
   // O mockup 1b trazia "Meta do mes 71,2%" e "Faturamento hoje +8,4%" - dois
@@ -25932,17 +25971,19 @@ $r | ConvertTo-Json -Compress
         && internoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
         && /MaximumRedirection 0/.test(internoR)
         && !/[a-f0-9]{48}/i.test(comandoR),
-      // 23/09: o endereço antigo foi aposentado (decisão do Master). O comando
-      // baixa SÓ do oficial - um segundo endereço seria uma porta que não
-      // responde mais, e o erro dela esconderia o erro de verdade.
-      'o comando baixa só do endereço oficial':
+      // 22/09: numa maquina de loja o comando morreu em "O nome remoto nao pode
+      // ser resolvido: 'www.nopulso.com.br'" - justamente a que mais precisava
+      // do reparo. O endereço antigo saiu de uso em 23/09, mas ainda responde
+      // (subdomínio do Render ligado): é o plano B, e o comando tenta os DOIS.
+      'o comando tenta o oficial E o antigo (loja com DNS restrito)':
         internoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
-        && !/onrender/.test(internoR)
+        && internoR.includes('https://adyen-monitor.onrender.com/api/loja-status/reparo-noczenith.ps1')
+        && internoR.indexOf('www.nopulso.com.br') < internoR.indexOf('adyen-monitor.onrender.com')
         && /foreach \(\$u in \$us\)/.test(internoR)
         && /if \(-not \$ok\) \{ throw/.test(internoR),
-      'sem base informada o comando cai no endereço oficial, e não fica vazio':
+      'sem base informada o comando cai no endereço OFICIAL primeiro, e não fica vazio':
         internoPadraoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
-        && !/onrender/.test(internoPadraoR),
+        && internoPadraoR.indexOf('www.nopulso.com.br') < internoPadraoR.indexOf('adyen-monitor.onrender.com'),
       // o reparo ainda RECONHECE uma cópia instalada com o host antigo (é o que
       // prova que ela é nossa), mas baixa sempre da origem oficial
       'cópia antiga ainda é reconhecida, e o download sai do oficial':

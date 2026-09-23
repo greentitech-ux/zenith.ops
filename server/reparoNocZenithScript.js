@@ -15,9 +15,8 @@ param([int]$VersaoMinima = __VERSAO_MINIMA__)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $OrigemOficial = [Uri]'https://www.nopulso.com.br'
-# o host antigo fica SO nesta lista de reconhecimento: e o que prova que uma
-# copia instalada antes de 23/09 e nossa. O download sai sempre da
-# $OrigemOficial - o endereco antigo nunca e contatado.
+# o host antigo aqui so RECONHECE uma copia instalada antes de 23/09 como
+# nossa; o download sai sempre da $OrigemOficial
 $HostsLegadosPermitidos = @('www.nopulso.com.br', 'nopulso.com.br', 'adyen-monitor.onrender.com')
 $mutex = $null
 $mutexAdquirido = $false
@@ -291,18 +290,26 @@ function montarScriptReparoNocZenith() {
 // loja ou nome do computador: o resgate encontra uma instalação já existente
 // e preserva a identidade dela. O -EncodedCommand evita que $env:TEMP ou
 // outras variáveis sejam expandidas pelo PowerShell/CMD de fora.
-// O ENDERECO VEM DO APP_BASE_URL (CLAUDE.md §4); sem ele, o oficial.
-// O adyen-monitor.onrender.com foi aposentado em 23/09/2026 (decisao do
-// Master): o comando nao tenta mais um segundo endereco.
+// O ENDERECO VEM DO APP_BASE_URL (CLAUDE.md §4); sem ele, o oficial. E o
+// comando tenta um SEGUNDO endereco: o adyen-monitor.onrender.com.
+//
+// O antigo saiu de uso em 23/09/2026, mas continua respondendo enquanto o
+// subdominio do Render estiver ligado - e aqui ele e a unica saida pra loja
+// atras de rede restrita que nao resolve o dominio novo. Foi o que aconteceu
+// em 22/09: "O nome remoto nao pode ser resolvido: 'www.nopulso.com.br'", na
+// maquina que mais precisava do reparo. Se o subdominio for desligado, esta
+// linha so acrescenta um erro a mais na mensagem - e ai pode sair.
 //
 // E confere o CONTEUDO antes de executar: portal cativo e proxy de loja
 // devolvem pagina de erro com HTTP 200, e aquilo seria salvo como .ps1 e
 // executado. Mesma trava do "# NOCZenith" do vigia, aplicada aqui.
 const ENDERECO_OFICIAL = 'https://www.nopulso.com.br';
+const ENDERECO_RESERVA = 'https://adyen-monitor.onrender.com';
 const MARCA_REPARO = '# Reparo seguro do NOCZenith';
 function montarComandoReparoNocZenith(baseUrl) {
   const oficial = String(baseUrl || ENDERECO_OFICIAL).replace(/\/+$/, '');
-  const urls = [oficial + '/api/loja-status/reparo-noczenith.ps1'];
+  const bases = oficial === ENDERECO_RESERVA ? [oficial] : [oficial, ENDERECO_RESERVA];
+  const urls = bases.map((b) => b + '/api/loja-status/reparo-noczenith.ps1');
   const interno = [
     "$ErrorActionPreference='Stop'",
     "$us=@(" + urls.map((u) => "'" + u + "'").join(',') + ")",

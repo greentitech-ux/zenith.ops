@@ -144,11 +144,20 @@ O endereço público sai de **uma** variável: `APP_BASE_URL` (`index.js`,
 não tem URL cravada em lugar nenhum.
 
 O `adyen-monitor.onrender.com` foi **aposentado em 23/09/2026** (decisão do
-Master, com o parque sendo reinstalado). Não volte a usá-lo como fallback,
-segundo endereço ou link. A única menção que fica no código é a lista do
-reparo (`reparoNocZenithScript.js`) que **reconhece** uma cópia instalada
-antes da troca — o download sai sempre do endereço oficial. Máquina que
-ficou com o agente antigo volta pelo reparo ou por reinstalação.
+Master, com o parque sendo reinstalado). Ele não é mais fallback nem link.
+Mas continua **respondendo** enquanto o subdomínio do Render estiver ligado,
+e por isso fica em exatamente dois lugares, onde ainda tem função (o
+`testeRotas.js` reprova qualquer outro):
+
+- `tema.js` — o aviso "o NoPulso mudou de endereço" pra quem ainda abre
+  pelo antigo (fora das telas de heartbeat da loja);
+- `reparoNocZenithScript.js` — plano B do comando de reparo, pra loja
+  atrás de rede que não resolve o domínio novo (caso real de 22/09), e o
+  reconhecimento de cópia do agente instalada antes da troca.
+
+Desligou o subdomínio no Render? Aí os dois perdem a função: tire o aviso
+(e a rota `/api/meta/endereco`) e o `ENDERECO_RESERVA` do reparo. Máquina
+que ficou com o agente antigo volta pelo reparo ou por reinstalação.
 
 Numa próxima troca de domínio, duas coisas quebram se forem ignoradas:
 
