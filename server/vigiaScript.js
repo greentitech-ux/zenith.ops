@@ -28,7 +28,10 @@
 // 108: inventaria RAM, processador, placa-mae e BIOS para exibir na ficha.
 // 115: maquina sem arte (ou tela sem imagem) ganha o modelo basico: logo do
 // grupo, logo da marca, nome da maquina e "MARCA · UNIDADE".
-const VERSAO_VIGIA = 115;
+// 116: vigia de travamento (a maquina nao some do NOC quando o laco principal
+// empaca: bate "viva, ocupada em X"), desafixar da barra com prazo de 15s e
+// o ZIP do arquivamento fora do laco principal.
+const VERSAO_VIGIA = 116;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -379,6 +382,47 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    }',
     '    "$([DateTime]::Now.ToString("yyyy-MM-dd HH:mm:ss")) - $mensagem" | Out-File -FilePath $CaminhoLog -Append -Encoding UTF8',
     '  } catch {}',
+    '}',
+    '',
+    // VIGIA DE TRAVAMENTO (v116). INCIDENTE 23/09, DOM-TIROL-MENU.BOARD: o
+    // laco principal ficou 33min preso num passo da politica da Area de
+    // Trabalho e a maquina sumiu do NOC ("calada"), sem nenhuma pista do
+    // porque - reinstalar nao adiantava, porque a politica roda de novo ao
+    // subir e empaca no mesmo lugar.
+    //
+    // Uma segunda linha de execucao, que nao faz NADA alem de olhar o
+    // relogio: se o laco nao completa uma volta ha 60s, ela bate uma presenca
+    // (soPresenca) dizendo em que ETAPA o laco esta e desde quando. O servidor
+    // mantem a maquina no ar, mas DEGRADADA com o motivo - e presenca nao
+    // recebe comando nem consome aviso (quem trataria e justamente o laco
+    // preso). Nao renova o carimbo de cedencia: se a instancia de login
+    // empacar, a de boot tem de continuar podendo assumir.
+    '$script:Pulso = $null',
+    'function Agora-Ms { return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }',
+    'function Pulso-Tick { if ($script:Pulso) { $script:Pulso.tick = (Agora-Ms); $script:Pulso.etapa = "laco principal"; $script:Pulso.etapaDesde = (Agora-Ms) } }',
+    'function Marcar-Etapa([string]$etapa) { if ($script:Pulso) { $script:Pulso.etapa = $etapa; $script:Pulso.etapaDesde = (Agora-Ms) } }',
+    'function Iniciar-VigiaDeTravamento([string]$url, [string]$unidade, [string]$posto) {',
+    '  if ($script:Pulso) { return }',
+    '  $script:Pulso = [hashtable]::Synchronized(@{ tick = (Agora-Ms); etapa = "iniciando"; etapaDesde = (Agora-Ms); limiteMs = 60000; esperaS = 20 })',
+    '  try {',
+    '    $rsVigia = [runspacefactory]::CreateRunspace(); $rsVigia.Open()',
+    '    $psVigia = [powershell]::Create(); $psVigia.Runspace = $rsVigia',
+    '    [void]$psVigia.AddScript({',
+    '      param($Pulso, $Url, $Cab, $Unidade, $Posto, $Instancia)',
+    '      while ($true) {',
+    '        Start-Sleep -Seconds ([int]$Pulso.esperaS)',
+    '        try {',
+    '          $agora = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
+    '          if (($agora - [int64]$Pulso.tick) -lt [int64]$Pulso.limiteMs) { continue }',
+    '          $corpo = @{ unidade = $Unidade; posto = $Posto; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)"; soPresenca = $true; instancia = $Instancia; ocupado = @{ etapa = [string]$Pulso.etapa; desde = [int64]$Pulso.etapaDesde; instancia = $Instancia } } | ConvertTo-Json -Depth 3',
+    '          Invoke-RestMethod -Uri $Url -Method Post -ContentType "application/json; charset=utf-8" -Headers $Cab -Body $corpo -TimeoutSec 10 | Out-Null',
+    '          $Pulso.presencas = [int]$Pulso.presencas + 1',
+    '        } catch {}',
+    '      }',
+    '    }).AddArgument($script:Pulso).AddArgument($url).AddArgument($CabecalhosAgente).AddArgument($unidade).AddArgument($posto).AddArgument($(if ($Servico) { "sistema" } else { "login" }))',
+    '    $script:VigiaTravamento = $psVigia.BeginInvoke()',
+    '    $script:VigiaTravamentoPs = $psVigia',
+    '  } catch { Escrever-Log "Vigia de travamento nao subiu: $($_.Exception.Message)" }',
     '}',
     '',
     '# ---- coordenacao entre as DUAS instancias possiveis (boot x login).',
@@ -2278,19 +2322,43 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '#',
     '# So funciona DENTRO da sessao do operador: o COM conversa com o Explorer',
     '# dele. Fora dela nao ha o que fazer, e o log diz isso em vez de fingir.',
-    'function Desafixar-DaBarra([string]$arquivo) {',
-    '  try {',
-    '    $shell = New-Object -ComObject Shell.Application',
-    '    $dir = $shell.Namespace([string](Split-Path -Parent $arquivo))',
-    '    if (-not $dir) { return $false }',
-    '    $item = $dir.ParseName([string](Split-Path -Leaf $arquivo))',
-    '    if (-not $item) { return $false }',
-    '    foreach ($v in @($item.Verbs())) {',
-    '      $rotulo = ([string]$v.Name) -replace "&", ""',
-    '      if ($rotulo -match "Desafixar da barra de tarefas|Unpin from taskbar|Desanclar de la barra de tareas") { $v.DoIt(); return $true }',
-    '    }',
-    '  } catch { Escrever-Log "Barra de tarefas: falha ao desafixar $arquivo ($($_.Exception.Message))." }',
+    // DESAFIXAR COM PRAZO (v116). O verbo do shell (Verbs()/DoIt()) passa
+    // pelas extensoes de menu de contexto instaladas na maquina - e uma delas
+    // pendurada segura o agente inteiro, sem erro e sem fim. Roda numa linha
+    // de execucao propria (STA, como o shell exige) e, se nao voltar em 15s,
+    // desiste: loga, larga os outros pinos deste ciclo e deixa a politica
+    // seguir. A linha pendurada fica pra tras; o agente nao.
+    '$script:CorpoDesafixar = {',
+    '  param($arquivo)',
+    '  $shell = New-Object -ComObject Shell.Application',
+    '  $dir = $shell.Namespace([string](Split-Path -Parent $arquivo))',
+    '  if (-not $dir) { return $false }',
+    '  $item = $dir.ParseName([string](Split-Path -Leaf $arquivo))',
+    '  if (-not $item) { return $false }',
+    '  foreach ($v in @($item.Verbs())) {',
+    '    $rotulo = ([string]$v.Name) -replace "&", ""',
+    '    if ($rotulo -match "Desafixar da barra de tarefas|Unpin from taskbar|Desanclar de la barra de tareas") { $v.DoIt(); return $true }',
+    '  }',
     '  return $false',
+    '}',
+    '$script:PrazoDesafixarMs = 15000',
+    '$script:BarraTravou = $false',
+    'function Desafixar-DaBarra([string]$arquivo) {',
+    '  if ($script:BarraTravou) { return $false }',
+    '  try {',
+    '    $rsB = [runspacefactory]::CreateRunspace(); $rsB.ApartmentState = "STA"; $rsB.Open()',
+    '    $psB = [powershell]::Create(); $psB.Runspace = $rsB',
+    '    [void]$psB.AddScript($script:CorpoDesafixar).AddArgument($arquivo)',
+    '    $hB = $psB.BeginInvoke()',
+    '    if (-not $hB.AsyncWaitHandle.WaitOne([int]$script:PrazoDesafixarMs)) {',
+    '      $script:BarraTravou = $true',
+    '      Escrever-Log "Barra de tarefas: o Windows nao respondeu ao desafixar $arquivo em $([int]($script:PrazoDesafixarMs / 1000))s - desisto dos pinos neste ciclo e a politica segue."',
+    '      return $false',
+    '    }',
+    '    $rB = @($psB.EndInvoke($hB))',
+    '    $psB.Dispose(); $rsB.Close()',
+    '    return [bool]($rB | Select-Object -Last 1)',
+    '  } catch { Escrever-Log "Barra de tarefas: falha ao desafixar $arquivo ($($_.Exception.Message))."; return $false }',
     '}',
     'function Perfil-DoUsuario($nomeUsuario) {',
     '  if (-not $nomeUsuario) { return $null }',
@@ -2378,6 +2446,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $atuais = @(Get-ChildItem -LiteralPath $pasta -File -Filter "*.lnk" -Force -ErrorAction SilentlyContinue)',
     '  if (-not $atuais.Count) { Escrever-Log "Barra de tarefas: nada fixado por atalho nesta maquina."; return $true }',
     '  $saiu = 0; $ficou = 0; $resistiu = 0',
+    '  $script:BarraTravou = $false',
     '  foreach ($item in $atuais) {',
     '    # casa pelo id do catalogo OU pelo nome real do arquivo - a lista lida da',
     '    # maquina manda nomes como "nopulso (2)", que regra nenhuma do catalogo pega',
@@ -2514,6 +2583,24 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# Arquivamento completo, porém reversível: move os dados do perfil ativo',
     '# para C:\\NoPulsoBackup e depois gera ZIP. Nunca toca Windows, Program',
     '# Files, aplicativos instalados ou a pasta do próprio NOCZenith.',
+    'function Iniciar-ZipEmSegundoPlano([string]$raiz) {',
+    '  try {',
+    '    $rsZ = [runspacefactory]::CreateRunspace(); $rsZ.Open()',
+    '    $psZ = [powershell]::Create(); $psZ.Runspace = $rsZ',
+    '    [void]$psZ.AddScript({',
+    '      param($raiz, $log)',
+    '      function L($m) { try { "$([DateTime]::Now.ToString(\'yyyy-MM-dd HH:mm:ss\')) - $m" | Out-File -FilePath $log -Append -Encoding UTF8 } catch {} }',
+    '      $parcial = $raiz + ".zip.parcial"',
+    '      try {',
+    '        Remove-Item -LiteralPath $parcial -Force -ErrorAction SilentlyContinue',
+    '        Compress-Archive -Path (Join-Path $raiz "*") -DestinationPath ($parcial + ".zip") -Force -ErrorAction Stop',
+    '        Move-Item -LiteralPath ($parcial + ".zip") -Destination ($raiz + ".zip") -Force -ErrorAction Stop',
+    '        L "Arquivamento: ZIP pronto em $raiz.zip (a pasta fica ate o ZIP ser enviado)"',
+    '      } catch { L "Arquivamento: ZIP falhou ($($_.Exception.Message)). Os dados estao INTEIROS em $raiz - compacte a mao; a maquina nao vai repetir o movimento." }',
+    '    }).AddArgument($raiz).AddArgument($CaminhoLog)',
+    '    return @{ ps = $psZ; handle = $psZ.BeginInvoke() }',
+    '  } catch { Escrever-Log "Arquivamento: nao consegui iniciar o ZIP ($($_.Exception.Message)). Os dados estao INTEIROS em $raiz."; return $null }',
+    '}',
     'function Arquivar-DadosDaEstacao($estacao, [string]$versao) {',
     '  if ($Servico -or -not $estacao -or -not [bool]$estacao.arquivarDados) { return $true }',
     '  $marca = Join-Path (Split-Path -Parent $PSCommandPath) ("dados-arquivados-" + $versao.Replace("|", "_").Replace(":", "_") + ".ok")',
@@ -2564,8 +2651,14 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  try { Set-Content -LiteralPath $marca -Value $raiz -Force -ErrorAction Stop } catch { Escrever-Log "Arquivamento: marcador nao gravado ($($_.Exception.Message)) - os dados estao em $raiz; confira antes do proximo ciclo." }',
     '  $script:AreaMudou = $true',
     '  if (-not [bool]$estacao.compactarBackup) { Escrever-Log "Arquivamento concluído: $raiz"; return $true }',
-    '  try { Compress-Archive -Path (Join-Path $raiz "*") -DestinationPath ($raiz + ".zip") -Force -ErrorAction Stop; Escrever-Log "Arquivamento concluído: $raiz.zip (a pasta fica ate o ZIP ser enviado)"; return $true }',
-    '  catch { Escrever-Log "Arquivamento: ZIP falhou ($($_.Exception.Message)). Os dados estao INTEIROS em $raiz - compacte a mao; a maquina nao vai repetir o movimento."; return $true }',
+    // ZIP FORA DO LACO (v116). Compress-Archive de uma pasta grande leva
+    // minutos, e rodava no meio da batida. Agora vai numa linha de execucao
+    // propria: grava .zip.parcial e so renomeia pra .zip no fim - um ZIP
+    // interrompido (reinicio, atualizacao) nunca parece completo. Os dados ja
+    // estao inteiros na pasta; o ZIP e so a copia compacta.
+    '  $script:ZipArquivamento = Iniciar-ZipEmSegundoPlano $raiz',
+    '  Escrever-Log "Arquivamento concluído: $raiz (compactando em segundo plano para $raiz.zip)"',
+    '  return $true',
     '}',
     '',
     '# ---- executa UM comando da fila e devolve o resultado ---------------',
@@ -2577,6 +2670,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     'function Executar-ComandoPendente($cmd) {',
     '  if (-not $cmd) { return }',
     '  Escrever-Log "Comando recebido (id=$($cmd.comandoId))"',
+    '  Marcar-Etapa "Comando do NOC (id=$($cmd.comandoId))"',
     '  try {',
     '    $sb = [scriptblock]::Create($cmd.comando)',
     '    $saidaComando = (& $sb 2>&1 | Out-String)',
@@ -2655,6 +2749,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '',
     'function Sincronizar-Politica {',
     '  try {',
+    '    Marcar-Etapa "Politica: lendo configuracao"',
     '    $cfg = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10',
     '    $pol = $cfg.politica',
     '    if (-not $pol) { return }',
@@ -2673,16 +2768,22 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // precisa rodar mesmo com a politica ja aplicada (quiosque so passa aqui)
     '    if (-not $Servico -and $null -ne $cfg.versaoModeloBasico -and "$($cfg.versaoModeloBasico)" -ne (Versao-ModeloBasicoAplicada)) { try { Aplicar-ModeloBasicoDaConfig $cfg "$($cfg.versaoModeloBasico)" } catch { Escrever-Log "Modelo basico nao sincronizou: $($_.Exception.Message)" } }',
     '    if (Politica-EstaAplicada $versaoServidor) { return }',
+    '    Marcar-Etapa "Politica: papel de parede"',
     '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo) ([bool]$cfg.papelDeParedeSemArte) $cfg.modeloBasico',
+    '    Marcar-Etapa "Politica: travas (pendrive/instalacao)"',
     '    $okUsb = Aplicar-BloqueioUsb ([bool]$pol.bloquearUsbStorage)',
     '    $okInst = Aplicar-BloqueioInstalacao ([bool]$pol.bloquearInstalacao)',
     '    # A BARRA VEM ANTES da limpeza de proposito: Aplicar-BarraTarefas procura',
     '    # o .lnk de origem na propria Area de Trabalho (e no menu Iniciar). Na',
     '    # ordem antiga, um app marcado SO em "Barra" era apagado da Area pela',
     '    # limpeza e logo depois nao era encontrado pra fixar - sumia dos dois.',
+    '    Marcar-Etapa "Politica: barra de tarefas"',
     '    $okBarra = Aplicar-BarraTarefas $pol.estacao',
+    '    Marcar-Etapa "Politica: Area de Trabalho"',
     '    $okEstacao = Aplicar-PerfilEstacao $pol.estacao',
+    '    Marcar-Etapa "Politica: arquivamento"',
     '    $okArquivo = Arquivar-DadosDaEstacao $pol.estacao $versao',
+    '    Marcar-Etapa "Politica: lixeira e icones"',
     '    $okLixeira = Aplicar-VisibilidadeLixeira ([bool]$pol.estacao.ocultarLixeira)',
     '    # depois de tirar atalho, a grade fica com buraco: o Windows guarda a',
     '    # posicao de cada icone e nao reaproveita o lugar do que saiu. So roda',
@@ -2699,6 +2800,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    Set-Content -Path (Caminho-PoliticaAplicada) -Value $versao -Force',
     '    Escrever-Log "Politica versao $versao aplicada."',
     '  } catch { Escrever-Log "Falha ao sincronizar a politica: $($_.Exception.Message)" }',
+    '  finally { Marcar-Etapa "laco principal" }',
     '}',
     '',
     '# lista de programas instalados -> o servidor compara com a ultima e avisa',
@@ -2733,6 +2835,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   // dois tipos de loop, no TOPO de cada volta. A de boot em espera continua
   // acordando a cada tick, so nao faz nada (nem heartbeat, nem comando).
   const linhasCedencia = [
+    '    Pulso-Tick',
     '    Bater-Ponto',
     '    if (-not $Servico) { Marcar-UiAtiva }',
     '    elseif (UiEstaAtiva) {',
@@ -3087,6 +3190,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    if (-not (Test-Path $marcaApp)) { try { Instalar-AppNoPulso; Set-Content -Path $marcaApp -Value (Get-Date).ToString() } catch { Escrever-Log "Instalar-AppNoPulso falhou: $($_.Exception.Message)" } }',
     '  }',
     '  Escrever-Log "NOCZenith iniciado (interno$(if ($Servico) { ", instancia de boot" })) - versao $VersaoScript - ' + codigoTextoPS + '/' + posto + ' - rodando como $env:USERNAME, operador no console: $(Usuario-DoConsole)"',
+    // ANTES da politica de subida: e ela que empacava no MENU.BOARD
+    '  Iniciar-VigiaDeTravamento $UrlHeartbeat "' + codigoTextoPS + '" "' + posto + '"',
     '  Reportar-IpLocal',
     '  Garantir-GatilhoDeRepeticao',
     '  Garantir-AcaoSemJanela',
@@ -3130,6 +3235,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      # entregarComandoPendente): a instancia SYSTEM manda true; a de',
     '      # login, usuario comum, false. Custo zero, ja e uma chamada local.',
     '      $corpo.souAdmin = (Sou-Admin)',
+    // qual das duas instancias bate: o servidor so limpa o "ocupado" da
+    // MESMA instancia que o registrou (a de boot batendo nao prova que a
+    // de login destravou)
+    '      $corpo.instancia = $(if ($Servico) { "sistema" } else { "login" })',
     '      # boot vai em TODA batida (e uma variavel ja lida, custo zero) - e o',
     '      # que deixa o servidor separar "reiniciou" de "so caiu a rede"',
     '      if ($BootEm -ne $null) { $corpo.bootEm = $BootEm; $corpo.desligamentoInesperado = $DesligamentoInesperado }',
@@ -3244,6 +3353,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # chamada extra so empilha atraso em cima do proximo heartbeat - e o',
     '    # heartbeat e a unica coisa que nao pode atrasar (limiar de 90s no NOC).',
     '    if ($resp) {',
+    '      Marcar-Etapa "Acesso remoto (logs do AnyDesk/TeamViewer)"',
     '      try { Verificar-SessaoRemota } catch { Escrever-Log "Falha ao ler log de sessao: $($_.Exception.Message)" }',
     '      try { Verificar-AcessoRemoto } catch { Escrever-Log "Falha ao checar acesso remoto: $($_.Exception.Message)" }',
     '    }',
@@ -3257,6 +3367,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # o AnyDesk vai na mesma cadencia do link: os dois sao leitura barata',
     '    # do que o Windows ja sabe, e viajam na batida seguinte',
     '    if ($contador -eq 1 -or $contador % $TicksParaLink -eq 0) {',
+    '      Marcar-Etapa "Medicoes (AnyDesk, link, disco, RAM, programas, rede, VMs)"',
     '      try { $AnyDeskSvc = Medir-AnyDesk } catch { $AnyDeskSvc = $null }',
     '      try { $AnyDeskId = Medir-AnyDeskId } catch { $AnyDeskId = $null }',
     '      try { $Link = Medir-Link } catch { Escrever-Log "Falha ao medir o link: $($_.Exception.Message)" }',
@@ -3275,7 +3386,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      if ($contador -eq 2 -or $contador % $TicksParaVMs -eq 0) { $vmsAgora = Medir-VMs }',
     '      if ($discoAgora -or $ramAgora -or $redeAgora -or $impAgora -or ($vmsAgora -ne $null)) { Enviar-Telemetria $discoAgora $ramAgora $redeAgora $impAgora $vmsAgora }',
     '    }',
-    '    if ($resp -and $contador % $TicksParaVerificarAtualizacao -eq 0) { Verificar-Atualizacao }',
+    '    if ($resp -and $contador % $TicksParaVerificarAtualizacao -eq 0) { Marcar-Etapa "Atualizacao do agente"; Verificar-Atualizacao }',
     '    # tick pesado nao pode virar queda falsa (ver Bater-Rapido)',
     '    if ($script:UltimoBeatOkEm -ne $null -and (([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $script:UltimoBeatOkEm) -gt $LimiteTickMs)) { Bater-Rapido }',
     '    Start-Sleep -Seconds $IntervaloSegundos',

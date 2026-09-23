@@ -1803,7 +1803,9 @@ function atualizarConteudoDetalhe(codigo, c){
   if(c.ultimoComandoEm && !ultimoFoiZebra){
     const saida = c.ultimoComandoErro
       ? `<span style="color:var(--bad);">erro: ${escapeHtml(c.ultimoComandoErro)}</span>`
-      : `<span style="color:var(--ok);white-space:pre-wrap;">${escapeHtml((c.ultimoComandoResultado||'(sem saída)')).slice(0,600)}</span>`;
+      // saída inteira, rolando dentro da caixa: cortar em 600 escondia
+      // justamente o fim do log do agente (a linha de onde ele parou)
+      : `<pre style="color:var(--ok);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;margin:4px 0 0;font:inherit;">${escapeHtml(c.ultimoComandoResultado||'(sem saída)')}</pre>`;
     infoBits.push(`🖥️ último comando · ${escapeHtml(tempoRelativo(c.ultimoComandoEm))}<br><span style="font-size:11px;">${saida}</span>`);
   }
   // saude do HD (SMART/espaco) e varredura da rede local - ver nocMaquina.js.

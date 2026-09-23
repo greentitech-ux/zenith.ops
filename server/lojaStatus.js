@@ -1020,8 +1020,14 @@ async function heartbeat(codigo, posto, info, token) {
   // que aqueles caminhos ja chamavam.
   const memoria = await garantirEspelho();
   const atual = memoria.get(id) || null;
-  const mensagemPendente = (atual && atual.mensagemPendente) || null;
   const dados = info || {};
+  // PRESENCA (v116): o vigia de travamento do agente bate so pra dizer "o
+  // laco principal esta preso em X, mas a maquina esta viva". Mantem a
+  // maquina no ar, mas NAO recebe comando nem consome o aviso de uso unico -
+  // quem os trataria e justamente o laco preso, e o que fosse entregue aqui
+  // se perderia.
+  const soPresenca = dados.soPresenca === true;
+  const mensagemPendente = soPresenca ? null : ((atual && atual.mensagemPendente) || null);
   // presenca (online/offline, IP, userAgent) continua SEM exigir token - e
   // telemetria de baixo risco e nao pode deixar maquina legada (que ainda
   // nao atualizou o NOCZenith, entao nao manda token) sumir do painel. Ja o
@@ -1045,8 +1051,8 @@ async function heartbeat(codigo, posto, info, token) {
     // marcava "Caiu" de novo, inventando queda que nao houve. Com
     // { merge: true }, nao citar o campo preserva o que estiver la.
     ip: dados.ip || (atual && atual.ip) || null,
-    userAgent: dados.userAgent || (atual && atual.userAgent) || null,
-    abertoDesde: dados.abertoDesde || (atual && atual.abertoDesde) || null,
+    userAgent: (!soPresenca && dados.userAgent) || (atual && atual.userAgent) || dados.userAgent || null,
+    abertoDesde: (!soPresenca && dados.abertoDesde) || (atual && atual.abertoDesde) || null,
     // diagnostico de link (ver redeDiagnostico.js). Entra nesta MESMA escrita
     // de proposito: o heartbeat ja grava a cada 25s, entao medir a rede nao
     // custa nenhuma operacao a mais no Firestore. redeDia/redeHistorico sao
@@ -1059,7 +1065,8 @@ async function heartbeat(codigo, posto, info, token) {
     // que ENCERRA um silencio ja chega dizendo se a maquina esteve viva
     // tentando o tempo todo. E' o unico jeito de saber isso: durante o
     // silencio, por definicao, nada chega aqui.
-    agenteFalhasSeguidas: falhasDeQuemBate(dados.rede),
+    // presenca do vigia nao mede rede: nao zera o que a batida normal contou
+    agenteFalhasSeguidas: soPresenca ? ((atual && atual.agenteFalhasSeguidas) || 0) : falhasDeQuemBate(dados.rede),
   };
 
   // A instancia _Boot so existe quando a instalacao conseguiu criar a tarefa
@@ -1155,6 +1162,21 @@ async function heartbeat(codigo, posto, info, token) {
     patch.ipHistorico = comMudancaDeIp(atual && atual.ipHistorico, 'publico', atual && atual.ip, patch.ip);
   }
 
+  // AGENTE OCUPADO (v116): o vigia informa a etapa em que o laco empacou.
+  // So com token (senao qualquer um pintaria uma maquina de amarelo), e so a
+  // MESMA instancia que registrou limpa - a de boot batendo nao prova que a
+  // de login destravou.
+  const tokenDoBeat = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
+  const ocupadoAntes = (atual && atual.agenteOcupado) || null;
+  if (soPresenca && tokenDoBeat) {
+    const o = sanitizarOcupado(dados.ocupado);
+    if (o) patch.agenteOcupado = { ...o, em: Date.now() };
+  } else if (!soPresenca && ocupadoAntes && instanciaValida(dados.instancia) === ocupadoAntes.instancia) {
+    patch.agenteOcupado = null;
+  }
+
+  const mudouOcupado = patch.agenteOcupado !== undefined && !mesmoOcupado(patch.agenteOcupado, ocupadoAntes);
+
   // ---- decide se ESTA batida vira gravacao no Firestore ----
   // A leitura ja tinha sido resolvida (espelho em memoria); a ESCRITA nao.
   // Gravar toda batida dava, com ~40 maquinas a cada 25s, ~138 mil escritas
@@ -1176,6 +1198,8 @@ async function heartbeat(codigo, posto, info, token) {
     || patch.abertoDesde !== anterior.abertoDesde
     || (patch.tailscale !== undefined && !mesmoTailscale(patch.tailscale, anterior.tailscale || null))
     || patch.redeHistorico !== undefined      // virada de dia da rede
+    // entrou/saiu de uma etapa presa: e o que o painel mostra
+    || mudouOcupado
     // reinício e mudança de link são eventos: não podem esperar o
     // PERSIST_MS, senão um restart do servidor apagaria o rastro
     || eventosNovos.length > 0;
@@ -1203,7 +1227,8 @@ async function heartbeat(codigo, posto, info, token) {
   // leitura a reler as 52. Como o espelho acabou de ser atualizado na linha
   // acima com o que esta batida gravou, basta derrubar a LISTA derivada:
   // ela é recalculada a partir da memória, sem tocar no Firestore.
-  if (eventosNovos.length || patch.tailscale !== undefined) cacheBase.invalidar();
+  // travou/destravou tambem: e o que o painel precisa mostrar na hora
+  if (eventosNovos.length || patch.tailscale !== undefined || mudouOcupado) cacheBase.invalidar();
   // token confere? (maquina legada sem token cadastrado nunca passa aqui -
   // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
   const tokenOk = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
@@ -1214,7 +1239,7 @@ async function heartbeat(codigo, posto, info, token) {
   // o comando PowerShell do Master e ainda o consumia, deixando a maquina de
   // verdade sem receber)
   let comandoPendente = null;
-  if (tokenOk && atual.tipo === 'interno' && atual.comandoPendenteId) {
+  if (!soPresenca && tokenOk && atual.tipo === 'interno' && atual.comandoPendenteId) {
     // souAdmin: o agente diz se esta rodando elevado (a instancia SYSTEM diz
     // true; a de login, usuario comum, false). soComandoAdmin: a sondagem da
     // instancia SYSTEM enquanto cede a vez - "so me de comando que exige admin,
@@ -1302,8 +1327,37 @@ function mesmoTailscale(a, b) {
     && a.nome === b.nome && a.versao === b.versao;
 }
 
-function motivosDeDegradacao(doc) {
+const INSTANCIAS_AGENTE = ['login', 'sistema'];
+function instanciaValida(v) { return INSTANCIAS_AGENTE.includes(v) ? v : null; }
+function sanitizarOcupado(bruto) {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const etapa = String(bruto.etapa || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 80);
+  const desde = Number(bruto.desde);
+  const instancia = instanciaValida(bruto.instancia);
+  if (!etapa || !Number.isFinite(desde) || desde <= 0 || !instancia) return null;
+  // relogio da maquina pode estar adiantado: "desde" no futuro vira agora
+  return { etapa, desde: Math.min(desde, Date.now()), instancia };
+}
+function mesmoOcupado(a, b) {
+  if (!a || !b) return a === b;
+  return a.etapa === b.etapa && a.desde === b.desde && a.instancia === b.instancia;
+}
+// ocupado ha mais que isto vira motivo de degradacao. Comando longo (a
+// limpeza de programas) passa de alguns minutos sem estar travado; 10min
+// sem terminar uma volta ja e motivo pra olhar.
+const AGENTE_OCUPADO_LIMIAR_MS = 10 * 60 * 1000;
+// o registro so vale enquanto o vigia continua batendo: sem presenca nova, a
+// maquina ou destravou (e a batida normal limpa) ou caiu (e ai e offline)
+const AGENTE_OCUPADO_FRESCO_MS = 3 * 60 * 1000;
+
+function motivosDeDegradacao(doc, agora = Date.now()) {
   const motivos = [];
+  const oc = doc.agenteOcupado;
+  if (oc && oc.etapa && agora - Number(oc.em || 0) < AGENTE_OCUPADO_FRESCO_MS
+    && agora - Number(oc.desde || 0) >= AGENTE_OCUPADO_LIMIAR_MS) {
+    const min = Math.floor((agora - Number(oc.desde)) / 60000);
+    motivos.push(`agente ocupado há ${min}min em: ${oc.etapa}${oc.instancia === 'sistema' ? ' (instância de sistema)' : ''}`);
+  }
   const link = doc.link || null;
   if (link && link.ethernetCaida) motivos.push('Ethernet caída');
   if (link && link.tipo === 'wifi' && !link.ethernetCaida) motivos.push('só no Wi-Fi');
@@ -3641,7 +3695,9 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
     comandoTravadoDesde: null,
     ultimoComandoEm: patch.executadoEm,
     ultimoComandoTexto: String(comando.comando || '').slice(0, 200),
-    ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 2000) : null,
+    // 4000: a leitura do log do agente (ação "Ler log do agente") traz ~40
+    // linhas; em 2000 a parte mais recente - a que diz onde travou - sumia
+    ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 4000) : null,
     ultimoComandoErro: patch.erro ? String(patch.erro).slice(0, 500) : null,
     ...(inventarioAtalhos ? { atalhosDesktop: inventarioAtalhos, atalhosDesktopEm: Date.now() } : {}),
     ...(eventoZebra ? { eventos: [...((compSnap.data() || {}).eventos || []), eventoZebra].slice(-EVENTOS_MAX) } : {}),
@@ -4617,6 +4673,7 @@ module.exports = {
   comandoResetZebra, comandoEncerrarGcomWcf,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
+  sanitizarOcupado, AGENTE_OCUPADO_LIMIAR_MS,
   logosDaUnidade, versaoLogosDe, versaoModeloBasicoDe, linhaDoCarimbo, chaveLogoCarimbo, TIPOS_LOGO_CARIMBO,
   definirLogoCarimbo, removerLogoCarimbo, logoCarimboSalvo, logoCarimboDaMaquina,
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,

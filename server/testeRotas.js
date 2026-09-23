@@ -13489,6 +13489,208 @@ $r | ConvertTo-Json -Depth 6 -Compress
   console.log(`${okVoltarSw ? '✓' : '✗'} Menu: a seta "‹" nunca volta pra arquivo (o /sw.js da notificação abria o código no celular)`);
 
   // ------------------------------------------------------------------
+  // VIGIA DE TRAVAMENTO + LER LOG DO AGENTE (v116, pedido do Master 23/09).
+  // DOM-TIROL-MENU.BOARD ficou 33min "calado", voltou sozinho, e o porquê só
+  // existia no NOCZenith.log dentro da máquina. O laço principal empacava num
+  // passo da política (Área de Trabalho/barra) e a máquina sumia do NOC.
+  //
+  // O que tranca:
+  //  - laço preso NÃO some do NOC: o vigia bate presença com a ETAPA, e a
+  //    máquina fica degradada com o motivo;
+  //  - presença não recebe comando nem consome aviso (se perderiam);
+  //  - só quem tem o token registra "ocupado", e só a MESMA instância limpa;
+  //  - desafixar da barra desiste em 15s; o ZIP roda fora do laço;
+  //  - "Ler log do agente" lê arquivo de verdade e cabe na ficha.
+  // O agente RODA no pwsh (vigia contra um servidor HTTP local de verdade).
+  let okVigia = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const acoes = require('/home/user/adyen-monitor/server/agenteAcoes.js');
+    const fs3 = require('fs'); const os3 = require('os'); const path3 = require('path'); const cp3 = require('child_process');
+    const U = 'VIGIA_T';
+    await ls.cadastrarComputador(U, 'MENU.BOARD Teste', 'interno');
+    const P = (await ls.listar()).find((c) => c.codigo === U && c.nome === 'MENU.BOARD Teste').posto;
+    const TK = await ls.garantirAgentToken(U, P);
+    const agora = Date.now();
+    const bate = (info, tk = TK) => ls.heartbeat(U, P, { userAgent: 'NOCZenith/1.0 (Windows NT; PowerShell)', ...info }, tk);
+    await bate({ instancia: 'login' });
+    await ls.enfileirarComando(U, P, 'Write-Output ok', { origem: 'teste-vigia' });
+    const ocupado15 = { etapa: 'Politica: barra de tarefas', desde: agora - 15 * 60000, instancia: 'login' };
+    const pres = await bate({ soPresenca: true, instancia: 'login', ocupado: ocupado15, userAgent: 'outro' });
+    const docPres = (await ls.listar()).find((c) => c.codigo === U && c.posto === P) || {};
+    const presSemToken = await bate({ soPresenca: true, instancia: 'login', ocupado: { ...ocupado15, etapa: 'forjado' } }, 'errado');
+    const docSemToken = (await ls.listar()).find((c) => c.codigo === U && c.posto === P) || {};
+    // a de SISTEMA batendo não limpa o ocupado da de login
+    const beatSistema = await bate({ instancia: 'sistema', souAdmin: true, soComandoAdmin: true });
+    const docAposSistema = (await ls.listar()).find((c) => c.codigo === U && c.posto === P) || {};
+    // aviso chega com a máquina presa: a presença não pode consumir
+    await ls.enviarMensagem(U, P, 'Aviso de teste', 'master@teste');
+    const pres2 = await bate({ soPresenca: true, instancia: 'login', ocupado: ocupado15 });
+    // a de LOGIN voltando: limpa, e recebe o comando e o aviso que a presença NÃO consumiu
+    const beatLogin = await bate({ instancia: 'login' });
+    const docAposLogin = (await ls.listar()).find((c) => c.codigo === U && c.posto === P) || {};
+    // saída grande do comando cabe (log do agente)
+    let guardou4000 = false;
+    if (beatLogin.comandoPendente) {
+      await ls.marcarComandoExecutado(beatLogin.comandoPendente.comandoId, { resultado: 'L'.repeat(5000) }, { codigo: U, posto: P, token: TK });
+      const bruto = DOCS.get(`lojaStatus/${U}__${P}`) || {};
+      guardou4000 = String(bruto.ultimoComandoResultado || '').length === 4000;
+    }
+    const mot = (oc, emAtras) => ls.motivosDeDegradacao({ agenteOcupado: { ...oc, em: agora - emAtras } }, agora);
+
+    // ---- agente ----
+    const ps = vg.montarScriptVigia({ codigo: U, posto: P, tipo: 'interno', agentToken: TK, maquinaNome: 'M' });
+    const psQ = vg.montarScriptVigia({ codigo: U, posto: P, tipo: 'atendimento', agentToken: TK, maquinaNome: 'M' });
+    const corpo = (fonte, nome) => { const i = fonte.indexOf('function ' + nome); return i < 0 ? '' : fonte.slice(i, fonte.indexOf('\n}\n', i) + 3); };
+    const linhaDe = (fonte, re) => (fonte.split('\n').find((l) => re.test(l)) || '');
+    const pwshBin = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh']
+      .filter(Boolean).find((c) => { try { return fs3.statSync(c).isFile(); } catch (e) { return false; } });
+    let ag = null; const recebidos = [];
+    if (pwshBin) {
+      const srv = require('http').createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { try { recebidos.push({ corpo: JSON.parse(b), token: req.headers['x-noc-token'] }); } catch (e) {} res.end('{}'); }); });
+      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      const porta = srv.address().port;
+      const dir = fs3.mkdtempSync(path3.join(os3.tmpdir(), 'vigia-'));
+      fs3.mkdirSync(path3.join(dir, 'arq'));
+      for (let i = 0; i < 30; i++) fs3.writeFileSync(path3.join(dir, 'arq', `f${i}.txt`), 'x'.repeat(2000));
+      const defs = [
+        linhaDe(ps, /^\$script:Pulso = \$null$/),
+        corpo(ps, 'Agora-Ms'), corpo(ps, 'Pulso-Tick'), corpo(ps, 'Marcar-Etapa'), corpo(ps, 'Iniciar-VigiaDeTravamento'),
+        corpo(ps, 'Iniciar-ZipEmSegundoPlano'), corpo(ps, 'Desafixar-DaBarra'),
+      ];
+      const iCorpo = ps.indexOf('$script:CorpoDesafixar = {');
+      const blocoCorpo = ps.slice(iCorpo, ps.indexOf('\n}\n', iCorpo) + 3);
+      const harness = `
+$ErrorActionPreference = "Continue"
+$Servico = $false
+$CabecalhosAgente = @{ "X-NOC-Token" = "${TK}" }
+$CaminhoLog = "${dir}/NOCZenith.log"
+$global:LOG = New-Object System.Collections.ArrayList
+function Escrever-Log($m) { [void]$global:LOG.Add([string]$m) }
+${defs.join('\n')}
+${blocoCorpo}
+$script:PrazoDesafixarMs = 15000
+$script:BarraTravou = $false
+$r = @{}
+# 1. vigia: laço andando = nenhuma presença; laço parado = presença com a etapa
+Iniciar-VigiaDeTravamento "http://127.0.0.1:${porta}/hb" "${U}" "${P}"
+$script:Pulso.esperaS = 1; $script:Pulso.limiteMs = 2500
+for ($i = 0; $i -lt 5; $i++) { Pulso-Tick; Start-Sleep -Milliseconds 800 }
+$r.presencasAndando = [int]$script:Pulso.presencas
+Marcar-Etapa "Politica: barra de tarefas"
+Start-Sleep -Seconds 5
+$r.presencasParado = [int]$script:Pulso.presencas
+# 2. desafixar: corpo que pendura -> desiste no prazo, e os outros pinos do ciclo nem tentam
+$script:CorpoDesafixar = { param($a) Start-Sleep -Seconds 30; $true }
+$script:PrazoDesafixarMs = 1500
+$t = [Diagnostics.Stopwatch]::StartNew(); $a1 = Desafixar-DaBarra "x.lnk"; $r.travouMs = $t.ElapsedMilliseconds
+$t = [Diagnostics.Stopwatch]::StartNew(); $a2 = Desafixar-DaBarra "y.lnk"; $r.segundoMs = $t.ElapsedMilliseconds
+$r.travouRet = $a1; $r.segundoRet = $a2; $r.logTravou = (@($global:LOG) -join " | ")
+$script:BarraTravou = $false
+$script:CorpoDesafixar = { param($a) $true }
+$r.normal = Desafixar-DaBarra "z.lnk"
+$script:CorpoDesafixar = { param($a) $false }
+$r.semVerbo = Desafixar-DaBarra "w.lnk"
+# 3. ZIP fora do laço: volta na hora, e o .zip só aparece inteiro
+$t = [Diagnostics.Stopwatch]::StartNew(); $z = Iniciar-ZipEmSegundoPlano "${dir}/arq"; $r.zipVoltouMs = $t.ElapsedMilliseconds
+$r.zipLogo = (Test-Path "${dir}/arq.zip")
+for ($i = 0; $i -lt 40 -and -not (Test-Path "${dir}/arq.zip"); $i++) { Start-Sleep -Milliseconds 250 }
+Start-Sleep -Milliseconds 300
+$r.zipFim = (Test-Path "${dir}/arq.zip"); $r.parcial = @(Get-ChildItem "${dir}" -Filter "*.parcial*").Count
+$r.zipLog = (Get-Content "${dir}/NOCZenith.log" -ErrorAction SilentlyContinue) -join " | "
+$r | ConvertTo-Json -Compress
+`;
+      const arq = path3.join(dir, 'h.ps1');
+      fs3.writeFileSync(arq, harness);
+      const out = await new Promise((resolve) => {
+        const pr = cp3.spawn(pwshBin, ['-NoProfile', '-NonInteractive', '-File', arq]);
+        let o = '', e = ''; pr.stdout.on('data', (c) => { o += c; }); pr.stderr.on('data', (c) => { e += c; });
+        const tmo = setTimeout(() => pr.kill('SIGKILL'), 120000);
+        pr.on('close', () => { clearTimeout(tmo); resolve({ o, e }); });
+      });
+      srv.close();
+      try { ag = JSON.parse(out.o.trim().split('\n').pop()); } catch (e) { ag = { erro: out.o + out.e }; }
+      if (ag.erro) console.log('  pwsh: ' + String(ag.erro).slice(0, 800));
+      else if (out.e.trim()) console.log('  pwsh stderr: ' + out.e.slice(0, 600));
+    }
+    // ---- ação "Ler log do agente": roda o modelo contra arquivos de verdade ----
+    const acao = (acoes.MODELOS_COMANDO || []).find((m) => m.id === 'ler-log-agente');
+    let saidaLog = null;
+    if (pwshBin && acao) {
+      const raiz = fs3.mkdtempSync(path3.join(os3.tmpdir(), 'lerlog-'));
+      const mk = (quem, n, prefixo) => { const d = path3.join(raiz, 'Users', quem, 'AppData', 'Local', 'NOCZenith'); fs3.mkdirSync(d, { recursive: true }); fs3.writeFileSync(path3.join(d, 'NOCZenith.log'), Array.from({ length: n }, (_, k) => `2026-09-23 23:${String(k % 60).padStart(2, '0')}:00 - ${prefixo} ${k + 1}${' .'.repeat(k === n - 1 ? 120 : 0)}`).join('\n')); };
+      mk('operador', 400, 'linha-operador');
+      mk('tecnico', 300, 'linha-tecnico');
+      // o do operador é o mais RECENTE: tem de vir primeiro
+      const agoraS = Date.now() / 1000;
+      fs3.utimesSync(path3.join(raiz, 'Users', 'tecnico', 'AppData', 'Local', 'NOCZenith', 'NOCZenith.log'), agoraS - 3600, agoraS - 3600);
+      fs3.utimesSync(path3.join(raiz, 'Users', 'operador', 'AppData', 'Local', 'NOCZenith', 'NOCZenith.log'), agoraS - 60, agoraS - 60);
+      const arqL = path3.join(raiz, 'l.ps1');
+      fs3.writeFileSync(arqL, `$env:SystemDrive = "${raiz}"; $env:SystemRoot = "${raiz}/Windows"\nfunction Get-CimInstance { @() }\n& { ${acao.comando} }`);
+      const r = cp3.spawnSync(pwshBin, ['-NoProfile', '-NonInteractive', '-File', arqL], { encoding: 'utf8', timeout: 60000 });
+      saidaLog = String(r.stdout || '') + String(r.stderr || '');
+    }
+    const temPw = !!pwshBin; const a = ag || {};
+    const mutante = /Remove-Item|Set-Item|Set-Content|Stop-|Start-Process|Invoke-WebRequest|Invoke-RestMethod|New-Item/;
+    const sLoop = ps.indexOf("Iniciar-VigiaDeTravamento $UrlHeartbeat");
+    const conf = {
+      // ---- servidor ----
+      'presença mantém a máquina no ar e grava a etapa presa': !!docPres.online && docPres.agenteOcupado && docPres.agenteOcupado.etapa === 'Politica: barra de tarefas',
+      'presença NÃO entrega comando nem consome o aviso, e não troca o userAgent':
+        !pres.comandoPendente && !pres.mensagemPendente && !pres2.comandoPendente && !pres2.mensagemPendente
+        && docPres.userAgent === 'NOCZenith/1.0 (Windows NT; PowerShell)',
+      'ocupado há 15min = degradado, com a etapa no motivo':
+        docPres.estado === 'degradado' && (docPres.degradacao || []).some((m) => /ocupado há 15min em: Politica: barra de tarefas/.test(m)),
+      'sem o token ninguém pinta a máquina de amarelo': !!presSemToken && docSemToken.agenteOcupado && docSemToken.agenteOcupado.etapa === 'Politica: barra de tarefas',
+      'a instância de sistema batendo NÃO limpa o ocupado da de login': !!beatSistema && docAposSistema.agenteOcupado && docAposSistema.agenteOcupado.instancia === 'login',
+      'a de login voltando limpa, e recebe o comando e o aviso guardados':
+        !docAposLogin.agenteOcupado && docAposLogin.estado === 'operacional' && !!beatLogin.comandoPendente && !!beatLogin.mensagemPendente,
+      'ocupado curto (comando longo) ou vigia calado não degradam':
+        mot({ ...ocupado15, desde: agora - 3 * 60000 }, 10000).length === 0 && mot(ocupado15, 5 * 60000).length === 0 && mot(ocupado15, 10000).length === 1,
+      'ocupado forjado sem etapa/instância é descartado':
+        ls.sanitizarOcupado({ etapa: '', desde: 1, instancia: 'login' }) === null && ls.sanitizarOcupado({ etapa: 'x', desde: 1, instancia: 'root' }) === null,
+      'a ficha guarda 4000 caracteres da saída (o fim do log não some)': guardou4000,
+      // ---- ação ----
+      'a ação "Ler log do agente" está no catálogo, só lê, roda como sistema e sem aprovação':
+        !!acao && acao.requerAdmin === true && acao.requerAprovacao === false && !mutante.test(acao.comando) && acao.comando.length < 8000,
+      'AÇÃO: traz o fim de cada log, o mais recente primeiro, e cabe na ficha': !temPw ? 'pular'
+        : !!saidaLog && /linha-operador 400/.test(saidaLog) && /linha-tecnico 300/.test(saidaLog)
+          && !/linha-operador 300\b/.test(saidaLog) && !/linha-tecnico 200\b/.test(saidaLog)
+          && saidaLog.indexOf('linha-operador') < saidaLog.indexOf('linha-tecnico'),
+      'AÇÃO: linha comprida é cortada e o total cabe nos 4000': !temPw ? 'pular'
+        : !!saidaLog && /\.\.\.$/m.test(saidaLog) && saidaLog.length < 4000,
+      // ---- agente (texto do laço) ----
+      'o agente subiu de versão': vg.VERSAO_VIGIA >= 116,
+      'toda volta do laço começa avisando o vigia (e a cedência também)': /const linhasCedencia = \[\n\s+'    Pulso-Tick',/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8')),
+      'o vigia sobe ANTES da política de subida (era ela que empacava)':
+        sLoop > 0 && sLoop < ps.indexOf('try { Sincronizar-Politica }', sLoop),
+      'quiosque não liga o vigia (lá quem bate é o navegador)': !/Iniciar-VigiaDeTravamento \$UrlHeartbeat/.test(psQ),
+      'cada passo da política diz o nome dele':
+        ['Politica: barra de tarefas', 'Politica: Area de Trabalho', 'Politica: arquivamento', 'Politica: papel de parede'].every((e) => corpo(ps, 'Sincronizar-Politica').includes(`Marcar-Etapa "${e}"`)),
+      'a batida normal diz a instância': /\$corpo\.instancia = \$\(if \(\$Servico\) \{ "sistema" \} else \{ "login" \}\)/.test(ps),
+      // ---- agente rodando ----
+      'AGENTE: laço andando = vigia quieto': !temPw ? 'pular' : a.presencasAndando === 0,
+      'AGENTE: laço parado = presença com a etapa, o token e sem pegar comando': !temPw ? 'pular'
+        : a.presencasParado >= 1 && recebidos.length >= 1 && recebidos.every((x) => x.corpo.soPresenca === true && x.token === TK)
+          && recebidos.some((x) => x.corpo.ocupado && x.corpo.ocupado.etapa === 'Politica: barra de tarefas' && x.corpo.ocupado.instancia === 'login'),
+      'AGENTE: desafixar pendurado desiste no prazo e larga os outros pinos do ciclo': !temPw ? 'pular'
+        : a.travouRet === false && a.travouMs < 5000 && a.segundoRet === false && a.segundoMs < 500 && /nao respondeu ao desafixar/.test(a.logTravou || ''),
+      'AGENTE: desafixar normal continua funcionando': !temPw ? 'pular' : a.normal === true && a.semVerbo === false,
+      'AGENTE: o ZIP volta na hora e só aparece inteiro': !temPw ? 'pular'
+        : a.zipVoltouMs < 3000 && a.zipLogo === false && a.zipFim === true && a.parcial === 0 && /ZIP pronto/.test(a.zipLog || ''),
+    };
+    const pulou = Object.entries(conf).filter(([, v]) => v === 'pular').map(([n]) => n);
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okVigia = !falhas.length;
+    if (pulou.length) console.log(`  (sem pwsh: ${pulou.length} asserção(ões) do agente puladas)`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pres=${JSON.stringify({ oc: docPres.agenteOcupado, est: docPres.estado, deg: docPres.degradacao, ua: docPres.userAgent })} login=${JSON.stringify({ oc: docAposLogin.agenteOcupado, est: docAposLogin.estado, cmd: !!beatLogin.comandoPendente, msg: !!beatLogin.mensagemPendente })} ag=${JSON.stringify(ag).slice(0, 700)} recebidos=${recebidos.length} log=${String(saidaLog).slice(0, 400)})`);
+    await ls.removerComputador(U, P);
+  } catch (e) { okVigia = false; console.log('  erro: ' + e.message); }
+  if (!okVigia) ruins += 1;
+  console.log(`${okVigia ? '✓' : '✗'} NOC: agente preso não some (vigia bate "ocupado em X", máquina degradada), barra com prazo, ZIP fora do laço e "Ler log do agente"`);
+
+  // ------------------------------------------------------------------
   // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)
   // "preciso poder marcar como medidor de quedas da unidade - um equipamento
   // que nao tem acesso, como um Modem, para ser o ponto de medicao".

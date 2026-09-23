@@ -1712,6 +1712,10 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // comum e deixava instalar/desinstalar preso na fila.
       souAdmin: req.body.souAdmin === true,
       soComandoAdmin: req.body.soComandoAdmin === true,
+      // vigia de travamento (v116): presenca sem comando, com a etapa presa
+      soPresenca: req.body.soPresenca === true,
+      ocupado: req.body.ocupado,
+      instancia: req.body.instancia,
     }, token);
     res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico });
   } catch (err) {

@@ -212,7 +212,49 @@ ${TRECHO_EDGE}
 $R.Add('AVISO: o icone some da barra no proximo logon do operador.')
 "Administrador: $admin"; $R -join "\`n"`;
 
+// LER O LOG DO AGENTE (pedido do Master, 23/09/2026). Nasceu do
+// DOM-TIROL-MENU.BOARD: 33min calado, voltou sozinho, e o porque so estava no
+// NOCZenith.log DENTRO da maquina - o servidor nao guarda nada. So LE.
+// Roda como SYSTEM (requerAdmin) de proposito: e a unica instancia que
+// enxerga o log de TODOS os perfis e a linha de comando das copias do agente,
+// e continua respondendo quando a instancia do usuario e que esta presa.
+// O tamanho e contado pra caber nos 4000 caracteres que a ficha guarda:
+// quanto mais logs, menos linhas de cada - a mais recente vem primeiro.
+const MODELO_LER_LOG = `# Ler o log do agente (NoPulso). So LE.
+$ErrorActionPreference = 'SilentlyContinue'
+$R = New-Object System.Collections.Generic.List[string]
+$logs = @(Get-ChildItem "$env:SystemDrive\\Users\\*\\AppData\\Local\\NOCZenith\\NOCZenith.log", "$env:SystemRoot\\System32\\config\\systemprofile\\AppData\\Local\\NOCZenith\\NOCZenith.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3)
+$procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object { [string]$_.CommandLine -match 'NOCZenith' })
+$R.Add("Copias do agente rodando: $($procs.Count)")
+foreach ($p in $procs) {
+  $dono = ''; try { $dono = [string](Invoke-CimMethod -InputObject $p -MethodName GetOwner).User } catch {}
+  $cpu = ''; try { $cpu = [math]::Round((Get-Process -Id $p.ProcessId).CPU, 1) } catch {}
+  $papel = if ([string]$p.CommandLine -match 'Servico|servico') { 'sistema' } else { 'login' }
+  $R.Add("  PID $($p.ProcessId) | $papel | $dono | desde $(([datetime]$p.CreationDate).ToString('dd/MM HH:mm')) | CPU $($cpu)s")
+}
+if (-not $logs.Count) { $R.Add("Nenhum NOCZenith.log encontrado nesta maquina."); $R -join "\`n"; return }
+$porLog = [math]::Floor(36 / $logs.Count)
+foreach ($l in $logs) {
+  $quem = if ($l.FullName -match 'systemprofile') { 'sistema' } else { ($l.FullName -split '\\\\')[2] }
+  $R.Add('')
+  $R.Add("== $quem | ultima escrita $($l.LastWriteTime.ToString('dd/MM HH:mm:ss'))")
+  foreach ($linha in @(Get-Content -LiteralPath $l.FullName -Tail $porLog)) {
+    $t = [string]$linha
+    if ($t.Length -gt 140) { $t = $t.Substring(0, 140) + '...' }
+    $R.Add($t)
+  }
+}
+$R -join "\`n"`;
+
 const MODELOS_COMANDO = [
+  {
+    id: 'ler-log-agente',
+    nome: 'Ler log do agente',
+    descricao: 'Só LÊ: traz as últimas linhas do NOCZenith.log de cada perfil da máquina (e da instância de sistema) e quantas cópias do agente estão rodando, com dono, desde quando e CPU. É o que diz ONDE o agente parou quando a máquina ficou calada. Roda pela instância de sistema, então responde mesmo com a do usuário presa. Não muda nada.',
+    requerAprovacao: false,
+    requerAdmin: true,
+    comando: MODELO_LER_LOG,
+  },
   {
     id: 'inventario-programas',
     nome: 'Inventário de programas instalados',
