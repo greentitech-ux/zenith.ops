@@ -521,6 +521,15 @@ function kpisPendentesDoEnvio(kpisExtras, defs) {
   }));
 }
 
+function kpisObrigatoriosPendentes(kpisExtras, defs) {
+  const origem = kpisExtras && typeof kpisExtras === 'object' ? kpisExtras : {};
+  return (defs || []).filter((k) => {
+    if (!k || !k.campo || k.obrigatorio !== true) return false;
+    const valor = origem[k.campo];
+    return valor == null || String(valor).trim() === '';
+  }).map((k) => String(k.label || k.campo).slice(0, 100));
+}
+
 // resolve campo->tipo dos kpisExtras configurados pro grupo da unidade (ver
 // grupos.js) - usa o grupo REAL da unidade, nao o id que o cliente mandou no
 // payload, pra nao confiar em um "grupo" desatualizado/errado vindo do form
@@ -579,6 +588,10 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
   }
   const tiposKpi = await tiposKpiDaUnidade(unidade);
   const grupoKpi = await grupos.grupoDaUnidade(unidade);
+  const obrigatoriosPendentes = kpisObrigatoriosPendentes(kpisExtras, grupoKpi?.kpisExtras);
+  if (obrigatoriosPendentes.length) {
+    throw new Error(`Preencha o(s) KPI(s) obrigatório(s) antes de lançar o fechamento: ${obrigatoriosPendentes.join(', ')}.`);
+  }
   // Guarda a lista de campos que chegaram vazios para o aviso e o relatório.
   // O mapa original ainda contém '' versus '0'; depois de sanitizado essa
   // diferença deixa de existir e não pode mais ser inferida com segurança.

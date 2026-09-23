@@ -10,6 +10,7 @@ const formularios = require('./formularios');
 const tarefas = require('./tarefas');
 const lojaStatus = require('./lojaStatus');
 const googleGmail = require('./googleGmail');
+const unidades = require('./unidades');
 
 const AUDITORIA = db.collection('coworkApiAuditoria');
 const IDEMPOTENCIA = db.collection('coworkApiIdempotencia');
@@ -29,7 +30,7 @@ const FERRAMENTAS = Object.freeze({
   criar_usuario: { descricao: 'Cria acesso copiando permissões de um usuário-modelo.', risco: 'alto', obrigatorios: ['modelo', 'email', 'username'], confirmar: true, devolveSegredo: true },
   desbloquear_usuario: { descricao: 'Desbloqueia um acesso existente sem trocar a senha.', risco: 'alto', obrigatorios: ['usuario'], confirmar: true },
   criar_nova_senha: { descricao: 'Gera e aplica senha temporária aleatória; Master precisa repassá-la com segurança.', risco: 'alto', obrigatorios: ['usuario'], confirmar: true, devolveSegredo: true },
-  executar_noc: { descricao: 'Enfileira uma ação fechada do NOC em computadores.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], confirmar: true },
+  executar_noc: { descricao: 'Enfileira uma ação fechada do NOC em computadores. Resetar Zebra só é permitido em unidade com marca Domino\'s configurada e Zebra monitorada. Para "TEF parou", use gsurf-rsa: reinicia o GSurfRSA Listener somente nas cinco unidades autorizadas e pode interromper uma transação por alguns segundos.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], confirmar: true },
 });
 
 function listarFerramentas() {
@@ -48,7 +49,7 @@ const PROPRIEDADES_COMUNS = {
   tarefaId: { type: 'string' }, motivo: { type: 'string' }, usuario: { type: 'string', description: 'E-mail ou username.' },
   pedirTrocaSenha: { type: 'boolean' }, modelo: { type: 'string' }, email: { type: 'string' }, username: { type: 'string' },
   tipo: { type: 'string' }, modo: { type: 'string', enum: ['link', 'preenchido'] }, campos: { type: 'object' }, linhas: { type: 'array', items: { type: 'object' } },
-  tarefa: { type: 'string', enum: ['reiniciar', 'abortar', 'anydesk', 'zebra', 'rede', 'corrigir-memoria-limitada'] },
+  tarefa: { type: 'string', enum: ['reiniciar', 'abortar', 'anydesk', 'zebra', 'gsurf-rsa', 'rede', 'corrigir-memoria-limitada'] },
   alvos: { type: 'array', items: { type: 'object', required: ['codigo', 'posto'], properties: { codigo: { type: 'string' }, posto: { type: 'string' } } } },
   limite: { type: 'number' }, confirmar: { type: 'boolean', description: 'Somente true após confirmação explícita do Master.' },
   idempotencyKey: { type: 'string', description: 'UUID novo por intenção de escrita; reutilize apenas ao repetir a mesma chamada.' },
@@ -153,6 +154,41 @@ async function despachar(nome, entrada, ator) {
       // e o resumo ja traz o campo, entao nao custa leitura nenhuma.
       versaoAgente: m.agenteVersao || null,
     }));
+  }
+  if (nome === 'executar_noc') {
+    const tarefa = String(p.tarefa || '');
+    const alvos = Array.isArray(p.alvos) ? p.alvos.filter((a) => a && a.codigo && a.posto) : [];
+    if (!alvos.length) throw new Error('Informe ao menos um computador alvo (codigo e posto).');
+    if (tarefa === 'zebra') {
+      // Marca vem do perfil explícito da unidade; nunca do nome. Sem perfil
+      // Domino's ou sem Zebra monitorada, não há comando para enfileirar.
+      const codigos = [...new Set(alvos.map((a) => String(a.codigo)))];
+      for (const codigo of codigos) {
+        const perfil = await unidades.perfil(codigo);
+        if (!perfil || perfil.marca !== 'dominos') {
+          throw new Error(`Reset de Zebra recusado para ${codigo}: a unidade precisa estar cadastrada com marca Domino's.`);
+        }
+        const zebras = await lojaStatus.impressorasPraSondar(codigo);
+        if (!zebras.length) {
+          throw new Error(`Reset de Zebra recusado para ${codigo}: não há impressora Zebra monitorada com IP atual nesta unidade.`);
+        }
+      }
+    }
+    if (tarefa === 'gsurf-rsa') {
+      // O TEF só usa este listener nas unidades abaixo. A permissão é por
+      // código canônico da unidade, nunca por trecho do nome exibido.
+      const unidadesTefAutorizadas = new Set([
+        "Domino's Carrinho Aeroporto Recife",
+        'Dominos Praça Aeroporto Recife',
+        'Spoleto Praça Aeroporto Recife',
+        'Spoleto Shopping Recife',
+        'Spoleto Shopping Tacaruna',
+      ]);
+      const naoAutorizadas = [...new Set(alvos.map((a) => String(a.codigo)))].filter((codigo) => !unidadesTefAutorizadas.has(codigo));
+      if (naoAutorizadas.length) {
+        throw new Error(`TEF parou / GSurfRSA recusado para: ${naoAutorizadas.join(', ')}. Permitido somente em Dom Car Aero Recife, Dom Praça Aero Recife, Spo Praça Aero Recife, Spo Shop Recife e Spo Shop Tacaruna.`);
+      }
+    }
   }
   const mapa = {
     criar_tarefa: 'criar_tarefa', criar_reuniao: 'marcar_reuniao',

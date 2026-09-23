@@ -66,12 +66,17 @@
   .szc-anexo-btn.szc-anexo-tem{color:var(--accent,#b8ff3c);}
   /* anexo no FORMULARIO DE ABERTURA: quem abre o chamado normalmente já está
      com o print na mão - mandar depois numa segunda mensagem se perdia */
-  .szc-anexo-abrir{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;margin-bottom:10px;
+  .szc-anexo-inicial-wrap{position:relative;margin-bottom:10px;}
+  .szc-anexo-abrir{display:flex;align-items:center;gap:8px;width:100%;padding:9px 38px 9px 11px;margin-bottom:0;
     border:1px dashed #2c3542;border-radius:8px;background:#12161b;color:#7d8896;font-size:12.5px;
     cursor:pointer;transition:border-color .15s ease,color .15s ease;}
   .szc-anexo-abrir:hover{border-color:var(--accent,#b8ff3c);color:#e7ecf1;}
   .szc-anexo-abrir.szc-anexo-tem{border-style:solid;border-color:var(--accent,#b8ff3c);color:#e7ecf1;}
   .szc-anexo-abrir span:last-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .szc-anexo-inicial-remover{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:27px;height:27px;border:0;
+    border-radius:7px;background:transparent;color:#ff7b72;font-size:20px;line-height:1;cursor:pointer;}
+  .szc-anexo-inicial-remover:hover{background:rgba(248,81,73,.15);color:#ff5c5c;}
+  .szc-anexo-inicial-remover.szc-hidden{display:none;}
   .szc-msg img.szc-anexo-img{max-width:180px;max-height:180px;border-radius:8px;border:1px solid #232a33;margin-top:4px;display:block;}
   /* previa do que vai junto. O icone 📎 -> ✅ sozinho e discreto demais pra
      quem acabou de colar um print: sem VER a imagem, a duvida "colou?" faz
@@ -385,22 +390,34 @@
       <div class="szc-label">Mensagem</div>
       <textarea class="szc-textarea nao-maiusc" id="szc-texto" maxlength="1000" placeholder="ex: não consigo entrar no sistema"></textarea>
       <div class="szc-label">Anexo (opcional)</div>
-      <label class="szc-anexo-abrir" id="szc-inicial-anexo-label">
-        <span id="szc-inicial-anexo-icone">📎</span>
-        <span id="szc-inicial-anexo-nome">Anexar print, foto ou PDF</span>
-        <input type="file" id="szc-inicial-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
-      </label>
+      <div class="szc-anexo-inicial-wrap">
+        <label class="szc-anexo-abrir" id="szc-inicial-anexo-label">
+          <span id="szc-inicial-anexo-icone">📎</span>
+          <span id="szc-inicial-anexo-nome">Anexar print, foto ou PDF</span>
+          <input type="file" id="szc-inicial-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+        </label>
+        <button type="button" class="szc-anexo-inicial-remover szc-hidden" id="szc-inicial-anexo-remover" title="Remover anexo" aria-label="Remover anexo">×</button>
+      </div>
       <button type="button" class="szc-enviar" id="szc-iniciar">Iniciar conversa</button>
       <div class="szc-erro szc-hidden" id="szc-erro-inicial"></div>`;
     corpo.querySelector('#szc-iniciar').addEventListener('click', iniciarConversa);
     // mostra o nome do arquivo escolhido - sem isso não dá pra saber se o
     // clique pegou, e a pessoa acaba mandando de novo
     const inicialAnexo = corpo.querySelector('#szc-inicial-anexo');
-    inicialAnexo.addEventListener('change', () => {
+    const removerInicialAnexo = corpo.querySelector('#szc-inicial-anexo-remover');
+    const atualizarInicialAnexo = () => {
       const arq = inicialAnexo.files[0];
       corpo.querySelector('#szc-inicial-anexo-icone').textContent = arq ? '✅' : '📎';
       corpo.querySelector('#szc-inicial-anexo-nome').textContent = arq ? arq.name : 'Anexar print, foto ou PDF';
       corpo.querySelector('#szc-inicial-anexo-label').classList.toggle('szc-anexo-tem', !!arq);
+      removerInicialAnexo.classList.toggle('szc-hidden', !arq);
+    };
+    inicialAnexo.addEventListener('change', () => {
+      atualizarInicialAnexo();
+    });
+    removerInicialAnexo.addEventListener('click', () => {
+      inicialAnexo.value = '';
+      atualizarInicialAnexo();
     });
     // o print colado tambem vale na PRIMEIRA mensagem: e justamente ali que a
     // pessoa esta descrevendo o problema pela primeira vez
