@@ -8006,7 +8006,7 @@ setTimeout(async () => {
       // duas máscaras no Ctrl+Q, névoa ficando depois do print, Esc duas vezes ----
       'v54 (sem subir, as máquinas com duas cópias continuam com duas)': vg.VERSAO_VIGIA >= 54,
       'antes do laço, um mutex por papel (login x boot): a cópia que chega depois se encerra': scripts.every((s) =>
-        /if \(\$Loop\) \{\n  Garantir-InstanciaUnica\n  Rodar-Loop/.test(s.replace(/\r/g, ''))
+        /if \(\$Loop\) \{\n  Garantir-InstanciaUnica\n(  \[void\]\(Checar-PartidaDaVersao\)\n)?  Rodar-Loop/.test(s.replace(/\r/g, ''))
         && s.includes('$nomeMutex = "Local\\" + $NomeTarefa + "_" + $papel')
         && s.includes('New-Object System.Threading.Mutex($false, $nomeMutex)')
         && s.includes('if (-not $dono) { Escrever-Log "Ja existe uma instancia ($papel) do NOCZenith rodando - esta copia se encerra."; exit }')
@@ -13763,6 +13763,7 @@ $ErrorActionPreference = "Stop"
 $Servico = $false
 $CabecalhosAgente = @{ "X-NOC-Token" = "abc123" }
 function Escrever-Log($m) { }
+function Confirmar-Partida { $script:PartidaConfirmada = $true }
 ${cabecalho}
 ${umaLinha(/^\$script:Pulso = \$null$/)}
 ${corpoW('Relogio-Ms')}
@@ -13806,6 +13807,179 @@ $r | ConvertTo-Json -Compress
   } catch (e) { okWinAntigo = false; console.log('  erro: ' + e.message); }
   if (!okWinAntigo) ruins += 1;
   console.log(`${okWinAntigo ? '✓' : '✗'} NOCZenith no Windows antigo: o vigia sobe sem recursão (a v116 matava os Server 2012 R2 ao iniciar)`);
+
+  // ------------------------------------------------------------------
+  // TRAVAS CONTRA VERSÃO RUIM (v118, pedido do Master 23/09/2026).
+  // "Conseguimos colocar alguma trava ... dando chance para correções como
+  // essa acontecerem e não ter que rodar novamente ... e evitando a perda em
+  // massa do parque como ocorreu?" (a v116 derrubou os Server 2012 R2)
+  //  1) o agente volta SOZINHO pra versão anterior quando a nova não dá a
+  //     primeira volta em 3 partidas, e não baixa a ruim de novo;
+  //  2) liberação em ondas: pilotos primeiro, o parque depois de 30min, e
+  //     suspende sozinha quando uma piloto volta ou cala.
+  // O agente RODA no pwsh, nas duas versões do script (padrão e Windows antigo).
+  let okTravasVersao = false;
+  try {
+    const rv = require('/home/user/adyen-monitor/server/rolloutVigia.js');
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const vgT = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const fsT = require('fs'); const osT = require('os'); const pathT = require('path'); const cpT = require('child_process');
+    const T0 = 1790000000000; const MIN = 60000;
+    const doc = (id, extra) => ({ _id: id, codigo: id.split('__')[0], posto: id.split('__')[1], nome: id, tipo: 'interno', online: true, agentToken: 't', agenteVersao: 118, ...extra });
+    const parque = [
+      doc('L1__normal1'), doc('L1__normal2'), doc('L2__normal3'),
+      doc('L3__antigo', { windowsAntigo: true, nome: 'zz-antigo' }), doc('L4__serv', { ehServidor: true, nome: 'zz-serv' }),
+      doc('L5__desligada', { online: false, nome: 'aa-desligada' }), doc('L6__velho', { agenteVersao: 117, nome: 'aa-velho' }),
+      doc('L7__quiosque', { tipo: 'atendimento', nome: 'aa-quiosque' }),
+    ];
+    // 1) primeira vez: nasce liberada (é a versão que traz a identidade)
+    const r0 = rv.avaliar(null, 118, parque, T0);
+    // 2) deploy da 119: rodada nova com pilotos
+    const r1 = rv.avaliar(r0.estado, 119, parque, T0 + MIN);
+    const p1 = r1.estado.pilotos;
+    const antesDaRodada = rv.versaoOferecida(r0.estado, 119, 'L1__normal1');
+    const ofPiloto = rv.versaoOferecida(r1.estado, 119, p1[0]);
+    const naoPiloto = parque.map((d) => d._id).find((id) => !p1.includes(id));
+    const ofResto = rv.versaoOferecida(r1.estado, 119, naoPiloto);
+    const ofSemId = rv.versaoOferecida(r1.estado, 119, null);
+    // 3) pilotos atualizam; 10min depois ainda não libera, 31min depois libera
+    const atualizado = parque.map((d) => (p1.includes(d._id) ? { ...d, agenteVersao: 119 } : d));
+    const r2 = rv.avaliar(r1.estado, 119, atualizado, T0 + 2 * MIN);
+    const r3 = rv.avaliar(r2.estado, 119, atualizado, T0 + 12 * MIN);
+    const r4 = rv.avaliar(r3.estado, 119, atualizado, T0 + 33 * MIN);
+    // 4) piloto voltou sozinha (versão ruim) -> suspende e ninguém mais recebe
+    const voltou = atualizado.map((d) => (d._id === p1[0] ? { ...d, agenteVersao: 118, agenteVersaoRuim: 119 } : d));
+    const r5 = rv.avaliar(r2.estado, 119, voltou, T0 + 5 * MIN);
+    // 5) piloto atualizou e calou logo depois (a v116) -> suspende
+    const calou = atualizado.map((d) => (d._id === p1[1] ? { ...d, online: false } : d));
+    const r6 = rv.avaliar(r2.estado, 119, calou, T0 + 6 * MIN);
+    // 6) versão seguinte depois de uma suspensa: a estável continua a última LIBERADA
+    const r7 = rv.avaliar(r5.estado, 120, voltou, T0 + 60 * MIN);
+    // 7) o Master decide
+    const lib = rv.decisaoDoMaster(r1.estado, 'liberar', 'master', T0);
+    const sus = rv.decisaoDoMaster(r1.estado, 'suspender', 'master', T0);
+
+    // ---- rotas ----
+    const cabT = { Authorization: 'Bearer ' + token };
+    await ls.setConfig({ vigiaRollout: { versao: vgT.VERSAO_VIGIA, estavel: vgT.VERSAO_VIGIA - 1, estado: 'piloto', pilotos: ['RV__PIL'], atualizados: [], iniciadoEm: Date.now(), motivo: '' } });
+    const vPil = JSON.parse((await pedir('/api/loja-status/vigia-versao?codigo=RV&posto=PIL')).corpo).versao;
+    const vOutro = JSON.parse((await pedir('/api/loja-status/vigia-versao?codigo=RV&posto=OUTRO')).corpo).versao;
+    const vSemId = JSON.parse((await pedir('/api/loja-status/vigia-versao')).corpo).versao;
+    const liberarSemSenha = await postarJson('/api/loja-status/rollout-vigia', { acao: 'liberar' }, cabT);
+    const suspender = await postarJson('/api/loja-status/rollout-vigia', { acao: 'suspender' }, cabT);
+    const liberar = await postarJson('/api/loja-status/rollout-vigia', { acao: 'liberar', password: process.env.MASTER_PASSWORD }, cabT);
+    const vDepois = JSON.parse((await pedir('/api/loja-status/vigia-versao?codigo=RV&posto=OUTRO')).corpo).versao;
+    // a versão ruim chega pelo estado do agente
+    await ls.cadastrarComputador('RVTESTE', 'PC ruim', 'interno');
+    const pRuim = (await ls.listar()).find((c) => c.codigo === 'RVTESTE' && c.nome === 'PC ruim').posto;
+    const tkRuim = await ls.garantirAgentToken('RVTESTE', pRuim);
+    const estRuim = await postarJson(`/api/loja-status/RVTESTE/computadores/${pRuim}/estado-agente`, { versao: 118, noPulsoPrint: 'pronto', versaoRuim: 119 }, { 'x-noc-token': tkRuim });
+    const docRuim = DOCS.get(`lojaStatus/RVTESTE__${pRuim}`) || {};
+    await ls.removerComputador('RVTESTE', pRuim);
+
+    // ---- agente (pwsh), nas duas versões do script ----
+    const pwshT = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh']
+      .filter(Boolean).find((c) => { try { return fsT.statSync(c).isFile(); } catch (e) { return false; } });
+    const fnPs = (fonte, nome) => {
+      const linhas = fonte.split('\n');
+      const i = linhas.findIndex((l) => l.startsWith('function ' + nome + ' ') || l.startsWith('function ' + nome + '(') || l === 'function ' + nome + ' {');
+      if (i < 0) return '';
+      const abre = (linhas[i].match(/\{/g) || []).length; const fecha = (linhas[i].match(/\}/g) || []).length;
+      if (abre && abre === fecha) return linhas[i];
+      const j = linhas.indexOf('}', i);
+      return linhas.slice(i, j + 1).join('\n');
+    };
+    const rodarAgente = async (windowsAntigo) => {
+      if (!pwshT) return null;
+      const ps = vgT.montarScriptVigia({ codigo: 'RV', posto: 'P1', tipo: 'interno', agentToken: 'abc', windowsAntigo });
+      const dir = fsT.mkdtempSync(pathT.join(osT.tmpdir(), 'partida-'));
+      const agente = pathT.join(dir, 'NOCZenith.ps1');
+      const nomes = ['Caminho-Partida', 'Caminho-VersaoRuim', 'Versao-DoArquivo', 'Versao-Ruim', 'Confirmar-Partida', 'Checar-PartidaDaVersao', 'Verificar-Atualizacao'];
+      const harness = `
+$ErrorActionPreference = "Continue"
+$Servico = $false
+$VersaoScript = 118
+$PartidasParaVoltar = 3
+$script:PartidaConfirmada = $false
+$script:ArquivoAgente = "${agente}"
+$UrlVersao = "http://x/versao"; $UrlScriptProprio = "http://x/script"; $CabecalhosAgente = @{}
+$global:LOG = New-Object System.Collections.ArrayList
+$global:REINICIOS = 0; $global:BAIXOU = 0; $global:OFERTA = 0
+function Escrever-Log($m) { [void]$global:LOG.Add([string]$m) }
+function Reiniciar-Agente { $global:REINICIOS++ }
+function Invoke-RestMethod { param($Uri, $Method, $Headers, $TimeoutSec) if ($Uri -eq $UrlVersao) { return [pscustomobject]@{ versao = $global:OFERTA } }; $global:BAIXOU++; return "nao e script" }
+${nomes.map((n) => fnPs(ps, n)).join('\n')}
+function Escrever($v) { Set-Content -LiteralPath $script:ArquivoAgente -Value "# NOCZenith\`n\`$VersaoScript = $v\`n" }
+$r = @{}
+Escrever 118; Set-Content -LiteralPath ($script:ArquivoAgente + ".ultima-valida") -Value "# NOCZenith\`n\`$VersaoScript = 117\`n"
+[void](Checar-PartidaDaVersao); [void](Checar-PartidaDaVersao)
+$r.duasPartidas = @{ versaoArquivo = (Versao-DoArquivo $script:ArquivoAgente); partida = [string](Get-Content (Caminho-Partida)); reinicios = $global:REINICIOS }
+Confirmar-Partida; [void](Checar-PartidaDaVersao)
+$r.depoisDeConfirmar = [string](Get-Content (Caminho-Partida))
+Remove-Item (Caminho-Partida)
+[void](Checar-PartidaDaVersao); [void](Checar-PartidaDaVersao); $voltou = Checar-PartidaDaVersao
+$r.tresPartidas = @{ voltou = $voltou; versaoArquivo = (Versao-DoArquivo $script:ArquivoAgente); ruim = (Versao-Ruim); reinicios = $global:REINICIOS; guardouRuim = (Test-Path ($script:ArquivoAgente + ".ruim")) }
+# depois da volta quem roda é a 117: o servidor oferecendo a 118 (a ruim) não
+# pode fazer baixar de novo; a 119 (a correção) sim
+$VersaoScript = 117
+$global:OFERTA = 118; Verificar-Atualizacao; $r.baixouRuim = $global:BAIXOU
+$global:OFERTA = 119; Verificar-Atualizacao; $r.baixouCorrecao = $global:BAIXOU
+# sem copia anterior (ou copia que nao e mais velha): nao volta
+$VersaoScript = 118
+Remove-Item ($script:ArquivoAgente + ".ultima-valida"); Escrever 118; Remove-Item (Caminho-Partida) -ErrorAction SilentlyContinue
+[void](Checar-PartidaDaVersao); [void](Checar-PartidaDaVersao); $r.semCopia = @{ voltou = (Checar-PartidaDaVersao); versaoArquivo = (Versao-DoArquivo $script:ArquivoAgente) }
+$r | ConvertTo-Json -Depth 4 -Compress
+`;
+      const arq = pathT.join(dir, 'h.ps1'); fsT.writeFileSync(arq, harness);
+      const out = cpT.spawnSync(pwshT, ['-NoProfile', '-NonInteractive', '-File', arq], { encoding: 'utf8', timeout: 60000 });
+      try { return JSON.parse(String(out.stdout).trim().split('\n').pop()); } catch (e) { return { erro: (out.stdout || '') + (out.stderr || '') }; }
+    };
+    const agPadrao = await rodarAgente(false);
+    const agAntigo = await rodarAgente(true);
+    const agenteOk = (a) => !!a && !a.erro
+      && a.duasPartidas.versaoArquivo === 118 && a.duasPartidas.partida === '118|2' && a.duasPartidas.reinicios === 0
+      && a.depoisDeConfirmar === '118|1'
+      && a.tresPartidas.voltou === true && a.tresPartidas.versaoArquivo === 117 && a.tresPartidas.ruim === 118
+      && a.tresPartidas.reinicios === 1 && a.tresPartidas.guardouRuim === true
+      && a.baixouRuim === 0 && a.baixouCorrecao === 1
+      && a.semCopia.voltou === false && a.semCopia.versaoArquivo === 118;
+    const psP = vgT.montarScriptVigia({ codigo: 'RV', posto: 'P1', tipo: 'interno', agentToken: 'abc' });
+    const conf = {
+      'primeira vez nasce liberada (é a versão que traz a identidade)': r0.estado.estado === 'liberada' && r0.estado.estavel === 118,
+      'deploy novo abre rodada: até 4 pilotos, Windows antigo e servidor primeiro, só quem é interno, online e se identifica':
+        r1.estado.estado === 'piloto' && r1.estado.estavel === 118 && p1.length === 4
+        && p1[0] === 'L3__antigo' && p1[1] === 'L4__serv'
+        && !p1.includes('L5__desligada') && !p1.includes('L6__velho') && !p1.includes('L7__quiosque'),
+      'piloto recebe a nova; o resto e quem não se identifica ficam na estável': ofPiloto === 119 && ofResto === 118 && ofSemId === 118,
+      'no minuto antes da rodada abrir, a nova não vaza': antesDaRodada === 118,
+      'só libera depois de 30min com as pilotos rodando': r3.estado.estado === 'piloto' && r4.estado.estado === 'liberada' && rv.versaoOferecida(r4.estado, 119, naoPiloto) === 119,
+      'piloto que voltou sozinha suspende, e ninguém mais recebe': r5.estado.estado === 'suspensa' && /voltou sozinho/.test(r5.estado.motivo)
+        && rv.versaoOferecida(r5.estado, 119, naoPiloto) === 118 && rv.versaoOferecida(r5.estado, 119, p1[2]) === 118,
+      'piloto que calou logo depois de atualizar suspende': r6.estado.estado === 'suspensa' && /fora do ar logo depois/.test(r6.estado.motivo),
+      'depois de uma suspensa, a próxima rodada parte da última liberada': r7.estado.estado === 'piloto' && r7.estado.estavel === 118 && r7.estado.versao === 120,
+      'o Master libera ou suspende': lib.estado === 'liberada' && sus.estado === 'suspensa',
+      'ROTA: a versão oferecida depende de quem pergunta': vPil === vgT.VERSAO_VIGIA && vOutro === vgT.VERSAO_VIGIA - 1 && vSemId === vgT.VERSAO_VIGIA - 1,
+      'ROTA: liberar pede a senha do Master, suspender não': liberarSemSenha.status === 400 && suspender.status === 200 && liberar.status === 200 && vDepois === vgT.VERSAO_VIGIA,
+      'ROTA: a versão ruim chega pelo estado do agente': estRuim.status === 200 && docRuim.agenteVersaoRuim === 119,
+      'o agente se identifica ao perguntar a versão': /\$UrlVersao = "[^"]*vigia-versao\?codigo=RV&posto=P1"/.test(psP),
+      'a checagem roda ANTES de tudo, e a primeira volta confirma':
+        /Garantir-InstanciaUnica\n\s+\[void\]\(Checar-PartidaDaVersao\)\n\s+Rodar-Loop/.test(psP)
+        && /function Pulso-Tick \{ if \(-not \$script:PartidaConfirmada\) \{ Confirmar-Partida \}/.test(psP),
+      'o agente sobe a versão': vgT.VERSAO_VIGIA >= 118,
+      'TELA: o NOC mostra a liberação, as pilotos e os botões; a ficha mostra a versão que voltou':
+        (() => { const h = fsT.readFileSync(pathT.join(__dirname, 'public', 'loja-status.html'), 'utf8');
+          return /id="rollout-vigia"/.test(h) && /carregarRolloutVigia\(\);/.test(h) && /fetch\('\/api\/loja-status\/rollout-vigia'\)/.test(h)
+            && /decidirRolloutVigia\('liberar'\)/.test(h) && /pedirSenhaMaster\('liberar a versão nova/.test(h) && /c\.agenteVersaoRuim/.test(h); })(),
+      'AGENTE (padrão): 3 partidas sem volta = volta pra anterior, marca a ruim e só baixa a correção': !pwshT ? 'pular' : agenteOk(agPadrao),
+      'AGENTE (Windows antigo): o mesmo, na versão do Server 2012 R2': !pwshT ? 'pular' : agenteOk(agAntigo),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okTravasVersao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (p1=${JSON.stringify(p1)} r5=${r5.estado.estado} padrao=${JSON.stringify(agPadrao).slice(0, 500)} antigo=${JSON.stringify(agAntigo).slice(0, 300)} rotas=${vPil}/${vOutro}/${vSemId} lib=${liberarSemSenha.status}/${suspender.status}/${liberar.status} est=${estRuim.status})`);
+    await ls.setConfig({ vigiaRollout: null });
+  } catch (e) { okTravasVersao = false; console.log('  erro: ' + e.message); }
+  if (!okTravasVersao) ruins += 1;
+  console.log(`${okTravasVersao ? '✓' : '✗'} NOCZenith: versão que não sobe volta sozinha, e versão nova vai em ondas (pilotos primeiro, suspende sozinha)`);
 
   // ------------------------------------------------------------------
   // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)
@@ -15075,7 +15249,7 @@ $r | ConvertTo-Json -Compress
       'o agente v51+ diz por qual endereço fala (e a dedup considera isso)':
         /\$EnderecoBase = "/.test(psMig)
         && /endereco = \$EnderecoBase/.test(psMig)
-        && /\$chave = "\$VersaoScript\|\$estadoPrint\|\$EnderecoBase"/.test(psMig),
+        && /\$chave = "\$VersaoScript\|\$estadoPrint\|\$EnderecoBase(\|\$ruim)?"/.test(psMig),
       'a rota do resumo é só do Master': rotaComum.status === 403 && rotaMaster.status === 200,
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);

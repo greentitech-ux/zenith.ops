@@ -2043,9 +2043,34 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
 // mesmo conteudo tanto pro botao "Baixar NOCZenith" quanto pra
 // autoatualizacao baixar e sobrescrever o proprio arquivo ----------
 
-app.get('/api/loja-status/vigia-versao', (req, res) => {
+// Versao que ESTE agente deve buscar - liberacao em ondas (rolloutVigia.js).
+// O agente v118+ manda ?codigo=&posto=; sem identidade, recebe a estavel ate
+// a versao nova ser liberada. Publica e sem Firestore (config em cache).
+app.get('/api/loja-status/vigia-versao', async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ versao: vigiaScript.VERSAO_VIGIA });
+  try {
+    res.json({ versao: await lojaStatus.versaoVigiaPara(req.query.codigo, req.query.posto, vigiaScript.VERSAO_VIGIA) });
+  } catch (err) {
+    // na duvida, nao atualiza ninguem: devolve a versao sem subir
+    res.json({ versao: 0 });
+  }
+});
+
+// estado da liberacao em ondas, pra tela do NOC (Master)
+app.get('/api/loja-status/rollout-vigia', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try { res.json({ rollout: await lojaStatus.resumoRolloutVigia(), versaoAtual: vigiaScript.VERSAO_VIGIA }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+// liberar pro parque inteiro pede a senha do Master (é o que manda a versão
+// nova pra 50 máquinas de uma vez); suspender não pede - é o lado seguro
+app.post('/api/loja-status/rollout-vigia', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const acao = String((req.body && req.body.acao) || '');
+    if (acao === 'liberar' && !(await exigirSenhaDoMaster(req, res))) return;
+    res.json({ rollout: await lojaStatus.decidirRolloutVigia(acao, req.user.username || req.user.email || 'Master'), versaoAtual: vigiaScript.VERSAO_VIGIA });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // O MESMO pra o agente de tablet/celular (ver agenteAndroid.js). Publica pelo
@@ -2074,7 +2099,7 @@ app.get('/api/loja-status/reparo-noczenith.ps1', (_req, res) => {
 app.post('/api/loja-status/:codigo/computadores/:posto/estado-agente', async (req, res) => {
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    res.json(await lojaStatus.reportarEstadoAgente(req.params.codigo, req.params.posto, { versao: req.body.versao, noPulsoPrint: req.body.noPulsoPrint, endereco: req.body.endereco }, token));
+    res.json(await lojaStatus.reportarEstadoAgente(req.params.codigo, req.params.posto, { versao: req.body.versao, noPulsoPrint: req.body.noPulsoPrint, endereco: req.body.endereco, versaoRuim: req.body.versaoRuim }, token));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -16644,6 +16669,9 @@ function aquecerBoot(promessa, ms) {
       ? Number(process.env.NOC_VARREDURA_MS) : 60 * 1000;
     setInterval(() => {
       rodarVarreduraLojaStatus().catch((err) => console.error('Erro na varredura de conectividade das lojas:', err.message));
+      // liberação em ondas do agente: avalia pilotas contra o espelho (sem
+      // leitura) e só grava quando o estado muda
+      lojaStatus.avaliarRolloutVigia(vigiaScript.VERSAO_VIGIA).catch((err) => console.error('Erro na liberação em ondas do agente:', err.message));
     }, VARREDURA_MS);
 
     // O reinício diário tem timer PRÓPRIO, de 1 min, e não pega carona no

@@ -733,6 +733,14 @@
 </div>
 
 <div id="agente-root" class="hidden">
+  <!-- LIBERAÇÃO EM ONDAS do agente (rolloutVigia.js): versão nova vai primeiro
+       pras pilotos e só depois pro parque. Nasceu da v116, que derrubou os
+       Server 2012 R2 de uma vez. -->
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo><h2>🚦 Versão do agente</h2></div>
+  <div class="agente-sub">Versão nova do agente vai primeiro para até 4 máquinas piloto (uma "Windows antigo" e um servidor, quando houver). O resto do parque só recebe depois que elas rodarem 30 minutos sem problema. Se uma piloto não subir a versão nova e voltar sozinha, ou calar logo depois de atualizar, a liberação fica suspensa e o parque segue na versão estável.</div>
+  <div id="rollout-vigia" style="margin-bottom:18px;"></div>
+  </div>
   <!-- QUEM AINDA FALA COM O ENDERECO ANTIGO. E o que decide se da pra
        aposentar o dominio velho: enquanto houver pendente, desligar deixa
        aquela maquina orfa (ver CLAUDE.md §4) -->
@@ -1832,6 +1840,9 @@ function atualizarConteudoDetalhe(codigo, c){
   // ultimo acesso remoto detectado pelo NOCZenith (AnyDesk/TeamViewer/
   // DWService/etc - ver Verificar-AcessoRemoto em baixarVigia) - so o Master
   // recebe o push na hora, mas fica registrado aqui pra qualquer um ver
+  // o agente v118+ volta sozinho de uma versão que não sobe (ver
+  // Checar-PartidaDaVersao) - informação, não alarme
+  if(c.agenteVersaoRuim) infoBits.push(`↩️ a v${escapeHtml(String(c.agenteVersaoRuim))} não subiu nesta máquina; o agente voltou sozinho${c.agenteVersao?' pra v'+escapeHtml(String(c.agenteVersao)):''} e espera a correção`);
   if(c.ultimoAcessoRemotoEm) infoBits.push(`🛑 acesso remoto: <b>${escapeHtml(c.ultimoAcessoRemotoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoAcessoRemotoEm))}`);
   // resultado do ultimo comando enfileirado (ver botao ▶ Rodar acao) - saida
   // ou erro que o NOCZenith devolveu
@@ -4272,6 +4283,50 @@ async function salvarEdicaoComputador(){
   }
 }
 
+async function carregarRolloutVigia(){
+  const el = document.getElementById('rollout-vigia');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/loja-status/rollout-vigia');
+    if(!r.ok) return;
+    const d = await r.json();
+    const e = d.rollout;
+    if(!e){ el.innerHTML = `<div class="agente-sub">Versão ${escapeHtml(String(d.versaoAtual))} no ar; a liberação em ondas começa na próxima versão.</div>`; return; }
+    const cor = e.estado==='liberada' ? 'var(--ok)' : (e.estado==='suspensa' ? 'var(--bad)' : 'var(--warn)');
+    const rotulo = e.estado==='liberada' ? `v${e.versao} liberada para o parque` : (e.estado==='suspensa' ? `v${e.versao} suspensa — o parque segue na v${e.estavel}` : `v${e.versao} em piloto — o parque segue na v${e.estavel}`);
+    const pilotos = (e.pilotos||[]).map(p=>{
+      const rodando = p.online && p.versao===e.versao;
+      const marca = rodando ? '🟢' : (p.online ? '🟡' : '🔴');
+      const tag = [p.windowsAntigo?'Windows antigo':'', p.ehServidor?'servidor':''].filter(Boolean).join(' · ');
+      return `<div style="font-size:12px;color:var(--muted);">${marca} ${escapeHtml(p.nome||p.id)}${tag?' <span style="font-size:11px;">('+escapeHtml(tag)+')</span>':''} — ${p.versao?'v'+escapeHtml(String(p.versao)):'sem versão'}${p.online?'':' · fora do ar'}${p.atualizadoEm?' · atualizou '+escapeHtml(tempoRelativo(p.atualizadoEm)):''}</div>`;
+    }).join('') || '<div style="font-size:12px;color:var(--muted);">Nenhuma piloto ainda: esperando uma máquina interna online com agente v118+.</div>';
+    const botoes = e.estado==='liberada' ? '' : `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">`
+      + `<button type="button" class="btn-mini ok" onclick="decidirRolloutVigia('liberar')">Liberar para o parque</button>`
+      + (e.estado==='piloto' ? `<button type="button" class="btn-mini" onclick="decidirRolloutVigia('suspender')">Suspender</button>` : '')
+      + `</div>`;
+    el.innerHTML = `<div style="border:1px solid ${cor};border-radius:10px;padding:12px;">
+      <div style="font-size:13px;"><b style="color:${cor};">${escapeHtml(rotulo)}</b></div>
+      ${e.motivo?`<div style="font-size:12px;color:var(--muted);margin:4px 0 8px;">${escapeHtml(e.motivo)}</div>`:''}
+      ${e.estado!=='liberada'?'<div style="font-size:12px;margin:6px 0 4px;"><b>Pilotos</b></div>'+pilotos:''}
+      ${botoes}
+    </div>`;
+  }catch(err){ /* o painel some em vez de quebrar a tela */ }
+}
+async function decidirRolloutVigia(acao){
+  let corpo = { acao };
+  if(acao==='liberar'){
+    const senha = await pedirSenhaMaster('liberar a versão nova do agente para o parque inteiro');
+    if(senha===null) return;
+    corpo.password = senha;
+  }
+  try{
+    const r = await fetch('/api/loja-status/rollout-vigia', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui.');
+    carregarRolloutVigia();
+  }catch(e){ alert(e.message); }
+}
+
 async function carregarMigracaoEndereco(){
   const el = document.getElementById('migracao-endereco');
   if(!el) return;
@@ -5401,6 +5456,7 @@ async function boot(){
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
     carregarMigracaoEndereco();
+    carregarRolloutVigia();
     carregarMarcasPapelDeParede();
     await carregarAgente();
   }

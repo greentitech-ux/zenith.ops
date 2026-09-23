@@ -33,7 +33,10 @@
 // o ZIP do arquivamento fora do laco principal.
 // 117: conserta a 116 no Windows antigo (Server 2012 R2): o relogio novo
 // tinha o mesmo nome do relogio da conversao e virava recursao ao subir.
-const VERSAO_VIGIA = 117;
+// 118: versao que nao sobe volta sozinha pra anterior (3 partidas sem dar a
+// primeira volta) e fica marcada como ruim; e o agente se identifica ao
+// perguntar a versao (liberacao em ondas, rolloutVigia.js).
+const VERSAO_VIGIA = 118;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -175,7 +178,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   const urlTelemetria = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/telemetria`;
   const urlConfiguracaoAgente = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/configuracao-agente`;
   const urlInventarioAtalhos = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/inventario-atalhos`;
-  const urlVersao = `${APP_BASE_URL}/api/loja-status/vigia-versao`;
+  // com identidade (liberacao em ondas): o servidor decide se ESTA maquina e
+  // piloto de uma versao nova. Nao e segredo - o token segue nas rotas sensiveis.
+  const urlVersao = `${APP_BASE_URL}/api/loja-status/vigia-versao?codigo=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlScriptProprio = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`;
   const nomeTarefa = 'NOCZenith_' + posto;
 
@@ -418,7 +423,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     'function Relogio-Ms {',
     '  return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
     '}',
-    'function Pulso-Tick { if ($script:Pulso) { $script:Pulso.tick = (Relogio-Ms); $script:Pulso.etapa = "laco principal"; $script:Pulso.etapaDesde = (Relogio-Ms) } }',
+    'function Pulso-Tick { if (-not $script:PartidaConfirmada) { Confirmar-Partida }; if ($script:Pulso) { $script:Pulso.tick = (Relogio-Ms); $script:Pulso.etapa = "laco principal"; $script:Pulso.etapaDesde = (Relogio-Ms) } }',
     'function Marcar-Etapa([string]$etapa) { if ($script:Pulso) { $script:Pulso.etapa = $etapa; $script:Pulso.etapaDesde = (Relogio-Ms) } }',
     'function Iniciar-VigiaDeTravamento([string]$url, [string]$unidade, [string]$posto) {',
     '  if ($script:Pulso) { return }',
@@ -1211,9 +1216,82 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  Start-Sleep -Milliseconds 400',
     '}',
     '',
+    // VERSAO QUE NAO SOBE VOLTA SOZINHA (v118, pedido do Master 23/09/2026).
+    // A v116 morria logo depois de "NOCZenith iniciado" nos Server 2012 R2, e a
+    // tarefa agendada so a relancava pra morrer de novo, de 5 em 5 minutos, ate
+    // alguem reinstalar na mao. Agora cada partida fica anotada; a primeira
+    // volta do laco (Pulso-Tick) confirma. Se a MESMA versao partir 3 vezes
+    // sem confirmar, o agente volta pra copia anterior (a .ultima-valida que a
+    // atualizacao ja guarda), marca a versao como ruim e so atualiza de novo
+    // quando o servidor oferecer uma MAIOR - a correcao.
+    //
+    // Internet caida NAO dispara isto: sem rede o laco continua dando volta.
+    // So agente que morre antes da primeira volta conta. Sem alarme: o NOC
+    // recebe a versao ruim no proximo estado e mostra como informacao.
+    '$script:ArquivoAgente = $PSCommandPath',
+    '$script:PartidaConfirmada = $false',
+    '$PartidasParaVoltar = 3',
+    'function Caminho-Partida { return (Join-Path (Split-Path -Parent $script:ArquivoAgente) "partida-versao.txt") }',
+    'function Caminho-VersaoRuim { return (Join-Path (Split-Path -Parent $script:ArquivoAgente) "versao-ruim.txt") }',
+    'function Versao-DoArquivo([string]$caminho) {',
+    '  try {',
+    // ReadAllLines e nao ReadLines: sair do foreach no meio deixava o arquivo
+    // ABERTO, e a proxima atualizacao nao conseguia regravar a .ultima-valida
+    '    foreach ($l in [IO.File]::ReadAllLines($caminho)) { if ($l -match \'^\\$VersaoScript = (\\d+)\\s*$\') { return [int]$Matches[1] } }',
+    '  } catch {}',
+    '  return 0',
+    '}',
+    'function Versao-Ruim {',
+    '  try { return [int](([string](Get-Content -LiteralPath (Caminho-VersaoRuim) -TotalCount 1 -ErrorAction Stop)).Trim()) } catch { return 0 }',
+    '}',
+    'function Confirmar-Partida {',
+    '  $script:PartidaConfirmada = $true',
+    '  try { Set-Content -LiteralPath (Caminho-Partida) -Value "$VersaoScript|ok" -Force -ErrorAction Stop } catch {}',
+    '}',
+    'function Reiniciar-Agente {',
+    // mesma saida da atualizacao: encerra o que e desta copia, sobe a nova pelo
+    // lancador invisivel e sai por completo (thread pendurada nao segura)
+    '  $viaLancador = (Gravar-Lancador)',
+    '  Encerrar-NoPulsoPrint',
+    '  Encerrar-JanelaChat',
+    '  Soltar-InstanciaUnica',
+    '  if ($viaLancador) {',
+    '    $argLanc = \'"\' + $CaminhoLancador + \'" "\' + $script:ArquivoAgente + \'"\'',
+    '    if ($Servico) { $argLanc += \' servico\' }',
+    '    Start-Process (Join-Path $env:SystemRoot "System32\\wscript.exe") -ArgumentList $argLanc',
+    '  } else { Escrever-Log "Lancador invisivel indisponivel: a tarefa agendada sobe a copia de novo em ate 5 minutos." }',
+    '  Start-Sleep -Seconds 2',
+    '  [Environment]::Exit(0)',
+    '}',
+    'function Checar-PartidaDaVersao {',
+    '  $n = 0',
+    '  try {',
+    '    $p = ([string](Get-Content -LiteralPath (Caminho-Partida) -TotalCount 1 -ErrorAction Stop)).Trim().Split("|")',
+    '    if ($p.Count -ge 2 -and [int]$p[0] -eq $VersaoScript -and $p[1] -ne "ok") { $n = [int]$p[1] }',
+    '  } catch {}',
+    '  $n = $n + 1',
+    '  try { Set-Content -LiteralPath (Caminho-Partida) -Value "$VersaoScript|$n" -Force -ErrorAction Stop } catch {}',
+    '  if ($n -lt $PartidasParaVoltar) { return $false }',
+    '  $anterior = $script:ArquivoAgente + ".ultima-valida"',
+    '  if (-not (Test-Path -LiteralPath $anterior)) { Escrever-Log "Versao $VersaoScript nao deu a primeira volta em $n partidas, e nao ha copia anterior pra voltar."; return $false }',
+    '  $vAnterior = Versao-DoArquivo $anterior',
+    '  if ($vAnterior -le 0 -or $vAnterior -ge $VersaoScript) { Escrever-Log "Versao $VersaoScript nao deu a primeira volta em $n partidas; a copia anterior (v$vAnterior) nao serve pra voltar."; return $false }',
+    '  try {',
+    '    Copy-Item -LiteralPath $script:ArquivoAgente -Destination ($script:ArquivoAgente + ".ruim") -Force -ErrorAction SilentlyContinue',
+    '    Copy-Item -LiteralPath $anterior -Destination $script:ArquivoAgente -Force -ErrorAction Stop',
+    '    Set-Content -LiteralPath (Caminho-VersaoRuim) -Value $VersaoScript -Force -ErrorAction Stop',
+    '    Remove-Item -LiteralPath (Caminho-Partida) -Force -ErrorAction SilentlyContinue',
+    '  } catch { Escrever-Log "Volta pra versao anterior falhou: $($_.Exception.Message)"; return $false }',
+    '  Escrever-Log "Versao $VersaoScript nao deu a primeira volta em $n partidas seguidas - voltei pra versao $vAnterior. So atualizo de novo quando sair versao maior que $VersaoScript."',
+    '  Reiniciar-Agente',
+    '  return $true',
+    '}',
+    '',
     'function Verificar-Atualizacao {',
     '  try {',
     '    $respVersao = Invoke-RestMethod -Uri $UrlVersao -Method Get -TimeoutSec 10',
+    // versao que ja voltou sozinha daqui: nao baixa de novo - espera a correcao
+    '    if ($respVersao -and $respVersao.versao -and ([int]$respVersao.versao -le (Versao-Ruim))) { return }',
     '    if ($respVersao -and $respVersao.versao -and ([int]$respVersao.versao -gt $VersaoScript)) {',
     '      Escrever-Log "Versao nova disponivel ($($respVersao.versao), essa copia e $VersaoScript) - baixando..."',
     '      $novoConteudo = Invoke-RestMethod -Uri $UrlScriptProprio -Method Get -Headers $CabecalhosAgente -TimeoutSec 30',
@@ -1743,10 +1821,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# quando muda: cada envio e 1 leitura + 1 escrita no Firestore, e o estado',
     '# quase nunca muda - sem a trava seriam ~45 mil escritas por dia no parque.',
     'function Reportar-EstadoAgente($estadoPrint) {',
-    '  $chave = "$VersaoScript|$estadoPrint|$EnderecoBase"',
+    '  $ruim = Versao-Ruim',
+    '  $chave = "$VersaoScript|$estadoPrint|$EnderecoBase|$ruim"',
     '  if ($global:UltimoEstadoAgenteReportado -eq $chave) { return }',
     '  try {',
-    '    $corpoEstado = @{ versao = $VersaoScript; noPulsoPrint = "$estadoPrint"; endereco = $EnderecoBase } | ConvertTo-Json -Compress',
+    '    $corpoEstado = @{ versao = $VersaoScript; noPulsoPrint = "$estadoPrint"; endereco = $EnderecoBase; versaoRuim = $ruim } | ConvertTo-Json -Compress',
     '    Invoke-RestMethod -Uri $UrlEstadoAgente -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpoEstado -TimeoutSec 10 | Out-Null',
     '    $global:UltimoEstadoAgenteReportado = $chave',
     '  } catch { Escrever-Log "Falha ao reportar estado do agente: $($_.Exception.Message)" }',
@@ -3531,6 +3610,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   const linhasFinal = [
     'if ($Loop) {',
     '  Garantir-InstanciaUnica',
+    // ANTES de qualquer outra coisa: se esta versao morre ao subir, e aqui que
+    // ela volta pra anterior (ver Checar-PartidaDaVersao)
+    '  [void](Checar-PartidaDaVersao)',
     '  Rodar-Loop',
     '} else {',
     '  # instala numa pasta fixa e protegida (%LOCALAPPDATA%\\NOCZenith): assim o',
