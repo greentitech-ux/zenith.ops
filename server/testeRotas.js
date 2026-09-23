@@ -13599,7 +13599,7 @@ $r | ConvertTo-Json -Depth 6 -Compress
       for (let i = 0; i < 30; i++) fs3.writeFileSync(path3.join(dir, 'arq', `f${i}.txt`), 'x'.repeat(2000));
       const defs = [
         linhaDe(ps, /^\$script:Pulso = \$null$/),
-        corpo(ps, 'Agora-Ms'), corpo(ps, 'Pulso-Tick'), corpo(ps, 'Marcar-Etapa'), corpo(ps, 'Iniciar-VigiaDeTravamento'),
+        corpo(ps, 'Relogio-Ms'), corpo(ps, 'Pulso-Tick'), corpo(ps, 'Marcar-Etapa'), corpo(ps, 'Iniciar-VigiaDeTravamento'),
         corpo(ps, 'Iniciar-ZipEmSegundoPlano'), corpo(ps, 'Desafixar-DaBarra'),
       ];
       const iCorpo = ps.indexOf('$script:CorpoDesafixar = {');
@@ -13732,6 +13732,80 @@ $r | ConvertTo-Json -Compress
   } catch (e) { okVigia = false; console.log('  erro: ' + e.message); }
   if (!okVigia) ruins += 1;
   console.log(`${okVigia ? '✓' : '✗'} NOC: agente preso não some (vigia bate "ocupado em X", máquina degradada), barra com prazo, ZIP fora do laço e "Ler log do agente"`);
+
+  // ------------------------------------------------------------------
+  // INCIDENTE 23/09 (v116): DOM-TIROL-HOST01 (Server 2012 R2, "Windows
+  // antigo") morria logo depois de "NOCZenith iniciado", a cada 5 minutos.
+  // O relogio novo da v116 se chamava Agora-Ms - mesmo nome do relogio que a
+  // conversao pra Windows antigo cria - e virou "function Agora-Ms { return
+  // (Agora-Ms) }": recursao sem fim ao subir. Os testes da v116 rodavam so o
+  // script PADRAO. Este roda a VERSAO DE WINDOWS ANTIGO de verdade no pwsh.
+  let okWinAntigo = false;
+  try {
+    const vgW = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const fsW = require('fs'); const osW = require('os'); const pathW = require('path'); const cpW = require('child_process');
+    const psW = vgW.montarScriptVigia({ codigo: 'WANT', posto: 'P1', tipo: 'interno', agentToken: 'abc123', windowsAntigo: true });
+    const corpoW = (nome) => { const i = psW.indexOf('function ' + nome); return i < 0 ? '' : psW.slice(i, psW.indexOf('\n}\n', i) + 3); };
+    const umaLinha = (re) => (psW.split('\n').find((l) => re.test(l)) || '');
+    const cabecalho = psW.slice(psW.indexOf('# ===== VERSAO PRA WINDOWS ANTIGO'), psW.indexOf('# ===== fim do bloco de Windows antigo'));
+    // a trava na conversao: um script com o relogio definido de novo tem de reprovar
+    let travaReprova = false;
+    try { vgW.adaptarParaWindowsAntigo('param([switch]$Loop, [switch]$Servico)\nfunction Agora-Ms { return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }\n'); } catch (e) { travaReprova = /mais de uma vez|chama a si mesma/.test(e.message); }
+    const pwshW = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh']
+      .filter(Boolean).find((c) => { try { return fsW.statSync(c).isFile(); } catch (e) { return false; } });
+    let ag = null; const recebidos = [];
+    if (pwshW) {
+      const srv = require('http').createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { try { recebidos.push(JSON.parse(b)); } catch (e) {} res.end('{}'); }); });
+      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      const dir = fsW.mkdtempSync(pathW.join(osW.tmpdir(), 'winantigo-'));
+      const harness = `
+$ErrorActionPreference = "Stop"
+$Servico = $false
+$CabecalhosAgente = @{ "X-NOC-Token" = "abc123" }
+function Escrever-Log($m) { }
+${cabecalho}
+${umaLinha(/^\$script:Pulso = \$null$/)}
+${corpoW('Relogio-Ms')}
+${corpoW('Pulso-Tick')}
+${corpoW('Marcar-Etapa')}
+${corpoW('Iniciar-VigiaDeTravamento')}
+$r = @{}
+# o que matava o agente: subir o vigia e dar a primeira volta do laço
+Iniciar-VigiaDeTravamento "http://127.0.0.1:${srv.address().port}/hb" "WANT" "P1"
+Pulso-Tick
+$r.tickPertoDeAgora = [math]::Abs([int64]$script:Pulso.tick - [int64](([DateTime]::UtcNow - (New-Object DateTime 1970,1,1,0,0,0,([DateTimeKind]::Utc))).TotalMilliseconds)) -lt 5000
+$script:Pulso.esperaS = 1; $script:Pulso.limiteMs = 2000
+Marcar-Etapa "Politica: barra de tarefas"
+Start-Sleep -Seconds 4
+$r.presencas = [int]$script:Pulso.presencas
+$r | ConvertTo-Json -Compress
+`;
+      const arq = pathW.join(dir, 'h.ps1'); fsW.writeFileSync(arq, harness);
+      const out = await new Promise((resolve) => {
+        const pr = cpW.spawn(pwshW, ['-NoProfile', '-NonInteractive', '-File', arq]);
+        let o = '', e = ''; pr.stdout.on('data', (c) => { o += c; }); pr.stderr.on('data', (c) => { e += c; });
+        const tmo = setTimeout(() => pr.kill('SIGKILL'), 60000);
+        pr.on('close', () => { clearTimeout(tmo); resolve({ o, e }); });
+      });
+      srv.close();
+      try { ag = JSON.parse(out.o.trim().split('\n').pop()); } catch (e) { ag = { erro: (out.o + out.e).slice(0, 600) }; }
+    }
+    const conf = {
+      'o script de Windows antigo tem UM relogio Agora-Ms, e nenhuma função chama a si mesma':
+        (psW.match(/^function Agora-Ms\b/gm) || []).length === 1 && !/function Relogio-Ms \{\n\s*return \(Relogio-Ms\)/.test(psW),
+      'a conversão reprova quem definir o relógio de novo': travaReprova,
+      'o vigia (runspace) não depende de função do script': !/\(Agora-Ms\)|\(Relogio-Ms\)/.test(corpoW('Iniciar-VigiaDeTravamento').slice(corpoW('Iniciar-VigiaDeTravamento').indexOf('AddScript'))),
+      'o agente subiu a versão': vgW.VERSAO_VIGIA >= 117,
+      'WINDOWS ANTIGO RODANDO: sobe o vigia e dá a volta do laço sem morrer': !pwshW ? 'pular' : !!ag && ag.tickPertoDeAgora === true,
+      'WINDOWS ANTIGO RODANDO: laço parado = o vigia bate presença com a etapa': !pwshW ? 'pular'
+        : !!ag && ag.presencas >= 1 && recebidos.some((x) => x.soPresenca === true && x.ocupado && x.ocupado.etapa === 'Politica: barra de tarefas'),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okWinAntigo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ag=${JSON.stringify(ag)} recebidos=${recebidos.length})`);
+  } catch (e) { okWinAntigo = false; console.log('  erro: ' + e.message); }
+  if (!okWinAntigo) ruins += 1;
+  console.log(`${okWinAntigo ? '✓' : '✗'} NOCZenith no Windows antigo: o vigia sobe sem recursão (a v116 matava os Server 2012 R2 ao iniciar)`);
 
   // ------------------------------------------------------------------
   // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)

@@ -31,7 +31,9 @@
 // 116: vigia de travamento (a maquina nao some do NOC quando o laco principal
 // empaca: bate "viva, ocupada em X"), desafixar da barra com prazo de 15s e
 // o ZIP do arquivamento fora do laco principal.
-const VERSAO_VIGIA = 116;
+// 117: conserta a 116 no Windows antigo (Server 2012 R2): o relogio novo
+// tinha o mesmo nome do relogio da conversao e virava recursao ao subir.
+const VERSAO_VIGIA = 117;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -118,6 +120,15 @@ function adaptarParaWindowsAntigo(texto) {
   out = out.replace('[int64]([DateTimeOffset]::new($b.ToUniversalTime(), [TimeSpan]::Zero).ToUnixTimeMilliseconds())', '(Ms-De $b)');
   out = out.replace('[int64]([DateTimeOffset]::new($ev.TimeCreated.ToUniversalTime(), [TimeSpan]::Zero).ToUnixTimeMilliseconds())', '(Ms-De $ev.TimeCreated)');
   if (/::new\(|ToUnixTimeMilliseconds/.test(out)) throw new Error('Sobrou API de PowerShell 5 no script de Windows antigo - ajuste adaptarParaWindowsAntigo.');
+  // v116 matou os Server 2012 R2: uma funcao do script com o MESMO nome do
+  // relogio daqui virou "function Agora-Ms { return (Agora-Ms) }" - recursao
+  // sem fim logo ao subir. Nenhuma funcao pode chamar a si mesma no corpo de
+  // uma linha, e os dois relogios daqui tem de ser os unicos com esse nome.
+  if ((out.match(/^function Agora-Ms\b/gm) || []).length !== 1 || (out.match(/^function Ms-De\b/gm) || []).length !== 1) {
+    throw new Error('O script de Windows antigo ficou com o relogio (Agora-Ms/Ms-De) definido mais de uma vez - renomeie a funcao nova.');
+  }
+  const autoChamada = out.split('\n').find((l) => { const m = l.match(/^function ([\w-]+)\b.*\{.*\(\1\)/); return !!m; });
+  if (autoChamada) throw new Error('Funcao que chama a si mesma no script de Windows antigo: ' + autoChamada.slice(0, 80));
   return out;
 }
 
@@ -398,21 +409,33 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // preso). Nao renova o carimbo de cedencia: se a instancia de login
     // empacar, a de boot tem de continuar podendo assumir.
     '$script:Pulso = $null',
-    'function Agora-Ms { return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }',
-    'function Pulso-Tick { if ($script:Pulso) { $script:Pulso.tick = (Agora-Ms); $script:Pulso.etapa = "laco principal"; $script:Pulso.etapaDesde = (Agora-Ms) } }',
-    'function Marcar-Etapa([string]$etapa) { if ($script:Pulso) { $script:Pulso.etapa = $etapa; $script:Pulso.etapaDesde = (Agora-Ms) } }',
+    // INCIDENTE 23/09 (v116): este relogio se chamava Agora-Ms - o MESMO nome
+    // que a versao de Windows antigo (Server 2012 R2) cria no topo do script.
+    // A conversao troca o corpo daqui por "(Agora-Ms)" e a funcao passou a
+    // chamar a si mesma: o agente morria logo depois de "NOCZenith iniciado",
+    // a cada 5min (DOM-TIROL-HOST01). Nome proprio, e a conversao agora
+    // reprova se sobrar Agora-Ms definido duas vezes.
+    'function Relogio-Ms {',
+    '  return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
+    '}',
+    'function Pulso-Tick { if ($script:Pulso) { $script:Pulso.tick = (Relogio-Ms); $script:Pulso.etapa = "laco principal"; $script:Pulso.etapaDesde = (Relogio-Ms) } }',
+    'function Marcar-Etapa([string]$etapa) { if ($script:Pulso) { $script:Pulso.etapa = $etapa; $script:Pulso.etapaDesde = (Relogio-Ms) } }',
     'function Iniciar-VigiaDeTravamento([string]$url, [string]$unidade, [string]$posto) {',
     '  if ($script:Pulso) { return }',
-    '  $script:Pulso = [hashtable]::Synchronized(@{ tick = (Agora-Ms); etapa = "iniciando"; etapaDesde = (Agora-Ms); limiteMs = 60000; esperaS = 20 })',
+    '  $script:Pulso = [hashtable]::Synchronized(@{ tick = (Relogio-Ms); etapa = "iniciando"; etapaDesde = (Relogio-Ms); limiteMs = 60000; esperaS = 20 })',
     '  try {',
     '    $rsVigia = [runspacefactory]::CreateRunspace(); $rsVigia.Open()',
     '    $psVigia = [powershell]::Create(); $psVigia.Runspace = $rsVigia',
     '    [void]$psVigia.AddScript({',
     '      param($Pulso, $Url, $Cab, $Unidade, $Posto, $Instancia)',
+    // esta linha de execucao e um runspace separado: nao enxerga funcao
+    // nenhuma do script (nem o Agora-Ms do Windows antigo). Conta os ms na
+    // mao, do jeito que funciona do PowerShell 4 ao 7.
+    '      $epoca = New-Object DateTime 1970, 1, 1, 0, 0, 0, ([DateTimeKind]::Utc)',
     '      while ($true) {',
-    '        Start-Sleep -Seconds ([int]$Pulso.esperaS)',
+    '        for ($s = 0; $s -lt [int]$Pulso.esperaS; $s++) { Start-Sleep -Seconds 1 }',
     '        try {',
-    '          $agora = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
+    '          $agora = [int64]([DateTime]::UtcNow - $epoca).TotalMilliseconds',
     '          if (($agora - [int64]$Pulso.tick) -lt [int64]$Pulso.limiteMs) { continue }',
     '          $corpo = @{ unidade = $Unidade; posto = $Posto; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)"; soPresenca = $true; instancia = $Instancia; ocupado = @{ etapa = [string]$Pulso.etapa; desde = [int64]$Pulso.etapaDesde; instancia = $Instancia } } | ConvertTo-Json -Depth 3',
     '          Invoke-RestMethod -Uri $Url -Method Post -ContentType "application/json; charset=utf-8" -Headers $Cab -Body $corpo -TimeoutSec 10 | Out-Null',
