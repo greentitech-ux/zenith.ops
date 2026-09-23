@@ -12,12 +12,21 @@ const lojaStatus = require('./lojaStatus');
 const googleGmail = require('./googleGmail');
 const unidades = require('./unidades');
 const qaAprovacoes = require('./qaAprovacoes');
+const centralChat = require('./centralChat');
+const storage = require('./storage');
 const push = require('./push');
 
 const AUDITORIA = db.collection('coworkApiAuditoria');
 const IDEMPOTENCIA = db.collection('coworkApiIdempotencia');
 
 const FERRAMENTAS = Object.freeze({
+  // ---- consultas (etapa 2, 23/09/2026): o Claude enxerga antes de agir ----
+  consultar_ticket: { descricao: 'Acha pelo NÚMERO que a pessoa vê (ex.: 12052 ou "#12052") a tarefa do Meu Dia e/ou a solicitação da Central com esse número. Devolve o tarefaId/solicitacaoId interno - é ele que as ações pedem, não o número.', risco: 'leitura', obrigatorios: ['numero'] },
+  listar_tarefas: { descricao: 'Lista tarefas e reuniões ABERTAS do Meu Dia (Pendente, A fazer, Hoje, Em andamento), filtrando por unidade, status, responsável e texto. Concluída/cancelada: use consultar_ticket com o número.', risco: 'leitura', obrigatorios: [] },
+  listar_solicitacoes: { descricao: 'Lista solicitações da Central (compra, suporte de TI, manutenção, pagamento, nota...) por unidade, tipo, status (PENDENTE, APROVADO, REJEITADO, CONVERTIDO) e texto, da mais nova pra mais antiga.', risco: 'leitura', obrigatorios: [] },
+  ler_chat_ticket: { descricao: 'Lê a conversa de uma solicitação da Central (a caixa "Escrever uma mensagem..." do ticket). Informe o numero, ou solicitacaoId.', risco: 'leitura', obrigatorios: [] },
+  listar_usuarios: { descricao: 'Lista acessos por cargo, unidade ou texto (nome, e-mail, username) - pra escolher o usuário-modelo de criar_usuario ou o responsável de uma tarefa. Não traz senha nem nada secreto.', risco: 'leitura', obrigatorios: [] },
+  ler_reuniao: { descricao: 'Lê uma reunião do Meu Dia: pauta, participantes, resumo, anotações (comentários), decisões e o TEXTO das transcrições anexadas (.txt, .vtt, .md, .docx). Informe tarefaId ou numero.', risco: 'leitura', obrigatorios: [] },
   consultar_autorizacao: { descricao: 'Consulta se o Master já autorizou (ou recusou) uma ação pedida antes, e o resultado dela.', risco: 'leitura', obrigatorios: ['autorizacaoId'] },
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
   consultar_noc: { descricao: 'Consulta o estado atual e compacto dos computadores monitorados.', risco: 'leitura', obrigatorios: [] },
@@ -59,6 +68,12 @@ const PROPRIEDADES_COMUNS = {
   // autoriza mais nada - quem autoriza é o Master, no celular.
   confirmar: { type: 'boolean', description: 'Ignorado. A autorização é feita pelo Master no NoPulso (digital ou senha).' },
   autorizacaoId: { type: 'string', description: 'Id devolvido quando a ação ficou aguardando autorização.' },
+  numero: { type: 'string', description: 'Número do ticket/tarefa que a pessoa vê, ex.: 12052.' },
+  status: { type: 'string', description: 'Tarefa: PENDENTE, A_FAZER, HOJE, EM_ANDAMENTO. Solicitação: PENDENTE, APROVADO, REJEITADO, CONVERTIDO.' },
+  responsavel: { type: 'string', description: 'Nome, e-mail ou username.' },
+  cargo: { type: 'string', description: 'Tag de cargo, ex.: gerente, supervisor, suporte.' },
+  solicitacaoId: { type: 'string' },
+  incluirInativos: { type: 'boolean' },
   idempotencyKey: { type: 'string', description: 'UUID novo por intenção de escrita; reutilize apenas ao repetir a mesma chamada.' },
 };
 
@@ -157,8 +172,155 @@ async function executarAutorizado(payload) {
   };
 }
 
+// ---------- CONSULTAS (etapa 2) ----------
+// O que volta é o MÍNIMO pra decidir e agir, sempre com os dois números
+// separados: `ticket` é o que a pessoa vê (#12052), `tarefaId` /
+// `solicitacaoId` é o que as ações pedem. Misturar os dois foi o que impediu
+// cancelar a #12052 (ela teve que ser recriada).
+const minusc = (v) => String(v == null ? '' : v).toLocaleLowerCase('pt-BR');
+const contem = (campos, termo) => !termo || campos.some((c) => minusc(c).includes(termo));
+const limiteDe = (v, padrao, max) => Math.min(max, Math.max(1, Number(v) || padrao));
+
+function tarefaCompacta(t) {
+  return {
+    tarefaId: t.id, ticket: t.numeroTicket || null, titulo: t.titulo, status: t.status, prioridade: t.prioridade || null,
+    reuniao: !!t.ehReuniao, dataEntrega: t.dataEntrega || null, horaInicio: t.horaInicio || null,
+    unidade: t.unidadeNome || t.unidade || null, codigoUnidade: t.unidade || null,
+    responsavel: t.responsavelNome || t.responsavelEmail || null, responsavelEmail: t.responsavelEmail || null,
+    participantes: (t.colaboradores || []).map((c) => c.nome || c.email).filter(Boolean),
+    criadoPor: t.criadoPorNome || null, criadaEm: t.criadaEm || null, atualizadoEm: t.atualizadoEm || null,
+    vinculo: t.vinculo && t.vinculo.id ? { tipo: t.vinculo.ticketTipo || t.vinculo.tipo || null, solicitacaoId: t.vinculo.id } : null,
+    descricao: t.descricao ? String(t.descricao).slice(0, 400) : null,
+  };
+}
+function solicitacaoCompacta(x) {
+  return {
+    solicitacaoId: x.id, ticket: x.numeroTicket || null, tipo: x.tipo, titulo: x.titulo, status: x.status,
+    execucaoStatus: x.execucaoStatus || null, prioridade: x.prioridade || null,
+    unidade: x.unidadeNome || x.unidade || null, codigoUnidade: x.unidade || null,
+    criadoPor: x.criadoPorEmail || null, criadoEm: x.criadoEm || null,
+    direcionadoPara: x.direcionadoParaEmail || null, valorEstimado: x.valorEstimado ?? null,
+    observacao: x.observacao ? String(x.observacao).slice(0, 500) : null,
+    itens: (x.itens || []).slice(0, 20),
+  };
+}
+
+async function consultarTicket(numero) {
+  const n = Number(String(numero == null ? '' : numero).replace(/\D/g, ''));
+  if (!n) throw new Error('Informe o número, ex.: 12052.');
+  const [listaTarefas, todasSolicitacoes] = await Promise.all([tarefas.porNumero(n), solicitacoes.listAll()]);
+  const achadas = todasSolicitacoes.filter((x) => Number(x.numeroTicket) === n);
+  return {
+    numero: n,
+    tarefas: listaTarefas.map(tarefaCompacta),
+    solicitacoes: achadas.map(solicitacaoCompacta),
+    aviso: !listaTarefas.length && !achadas.length ? 'Nenhuma tarefa nem solicitação com esse número (estorno e ajuste de fechamento não entram nesta consulta).' : null,
+  };
+}
+
+async function listarTarefas(p) {
+  const unidade = minusc(p.unidade).trim(); const termo = minusc(p.termo).trim();
+  const resp = minusc(p.responsavel).trim(); const status = String(p.status || '').trim().toUpperCase();
+  const limite = limiteDe(p.limite, 40, 100);
+  const abertas = await tarefas.listarAbertas();
+  const filtradas = abertas.filter((t) => (!status || t.status === status)
+    && (!unidade || minusc(t.unidade).includes(unidade) || minusc(t.unidadeNome).includes(unidade))
+    && (!resp || contem([t.responsavelNome, t.responsavelEmail], resp))
+    && contem([t.titulo, t.descricao, t.numeroTicket, t.unidadeNome, t.responsavelNome], termo))
+    .sort((a, b) => String(b.atualizadoEm || '').localeCompare(String(a.atualizadoEm || '')));
+  return {
+    total: filtradas.length, mostrando: Math.min(limite, filtradas.length),
+    // o teto da consulta: se bateu, a lista pode estar incompleta
+    listaCompleta: abertas.length < tarefas.LIMITE_ABERTAS_AGENTE,
+    tarefas: filtradas.slice(0, limite).map(tarefaCompacta),
+  };
+}
+
+async function listarSolicitacoes(p) {
+  const unidade = minusc(p.unidade).trim(); const termo = minusc(p.termo).trim();
+  const tipo = minusc(p.tipo).trim(); const status = String(p.status || '').trim().toUpperCase();
+  const limite = limiteDe(p.limite, 40, 100);
+  const filtradas = (await solicitacoes.listAll()).filter((x) => !x.teste
+    && (!status || x.status === status) && (!tipo || minusc(x.tipo) === tipo)
+    && (!unidade || minusc(x.unidade).includes(unidade) || minusc(x.unidadeNome).includes(unidade))
+    && contem([x.titulo, x.observacao, x.numeroTicket, x.unidadeNome, x.criadoPorEmail, x.tipo], termo))
+    .sort((a, b) => String(b.criadoEm || '').localeCompare(String(a.criadoEm || '')));
+  return { total: filtradas.length, mostrando: Math.min(limite, filtradas.length), solicitacoes: filtradas.slice(0, limite).map(solicitacaoCompacta) };
+}
+
+async function lerChatTicket(p) {
+  let alvo = null;
+  if (p.solicitacaoId) alvo = await solicitacoes.getOne(String(p.solicitacaoId));
+  else if (p.numero) {
+    const n = Number(String(p.numero).replace(/\D/g, ''));
+    alvo = (await solicitacoes.listAll()).find((x) => Number(x.numeroTicket) === n) || null;
+  } else throw new Error('Informe o numero ou o solicitacaoId.');
+  if (!alvo) throw new Error('Solicitação não encontrada.');
+  const mensagens = await centralChat.listByCard(alvo.tipo, alvo.id);
+  return {
+    solicitacao: solicitacaoCompacta(alvo),
+    mensagens: mensagens.map((m) => ({ por: m.autorUsername || m.autorEmail || 'Usuário', em: m.criadoEm, texto: m.texto || '', temFoto: !!m.imagem })),
+  };
+}
+
+async function listarUsuarios(p) {
+  const cargo = minusc(p.cargo).trim(); const unidade = minusc(p.unidade).trim(); const termo = minusc(p.termo).trim();
+  const limite = limiteDe(p.limite, 40, 150);
+  const todos = await users.list();
+  const filtrados = todos.filter((u) => (p.incluirInativos || u.active !== false)
+    && (!cargo || (u.cargos || []).some((c) => minusc(c).includes(cargo)) || minusc(u.cargo).includes(cargo) || (cargo === 'master' && u.role === 'master'))
+    && (!unidade || (u.permissions && (u.permissions.unidades || []).some((x) => minusc(x).includes(unidade))))
+    && contem([u.username, u.email], termo))
+    .sort((a, b) => minusc(a.username || a.email).localeCompare(minusc(b.username || b.email)));
+  return {
+    total: filtrados.length, mostrando: Math.min(limite, filtrados.length),
+    usuarios: filtrados.slice(0, limite).map((u) => ({
+      username: u.username || null, email: u.email, papel: u.role === 'master' ? 'master' : (u.isAdmin ? 'admin' : 'usuario'),
+      cargo: u.cargo || null, cargos: u.cargos || [], ativo: u.active !== false, bloqueado: !!u.locked,
+      unidades: u.permissions ? (u.permissions.unidades || []) : 'todas (master)',
+      secoes: u.permissions ? (u.permissions.sections || []) : 'todas (master)',
+    })),
+  };
+}
+
+const TRANSCRICAO_MAX_CARACTERES = 200000;
+async function lerReuniao(p) {
+  let t = null;
+  if (p.tarefaId) t = await tarefas.getOne(String(p.tarefaId));
+  else if (p.numero) t = (await tarefas.porNumero(p.numero)).find((x) => x.ehReuniao) || null;
+  else throw new Error('Informe tarefaId ou numero.');
+  if (!t || !t.ehReuniao) throw new Error('Reunião não encontrada.');
+  const anexosTranscricao = (t.anexos || []).filter((a) => a.transcricao || tarefas.ehArquivoDeTranscricao(a.nome)).slice(-3);
+  const transcricoes = [];
+  for (const a of anexosTranscricao) {
+    const buf = await storage.baixarArquivo(a.path);
+    const texto = tarefas.textoDaTranscricao(buf, a.nome);
+    transcricoes.push({
+      nome: a.nome, enviadaPor: a.enviadoPorNome || null, em: a.enviadoEm || null,
+      texto: texto ? texto.slice(0, TRANSCRICAO_MAX_CARACTERES) : null,
+      cortada: !!texto && texto.length > TRANSCRICAO_MAX_CARACTERES,
+      aviso: texto ? null : 'Não consegui ler o texto deste arquivo.',
+    });
+  }
+  return {
+    ...tarefaCompacta(t), duracaoMin: t.duracaoMin || null, linkReuniao: t.linkReuniao || null,
+    descricao: t.descricao || null,
+    resumo: t.resumoReuniao ? { texto: t.resumoReuniao.texto, por: t.resumoReuniao.porNome, em: t.resumoReuniao.em } : null,
+    anotacoes: (t.comentarios || []).filter((c) => !c.sistema).map((c) => ({ por: c.porNome, em: c.em, texto: c.texto })),
+    decisoes: (t.decisoes || []).map((d) => ({ ticket: d.numeroTicket, titulo: d.titulo, tarefaId: d.tarefaId })),
+    subtarefas: (t.subtarefas || []).map((x) => ({ titulo: x.titulo, feita: !!(x.feita || x.concluida) })),
+    transcricoes,
+  };
+}
+
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
+  if (nome === 'consultar_ticket') return consultarTicket(p.numero);
+  if (nome === 'listar_tarefas') return listarTarefas(p);
+  if (nome === 'listar_solicitacoes') return listarSolicitacoes(p);
+  if (nome === 'ler_chat_ticket') return lerChatTicket(p);
+  if (nome === 'listar_usuarios') return listarUsuarios(p);
+  if (nome === 'ler_reuniao') return lerReuniao(p);
   if (nome === 'consultar_autorizacao') {
     const a = await qaAprovacoes.obter(String(p.autorizacaoId || ''));
     // só os pedidos do próprio Claude: o id de um pedido de QA Master ou do

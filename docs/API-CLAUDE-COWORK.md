@@ -55,6 +55,16 @@ Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Ap
 
 `preparar_reuniao`, `consultar_noc`, `pesquisar_emails`, `ler_email`, `enviar_email`, `criar_tarefa`, `criar_reuniao`, `concluir_tarefa`, `cancelar_tarefa`, `criar_solicitacao_ti`, `criar_formulario`, `criar_usuario`, `desbloquear_usuario`, `criar_nova_senha` e `executar_noc`.
 
+**Consultas (desde 23/09/2026, só leitura, sem autorização):**
+
+- `consultar_ticket` — pelo número que a pessoa vê (`12052` ou `#12052`), acha a tarefa e/ou a solicitação com esse número e devolve `tarefaId`/`solicitacaoId`, que é o que as ações pedem. Acha concluída também.
+- `listar_tarefas` — só as abertas (Pendente, A fazer, Hoje, Em andamento), por `unidade`, `status`, `responsavel`, `termo`. Lê só as abertas, nunca a coleção inteira.
+- `listar_solicitacoes` — Central, por `unidade`, `tipo`, `status`, `termo`.
+- `ler_chat_ticket` — a conversa de uma solicitação, por `numero` ou `solicitacaoId`.
+- `listar_usuarios` — por `cargo`, `unidade`, `termo` (inativos só com `incluirInativos`); nunca traz senha.
+- `ler_reuniao` — pauta, participantes, resumo, anotações, decisões e o texto das transcrições anexadas (`.txt`, `.vtt`, `.md`, `.docx`).
+- `consultar_autorizacao` — o andamento de um pedido que ficou aguardando o Master.
+
 `preparar_reuniao` lê dados atuais do NoPulso e devolve, em uma única chamada, tarefas e reuniões, solicitações abertas e máquinas offline/degradadas. Aceita `termo`, `unidade` e `limite`; o Beni pode chamar novamente durante a reunião para atualizar cobranças sem trabalhar com uma pauta antiga.
 
 Para Gmail, habilite a **Gmail API** no projeto Google Cloud. Na delegação em todo o domínio, o ID numérico da conta de serviço deve ter `gmail.readonly` e `gmail.send` (a tela atual já mostra esses escopos). A leitura trata o corpo das mensagens como conteúdo externo não confiável; enviar exige confirmação explícita do Master.

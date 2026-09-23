@@ -26783,6 +26783,118 @@ $r | ConvertTo-Json -Depth 4 -Compress
   console.log(`${okAutoriza ? '✓' : '✗'} Autorização no celular: o Claude prepara, só a digital/senha do Master faz rodar`);
 
   // ------------------------------------------------------------------
+  // O CLAUDE ENXERGA ANTES DE AGIR (etapa 2, 23/09/2026).
+  //
+  // Casos reais que a falta disto causou: a tarefa #12052 não pôde ser
+  // cancelada porque o número que a pessoa vê não é o id que a ação pede (e
+  // não havia como achar o id); o usuário-modelo do Jefferson teve de ser
+  // perguntado até chegar em "anny"; e ninguém conseguia ler a conversa de um
+  // ticket. Tudo leitura - nenhuma consulta pode vazar segredo nem custar a
+  // coleção inteira.
+  let okConsultas = false;
+  try {
+    const cw = require(__dirname + '/coworkApi.js');
+    const usersC = require(__dirname + '/users.js');
+    const stC = require(__dirname + '/storage.js');
+    const zlibC = require('zlib');
+    const agoraC = new Date().toISOString();
+    const base = { prioridade: 'media', comentarios: [], anexos: [], colaboradores: [], criadaEm: agoraC, atualizadoEm: agoraC };
+    DOCS.set('tarefas/tc-aberta', { ...base, id: 'tc-aberta', numeroTicket: 91052, titulo: 'Nota fiscal com pedido errado', status: 'A_FAZER', unidade: 'Dominos Praca Aero Recife', unidadeNome: "Dom Praça Aero Recife", responsavelNome: 'Val', responsavelEmail: 'val@teste.local' });
+    DOCS.set('tarefas/tc-outra', { ...base, id: 'tc-outra', numeroTicket: 91053, titulo: 'Trocar roteador', status: 'HOJE', unidade: 'Dominos Tirol', unidadeNome: 'Dom Tirol', responsavelNome: 'Fernandda' });
+    DOCS.set('tarefas/tc-feita', { ...base, id: 'tc-feita', numeroTicket: 91054, titulo: 'Conferir caixa', status: 'CONCLUIDA', unidade: 'Dominos Tirol', unidadeNome: 'Dom Tirol' });
+    // reunião com transcrição .txt, .vtt e .docx (o que o Meet/Drive exportam)
+    const docxDe = (texto) => {
+      const xml = Buffer.from(`<?xml version="1.0"?><w:document xmlns:w="x"><w:body>${texto.split('\n').map((l) => `<w:p><w:r><w:t>${l.replace(/&/g, '&amp;')}</w:t></w:r></w:p>`).join('')}</w:body></w:document>`);
+      const comp = zlibC.deflateRawSync(xml); const nome = Buffer.from('word/document.xml');
+      const crc = zlibC.crc32 ? zlibC.crc32(xml) : 0;
+      const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(8, 8);
+      local.writeUInt32LE(crc, 14); local.writeUInt32LE(comp.length, 18); local.writeUInt32LE(xml.length, 22); local.writeUInt16LE(nome.length, 26);
+      const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(8, 10);
+      central.writeUInt32LE(crc, 16); central.writeUInt32LE(comp.length, 20); central.writeUInt32LE(xml.length, 24); central.writeUInt16LE(nome.length, 28); central.writeUInt32LE(0, 42);
+      const inicioCentral = 30 + nome.length + comp.length;
+      const fim = Buffer.alloc(22); fim.writeUInt32LE(0x06054b50, 0); fim.writeUInt16LE(1, 8); fim.writeUInt16LE(1, 10);
+      fim.writeUInt32LE(46 + nome.length, 12); fim.writeUInt32LE(inicioCentral, 16);
+      return Buffer.concat([local, nome, comp, central, nome, fim]);
+    };
+    const ARQ = {
+      'mem/ata.txt': Buffer.from('﻿Sidney: vamos trocar o roteador da Bessa.\r\nVal: fechado.'),
+      'mem/ata.vtt': Buffer.from('WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\nFernandda: o caixa fechou certo\n'),
+      'mem/ata.docx': docxDe('Decisão: comprar 2 nobreaks & 1 switch\nResponsável: Val'),
+    };
+    DOCS.set('tarefas/tc-reuniao', { ...base, id: 'tc-reuniao', numeroTicket: 91055, titulo: 'Reunião quinzenal', status: 'A_FAZER', ehReuniao: true, horaInicio: '10:00', duracaoMin: 60,
+      resumoReuniao: { texto: 'Roteador e nobreaks.', porNome: 'Sidney', em: agoraC },
+      comentarios: [{ id: 'c1', texto: 'Anotação: ver orçamento', porNome: 'Val', em: agoraC }, { id: 'c2', texto: 'Resumo atualizado.', porNome: 'Sidney', em: agoraC, sistema: true }],
+      anexos: [{ id: 'a1', nome: 'ata.txt', path: 'mem/ata.txt' }, { id: 'a2', nome: 'ata.vtt', path: 'mem/ata.vtt' }, { id: 'a3', nome: 'ata.docx', path: 'mem/ata.docx', transcricao: true }, { id: 'a4', nome: 'foto.png', path: 'mem/foto.png' }] });
+    // solicitação com o MESMO número de uma tarefa (a cópia herda o número)
+    DOCS.set('solicitacoes/sc-1', { id: 'sc-1', numeroTicket: 91052, tipo: 'compra', titulo: 'Nota fiscal errada', status: 'PENDENTE', unidade: 'Dominos Praca Aero Recife', unidadeNome: 'Dom Praça Aero Recife', criadoPorEmail: 'jsilva@teste.local', criadoEm: agoraC, observacao: 'pedido 4412', itens: [] });
+    DOCS.set('solicitacoes/sc-2', { id: 'sc-2', numeroTicket: 91060, tipo: 'suporte-ti', titulo: 'Acesso Meu Dia', status: 'APROVADO', unidade: 'Dominos Tirol', unidadeNome: 'Dom Tirol', criadoPorEmail: 'val@teste.local', criadoEm: agoraC, itens: [] });
+    require(__dirname + '/solicitacoes.js').invalidar();
+    DOCS.set('centralChat/m1', { id: 'm1', cardKey: 'compra:sc-1', tipo: 'compra', cardId: 'sc-1', autorUsername: 'jsilva', texto: 'O pedido certo é o 4413', criadoEm: agoraC });
+    DOCS.set('centralChat/m2', { id: 'm2', cardKey: 'suporte-ti:sc-2', tipo: 'suporte-ti', cardId: 'sc-2', autorUsername: 'val', texto: 'outra conversa', criadoEm: agoraC });
+    DOCS.set('users/uc-anny', { email: 'anny@teste.local', username: 'anny', role: 'user', active: true, passwordHash: 'HASH-SECRETO', palavraRecuperacaoHash: 'OUTRO-SEGREDO', cargo: 'gerente', cargos: ['gerente'],
+      permissions: { sections: ['tarefas', 'solicitacoes'], unidades: ['Dominos Praca Aero Recife'], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: agoraC });
+    DOCS.set('users/uc-inativo', { email: 'velho@teste.local', username: 'velhogerente', role: 'user', active: false, passwordHash: 'x', cargo: 'gerente', cargos: ['gerente'],
+      permissions: { sections: [], unidades: ['Dominos Praca Aero Recife'], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: agoraC });
+    await usersC.updateCargo('uc-anny', 'gerente'); // derruba o cache de usuários
+
+    DOCS.set('users/mst-consultas', { email: 'master-consultas@teste.local', role: 'master', active: true });
+    const masterAntesC = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'master-consultas@teste.local';
+    const baixarOrig = stC.baixarArquivo;
+    stC.baixarArquivo = async (c) => ARQ[c] || null;
+    const lerC = async (nome, entrada) => (await cw.executar({ nome, entrada })).resultado;
+    let tk, tkFeita, lt, ltUni, lsol, chat, us, usTodos, reun, leituraListar;
+    try {
+      tk = await lerC('consultar_ticket', { numero: '#91052' });
+      tkFeita = await lerC('consultar_ticket', { numero: 91054 });
+      const antes = LEITURAS.docs;
+      lt = await lerC('listar_tarefas', {});
+      leituraListar = LEITURAS.docs - antes;
+      ltUni = await lerC('listar_tarefas', { unidade: 'tirol', responsavel: 'fernandda' });
+      lsol = await lerC('listar_solicitacoes', { status: 'PENDENTE', unidade: 'aero' });
+      chat = await lerC('ler_chat_ticket', { numero: '91052' });
+      us = await lerC('listar_usuarios', { cargo: 'gerente', unidade: 'praca aero' });
+      usTodos = await lerC('listar_usuarios', { cargo: 'gerente', unidade: 'praca aero', incluirInativos: true });
+      reun = await lerC('ler_reuniao', { numero: 91055 });
+    } finally {
+      stC.baixarArquivo = baixarOrig;
+      if (masterAntesC === undefined) delete process.env.NOPULSO_AGENT_MASTER; else process.env.NOPULSO_AGENT_MASTER = masterAntesC;
+    }
+    const idsLt = (lt.tarefas || []).map((t) => t.tarefaId);
+    const txtReun = (reun.transcricoes || []).map((x) => x.texto || '').join('\n');
+    const leituras = cw.ferramentasMcp().filter((f) => ['consultar_ticket', 'listar_tarefas', 'listar_solicitacoes', 'ler_chat_ticket', 'listar_usuarios', 'ler_reuniao'].includes(f.name));
+    const conf = {
+      'o número que a pessoa vê acha a tarefa E a solicitação, com o id que as ações pedem':
+        tk.tarefas.length === 1 && tk.tarefas[0].tarefaId === 'tc-aberta' && tk.tarefas[0].ticket === 91052
+        && tk.solicitacoes.length === 1 && tk.solicitacoes[0].solicitacaoId === 'sc-1',
+      'tarefa concluída também se acha pelo número': tkFeita.tarefas.length === 1 && tkFeita.tarefas[0].status === 'CONCLUIDA',
+      'a lista traz só as abertas': idsLt.includes('tc-aberta') && idsLt.includes('tc-outra') && !idsLt.includes('tc-feita'),
+      // CLAUDE.md §3: listar as abertas não lê as concluídas (a coleção inteira)
+      'listar não lê as tarefas concluídas': leituraListar > 0 && leituraListar < [...DOCS.keys()].filter((k) => k.startsWith('tarefas/')).length,
+      'filtra por unidade e responsável': (ltUni.tarefas || []).length === 1 && ltUni.tarefas[0].tarefaId === 'tc-outra',
+      'solicitações por status e unidade': (lsol.solicitacoes || []).some((x) => x.solicitacaoId === 'sc-1') && !(lsol.solicitacoes || []).some((x) => x.solicitacaoId === 'sc-2'),
+      'o chat do ticket vem só daquele ticket': (chat.mensagens || []).length === 1 && chat.mensagens[0].texto === 'O pedido certo é o 4413' && chat.mensagens[0].por === 'jsilva',
+      'usuário-modelo por cargo e unidade (inativo só se pedir)':
+        (us.usuarios || []).map((u) => u.username).join() === 'anny' && (usTodos.usuarios || []).length === 2,
+      'nenhuma consulta de usuário leva hash de senha nem de palavra de recuperação':
+        !JSON.stringify(usTodos).includes('HASH-SECRETO') && !JSON.stringify(usTodos).includes('OUTRO-SEGREDO'),
+      'a reunião traz resumo, anotações (sem as do sistema) e transcrições':
+        !!reun.resumo && reun.resumo.texto === 'Roteador e nobreaks.' && reun.anotacoes.length === 1 && reun.transcricoes.length === 3,
+      'transcrição .txt, .vtt (sem as marcas de tempo) e .docx viram texto':
+        txtReun.includes('trocar o roteador da Bessa') && txtReun.includes('Fernandda: o caixa fechou certo') && !txtReun.includes('-->')
+        && txtReun.includes('comprar 2 nobreaks & 1 switch') && !txtReun.includes('<w:'),
+      'imagem anexada não é tratada como transcrição': !(reun.transcricoes || []).some((x) => x.nome === 'foto.png'),
+      'as seis consultas são só leitura (sem autorização nem idempotência)':
+        leituras.length === 6 && leituras.every((f) => f.annotations.readOnlyHint === true && !f.inputSchema.required.includes('idempotencyKey')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okConsultas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [leituras=${leituraListar} us=${JSON.stringify((usTodos || {}).usuarios || []).slice(0, 200)}]`);
+  } catch (e) { okConsultas = false; console.log('  erro: ' + e.message); }
+  if (!okConsultas) ruins += 1;
+  console.log(`${okConsultas ? '✓' : '✗'} Claude enxerga: ticket pelo número, tarefas, solicitações, chat, usuários e reunião`);
+
+  // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
   //
   // Master (23/09/2026): "quero poder monitorar tanto celular como tablet -
