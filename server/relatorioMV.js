@@ -39,7 +39,7 @@ const FUSO_BR = 'America/Sao_Paulo';
 const RELATORIO_EMAIL_TO_PADRAO = process.env.RELATORIO_EMAIL_TO || 'mv@grupobravoempresarial.com';
 const USUARIO_GATILHO_PADRAO = 'MV';
 // sem barra no final, pra concatenar direto nos links (/decidir...)
-const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 // unicos tipos com fluxo de decisao por e-mail (ver aviso de escopo acima)
 const TIPOS_COM_ACAO_POR_EMAIL = new Set(solicitacoes.TIPOS);
 const TIPOS_LABEL = {

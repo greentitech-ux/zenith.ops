@@ -321,7 +321,6 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/solicitacao-publica.html',
   '/atendimento.html',
   '/api/meta/unidades-publico',
-  '/api/meta/endereco',
   '/api/refund-requests/publico',
   '/api/solicitacoes/publico',
   '/api/bot/solicitacoes',
@@ -763,15 +762,6 @@ app.get('/api/meta/unidades-publico', async (req, res) => {
   res.json(await listaUnidadesPublicas(req.query.area));
 });
 
-// Endereco oficial do app, pra tela avisar quem ainda entra pelo antigo.
-// Publica e sem Firestore: e so devolver o APP_BASE_URL que ja esta em
-// memoria, entao nao custa leitura nenhuma. Existe porque o tema.js e
-// servido como arquivo estatico e nao tem como saber o endereco sozinho -
-// e cravar o dominio novo no JS quebraria a regra de que APP_BASE_URL e a
-// UNICA fonte do endereco (ver CLAUDE.md secao 4).
-app.get('/api/meta/endereco', (req, res) => {
-  res.json({ oficial: APP_BASE_URL });
-});
 
 // personalizacao da tela de login (fundo + balao do robo, ver loginCustom.js
 // e o painel em login-custom.html, Master) - publica porque quem le e a
@@ -795,7 +785,7 @@ app.get('/api/login-custom/logo/:id', async (req, res) => {
 // dominio publico do app - usado pra montar links completos (clicaveis fora
 // do NoPulso, ex: mandados pelo Beniboy no chat pro colaborador repassar pro
 // cliente por WhatsApp). Mesmo padrao ja usado em relatorioMV.js.
-const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
 // acha a loja que mais bate com o que o colaborador escreveu no chat (nome
 // solto, com ou sem acento/maiusculas - ex: "dom bessa", "Bessa") - usado
