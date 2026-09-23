@@ -1835,7 +1835,7 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
 
 app.get('/api/loja-status/vigia-versao', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ versao: vigiaScript.versaoVigiaOferecida(req.query.codigo, req.query.posto) });
+  res.json({ versao: vigiaScript.VERSAO_VIGIA });
 });
 
 // Resgate para agentes derrubados por uma versao invalida. E publico porque

@@ -27,7 +27,6 @@
 // 86: o serviço aplica o perfil no usuário ativo, não só a janela de login.
 // 108: inventaria RAM, processador, placa-mae e BIOS para exibir na ficha.
 const VERSAO_VIGIA = 114;
-const VERSAO_VIGIA_ESTAVEL = 113;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -157,9 +156,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   const urlTelemetria = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/telemetria`;
   const urlConfiguracaoAgente = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/configuracao-agente`;
   const urlInventarioAtalhos = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/inventario-atalhos`;
-  // Identidade para rollout piloto; nao e segredo. A autenticacao das rotas
-  // sensiveis continua sendo feita pelo X-NOC-Token individual da maquina.
-  const urlVersao = `${APP_BASE_URL}/api/loja-status/vigia-versao?codigo=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
+  const urlVersao = `${APP_BASE_URL}/api/loja-status/vigia-versao`;
   const urlScriptProprio = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`;
   const nomeTarefa = 'NOCZenith_' + posto;
 
@@ -3399,16 +3396,4 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
   return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64Elevador}`;
 }
 
-function versaoVigiaOferecida(codigo, posto, env = process.env) {
-  const modo = String(env.NOC_VIGIA_ROLLOUT || 'piloto').trim().toLowerCase();
-  if (modo === 'todos') return VERSAO_VIGIA;
-  const chave = `${String(codigo || '').trim()}|${String(posto || '').trim()}`.toLowerCase();
-  const pilotos = String(env.NOC_VIGIA_PILOTOS || '')
-    .split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
-  return chave && pilotos.includes(chave) ? VERSAO_VIGIA : VERSAO_VIGIA_ESTAVEL;
-}
-
-module.exports = {
-  montarScriptVigia, montarComandoInstalacao, adaptarParaWindowsAntigo,
-  versaoVigiaOferecida, VERSAO_VIGIA, VERSAO_VIGIA_ESTAVEL,
-};
+module.exports = { montarScriptVigia, montarComandoInstalacao, adaptarParaWindowsAntigo, VERSAO_VIGIA };
