@@ -92,16 +92,23 @@ function podeReceberAprovacaoQa(sub) {
   return !!meta && meta.isMaster && !meta.isQaMaster;
 }
 
-// avisa os Masters de verdade que um acesso QA Master tentou uma acao
-// sensivel (exclusao/configuracao global) e ela esta parada esperando
-// aprovacao (ver EXECUTORES_QA em index.js)
-async function notifyQaAprovacaoPendente(resumo, criadoPorEmail) {
+// avisa os Masters de verdade que uma acao sensivel esta PARADA esperando
+// autorizacao (ver qaAprovacoes.js). Nasceu pro QA Master; desde 23/09/2026
+// tambem e por onde chegam os pedidos do Claude/Cowork e do Beniboy - o
+// Master aprova no celular com a DIGITAL (ou a senha), em /autorizacoes.html.
+const TITULO_AUTORIZACAO = {
+  cowork: '🔐 Claude pede autorização',
+  beniboy: '🔐 Beniboy pede autorização',
+  qa: '🧪 QA Master pediu autorização',
+};
+async function notifyQaAprovacaoPendente(resumo, criadoPorEmail, { id = null, origem = 'qa' } = {}) {
   const dados = {
-    title: '🧪 QA Master pediu autorização',
-    body: `${criadoPorEmail || ''} · ${resumo || ''}`,
-    tag: 'qa-aprovacao',
+    title: TITULO_AUTORIZACAO[origem] || TITULO_AUTORIZACAO.qa,
+    body: `${resumo || ''}${criadoPorEmail ? ` · ${criadoPorEmail}` : ''}`,
+    // um aviso por pedido: dois pedidos seguidos nao podem se engolir
+    tag: id ? `autorizacao-${id}` : 'qa-aprovacao',
     critical: true,
-    url: '/usuarios.html',
+    url: id ? `/autorizacoes.html?id=${encodeURIComponent(id)}` : '/autorizacoes.html',
   };
   await alertasCentral.registrar({ tipo: 'qa-aprovacao', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;

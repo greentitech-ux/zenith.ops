@@ -96,6 +96,14 @@ function fakeDoc(caminho) {
     get: async () => { LEITURAS.docs += 1; return snapDoc(caminho); },
     set: async (d, o) => { DOCS.set(caminho, o && o.merge ? { ...(DOCS.get(caminho) || {}), ...d } : d); },
     update: async (d) => { DOCS.set(caminho, { ...(DOCS.get(caminho) || {}), ...d }); },
+    // create() do Firestore: grava SÓ se não existir (é a reserva atômica da
+    // idempotência do Cowork). Faltava aqui, e toda escrita do Cowork caía no
+    // "já está em execução" no teste - sem ninguém ter percebido, porque até
+    // hoje o teste só usava as ferramentas de leitura.
+    create: async (d) => {
+      if (DOCS.has(caminho)) { const e = new Error('ALREADY_EXISTS: documento já existe'); e.code = 6; throw e; }
+      DOCS.set(caminho, d);
+    },
     delete: async () => { DOCS.delete(caminho); },
     collection: (n) => fakeQuery(`${caminho}/${n}`),
   };
@@ -281,12 +289,21 @@ function textoDoPdf(b) {
       dentro.replace(/\\([()\\])/g, '$1') + ' ');
 }
 
-function pedir(caminho, headers = {}) {
+// GET que perde a conexão ANTES de qualquer resposta (ECONNRESET / socket
+// hang up) é repetido UMA vez. É o cliente HTTP do Node reaproveitando um
+// socket que o servidor acabou de fechar por keep-alive ocioso: aparecia como
+// http=0 em testes sem relação nenhuma com o que mudou (o do socorro do NOC
+// falhou assim em 2 de 6 rodadas de 23/09, e passou nas outras 4 com o mesmo
+// código). Rota que derruba a conexão de verdade cai nas duas tentativas.
+function pedir(caminho, headers = {}, tentativa = 1) {
   return new Promise((resolve) => {
     const req = http.request({ host: '127.0.0.1', port: 8899, path: caminho, headers }, (res) => {
       let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b, headers: res.headers }));
     });
-    req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
+    req.on('error', (e) => {
+      if (tentativa === 1 && (e.code === 'ECONNRESET' || /socket hang up/i.test(e.message))) return resolve(pedir(caminho, headers, 2));
+      resolve({ status: 0, corpo: `${e.code || ''} ${e.message}` });
+    });
     // 4s marcava timeout até em rota que respondia certo (relatório de
     // fechamentos em PDF passou a levar mais que isso no ambiente de teste,
     // sem nenhum travamento real - só devagar). 10s ainda pega rota
@@ -26647,6 +26664,123 @@ $r | ConvertTo-Json -Depth 4 -Compress
   } catch (e) { okBuscaNoc = false; console.log('  erro: ' + e.message); }
   if (!okBuscaNoc) ruins += 1;
   console.log(`${okBuscaNoc ? '✓' : '✗'} NOC: a busca tem ✕ e nunca mostra filtro que não está filtrando`);
+
+  // ------------------------------------------------------------------
+  // AUTORIZAÇÃO NO CELULAR: O CLAUDE PREPARA, O MASTER AUTORIZA.
+  //
+  // Master (23/09/2026): "ambos resolvem e eu só faço a autorização, ela
+  // chega no celular e eu aprovo com a senha ou a digital, sempre dando a
+  // digital como primeira opção".
+  //
+  // Antes a única trava das ações sensíveis do Cowork era um confirmar=true
+  // mandado pelo PRÓPRIO modelo: desbloquear acesso, gerar senha, comando no
+  // NOC e e-mail rodavam na hora. E a fila de aprovação aprovava com um
+  // clique, sem senha. Aqui se prova, pela rota de verdade: nada roda antes da
+  // autorização; autorizar exige digital ou senha do próprio Master; pedido
+  // vencido não roda; dois toques não rodam duas vezes; e a senha temporária
+  // vai só pra tela do Master, nunca pro Firestore nem pro Claude.
+  let okAutoriza = false;
+  try {
+    const cw = require(__dirname + '/coworkApi.js');
+    const authA = require(__dirname + '/auth.js');
+    const pkA = require(__dirname + '/passkeys.js');
+    const bcryptA = require('bcryptjs');
+    const hashA = bcryptA.hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-aut-master', { passwordHash: hashA, role: 'master', active: true, email: 'aut-master@teste.local', username: 'autmaster', createdAt: new Date().toISOString() });
+    DOCS.set('users/u-aut-comum', { passwordHash: hashA, role: 'user', active: true, email: 'aut-comum@teste.local', username: 'autcomum',
+      permissions: { sections: ['usuarios'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: new Date().toISOString() });
+    for (const n of ['a', 'b', 'c', 'd']) {
+      DOCS.set(`users/u-aut-alvo-${n}`, { passwordHash: hashA, role: 'user', active: true, locked: true, failedAttempts: 5, email: `aut-alvo-${n}@teste.local`, username: `autalvo${n}`,
+        permissions: { sections: [], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: new Date().toISOString() });
+    }
+    const tkM = (await authA.login('aut-master@teste.local', 'SenhaDeTeste!2026')).token;
+    const tkC = (await authA.login('aut-comum@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabM = { Authorization: 'Bearer ' + tkM }; const cabC = { Authorization: 'Bearer ' + tkC };
+    const masterAntesA = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'aut-master@teste.local';
+    const travado = (n) => !!(DOCS.get(`users/u-aut-alvo-${n}`) || {}).locked;
+    const aprovar = (id, senha, cab = cabM) => postarJson(`/api/qa-aprovacoes/${id}/aprovar`, senha === undefined ? {} : { password: senha }, cab);
+    let r1, r1b, cons1, cons2, semSenha, senhaErrada, deComum, comDigital, deNovo, vencida, dobro, segredo, consSeg, docSeg, deQa, travadoAntes, travadoAposNegadas;
+    try {
+      // 1) o Claude pede: NÃO roda, vira pedido
+      r1 = await cw.executar({ nome: 'desbloquear_usuario', entrada: { usuario: 'autalvoa', confirmar: true }, idempotencyKey: 'aut-k1' });
+      travadoAntes = travado('a');
+      r1b = await cw.executar({ nome: 'desbloquear_usuario', entrada: { usuario: 'autalvoa' }, idempotencyKey: 'aut-k1' });
+      cons1 = (await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: r1.autorizacaoId } })).resultado;
+      // 2) autorizar sem identidade, com senha errada, ou sem ser Master: nada
+      semSenha = await aprovar(r1.autorizacaoId);
+      senhaErrada = await aprovar(r1.autorizacaoId, 'errada');
+      deComum = await aprovar(r1.autorizacaoId, 'SenhaDeTeste!2026', cabC);
+      travadoAposNegadas = travado('a');
+      // 3) com a DIGITAL do Master (o comprovante que a tela manda): roda
+      comDigital = await aprovar(r1.autorizacaoId, pkA.emitirConfirmacao('u-aut-master'));
+      cons2 = (await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: r1.autorizacaoId } })).resultado;
+      deNovo = await aprovar(r1.autorizacaoId, 'SenhaDeTeste!2026');
+      // 4) pedido vencido não roda nem com a senha certa
+      const r2 = await cw.executar({ nome: 'desbloquear_usuario', entrada: { usuario: 'autalvob' }, idempotencyKey: 'aut-k2' });
+      DOCS.set(`qaAprovacoes/${r2.autorizacaoId}`, { ...DOCS.get(`qaAprovacoes/${r2.autorizacaoId}`), expiraEm: new Date(Date.now() - 1000).toISOString() });
+      vencida = { r: await aprovar(r2.autorizacaoId, 'SenhaDeTeste!2026'), status: (DOCS.get(`qaAprovacoes/${r2.autorizacaoId}`) || {}).status };
+      // 5) dois toques ao mesmo tempo: roda uma vez só
+      const r3 = await cw.executar({ nome: 'desbloquear_usuario', entrada: { usuario: 'autalvoc' }, idempotencyKey: 'aut-k3' });
+      // o fake responde rápido demais pra corrida acontecer sozinha: a leitura
+      // do pedido demora 80ms, e os DOIS toques leem "pendente" antes de
+      // qualquer um terminar - sem a trava, os dois executariam
+      const qaModCorrida = require(__dirname + '/qaAprovacoes.js');
+      const obterOrig = qaModCorrida.obter;
+      qaModCorrida.obter = async (id) => { const x = await obterOrig(id); if (id === r3.autorizacaoId) await new Promise((ok) => setTimeout(ok, 80)); return x; };
+      try {
+        dobro = (await Promise.all([aprovar(r3.autorizacaoId, 'SenhaDeTeste!2026'), aprovar(r3.autorizacaoId, 'SenhaDeTeste!2026')])).map((x) => x.status).sort();
+      } finally { qaModCorrida.obter = obterOrig; }
+      // 6) senha temporária: aparece na tela do Master, não no gravado nem pro Claude
+      const r4 = await cw.executar({ nome: 'criar_nova_senha', entrada: { usuario: 'autalvod' }, idempotencyKey: 'aut-k4' });
+      segredo = await aprovar(r4.autorizacaoId, 'SenhaDeTeste!2026');
+      docSeg = DOCS.get(`qaAprovacoes/${r4.autorizacaoId}`) || {};
+      consSeg = (await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: r4.autorizacaoId } })).resultado;
+      // 7) pedido de QA Master não se abre pela consulta do Claude
+      const qaMod = require(__dirname + '/qaAprovacoes.js');
+      const pedQa = await qaMod.criar({ tipo: 'usuarios.ativo', resumo: 'teste', payload: { id: 'x', active: false } });
+      try { await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: pedQa.id } }); deQa = 'abriu'; } catch (e) { deQa = e.message; }
+    } finally {
+      if (masterAntesA === undefined) delete process.env.NOPULSO_AGENT_MASTER; else process.env.NOPULSO_AGENT_MASTER = masterAntesA;
+    }
+    const pedidoDoc = DOCS.get(`qaAprovacoes/${r1.autorizacaoId}`) || {};
+    const segJson = JSON.parse(segredo.corpo || '{}');
+    const senhaTemp = (String(segJson.resultadoParaMaster || '').match(/Senha temporária: (\S+)/) || [])[1] || '';
+    const ferramentas = cw.ferramentasMcp();
+    const fDesb = ferramentas.find((f) => f.name === 'desbloquear_usuario');
+    const htmlAut = require('fs').readFileSync(__dirname + '/public/autorizacoes.html', 'utf8');
+    const srcBot = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+    const conf = {
+      'ação sensível do Claude NÃO roda: vira pedido de autorização': r1.pendente === true && !!r1.autorizacaoId && travadoAntes === true,
+      'repetir a mesma chamada não cria segundo pedido': r1b.autorizacaoId === r1.autorizacaoId,
+      'o pedido mostra o que vai rodar, montado pelo servidor, e vence': pedidoDoc.origem === 'cowork'
+        && (pedidoDoc.detalhes || []).some((d) => d.rotulo === 'Acesso' && d.valor === 'autalvoa') && !!pedidoDoc.expiraEm
+        && !(pedidoDoc.detalhes || []).some((d) => /confirmar|idempotency/i.test(d.rotulo)),
+      'o Claude acompanha: pendente antes, aprovado depois': cons1.status === 'pendente' && cons2.status === 'aprovado' && !!cons2.resultado,
+      'autorizar sem digital/senha não roda (400, não 401)': semSenha.status === 400 && /Senha incorreta/.test(semSenha.corpo) && travadoAposNegadas === true,
+      'senha errada não autoriza': senhaErrada.status === 400 && /Senha incorreta/.test(senhaErrada.corpo),
+      'quem não é Master não autoriza': deComum.status === 403,
+      'a digital do Master autoriza e a ação roda': comDigital.status === 200 && travado('a') === false,
+      'autorizado não roda de novo': deNovo.status === 400,
+      'pedido vencido não roda nem com a senha certa': vencida.r.status === 400 && vencida.status === 'expirado' && travado('b') === true,
+      'dois toques ao mesmo tempo rodam uma vez só': JSON.stringify(dobro) === '[200,409]' && travado('c') === false,
+      'a senha temporária aparece pro Master': segredo.status === 200 && senhaTemp.length >= 6,
+      'e não fica gravada nem vai pro Claude': !!senhaTemp && !JSON.stringify(docSeg).includes(senhaTemp) && !JSON.stringify(consSeg).includes(senhaTemp),
+      'o Claude não abre pedido do QA Master nem do Beniboy': /não encontrada/.test(deQa || ''),
+      'o esquema do Cowork não pede mais confirmar=true e avisa da autorização':
+        !!fDesb && !fDesb.inputSchema.required.includes('confirmar') && /autorização/.test(fDesb.description),
+      'o pedido do Beniboy também toca o celular': /notifyQaAprovacaoPendente\(resumo, [^\n]*\{ id: pedido\.id, origem: 'beniboy' \}/.test(srcBot),
+      'na tela, a digital vem PRIMEIRO e a senha é a alternativa':
+        /<script src="\/digital\.js"/.test(htmlAut) && htmlAut.indexOf('👆 Autorizar com a digital') > -1
+        && htmlAut.indexOf('👆 Autorizar com a digital') < htmlAut.indexOf('Autorizar com a senha')
+        && /class="primario" id="dig-/.test(htmlAut),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAutoriza = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [semSenha=${semSenha && semSenha.status} digital=${comDigital && comDigital.status}:${comDigital && String(comDigital.corpo).slice(0, 120)} dobro=${JSON.stringify(dobro)}]`);
+  } catch (e) { okAutoriza = false; console.log('  erro: ' + e.message); }
+  if (!okAutoriza) ruins += 1;
+  console.log(`${okAutoriza ? '✓' : '✗'} Autorização no celular: o Claude prepara, só a digital/senha do Master faz rodar`);
 
   // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.

@@ -11,26 +11,29 @@ const tarefas = require('./tarefas');
 const lojaStatus = require('./lojaStatus');
 const googleGmail = require('./googleGmail');
 const unidades = require('./unidades');
+const qaAprovacoes = require('./qaAprovacoes');
+const push = require('./push');
 
 const AUDITORIA = db.collection('coworkApiAuditoria');
 const IDEMPOTENCIA = db.collection('coworkApiIdempotencia');
 
 const FERRAMENTAS = Object.freeze({
+  consultar_autorizacao: { descricao: 'Consulta se o Master já autorizou (ou recusou) uma ação pedida antes, e o resultado dela.', risco: 'leitura', obrigatorios: ['autorizacaoId'] },
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
   consultar_noc: { descricao: 'Consulta o estado atual e compacto dos computadores monitorados.', risco: 'leitura', obrigatorios: [] },
   pesquisar_emails: { descricao: 'Pesquisa a caixa corporativa autorizada usando a sintaxe de busca do Gmail.', risco: 'leitura', obrigatorios: [] },
   ler_email: { descricao: 'Lê uma mensagem específica encontrada pela pesquisa.', risco: 'leitura', obrigatorios: ['emailId'] },
-  enviar_email: { descricao: 'Envia e-mail pela caixa corporativa autorizada.', risco: 'alto', obrigatorios: ['para', 'assunto', 'texto'], confirmar: true },
+  enviar_email: { descricao: 'Envia e-mail pela caixa corporativa autorizada.', risco: 'alto', obrigatorios: ['para', 'assunto', 'texto'], autorizar: true },
   criar_tarefa: { descricao: 'Cria uma tarefa no Meu Dia.', risco: 'baixo', obrigatorios: ['titulo'] },
   criar_reuniao: { descricao: 'Cria reunião e, sem link informado, agenda no Google Meet.', risco: 'baixo', obrigatorios: ['titulo', 'dataEntrega', 'horaInicio'] },
-  concluir_tarefa: { descricao: 'Marca uma tarefa como concluída.', risco: 'medio', obrigatorios: ['tarefaId'], confirmar: true },
-  cancelar_tarefa: { descricao: 'Cancela uma tarefa.', risco: 'alto', obrigatorios: ['tarefaId', 'motivo'], confirmar: true },
+  concluir_tarefa: { descricao: 'Marca uma tarefa como concluída.', risco: 'medio', obrigatorios: ['tarefaId'], autorizar: true },
+  cancelar_tarefa: { descricao: 'Cancela uma tarefa.', risco: 'alto', obrigatorios: ['tarefaId', 'motivo'], autorizar: true },
   criar_solicitacao_ti: { descricao: 'Abre solicitação de Suporte de TI na Central.', risco: 'baixo', obrigatorios: ['unidade', 'titulo'] },
   criar_formulario: { descricao: 'Cria formulário preenchido ou link para preenchimento.', risco: 'medio', obrigatorios: ['tipo', 'unidade'] },
-  criar_usuario: { descricao: 'Cria acesso copiando permissões de um usuário-modelo.', risco: 'alto', obrigatorios: ['modelo', 'email', 'username'], confirmar: true, devolveSegredo: true },
-  desbloquear_usuario: { descricao: 'Desbloqueia um acesso existente sem trocar a senha.', risco: 'alto', obrigatorios: ['usuario'], confirmar: true },
-  criar_nova_senha: { descricao: 'Gera e aplica senha temporária aleatória; Master precisa repassá-la com segurança.', risco: 'alto', obrigatorios: ['usuario'], confirmar: true, devolveSegredo: true },
-  executar_noc: { descricao: 'Enfileira uma ação fechada do NOC em computadores. Resetar Zebra só é permitido em unidade com marca Domino\'s configurada e Zebra monitorada. Para "TEF parou", use gsurf-rsa: reinicia o GSurfRSA Listener somente nas cinco unidades autorizadas e pode interromper uma transação por alguns segundos.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], confirmar: true },
+  criar_usuario: { descricao: 'Cria acesso copiando permissões de um usuário-modelo.', risco: 'alto', obrigatorios: ['modelo', 'email', 'username'], autorizar: true, devolveSegredo: true },
+  desbloquear_usuario: { descricao: 'Desbloqueia um acesso existente sem trocar a senha.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true },
+  criar_nova_senha: { descricao: 'Gera e aplica senha temporária aleatória; Master precisa repassá-la com segurança.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true, devolveSegredo: true },
+  executar_noc: { descricao: 'Enfileira uma ação fechada do NOC em computadores. Resetar Zebra só é permitido em unidade com marca Domino\'s configurada e Zebra monitorada. Para "TEF parou", use gsurf-rsa: reinicia o GSurfRSA Listener somente nas cinco unidades autorizadas e pode interromper uma transação por alguns segundos.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], autorizar: true },
 });
 
 function listarFerramentas() {
@@ -51,17 +54,21 @@ const PROPRIEDADES_COMUNS = {
   tipo: { type: 'string' }, modo: { type: 'string', enum: ['link', 'preenchido'] }, campos: { type: 'object' }, linhas: { type: 'array', items: { type: 'object' } },
   tarefa: { type: 'string', enum: ['reiniciar', 'abortar', 'anydesk', 'zebra', 'gsurf-rsa', 'rede', 'corrigir-memoria-limitada'] },
   alvos: { type: 'array', items: { type: 'object', required: ['codigo', 'posto'], properties: { codigo: { type: 'string' }, posto: { type: 'string' } } } },
-  limite: { type: 'number' }, confirmar: { type: 'boolean', description: 'Somente true após confirmação explícita do Master.' },
+  limite: { type: 'number' },
+  // compatibilidade: versões antigas do Cowork mandavam confirmar=true. Não
+  // autoriza mais nada - quem autoriza é o Master, no celular.
+  confirmar: { type: 'boolean', description: 'Ignorado. A autorização é feita pelo Master no NoPulso (digital ou senha).' },
+  autorizacaoId: { type: 'string', description: 'Id devolvido quando a ação ficou aguardando autorização.' },
   idempotencyKey: { type: 'string', description: 'UUID novo por intenção de escrita; reutilize apenas ao repetir a mesma chamada.' },
 };
 
 function ferramentasMcp() {
   return Object.entries(FERRAMENTAS).map(([name, f]) => ({
-    name, description: `${f.descricao} Risco: ${f.risco}.${f.confirmar ? ' Exige confirmação explícita.' : ''}`,
+    name, description: `${f.descricao} Risco: ${f.risco}.${f.autorizar ? ' NÃO executa na hora: vira um pedido de autorização que chega no celular do Master (digital ou senha). A resposta traz pendente=true e autorizacaoId; acompanhe com consultar_autorizacao e só diga que foi feito depois de status aprovado.' : ''}`,
     inputSchema: {
       type: 'object', additionalProperties: false,
       properties: PROPRIEDADES_COMUNS,
-      required: [...f.obrigatorios, ...(f.risco === 'leitura' ? [] : ['idempotencyKey']), ...(f.confirmar ? ['confirmar'] : [])],
+      required: [...f.obrigatorios, ...(f.risco === 'leitura' ? [] : ['idempotencyKey'])],
     },
     annotations: { readOnlyHint: f.risco === 'leitura', destructiveHint: f.risco === 'alto', idempotentHint: f.risco === 'leitura' },
   }));
@@ -85,21 +92,85 @@ async function resolverAtor() {
   return ator;
 }
 
-function validar(nome, entrada, confirmar) {
+// Antes de 23/09/2026 a trava das ações sensíveis era um `confirmar=true`
+// mandado PELO PRÓPRIO MODELO depois de perguntar no chat - ou seja, não
+// havia trava do lado do NoPulso: criar acesso, gerar senha, comando no NOC e
+// e-mail rodavam na hora. Agora essas ferramentas (`autorizar: true`) viram
+// um pedido na fila de autorização, com aviso no celular do Master, e só
+// rodam quando ele aprova com a digital ou a senha (ver executarAutorizado).
+function validar(nome, entrada) {
   const ferramenta = FERRAMENTAS[nome];
   if (!ferramenta) throw new Error('Ferramenta não permitida. Consulte GET /api/agent/tools.');
   const faltando = ferramenta.obrigatorios.filter((campo) => entrada?.[campo] == null || entrada[campo] === '');
   if (faltando.length) throw new Error(`Campos obrigatórios: ${faltando.join(', ')}.`);
-  if (ferramenta.confirmar && confirmar !== true) {
-    const erro = new Error('Esta ação altera dados sensíveis e exige confirmar=true após confirmação explícita do Master.');
-    erro.code = 'CONFIRMACAO_NECESSARIA';
-    throw erro;
-  }
   return ferramenta;
+}
+
+// O que a tela de autorização mostra. Sai do PAYLOAD (o que vai rodar), com
+// rótulo em português - nunca um resumo escrito pelo modelo, que poderia
+// dizer uma coisa e pedir outra.
+const ROTULOS = {
+  para: 'Para', assunto: 'Assunto', texto: 'Texto', tarefaId: 'Tarefa', motivo: 'Motivo',
+  modelo: 'Copiar permissões de', email: 'E-mail', username: 'Usuário', usuario: 'Acesso',
+  pedirTrocaSenha: 'Pedir troca de senha', tarefa: 'Comando', alvos: 'Computadores', unidade: 'Unidade',
+  titulo: 'Título', descricao: 'Descrição', observacao: 'Observação',
+};
+const TITULO_ACAO = {
+  enviar_email: 'Enviar e-mail', concluir_tarefa: 'Concluir tarefa', cancelar_tarefa: 'Cancelar tarefa',
+  criar_usuario: 'Criar acesso', desbloquear_usuario: 'Desbloquear acesso', criar_nova_senha: 'Gerar senha temporária',
+  executar_noc: 'Comando no NOC',
+};
+function valorLegivel(v) {
+  if (Array.isArray(v)) return v.map((x) => (x && typeof x === 'object' ? [x.codigo, x.posto].filter(Boolean).join(' / ') || JSON.stringify(x) : String(x))).join(', ');
+  if (typeof v === 'boolean') return v ? 'sim' : 'não';
+  if (v && typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+function detalhesDoPedido(nome, entrada) {
+  return Object.entries(entrada || {})
+    .filter(([k, v]) => !['idempotencyKey', 'confirmar', 'porId'].includes(k) && v != null && v !== '')
+    .map(([k, v]) => ({ rotulo: ROTULOS[k] || k, valor: valorLegivel(v) }));
+}
+function resumoDoPedido(nome, entrada) {
+  const e = entrada || {};
+  const alvo = e.username || e.usuario || e.email || e.tarefaId || (Array.isArray(e.alvos) ? `${e.alvos.length} computador(es)` : '') || e.assunto || '';
+  return `${TITULO_ACAO[nome] || nome}${e.tarefa ? ` (${e.tarefa})` : ''}${alvo ? ` · ${valorLegivel(alvo)}` : ''}`;
+}
+// comando de máquina aprovado horas depois já não é o que se pediu
+const VALIDADE_AUTORIZACAO_MS = { executar_noc: 2 * 60 * 60 * 1000 };
+const VALIDADE_PADRAO_MS = 24 * 60 * 60 * 1000;
+
+// Chamado pela APROVAÇÃO (index.js, EXECUTORES_QA['cowork.executar']), com
+// o Master já conferido por digital/senha. Roda exatamente o que ficou
+// gravado no pedido. `segredo` avisa que o resultado tem senha temporária:
+// ela vai só pra tela do Master, nunca pro Firestore nem pro Claude.
+async function executarAutorizado(payload) {
+  const nome = String(payload && payload.nome || '');
+  const ferramenta = FERRAMENTAS[nome];
+  if (!ferramenta || !ferramenta.autorizar) throw new Error('Ação do Claude inválida.');
+  const ator = await resolverAtor();
+  const resultado = await despachar(nome, payload.entrada || {}, ator);
+  const texto = typeof resultado === 'string' ? resultado : JSON.stringify(resultado);
+  return {
+    resultado: texto,
+    resultadoPersistido: ferramenta.devolveSegredo ? 'Executado. A senha temporária foi mostrada só ao Master, na autorização.' : texto,
+  };
 }
 
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
+  if (nome === 'consultar_autorizacao') {
+    const a = await qaAprovacoes.obter(String(p.autorizacaoId || ''));
+    // só os pedidos do próprio Claude: o id de um pedido de QA Master ou do
+    // Beniboy não abre o conteúdo dele por aqui
+    if (!a || a.origem !== 'cowork') throw new Error('Autorização não encontrada.');
+    const vencida = a.status === 'pendente' && a.expiraEm && Date.parse(a.expiraEm) <= Date.now();
+    return {
+      autorizacaoId: a.id, status: vencida ? 'expirado' : a.status, resumo: a.resumo,
+      decididoEm: a.decididoEm || null, motivoRecusa: a.motivoRejeicao || null,
+      erro: a.erroExecucao || null, resultado: a.resultado || null,
+    };
+  }
   if (nome === 'pesquisar_emails') return googleGmail.pesquisar({ consulta: p.consulta, limite: p.limite });
   if (nome === 'ler_email') return googleGmail.ler(p.emailId);
   if (nome === 'enviar_email') return googleGmail.enviar({ para: p.para, assunto: p.assunto, texto: p.texto });
@@ -218,8 +289,8 @@ async function despachar(nome, entrada, ator) {
   throw new Error('Executor não implementado.');
 }
 
-async function executar({ nome, entrada, confirmar, idempotencyKey }) {
-  const ferramenta = validar(String(nome || ''), entrada || {}, confirmar);
+async function executar({ nome, entrada, idempotencyKey }) {
+  const ferramenta = validar(String(nome || ''), entrada || {});
   const chave = String(idempotencyKey || '').trim().slice(0, 160);
   if (!chave && ferramenta.risco !== 'leitura') throw new Error('idempotencyKey é obrigatório para evitar ações duplicadas.');
   if (ferramenta.risco === 'leitura') {
@@ -247,6 +318,25 @@ async function executar({ nome, entrada, confirmar, idempotencyKey }) {
   const inicio = new Date().toISOString();
   await auditoria.set({ id: auditoria.id, nome, risco: ferramenta.risco, atorId: ator.id, atorEmail: ator.email, idempotencyKeyHash: ref.id, status: 'EXECUTANDO', criadoEm: inicio });
   try {
+    if (ferramenta.autorizar) {
+      // não executa: vira pedido, e o celular do Master toca
+      const entradaLimpa = { ...(entrada || {}) }; delete entradaLimpa.confirmar; delete entradaLimpa.idempotencyKey;
+      const resumo = resumoDoPedido(nome, entradaLimpa);
+      const pedido = await qaAprovacoes.criar({
+        tipo: 'cowork.executar', resumo, origem: 'cowork',
+        detalhes: detalhesDoPedido(nome, entradaLimpa),
+        expiraEm: new Date(Date.now() + (VALIDADE_AUTORIZACAO_MS[nome] || VALIDADE_PADRAO_MS)).toISOString(),
+        payload: { nome, entrada: entradaLimpa },
+        criadoPorId: ator.id, criadoPorEmail: 'Claude (Cowork)',
+      });
+      push.notifyQaAprovacaoPendente(resumo, 'Claude (Cowork)', { id: pedido.id, origem: 'cowork' })
+        .catch((e) => console.error('Falha ao avisar autorização do Claude:', e.message));
+      const resposta = { ok: true, requestId: auditoria.id, pendente: true, autorizacaoId: pedido.id,
+        resultado: `Aguardando autorização do Master no celular (digital ou senha): ${resumo}. Consulte com consultar_autorizacao antes de dizer que foi feito.` };
+      await ref.update({ status: 'AGUARDANDO_AUTORIZACAO', resposta, concluidoEm: new Date().toISOString() });
+      await auditoria.update({ status: 'AGUARDANDO_AUTORIZACAO', autorizacaoId: pedido.id, concluidoEm: new Date().toISOString() });
+      return resposta;
+    }
     const resultado = await despachar(nome, entrada || {}, ator);
     const resposta = { ok: true, requestId: auditoria.id, resultado, sensivel: !!ferramenta.devolveSegredo };
     // Senhas temporárias nunca ficam no Firestore. Na repetição informamos que
@@ -264,4 +354,4 @@ async function executar({ nome, entrada, confirmar, idempotencyKey }) {
   }
 }
 
-module.exports = { listarFerramentas, ferramentasMcp, tokenValido, executar };
+module.exports = { listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado };
