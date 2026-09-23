@@ -586,6 +586,7 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
   try {
     const guardado = passkeys.consumirDesafio(String(req.body.chave || ''));
     if (!guardado) throw new Error('Tentativa expirada. Toque em entrar de novo.');
+    if (guardado.tipo === 'confirmar') throw new Error('Tentativa inválida. Toque em entrar de novo.');
     const resposta = req.body.resposta;
     const credencial = await passkeys.acharPorCredentialID(resposta && resposta.id);
     if (!credencial) throw new Error('Esse aparelho não está cadastrado neste acesso.');
@@ -620,6 +621,87 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
     if (!atual || Date.now() - atual.desdeMs >= LOGIN_JANELA_MS) LOGIN_FALHAS.set(chaveTentativa, { count: 1, desdeMs: Date.now() });
     else atual.count += 1;
     res.status(401).json({ error: err.message });
+  }
+});
+
+// ---------- CONFIRMAR UMA AÇÃO COM A DIGITAL (no lugar da senha) ----------
+// Ver passkeys.emitirConfirmacao. Três rotas, todas com a pessoa logada:
+// a tela pergunta se ESTE aparelho tem digital cadastrada (pra só então
+// mostrar o botão), pede o desafio e devolve a assinatura - e recebe um
+// comprovante que vale como a senha por 3 minutos, só pra ela.
+//
+// Erro aqui é 400, nunca 401: o wrapper de fetch das páginas desloga em
+// qualquer 401, e a digital falhar não significa sessão inválida.
+function credenciaisDesteEndereco(lista, rpID) {
+  return lista.filter((c) => !c.rpId || c.rpId === rpID);
+}
+
+// o botão só aparece quando há credencial deste acesso, neste endereço, do
+// mesmo sistema deste aparelho (ver passkeys.sistemaDoAparelho). Uma consulta
+// só quando a tela abre um campo de senha - não a cada carregamento.
+app.get('/api/auth/passkey/confirmar/disponivel', auth.requireAuth, async (req, res) => {
+  try {
+    const rpID = passkeys.rpIdDoPedido(req);
+    const sistema = passkeys.sistemaDoAparelho(req.headers['user-agent']);
+    const lista = credenciaisDesteEndereco(await passkeys.listarDoUsuario(req.user.id), rpID);
+    res.json({ disponivel: lista.some((c) => String(c.aparelho || '').split(' · ')[0] === sistema) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/passkey/confirmar/inicio', auth.requireAuth, async (req, res) => {
+  try {
+    const rpID = passkeys.rpIdDoPedido(req);
+    if (!rpID) return res.status(400).json({ error: 'Não consegui identificar o endereço do app.' });
+    const lista = credenciaisDesteEndereco(await passkeys.listarDoUsuario(req.user.id), rpID);
+    if (!lista.length) return res.status(400).json({ error: 'Nenhuma digital cadastrada neste acesso. Use a senha.' });
+    const opcoes = await webauthn.generateAuthenticationOptions({
+      rpID,
+      // só as credenciais DESTE acesso: o aparelho não pode confirmar com a
+      // digital de outra pessoa cadastrada no mesmo celular
+      allowCredentials: lista.map((c) => ({ id: c.credentialID, transports: c.transports })),
+      userVerification: 'required',
+    });
+    const chave = passkeys.novaChaveDeSessao();
+    passkeys.guardarDesafio(chave, opcoes.challenge, req.user.id, 'confirmar');
+    res.json({ chave, opcoes });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/passkey/confirmar/fim', auth.requireAuth, async (req, res) => {
+  try {
+    const guardado = passkeys.consumirDesafio(String(req.body.chave || ''));
+    if (!guardado || guardado.tipo !== 'confirmar') throw new Error('Tentativa expirada. Toque na digital de novo.');
+    if (String(guardado.userId) !== String(req.user.id)) throw new Error('Essa tentativa é de outro acesso.');
+    const resposta = req.body.resposta;
+    const credencial = await passkeys.acharPorCredentialID(resposta && resposta.id);
+    // a assinatura confere com QUALQUER credencial válida; o que prova que é
+    // a pessoa logada é a credencial ser dela
+    if (!credencial || String(credencial.userId) !== String(req.user.id)) throw new Error('Essa digital não é deste acesso.');
+    const rpID = passkeys.rpIdDoPedido(req);
+    if (credencial.rpId && credencial.rpId !== rpID) throw new Error('Essa digital foi cadastrada em outro endereço do app.');
+    const verificacao = await webauthn.verifyAuthenticationResponse({
+      response: resposta,
+      expectedChallenge: guardado.desafio,
+      expectedOrigin: `https://${rpID}`,
+      expectedRPID: rpID,
+      requireUserVerification: true,
+      credential: {
+        id: credencial.credentialID,
+        publicKey: Buffer.from(credencial.publicKey, 'base64url'),
+        counter: credencial.counter || 0,
+        transports: credencial.transports || [],
+      },
+    });
+    if (!verificacao.verified) throw new Error('Não consegui confirmar a digital.');
+    await passkeys.registrarUso(credencial.credentialID, verificacao.authenticationInfo.newCounter);
+    console.log(`[passkey] ${req.user.email} confirmou uma ação com a digital (${credencial.aparelho})`);
+    res.json({ confirmacao: passkeys.emitirConfirmacao(req.user.id), validadeMs: passkeys.VALIDADE_CONFIRMACAO_MS });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

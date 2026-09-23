@@ -215,7 +215,12 @@ async function loginComPasskey(userId, contexto = {}) {
 
 // reautenticacao (ex: confirmar a senha antes de solicitar um estorno) - nao
 // gera token novo, so confirma que a senha bate com a conta logada
+//
+// Aceita também o comprovante da DIGITAL (passkeys.emitirConfirmacao): é
+// assim que toda confirmação de senha do app ganha a biometria sem cada rota
+// saber disso. Só vale pro próprio acesso que o tirou, por 3 minutos.
 async function verifyPassword(userId, password) {
+  if (require('./passkeys').confirmacaoValida(password, userId)) return true;
   const user = await getUserById(userId);
   if (!user) return false;
   return bcrypt.compare(String(password || ''), user.passwordHash);

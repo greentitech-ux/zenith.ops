@@ -26462,6 +26462,167 @@ $r | ConvertTo-Json -Depth 4 -Compress
   console.log(`${okPasskey ? '✓' : '✗'} Passkey: entrar com digital/rosto sem pular nenhuma trava do login por senha`);
 
   // ------------------------------------------------------------------
+  // CONFIRMAR COM A DIGITAL NO LUGAR DA SENHA.
+  //
+  // Master (23/09/2026): "quando for preciso colocar a senha por algum motivo
+  // e estiver no mobile, dá a opção de digital".
+  //
+  // Aqui a assinatura é DE VERDADE: o teste faz o papel do celular, com uma
+  // chave P-256 gerada na hora, e assina o desafio que as rotas mandam. É o
+  // único jeito de provar o ligamento inteiro - desafio -> assinatura ->
+  // comprovante -> rota protegida por senha aceitando o comprovante - e,
+  // principalmente, as recusas: comprovante de uma pessoa na conta de outra,
+  // credencial de outra pessoa, desafio de login reaproveitado, aparelho que
+  // não verificou o dedo.
+  let okDigitalConfirma = false;
+  try {
+    const cryptoD = require('crypto');
+    const pkD = require(__dirname + '/passkeys.js');
+    const authD = require(__dirname + '/auth.js');
+    const bcryptD = require('bcryptjs');
+    const b64u = (b) => Buffer.from(b).toString('base64url');
+    const senhaHashD = bcryptD.hashSync('SenhaDeTeste!2026', 4);
+    for (const [id, nome] of [['u-dig-a', 'diga'], ['u-dig-b', 'digb']]) {
+      DOCS.set(`users/${id}`, { passwordHash: senhaHashD, role: 'user', active: true, email: `${nome}@teste.local`, username: nome,
+        permissions: { sections: [], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: new Date().toISOString() });
+    }
+    const tkA = (await authD.login('diga@teste.local', 'SenhaDeTeste!2026')).token;
+    const tkB = (await authD.login('digb@teste.local', 'SenhaDeTeste!2026')).token;
+    const UA_ANDROID = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36';
+    const UA_WINDOWS = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36';
+    const cabA = { Authorization: 'Bearer ' + tkA, 'User-Agent': UA_ANDROID };
+    const cabB = { Authorization: 'Bearer ' + tkB, 'User-Agent': UA_ANDROID };
+
+    // o "celular": chave P-256, pública gravada em COSE como o cadastro grava
+    const novaChave = () => {
+      const { privateKey, publicKey } = cryptoD.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+      const jwk = publicKey.export({ format: 'jwk' });
+      const cose = Buffer.concat([Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
+        Buffer.from(jwk.x, 'base64url'), Buffer.from([0x22, 0x58, 0x20]), Buffer.from(jwk.y, 'base64url')]);
+      return { privateKey, cose: b64u(cose) };
+    };
+    const chaveA = novaChave(); const chaveB = novaChave();
+    const rpId = '127.0.0.1';
+    const credDoc = (id, userId, ch) => ({ id, credentialID: id, userId, publicKey: ch.cose, counter: 0, rpId,
+      transports: ['internal'], aparelho: 'Android · Chrome', criadoEm: new Date().toISOString(), ultimoUsoEm: null });
+    DOCS.set('passkeys/credDigA', credDoc('credDigA', 'u-dig-a', chaveA));
+    // flags 0x05 = presença + VERIFICAÇÃO (dedo/rosto); 0x01 = só encostou
+    const assinar = (ch, credId, desafio, flags = 0x05) => {
+      const clientData = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: desafio, origin: `https://${rpId}`, crossOrigin: false }));
+      const authData = Buffer.concat([cryptoD.createHash('sha256').update(rpId).digest(), Buffer.from([flags]), Buffer.from([0, 0, 0, 0])]);
+      const sig = cryptoD.sign('sha256', Buffer.concat([authData, cryptoD.createHash('sha256').update(clientData).digest()]), ch.privateKey);
+      return { id: credId, rawId: credId, type: 'public-key', clientExtensionResults: {},
+        response: { clientDataJSON: b64u(clientData), authenticatorData: b64u(authData), signature: b64u(sig), userHandle: null } };
+    };
+    const iniciar = async (cab) => { const r = await postarJson('/api/auth/passkey/confirmar/inicio', {}, cab); return { status: r.status, d: JSON.parse(r.corpo || '{}') }; };
+    const terminar = async (cab, chave, resposta) => { const r = await postarJson('/api/auth/passkey/confirmar/fim', { chave, resposta }, cab); return { status: r.status, d: JSON.parse(r.corpo || '{}') }; };
+    // rota real protegida por senha: concluir em lote. Senha errada = 400
+    // "Senha incorreta."; senha aceita = 200 (a tarefa inexistente só falha
+    // no resultado dela)
+    const concluirCom = async (cab, senha) => {
+      const r = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: ['tarefa-que-nao-existe'], status: 'CONCLUIDA', password: senha }, cab);
+      return r.status === 200 ? 'aceitou' : (/Senha incorreta/.test(r.corpo) ? 'senha incorreta' : `outro ${r.status}`);
+    };
+
+    // --- o botão: aparece só pra quem tem credencial DESTE sistema ---
+    const disp = async (cab) => JSON.parse((await pedir('/api/auth/passkey/confirmar/disponivel', cab)).corpo || '{}').disponivel;
+    const dispAndroid = await disp(cabA);
+    const dispWindows = await disp({ ...cabA, 'User-Agent': UA_WINDOWS });
+    const dispSemCredencial = await disp(cabB);
+    const inicioSemCredencial = await iniciar(cabB);
+
+    // --- o caminho feliz ---
+    const i1 = await iniciar(cabA);
+    const soDeleNoAllow = (i1.d.opcoes?.allowCredentials || []).map((c) => c.id).join(',') === 'credDigA';
+    const f1 = await terminar(cabA, i1.d.chave, assinar(chaveA, 'credDigA', i1.d.opcoes.challenge));
+    const comp = f1.d.confirmacao || '';
+    const usoA1 = await concluirCom(cabA, comp);
+    const usoA2 = await concluirCom(cabA, comp); // lote: a mesma "senha" em N chamadas
+    const usoB = await concluirCom(cabB, comp);  // comprovante de A na conta de B
+    const senhaNormal = await concluirCom(cabA, 'SenhaDeTeste!2026');
+    const senhaErrada = await concluirCom(cabA, 'digital.inventado');
+    // a assinatura capturada não serve de novo: o desafio já foi consumido
+    const replay = await terminar(cabA, i1.d.chave, assinar(chaveA, 'credDigA', i1.d.opcoes.challenge));
+
+    // --- B tenta confirmar com a digital de A (celular emprestado) ---
+    DOCS.set('passkeys/credDigB', credDoc('credDigB', 'u-dig-b', chaveB));
+    const iB = await iniciar(cabB);
+    const fB = await terminar(cabB, iB.d.chave, assinar(chaveA, 'credDigA', iB.d.opcoes.challenge));
+
+    // --- aparelho que não verificou o dedo (só "encostou") ---
+    const iUV = await iniciar(cabA);
+    const fUV = await terminar(cabA, iUV.d.chave, assinar(chaveA, 'credDigA', iUV.d.opcoes.challenge, 0x01));
+
+    // --- desafio de LOGIN usado pra confirmar, e o contrário ---
+    const lg = JSON.parse((await postarJson('/api/auth/passkey/login/inicio', {}, {})).corpo || '{}');
+    const loginNaConfirma = await terminar(cabA, lg.chave, assinar(chaveA, 'credDigA', lg.opcoes.challenge));
+    // o de CADASTRO é da própria pessoa (passa na conferência de dono): só a
+    // marca de tipo o separa
+    const rg = JSON.parse((await postarJson('/api/auth/passkey/registro/inicio', {}, cabA)).corpo || '{}');
+    const cadastroNaConfirma = await terminar(cabA, rg.chave, assinar(chaveA, 'credDigA', rg.opcoes.challenge));
+    const iX = await iniciar(cabA);
+    const confirmaNoLogin = await postarJson('/api/auth/passkey/login/fim', { chave: iX.d.chave, resposta: assinar(chaveA, 'credDigA', iX.d.opcoes.challenge) }, {});
+
+    // --- o comprovante vence ---
+    const compVelho = pkD.emitirConfirmacao('u-dig-a');
+    const agoraReal = Date.now;
+    let vencido;
+    try { Date.now = () => agoraReal() + pkD.VALIDADE_CONFIRMACAO_MS + 1000; vencido = await authD.verifyPassword('u-dig-a', compVelho); }
+    finally { Date.now = agoraReal; }
+
+    const js = require('fs').readFileSync(__dirname + '/public/digital.js', 'utf8');
+    const pag = (n) => require('fs').readFileSync(__dirname + '/public/' + n, 'utf8');
+    // campo de confirmação -> botão que envia depois da digital (null = não envia)
+    const CAMPOS = [
+      ['loja-status.html', 'senha-input', 'senha-ok'], ['loja-status.html', 'manut-senha', null],
+      ['tarefas.html', 'PWDIN', 'PWDOK'], ['noc-maquinas.html', 'mr-senha', 'mr-confirmar'],
+      ['noc-maquinas.html', 'mo-senha', 'mo-confirmar'], ['noc-maquinas.html', 'me-senha', 'me-confirmar'],
+      ['grupos.html', 'emp-conf-senha', 'emp-conf-ok'], ['central.html', 'e-senha', null],
+      ['lancamento.html', 's-password', null], ['monitor.html', 'refund-password', null],
+    ];
+    const semCampo = CAMPOS.filter(([arq, id, enviar]) => {
+      const h = pag(arq);
+      const tag = (h.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`)) || [''])[0];
+      const botaoExiste = !enviar || new RegExp(`id="${enviar}"`).test(h);
+      return !/<script src="\/digital\.js"/.test(h) || !/\sdata-digital[\s>]/.test(tag)
+        || (enviar ? !tag.includes(`data-digital-enviar="${enviar}"`) : /data-digital-enviar/.test(tag)) || !botaoExiste;
+    }).map(([a, id]) => `${a}#${id}`);
+
+    const conf = {
+      'o botão aparece no celular que tem a digital cadastrada': dispAndroid === true,
+      'e não num desktop cuja credencial está só no celular (evita o "use seu celular / QR")': dispWindows === false,
+      'quem não cadastrou digital não vê o botão, e pedir o desafio responde 400 (nunca 401)':
+        dispSemCredencial === false && inicioSemCredencial.status === 400,
+      'o desafio só aceita as credenciais DESTE acesso': soDeleNoAllow,
+      'digital verificada vira um comprovante': f1.status === 200 && comp.startsWith('digital.'),
+      'o comprovante vale como a senha numa rota protegida de verdade': usoA1 === 'aceitou',
+      'vale de novo dentro do prazo (ações em lote mandam a mesma senha N vezes)': usoA2 === 'aceitou',
+      'comprovante de uma pessoa NÃO vale na conta de outra': usoB === 'senha incorreta',
+      'a senha digitada continua valendo, e comprovante inventado não': senhaNormal === 'aceitou' && senhaErrada === 'senha incorreta',
+      'assinatura capturada não confirma duas vezes (desafio de uso único)': replay.status === 400 && !replay.d.confirmacao,
+      'ninguém confirma com a digital de OUTRO acesso': fB.status === 400 && /não é deste acesso/.test(fB.d.error || '') && !fB.d.confirmacao,
+      'aparelho que não verificou dedo/rosto é recusado': fUV.status === 400 && !fUV.d.confirmacao,
+      'desafio de login ou de cadastro não serve pra confirmar': loginNaConfirma.status === 400 && !loginNaConfirma.d.confirmacao
+        && !!rg.chave && cadastroNaConfirma.status === 400 && !cadastroNaConfirma.d.confirmacao,
+      'desafio de confirmação não serve pra entrar': confirmaNoLogin.status === 401 && !/"token"/.test(confirmaNoLogin.corpo),
+      'o comprovante vence (3 min)': vencido === false && pkD.VALIDADE_CONFIRMACAO_MS <= 5 * 60 * 1000,
+      // tela
+      'os campos de senha de confirmação têm o botão (e enviam sozinhos só onde a senha é o último passo)': !semCampo.length,
+      'cancelar o sensor não vira mensagem de erro': /err\.name === 'NotAllowedError' \|\| err\.name === 'AbortError'/.test(js),
+      'o botão só aparece com biometria de plataforma e só pergunta ao servidor quando o campo aparece':
+        /isUserVerifyingPlatformAuthenticatorAvailable\(\)/.test(js) && /IntersectionObserver/.test(js)
+        && /sessionStorage/.test(js),
+      'o comprovante sai do campo antes de vencer': /setTimeout\(\(\) => \{\s*if\(input\.value === comprovante\) input\.value = '';/.test(js),
+      'o botão usa o token do acento (tema Claro)': /var\(--accent\)/.test(js) && !/#b8ff3c/i.test(js),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDigitalConfirma = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}${semCampo.length ? ` [sem botão: ${semCampo.join(', ')}]` : ''}`);
+  } catch (e) { okDigitalConfirma = false; console.log('  erro: ' + e.message); }
+  if (!okDigitalConfirma) ruins += 1;
+  console.log(`${okDigitalConfirma ? '✓' : '✗'} Digital no lugar da senha: comprovante só do próprio acesso, curto, e em toda confirmação`);
+
+  // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
   //
   // Master (23/09/2026): "quero poder monitorar tanto celular como tablet -

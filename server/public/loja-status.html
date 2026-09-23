@@ -575,7 +575,7 @@
   }
 </style>
 <link rel="stylesheet" href="/noc-workbench.css">
-<script src="/tema.js"></script>
+<script src="/tema.js"></script><script src="/digital.js" defer></script>
 </head>
 <body class="noc-workbench">
 
@@ -851,7 +851,7 @@
   <div class="modal">
     <h3>🔒 Confirme sua senha</h3>
     <div class="sub" style="margin-bottom:8px;">Para <b id="senha-acao">esta ação</b>, confirme que é você.</div>
-    <input type="password" id="senha-input" autocomplete="new-password" placeholder="sua senha de Master">
+    <input type="password" id="senha-input" autocomplete="new-password" placeholder="sua senha de Master" data-digital data-digital-enviar="senha-ok">
     <div class="msg hidden err" id="senha-erro" style="margin-top:6px;"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" id="senha-cancel">Cancelar</button>
@@ -1031,7 +1031,7 @@
       <div class="sub" id="manut-agendados" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:8px;"></div>
     </div>
     <label style="margin-top:10px;">Sua senha de Master (confirma quem está mandando reiniciar)</label>
-    <input type="password" id="manut-senha" autocomplete="new-password" placeholder="senha">
+    <input type="password" id="manut-senha" autocomplete="new-password" placeholder="senha" data-digital>
     <div class="msg hidden" id="manut-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>

@@ -46,9 +46,11 @@ function limparVencidos() {
   const agora = Date.now();
   for (const [k, v] of desafios) if (v.expiraEm <= agora) desafios.delete(k);
 }
-function guardarDesafio(chave, desafio, userId) {
+// `tipo` separa o desafio de ENTRAR do de CONFIRMAR uma ação: um não vale
+// na rota do outro
+function guardarDesafio(chave, desafio, userId, tipo = null) {
   limparVencidos();
-  desafios.set(chave, { desafio, userId: userId || null, expiraEm: Date.now() + VALIDADE_DESAFIO_MS });
+  desafios.set(chave, { desafio, userId: userId || null, tipo: tipo || null, expiraEm: Date.now() + VALIDADE_DESAFIO_MS });
 }
 // pega E CONSOME: um desafio serve pra uma tentativa só, senão a mesma
 // assinatura entraria duas vezes
@@ -60,6 +62,45 @@ function consumirDesafio(chave) {
 }
 function novaChaveDeSessao() {
   return crypto.randomBytes(24).toString('base64url');
+}
+
+// ---------- CONFIRMAR UMA AÇÃO COM A DIGITAL (no lugar da senha) ----------
+// Master, 23/09/2026: "quando for preciso colocar a senha por algum motivo e
+// estiver no mobile, dá a opção de digital".
+//
+// A senha de confirmação (estorno, sangria, concluir tarefa, comando no NOC)
+// passa sempre por auth.verifyPassword. Em vez de ensinar cada uma dessas
+// rotas a falar WebAuthn, a digital vira um COMPROVANTE: o aparelho assina um
+// desafio com a credencial DESTE acesso, o servidor confere e devolve um
+// texto aleatório que vale como a senha - só pra esse acesso, por poucos
+// minutos. A tela põe o comprovante no campo de senha e segue igual.
+//
+// Vale mais de uma vez dentro do prazo DE PROPÓSITO: cancelar 5 comandos de
+// uma vez são 5 chamadas com a mesma "senha" (loja-status.html). A senha
+// digitada vale pra sempre; o comprovante vale 3 minutos e só pra quem o
+// tirou - é estritamente menos que a senha.
+//
+// Em memória, como os desafios: reiniciou a instância, toca de novo.
+const VALIDADE_CONFIRMACAO_MS = 3 * 60 * 1000;
+const PREFIXO_CONFIRMACAO = 'digital.';
+const confirmacoes = new Map(); // comprovante -> { userId, expiraEm }
+
+function emitirConfirmacao(userId) {
+  const agora = Date.now();
+  for (const [k, v] of confirmacoes) if (v.expiraEm <= agora) confirmacoes.delete(k);
+  const comprovante = PREFIXO_CONFIRMACAO + crypto.randomBytes(32).toString('base64url');
+  confirmacoes.set(comprovante, { userId: String(userId), expiraEm: agora + VALIDADE_CONFIRMACAO_MS });
+  return comprovante;
+}
+// o userId entra na conferência: comprovante de uma pessoa nunca confirma
+// ação de outra (ex.: o desconto de festa, que confere a senha do GERENTE)
+function confirmacaoValida(comprovante, userId) {
+  const txt = String(comprovante || '');
+  if (!txt.startsWith(PREFIXO_CONFIRMACAO)) return false;
+  const c = confirmacoes.get(txt);
+  if (!c) return false;
+  if (c.expiraEm <= Date.now()) { confirmacoes.delete(txt); return false; }
+  return c.userId === String(userId || '');
 }
 
 // O NOME que aparece na lista de aparelhos da pessoa. Vem do próprio
@@ -79,6 +120,15 @@ function apelidoDoAparelho(userAgent) {
           : /Firefox\//i.test(ua) ? 'Firefox'
             : '';
   return navegador ? `${sistema} · ${navegador}` : sistema;
+}
+
+// a parte "sistema" do apelido (iPhone/iPad, Android...): é por ela que a
+// tela decide se ESTE aparelho tem uma digital cadastrada. A credencial fica
+// no chaveiro do sistema (iCloud, Google), então trocar de navegador no mesmo
+// celular não importa - mas um desktop com a credencial só no celular
+// abriria o "use seu celular / QR code" do navegador, que ninguém entende.
+function sistemaDoAparelho(userAgent) {
+  return apelidoDoAparelho(userAgent).split(' · ')[0];
 }
 
 // O DOMÍNIO da credencial. O navegador exige que o rpId seja o host ou um
@@ -166,7 +216,9 @@ async function removerTodasDoUsuario(userId) {
 
 module.exports = {
   VALIDADE_DESAFIO_MS, MAX_POR_USUARIO,
+  VALIDADE_CONFIRMACAO_MS, PREFIXO_CONFIRMACAO,
   guardarDesafio, consumirDesafio, novaChaveDeSessao,
-  apelidoDoAparelho, rpIdDoPedido,
+  emitirConfirmacao, confirmacaoValida,
+  apelidoDoAparelho, sistemaDoAparelho, rpIdDoPedido,
   listarDoUsuario, acharPorCredentialID, salvar, registrarUso, remover, removerTodasDoUsuario,
 };

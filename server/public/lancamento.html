@@ -177,7 +177,7 @@
   .sheet h3{margin:0 0 4px;font-size:14px;}
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
 </style>
-<script src="/tema.js"></script>
+<script src="/tema.js"></script><script src="/digital.js" defer></script>
 </head>
 <body>
 
@@ -256,7 +256,7 @@
     <label>Observação (opcional)</label>
     <input type="text" id="s-descricao" autocomplete="off" placeholder="ex: retirada na visita da tarde">
     <label>Confirme sua senha</label>
-    <input type="password" id="s-password" required autocomplete="new-password">
+    <input type="password" id="s-password" required autocomplete="new-password" data-digital>
     <div class="msg hidden" id="msg-sangria"></div>
     <button class="btn-primary" type="submit" id="btn-sangria">Registrar sangria/depósito</button>
   </form>
