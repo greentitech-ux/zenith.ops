@@ -260,7 +260,7 @@ function elegiveis(unidade){return((CTX.responsaveis)||[]).filter(u=>!unidade||(
 // de /usuarios.html, sem inventar rótulo. O "·" (via .cargo-tag::before) fica
 // centralizado na altura, entre o nome e a tag. tagCargoTexto é a versão sem
 // HTML pro <option> do responsável, que não aceita <span> dentro.
-const CARGO_TAG={loja:'Loja',gerente:'Gerente','assistente-gerente':'Assistente',tecnico:'Técnico',suporte:'Suporte',manutencao:'Manutenção',operador:'Operador','coordenador-agregador':'Coord. Agregador'};
+const CARGO_TAG={loja:'Loja',gerente:'Gerente','assistente-gerente':'Assistente',tecnico:'Técnico',suporte:'Suporte',manutencao:'Manutenção',operador:'Operador','coordenador-agregador':'Coord. Agregador',qa:'Q.A'};
 // TODAS as tags da pessoa, não só a principal (ver tagsDe em users.js): quem
 // é Suporte e também cuida do Agregador aparece como as duas coisas
 function cargosDe(u){const l=(u&&u.cargos&&u.cargos.length)?u.cargos:(u&&u.cargo?[u.cargo]:[]);return l.map(c=>CARGO_TAG[c]).filter(Boolean)}

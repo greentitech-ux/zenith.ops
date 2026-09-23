@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Visita Q.A · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 80px;max-width:640px;margin-inline:auto;overflow-x:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-16px -12px 16px;padding:12px;border-bottom:1px solid var(--line);}
+  .sub{color:var(--muted);font-size:12px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;}
+  button{font-family:inherit;}
+  .btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:13px;cursor:pointer;}
+  .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:9px;padding:10px 15px;font-size:13.5px;font-weight:700;cursor:pointer;}
+  input,textarea,select{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:10px;font-size:14px;font-family:inherit;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:8px 0 3px;}
+  /* SETOR: acordeao. Na loja ela abre um setor por vez - a lista inteira
+     aberta num celular vira rolagem infinita e ela perde o lugar. */
+  .setor{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden;}
+  .setor-cab{display:flex;align-items:center;gap:9px;padding:13px 12px;cursor:pointer;user-select:none;}
+  .setor-cab b{font-size:13.5px;flex:1;}
+  .setor-prog{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;}
+  .setor-corpo{display:none;border-top:1px solid var(--line);}
+  .setor.aberto .setor-corpo{display:block;}
+  .item{border-bottom:1px solid var(--line);padding:11px 12px;}
+  .item:last-child{border-bottom:none;}
+  .item-txt{font-size:13px;line-height:1.45;margin-bottom:9px;}
+  /* Dois botoes grandes, lado a lado: ela responde com o polegar, de pe,
+     segurando o celular com uma mao so. */
+  .resp{display:flex;gap:8px;}
+  .resp button{flex:1;padding:11px 8px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;}
+  .resp button.on-ok{background:var(--ok-dim);border-color:var(--ok);color:var(--ok);}
+  .resp button.on-bad{background:var(--bad-dim);border-color:var(--bad);color:var(--bad);}
+  .detalhe{margin-top:9px;}
+  .espec{display:flex;gap:6px;align-items:center;margin-top:5px;}
+  .espec input{flex:1;padding:8px;font-size:12.5px;}
+  .espec button{background:none;border:none;color:var(--bad);font-size:15px;cursor:pointer;padding:0 5px;}
+  .nota-box{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;}
+  .nota{font-family:var(--mono);font-size:27px;font-weight:700;line-height:1;}
+  .faixa{font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px;}
+  .faixa.positiva{background:var(--ok-dim);color:var(--ok);}
+  .faixa.atencao{background:var(--warn-dim);color:var(--warn);}
+  .faixa.negativa{background:var(--bad-dim);color:var(--bad);}
+  .linha{display:flex;gap:8px;flex-wrap:wrap;}
+  .linha>*{flex:1;min-width:130px;}
+  .vazio{color:var(--muted);font-size:12.5px;text-align:center;padding:22px 10px;}
+  .hidden{display:none!important;}
+  .visita-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer;}
+  .visita-row:last-child{border-bottom:none;}
+  .pill{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:99px;background:var(--panel2);color:var(--muted);}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Q.A · Visita técnica</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+    <h1 id="titulo">Visitas</h1>
+    <button class="btn-primary" id="btn-nova" onclick="abrirNova()">+ Visita</button>
+  </div>
+</header>
+
+<!-- LISTA -->
+<div id="tela-lista">
+  <div class="card"><div id="lista-visitas"><div class="vazio">Carregando…</div></div></div>
+</div>
+
+<!-- NOVA VISITA -->
+<div id="tela-nova" class="hidden">
+  <div class="card">
+    <h2 style="margin:0 0 4px;font-size:14px;">Abrir visita</h2>
+    <p class="sub" style="margin:0 0 10px;">Os dados do cabeçalho do laudo. Dá pra começar o checklist e completar depois.</p>
+    <label for="n-modelo">Modelo</label>
+    <select id="n-modelo"></select>
+    <div class="linha">
+      <div><label for="n-loja">Loja</label><input id="n-loja" placeholder="DOMINOS NATAL"></div>
+      <div><label for="n-data">Data</label><input id="n-data" type="date"></div>
+    </div>
+    <div class="linha">
+      <div><label for="n-horario">Horário</label><input id="n-horario" placeholder="16:00 às 19:00h"></div>
+      <div><label for="n-repr">Representante da loja</label><input id="n-repr" placeholder="Marcela"></div>
+    </div>
+    <label for="n-nutri">Responsável técnico</label>
+    <input id="n-nutri" placeholder="Suênia Freire CRN 16720">
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn" onclick="verLista()">Cancelar</button>
+      <button class="btn-primary" style="flex:1;" onclick="criarVisita()">Começar visita</button>
+    </div>
+  </div>
+</div>
+
+<!-- VISITA -->
+<div id="tela-visita" class="hidden">
+  <div class="card">
+    <div class="nota-box">
+      <span class="nota" id="v-nota">—</span>
+      <span id="v-faixa"></span>
+      <span class="sub" id="v-progresso"></span>
+    </div>
+    <div class="sub" id="v-cabecalho" style="margin-top:7px;"></div>
+  </div>
+  <div id="v-setores"></div>
+  <div class="card" id="v-fechar">
+    <button class="btn-primary" style="width:100%;" onclick="concluir()">Concluir visita</button>
+    <p class="sub" style="margin:8px 0 0;text-align:center;">Depois de concluída, o checklist não muda mais — só as ações corretivas.</p>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+let MODELOS = [];
+let VISITA = null;
+
+async function api(caminho, opcoes){
+  const r = await fetch(caminho, Object.assign({ headers: { 'Content-Type':'application/json' } }, opcoes||{}));
+  const t = await r.text();
+  let d = null; try { d = t ? JSON.parse(t) : null; } catch(e){}
+  if(!r.ok) throw new Error((d && d.error) || 'Falha na comunicação.');
+  return d;
+}
+
+function verLista(){
+  $('tela-lista').classList.remove('hidden');
+  $('tela-nova').classList.add('hidden');
+  $('tela-visita').classList.add('hidden');
+  $('btn-nova').classList.remove('hidden');
+  $('titulo').textContent = 'Visitas';
+  VISITA = null;
+  carregarLista();
+}
+function abrirNova(){
+  $('tela-lista').classList.add('hidden');
+  $('tela-nova').classList.remove('hidden');
+  $('tela-visita').classList.add('hidden');
+  $('btn-nova').classList.add('hidden');
+  $('titulo').textContent = 'Nova visita';
+  $('n-data').value = new Date().toISOString().slice(0,10);
+}
+
+async function carregarLista(){
+  try{
+    const visitas = await api('/api/qualidade/visitas');
+    if(!visitas.length){ $('lista-visitas').innerHTML = '<div class="vazio">Nenhuma visita ainda. Toque em <b>+ Visita</b> pra começar.</div>'; return; }
+    $('lista-visitas').innerHTML = visitas.map((v)=>`
+      <div class="visita-row" onclick="abrirVisita('${escapeHtml(v.id)}')">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;">${escapeHtml(v.loja || v.unidadeNome || 'Sem loja')}</div>
+          <div class="sub">${escapeHtml(v.data||'')} ${v.horario?'· '+escapeHtml(v.horario):''}</div>
+        </div>
+        ${v.status==='CONCLUIDA'
+          ? `<span class="faixa ${escapeHtml(v.faixa||'')}">${v.nota==null?'—':escapeHtml(String(v.nota).replace('.',','))}</span>`
+          : `<span class="pill">em andamento</span>`}
+      </div>`).join('');
+  }catch(e){ $('lista-visitas').innerHTML = `<div class="vazio">${escapeHtml(e.message)}</div>`; }
+}
+
+async function criarVisita(){
+  try{
+    const v = await api('/api/qualidade/visitas', { method:'POST', body: JSON.stringify({
+      modeloId: $('n-modelo').value,
+      loja: $('n-loja').value, data: $('n-data').value, horario: $('n-horario').value,
+      representanteLoja: $('n-repr').value, nutricionista: $('n-nutri').value,
+    })});
+    abrirVisita(v.id);
+  }catch(e){ alert(e.message); }
+}
+
+async function abrirVisita(id){
+  try{
+    VISITA = await api('/api/qualidade/visitas/'+encodeURIComponent(id));
+    $('tela-lista').classList.add('hidden');
+    $('tela-nova').classList.add('hidden');
+    $('tela-visita').classList.remove('hidden');
+    $('btn-nova').classList.add('hidden');
+    $('titulo').textContent = VISITA.loja || 'Visita';
+    pintarVisita();
+  }catch(e){ alert(e.message); }
+}
+
+function pintarVisita(){
+  const v = VISITA;
+  $('v-nota').textContent = v.nota==null ? '—' : String(v.nota.toFixed(2)).replace('.',',');
+  $('v-faixa').innerHTML = v.faixa ? `<span class="faixa ${escapeHtml(v.faixa)}">${escapeHtml({positiva:'Positiva',atencao:'Atenção',negativa:'Negativa'}[v.faixa]||'')}</span>` : '';
+  $('v-progresso').textContent = `${v.respondidos} de ${v.total} respondidos · ${v.naoConformes} não conforme(s)`;
+  $('v-cabecalho').textContent = [v.data, v.horario, v.representanteLoja, v.nutricionista].filter(Boolean).join(' · ');
+  const concluida = v.status === 'CONCLUIDA';
+  $('v-fechar').classList.toggle('hidden', concluida);
+
+  $('v-setores').innerHTML = (v.modeloSnap.setores||[]).map((s)=>{
+    const extras = (v.extras||{})[s.id] || [];
+    const todos = [...s.itens.map(i=>({...i})), ...extras.map(e=>({...e, extra:true}))];
+    const feitos = todos.filter(i => (v.respostas||{})[i.id] && (v.respostas||{})[i.id].resposta).length;
+    return `<div class="setor" id="setor-${escapeHtml(s.id)}">
+      <div class="setor-cab" onclick="document.getElementById('setor-${escapeHtml(s.id)}').classList.toggle('aberto')">
+        <b>${escapeHtml(s.nome)}</b>
+        <span class="setor-prog">${feitos}/${todos.length}</span>
+        <span class="sub">▾</span>
+      </div>
+      <div class="setor-corpo">
+        ${todos.map(i=>pintarItem(i, concluida)).join('')}
+        ${concluida ? '' : `<div class="item" style="background:var(--panel2);">
+          <div class="espec">
+            <input id="novo-ponto-${escapeHtml(s.id)}" placeholder="Outro ponto que você viu neste setor…">
+            <button class="btn" style="color:var(--accent);" onclick="addPonto('${escapeHtml(s.id)}')">+</button>
+          </div>
+        </div>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function pintarItem(item, concluida){
+  const r = (VISITA.respostas||{})[item.id] || {};
+  const naoConforme = r.resposta === 'nao-conforme';
+  const trava = concluida ? 'disabled' : '';
+  return `<div class="item">
+    <div class="item-txt">${escapeHtml(item.texto)}${item.extra?' <span class="pill">extra</span>':''}</div>
+    <div class="resp">
+      <button ${trava} class="${r.resposta==='conforme'?'on-ok':''}" onclick="responder('${escapeHtml(item.id)}','conforme')">CONFORME</button>
+      <button ${trava} class="${naoConforme?'on-bad':''}" onclick="responder('${escapeHtml(item.id)}','nao-conforme')">NÃO CONFORME</button>
+    </div>
+    ${naoConforme ? `<div class="detalhe">
+      <label>O que foi visto</label>
+      <textarea rows="2" ${trava} onchange="salvarObs('${escapeHtml(item.id)}', this.value)">${escapeHtml(r.observacao||'')}</textarea>
+      <label>Ação corretiva</label>
+      <textarea rows="2" onchange="salvarAcao('${escapeHtml(item.id)}','acaoCorretiva',this.value)">${escapeHtml(r.acaoCorretiva||'')}</textarea>
+      <div class="linha">
+        <div><label>Responsável</label><input value="${escapeHtml(r.responsavel||'')}" onchange="salvarAcao('${escapeHtml(item.id)}','responsavel',this.value)"></div>
+        <div><label>Prazo</label><input type="date" value="${escapeHtml(r.prazo||'')}" onchange="salvarAcao('${escapeHtml(item.id)}','prazo',this.value)"></div>
+      </div>
+    </div>` : ''}
+  </div>`;
+}
+
+async function responder(itemId, resposta){
+  try{
+    const atual = (VISITA.respostas||{})[itemId] || {};
+    // tocar de novo na mesma resposta desmarca: errar o polegar numa tela de
+    // celular tem que ter volta sem precisar recarregar a visita
+    const nova = atual.resposta === resposta ? null : resposta;
+    await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/item/${encodeURIComponent(itemId)}`,
+      { method:'POST', body: JSON.stringify({ resposta: nova }) });
+    await recarregar();
+  }catch(e){ alert(e.message); }
+}
+async function salvarObs(itemId, valor){
+  try{ await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/item/${encodeURIComponent(itemId)}`,
+    { method:'POST', body: JSON.stringify({ resposta:'nao-conforme', observacao: valor }) }); }catch(e){ alert(e.message); }
+}
+async function salvarAcao(itemId, campo, valor){
+  try{ await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/item/${encodeURIComponent(itemId)}/acao`,
+    { method:'POST', body: JSON.stringify({ [campo]: valor }) }); }catch(e){ alert(e.message); }
+}
+async function addPonto(setorId){
+  const campo = $('novo-ponto-'+setorId);
+  const texto = (campo.value||'').trim();
+  if(!texto) return;
+  try{
+    await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/setor/${encodeURIComponent(setorId)}/ponto`,
+      { method:'POST', body: JSON.stringify({ texto }) });
+    campo.value='';
+    await recarregar(setorId);
+  }catch(e){ alert(e.message); }
+}
+async function recarregar(setorAberto){
+  const abertos = [...document.querySelectorAll('.setor.aberto')].map(e=>e.id);
+  VISITA = await api('/api/qualidade/visitas/'+encodeURIComponent(VISITA.id));
+  pintarVisita();
+  // o acordeao volta como estava: recarregar e fechar tudo faria ela perder
+  // o lugar a cada item respondido
+  abertos.forEach(id => { const e = document.getElementById(id); if(e) e.classList.add('aberto'); });
+  if(setorAberto){ const e = document.getElementById('setor-'+setorAberto); if(e) e.classList.add('aberto'); }
+}
+async function concluir(){
+  if(!confirm('Concluir a visita? Depois disso o checklist não muda mais.')) return;
+  try{ await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/concluir`, { method:'POST', body:'{}' }); await recarregar(); }
+  catch(e){ alert(e.message); }
+}
+
+(async function boot(){
+  try{
+    MODELOS = await api('/api/qualidade/modelos');
+    $('n-modelo').innerHTML = MODELOS.map(m=>`<option value="${escapeHtml(m.id)}">${escapeHtml(m.nome)}</option>`).join('');
+  }catch(e){ /* a lista mostra o erro */ }
+  verLista();
+})();
+</script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>

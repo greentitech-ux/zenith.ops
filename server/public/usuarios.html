@@ -698,7 +698,7 @@ function caminhoSubgrupo(id){
 // junta num so bloco reaproveitado no formulario de criacao e no modal de
 // Permissoes, pra nao ter que criar o acesso "pelado" e so depois ir ate
 // Acoes marcar cada tag uma por uma ----------
-const CARGOS = [ ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'], ['coordenador-agregador','🛵 Coord. Agregador'] ];
+const CARGOS = [ ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'], ['coordenador-agregador','🛵 Coord. Agregador'], ['qa','🥼 Q.A'] ];
 function tagsFieldsetHtml(prefixo, tags){
   tags = tags || { cargo:null, cargos:[], empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeNoPulsoPrint:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, podeBonifVerValorTotal:false, podeBonifVerColaboradores:false, sessaoLonga:false, qaUser:false };
   // MAIS DE UMA TAG por pessoa (Master, 14/09): "assim eu designo alguém de

@@ -90,6 +90,14 @@
       { id: 'nav-manutencao', href: '/manutencao.html', icone: '🛠️', rotulo: 'Manutenção', secoes: ['manutencao'] },
       { id: 'nav-ativos-ti', href: '/ativos-ti.html', icone: '🖥️', rotulo: 'Ativos de TI', secoes: ['ativos-ti'] },
     ] },
+    // Q.A - a seção inteira é liberada pela TAG de cargo 'qa' (Master,
+    // 23/09/2026: "só quem tem acesso a tag terá acesso a ela, pois é um
+    // setor que fará a visita nas unidades"). Master e Admin veem sempre,
+    // como em todo o resto do app. `tags` aqui é lido por aplicarRegras().
+    { grupo: 'Q.A', itens: [
+      { id: 'nav-qa-visita', href: '/qa-visita.html', icone: '🥼', rotulo: 'Visita Q.A', tags: ['qa'] },
+      { id: 'nav-qa-treinamento', href: '/qa-treinamento.html', icone: '🎓', rotulo: 'Treinamento Q.A', tags: ['qa'] },
+    ] },
     { grupo: 'Saltiverso', itens: [
       { id: 'nav-parque-checkin', href: '/parque-checkin.html', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },
       { id: 'nav-parque', href: '/parque.html', icone: '🎡', rotulo: 'Parque (painel)', secoes: ['parque'] },
@@ -473,6 +481,12 @@
     // Suporte tem 'suporte' como principal em alguns casos, e perderia o menu
     // de gerente por causa da ordem (ver tagsDe/tagPrincipal em users.js)
     if (it.gerenteOuSecoes) return isAdmin || /gerente/i.test([...(me.cargos || []), me.cargo || ''].join(' ')) || it.gerenteOuSecoes.some((s) => temSecao(me, s));
+    // TAG DE CARGO como chave de acesso (Q.A - Master, 23/09/2026: "só quem
+    // tem acesso a tag terá acesso a ela"). Master e Admin veem sempre, como
+    // no resto do app. Olha o CONJUNTO de tags e não só a principal, pela
+    // mesma razão do gerenteOuSecoes logo acima: quem acumula Suporte + Q.A
+    // tem uma delas como principal e perderia a outra.
+    if (it.tags) return isAdmin || it.tags.some((t) => (me.cargos || []).includes(t) || me.cargo === t);
     if (it.secoes) return it.secoes.some((s) => temSecao(me, s));
     return true;
   }

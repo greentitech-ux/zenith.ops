@@ -535,7 +535,11 @@ async function updatePodeRhCadastrarEfetivado(id, valor) {
 // item no agregador não é coisa que se resolve no chat nem que qualquer
 // atendente faça - tem que chegar em quem tem o painel na mão (Master,
 // 14/09). Sem um cargo, "o time" é todo mundo, e todo mundo é ninguém.
-const CARGOS_VALIDOS = ['loja', 'gerente', 'assistente-gerente', 'tecnico', 'suporte', 'manutencao', 'operador', 'coordenador-agregador'];
+// 'qa' é o cargo de Qualidade (Master, 23/09/2026: "é um Cargo Q.A"). É a
+// tag que dá acesso à seção Q.A inteira - quem não a tem não vê a seção, e
+// não existe permissão de seção separada pra ela de propósito: o Master
+// pediu que a TAG fosse a chave.
+const CARGOS_VALIDOS = ['loja', 'gerente', 'assistente-gerente', 'tecnico', 'suporte', 'manutencao', 'operador', 'coordenador-agregador', 'qa'];
 // Ass. Ger (assistente de Gerente) tem as MESMAS permissoes de aprovacao do
 // Gerente (check-out antecipado do Parque, decidir cortesia, alertas de
 // limite do PCD cortesia, etc.) - qualquer checagem de "e gerente" espalhada

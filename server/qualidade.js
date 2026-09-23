@@ -1,0 +1,513 @@
+// qualidade.js
+//
+// VISITA TÉCNICA DE QUALIDADE (BPF) - o checklist que a nutricionista
+// preenche ANDANDO pela loja, do celular, de pé, com uma mão.
+//
+// De onde saiu: das planilhas reais de visita (Dominos Natal 06/08 e Spoleto
+// Natal 07/08) e do relatório do São Braz. Os 6 setores e os 38 itens abaixo
+// são transcrição daquelas planilhas - não é um checklist que eu inventei.
+//
+// A NOTA foi conferida contra os dois arquivos, e é só isto:
+//   nota = conformes / total de itens do modelo x 10
+// Dominos: 28/38 x 10 = 7,36 (a planilha diz 7.36). Spoleto: 29/38 x 10 =
+// 7,63 (a planilha diz 7.63). Bate exato nos dois - por isso a conta está
+// aqui e não num campo digitado à mão.
+//
+// O QUE NÃO ENTRA NA NOTA, de propósito: as especificações que ela adiciona
+// dentro de um item, e os pontos de check que ela acrescenta no fim de um
+// setor. Os dois viram APONTAMENTO no relatório, com foto e ação corretiva,
+// mas não mexem no número. Motivo: a nota existe pra comparar loja com loja
+// e visita com visita. Se cada observação a mais mudasse o denominador, a
+// visita mais atenta daria a nota pior - e duas lojas nunca seriam
+// comparáveis. (Master: se preferir que contem, é uma linha aqui.)
+//
+// CUSTO (CLAUDE.md §3): UM documento por visita, com todas as respostas
+// dentro. A lista usa createCache e resumo, nunca o documento inteiro. FOTO
+// NUNCA vai pro Firestore - vai pro Storage (ver storage.js) e no documento
+// fica só o caminho.
+// ---------------------------------------------------------------------
+// ARQUITETURA - o que auditoria de verdade pratica, e por que.
+//
+// 1. MODELO VERSIONADO, E A VISITA GUARDA O RETRATO DELE.
+//    Toda visita grava, dentro dela, o modelo que respondeu (`modeloSnap`).
+//    Sem isso, corrigir o texto de um item hoje reescreveria em silêncio o
+//    que a loja respondeu em agosto - e a regra da casa é que o histórico
+//    continue legível exatamente como estava (CLAUDE.md §1). É também o que
+//    todo software de auditoria faz: o laudo vale contra a versão do
+//    roteiro usada no dia.
+//
+// 2. CRITICIDADE DO ITEM (ANVISA RDC 275/2002: IMPRESCINDÍVEL, NECESSÁRIO,
+//    RECOMENDÁVEL). Um checklist plano trata "funcionário sem touca" igual a
+//    "produto vencido na prateleira", e nenhum auditor aceita isso. A
+//    estrutura carrega a criticidade de cada item, MAS o peso vem desligado:
+//    `pesos: false` faz a conta ficar idêntica à planilha de hoje (7,36 é
+//    7,36). Ligar é decisão do Master - e muda nota de loja, por isso não
+//    ligo sozinho.
+//
+// 3. CAPA (ação corretiva e preventiva). O "AÇÃO CORRETIVA / ESPAÇO CLIENTE
+//    / CORRIGIDO SIM-NÃO" da planilha já é um ciclo CAPA feito no papel. Aqui
+//    ele ganha o que falta pra fechar: responsável, prazo e verificação na
+//    visita seguinte. Apontamento sem dono e sem data não vira conserto.
+//
+// 4. VISITA CONCLUÍDA É IMUTÁVEL. Depois de fechada e assinada, não se
+//    edita: o que muda é o ciclo da ação corretiva. Laudo que pode ser
+//    reescrito depois não serve de laudo.
+//
+// 5. A VISITA SEGUINTE ENXERGA A ANTERIOR (`visitaAnteriorId`), que é como a
+//    verificação de eficácia acontece de verdade - a pessoa chega na loja
+//    já sabendo o que ficou pendente da última vez.
+const crypto = require('crypto');
+const db = require('./firestore');
+const { createCache } = require('./liveCache');
+
+const COLLECTION = db.collection('qualidadeVisitas');
+const MODELOS = db.collection('qualidadeModelos');
+
+// ---------------------------------------------------------------------
+// CRITICIDADE - vocabulário da RDC 275/2002 da ANVISA, não inventado aqui.
+// O peso só é usado quando o modelo liga `pesos`; desligado, todo item vale
+// 1 e a nota sai idêntica à da planilha.
+const CRITICIDADES = ['imprescindivel', 'necessario', 'recomendavel'];
+const CRITICIDADE_LABEL = {
+  imprescindivel: 'Imprescindível',
+  necessario: 'Necessário',
+  recomendavel: 'Recomendável',
+};
+const PESO_POR_CRITICIDADE = { imprescindivel: 3, necessario: 2, recomendavel: 1 };
+function pesoDoItem(item, comPesos) {
+  if (!comPesos) return 1;
+  return PESO_POR_CRITICIDADE[item && item.criticidade] || 1;
+}
+
+// ---------------------------------------------------------------------
+// VOCABULÁRIO (CLAUDE.md §5) - as duas respostas são as da planilha, e não
+// há uma terceira. "Não se aplica" ficou de fora de propósito: ela mudaria
+// o denominador da nota, e nenhuma das visitas enviadas usa isso.
+const RESPOSTAS = ['conforme', 'nao-conforme'];
+const RESPOSTA_LABEL = { conforme: 'CONFORME', 'nao-conforme': 'NÃO CONFORME' };
+// a visita nasce aberta e só fecha quando ela termina de andar pela loja
+const STATUS = ['EM_ANDAMENTO', 'CONCLUIDA'];
+
+// FAIXAS (decisão do Master, 23/09/2026). As cores são as da planilha
+// (verde 92D050, amarelo FFFF00, vermelho FF0000); os números não estavam
+// em lugar nenhum do arquivo e vieram dele.
+const FAIXA_POSITIVA_MIN = 7;
+const FAIXA_ATENCAO_MIN = 5;
+function faixaDaNota(nota) {
+  if (nota === null || nota === undefined) return null;
+  if (nota >= FAIXA_POSITIVA_MIN) return 'positiva';
+  if (nota >= FAIXA_ATENCAO_MIN) return 'atencao';
+  return 'negativa';
+}
+const FAIXA_LABEL = { positiva: 'Pontuação positiva', atencao: 'Pontuação de atenção', negativa: 'Pontuação negativa' };
+
+// ---------------------------------------------------------------------
+// O MODELO PADRÃO.
+//
+// `id` de setor e de item NUNCA muda (mesma regra do CLAUDE.md §1): é ele
+// que amarra a resposta gravada numa visita de agosto ao item de hoje. O
+// TEXTO ao lado pode ser corrigido à vontade - inclusive os erros de
+// digitação que vieram da planilha - que o histórico continua legível.
+const MODELO_PADRAO = {
+  id: 'padrao',
+  nome: 'Padrão',
+  setores: [
+    {
+      id: 'higiene-manipuladores',
+      nome: 'Higiene e Saúde dos Manipuladores',
+      itens: [
+        { id: 'uniforme-completo', texto: 'Funcionários usam uniforme completo, limpo e de cor clara.' },
+        { id: 'touca-cabelos', texto: 'Uso correto de rede ou touca prendendo todos os cabelos.' },
+        { id: 'unhas', texto: 'Unhas curtas, limpas, sem esmalte ou base.' },
+        { id: 'adornos', texto: 'Ausência de adornos (alianças, anéis, brincos, relógios).' },
+        { id: 'higienizacao-maos', texto: 'Higienização correta e frequente das mãos.' },
+        { id: 'sem-sintomas', texto: 'Funcionários sem sintomas de doenças (tosse, diarreia, feridas expostas).' },
+      ],
+    },
+    {
+      id: 'estrutura-fisica',
+      nome: 'Estrutura Física e Instalações',
+      itens: [
+        { id: 'pisos-paredes-tetos', texto: 'Pisos, paredes e tetos íntegros, lisos e fáceis de limpar.' },
+        { id: 'iluminacao', texto: 'Iluminação adequada e com proteção contra quebras.' },
+        { id: 'ventilacao', texto: 'Ventilação eficiente e livre de fungos ou odores fortes.' },
+        { id: 'janelas-teladas', texto: 'Janelas e aberturas teladas para evitar entrada de insetos.' },
+        { id: 'pia-exclusiva-maos', texto: 'Pia exclusiva para lavagem de mãos na área de produção, completa.' },
+        { id: 'sanitarios-vestiarios', texto: 'Sanitários e vestiários limpos e distantes da área de produção.' },
+      ],
+    },
+    {
+      id: 'recebimento-armazenamento',
+      nome: 'Recebimento e Armazenamento',
+      itens: [
+        { id: 'planilha-recebimento', texto: 'Presença de planilha com os recebimentos de mercadorias preenchidas.' },
+        { id: 'temperatura-entrega', texto: 'Conferência de temperatura dos alimentos refrigerados/congelados na entrega.' },
+        { id: 'estrados-prateleiras', texto: 'Produtos armazenados em estrados ou prateleiras (nunca no chão).' },
+        { id: 'identificacao-alimentos', texto: 'Alimentos identificados com nome, data de validade e manipulação.' },
+        { id: 'pvps', texto: 'Controle rigoroso do princípio PVPS (Primeiro que Vence, Primeiro a Sair).' },
+        { id: 'sem-vencidos', texto: 'Ausência de produtos vencidos, embalagens danificadas ou caixa de papelão.' },
+      ],
+    },
+    {
+      id: 'higienizacao-ambientes',
+      nome: 'Higienização de Ambientes, Equipamentos e Utensílios',
+      itens: [
+        { id: 'superficies-contato', texto: 'Superfícies que entram em contato com alimentos em bom estado de conservação.' },
+        { id: 'saneantes', texto: 'Produtos saneantes regularizados pelo Ministério da Saúde e identificados.' },
+        { id: 'lixeiras-pedal', texto: 'Lixeiras com tampas acionadas por pedal e devidamente ensacadas.' },
+        { id: 'controle-pragas', texto: 'Controle de pragas atualizado e realizado por empresa especializada.' },
+      ],
+    },
+    {
+      id: 'preparo-alimentos',
+      nome: 'Preparo dos alimentos',
+      itens: [
+        { id: 'descongelamento', texto: 'Descongelamento dos alimentos realizado sob temperatura de 5 °C.' },
+        { id: 'termometros-calibrados', texto: 'A unidade possui termômetros calibrados para aferir a temperatura dos alimentos.' },
+        { id: 'conservacao-preparados', texto: 'Os alimentos preparados são conservados sob temperatura adequada.' },
+        { id: 'boas-praticas', texto: 'Todos os preparos dos alimentos são realizados em cima das boas práticas.' },
+        { id: 'contaminacao-cruzada', texto: 'Existe controle para que não haja contaminação cruzada.' },
+      ],
+    },
+    {
+      // fica por último porque é o que ela confere DEPOIS de andar pela loja
+      // (Master: "seria no final, né? após a visita")
+      id: 'documentacao',
+      nome: 'Documentação sanitária e outras',
+      itens: [
+        { id: 'licenca-sanitaria', texto: 'Licença sanitária' },
+        { id: 'alvara-funcionamento', texto: 'Alvará de funcionamento' },
+        { id: 'alvara-bombeiro', texto: 'Alvará de bombeiro' },
+        { id: 'manual-boas-praticas', texto: 'Manual de boas práticas' },
+        { id: 'certificado-detetizacao', texto: 'Certificado de detetização' },
+        { id: 'limpeza-caixa-agua', texto: 'Limpeza de caixa de água' },
+        { id: 'analise-agua', texto: 'Análise de água' },
+        { id: 'programas-aso', texto: 'Programas e ASO' },
+        { id: 'certificado-boas-praticas', texto: 'Certificado de boas práticas' },
+        { id: 'limpeza-ar-coifa', texto: 'Planilha de limpeza do ar-condicionado e coifa' },
+        { id: 'calibracao-termometro-balanca', texto: 'Calibração de termômetro e balança' },
+      ],
+    },
+  ],
+};
+
+function itensDoModelo(modelo) {
+  return (modelo.setores || []).flatMap((s) => (s.itens || []).map((i) => ({ ...i, setorId: s.id })));
+}
+function totalDeItens(modelo) {
+  return itensDoModelo(modelo).length;
+}
+
+// ---------------------------------------------------------------------
+// A NOTA. Só os itens DO MODELO entram - ver o cabeçalho do arquivo.
+function calcularNota(modelo, respostas) {
+  const itens = itensDoModelo(modelo);
+  if (!itens.length) return { nota: null, conformes: 0, naoConformes: 0, respondidos: 0, total: 0, faixa: null, criticasAbertas: 0 };
+  const comPesos = !!(modelo && modelo.pesos);
+  const porId = new Map(itens.map((i) => [i.id, i]));
+  let pontosPossiveis = 0;
+  let pontosObtidos = 0;
+  let conformes = 0;
+  let naoConformes = 0;
+  let criticasAbertas = 0;
+  for (const item of itens) pontosPossiveis += pesoDoItem(item, comPesos);
+  for (const [id, r] of Object.entries(respostas || {})) {
+    const item = porId.get(id);
+    if (!item || !r) continue;
+    if (r.resposta === 'conforme') {
+      conformes += 1;
+      pontosObtidos += pesoDoItem(item, comPesos);
+    } else if (r.resposta === 'nao-conforme') {
+      naoConformes += 1;
+      // não conformidade em item imprescindível é o que o relatório precisa
+      // destacar mesmo quando a nota final ficou boa
+      if (item.criticidade === 'imprescindivel') criticasAbertas += 1;
+    }
+  }
+  const respondidos = conformes + naoConformes;
+  // A nota é sobre o modelo INTEIRO, não sobre o que já foi respondido: meia
+  // visita não pode parecer nota 10 porque só os conformes foram marcados.
+  //
+  // TRUNCA, não arredonda: 28/38 x 10 = 7,3684, e a planilha do Dominos
+  // mostra 7,36. Arredondar viraria 7,37 e a mesma visita passaria a ter
+  // duas notas diferentes conforme onde fosse lida.
+  const bruta = (pontosObtidos / pontosPossiveis) * 10;
+  const nota = Math.floor(bruta * 100) / 100;
+  return { nota, conformes, naoConformes, respondidos, total: itens.length, faixa: faixaDaNota(nota), criticasAbertas };
+}
+
+// ---------------------------------------------------------------------
+// MODELOS. O padrão vive em código (é o que a planilha provou); modelo por
+// marca - Dominos, Spoleto, São Braz, Milk Moo - nasce como CÓPIA dele e é
+// gravado no Firestore. Foi o que o Master descreveu: monta a primeira vez,
+// e aquilo vira um modelo pra reusar.
+async function listarModelos() {
+  const snap = await MODELOS.get();
+  const salvos = snap.docs.map((d) => d.data());
+  return [MODELO_PADRAO, ...salvos];
+}
+const cacheModelos = createCache(listarModelos, 60 * 1000);
+
+async function modeloPorId(id) {
+  if (!id || id === MODELO_PADRAO.id) return MODELO_PADRAO;
+  const snap = await MODELOS.doc(String(id)).get();
+  return snap.exists ? snap.data() : MODELO_PADRAO;
+}
+
+async function salvarModelo({ id, nome, setores, pesos }, email) {
+  const limpo = String(nome || '').trim();
+  if (!limpo) throw new Error('O modelo precisa de um nome.');
+  if (!Array.isArray(setores) || !setores.length) throw new Error('O modelo precisa de pelo menos um setor.');
+  const idFinal = String(id || '').trim() || limpo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+  if (!idFinal || idFinal === MODELO_PADRAO.id) throw new Error('Esse identificador de modelo não pode ser usado.');
+  const anterior = (await MODELOS.doc(idFinal).get()).data();
+  const registro = {
+    id: idFinal,
+    nome: limpo,
+    // VERSÃO SOBE A CADA EDIÇÃO. A visita guarda a versão que respondeu,
+    // então mexer no modelo hoje nunca reescreve o que foi respondido antes.
+    versao: Number(anterior && anterior.versao ? anterior.versao : 0) + 1,
+    pesos: pesos === true,
+    setores,
+    criadoEm: (anterior && anterior.criadoEm) || new Date().toISOString(),
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPorEmail: email || null,
+  };
+  await MODELOS.doc(idFinal).set(registro);
+  cacheModelos.invalidar();
+  return registro;
+}
+
+// ---------------------------------------------------------------------
+// A VISITA.
+function novoId() {
+  return crypto.randomBytes(12).toString('hex');
+}
+
+// o retrato do modelo que viaja DENTRO da visita (ver ARQUITETURA, item 1).
+// Só o que o relatório precisa reler: id, texto e criticidade.
+function retratoDoModelo(modelo) {
+  return {
+    id: modelo.id,
+    nome: modelo.nome,
+    versao: Number(modelo.versao || 1),
+    pesos: !!modelo.pesos,
+    setores: (modelo.setores || []).map((s) => ({
+      id: s.id,
+      nome: s.nome,
+      itens: (s.itens || []).map((i) => ({ id: i.id, texto: i.texto, criticidade: i.criticidade || null })),
+    })),
+  };
+}
+
+async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, horario, representanteLoja, nutricionista, visitaAnteriorId }, email) {
+  const modelo = await modeloPorId(modeloId);
+  const registro = {
+    id: novoId(),
+    status: 'EM_ANDAMENTO',
+    modeloSnap: retratoDoModelo(modelo),
+    unidade: String(unidade || '').trim() || null,
+    unidadeNome: String(unidadeNome || '').trim() || null,
+    loja: String(loja || '').trim() || null,
+    data: String(data || '').trim() || new Date().toISOString().slice(0, 10),
+    horario: String(horario || '').trim() || null,
+    representanteLoja: String(representanteLoja || '').trim() || null,
+    nutricionista: String(nutricionista || '').trim() || null,
+    visitaAnteriorId: String(visitaAnteriorId || '').trim() || null,
+    respostas: {},
+    extras: {},
+    criadoEm: new Date().toISOString(),
+    criadoPorEmail: email || null,
+    concluidaEm: null,
+  };
+  await COLLECTION.doc(registro.id).set(registro);
+  cacheLista.invalidar();
+  return registro;
+}
+
+async function obterVisita(id) {
+  const snap = await COLLECTION.doc(String(id || '')).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  return { ...visita, ...calcularNota(visita.modeloSnap, visita.respostas) };
+}
+
+// visita CONCLUÍDA não aceita mais resposta (ver ARQUITETURA, item 4) - o
+// que continua aberto depois de fechar é só o ciclo da ação corretiva
+function travarSeConcluida(visita) {
+  if (visita.status === 'CONCLUIDA') {
+    throw new Error('Visita concluída não pode ser alterada. Abra uma visita nova.');
+  }
+}
+
+async function responderItem(id, itemId, { resposta, observacao, especificacoes }, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  travarSeConcluida(visita);
+  if (resposta !== null && !RESPOSTAS.includes(resposta)) throw new Error('Resposta inválida.');
+  const itens = new Set(itensDoModelo(visita.modeloSnap).map((i) => i.id));
+  const extrasIds = new Set(Object.values(visita.extras || {}).flat().map((e) => e.id));
+  if (!itens.has(itemId) && !extrasIds.has(itemId)) throw new Error('Esse item não existe nesta visita.');
+  const atual = (visita.respostas || {})[itemId] || {};
+  const nova = {
+    ...atual,
+    resposta: resposta || null,
+    observacao: observacao === undefined ? (atual.observacao || null) : (String(observacao || '').trim().slice(0, 2000) || null),
+    // as especificações que ela acrescenta DENTRO do item (pedido do Master).
+    // Não entram na nota - viram apontamento no relatório.
+    especificacoes: Array.isArray(especificacoes)
+      ? especificacoes.map((e) => ({
+        texto: String((e && e.texto) || '').trim().slice(0, 500),
+        resposta: RESPOSTAS.includes(e && e.resposta) ? e.resposta : null,
+      })).filter((e) => e.texto).slice(0, 30)
+      : (atual.especificacoes || []),
+    respondidoEm: new Date().toISOString(),
+    respondidoPorEmail: email || null,
+  };
+  await COLLECTION.doc(String(id)).set({ respostas: { [itemId]: nova } }, { merge: true });
+  cacheLista.invalidar();
+  return nova;
+}
+
+// PONTO DE CHECK NOVO, no fim de um setor (pedido do Master: "ao término de
+// todas as opções do checklist daquele setor, ter a opção de adicionar mais
+// pontos de check"). Fica na visita, não no modelo: é o que ela viu HOJE
+// naquela loja. Virar item fixo do modelo é outra decisão, e é por isso que
+// existe salvarModelo.
+async function adicionarPontoDeCheck(id, setorId, texto, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  travarSeConcluida(visita);
+  const limpo = String(texto || '').trim().slice(0, 500);
+  if (!limpo) throw new Error('Escreva o ponto de check.');
+  const setores = new Set((visita.modeloSnap.setores || []).map((s) => s.id));
+  if (!setores.has(setorId)) throw new Error('Esse setor não existe nesta visita.');
+  const lista = (visita.extras || {})[setorId] || [];
+  if (lista.length >= 30) throw new Error('Limite de pontos de check extras neste setor.');
+  const ponto = { id: `extra-${novoId().slice(0, 8)}`, texto: limpo, criadoEm: new Date().toISOString(), criadoPorEmail: email || null };
+  await COLLECTION.doc(String(id)).set({ extras: { [setorId]: [...lista, ponto] } }, { merge: true });
+  cacheLista.invalidar();
+  return ponto;
+}
+
+// ---------------------------------------------------------------------
+// CAPA - a ação corretiva de um apontamento (ver ARQUITETURA, item 3).
+// Continua editável DEPOIS de concluída a visita, de propósito: é o ciclo
+// que segue vivo até a loja corrigir e alguém verificar.
+async function salvarAcaoCorretiva(id, itemId, { acaoCorretiva, responsavel, prazo, espacoCliente, corrigido }, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  const atual = (visita.respostas || {})[itemId] || {};
+  const patch = {
+    ...atual,
+    acaoCorretiva: acaoCorretiva === undefined ? (atual.acaoCorretiva || null) : (String(acaoCorretiva || '').trim().slice(0, 4000) || null),
+    responsavel: responsavel === undefined ? (atual.responsavel || null) : (String(responsavel || '').trim().slice(0, 120) || null),
+    prazo: prazo === undefined ? (atual.prazo || null) : (String(prazo || '').trim().slice(0, 10) || null),
+    // "ESPAÇO CLIENTE" da planilha: o que a loja responde
+    espacoCliente: espacoCliente === undefined ? (atual.espacoCliente || null) : (String(espacoCliente || '').trim().slice(0, 4000) || null),
+  };
+  if (corrigido !== undefined) {
+    patch.corrigido = corrigido === null ? null : !!corrigido;
+    patch.verificadoEm = corrigido === null ? null : new Date().toISOString();
+    patch.verificadoPorEmail = corrigido === null ? null : (email || null);
+  }
+  await COLLECTION.doc(String(id)).set({ respostas: { [itemId]: patch } }, { merge: true });
+  cacheLista.invalidar();
+  return patch;
+}
+
+async function concluirVisita(id, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  travarSeConcluida(visita);
+  const conta = calcularNota(visita.modeloSnap, visita.respostas);
+  // fechar visita pela metade produziria nota baixa que não é a realidade da
+  // loja - e nota errada em laudo é pior que laudo atrasado
+  if (conta.respondidos < conta.total) {
+    throw new Error(`Faltam ${conta.total - conta.respondidos} item(ns) para concluir.`);
+  }
+  const patch = {
+    status: 'CONCLUIDA',
+    concluidaEm: new Date().toISOString(),
+    concluidaPorEmail: email || null,
+    // a nota vai CONGELADA no documento: é o que o laudo mostrou no dia.
+    // Recalcular na leitura faria uma correção futura no modelo mudar a nota
+    // de uma visita já entregue ao cliente.
+    nota: conta.nota,
+    faixa: conta.faixa,
+    conformes: conta.conformes,
+    naoConformes: conta.naoConformes,
+    totalItens: conta.total,
+  };
+  await COLLECTION.doc(String(id)).set(patch, { merge: true });
+  cacheLista.invalidar();
+  return { ...visita, ...patch };
+}
+
+// ---------------------------------------------------------------------
+// LISTA. Resumo, nunca o documento inteiro (CLAUDE.md §3).
+async function listarUncached() {
+  const snap = await COLLECTION.orderBy('criadoEm', 'desc').limit(300).get();
+  return snap.docs.map((d) => {
+    const v = d.data();
+    const conta = v.status === 'CONCLUIDA'
+      ? { nota: v.nota, faixa: v.faixa, conformes: v.conformes, naoConformes: v.naoConformes, total: v.totalItens }
+      : calcularNota(v.modeloSnap, v.respostas);
+    return {
+      id: v.id, status: v.status, data: v.data, horario: v.horario,
+      unidade: v.unidade, unidadeNome: v.unidadeNome, loja: v.loja,
+      modeloNome: (v.modeloSnap || {}).nome || null,
+      representanteLoja: v.representanteLoja, nutricionista: v.nutricionista,
+      criadoEm: v.criadoEm, concluidaEm: v.concluidaEm,
+      nota: conta.nota, faixa: conta.faixa,
+      conformes: conta.conformes, naoConformes: conta.naoConformes, total: conta.total,
+    };
+  });
+}
+const cacheLista = createCache(listarUncached, 20 * 1000);
+async function listarVisitas() { return cacheLista.cached(); }
+
+// APONTAMENTOS: tudo que ficou NÃO CONFORME, já no formato que o relatório
+// e a tela de pendências usam. Sai do documento que já foi lido - não custa
+// leitura nova.
+function apontamentosDe(visita) {
+  const porId = new Map(itensDoModelo(visita.modeloSnap || {}).map((i) => [i.id, i]));
+  for (const [setorId, lista] of Object.entries(visita.extras || {})) {
+    for (const e of lista) porId.set(e.id, { ...e, setorId, extra: true });
+  }
+  const setorNome = new Map((visita.modeloSnap && visita.modeloSnap.setores || []).map((s) => [s.id, s.nome]));
+  return Object.entries(visita.respostas || {})
+    .filter(([, r]) => r && r.resposta === 'nao-conforme')
+    .map(([id, r]) => {
+      const item = porId.get(id) || {};
+      return {
+        itemId: id,
+        texto: item.texto || id,
+        extra: !!item.extra,
+        criticidade: item.criticidade || null,
+        setor: setorNome.get(item.setorId) || null,
+        observacao: r.observacao || null,
+        especificacoes: r.especificacoes || [],
+        fotos: r.fotos || [],
+        acaoCorretiva: r.acaoCorretiva || null,
+        responsavel: r.responsavel || null,
+        prazo: r.prazo || null,
+        espacoCliente: r.espacoCliente || null,
+        corrigido: r.corrigido === undefined ? null : r.corrigido,
+      };
+    });
+}
+
+module.exports = {
+  MODELO_PADRAO, RESPOSTAS, RESPOSTA_LABEL, STATUS,
+  CRITICIDADES, CRITICIDADE_LABEL, PESO_POR_CRITICIDADE, pesoDoItem,
+  FAIXA_POSITIVA_MIN, FAIXA_ATENCAO_MIN, FAIXA_LABEL,
+  faixaDaNota, calcularNota, itensDoModelo, totalDeItens,
+  listarModelos, modeloPorId, salvarModelo, retratoDoModelo,
+  criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
+  salvarAcaoCorretiva, concluirVisita, listarVisitas, apontamentosDe,
+};

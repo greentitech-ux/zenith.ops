@@ -123,6 +123,7 @@ const agenteAcoes = require('./agenteAcoes');
 const coworkApi = require('./coworkApi');
 const vigiaScript = require('./vigiaScript');
 const agenteAndroid = require('./agenteAndroid');
+const qualidade = require('./qualidade');
 const reparoNocZenithScript = require('./reparoNocZenithScript');
 const procedimentosSocorro = require('./procedimentosSocorro');
 const loginCustom = require('./loginCustom');
@@ -4621,6 +4622,72 @@ async function filtrarFormulariosPorUnidade(req, lista) {
     return codigo && liberadas.has(codigo);
   });
 }
+
+// ---------------------------------------------------------------------
+// Q.A - VISITA TÉCNICA DE QUALIDADE (ver qualidade.js)
+//
+// A porta é a TAG DE CARGO 'qa', e não uma seção de permissão (Master,
+// 23/09/2026: "essa seção vira uma Tag para ter acesso a ela, só quem tem
+// acesso a tag terá acesso a ela, pois é um setor que fará a visita nas
+// unidades... só Master, Admin ou quem tem a TAG, pois é um Cargo Q.A").
+//
+// O MESMO critério do menu (podeVer em nav-menu.js). Esconder no menu não é
+// controle de acesso: sem esta função, bastava digitar a URL.
+function exigirQA(req, res) {
+  if (req.isMaster || req.isAdmin || users.temTag(req.user, 'qa')) return true;
+  res.status(403).json({ error: 'Acesso restrito ao setor Q.A.' });
+  return false;
+}
+
+app.get('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try { res.json(await qualidade.listarModelos()); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// editar modelo mexe no checklist de TODAS as visitas futuras - fica com
+// Master/Admin, mesmo dentro do Q.A
+app.post('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
+  if (!(req.isMaster || req.isAdmin)) return res.status(403).json({ error: 'Só Master ou Admin edita modelo de checklist.' });
+  try { res.json(await qualidade.salvarModelo(req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try { res.json(await qualidade.listarVisitas()); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try { res.json(await qualidade.criarVisita(req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/qualidade/visitas/:id', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try {
+    const visita = await qualidade.obterVisita(req.params.id);
+    res.json({ ...visita, apontamentos: qualidade.apontamentosDe(visita) });
+  } catch (err) { res.status(404).json({ error: err.message }); }
+});
+
+app.post('/api/qualidade/visitas/:id/item/:itemId', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try { res.json(await qualidade.responderItem(req.params.id, req.params.itemId, req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/qualidade/visitas/:id/setor/:setorId/ponto', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try { res.json(await qualidade.adicionarPontoDeCheck(req.params.id, req.params.setorId, (req.body || {}).texto, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/qualidade/visitas/:id/item/:itemId/acao', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try { res.json(await qualidade.salvarAcaoCorretiva(req.params.id, req.params.itemId, req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/qualidade/visitas/:id/concluir', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try { res.json(await qualidade.concluirVisita(req.params.id, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
 
 app.get('/api/formularios', requireSection('formularios'), async (req, res) => {
   res.json(await filtrarFormulariosPorUnidade(req, await formularios.listar()));

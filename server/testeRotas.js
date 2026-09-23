@@ -26404,6 +26404,91 @@ $r | ConvertTo-Json -Compress
   if (!okAgenteAndroid) ruins += 1;
   console.log(`${okAgenteAndroid ? '✓' : '✗'} Agente Android: roda com o NoPulso fechado, pelo heartbeat que ja existe`);
 
+  // ------------------------------------------------------------------
+  // Q.A - VISITA TÉCNICA DE QUALIDADE.
+  //
+  // O checklist saiu de DUAS planilhas reais (Dominos Natal 06/08 e Spoleto
+  // Natal 07/08), e elas trazem a nota já calculada: 7.36 e 7.63. Isso faz
+  // delas um teste de verdade - se a conta daqui divergir, o laudo novo
+  // contradiz o laudo que o cliente já recebeu.
+  //
+  // O resto do bloco protege as três coisas que, se quebrarem, produzem
+  // laudo errado em silêncio: a porta de acesso (é TAG, não seção), a
+  // imutabilidade depois de concluída, e o retrato do modelo dentro da
+  // visita (sem ele, corrigir um item hoje reescreve agosto).
+  let okQA = false;
+  try {
+    const fsQ = require('fs');
+    const q = require(__dirname + '/qualidade.js');
+    const nav = fsQ.readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
+    const idxQ = fsQ.readFileSync(__dirname + '/index.js', 'utf8');
+    const usersQ = fsQ.readFileSync(__dirname + '/users.js', 'utf8');
+
+    const respostasCom = (naoConformes) => {
+      const r = {};
+      q.itensDoModelo(q.MODELO_PADRAO).forEach((i) => { r[i.id] = { resposta: naoConformes.includes(i.id) ? 'nao-conforme' : 'conforme' }; });
+      return r;
+    };
+    const dominos = q.calcularNota(q.MODELO_PADRAO, respostasCom(['uniforme-completo', 'adornos', 'higienizacao-maos', 'pisos-paredes-tetos', 'pia-exclusiva-maos', 'sanitarios-vestiarios', 'estrados-prateleiras', 'sem-vencidos', 'alvara-funcionamento', 'limpeza-ar-coifa']));
+    const spoleto = q.calcularNota(q.MODELO_PADRAO, respostasCom(['pisos-paredes-tetos', 'estrados-prateleiras', 'identificacao-alimentos', 'pvps', 'sem-vencidos', 'licenca-sanitaria', 'alvara-funcionamento', 'alvara-bombeiro', 'calibracao-termometro-balanca']));
+
+    const conf = {
+      // o número que o cliente já viu
+      'reproduz a nota da planilha do Dominos (7,36)': dominos.nota === 7.36,
+      'reproduz a nota da planilha do Spoleto (7,63)': spoleto.nota === 7.63,
+      'o checklist tem os 6 setores e os 38 itens da planilha':
+        q.MODELO_PADRAO.setores.length === 6 && q.totalDeItens(q.MODELO_PADRAO) === 38,
+      // arredondar viraria 7,37 e a mesma visita teria duas notas
+      'a nota TRUNCA, como a planilha': q.calcularNota(q.MODELO_PADRAO, respostasCom(['uniforme-completo'])).nota === 9.73,
+      // meia visita não pode parecer nota boa
+      'visita pela metade não vira nota alta': (() => {
+        const r = {}; q.itensDoModelo(q.MODELO_PADRAO).slice(0, 5).forEach((i) => { r[i.id] = { resposta: 'conforme' }; });
+        return q.calcularNota(q.MODELO_PADRAO, r).nota < 2;
+      })(),
+      // faixas: decisão do Master (>=7 positiva, 5 a 6,9 atenção, <5 negativa)
+      'as faixas são as que o Master definiu':
+        q.faixaDaNota(7) === 'positiva' && q.faixaDaNota(6.99) === 'atencao'
+        && q.faixaDaNota(5) === 'atencao' && q.faixaDaNota(4.99) === 'negativa',
+      // ACESSO: é TAG de cargo, não seção de permissão
+      'a tag de cargo qa existe': /'coordenador-agregador', 'qa'\]/.test(usersQ),
+      'a porta do servidor é a tag, e vale pra todas as rotas de Q.A':
+        /function exigirQA\(req, res\) \{/.test(idxQ)
+        && /req\.isMaster \|\| req\.isAdmin \|\| users\.temTag\(req\.user, 'qa'\)/.test(idxQ)
+        && (idxQ.match(/if \(!exigirQA\(req, res\)\) return;/g) || []).length >= 7,
+      // esconder no menu não é controle de acesso, mas o menu tem que saber
+      'o menu entende tag de cargo (senão o item apareceria pra todo mundo)':
+        /if \(it\.tags\) return isAdmin \|\| it\.tags\.some/.test(nav)
+        && /id: 'nav-qa-visita'[^}]*tags: \['qa'\]/.test(nav)
+        && /id: 'nav-qa-treinamento'[^}]*tags: \['qa'\]/.test(nav),
+      // item de menu que dá 404 é pior que item ausente
+      'as duas telas do menu Q.A existem':
+        fsQ.existsSync(__dirname + '/public/qa-visita.html')
+        && fsQ.existsSync(__dirname + '/public/qa-treinamento.html'),
+      // ARQUITETURA: o retrato do modelo viaja na visita
+      'a visita guarda o retrato do modelo que respondeu': (() => {
+        const snap = q.retratoDoModelo(q.MODELO_PADRAO);
+        return snap.versao >= 1 && snap.setores.length === 6
+          && /modeloSnap: retratoDoModelo\(modelo\)/.test(fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8'));
+      })(),
+      'visita concluída não aceita mais resposta':
+        /function travarSeConcluida/.test(fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8'))
+        && /Visita concluída não pode ser alterada/.test(fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8')),
+      // peso desligado = nota igual à planilha; é isso que deixa ligar depois
+      // sem reescrever o passado
+      'criticidade existe, mas o peso vem desligado':
+        q.CRITICIDADES.length === 3 && !q.MODELO_PADRAO.pesos
+        && q.pesoDoItem({ criticidade: 'imprescindivel' }, false) === 1
+        && q.pesoDoItem({ criticidade: 'imprescindivel' }, true) === 3,
+      // a rota tem que existir de verdade, não só o módulo
+      'a rota de visitas responde': (await pedir('/api/qualidade/visitas', token ? { Authorization: 'Bearer ' + token } : {})).status !== 404,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okQA = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okQA = false; console.log('  erro: ' + e.message); }
+  if (!okQA) ruins += 1;
+  console.log(`${okQA ? '✓' : '✗'} Q.A: checklist de visita reproduz a nota das planilhas reais, e a porta é a tag de cargo`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
