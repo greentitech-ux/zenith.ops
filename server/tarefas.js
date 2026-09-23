@@ -511,7 +511,9 @@ async function adicionarAnexo(id, acesso, anexo) {
     id: crypto.randomBytes(8).toString('hex'), nome: String(anexo.nome || 'print').slice(0, 160),
     path: anexo.path, tipo: anexo.tipo || 'application/octet-stream', tamanho: Number(anexo.tamanho || 0),
     enviadoEm: new Date().toISOString(), enviadoPorId: acesso.usuario.id, enviadoPorNome: nomeUsuario(acesso.usuario),
+    ...(anexo.transcricao ? { transcricao: true } : {}),
   };
+  if (item.transcricao && !tarefa.ehReuniao) throw new Error('Transcrição só pode ser anexada em reunião.');
   await ref.update({ anexos: [...(tarefa.anexos || []), item].slice(-20), atualizadoEm: item.enviadoEm });
   return getOne(id);
 }
@@ -549,6 +551,76 @@ async function atualizarDatas(id, acesso, { dataInicio, dataEntrega } = {}) {
   if (dataEntrega !== undefined && String(dataEntrega || '').trim() && !entrega) throw new Error('Previsão de conclusão inválida.');
   if (inicio && entrega && entrega < inicio) throw new Error('A previsão de conclusão não pode ser anterior à data de início.');
   await ref.update({ dataInicio: inicio, dataEntrega: entrega, atualizadoEm: new Date().toISOString() });
+  return getOne(id);
+}
+
+// REAGENDAR (pedido do Master, 23/09/2026): "preciso poder reagendar tarefa,
+// mudar a data quando entrar em pendente, para situações reais de não
+// possibilidade". Diferente de editar a previsão no campo de data:
+//  - exige MOTIVO - quem cobra precisa ver por que o combinado mudou;
+//  - fica no histórico (reagendamentos) e num comentário automático, pra
+//    todo mundo da tarefa saber sem abrir a ficha;
+//  - reunião muda dia E hora, e o evento do Google Agenda anda junto (se a
+//    agenda recusar, nada muda - senão a turma entra numa sala vazia);
+//  - o SLA ORIGINAL não é apagado: ele continua registrado, e a tela passa a
+//    medir "em prazo/atrasado" pela data reagendada. Estourou antes, fica
+//    dito que estourou - o reagendamento explica, não esconde.
+const MOTIVO_REAGENDAR_MIN = 10;
+const REAGENDAMENTOS_MAX = 30;
+function hojeEmSaoPaulo() { return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }); }
+async function reagendar(id, acesso, { dataEntrega, horaInicio, motivo } = {}) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Só quem gere a tarefa (responsável, quem criou ou Master) pode reagendar.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
+  const dia = String(dataEntrega || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) throw new Error('Informe a nova data.');
+  if (dia < hojeEmSaoPaulo()) throw new Error('A nova data não pode ser no passado.');
+  const texto = String(motivo || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+  if (texto.length < MOTIVO_REAGENDAR_MIN) throw new Error(`Explique o motivo do reagendamento (mínimo ${MOTIVO_REAGENDAR_MIN} letras).`);
+  let hora = tarefa.horaInicio || null;
+  if (tarefa.ehReuniao) {
+    hora = String(horaInicio || tarefa.horaInicio || '').trim();
+    if (!HORA_RE.test(hora)) throw new Error('Informe a nova hora da reunião no formato HH:MM.');
+  }
+  if (dia === (tarefa.dataEntrega || '') && (hora || null) === (tarefa.horaInicio || null)) {
+    throw new Error('A nova data é igual à atual.');
+  }
+  // reunião com evento na agenda: move ANTES de gravar - se o Google recusar,
+  // a exceção sobe e a tarefa fica exatamente como estava
+  if (tarefa.ehReuniao && tarefa.eventoGoogleId) {
+    await reuniaoGoogle.moverSala(tarefa.eventoGoogleId, { dia, hora, duracaoMin: tarefa.duracaoMin || 60 });
+  }
+  const agora = new Date().toISOString();
+  const quem = nomeUsuario(acesso.usuario);
+  const fmtData = (d, h) => (d ? d.split('-').reverse().join('/') : 'sem data') + (h ? ' ' + h : '');
+  const registro = {
+    de: { dataEntrega: tarefa.dataEntrega || null, horaInicio: tarefa.horaInicio || null },
+    para: { dataEntrega: dia, horaInicio: tarefa.ehReuniao ? hora : null },
+    motivo: texto, porId: acesso.usuario.id, porNome: quem, em: agora,
+  };
+  const comentario = {
+    id: crypto.randomBytes(8).toString('hex'), porId: acesso.usuario.id, porNome: quem, em: agora, sistema: true,
+    texto: `📅 Reagendada de ${fmtData(tarefa.dataEntrega, tarefa.ehReuniao ? tarefa.horaInicio : null)} para ${fmtData(dia, tarefa.ehReuniao ? hora : null)}. Motivo: ${texto}`,
+  };
+  const hojeSp = hojeEmSaoPaulo();
+  const patch = {
+    dataEntrega: dia,
+    // início depois do novo prazo viraria "previsão vencida" na hora
+    dataInicio: tarefa.dataInicio && tarefa.dataInicio > dia ? dia : (tarefa.dataInicio || null),
+    reagendamentos: [...(tarefa.reagendamentos || []), registro].slice(-REAGENDAMENTOS_MAX),
+    reagendadaPara: tarefa.ehReuniao ? `${dia}T${hora}` : dia,
+    comentarios: [...(tarefa.comentarios || []), comentario].slice(-100),
+    atualizadoEm: agora,
+  };
+  if (tarefa.ehReuniao) patch.horaInicio = hora;
+  // saiu de "Pendentes" de verdade: a tarefa que estava parada por prazo
+  // vencido volta pra fila certa da data nova. Tarefa de TICKET fica com o
+  // status que o ticket manda (PENDENTE ali é "aguardando decisão", não prazo)
+  // - a sincronização do ticket regravaria por cima de qualquer jeito.
+  if (tarefa.status === 'PENDENTE' && !(tarefa.vinculo && tarefa.vinculo.id)) patch.status = dia === hojeSp ? 'HOJE' : 'A_FAZER';
+  await ref.update(patch);
   return getOne(id);
 }
 
@@ -600,6 +672,86 @@ async function atualizarDescricao(id, acesso, descricao) {
   const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: 'Descrição editada pelo Master.', porId: acesso.usuario.id, porNome: nomeUsuario(acesso.usuario), em: agora, sistema: true };
   await ref.update({ descricao: nova, comentarios: [...(tarefa.comentarios || []), comentario].slice(-100), atualizadoEm: agora });
   return getOne(id);
+}
+
+// ---------- RESUMO DA REUNIÃO ----------
+// Master (23/09/2026): um campo pra anotar durante ou depois da reunião, e o
+// Claude/Cowork lendo a transcrição pra propor o resumo (ele grava por aqui,
+// com a confirmação do Master - ver coworkApi.registrar_resumo_reuniao).
+//
+// Não é a descrição: a descrição é o ANTES (pauta, objetivo) e continua só do
+// Master; o resumo é o que ACONTECEU. E não é comentário: comentário corta em
+// 2000 caracteres e some entre os outros 100.
+//
+// Quem edita é quem GERENCIA a reunião (responsável, quem criou, Admin da
+// unidade, Master). Participante anota nos comentários: vários editando o
+// mesmo campo ao mesmo tempo, a última gravação apagaria a dos outros.
+//
+// Fica fora do link de convidado externo (reuniaoPublica): o resumo pode
+// ter assunto interno.
+const RESUMO_MAX = 8000;
+async function atualizarResumo(id, acesso, texto, { origem = 'manual' } = {}) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Reunião não encontrada.');
+  const tarefa = snap.data();
+  if (!tarefa.ehReuniao) throw new Error('O resumo é só de reunião.');
+  if (!podeGerir(tarefa, acesso)) throw new Error('Só quem gerencia esta reunião edita o resumo. Anote nos comentários.');
+  const novo = String(texto || '').replace(/\r\n/g, '\n').trim().slice(0, RESUMO_MAX);
+  const agora = new Date().toISOString();
+  const via = origem === 'cowork' ? ' via Claude/Cowork' : '';
+  const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: novo ? `Resumo da reunião atualizado${via}.` : 'Resumo da reunião apagado.', porId: acesso.usuario.id, porNome: nomeUsuario(acesso.usuario), em: agora, sistema: true };
+  await ref.update({
+    resumoReuniao: novo ? { texto: novo, porId: acesso.usuario.id, porNome: nomeUsuario(acesso.usuario), em: agora, origem: origem === 'cowork' ? 'cowork' : 'manual' } : null,
+    comentarios: [...(tarefa.comentarios || []), comentario].slice(-100), atualizadoEm: agora,
+  });
+  return getOne(id);
+}
+
+// A TRANSCRIÇÃO é anexo (Storage), nunca campo do documento: o Meu Dia lê a
+// tarefa inteira em toda listagem, e 1h de reunião são ~60 KB de texto em
+// cada leitura. Aceita o que o Meet e os gravadores exportam em texto.
+const TRANSCRICAO_EXT = /\.(txt|vtt|md|docx)$/i;
+function ehArquivoDeTranscricao(nome) { return TRANSCRICAO_EXT.test(String(nome || '')); }
+const TIPO_TRANSCRICAO = { txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', vtt: 'text/vtt; charset=utf-8', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+function tipoDaTranscricao(nome) { return TIPO_TRANSCRICAO[String(nome || '').split('.').pop().toLowerCase()] || 'text/plain; charset=utf-8'; }
+
+// .docx é um zip: acha word/document.xml pelo diretório central e tira o
+// texto, um parágrafo por linha. Feito à mão (zlib do próprio Node) pra não
+// trazer biblioteca só pra isso. Qualquer coisa fora do esperado = null.
+function textoDoDocx(buf) {
+  try {
+    const zlib = require('zlib');
+    let fim = -1;
+    for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) { if (buf.readUInt32LE(i) === 0x06054b50) { fim = i; break; } }
+    if (fim < 0) return null;
+    const total = buf.readUInt16LE(fim + 10); let p = buf.readUInt32LE(fim + 16);
+    for (let n = 0; n < total; n++) {
+      if (buf.readUInt32LE(p) !== 0x02014b50) return null;
+      const metodo = buf.readUInt16LE(p + 10); const tamComp = buf.readUInt32LE(p + 20);
+      const lNome = buf.readUInt16LE(p + 28); const lExtra = buf.readUInt16LE(p + 30); const lCom = buf.readUInt16LE(p + 32);
+      const local = buf.readUInt32LE(p + 42); const nome = buf.toString('utf8', p + 46, p + 46 + lNome);
+      if (nome === 'word/document.xml') {
+        const ini = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+        const dados = buf.subarray(ini, ini + tamComp);
+        const xml = (metodo === 8 ? zlib.inflateRawSync(dados) : dados).toString('utf8');
+        return xml.replace(/<\/w:p>/g, '\n').replace(/<w:tab\/>/g, '\t').replace(/<w:br\/>/g, '\n').replace(/<[^>]+>/g, '')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+          .replace(/\n{3,}/g, '\n\n').trim();
+      }
+      p += 46 + lNome + lExtra + lCom;
+    }
+    return null;
+  } catch (e) { return null; }
+}
+// texto legível de um anexo de transcrição (quem lê é o Claude/Cowork)
+function textoDaTranscricao(buf, nome) {
+  if (!buf) return null;
+  const ext = String(nome || '').split('.').pop().toLowerCase();
+  if (ext === 'docx') return textoDoDocx(buf);
+  let t = buf.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  // WebVTT: tira o cabeçalho e as linhas de tempo, fica a fala
+  if (ext === 'vtt') t = t.replace(/^WEBVTT[^\n]*\n/, '').split('\n').filter((l) => !/-->/.test(l) && !/^\d+$/.test(l.trim())).join('\n').replace(/\n{3,}/g, '\n\n');
+  return t.trim();
 }
 
 function hashLinkExterno(segredo) {
@@ -1000,4 +1152,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, atualizarResumo, RESUMO_MAX, ehArquivoDeTranscricao, tipoDaTranscricao, textoDaTranscricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

@@ -44,6 +44,7 @@ const impressoraStatus = require('./impressoraStatus');
 const ouiFabricantes = require('./ouiFabricantes');
 const unidades = require('./unidades');
 const empresas = require('./empresas');
+const rolloutVigia = require('./rolloutVigia');
 
 const COLLECTION = db.collection('lojaStatus');
 // fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
@@ -2031,7 +2032,7 @@ function resumoEnderecoAgentes(docs, oficial) {
   return { oficial: alvo, total: migradas.length + pendentes.length, migradas: migradas.length, pendentes, podeAposentar: !!alvo && pendentes.length === 0 };
 }
 
-async function reportarEstadoAgente(codigo, posto, { versao, noPulsoPrint, endereco }, token) {
+async function reportarEstadoAgente(codigo, posto, { versao, noPulsoPrint, endereco, versaoRuim }, token) {
   const id = docIdFor(codigo, posto);
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Computador não encontrado.');
@@ -2043,11 +2044,60 @@ async function reportarEstadoAgente(codigo, posto, { versao, noPulsoPrint, ender
     agenteNoPulsoPrint: String(noPulsoPrint || '').trim().slice(0, 200) || null,
     agenteEstadoEm: Date.now(),
   };
+  // versao que NAO subiu nesta maquina e da qual o agente voltou sozinho
+  // (v118+, ver Checar-PartidaDaVersao). Informativo no NOC, e e o sinal que
+  // suspende a liberacao em ondas (rolloutVigia.js).
+  if (versaoRuim !== undefined) {
+    const ruim = Number(versaoRuim);
+    patch.agenteVersaoRuim = Number.isFinite(ruim) && ruim > 0 ? ruim : null;
+  }
   const end = String(endereco || '').trim().slice(0, 200);
   if (end) patch.agenteEndereco = end;
   await COLLECTION.doc(id).set(patch, { merge: true });
   espelharEscrita(id, patch);
   return { codigo, posto, ...patch };
+}
+
+// ---- LIBERACAO EM ONDAS DO AGENTE (ver rolloutVigia.js) ----
+// Avalia a cada varredura (1min) contra o espelho em memoria - leitura zero;
+// grava no config SO quando o estado muda (poucas vezes por versao, §3).
+async function avaliarRolloutVigia(versaoAtual, agora = Date.now()) {
+  const cfg = await getConfig();
+  const docs = [...(await garantirEspelho()).entries()].map(([id, d]) => ({ ...comOnline(d), _id: id }));
+  const r = rolloutVigia.avaliar(cfg && cfg.vigiaRollout, versaoAtual, docs, agora);
+  if (r.mudou) {
+    await setConfig({ vigiaRollout: r.estado });
+    if (r.evento) console.log(`[NOC] liberação do agente v${r.estado.versao}: ${r.evento}${r.estado.motivo ? ' - ' + r.estado.motivo : ''}`);
+  }
+  return r;
+}
+async function versaoVigiaPara(codigo, posto, versaoAtual) {
+  const cfg = await getConfig();
+  let id = null;
+  try { id = codigo && posto ? docIdFor(codigo, posto) : null; } catch (e) { id = null; }
+  return rolloutVigia.versaoOferecida(cfg && cfg.vigiaRollout, versaoAtual, id);
+}
+async function resumoRolloutVigia() {
+  const cfg = await getConfig();
+  const e = (cfg && cfg.vigiaRollout) || null;
+  if (!e) return null;
+  const memoria = await garantirEspelho();
+  const pilotos = (e.pilotos || []).map((id) => {
+    const d = memoria.get(id) ? comOnline(memoria.get(id)) : null;
+    return {
+      id, nome: (d && d.nome) || id, codigo: d && d.codigo, online: !!(d && d.online),
+      versao: (d && d.agenteVersao) || null, windowsAntigo: !!(d && d.windowsAntigo), ehServidor: !!(d && d.ehServidor),
+      atualizadoEm: ((e.atualizados || []).find((x) => x.id === id) || {}).em || null,
+    };
+  });
+  return { ...e, pilotos, promoverAposMs: rolloutVigia.PROMOVER_APOS_MS };
+}
+async function decidirRolloutVigia(acao, quem) {
+  const cfg = await getConfig();
+  const novo = rolloutVigia.decisaoDoMaster(cfg && cfg.vigiaRollout, acao, quem);
+  await setConfig({ vigiaRollout: novo });
+  console.log(`[NOC] liberação do agente v${novo.versao}: ${novo.estado} (${novo.motivo})`);
+  return resumoRolloutVigia();
 }
 
 async function noPulsoPrintDoComputador(codigo, posto) {
@@ -4766,6 +4816,7 @@ async function impressorasPraSondar(codigo) {
 }
 
 module.exports = {
+  avaliarRolloutVigia, versaoVigiaPara, resumoRolloutVigia, decidirRolloutVigia,
   substituirSegredos, SEGREDOS_PERMITIDOS,
   impressorasPraSondar,
   flushHeartbeatsPendentes,

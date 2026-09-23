@@ -8006,7 +8006,7 @@ setTimeout(async () => {
       // duas máscaras no Ctrl+Q, névoa ficando depois do print, Esc duas vezes ----
       'v54 (sem subir, as máquinas com duas cópias continuam com duas)': vg.VERSAO_VIGIA >= 54,
       'antes do laço, um mutex por papel (login x boot): a cópia que chega depois se encerra': scripts.every((s) =>
-        /if \(\$Loop\) \{\n  Garantir-InstanciaUnica\n  Rodar-Loop/.test(s.replace(/\r/g, ''))
+        /if \(\$Loop\) \{\n  Garantir-InstanciaUnica\n(  \[void\]\(Checar-PartidaDaVersao\)\n)?  Rodar-Loop/.test(s.replace(/\r/g, ''))
         && s.includes('$nomeMutex = "Local\\" + $NomeTarefa + "_" + $papel')
         && s.includes('New-Object System.Threading.Mutex($false, $nomeMutex)')
         && s.includes('if (-not $dono) { Escrever-Log "Ja existe uma instancia ($papel) do NOCZenith rodando - esta copia se encerra."; exit }')
@@ -13599,7 +13599,7 @@ $r | ConvertTo-Json -Depth 6 -Compress
       for (let i = 0; i < 30; i++) fs3.writeFileSync(path3.join(dir, 'arq', `f${i}.txt`), 'x'.repeat(2000));
       const defs = [
         linhaDe(ps, /^\$script:Pulso = \$null$/),
-        corpo(ps, 'Agora-Ms'), corpo(ps, 'Pulso-Tick'), corpo(ps, 'Marcar-Etapa'), corpo(ps, 'Iniciar-VigiaDeTravamento'),
+        corpo(ps, 'Relogio-Ms'), corpo(ps, 'Pulso-Tick'), corpo(ps, 'Marcar-Etapa'), corpo(ps, 'Iniciar-VigiaDeTravamento'),
         corpo(ps, 'Iniciar-ZipEmSegundoPlano'), corpo(ps, 'Desafixar-DaBarra'),
       ];
       const iCorpo = ps.indexOf('$script:CorpoDesafixar = {');
@@ -13732,6 +13732,254 @@ $r | ConvertTo-Json -Compress
   } catch (e) { okVigia = false; console.log('  erro: ' + e.message); }
   if (!okVigia) ruins += 1;
   console.log(`${okVigia ? '✓' : '✗'} NOC: agente preso não some (vigia bate "ocupado em X", máquina degradada), barra com prazo, ZIP fora do laço e "Ler log do agente"`);
+
+  // ------------------------------------------------------------------
+  // INCIDENTE 23/09 (v116): DOM-TIROL-HOST01 (Server 2012 R2, "Windows
+  // antigo") morria logo depois de "NOCZenith iniciado", a cada 5 minutos.
+  // O relogio novo da v116 se chamava Agora-Ms - mesmo nome do relogio que a
+  // conversao pra Windows antigo cria - e virou "function Agora-Ms { return
+  // (Agora-Ms) }": recursao sem fim ao subir. Os testes da v116 rodavam so o
+  // script PADRAO. Este roda a VERSAO DE WINDOWS ANTIGO de verdade no pwsh.
+  let okWinAntigo = false;
+  try {
+    const vgW = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const fsW = require('fs'); const osW = require('os'); const pathW = require('path'); const cpW = require('child_process');
+    const psW = vgW.montarScriptVigia({ codigo: 'WANT', posto: 'P1', tipo: 'interno', agentToken: 'abc123', windowsAntigo: true });
+    const corpoW = (nome) => { const i = psW.indexOf('function ' + nome); return i < 0 ? '' : psW.slice(i, psW.indexOf('\n}\n', i) + 3); };
+    const umaLinha = (re) => (psW.split('\n').find((l) => re.test(l)) || '');
+    const cabecalho = psW.slice(psW.indexOf('# ===== VERSAO PRA WINDOWS ANTIGO'), psW.indexOf('# ===== fim do bloco de Windows antigo'));
+    // a trava na conversao: um script com o relogio definido de novo tem de reprovar
+    let travaReprova = false;
+    try { vgW.adaptarParaWindowsAntigo('param([switch]$Loop, [switch]$Servico)\nfunction Agora-Ms { return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }\n'); } catch (e) { travaReprova = /mais de uma vez|chama a si mesma/.test(e.message); }
+    const pwshW = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh']
+      .filter(Boolean).find((c) => { try { return fsW.statSync(c).isFile(); } catch (e) { return false; } });
+    let ag = null; const recebidos = [];
+    if (pwshW) {
+      const srv = require('http').createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { try { recebidos.push(JSON.parse(b)); } catch (e) {} res.end('{}'); }); });
+      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      const dir = fsW.mkdtempSync(pathW.join(osW.tmpdir(), 'winantigo-'));
+      const harness = `
+$ErrorActionPreference = "Stop"
+$Servico = $false
+$CabecalhosAgente = @{ "X-NOC-Token" = "abc123" }
+function Escrever-Log($m) { }
+function Confirmar-Partida { $script:PartidaConfirmada = $true }
+${cabecalho}
+${umaLinha(/^\$script:Pulso = \$null$/)}
+${corpoW('Relogio-Ms')}
+${corpoW('Pulso-Tick')}
+${corpoW('Marcar-Etapa')}
+${corpoW('Iniciar-VigiaDeTravamento')}
+$r = @{}
+# o que matava o agente: subir o vigia e dar a primeira volta do laço
+Iniciar-VigiaDeTravamento "http://127.0.0.1:${srv.address().port}/hb" "WANT" "P1"
+Pulso-Tick
+$r.tickPertoDeAgora = [math]::Abs([int64]$script:Pulso.tick - [int64](([DateTime]::UtcNow - (New-Object DateTime 1970,1,1,0,0,0,([DateTimeKind]::Utc))).TotalMilliseconds)) -lt 5000
+$script:Pulso.esperaS = 1; $script:Pulso.limiteMs = 2000
+Marcar-Etapa "Politica: barra de tarefas"
+Start-Sleep -Seconds 4
+$r.presencas = [int]$script:Pulso.presencas
+$r | ConvertTo-Json -Compress
+`;
+      const arq = pathW.join(dir, 'h.ps1'); fsW.writeFileSync(arq, harness);
+      const out = await new Promise((resolve) => {
+        const pr = cpW.spawn(pwshW, ['-NoProfile', '-NonInteractive', '-File', arq]);
+        let o = '', e = ''; pr.stdout.on('data', (c) => { o += c; }); pr.stderr.on('data', (c) => { e += c; });
+        const tmo = setTimeout(() => pr.kill('SIGKILL'), 60000);
+        pr.on('close', () => { clearTimeout(tmo); resolve({ o, e }); });
+      });
+      srv.close();
+      try { ag = JSON.parse(out.o.trim().split('\n').pop()); } catch (e) { ag = { erro: (out.o + out.e).slice(0, 600) }; }
+    }
+    const conf = {
+      'o script de Windows antigo tem UM relogio Agora-Ms, e nenhuma função chama a si mesma':
+        (psW.match(/^function Agora-Ms\b/gm) || []).length === 1 && !/function Relogio-Ms \{\n\s*return \(Relogio-Ms\)/.test(psW),
+      'a conversão reprova quem definir o relógio de novo': travaReprova,
+      'o vigia (runspace) não depende de função do script': !/\(Agora-Ms\)|\(Relogio-Ms\)/.test(corpoW('Iniciar-VigiaDeTravamento').slice(corpoW('Iniciar-VigiaDeTravamento').indexOf('AddScript'))),
+      'o agente subiu a versão': vgW.VERSAO_VIGIA >= 117,
+      'WINDOWS ANTIGO RODANDO: sobe o vigia e dá a volta do laço sem morrer': !pwshW ? 'pular' : !!ag && ag.tickPertoDeAgora === true,
+      'WINDOWS ANTIGO RODANDO: laço parado = o vigia bate presença com a etapa': !pwshW ? 'pular'
+        : !!ag && ag.presencas >= 1 && recebidos.some((x) => x.soPresenca === true && x.ocupado && x.ocupado.etapa === 'Politica: barra de tarefas'),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okWinAntigo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ag=${JSON.stringify(ag)} recebidos=${recebidos.length})`);
+  } catch (e) { okWinAntigo = false; console.log('  erro: ' + e.message); }
+  if (!okWinAntigo) ruins += 1;
+  console.log(`${okWinAntigo ? '✓' : '✗'} NOCZenith no Windows antigo: o vigia sobe sem recursão (a v116 matava os Server 2012 R2 ao iniciar)`);
+
+  // ------------------------------------------------------------------
+  // TRAVAS CONTRA VERSÃO RUIM (v118, pedido do Master 23/09/2026).
+  // "Conseguimos colocar alguma trava ... dando chance para correções como
+  // essa acontecerem e não ter que rodar novamente ... e evitando a perda em
+  // massa do parque como ocorreu?" (a v116 derrubou os Server 2012 R2)
+  //  1) o agente volta SOZINHO pra versão anterior quando a nova não dá a
+  //     primeira volta em 3 partidas, e não baixa a ruim de novo;
+  //  2) liberação em ondas: pilotos primeiro, o parque depois de 30min, e
+  //     suspende sozinha quando uma piloto volta ou cala.
+  // O agente RODA no pwsh, nas duas versões do script (padrão e Windows antigo).
+  let okTravasVersao = false;
+  try {
+    const rv = require('/home/user/adyen-monitor/server/rolloutVigia.js');
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const vgT = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const fsT = require('fs'); const osT = require('os'); const pathT = require('path'); const cpT = require('child_process');
+    const T0 = 1790000000000; const MIN = 60000;
+    const doc = (id, extra) => ({ _id: id, codigo: id.split('__')[0], posto: id.split('__')[1], nome: id, tipo: 'interno', online: true, agentToken: 't', agenteVersao: 118, ...extra });
+    const parque = [
+      doc('L1__normal1'), doc('L1__normal2'), doc('L2__normal3'),
+      doc('L3__antigo', { windowsAntigo: true, nome: 'zz-antigo' }), doc('L4__serv', { ehServidor: true, nome: 'zz-serv' }),
+      doc('L5__desligada', { online: false, nome: 'aa-desligada' }), doc('L6__velho', { agenteVersao: 117, nome: 'aa-velho' }),
+      doc('L7__quiosque', { tipo: 'atendimento', nome: 'aa-quiosque' }),
+    ];
+    // 1) primeira vez: nasce liberada (é a versão que traz a identidade)
+    const r0 = rv.avaliar(null, 118, parque, T0);
+    // 2) deploy da 119: rodada nova com pilotos
+    const r1 = rv.avaliar(r0.estado, 119, parque, T0 + MIN);
+    const p1 = r1.estado.pilotos;
+    const antesDaRodada = rv.versaoOferecida(r0.estado, 119, 'L1__normal1');
+    const ofPiloto = rv.versaoOferecida(r1.estado, 119, p1[0]);
+    const naoPiloto = parque.map((d) => d._id).find((id) => !p1.includes(id));
+    const ofResto = rv.versaoOferecida(r1.estado, 119, naoPiloto);
+    const ofSemId = rv.versaoOferecida(r1.estado, 119, null);
+    // 3) pilotos atualizam; 10min depois ainda não libera, 31min depois libera
+    const atualizado = parque.map((d) => (p1.includes(d._id) ? { ...d, agenteVersao: 119 } : d));
+    const r2 = rv.avaliar(r1.estado, 119, atualizado, T0 + 2 * MIN);
+    const r3 = rv.avaliar(r2.estado, 119, atualizado, T0 + 12 * MIN);
+    const r4 = rv.avaliar(r3.estado, 119, atualizado, T0 + 33 * MIN);
+    // 4) piloto voltou sozinha (versão ruim) -> suspende e ninguém mais recebe
+    const voltou = atualizado.map((d) => (d._id === p1[0] ? { ...d, agenteVersao: 118, agenteVersaoRuim: 119 } : d));
+    const r5 = rv.avaliar(r2.estado, 119, voltou, T0 + 5 * MIN);
+    // 5) piloto atualizou e calou logo depois (a v116) -> suspende
+    const calou = atualizado.map((d) => (d._id === p1[1] ? { ...d, online: false } : d));
+    const r6 = rv.avaliar(r2.estado, 119, calou, T0 + 6 * MIN);
+    // 6) versão seguinte depois de uma suspensa: a estável continua a última LIBERADA
+    const r7 = rv.avaliar(r5.estado, 120, voltou, T0 + 60 * MIN);
+    // 7) o Master decide
+    const lib = rv.decisaoDoMaster(r1.estado, 'liberar', 'master', T0);
+    const sus = rv.decisaoDoMaster(r1.estado, 'suspender', 'master', T0);
+
+    // ---- rotas ----
+    const cabT = { Authorization: 'Bearer ' + token };
+    await ls.setConfig({ vigiaRollout: { versao: vgT.VERSAO_VIGIA, estavel: vgT.VERSAO_VIGIA - 1, estado: 'piloto', pilotos: ['RV__PIL'], atualizados: [], iniciadoEm: Date.now(), motivo: '' } });
+    const vPil = JSON.parse((await pedir('/api/loja-status/vigia-versao?codigo=RV&posto=PIL')).corpo).versao;
+    const vOutro = JSON.parse((await pedir('/api/loja-status/vigia-versao?codigo=RV&posto=OUTRO')).corpo).versao;
+    const vSemId = JSON.parse((await pedir('/api/loja-status/vigia-versao')).corpo).versao;
+    const liberarSemSenha = await postarJson('/api/loja-status/rollout-vigia', { acao: 'liberar' }, cabT);
+    const suspender = await postarJson('/api/loja-status/rollout-vigia', { acao: 'suspender' }, cabT);
+    const liberar = await postarJson('/api/loja-status/rollout-vigia', { acao: 'liberar', password: process.env.MASTER_PASSWORD }, cabT);
+    const vDepois = JSON.parse((await pedir('/api/loja-status/vigia-versao?codigo=RV&posto=OUTRO')).corpo).versao;
+    // a versão ruim chega pelo estado do agente
+    await ls.cadastrarComputador('RVTESTE', 'PC ruim', 'interno');
+    const pRuim = (await ls.listar()).find((c) => c.codigo === 'RVTESTE' && c.nome === 'PC ruim').posto;
+    const tkRuim = await ls.garantirAgentToken('RVTESTE', pRuim);
+    const estRuim = await postarJson(`/api/loja-status/RVTESTE/computadores/${pRuim}/estado-agente`, { versao: 118, noPulsoPrint: 'pronto', versaoRuim: 119 }, { 'x-noc-token': tkRuim });
+    const docRuim = DOCS.get(`lojaStatus/RVTESTE__${pRuim}`) || {};
+    await ls.removerComputador('RVTESTE', pRuim);
+
+    // ---- agente (pwsh), nas duas versões do script ----
+    const pwshT = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh']
+      .filter(Boolean).find((c) => { try { return fsT.statSync(c).isFile(); } catch (e) { return false; } });
+    const fnPs = (fonte, nome) => {
+      const linhas = fonte.split('\n');
+      const i = linhas.findIndex((l) => l.startsWith('function ' + nome + ' ') || l.startsWith('function ' + nome + '(') || l === 'function ' + nome + ' {');
+      if (i < 0) return '';
+      const abre = (linhas[i].match(/\{/g) || []).length; const fecha = (linhas[i].match(/\}/g) || []).length;
+      if (abre && abre === fecha) return linhas[i];
+      const j = linhas.indexOf('}', i);
+      return linhas.slice(i, j + 1).join('\n');
+    };
+    const rodarAgente = async (windowsAntigo) => {
+      if (!pwshT) return null;
+      const ps = vgT.montarScriptVigia({ codigo: 'RV', posto: 'P1', tipo: 'interno', agentToken: 'abc', windowsAntigo });
+      const dir = fsT.mkdtempSync(pathT.join(osT.tmpdir(), 'partida-'));
+      const agente = pathT.join(dir, 'NOCZenith.ps1');
+      const nomes = ['Caminho-Partida', 'Caminho-VersaoRuim', 'Versao-DoArquivo', 'Versao-Ruim', 'Confirmar-Partida', 'Checar-PartidaDaVersao', 'Verificar-Atualizacao'];
+      const harness = `
+$ErrorActionPreference = "Continue"
+$Servico = $false
+$VersaoScript = 118
+$PartidasParaVoltar = 3
+$script:PartidaConfirmada = $false
+$script:ArquivoAgente = "${agente}"
+$UrlVersao = "http://x/versao"; $UrlScriptProprio = "http://x/script"; $CabecalhosAgente = @{}
+$global:LOG = New-Object System.Collections.ArrayList
+$global:REINICIOS = 0; $global:BAIXOU = 0; $global:OFERTA = 0
+function Escrever-Log($m) { [void]$global:LOG.Add([string]$m) }
+function Reiniciar-Agente { $global:REINICIOS++ }
+function Invoke-RestMethod { param($Uri, $Method, $Headers, $TimeoutSec) if ($Uri -eq $UrlVersao) { return [pscustomobject]@{ versao = $global:OFERTA } }; $global:BAIXOU++; return "nao e script" }
+${nomes.map((n) => fnPs(ps, n)).join('\n')}
+function Escrever($v) { Set-Content -LiteralPath $script:ArquivoAgente -Value "# NOCZenith\`n\`$VersaoScript = $v\`n" }
+$r = @{}
+Escrever 118; Set-Content -LiteralPath ($script:ArquivoAgente + ".ultima-valida") -Value "# NOCZenith\`n\`$VersaoScript = 117\`n"
+[void](Checar-PartidaDaVersao); [void](Checar-PartidaDaVersao)
+$r.duasPartidas = @{ versaoArquivo = (Versao-DoArquivo $script:ArquivoAgente); partida = [string](Get-Content (Caminho-Partida)); reinicios = $global:REINICIOS }
+Confirmar-Partida; [void](Checar-PartidaDaVersao)
+$r.depoisDeConfirmar = [string](Get-Content (Caminho-Partida))
+Remove-Item (Caminho-Partida)
+[void](Checar-PartidaDaVersao); [void](Checar-PartidaDaVersao); $voltou = Checar-PartidaDaVersao
+$r.tresPartidas = @{ voltou = $voltou; versaoArquivo = (Versao-DoArquivo $script:ArquivoAgente); ruim = (Versao-Ruim); reinicios = $global:REINICIOS; guardouRuim = (Test-Path ($script:ArquivoAgente + ".ruim")) }
+# depois da volta quem roda é a 117: o servidor oferecendo a 118 (a ruim) não
+# pode fazer baixar de novo; a 119 (a correção) sim
+$VersaoScript = 117
+$global:OFERTA = 118; Verificar-Atualizacao; $r.baixouRuim = $global:BAIXOU
+$global:OFERTA = 119; Verificar-Atualizacao; $r.baixouCorrecao = $global:BAIXOU
+# sem copia anterior (ou copia que nao e mais velha): nao volta
+$VersaoScript = 118
+Remove-Item ($script:ArquivoAgente + ".ultima-valida"); Escrever 118; Remove-Item (Caminho-Partida) -ErrorAction SilentlyContinue
+[void](Checar-PartidaDaVersao); [void](Checar-PartidaDaVersao); $r.semCopia = @{ voltou = (Checar-PartidaDaVersao); versaoArquivo = (Versao-DoArquivo $script:ArquivoAgente) }
+$r | ConvertTo-Json -Depth 4 -Compress
+`;
+      const arq = pathT.join(dir, 'h.ps1'); fsT.writeFileSync(arq, harness);
+      const out = cpT.spawnSync(pwshT, ['-NoProfile', '-NonInteractive', '-File', arq], { encoding: 'utf8', timeout: 60000 });
+      try { return JSON.parse(String(out.stdout).trim().split('\n').pop()); } catch (e) { return { erro: (out.stdout || '') + (out.stderr || '') }; }
+    };
+    const agPadrao = await rodarAgente(false);
+    const agAntigo = await rodarAgente(true);
+    const agenteOk = (a) => !!a && !a.erro
+      && a.duasPartidas.versaoArquivo === 118 && a.duasPartidas.partida === '118|2' && a.duasPartidas.reinicios === 0
+      && a.depoisDeConfirmar === '118|1'
+      && a.tresPartidas.voltou === true && a.tresPartidas.versaoArquivo === 117 && a.tresPartidas.ruim === 118
+      && a.tresPartidas.reinicios === 1 && a.tresPartidas.guardouRuim === true
+      && a.baixouRuim === 0 && a.baixouCorrecao === 1
+      && a.semCopia.voltou === false && a.semCopia.versaoArquivo === 118;
+    const psP = vgT.montarScriptVigia({ codigo: 'RV', posto: 'P1', tipo: 'interno', agentToken: 'abc' });
+    const conf = {
+      'primeira vez nasce liberada (é a versão que traz a identidade)': r0.estado.estado === 'liberada' && r0.estado.estavel === 118,
+      'deploy novo abre rodada: até 4 pilotos, Windows antigo e servidor primeiro, só quem é interno, online e se identifica':
+        r1.estado.estado === 'piloto' && r1.estado.estavel === 118 && p1.length === 4
+        && p1[0] === 'L3__antigo' && p1[1] === 'L4__serv'
+        && !p1.includes('L5__desligada') && !p1.includes('L6__velho') && !p1.includes('L7__quiosque'),
+      'piloto recebe a nova; o resto e quem não se identifica ficam na estável': ofPiloto === 119 && ofResto === 118 && ofSemId === 118,
+      'no minuto antes da rodada abrir, a nova não vaza': antesDaRodada === 118,
+      'só libera depois de 30min com as pilotos rodando': r3.estado.estado === 'piloto' && r4.estado.estado === 'liberada' && rv.versaoOferecida(r4.estado, 119, naoPiloto) === 119,
+      'piloto que voltou sozinha suspende, e ninguém mais recebe': r5.estado.estado === 'suspensa' && /voltou sozinho/.test(r5.estado.motivo)
+        && rv.versaoOferecida(r5.estado, 119, naoPiloto) === 118 && rv.versaoOferecida(r5.estado, 119, p1[2]) === 118,
+      'piloto que calou logo depois de atualizar suspende': r6.estado.estado === 'suspensa' && /fora do ar logo depois/.test(r6.estado.motivo),
+      'depois de uma suspensa, a próxima rodada parte da última liberada': r7.estado.estado === 'piloto' && r7.estado.estavel === 118 && r7.estado.versao === 120,
+      'o Master libera ou suspende': lib.estado === 'liberada' && sus.estado === 'suspensa',
+      'ROTA: a versão oferecida depende de quem pergunta': vPil === vgT.VERSAO_VIGIA && vOutro === vgT.VERSAO_VIGIA - 1 && vSemId === vgT.VERSAO_VIGIA - 1,
+      'ROTA: liberar pede a senha do Master, suspender não': liberarSemSenha.status === 400 && suspender.status === 200 && liberar.status === 200 && vDepois === vgT.VERSAO_VIGIA,
+      'ROTA: a versão ruim chega pelo estado do agente': estRuim.status === 200 && docRuim.agenteVersaoRuim === 119,
+      'o agente se identifica ao perguntar a versão': /\$UrlVersao = "[^"]*vigia-versao\?codigo=RV&posto=P1"/.test(psP),
+      'a checagem roda ANTES de tudo, e a primeira volta confirma':
+        /Garantir-InstanciaUnica\n\s+\[void\]\(Checar-PartidaDaVersao\)\n\s+Rodar-Loop/.test(psP)
+        && /function Pulso-Tick \{ if \(-not \$script:PartidaConfirmada\) \{ Confirmar-Partida \}/.test(psP),
+      'o agente sobe a versão': vgT.VERSAO_VIGIA >= 118,
+      'TELA: o NOC mostra a liberação, as pilotos e os botões; a ficha mostra a versão que voltou':
+        (() => { const h = fsT.readFileSync(pathT.join(__dirname, 'public', 'loja-status.html'), 'utf8');
+          return /id="rollout-vigia"/.test(h) && /carregarRolloutVigia\(\);/.test(h) && /fetch\('\/api\/loja-status\/rollout-vigia'\)/.test(h)
+            && /decidirRolloutVigia\('liberar'\)/.test(h) && /pedirSenhaMaster\('liberar a versão nova/.test(h) && /c\.agenteVersaoRuim/.test(h); })(),
+      'AGENTE (padrão): 3 partidas sem volta = volta pra anterior, marca a ruim e só baixa a correção': !pwshT ? 'pular' : agenteOk(agPadrao),
+      'AGENTE (Windows antigo): o mesmo, na versão do Server 2012 R2': !pwshT ? 'pular' : agenteOk(agAntigo),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okTravasVersao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (p1=${JSON.stringify(p1)} r5=${r5.estado.estado} padrao=${JSON.stringify(agPadrao).slice(0, 500)} antigo=${JSON.stringify(agAntigo).slice(0, 300)} rotas=${vPil}/${vOutro}/${vSemId} lib=${liberarSemSenha.status}/${suspender.status}/${liberar.status} est=${estRuim.status})`);
+    await ls.setConfig({ vigiaRollout: null });
+  } catch (e) { okTravasVersao = false; console.log('  erro: ' + e.message); }
+  if (!okTravasVersao) ruins += 1;
+  console.log(`${okTravasVersao ? '✓' : '✗'} NOCZenith: versão que não sobe volta sozinha, e versão nova vai em ondas (pilotos primeiro, suspende sozinha)`);
 
   // ------------------------------------------------------------------
   // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)
@@ -15001,7 +15249,7 @@ $r | ConvertTo-Json -Compress
       'o agente v51+ diz por qual endereço fala (e a dedup considera isso)':
         /\$EnderecoBase = "/.test(psMig)
         && /endereco = \$EnderecoBase/.test(psMig)
-        && /\$chave = "\$VersaoScript\|\$estadoPrint\|\$EnderecoBase"/.test(psMig),
+        && /\$chave = "\$VersaoScript\|\$estadoPrint\|\$EnderecoBase(\|\$ruim)?"/.test(psMig),
       'a rota do resumo é só do Master': rotaComum.status === 403 && rotaMaster.status === 200,
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -19898,6 +20146,100 @@ $r | ConvertTo-Json -Compress
   } catch (e) { okSecaoMD = false; console.log('  erro: ' + e.message); }
   if (!okSecaoMD) ruins += 1;
   console.log(`${okSecaoMD ? '✓' : '✗'} Meu Dia: a seção libera criar tarefa própria; sem ela a pessoa só responde o que recebeu`);
+
+  // ---- Meu Dia: REAGENDAR com motivo (pedido do Master, 23/09/2026) ----
+  // "Preciso poder reagendar tarefa, mudar a data quando entrar em pendente,
+  // para situações reais de não possibilidade." Tranca: motivo obrigatório,
+  // histórico + comentário, reunião muda dia E hora com o evento da agenda
+  // junto (e se a agenda recusar, NADA muda), o SLA original não é apagado,
+  // e só quem gere a tarefa reagenda.
+  let okReagendar = false;
+  try {
+    const cabM = { Authorization: 'Bearer ' + token };
+    const senhaRG = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-reag-fora', {
+      passwordHash: senhaRG, role: 'user', active: true, email: 'reag-fora@teste.local', username: 'reagfora',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabFora = { Authorization: 'Bearer ' + (await auth.login('reag-fora@teste.local', 'SenhaDeTeste!2026')).token };
+    const diaSp = (deltaDias) => new Date(Date.now() + deltaDias * 86400000).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const ontem = diaSp(-1); const amanha = diaSp(1); const depois = diaSp(3);
+    const idDe = (r) => (r.status === 200 ? JSON.parse(r.corpo).id : null);
+    const doc = (id) => DOCS.get('tarefas/' + id) || {};
+    const reag = (id, corpo, cab = cabM) => postarJson('/api/tarefas/' + id + '/reagendar', corpo, cab);
+
+    // tarefa comum, prazo vencido -> nasce PENDENTE
+    const t1 = idDe(await postarJson('/api/tarefas', { titulo: 'Visita técnica na loja', dataEntrega: ontem, dataInicio: ontem }, cabM));
+    const slaAntes = doc(t1).slaPrazo;
+    const semMotivo = await reag(t1, { dataEntrega: amanha, motivo: 'curto' });
+    const noPassado = await reag(t1, { dataEntrega: diaSp(-2), motivo: 'loja fechada no dia combinado' });
+    const mesmaData = await reag(t1, { dataEntrega: ontem, motivo: 'loja fechada no dia combinado' });
+    const deFora = await reag(t1, { dataEntrega: amanha, motivo: 'loja fechada no dia combinado' }, cabFora);
+    const intacta = doc(t1).dataEntrega === ontem && !(doc(t1).reagendamentos || []).length;
+    const ok1 = await reag(t1, { dataEntrega: depois, motivo: 'Loja fechada no dia combinado (reforma)' });
+    const d1 = doc(t1);
+    const hist1 = (d1.reagendamentos || [])[0] || {};
+    const com1 = (d1.comentarios || []).slice(-1)[0] || {};
+
+    // reunião com evento na agenda: a agenda recusa -> nada muda; aceita -> muda dia e hora
+    const rg = require(__dirname + '/reuniaoGoogle.js');
+    const moverOriginal = rg.moverSala;
+    const chamadas = [];
+    const t2 = idDe(await postarJson('/api/tarefas', { titulo: 'Entrevista candidato', dataEntrega: ontem, ehReuniao: true, horaInicio: '15:00', duracaoMin: 60, linkOrigem: 'colado', linkReuniao: 'https://meet.google.com/abc-defg-hij' }, cabM));
+    DOCS.set('tarefas/' + t2, { ...doc(t2), eventoGoogleId: 'evt-teste-1', linkOrigem: 'google' });
+    rg.moverSala = async () => { throw new Error('Google Agenda recusou mover a reunião: 403. Nada foi alterado.'); };
+    const recusou = await reag(t2, { dataEntrega: amanha, horaInicio: '10:30', motivo: 'Candidato pediu para remarcar' });
+    const naoMudou = doc(t2).dataEntrega === ontem && doc(t2).horaInicio === '15:00';
+    rg.moverSala = async (ev, x) => { chamadas.push({ ev, ...x }); return true; };
+    const semHora = await reag(t2, { dataEntrega: amanha, horaInicio: '25:00', motivo: 'Candidato pediu para remarcar' });
+    const ok2 = await reag(t2, { dataEntrega: amanha, horaInicio: '10:30', motivo: 'Candidato pediu para remarcar' });
+    rg.moverSala = moverOriginal;
+    const d2 = doc(t2);
+
+    // tarefa de TICKET: o status continua com o ticket
+    const t3 = idDe(await postarJson('/api/tarefas', { titulo: 'Tarefa de ticket', dataEntrega: ontem }, cabM));
+    DOCS.set('tarefas/' + t3, { ...doc(t3), vinculo: { id: 'tk-1', ticketTipo: 'solicitacao' }, status: 'PENDENTE' });
+    const ok3 = await reag(t3, { dataEntrega: amanha, motivo: 'Aguardando retorno do fornecedor' });
+
+    // ---- tela: as funções de SLA rodando isoladas ----
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const fn = (nome) => { const i = html.indexOf('function ' + nome + '('); const j = html.indexOf('\n}\n', i); return html.slice(i, j + 3); };
+    const tela = new Function('fmt', 'e', 'hoje', 'TAREFA_ABERTA', `${fn('prazoReagendado')}\n${fn('linhaSla')}\n${fn('tarefaVencida')}\nreturn { prazoReagendado, linhaSla, tarefaVencida };`)(
+      (x) => String(x), (x) => String(x), () => diaSp(0), new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']));
+    const slaVencido = new Date(Date.now() - 86400000).toISOString();
+    const semReag = { status: 'A_FAZER', slaPrazo: slaVencido, dataEntrega: ontem };
+    const comReag = { status: 'A_FAZER', slaPrazo: slaVencido, dataEntrega: depois, reagendadaPara: depois };
+    const reuReag = { status: 'A_FAZER', slaPrazo: slaVencido, dataEntrega: amanha, reagendadaPara: amanha + 'T10:30', duracaoMin: 60 };
+
+    const conf = {
+      'motivo é obrigatório, data no passado e mesma data são recusadas':
+        semMotivo.status === 400 && noPassado.status === 400 && mesmaData.status === 400,
+      'só quem gere a tarefa reagenda, e a recusa não muda nada': deFora.status === 400 && intacta,
+      'reagendar muda a data e tira de Pendentes': ok1.status === 200 && d1.dataEntrega === depois && d1.status === 'A_FAZER',
+      'o histórico guarda de/para/motivo/quem': hist1.de && hist1.de.dataEntrega === ontem && hist1.para.dataEntrega === depois
+        && /reforma/.test(hist1.motivo || '') && !!hist1.porNome,
+      'todo mundo da tarefa vê: comentário automático com o motivo': com1.sistema === true && /Reagendada de .* para .*reforma/.test(com1.texto || ''),
+      'o SLA original NÃO é apagado': d1.slaPrazo === slaAntes && d1.reagendadaPara === depois,
+      'reunião: se a agenda recusar, nada muda': recusou.status === 400 && /Google Agenda recusou/.test(recusou.corpo) && naoMudou,
+      'reunião: hora inválida é recusada': semHora.status === 400,
+      'reunião: muda dia E hora, e o evento da agenda anda junto':
+        ok2.status === 200 && d2.dataEntrega === amanha && d2.horaInicio === '10:30' && d2.reagendadaPara === amanha + 'T10:30'
+        && chamadas.length === 1 && chamadas[0].ev === 'evt-teste-1' && chamadas[0].dia === amanha && chamadas[0].hora === '10:30',
+      'tarefa de ticket: o status continua com o ticket': ok3.status === 200 && doc(t3).status === 'PENDENTE' && doc(t3).dataEntrega === amanha,
+      'TELA: sem reagendar, SLA vencido continua "atrasado"': /atrasado/.test(tela.linhaSla(semReag)) && tela.tarefaVencida(semReag) === true,
+      'TELA: reagendada, mostra o SLA original que estourou e mede pela data nova':
+        /SLA original/.test(tela.linhaSla(comReag)) && /estourou/.test(tela.linhaSla(comReag))
+        && /Reagendada para/.test(tela.linhaSla(comReag)) && !/late">atrasado/.test(tela.linhaSla(comReag)) && tela.tarefaVencida(comReag) === false,
+      'TELA: reunião reagendada mede pela hora nova': tela.prazoReagendado(reuReag) > new Date() && /às 10:30/.test(tela.linhaSla(reuReag)),
+      'TELA: o botão Reagendar existe e chama a rota': /onclick="abrirReagendar\(\)"/.test(html) && /'\/api\/tarefas\/'\+id\+'\/reagendar'/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okReagendar = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ok1=${ok1.status} ${ok1.corpo.slice(0, 160)} ok2=${ok2.status} ${ok2.corpo.slice(0, 160)} d1=${JSON.stringify({ s: d1.status, d: d1.dataEntrega, r: d1.reagendadaPara })} semMotivo=${semMotivo.corpo.slice(0, 100)} deFora=${deFora.status})`);
+  } catch (e) { okReagendar = false; console.log('  erro: ' + e.message); }
+  if (!okReagendar) ruins += 1;
+  console.log(`${okReagendar ? '✓' : '✗'} Meu Dia: reagendar com motivo (histórico, comentário, agenda junto) sem apagar o SLA original`);
 
   // ---- Meu Dia: cancelar (qualquer um) x excluir (só Master, ou pedido + aprovação) ----
   let okCancDel = false;
@@ -26118,6 +26460,193 @@ $r | ConvertTo-Json -Compress
   } catch (e) { okPasskey = false; console.log('  erro: ' + e.message); }
   if (!okPasskey) ruins += 1;
   console.log(`${okPasskey ? '✓' : '✗'} Passkey: entrar com digital/rosto sem pular nenhuma trava do login por senha`);
+
+  // ------------------------------------------------------------------
+  // CONFIRMAR COM A DIGITAL NO LUGAR DA SENHA.
+  //
+  // Master (23/09/2026): "quando for preciso colocar a senha por algum motivo
+  // e estiver no mobile, dá a opção de digital".
+  //
+  // Aqui a assinatura é DE VERDADE: o teste faz o papel do celular, com uma
+  // chave P-256 gerada na hora, e assina o desafio que as rotas mandam. É o
+  // único jeito de provar o ligamento inteiro - desafio -> assinatura ->
+  // comprovante -> rota protegida por senha aceitando o comprovante - e,
+  // principalmente, as recusas: comprovante de uma pessoa na conta de outra,
+  // credencial de outra pessoa, desafio de login reaproveitado, aparelho que
+  // não verificou o dedo.
+  let okDigitalConfirma = false;
+  try {
+    const cryptoD = require('crypto');
+    const pkD = require(__dirname + '/passkeys.js');
+    const authD = require(__dirname + '/auth.js');
+    const bcryptD = require('bcryptjs');
+    const b64u = (b) => Buffer.from(b).toString('base64url');
+    const senhaHashD = bcryptD.hashSync('SenhaDeTeste!2026', 4);
+    for (const [id, nome] of [['u-dig-a', 'diga'], ['u-dig-b', 'digb']]) {
+      DOCS.set(`users/${id}`, { passwordHash: senhaHashD, role: 'user', active: true, email: `${nome}@teste.local`, username: nome,
+        permissions: { sections: [], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: new Date().toISOString() });
+    }
+    const tkA = (await authD.login('diga@teste.local', 'SenhaDeTeste!2026')).token;
+    const tkB = (await authD.login('digb@teste.local', 'SenhaDeTeste!2026')).token;
+    const UA_ANDROID = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36';
+    const UA_WINDOWS = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36';
+    const cabA = { Authorization: 'Bearer ' + tkA, 'User-Agent': UA_ANDROID };
+    const cabB = { Authorization: 'Bearer ' + tkB, 'User-Agent': UA_ANDROID };
+
+    // o "celular": chave P-256, pública gravada em COSE como o cadastro grava
+    const novaChave = () => {
+      const { privateKey, publicKey } = cryptoD.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+      const jwk = publicKey.export({ format: 'jwk' });
+      const cose = Buffer.concat([Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
+        Buffer.from(jwk.x, 'base64url'), Buffer.from([0x22, 0x58, 0x20]), Buffer.from(jwk.y, 'base64url')]);
+      return { privateKey, cose: b64u(cose) };
+    };
+    const chaveA = novaChave(); const chaveB = novaChave();
+    const rpId = '127.0.0.1';
+    const credDoc = (id, userId, ch) => ({ id, credentialID: id, userId, publicKey: ch.cose, counter: 0, rpId,
+      transports: ['internal'], aparelho: 'Android · Chrome', criadoEm: new Date().toISOString(), ultimoUsoEm: null });
+    DOCS.set('passkeys/credDigA', credDoc('credDigA', 'u-dig-a', chaveA));
+    // flags 0x05 = presença + VERIFICAÇÃO (dedo/rosto); 0x01 = só encostou
+    const assinar = (ch, credId, desafio, flags = 0x05) => {
+      const clientData = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: desafio, origin: `https://${rpId}`, crossOrigin: false }));
+      const authData = Buffer.concat([cryptoD.createHash('sha256').update(rpId).digest(), Buffer.from([flags]), Buffer.from([0, 0, 0, 0])]);
+      const sig = cryptoD.sign('sha256', Buffer.concat([authData, cryptoD.createHash('sha256').update(clientData).digest()]), ch.privateKey);
+      return { id: credId, rawId: credId, type: 'public-key', clientExtensionResults: {},
+        response: { clientDataJSON: b64u(clientData), authenticatorData: b64u(authData), signature: b64u(sig), userHandle: null } };
+    };
+    const iniciar = async (cab) => { const r = await postarJson('/api/auth/passkey/confirmar/inicio', {}, cab); return { status: r.status, d: JSON.parse(r.corpo || '{}') }; };
+    const terminar = async (cab, chave, resposta) => { const r = await postarJson('/api/auth/passkey/confirmar/fim', { chave, resposta }, cab); return { status: r.status, d: JSON.parse(r.corpo || '{}') }; };
+    // rota real protegida por senha: concluir em lote. Senha errada = 400
+    // "Senha incorreta."; senha aceita = 200 (a tarefa inexistente só falha
+    // no resultado dela)
+    const concluirCom = async (cab, senha) => {
+      const r = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: ['tarefa-que-nao-existe'], status: 'CONCLUIDA', password: senha }, cab);
+      return r.status === 200 ? 'aceitou' : (/Senha incorreta/.test(r.corpo) ? 'senha incorreta' : `outro ${r.status}`);
+    };
+
+    // --- o botão: aparece só pra quem tem credencial DESTE sistema ---
+    const disp = async (cab) => JSON.parse((await pedir('/api/auth/passkey/confirmar/disponivel', cab)).corpo || '{}').disponivel;
+    const dispAndroid = await disp(cabA);
+    const dispWindows = await disp({ ...cabA, 'User-Agent': UA_WINDOWS });
+    const dispSemCredencial = await disp(cabB);
+    const inicioSemCredencial = await iniciar(cabB);
+
+    // --- o caminho feliz ---
+    const i1 = await iniciar(cabA);
+    const soDeleNoAllow = (i1.d.opcoes?.allowCredentials || []).map((c) => c.id).join(',') === 'credDigA';
+    const f1 = await terminar(cabA, i1.d.chave, assinar(chaveA, 'credDigA', i1.d.opcoes.challenge));
+    const comp = f1.d.confirmacao || '';
+    const usoA1 = await concluirCom(cabA, comp);
+    const usoA2 = await concluirCom(cabA, comp); // lote: a mesma "senha" em N chamadas
+    const usoB = await concluirCom(cabB, comp);  // comprovante de A na conta de B
+    const senhaNormal = await concluirCom(cabA, 'SenhaDeTeste!2026');
+    const senhaErrada = await concluirCom(cabA, 'digital.inventado');
+    // a assinatura capturada não serve de novo: o desafio já foi consumido
+    const replay = await terminar(cabA, i1.d.chave, assinar(chaveA, 'credDigA', i1.d.opcoes.challenge));
+
+    // --- B tenta confirmar com a digital de A (celular emprestado) ---
+    DOCS.set('passkeys/credDigB', credDoc('credDigB', 'u-dig-b', chaveB));
+    const iB = await iniciar(cabB);
+    const fB = await terminar(cabB, iB.d.chave, assinar(chaveA, 'credDigA', iB.d.opcoes.challenge));
+
+    // --- aparelho que não verificou o dedo (só "encostou") ---
+    const iUV = await iniciar(cabA);
+    const fUV = await terminar(cabA, iUV.d.chave, assinar(chaveA, 'credDigA', iUV.d.opcoes.challenge, 0x01));
+
+    // --- desafio de LOGIN usado pra confirmar, e o contrário ---
+    const lg = JSON.parse((await postarJson('/api/auth/passkey/login/inicio', {}, {})).corpo || '{}');
+    const loginNaConfirma = await terminar(cabA, lg.chave, assinar(chaveA, 'credDigA', lg.opcoes.challenge));
+    // o de CADASTRO é da própria pessoa (passa na conferência de dono): só a
+    // marca de tipo o separa
+    const rg = JSON.parse((await postarJson('/api/auth/passkey/registro/inicio', {}, cabA)).corpo || '{}');
+    const cadastroNaConfirma = await terminar(cabA, rg.chave, assinar(chaveA, 'credDigA', rg.opcoes.challenge));
+    const iX = await iniciar(cabA);
+    const confirmaNoLogin = await postarJson('/api/auth/passkey/login/fim', { chave: iX.d.chave, resposta: assinar(chaveA, 'credDigA', iX.d.opcoes.challenge) }, {});
+
+    // --- o comprovante vence ---
+    const compVelho = pkD.emitirConfirmacao('u-dig-a');
+    const agoraReal = Date.now;
+    let vencido;
+    try { Date.now = () => agoraReal() + pkD.VALIDADE_CONFIRMACAO_MS + 1000; vencido = await authD.verifyPassword('u-dig-a', compVelho); }
+    finally { Date.now = agoraReal; }
+
+    const js = require('fs').readFileSync(__dirname + '/public/digital.js', 'utf8');
+    const pag = (n) => require('fs').readFileSync(__dirname + '/public/' + n, 'utf8');
+    // campo de confirmação -> botão que envia depois da digital (null = não envia)
+    const CAMPOS = [
+      ['loja-status.html', 'senha-input', 'senha-ok'], ['loja-status.html', 'manut-senha', null],
+      ['tarefas.html', 'PWDIN', 'PWDOK'], ['noc-maquinas.html', 'mr-senha', 'mr-confirmar'],
+      ['noc-maquinas.html', 'mo-senha', 'mo-confirmar'], ['noc-maquinas.html', 'me-senha', 'me-confirmar'],
+      ['grupos.html', 'emp-conf-senha', 'emp-conf-ok'], ['central.html', 'e-senha', null],
+      ['lancamento.html', 's-password', null], ['monitor.html', 'refund-password', null],
+    ];
+    const semCampo = CAMPOS.filter(([arq, id, enviar]) => {
+      const h = pag(arq);
+      const tag = (h.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`)) || [''])[0];
+      const botaoExiste = !enviar || new RegExp(`id="${enviar}"`).test(h);
+      return !/<script src="\/digital\.js"/.test(h) || !/\sdata-digital[\s>]/.test(tag)
+        || (enviar ? !tag.includes(`data-digital-enviar="${enviar}"`) : /data-digital-enviar/.test(tag)) || !botaoExiste;
+    }).map(([a, id]) => `${a}#${id}`);
+
+    const conf = {
+      'o botão aparece no celular que tem a digital cadastrada': dispAndroid === true,
+      'e não num desktop cuja credencial está só no celular (evita o "use seu celular / QR")': dispWindows === false,
+      'quem não cadastrou digital não vê o botão, e pedir o desafio responde 400 (nunca 401)':
+        dispSemCredencial === false && inicioSemCredencial.status === 400,
+      'o desafio só aceita as credenciais DESTE acesso': soDeleNoAllow,
+      'digital verificada vira um comprovante': f1.status === 200 && comp.startsWith('digital.'),
+      'o comprovante vale como a senha numa rota protegida de verdade': usoA1 === 'aceitou',
+      'vale de novo dentro do prazo (ações em lote mandam a mesma senha N vezes)': usoA2 === 'aceitou',
+      'comprovante de uma pessoa NÃO vale na conta de outra': usoB === 'senha incorreta',
+      'a senha digitada continua valendo, e comprovante inventado não': senhaNormal === 'aceitou' && senhaErrada === 'senha incorreta',
+      'assinatura capturada não confirma duas vezes (desafio de uso único)': replay.status === 400 && !replay.d.confirmacao,
+      'ninguém confirma com a digital de OUTRO acesso': fB.status === 400 && /não é deste acesso/.test(fB.d.error || '') && !fB.d.confirmacao,
+      'aparelho que não verificou dedo/rosto é recusado': fUV.status === 400 && !fUV.d.confirmacao,
+      'desafio de login ou de cadastro não serve pra confirmar': loginNaConfirma.status === 400 && !loginNaConfirma.d.confirmacao
+        && !!rg.chave && cadastroNaConfirma.status === 400 && !cadastroNaConfirma.d.confirmacao,
+      'desafio de confirmação não serve pra entrar': confirmaNoLogin.status === 401 && !/"token"/.test(confirmaNoLogin.corpo),
+      'o comprovante vence (3 min)': vencido === false && pkD.VALIDADE_CONFIRMACAO_MS <= 5 * 60 * 1000,
+      // tela
+      'os campos de senha de confirmação têm o botão (e enviam sozinhos só onde a senha é o último passo)': !semCampo.length,
+      'cancelar o sensor não vira mensagem de erro': /err\.name === 'NotAllowedError' \|\| err\.name === 'AbortError'/.test(js),
+      'o botão só aparece com biometria de plataforma e só pergunta ao servidor quando o campo aparece':
+        /isUserVerifyingPlatformAuthenticatorAvailable\(\)/.test(js) && /IntersectionObserver/.test(js)
+        && /sessionStorage/.test(js),
+      'o comprovante sai do campo antes de vencer': /setTimeout\(\(\) => \{\s*if\(input\.value === comprovante\) input\.value = '';/.test(js),
+      'o botão usa o token do acento (tema Claro)': /var\(--accent\)/.test(js) && !/#b8ff3c/i.test(js),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDigitalConfirma = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}${semCampo.length ? ` [sem botão: ${semCampo.join(', ')}]` : ''}`);
+  } catch (e) { okDigitalConfirma = false; console.log('  erro: ' + e.message); }
+  if (!okDigitalConfirma) ruins += 1;
+  console.log(`${okDigitalConfirma ? '✓' : '✗'} Digital no lugar da senha: comprovante só do próprio acesso, curto, e em toda confirmação`);
+
+  // ------------------------------------------------------------------
+  // NOC: A BUSCA NAO PODE MOSTRAR UM FILTRO QUE NAO ESTA FILTRANDO.
+  //
+  // Master (23/09/2026, print do celular): "Falta o x de limpa filtro". A
+  // caixa mostrava "suporte" depois de recarregar - o guarda-rascunho do
+  // tema.js devolvia o texto sem disparar o oninput - então a lista NÃO
+  // filtrava e o ✕ (que só aparecia pela classe posta no oninput) sumia.
+  let okBuscaNoc = false;
+  try {
+    const h = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const tag = (h.match(/<input[^>]*id="filtro-texto"[^>]*>/) || [''])[0];
+    const corpoRender = (h.match(/function render\(\)\{([\s\S]*?)\n\}/) || ['', ''])[1];
+    const conf = {
+      'o texto da busca não volta sozinho depois de recarregar': /\sdata-zenith-sem-rascunho[\s>]/.test(tag) && /autocomplete="off"/.test(tag),
+      'o ✕ aparece sempre que a caixa tem texto (não só depois do oninput)':
+        /\.busca-com-limpar input:not\(:placeholder-shown\) ~ button\{display:block;\}/.test(h) && /placeholder="/.test(tag),
+      'todo desenho filtra pelo que está NA caixa': /^\s*sincronizarBuscaDoCampo\(\);/.test(corpoRender)
+        && /function sincronizarBuscaDoCampo\(\)\{[\s\S]*?FILTRO_TEXTO = campo\.value\.trim\(\)\.toLowerCase\(\);/.test(h),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBuscaNoc = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBuscaNoc = false; console.log('  erro: ' + e.message); }
+  if (!okBuscaNoc) ruins += 1;
+  console.log(`${okBuscaNoc ? '✓' : '✗'} NOC: a busca tem ✕ e nunca mostra filtro que não está filtrando`);
 
   // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.

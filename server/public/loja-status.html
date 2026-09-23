@@ -118,7 +118,12 @@
   .busca-com-limpar input[type=text]{width:100%;padding-right:38px;box-sizing:border-box;}
   .busca-com-limpar button{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:22px;line-height:1;cursor:pointer;}
   .busca-com-limpar button:hover{background:rgba(255,255,255,.08);color:var(--text);}
-  .busca-com-limpar button.hidden{display:none;}
+  .busca-com-limpar button{display:none;}
+  .busca-com-limpar.tem-texto button{display:block;}
+  /* o ✕ aparece sempre que a caixa TEM texto, venha de onde vier (digitado,
+     colado, devolvido pelo navegador ao voltar de outra tela) - nao so
+     quando o oninput rodou */
+  .busca-com-limpar input:not(:placeholder-shown) ~ button{display:block;}
   .filtro-bar input[type=text]:focus{outline:none;border-color:var(--accent);}
   .filtro-bar select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:12.5px;font-family:var(--sans);}
   .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
@@ -575,7 +580,7 @@
   }
 </style>
 <link rel="stylesheet" href="/noc-workbench.css">
-<script src="/tema.js"></script>
+<script src="/tema.js"></script><script src="/digital.js" defer></script>
 </head>
 <body class="noc-workbench">
 
@@ -679,8 +684,12 @@
 
   <div class="filtro-bar">
     <div class="busca-com-limpar">
-      <input type="text" id="filtro-texto" placeholder="🔎 Buscar por computador ou unidade..." oninput="onFiltroTexto()">
-      <button type="button" id="limpar-filtro-texto" class="hidden" onclick="limparFiltroTexto()" title="Limpar busca" aria-label="Limpar busca">×</button>
+      <!-- data-zenith-sem-rascunho: o guarda-rascunho do tema.js devolvia o
+           texto depois de recarregar SEM avisar a tela - a caixa mostrava
+           "suporte", a lista nao filtrava e o ✕ ficava escondido (23/09).
+           A busca e da tela aberta; recarregou, comeca limpa como o filtro. -->
+      <input type="text" id="filtro-texto" placeholder="🔎 Buscar por computador ou unidade..." oninput="onFiltroTexto()" autocomplete="off" data-zenith-sem-rascunho>
+      <button type="button" id="limpar-filtro-texto" onclick="limparFiltroTexto()" title="Apagar texto do filtro" aria-label="Apagar texto do filtro">×</button>
     </div>
     <select id="filtro-unidade" onchange="onFiltroUnidade()">
       <option value="">Todas as unidades</option>
@@ -733,6 +742,14 @@
 </div>
 
 <div id="agente-root" class="hidden">
+  <!-- LIBERAÇÃO EM ONDAS do agente (rolloutVigia.js): versão nova vai primeiro
+       pras pilotos e só depois pro parque. Nasceu da v116, que derrubou os
+       Server 2012 R2 de uma vez. -->
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo><h2>🚦 Versão do agente</h2></div>
+  <div class="agente-sub">Versão nova do agente vai primeiro para até 4 máquinas piloto (uma "Windows antigo" e um servidor, quando houver). O resto do parque só recebe depois que elas rodarem 30 minutos sem problema. Se uma piloto não subir a versão nova e voltar sozinha, ou calar logo depois de atualizar, a liberação fica suspensa e o parque segue na versão estável.</div>
+  <div id="rollout-vigia" style="margin-bottom:18px;"></div>
+  </div>
   <!-- QUEM AINDA FALA COM O ENDERECO ANTIGO. E o que decide se da pra
        aposentar o dominio velho: enquanto houver pendente, desligar deixa
        aquela maquina orfa (ver CLAUDE.md §4) -->
@@ -843,7 +860,7 @@
   <div class="modal">
     <h3>🔒 Confirme sua senha</h3>
     <div class="sub" style="margin-bottom:8px;">Para <b id="senha-acao">esta ação</b>, confirme que é você.</div>
-    <input type="password" id="senha-input" autocomplete="new-password" placeholder="sua senha de Master">
+    <input type="password" id="senha-input" autocomplete="new-password" placeholder="sua senha de Master" data-digital data-digital-enviar="senha-ok">
     <div class="msg hidden err" id="senha-erro" style="margin-top:6px;"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" id="senha-cancel">Cancelar</button>
@@ -1023,7 +1040,7 @@
       <div class="sub" id="manut-agendados" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:8px;"></div>
     </div>
     <label style="margin-top:10px;">Sua senha de Master (confirma quem está mandando reiniciar)</label>
-    <input type="password" id="manut-senha" autocomplete="new-password" placeholder="senha">
+    <input type="password" id="manut-senha" autocomplete="new-password" placeholder="senha" data-digital>
     <div class="msg hidden" id="manut-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
@@ -1269,7 +1286,6 @@
       <button type="button" role="tab" aria-selected="true" aria-controls="prog-corpo" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
       <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
       <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-manutencao" onclick="trocarAbaProgramas('manutencao')">Manutenção</button>
-      <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-estacao" onclick="trocarAbaProgramas('estacao')">Área de Trabalho</button>
     </div>
     <div id="prog-acoes-master" class="hidden" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2,rgba(255,255,255,.03));">
       <div style="font-weight:700;font-size:13px;margin-bottom:7px;">Gerenciar por catálogo</div>
@@ -1832,6 +1848,9 @@ function atualizarConteudoDetalhe(codigo, c){
   // ultimo acesso remoto detectado pelo NOCZenith (AnyDesk/TeamViewer/
   // DWService/etc - ver Verificar-AcessoRemoto em baixarVigia) - so o Master
   // recebe o push na hora, mas fica registrado aqui pra qualquer um ver
+  // o agente v118+ volta sozinho de uma versão que não sobe (ver
+  // Checar-PartidaDaVersao) - informação, não alarme
+  if(c.agenteVersaoRuim) infoBits.push(`↩️ a v${escapeHtml(String(c.agenteVersaoRuim))} não subiu nesta máquina; o agente voltou sozinho${c.agenteVersao?' pra v'+escapeHtml(String(c.agenteVersao)):''} e espera a correção`);
   if(c.ultimoAcessoRemotoEm) infoBits.push(`🛑 acesso remoto: <b>${escapeHtml(c.ultimoAcessoRemotoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoAcessoRemotoEm))}`);
   // resultado do ultimo comando enfileirado (ver botao ▶ Rodar acao) - saida
   // ou erro que o NOCZenith devolveu
@@ -2033,7 +2052,7 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-icone" data-dica="Mensagem na tela da loja" aria-label="Mensagem na tela da loja" onclick="abrirModalMensagem('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">💬</button>
     <button type="button" class="btn-icone" data-dica="Copiar o link desta máquina" aria-label="Copiar o link desta máquina" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗</button>
     ${c.noPulsoPrint ? `<button type="button" class="btn-icone" data-dica="Capturar a tela desta máquina agora" aria-label="Capturar a tela desta máquina agora" onclick="capturarAgora('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📸</button>` : ''}
-    <button type="button" class="btn-icone" data-dica="Programas, manutenção e Área de Trabalho" aria-label="Programas, manutenção e Área de Trabalho" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
+    <button type="button" class="btn-icone" data-dica="Programas e manutenção" aria-label="Programas e manutenção" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
     <button type="button" class="btn-icone perigo" data-dica="Remover do NOC" aria-label="Remover do NOC" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
   `;
   renderPoliticaComputador(codigo, c);
@@ -2143,11 +2162,12 @@ async function enviarConsoleNoc(){
 }
 
 // ================= PROGRAMAS DA MÁQUINA =================
-// Janela própria, com quatro abas porque cada uma responde uma decisão distinta:
+// Janela própria, com três abas porque cada uma responde uma decisão distinta:
 //   "o que mudou aqui?"      -> Mudanças (o histórico entrou/saiu)
 //   "o que tem instalado?"   -> Instalados agora (a última varredura inteira)
 //   "como intervenho?"       -> Manutenção (comandos e recuperação do agente)
-//   "o que fica visível?"    -> Área de Trabalho (perfil da estação)
+// A política de Área de Trabalho fica exclusivamente na aba Política da ficha
+// da máquina; duplicá-la aqui criava duas telas que podiam sair de sincronia.
 // Nenhuma leitura nova no Firestore: o agente já manda a lista, o servidor já
 // a guarda, e a ficha da máquina já trouxe tudo (ver detalhar/listar).
 let PROG_ATUAL = null;
@@ -2276,7 +2296,7 @@ async function removerProgramaAtual(nome){
 }
 function trocarAbaProgramas(aba){
   PROG_ABA = aba;
-  ['mudancas','atuais','manutencao','estacao'].forEach(nome => {
+  ['mudancas','atuais','manutencao'].forEach(nome => {
     const botao = document.getElementById(`prog-aba-${nome}`);
     if(!botao) return;
     const ativa = aba===nome;
@@ -2286,7 +2306,7 @@ function trocarAbaProgramas(aba){
   });
   const mostraCatalogo = (aba==='mudancas' || aba==='atuais') && IS_MASTER && PROG_ATUAL?.tipo === 'interno';
   document.getElementById('prog-acoes-master').classList.toggle('hidden', !mostraCatalogo);
-  document.getElementById('prog-busca').classList.toggle('hidden', aba==='manutencao' || aba==='estacao');
+  document.getElementById('prog-busca').classList.toggle('hidden', aba==='manutencao');
   pintarProgramas();
 }
 function abrirManutencaoDestaMaquina(codigo, posto, nome){
@@ -2395,18 +2415,6 @@ function pintarProgramas(){
   if(!PROG_ATUAL){ corpo.innerHTML=''; return; }
   if(PROG_ABA==='manutencao'){
     pintarManutencaoProgramas(corpo);
-    return;
-  }
-  if(PROG_ABA==='estacao'){
-    // Reusa a mesma política e os mesmos botões da ficha do NOC: não há uma
-    // segunda configuração concorrente. A aba só coloca o contexto "o que há
-    // instalado" e "o que fica visível" no mesmo lugar.
-    const ficha = document.getElementById('detalhe-comp-politica');
-    const antes = ficha ? ficha.innerHTML : '';
-    if(ficha) renderPoliticaComputador(PROG_ATUAL.codigo, PROG_ATUAL);
-    const configuracao = ficha ? ficha.innerHTML.replace('id="msg-estacao"','id="prog-msg-estacao"') : '<div class="prog-vazio">A configuração desta máquina não está disponível.</div>';
-    if(ficha) ficha.innerHTML = antes;
-    corpo.innerHTML = `<div id="prog-estacao">${configuracao}</div>`;
     return;
   }
   const busca = (document.getElementById('prog-busca').value||'').trim().toLowerCase();
@@ -2706,7 +2714,7 @@ function filtrarGrupoKpi(ev, st, grupo, n){
 function onFiltroTexto(){
   const campo = document.getElementById('filtro-texto');
   FILTRO_TEXTO = campo.value.trim().toLowerCase();
-  document.getElementById('limpar-filtro-texto').classList.toggle('hidden', !campo.value);
+  campo.closest('.busca-com-limpar')?.classList.toggle('tem-texto', !!campo.value.trim());
   render();
 }
 function limparFiltroTexto(){
@@ -2714,6 +2722,15 @@ function limparFiltroTexto(){
   campo.value = '';
   onFiltroTexto();
   campo.focus();
+}
+// o que esta NA CAIXA e o filtro - sempre. Se algum caminho por fora (o
+// navegador restaurando o campo ao voltar de outra tela) mudar o texto sem
+// disparar o oninput, o proximo desenho ja filtra por ele e mostra o ✕
+function sincronizarBuscaDoCampo(){
+  const campo = document.getElementById('filtro-texto');
+  if(!campo) return;
+  FILTRO_TEXTO = campo.value.trim().toLowerCase();
+  campo.closest('.busca-com-limpar')?.classList.toggle('tem-texto', !!campo.value.trim());
 }
 function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-unidade').value; render(); }
 
@@ -3090,6 +3107,7 @@ async function carregarQuedas(periodo){
 }
 
 function render(){
+  sincronizarBuscaDoCampo();
   renderKpis();
   renderUnidades();
   renderFantasmas();
@@ -4272,6 +4290,50 @@ async function salvarEdicaoComputador(){
   }
 }
 
+async function carregarRolloutVigia(){
+  const el = document.getElementById('rollout-vigia');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/loja-status/rollout-vigia');
+    if(!r.ok) return;
+    const d = await r.json();
+    const e = d.rollout;
+    if(!e){ el.innerHTML = `<div class="agente-sub">Versão ${escapeHtml(String(d.versaoAtual))} no ar; a liberação em ondas começa na próxima versão.</div>`; return; }
+    const cor = e.estado==='liberada' ? 'var(--ok)' : (e.estado==='suspensa' ? 'var(--bad)' : 'var(--warn)');
+    const rotulo = e.estado==='liberada' ? `v${e.versao} liberada para o parque` : (e.estado==='suspensa' ? `v${e.versao} suspensa — o parque segue na v${e.estavel}` : `v${e.versao} em piloto — o parque segue na v${e.estavel}`);
+    const pilotos = (e.pilotos||[]).map(p=>{
+      const rodando = p.online && p.versao===e.versao;
+      const marca = rodando ? '🟢' : (p.online ? '🟡' : '🔴');
+      const tag = [p.windowsAntigo?'Windows antigo':'', p.ehServidor?'servidor':''].filter(Boolean).join(' · ');
+      return `<div style="font-size:12px;color:var(--muted);">${marca} ${escapeHtml(p.nome||p.id)}${tag?' <span style="font-size:11px;">('+escapeHtml(tag)+')</span>':''} — ${p.versao?'v'+escapeHtml(String(p.versao)):'sem versão'}${p.online?'':' · fora do ar'}${p.atualizadoEm?' · atualizou '+escapeHtml(tempoRelativo(p.atualizadoEm)):''}</div>`;
+    }).join('') || '<div style="font-size:12px;color:var(--muted);">Nenhuma piloto ainda: esperando uma máquina interna online com agente v118+.</div>';
+    const botoes = e.estado==='liberada' ? '' : `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">`
+      + `<button type="button" class="btn-mini ok" onclick="decidirRolloutVigia('liberar')">Liberar para o parque</button>`
+      + (e.estado==='piloto' ? `<button type="button" class="btn-mini" onclick="decidirRolloutVigia('suspender')">Suspender</button>` : '')
+      + `</div>`;
+    el.innerHTML = `<div style="border:1px solid ${cor};border-radius:10px;padding:12px;">
+      <div style="font-size:13px;"><b style="color:${cor};">${escapeHtml(rotulo)}</b></div>
+      ${e.motivo?`<div style="font-size:12px;color:var(--muted);margin:4px 0 8px;">${escapeHtml(e.motivo)}</div>`:''}
+      ${e.estado!=='liberada'?'<div style="font-size:12px;margin:6px 0 4px;"><b>Pilotos</b></div>'+pilotos:''}
+      ${botoes}
+    </div>`;
+  }catch(err){ /* o painel some em vez de quebrar a tela */ }
+}
+async function decidirRolloutVigia(acao){
+  let corpo = { acao };
+  if(acao==='liberar'){
+    const senha = await pedirSenhaMaster('liberar a versão nova do agente para o parque inteiro');
+    if(senha===null) return;
+    corpo.password = senha;
+  }
+  try{
+    const r = await fetch('/api/loja-status/rollout-vigia', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui.');
+    carregarRolloutVigia();
+  }catch(e){ alert(e.message); }
+}
+
 async function carregarMigracaoEndereco(){
   const el = document.getElementById('migracao-endereco');
   if(!el) return;
@@ -4516,14 +4578,10 @@ const ATALHOS_PADRAO_PDV = [
   ['suporte-linx-whatsapp','Suporte Linx WhatsApp'], ['google-chrome','Google Chrome'],
   ['gcom','GCOM (Client, DB, Service, Suporte)'],
 ];
-// QUAL painel de estação está na tela. Os DOIS existem ao mesmo tempo: a aba
-// 📦 Programas clona o innerHTML da ficha (ver montarProgramas), e fechar a aba
-// não limpa esse clone. Pegar sempre o #prog-estacao fazia o salvar ler o clone
-// ESCONDIDO em vez dos checkboxes que o Master acabou de marcar na ficha - a
-// lista voltava sozinha para o que o clone tinha. Vale o painel visível.
+// A política de estação tem uma única fonte na aba Política da ficha. Assim a
+// leitura e o salvamento sempre usam o mesmo conjunto de checkboxes.
 function raizEstacao(){
-  const candidatos = [document.getElementById('prog-estacao'), document.getElementById('detalhe-comp-politica')];
-  return candidatos.find((el) => el && el.offsetParent !== null) || candidatos.find(Boolean) || null;
+  return document.getElementById('detalhe-comp-politica');
 }
 
 function renderPoliticaComputador(codigo, c){
@@ -4650,7 +4708,7 @@ async function salvarPoliticaComputador(codigo, posto){
 
 async function salvarPerfilEstacao(codigo, posto){
   const raiz = raizEstacao();
-  const msg = raiz?.querySelector('#prog-msg-estacao, #msg-estacao');
+  const msg = raiz?.querySelector('#msg-estacao');
   const ativa = !!raiz?.querySelector('[data-estacao="ativa"]')?.checked;
   const aplicar = ativa && !!raiz?.querySelector('[data-estacao="aplicar"]')?.checked;
   const ocultarLixeira = ativa && !!raiz?.querySelector('[data-estacao="ocultarLixeira"]')?.checked;
@@ -4680,7 +4738,7 @@ async function salvarPerfilEstacao(codigo, posto){
 
 async function inventariarAtalhosComputador(codigo, posto){
   const raiz = raizEstacao();
-  const msg = raiz?.querySelector('#prog-msg-estacao, #msg-estacao');
+  const msg = raiz?.querySelector('#msg-estacao');
   const solicitadoEm = Date.now();
   const senha = await pedirSenhaMaster('ler os atalhos atuais desta máquina');
   if(senha===null) return;
@@ -4704,7 +4762,6 @@ async function inventariarAtalhosComputador(codigo, posto){
       if(detalhe) ultimo = detalhe;
       if(detalhe && Number(detalhe.atalhosDesktopEm||0) >= solicitadoEm){
         atualizarDetalheSeAberto();
-        if(PROG_ATUAL && PROG_ABA==='estacao'){ PROG_ATUAL={...PROG_ATUAL,...detalhe}; pintarProgramas(); }
         return;
       }
     }
@@ -5401,6 +5458,7 @@ async function boot(){
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
     carregarMigracaoEndereco();
+    carregarRolloutVigia();
     carregarMarcasPapelDeParede();
     await carregarAgente();
   }

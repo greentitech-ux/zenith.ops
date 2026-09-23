@@ -171,7 +171,7 @@
     .busca{max-width:420px;}
   }
 </style>
-<script src="/tema.js"></script>
+<script src="/tema.js"></script><script src="/digital.js" defer></script>
 </head>
 <body>
 <header>
@@ -207,7 +207,7 @@
     <div class="alvo" id="mr-alvo"></div>
     <p>A tela da loja mostra um aviso de <b>2 minutos</b> antes de reiniciar — dá tempo de quem está no caixa fechar o que estiver aberto, e de abortar se o alvo estiver errado.</p>
     <label for="mr-senha">Sua senha de Master</label>
-    <input type="password" id="mr-senha" autocomplete="new-password" placeholder="senha">
+    <input type="password" id="mr-senha" autocomplete="new-password" placeholder="senha" data-digital data-digital-enviar="mr-confirmar">
     <div class="erro hidden" id="mr-erro"></div>
     <div class="linha-botoes">
       <button type="button" class="btn-cancelar" onclick="fecharReiniciar()">Cancelar</button>
@@ -224,7 +224,7 @@
     <div class="alvo" id="mo-alvo"></div>
     <p id="mo-descricao"></p>
     <label for="mo-senha">Sua senha de Master</label>
-    <input type="password" id="mo-senha" autocomplete="new-password" placeholder="senha">
+    <input type="password" id="mo-senha" autocomplete="new-password" placeholder="senha" data-digital data-digital-enviar="mo-confirmar">
     <div class="erro hidden" id="mo-erro"></div>
     <div class="linha-botoes">
       <button type="button" class="btn-cancelar" onclick="fecharOtimizar()">Cancelar</button>
@@ -245,7 +245,7 @@
     <label><input type="checkbox" id="me-anydesk" checked> Proteger AnyDesk</label>
     <label><input type="checkbox" id="me-rdp" checked> Manter acesso RDP da Domino’s</label>
     <label for="me-senha" style="margin-top:12px;">Sua senha de Master para salvar a política</label>
-    <input type="password" id="me-senha" autocomplete="new-password" placeholder="senha">
+    <input type="password" id="me-senha" autocomplete="new-password" placeholder="senha" data-digital data-digital-enviar="me-confirmar">
     <div class="erro hidden" id="me-erro"></div>
     <div class="linha-botoes">
       <button type="button" class="btn-cancelar" onclick="fecharEstacao()">Cancelar</button>

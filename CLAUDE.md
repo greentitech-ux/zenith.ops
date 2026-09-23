@@ -163,6 +163,19 @@ Desligou o subdomínio no Render? Aí os dois perdem a função: tire o aviso
 (e a rota `/api/meta/endereco`) e o `ENDERECO_RESERVA` do reparo. Máquina
 que ficou com o agente antigo volta pelo reparo ou por reinstalação.
 
+### Versão nova do agente vai em ondas (desde a v118)
+
+Subir `VERSAO_VIGIA` **não** manda a versão pro parque inteiro: vai primeiro
+pra até 4 pilotos (uma "Windows antigo" e um servidor, quando houver), e o
+resto só recebe depois de 30 min com elas rodando (`rolloutVigia.js`, painel
+🚦 no NOC). Piloto que volta sozinha ou cala logo depois de atualizar
+**suspende** a liberação. E o agente v118+ volta sozinho pra versão anterior
+quando a nova não dá a primeira volta em 3 partidas (`Checar-PartidaDaVersao`)
+e não baixa a ruim de novo — a correção sai como versão **maior**. Nasceu da
+v116, que morria ao iniciar nos Server 2012 R2 (relógio `Agora-Ms` com o
+mesmo nome do da conversão de Windows antigo): mudou o agente, rode também a
+versão de Windows antigo no teste.
+
 Numa próxima troca de domínio, duas coisas quebram se forem ignoradas:
 
 1. **`VERSAO_VIGIA` tem que subir junto** (`vigiaScript.js`). O agente
