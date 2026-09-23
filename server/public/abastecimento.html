@@ -85,6 +85,26 @@
   .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
   .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  /* Painel de operação: a tela fica aberta 24h, então o primeiro bloco não
+     pode ser um histórico que exige interpretação. Ele diz o estado atual e
+     oferece UMA próxima ação sem remover os atalhos que a operação já usa. */
+  .operacao-agora{border-color:rgba(184,255,60,.38);box-shadow:0 0 0 1px rgba(184,255,60,.06) inset;}
+  .operacao-topo{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:11px;}
+  .operacao-titulo{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);}
+  .sinal-live{font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:20px;background:var(--ok-dim);color:var(--ok);white-space:nowrap;}
+  .sinal-live.instavel{background:var(--warn-dim);color:var(--warn);}
+  .sinal-live.offline{background:var(--bad-dim);color:var(--bad);}
+  .operacao-corpo{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;}
+  .operacao-estado b{display:block;font-size:15px;line-height:1.25;}
+  .operacao-estado span{display:block;font-size:11.5px;color:var(--muted);line-height:1.45;margin-top:3px;}
+  .operacao-itens{font-size:11px!important;color:var(--text)!important;background:var(--panel2);border-radius:7px;padding:6px 8px;margin-top:8px!important;}
+  .operacao-acao{min-width:180px;max-width:280px;padding:10px 12px;font-size:12.5px;}
+  .operacao-pendencias{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:12px;padding-top:10px;}
+  .op-chip{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);background:var(--panel2);border-radius:16px;padding:5px 8px;color:var(--muted);}
+  .op-chip.alerta{border-color:rgba(242,179,61,.45);color:var(--warn);background:var(--warn-dim);}
+  /* Loja também opera em tablet: até esse ponto o painel vira uma coluna,
+     preservando área de toque e evitando que a ação fique espremida. */
+  @media(max-width:860px){.operacao-corpo{grid-template-columns:1fr;gap:10px}.operacao-acao{max-width:none;width:100%;min-height:44px;}.operacao-estado b{font-size:14px;}}
   label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono);}
   input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
@@ -301,6 +321,18 @@
 <div id="sem-acesso" class="empty hidden">Você não tem acesso ao Abastecimento do Carrinho. Fale com o administrador (Master).</div>
 
 <div id="root" class="hidden">
+
+<section class="panel operacao-agora" aria-live="polite" aria-label="Situação atual da operação">
+  <div class="operacao-topo">
+    <span class="operacao-titulo">Operação agora</span>
+    <span class="sinal-live" id="sinal-live">● conectando</span>
+  </div>
+  <div class="operacao-corpo">
+    <div class="operacao-estado" id="operacao-estado"><b>Carregando a operação…</b><span>Verificando pedidos, envios e confirmações.</span></div>
+    <div id="operacao-acao"></div>
+  </div>
+  <div class="operacao-pendencias" id="operacao-pendencias"></div>
+</section>
 
 <!-- saldo do dia: total ENVIADO hoje x ontem por sabor (o card "73 Ont/HJ 3"
      do AppSheet antigo) + pedidos aguardando envio -->
@@ -832,6 +864,64 @@ function fmtDia(dataSv){
 // pedido aguardando envio = PEDIDO sem envio vinculado e sem a baixa
 // "ja lancei" (pedido retroativo cujo envio ja existia antes)
 function pendente(r){ return r.tipo==='PEDIDO' && !r.atendidoPorEnvioId && !r.jaLancadoEm; }
+function envioPendenteRecebimento(r){ return r.tipo==='ENVIO' && !r.recebidoEm; }
+
+// A decisão operacional vem antes do histórico: confirmação de material que
+// chegou evita perda/divergência; depois vem pedido aguardando envio. Se não
+// houver pendência, cada ponta recebe apenas o seu próximo lançamento.
+function renderOperacaoAgora(){
+  const estado = document.getElementById('operacao-estado');
+  const acao = document.getElementById('operacao-acao');
+  const pendencias = document.getElementById('operacao-pendencias');
+  if(!estado || !acao || !pendencias) return;
+  const pedidos = REGS.filter(pendente);
+  const recebimentos = REGS.filter(envioPendenteRecebimento);
+  const primeiroRecebimento = recebimentos.sort((a,b)=>(a.criadoEm||'').localeCompare(b.criadoEm||''))[0];
+  const primeiroPedido = pedidos.sort((a,b)=>(a.criadoEm||'').localeCompare(b.criadoEm||''))[0];
+  const chips = [];
+  if(pedidos.length) chips.push(`<span class="op-chip alerta">🛒 ${pedidos.length} pedido${pedidos.length===1?'':'s'} aguardando envio</span>`);
+  if(recebimentos.length) chips.push(`<span class="op-chip alerta">📦 ${recebimentos.length} envio${recebimentos.length===1?'':'s'} para conferir</span>`);
+  chips.push(`<span class="op-chip">Último movimento: ${REGS[0] ? fmtHora(REGS[0].criadoEm) : '—'}</span>`);
+  pendencias.innerHTML = chips.join('');
+
+  if(TEM_PEDIDO && primeiroRecebimento){
+    // ENVIO registrado pela loja é a confirmação imediata de que o material
+    // saiu. O carrinho vê "a caminho" antes de ser cobrado a conferir; a
+    // confirmação física continua sendo uma ação consciente ao receber.
+    const pedidoVinculado = primeiroRecebimento.atendePedidoId && REGS.find(r=>r.id===primeiroRecebimento.atendePedidoId);
+    estado.innerHTML = `<b>🚚 Envio a caminho</b><span>A loja registrou o envio às ${fmtHora(primeiroRecebimento.criadoEm)}. Confira quando o material chegar ao carrinho.</span>${pedidoVinculado ? `<span class="operacao-itens">Pedido: ${resumoPedidoHtml(pedidoVinculado)}</span>` : ''}`;
+    acao.innerHTML = `<button type="button" class="btn-acao envio operacao-acao" onclick="abrirRecebimentoManual('${primeiroRecebimento.id}')">Conferir quando chegar</button>`;
+  }else if(TEM_ENVIO && primeiroPedido){
+    const emPreparo = !!primeiroPedido.preparoEm;
+    estado.innerHTML = emPreparo
+      ? `<b>👨‍🍳 Pedido em preparo</b><span>O carrinho sabe que a loja viu o pedido de ${fmtHora(primeiroPedido.criadoEm)}. Registre o envio quando sair.</span>`
+      : `<b>🛒 Novo pedido do carrinho</b><span>Pedido de ${fmtHora(primeiroPedido.criadoEm)} aguardando a loja visualizar e preparar.</span>`;
+    estado.innerHTML += `<span class="operacao-itens">Pedido: ${resumoPedidoHtml(primeiroPedido)}</span>`;
+    // No tablet, o primeiro toque confirma que a loja assumiu o preparo e o
+    // carrinho é avisado imediatamente. Envio continua uma ação separada.
+    acao.innerHTML = emPreparo
+      ? `<button type="button" class="btn-acao envio operacao-acao" onclick="abrirForm('ENVIO')">Registrar envio</button>`
+      : `<button type="button" class="btn-acao pedido operacao-acao" onclick="marcarPreparo('${primeiroPedido.id}')">Marcar como em preparo</button>`;
+  }else if(TEM_PEDIDO){
+    estado.innerHTML = `<b>✅ Carrinho sem pendência de recebimento</b><span>Registre um pedido, uma contagem ou um remake quando houver movimento.</span>`;
+    acao.innerHTML = `<button type="button" class="btn-acao pedido operacao-acao" onclick="abrirForm('PEDIDO')">Novo pedido</button>`;
+  }else{
+    estado.innerHTML = `<b>✅ Loja sem pedido pendente</b><span>Registre o envio assim que o carrinho solicitar reposição.</span>`;
+    acao.innerHTML = `<button type="button" class="btn-acao envio operacao-acao" onclick="abrirForm('ENVIO')">Registrar envio</button>`;
+  }
+}
+
+function atualizarSinalAoVivo(tipo){
+  const el = document.getElementById('sinal-live');
+  if(!el) return;
+  const estados = {
+    vivo: ['● ao vivo', ''],
+    instavel: ['● reconectando', 'instavel'],
+    offline: ['● sem conexão', 'offline'],
+  };
+  const [texto, classe] = estados[tipo] || estados.instavel;
+  el.textContent = texto; el.className = `sinal-live ${classe}`.trim();
+}
 
 // resumo: total ENVIADO hoje/ontem por sabor + contagem de pedidos pendentes
 function renderResumo(){
@@ -1373,16 +1463,27 @@ function renderPaginacao(totalPaginas){
 }
 
 async function carregar(){
-  REGS = await fetch('/api/abastecimento').then(r=>r.json());
-  REGS.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
-  renderResumo();
-  renderLista();
-  atualizarDatalistOperadores();
-  verificarAlarme();
-  verificarRecebimento();
-  verificarContagem();
-  if(CONVERSA_ABERTA) abrirConversa(); else atualizarChipConversa();
-  carregarSugestao();
+  try{
+    const resp = await fetch('/api/abastecimento');
+    if(!resp.ok) throw new Error(`Falha ao carregar (${resp.status})`);
+    REGS = await resp.json();
+    REGS.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
+    atualizarSinalAoVivo('vivo');
+    renderOperacaoAgora();
+    renderResumo();
+    renderLista();
+    atualizarDatalistOperadores();
+    verificarAlarme();
+    verificarRecebimento();
+    verificarContagem();
+    if(CONVERSA_ABERTA) abrirConversa(); else atualizarChipConversa();
+    carregarSugestao();
+  }catch(err){
+    // Não limpa a tela em uma falha transitória: quem está no turno continua
+    // vendo a última foto válida e pode decidir se aguarda a reconexão.
+    atualizarSinalAoVivo(navigator.onLine ? 'instavel' : 'offline');
+    console.warn('Abastecimento: não foi possível atualizar agora.', err.message);
+  }
 }
 
 // ---------- PRE-ENVIO (sugestao logo depois da contagem) ----------
@@ -2838,6 +2939,8 @@ async function boot(){
 // e o alarme dispara na hora do lado de quem envia
 function iniciarStream(){
   const es = new EventSource('/api/stream?token='+encodeURIComponent(AUTH_TOKEN));
+  es.addEventListener('open', ()=>atualizarSinalAoVivo('vivo'));
+  es.addEventListener('error', ()=>atualizarSinalAoVivo(navigator.onLine ? 'instavel' : 'offline'));
   es.addEventListener('abastecimento-atualizado', ()=>{ carregar(); });
   es.addEventListener('abastecimento-insumos-atualizado', async ()=>{ await carregarCatalogo(); renderInsumos(); });
 }
