@@ -288,13 +288,31 @@ function montarScriptReparoNocZenith() {
 // loja ou nome do computador: o resgate encontra uma instalação já existente
 // e preserva a identidade dela. O -EncodedCommand evita que $env:TEMP ou
 // outras variáveis sejam expandidas pelo PowerShell/CMD de fora.
-function montarComandoReparoNocZenith() {
-  const url = 'https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1';
+// O ENDERECO VEM DO APP_BASE_URL, nunca cravado (CLAUDE.md §4). E ele tenta
+// DOIS enderecos: o oficial e o adyen-monitor.onrender.com.
+//
+// Isto nao e redundancia de luxo. Loja atras de rede restrita pode nao
+// resolver o dominio novo - foi o que aconteceu em 22/09 numa maquina:
+// "O nome remoto nao pode ser resolvido: 'www.nopulso.com.br'". E justamente
+// a maquina que mais precisa do reparo, porque o agente dela esta caido e nao
+// ha outro jeito de chegar nela. O endereco velho nunca pode ser desligado
+// (mesma §4), entao ele e a rede de seguranca natural.
+//
+// E confere o CONTEUDO antes de executar: portal cativo e proxy de loja
+// devolvem pagina de erro com HTTP 200, e aquilo seria salvo como .ps1 e
+// executado. Mesma trava do "# NOCZenith" do vigia, aplicada aqui.
+const ENDERECO_ANTIGO = 'https://adyen-monitor.onrender.com';
+const MARCA_REPARO = '# Reparo seguro do NOCZenith';
+function montarComandoReparoNocZenith(baseUrl) {
+  const oficial = String(baseUrl || ENDERECO_ANTIGO).replace(/\/+$/, '');
+  const bases = oficial === ENDERECO_ANTIGO ? [oficial] : [oficial, ENDERECO_ANTIGO];
+  const urls = bases.map((b) => b + '/api/loja-status/reparo-noczenith.ps1');
   const interno = [
     "$ErrorActionPreference='Stop'",
-    "$u='" + url + "'",
+    "$us=@(" + urls.map((u) => "'" + u + "'").join(',') + ")",
     "$f=Join-Path $env:TEMP ('Reparar-NOCZenith-'+[Guid]::NewGuid().ToString('N')+'.ps1')",
-    "try { Invoke-WebRequest -UseBasicParsing -Uri $u -MaximumRedirection 0 -OutFile $f; & $f } finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }",
+    "$erros=@()",
+    "try { $ok=$false; foreach ($u in $us) { try { Invoke-WebRequest -UseBasicParsing -Uri $u -MaximumRedirection 0 -OutFile $f; if ((Get-Content -LiteralPath $f -TotalCount 1 -ErrorAction Stop) -notlike '" + MARCA_REPARO + "*') { throw 'conteudo inesperado (rede da loja devolveu outra coisa)' }; $ok=$true; break } catch { $erros += ($u + ' -> ' + $_.Exception.Message) } }; if (-not $ok) { throw ('Nao consegui baixar o reparo. ' + ($erros -join ' | ')) }; & $f } finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }",
   ].join(';');
   const b64Interno = Buffer.from(interno, 'utf16le').toString('base64');
   const elevador = [

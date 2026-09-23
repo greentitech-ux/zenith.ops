@@ -120,8 +120,10 @@ const botIndicadores = require('./botIndicadores');
 const briefingEmail = require('./briefingEmail');
 const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
+const coworkApi = require('./coworkApi');
 const vigiaScript = require('./vigiaScript');
 const reparoNocZenithScript = require('./reparoNocZenithScript');
+const procedimentosSocorro = require('./procedimentosSocorro');
 const loginCustom = require('./loginCustom');
 
 const upload = multer({
@@ -338,6 +340,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/loja-status/vigia-versao',
   '/api/loja-status/reparo-noczenith.ps1',
   '/assinar.html',
+  '/reuniao-publica.html',
 ]);
 // A MESMA lista vale SEM o ".html": `/atendimento` e `/atendimento.html`
 // servem a mesma pagina (ver o `extensions` do express.static la embaixo).
@@ -405,7 +408,7 @@ const ROTA_LOJA_CHAT_RESPONDER_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[
 // maquina, sem sessao de usuario. O token do agente continua obrigatorio.
 const ROTA_LOJA_TELEMETRIA_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/telemetria$/;
 function rotaPublicaSemDashboard(path) {
-  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
+  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/') || path.startsWith('/api/reunioes/publica/')
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
@@ -914,6 +917,67 @@ function exigirTokenBot(req, res, envVar = 'BOT_API_TOKEN') {
   if (!recebido || !senhasIguais(recebido, esperado)) { res.status(401).json({ error: 'Token inválido.' }); return false; }
   return true;
 }
+
+// API operacional única para Claude/Cowork. Fica antes do login humano e só
+// aceita Bearer próprio, desligando completamente se o token não existir.
+function exigirTokenAgente(req, res) {
+  if (!process.env.NOPULSO_AGENT_API_TOKEN) {
+    res.status(404).json({ error: 'API do agente desativada.' }); return false;
+  }
+  if (!coworkApi.tokenValido(req.headers.authorization || req.headers['x-agent-token'])) {
+    res.status(401).json({ error: 'Token do agente inválido.' }); return false;
+  }
+  return true;
+}
+
+app.get('/api/agent/tools', (req, res) => {
+  if (!exigirTokenAgente(req, res)) return;
+  res.json({ nome: 'NoPulso Agent API', versao: 1, ferramentas: coworkApi.listarFerramentas() });
+});
+
+app.post('/api/agent/execute', async (req, res) => {
+  if (!exigirTokenAgente(req, res)) return;
+  try {
+    res.json(await coworkApi.executar({
+      nome: req.body?.action, entrada: req.body?.input,
+      confirmar: req.body?.confirmar,
+      idempotencyKey: req.headers['idempotency-key'] || req.body?.idempotencyKey,
+    }));
+  } catch (err) {
+    res.status(err.code === 'CONFIRMACAO_NECESSARIA' ? 409 : 400).json({ error: err.message, code: err.code || 'ACAO_INVALIDA' });
+  }
+});
+
+// Remote MCP stateless. O Cowork guarda `x-agent-token` como cabecalho
+// secreto; assim a chave nao aparece na URL nem nos access logs. A rota
+// antiga com token no caminho permanece temporariamente compativel.
+async function atenderMcpNoPulso(req, res) {
+  const recebido = req.headers['x-agent-token'] || req.headers.authorization || req.params.token;
+  if (!coworkApi.tokenValido(recebido)) return res.status(401).json({ error: 'Conector inválido.' });
+  const rpc = req.body || {};
+  const responder = (result) => res.json({ jsonrpc: '2.0', id: rpc.id, result });
+  try {
+    if (rpc.method === 'initialize') return responder({
+      protocolVersion: '2025-03-26', capabilities: { tools: { listChanged: false } },
+      serverInfo: { name: 'NoPulso - Beni Cowork', version: '1.0.0' },
+    });
+    if (rpc.method === 'notifications/initialized') return res.status(202).end();
+    if (rpc.method === 'ping') return responder({});
+    if (rpc.method === 'tools/list') return responder({ tools: coworkApi.ferramentasMcp() });
+    if (rpc.method === 'tools/call') {
+      const args = { ...(rpc.params?.arguments || {}) };
+      const idempotencyKey = args.idempotencyKey; const confirmar = args.confirmar;
+      delete args.idempotencyKey; delete args.confirmar;
+      const saida = await coworkApi.executar({ nome: rpc.params?.name, entrada: args, confirmar, idempotencyKey });
+      return responder({ content: [{ type: 'text', text: JSON.stringify(saida) }], isError: false });
+    }
+    return res.status(400).json({ jsonrpc: '2.0', id: rpc.id, error: { code: -32601, message: 'Método MCP não suportado.' } });
+  } catch (err) {
+    return responder({ content: [{ type: 'text', text: JSON.stringify({ error: err.message, code: err.code || 'ACAO_INVALIDA' }) }], isError: true });
+  }
+}
+app.post('/mcp/nopulso', atenderMcpNoPulso);
+app.post('/mcp/nopulso/:token', atenderMcpNoPulso);
 app.post('/api/bot/solicitacoes', async (req, res) => {
   if (!exigirTokenBot(req, res)) return;
   try {
@@ -1801,7 +1865,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // a entrega do comando/chat (ver lojaStatus.heartbeat); presenca/IP nao
     // dependem dele, pra maquina legada nao sumir do painel
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, avisoBateria } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico, avisoBateria } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
       // o que o navegador sabe do aparelho (bateria, armazenamento, rede, SO
       // - ver public/aparelho.js). Entra na MESMA escrita do heartbeat, que
@@ -1811,6 +1875,10 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
       // e o redeDiagnostico.sanitizarAmostra, chamado la dentro.
       rede: req.body.rede,
+      // O agente interno mede o ID pelo próprio AnyDesk e o manda junto da
+      // batida autenticada. O backend só aceita esse dado como leitura local
+      // quando o token bate (a validação fica em lojaStatus.heartbeat).
+      anydeskId: req.body.anydeskId,
       tailscale: req.body.tailscale,
       // A instancia _Boot do NOCZenith roda como SYSTEM e usa estes dois
       // marcadores para receber SOMENTE comandos que exigem elevacao. Eles
@@ -1819,8 +1887,12 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // comum e deixava instalar/desinstalar preso na fila.
       souAdmin: req.body.souAdmin === true,
       soComandoAdmin: req.body.soComandoAdmin === true,
+      // vigia de travamento (v116): presenca sem comando, com a etapa presa
+      soPresenca: req.body.soPresenca === true,
+      ocupado: req.body.ocupado,
+      instancia: req.body.instancia,
     }, token);
-    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao });
+    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico });
     // BATERIA DO TABLET (ver public/aparelho.js). Sai uma vez por descarga -
     // o aparelho voltando a carregar rearma o aviso. Vai pro mesmo público
     // do NOC (Master/Suporte), nunca pra loja.
@@ -1871,7 +1943,7 @@ app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, 
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
     const r = await lojaStatus.registrarTelemetria(req.params.codigo, req.params.posto, {
-      disco: req.body.disco, ram: req.body.ram, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
+      disco: req.body.disco, ram: req.body.ram, hardware: req.body.hardware, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
       statusImpressoras: req.body.statusImpressoras,
       anydeskServico: req.body.anydeskServico, anydeskId: req.body.anydeskId,
     }, token);
@@ -1920,7 +1992,17 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
     // log da propria ferramenta) de servico conectado - e so a sessao vira
     // push. O batimento de nuvem, que era o que enchia o Master, nunca mais
     // toca o celular dele, mesmo com o toggle ligado.
-    if (ehSessao && await lojaStatus.pushAcessoRemotoAtivo()) {
+    // ACESSO CONHECIDO NAO TOCA O CELULAR. O evento ja foi gravado acima, no
+    // historico da maquina - e continua la, com o nome de quem e. So o push
+    // e' poupado: alerta que dispara pela propria equipe vira ruido e faz o
+    // Master parar de olhar justamente o que importa.
+    const conhecido = ehSessao
+      ? lojaStatus.acessoConhecidoDe(req.body.detalhe, (await lojaStatus.getConfig()).acessosConhecidos)
+      : null;
+    if (conhecido) {
+      console.log(`[NOC] acesso remoto conhecido (${conhecido.nome || conhecido.id}) em ${req.params.codigo}/${req.params.posto} - registrado sem push.`);
+    }
+    if (ehSessao && !conhecido && await lojaStatus.pushAcessoRemotoAtivo()) {
       const mapa = await construirUnidadesMapa();
       push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
         .catch((err) => console.error('Erro no push de acesso remoto:', err.message));
@@ -1936,7 +2018,9 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
 // confere periodicamente pra saber se precisa baixar de novo; o .ps1 e o
 // mesmo conteudo tanto pro botao "Baixar NOCZenith" quanto pra
 // autoatualizacao baixar e sobrescrever o proprio arquivo ----------
+
 app.get('/api/loja-status/vigia-versao', (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json({ versao: vigiaScript.VERSAO_VIGIA });
 });
 
@@ -1965,7 +2049,9 @@ app.post('/api/loja-status/:codigo/computadores/:posto/estado-agente', async (re
 
 app.get('/api/loja-status/:codigo/computadores/:posto/configuracao-agente', async (req, res) => {
   try {
-    res.json(await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null));
+    // o nome da loja vai junto pro modelo básico ("DOMINO'S · TIROL") - quem
+    // sabe o nome canônico é este arquivo, não o lojaStatus
+    res.json(await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null, { unidadeNome: nomeCanonicoUnidade(req.params.codigo) }));
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
@@ -2038,6 +2124,18 @@ app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (r
     // sendo carimbada (sem header). Ver Aplicar-PapelDeParede no vigiaScript.js.
     if (arte.daMaquina) res.set('X-NOC-Carimbo', 'nao');
     storage.streamArquivo(arte.caminho, arte.tipo || 'image/jpeg', res);
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+// LOGO do modelo básico (máquina sem arte): o servidor escolhe qual - o da
+// marca ou o do grupo DAQUELA unidade - e o agente só diz qual dos dois quer.
+app.get('/api/loja-status/:codigo/computadores/:posto/logo-carimbo/:tipo', async (req, res) => {
+  try {
+    const logo = await lojaStatus.logoCarimboDaMaquina(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null, req.params.tipo);
+    if (!logo) return res.sendStatus(404);
+    storage.streamArquivo(logo.caminho, logo.tipo || 'image/png', res);
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
@@ -2521,9 +2619,41 @@ app.post('/api/push/migrar-subscricao', async (req, res) => {
   }
 });
 
+// Convite de reunião: o token aleatório é a única credencial. O convidado vê
+// somente os dados da reunião e comenta até o responsável encerrar o link.
+const comentariosExternosPorIp = new Map();
+function permitirComentarioExterno(ip) {
+  const agora = Date.now(); const chave = String(ip || 'desconhecido');
+  const recentes = (comentariosExternosPorIp.get(chave) || []).filter((t) => agora - t < 10 * 60 * 1000);
+  if (recentes.length >= 8) return false;
+  recentes.push(agora); comentariosExternosPorIp.set(chave, recentes); return true;
+}
+app.get('/api/reunioes/publica/:token', async (req, res) => {
+  const reuniao = await tarefas.reuniaoPorLinkExterno(req.params.token);
+  if (!reuniao) return res.status(410).json({ error: 'Este link foi encerrado ou não é válido.' });
+  res.json(tarefas.reuniaoPublica(reuniao));
+});
+app.post('/api/reunioes/publica/:token/comentarios', async (req, res) => {
+  try {
+    if (!permitirComentarioExterno(req.ip)) return res.status(429).json({ error: 'Muitos comentários enviados. Aguarde alguns minutos.' });
+    const comentario = await tarefas.comentarPorLinkExterno(req.params.token, { nome: req.body?.nome, texto: req.body?.texto });
+    res.status(201).json(comentario);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
 app.use('/api', auth.requireAuth);
+
+// PROCEDIMENTOS DE SOCORRO: o que se copia no NOC e cola NA MAQUINA quando
+// ela nao responde a comando nenhum (ver procedimentosSocorro.js). Autenticada
+// de proposito - diferente do reparo-noczenith.ps1, que e publico porque o
+// agente caido precisa baixar sozinho; aqui quem le e o painel do Master.
+app.get('/api/loja-status/procedimentos-socorro', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ categorias: procedimentosSocorro.listarPorCategoria(APP_BASE_URL) });
+});
+
 
 // preferencias de tela da PESSOA logada (ver preferencias.js) - hoje so o
 // seletor 🧩 Colunas do Fechamento usa. Fica no servidor, e nao no
@@ -5227,12 +5357,14 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // ação sobrevive até um restart do servidor (fica só o tipo+payload
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
+  'manutencao.resetarSenha': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoResetSenha(p.nomeConta), { origem: 'manutencao-reset-senha', requerAdmin: true }),
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
   'manutencao.reiniciarGsurfRsa': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_GSURF_RSA, { origem: 'manutencao-gsurf-rsa' }),
   'manutencao.encerrarGcomWcf': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoEncerrarGcomWcf, { origem: 'manutencao-gcom-wcf' }),
   'manutencao.limpezaSegura': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_LIMPEZA_SEGURA, { origem: 'manutencao-limpeza-segura' }),
+  'manutencao.corrigirMemoriaLimitada': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, { origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true }),
   'manutencao.removerOffice': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REMOVER_OFFICE, { origem: 'manutencao-remover-office', requerAdmin: true }),
   'manutencao.destravarRede': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REDE_DESTRAVAR, { origem: 'manutencao-rede' }),
   'formularios.removerAssinatura': (p) => formularios.removerAssinatura(p.id, p.chave, p.porEmail),
@@ -5484,13 +5616,15 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const nomeConta = tarefa === 'reset-senha' ? req.body.nomeConta : undefined;
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
       'diagnostico-desempenho': { acao: 'manutencao.diagnosticoDesempenho', verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
       'inventario-estacao': { acao: 'manutencao.inventarioEstacao', verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
       'limpeza-segura': { acao: 'manutencao.limpezaSegura', verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },
+      'corrigir-memoria-limitada': { acao: 'manutencao.corrigirMemoriaLimitada', verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
       'remover-office': { acao: 'manutencao.removerOffice', verbo: 'Remover Microsoft Office de', comando: lojaStatus.COMANDO_REMOVER_OFFICE, origem: 'manutencao-remover-office', requerAdmin: true },
       // reinicia SO o servico do AnyDesk: leva segundos e nao derruba o
       // caixa, ao contrario de reiniciar a maquina inteira por causa de um
@@ -5514,15 +5648,15 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       },
       'reset-senha': {
         acao: 'manutencao.resetarSenha',
-        verbo: 'Resetar a senha do Windows de',
-        comando: lojaStatus.COMANDO_RESET_SENHA,
+        verbo: `Remover a senha da conta ${nomeConta} em`,
+        comando: tarefa === 'reset-senha' ? lojaStatus.comandoResetSenha(nomeConta) : '',
         origem: 'manutencao-reset-senha', requerAdmin: true,
       },
     };
     const t = TAREFAS[tarefa];
     if (!(await exigirSenhaDoMaster(req, res))) return;
     const resumo = `${t.verbo} ${alvos.length} computador(es) do parque`;
-    if (await desviarSeQaMaster(req, res, t.acao, resumo, { alvos, porEmail: req.user.email })) return;
+    if (await desviarSeQaMaster(req, res, t.acao, resumo, { alvos, nomeConta, porEmail: req.user.email })) return;
     const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, {
       origem: t.origem,
       requerAdmin: !!t.requerAdmin,
@@ -5867,6 +6001,15 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
   const arte = (chave) => ({ temArte: !!(porMarca[chave] && porMarca[chave].caminho), em: (porMarca[chave] && porMarca[chave].em) || null });
   res.json({
     doParque: !!(cfg && cfg.papelDeParede && cfg.papelDeParede.caminho),
+    // logos do modelo básico (máquina sem arte): o que já subiu e o que falta
+    logosCarimbo: await (async () => {
+      const logos = (cfg && cfg.logosCarimbo) || {};
+      const info = (k) => ({ temLogo: !!(logos[k] && logos[k].caminho), em: (logos[k] && logos[k].em) || null });
+      return {
+        marcas: unidadesExtras.MARCAS_VALIDAS.map((id) => ({ id, label: unidadesExtras.MARCAS_LABEL[id] || id, ...info(lojaStatus.chaveLogoCarimbo('marca', id)) })),
+        grupos: (await empresas.listAtivas().catch(() => [])).map((e) => ({ id: String(e.id), label: e.nome, ...info(lojaStatus.chaveLogoCarimbo('grupo', String(e.id))) })),
+      };
+    })(),
     // a marca pura fica na lista de proposito: e a arte que vale pras duas
     // redes, util pra marca que so existe em uma delas (Saltiverso, Milky Moo)
     marcas: unidadesExtras.MARCAS_VALIDAS.map((id) => ({
@@ -5939,6 +6082,43 @@ app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo
     res.status(400).json({ error: err.message });
   }
 });
+// LOGOS DO MODELO BÁSICO (Master). Um PNG por marca e um por grupo; a
+// máquina SEM ARTE monta o desenho com eles. A arte que o Master sobe acima
+// continua mandando - isto não substitui arte nenhuma.
+// Caminho de UM segmento (+ query), pelo mesmo motivo do -marcas.
+app.get('/api/loja-status/logo-carimbo', auth.requireMaster, async (req, res) => {
+  try {
+    const logo = await lojaStatus.logoCarimboSalvo(req.query.tipo, req.query.id);
+    if (!logo) return res.sendStatus(404);
+    storage.streamArquivo(logo.caminho, logo.tipo || 'image/png', res);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.put('/api/loja-status/logo-carimbo', auth.requireMaster, uploadLoginFundo.single('imagem'), async (req, res) => {
+  try {
+    // cai na tela de toda máquina sem arte daquela marca/grupo: mesma trava
+    // de senha da arte
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    if (!req.file) return res.status(400).json({ error: 'Escolha a imagem.' });
+    if (!/^image\/(png|jpeg)$/.test(req.file.mimetype || '')) return res.status(400).json({ error: 'O logo precisa ser PNG (de preferência com fundo transparente) ou JPG.' });
+    const { tipo, id } = req.body;
+    await lojaStatus.logoCarimboSalvo(tipo, id); // valida tipo/id ANTES de gravar arquivo no Storage
+    const logo = { caminho: null, tipo: req.file.mimetype, em: Date.now(), versao: Date.now() };
+    logo.caminho = await storage.salvarArquivo('parque', req.file, `logo-carimbo-${String(tipo)}-${String(id).replace(/[^\w-]/g, '_')}`);
+    res.json(await lojaStatus.definirLogoCarimbo(tipo, id, logo));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete('/api/loja-status/logo-carimbo', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    res.json(await lojaStatus.removerLogoCarimbo(req.body && req.body.tipo, req.body && req.body.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 // QUEM AINDA FALA COM O ENDERECO ANTIGO. Responde a pergunta que decide se da
 // pra aposentar o dominio velho: enquanto houver pendente, desligar deixa
 // aquela maquina orfa (ver CLAUDE.md §4 e resumoEnderecoAgentes).
@@ -5951,6 +6131,14 @@ app.put('/api/loja-status/config', auth.requireMaster, async (req, res) => {
   try {
     const patch = {};
     if (req.body.pushAcessoRemoto !== undefined) patch.pushAcessoRemoto = req.body.pushAcessoRemoto === true;
+    // lista de IDs de AnyDesk da equipe: acesso vindo deles nao toca o celular.
+    // Pede a senha do Master porque mexer nela SILENCIA alerta de seguranca -
+    // um ID a mais aqui e um acesso que deixa de avisar. So quando a lista vem
+    // no corpo: o toggle de push continua sem senha, como sempre foi.
+    if (req.body.acessosConhecidos !== undefined) {
+      if (!(await exigirSenhaDoMaster(req, res))) return;
+      patch.acessosConhecidos = lojaStatus.sanitizarAcessosConhecidos(req.body.acessosConhecidos);
+    }
     res.json(await lojaStatus.setConfig(patch));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -11442,6 +11630,29 @@ app.post('/api/tarefas/:id/comentarios', auth.requireAuth, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+app.patch('/api/tarefas/:id/descricao', auth.requireMaster, async (req, res) => {
+  try {
+    const atualizada = await tarefas.atualizarDescricao(req.params.id, acessoDasTarefas(req), req.body?.descricao);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/tarefas/:id/link-externo', auth.requireAuth, async (req, res) => {
+  try {
+    const criado = await tarefas.criarLinkExterno(req.params.id, acessoDasTarefas(req));
+    res.status(201).json({ link: `${APP_BASE_URL}/reuniao-publica.html?convite=${encodeURIComponent(criado.token)}` });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.delete('/api/tarefas/:id/link-externo', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.encerrarLinkExterno(req.params.id, acessoDasTarefas(req));
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {

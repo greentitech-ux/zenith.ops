@@ -604,7 +604,7 @@ function cardHtml(c){
   const linha = (rot, val) => ficha.push(`<dt>${rot}</dt><dd>${val}</dd>`);
   if(c.ipLocal) linha('IP local', `<b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-reiniciar" style="padding:2px 7px;font-size:10px;" onclick="copiarTexto('${escapeJs(c.ipLocal)}')">📋</button>`);
   if(c.ip) linha('IP público', escapeHtml(c.ip));
-  if(c.anydeskId) linha('AnyDesk', `<b>${escapeHtml(c.anydeskId)}</b>`);
+  if(c.anydeskId) linha('AnyDesk', `<b>${escapeHtml(c.anydeskId)}</b>${c.anydeskIdFonte === 'maquina' ? ' <span class="sub">· lido da máquina</span>' : ' <span class="sub">· referência cadastrada</span>'}`);
   if(c.ram && c.ram.totalGb != null){
     linha('RAM', `<b>${c.ram.totalGb} GB</b>${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}`
       + (c.ramMedidaEm ? ` <span class="sub">· medido ${escapeHtml(tempoRelativo(c.ramMedidaEm))}</span>` : ''));

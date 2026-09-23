@@ -141,6 +141,57 @@ function sanitizarRam(ram) {
   return out;
 }
 
+// Inventario resumido do hardware. Mantemos somente informacoes necessarias
+// para suporte e upgrade; numero de serie, asset tag e identificadores nao
+// entram na telemetria.
+function sanitizarHardware(hardware) {
+  if (!hardware || typeof hardware !== 'object') return null;
+  const out = {};
+  const textoHardware = (v, max = 120) => String(v || '').trim().replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').slice(0, max);
+  const p = hardware.processador;
+  if (p && typeof p === 'object') {
+    const nome = String(p.nome || '').trim().replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').slice(0, 160);
+    const inteiro = (v, min, max) => {
+      const n = Number(v);
+      return Number.isInteger(n) && n >= min && n <= max ? n : null;
+    };
+    const processador = {};
+    if (nome) processador.nome = nome;
+    const nucleos = inteiro(p.nucleos, 1, 256);
+    const threads = inteiro(p.threads, 1, 512);
+    const frequenciaMaxMhz = inteiro(p.frequenciaMaxMhz, 100, 10000);
+    if (nucleos != null) processador.nucleos = nucleos;
+    if (threads != null) processador.threads = threads;
+    if (frequenciaMaxMhz != null) processador.frequenciaMaxMhz = frequenciaMaxMhz;
+    if (Object.keys(processador).length) out.processador = processador;
+  }
+  const tiposValidos = new Set(['DDR', 'DDR2', 'DDR2 FB-DIMM', 'DDR3', 'DDR4', 'DDR5', 'Desconhecido']);
+  const memoria = (Array.isArray(hardware.memoria) ? hardware.memoria : [hardware.memoria])
+    .filter(Boolean).map((m) => {
+      const capacidadeGb = Number(m.capacidadeGb);
+      const frequenciaMhz = Number(m.frequenciaMhz);
+      const tipo = tiposValidos.has(String(m.tipo || '')) ? String(m.tipo) : 'Desconhecido';
+      if (!Number.isFinite(capacidadeGb) || capacidadeGb < 0.25 || capacidadeGb > 256) return null;
+      const mod = { capacidadeGb: Math.round(capacidadeGb * 10) / 10, tipo };
+      if (Number.isInteger(frequenciaMhz) && frequenciaMhz >= 100 && frequenciaMhz <= 10000) mod.frequenciaMhz = frequenciaMhz;
+      return mod;
+    }).filter(Boolean).slice(0, 16);
+  if (memoria.length) out.memoria = memoria;
+  const placa = hardware.placaMae;
+  if (placa && typeof placa === 'object') {
+    const fabricante = textoHardware(placa.fabricante);
+    const modelo = textoHardware(placa.modelo);
+    if (fabricante || modelo) out.placaMae = { ...(fabricante ? { fabricante } : {}), ...(modelo ? { modelo } : {}) };
+  }
+  const bios = hardware.bios;
+  if (bios && typeof bios === 'object') {
+    const fabricante = textoHardware(bios.fabricante);
+    const versao = textoHardware(bios.versao);
+    if (fabricante || versao) out.bios = { ...(fabricante ? { fabricante } : {}), ...(versao ? { versao } : {}) };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function diagnosticoRam(ram) {
   if (!ram || ram.totalGb == null || ram.livreGb == null) return null;
   const processo = (ram.processos || [])[0] || null;
@@ -510,7 +561,7 @@ function quedasDeVm(antesArr, depoisArr) {
 module.exports = {
   LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, RAM_LIVRE_CRITICA_GB, RAM_LIVRE_ATENCAO_GB, RAM_LIVRE_CRITICA_PCT, RAM_LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
   UPTIME_REINICIAR_DIAS,
-  sanitizarDisco, avaliarDisco, sanitizarRam, avaliarRam, diagnosticoRam, planoOtimizar, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
+  sanitizarDisco, avaliarDisco, sanitizarRam, sanitizarHardware, avaliarRam, diagnosticoRam, planoOtimizar, sanitizarVms, quedasDeVm, normalizarEstadoVm, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
   sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
   resumoDispositivos, discosComProblema, panorama,
 };

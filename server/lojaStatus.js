@@ -73,6 +73,43 @@ async function getConfig() {
   configCacheEm = Date.now();
   return configCache;
 }
+// ACESSOS REMOTOS CONHECIDOS (pedido do Master): o ID do AnyDesk de quem
+// ACESSA - o computador da TI, nao o da loja. Cadastrado uma vez, vale pras 52
+// maquinas: quem acessa e a pessoa, nao a maquina acessada.
+//
+// O QUE ELE FAZ E O QUE NAO FAZ: silencia o PUSH, nunca o historico. O evento
+// continua na aba Atividades com o nome de quem e, senao a lista viraria um
+// jeito de entrar na loja sem deixar rastro - e o valor do NOC e justamente
+// saber quem entrou.
+//
+// ID do AnyDesk e' numero de 6 a 16 digitos (mesma faixa do Medir-AnyDeskId no
+// vigiaScript). Guarda so digito: o Master pode digitar "123 456 789".
+function idAnydeskLimpo(valor) {
+  const so = String(valor == null ? '' : valor).replace(/\D/g, '');
+  return /^\d{6,16}$/.test(so) ? so : null;
+}
+function sanitizarAcessosConhecidos(lista) {
+  const vistos = new Set();
+  return (Array.isArray(lista) ? lista : []).map((item) => {
+    const id = idAnydeskLimpo(item && item.id);
+    if (!id || vistos.has(id)) return null;
+    vistos.add(id);
+    return { id, nome: String((item && item.nome) || '').trim().slice(0, 60) };
+  }).filter(Boolean).slice(0, 60);
+}
+
+// O agente manda a linha CRUA do log do AnyDesk; o ID de quem conectou esta
+// dentro dela. Procura todo numero da faixa e casa com a lista - assim nao
+// depende do formato exato da frase, que muda entre versoes do AnyDesk.
+// Ancorado em nao-digito dos dois lados: sem isso, um ID cadastrado de 9
+// digitos casaria dentro de um numero de 12 e silenciaria acesso de estranho.
+function acessoConhecidoDe(detalhe, conhecidos) {
+  const lista = sanitizarAcessosConhecidos(conhecidos);
+  if (!lista.length) return null;
+  const numeros = new Set(String(detalhe || '').match(/\d{6,16}/g) || []);
+  return lista.find((c) => numeros.has(c.id)) || null;
+}
+
 async function setConfig(patch) {
   await CONFIG_DOC.set(patch, { merge: true });
   configCache = null;
@@ -263,6 +300,103 @@ async function papelDeParedeDe(codigo, posto) {
 // da politica, contada de 1 em 1, e tem tela e teste que leem como numero.
 function versaoAplicacao(politicaVersao, arte) {
   return `${Number(politicaVersao || 0)}.${(arte && arte.versao) || 0}`;
+}
+
+// LOGOS DO MODELO BÁSICO (pedido do Master, 23/09/2026). Máquina sem arte
+// nenhuma mostrava tela preta; agora o agente monta ali o mesmo desenho das
+// artes do grupo: logo do GRUPO em cima, logo da MARCA num cartão branco, o
+// nome da máquina e a linha "MARCA · UNIDADE". Os logos não existiam em
+// lugar nenhum do sistema - o Master sobe um PNG por marca e um por grupo
+// (config.logosCarimbo, chave "marca:<id>" / "grupo:<empresaId>").
+//
+// A ARTE continua mandando: isto só entra quando não há arte que sirva
+// (papelDeParedeDe devolve null) ou quando a tela está sem imagem nenhuma.
+//
+// NÃO passa pela versão da política (versaoAplicacao): subir um logo faria
+// TODA máquina sem arte reaplicar a política inteira - Área de Trabalho,
+// arquivamento, barra - por causa de um PNG. O heartbeat leva uma versão
+// própria (versaoModeloBasico) e o agente só redesenha o papel de parede.
+//
+// Custo (§3): getConfig tem cache de 30s, perfil e empresa saem dos caches de
+// unidades.js/empresas.js. Nenhuma leitura nova por heartbeat.
+const TIPOS_LOGO_CARIMBO = ['marca', 'grupo'];
+const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
+async function logosDaUnidade(codigo) {
+  const cfg = await getConfig();
+  const logos = (cfg && cfg.logosCarimbo) || {};
+  const perfilUnidade = await unidades.perfil(codigo).catch(() => null);
+  const marca = (perfilUnidade && perfilUnidade.marca) || null;
+  const empresa = await empresas.empresaDaUnidade(codigo).catch(() => null);
+  const rede = empresa && empresa.id ? String(empresa.id) : null;
+  const tem = (k) => (logos[k] && logos[k].caminho ? logos[k] : null);
+  const logoMarca = marca ? tem(chaveLogoCarimbo('marca', marca)) : null;
+  const logoGrupo = rede ? tem(chaveLogoCarimbo('grupo', rede)) : null;
+  const versao = Math.max(Number(logoMarca && logoMarca.versao) || 0, Number(logoGrupo && logoGrupo.versao) || 0);
+  return { marca, rede, logoMarca, logoGrupo, versao };
+}
+// só paga a resolução quando existe ALGUM logo cadastrado: o heartbeat roda a
+// cada 25s nas 52 máquinas e, sem logo, a resposta é sempre 0
+async function versaoLogosDe(codigo) {
+  const cfg = await getConfig();
+  const logos = (cfg && cfg.logosCarimbo) || {};
+  if (!Object.values(logos).some((l) => l && l.caminho)) return 0;
+  return (await logosDaUnidade(codigo)).versao;
+}
+
+// Master sobe/remove um logo. Remover grava null em vez de apagar a chave: o
+// set com merge não apaga campo de mapa, e null já é lido como "sem logo".
+async function validarAlvoLogo(tipo, id) {
+  const t = String(tipo || '');
+  const i = String(id || '');
+  if (!TIPOS_LOGO_CARIMBO.includes(t)) throw new Error('Tipo de logo inválido (marca ou grupo).');
+  if (t === 'marca' && !unidades.MARCAS_VALIDAS.includes(i)) throw new Error('Marca inválida.');
+  if (t === 'grupo' && !(await empresas.listAtivas().catch(() => [])).some((e) => String(e.id) === i)) throw new Error('Grupo inválido.');
+  return chaveLogoCarimbo(t, i);
+}
+async function definirLogoCarimbo(tipo, id, logo) {
+  const chave = await validarAlvoLogo(tipo, id);
+  const atual = await getConfig();
+  const mapa = { ...((atual && atual.logosCarimbo) || {}), [chave]: logo };
+  const cfg = await setConfig({ logosCarimbo: mapa });
+  return { chave, ...cfg.logosCarimbo[chave] };
+}
+async function removerLogoCarimbo(tipo, id) {
+  const chave = await validarAlvoLogo(tipo, id);
+  const atual = await getConfig();
+  const mapa = { ...((atual && atual.logosCarimbo) || {}), [chave]: null };
+  await setConfig({ logosCarimbo: mapa });
+  return { chave, removido: true };
+}
+async function logoCarimboSalvo(tipo, id) {
+  const chave = await validarAlvoLogo(tipo, id);
+  const l = ((await getConfig()).logosCarimbo || {})[chave];
+  return l && l.caminho ? l : null;
+}
+// o agente baixa o logo pela rota DA MÁQUINA: quem escolhe qual logo é o
+// servidor (marca e grupo da unidade), como na arte. O token é conferido no
+// espelho em memória - baixar dois logos não custa leitura (§3).
+async function logoCarimboDaMaquina(codigo, posto, token, tipo) {
+  const doc = (await garantirEspelho()).get(docIdFor(codigo, posto));
+  if (!doc) throw new Error('Computador não encontrado.');
+  exigirTokenSeTiver(doc, token);
+  const l = await logosDaUnidade(codigo);
+  return tipo === 'grupo' ? l.logoGrupo : tipo === 'marca' ? l.logoMarca : null;
+}
+
+// a MESMA conta no heartbeat e na configuração do agente: se as duas
+// divergissem, a máquina redesenharia a cada batida
+function versaoModeloBasicoDe(versaoLogos, doc) {
+  return `${Number(versaoLogos) || 0}|${String((doc && doc.nome) || '').trim()}`;
+}
+
+// "DOMINO'S · TIROL": o nome da loja já vem com o prefixo da marca ("Dom
+// Tirol", "Spo Praça Aero Recife"); tira o prefixo pra não repetir a marca.
+const PREFIXOS_MARCA = /^(dom|dominos|domino's|spo|spoleto|milky\s*moo|mm|s[aã]o\s*braz|sb|saltiverso|salti)\s+/i;
+function linhaDoCarimbo(marca, unidadeNome) {
+  const rotulo = marca ? (unidades.MARCAS_LABEL[marca] || marca) : '';
+  const loja = String(unidadeNome || '').trim();
+  const semPrefixo = rotulo ? (loja.replace(PREFIXOS_MARCA, '').trim() || loja) : loja;
+  return (rotulo ? `${rotulo} · ${semPrefixo}` : semPrefixo).toUpperCase();
 }
 
 async function pushAcessoRemotoAtivo() {
@@ -912,13 +1046,21 @@ async function heartbeat(codigo, posto, info, token) {
   // que aqueles caminhos ja chamavam.
   const memoria = await garantirEspelho();
   const atual = memoria.get(id) || null;
-  const mensagemPendente = (atual && atual.mensagemPendente) || null;
   const dados = info || {};
+  // PRESENCA (v116): o vigia de travamento do agente bate so pra dizer "o
+  // laco principal esta preso em X, mas a maquina esta viva". Mantem a
+  // maquina no ar, mas NAO recebe comando nem consome o aviso de uso unico -
+  // quem os trataria e justamente o laco preso, e o que fosse entregue aqui
+  // se perderia.
+  const soPresenca = dados.soPresenca === true;
+  const mensagemPendente = soPresenca ? null : ((atual && atual.mensagemPendente) || null);
   // BATERIA: decidido com o estado ANTERIOR a esta batida (`atual`), e o
   // resultado entra no MESMO patch la embaixo. Ja foi um `ref.set` separado,
   // depois do patch - e ai a marca ia pro banco mas nao pro espelho em
   // memoria, que e de onde a proxima batida le: 25s depois o servidor nao
   // sabia que ja tinha avisado e mandava push de novo, pra sempre.
+  // A batida de "so presenca" vem do agente Windows e nunca traz aparelho,
+  // entao cai fora sozinha em precisaAvisarBateria.
   const avisoBateria = precisaAvisarBateria(atual, dados.aparelho);
   // presenca (online/offline, IP, userAgent) continua SEM exigir token - e
   // telemetria de baixo risco e nao pode deixar maquina legada (que ainda
@@ -943,8 +1085,8 @@ async function heartbeat(codigo, posto, info, token) {
     // marcava "Caiu" de novo, inventando queda que nao houve. Com
     // { merge: true }, nao citar o campo preserva o que estiver la.
     ip: dados.ip || (atual && atual.ip) || null,
-    userAgent: dados.userAgent || (atual && atual.userAgent) || null,
-    abertoDesde: dados.abertoDesde || (atual && atual.abertoDesde) || null,
+    userAgent: (!soPresenca && dados.userAgent) || (atual && atual.userAgent) || dados.userAgent || null,
+    abertoDesde: (!soPresenca && dados.abertoDesde) || (atual && atual.abertoDesde) || null,
     // diagnostico de link (ver redeDiagnostico.js). Entra nesta MESMA escrita
     // de proposito: o heartbeat ja grava a cada 25s, entao medir a rede nao
     // custa nenhuma operacao a mais no Firestore. redeDia/redeHistorico sao
@@ -970,7 +1112,8 @@ async function heartbeat(codigo, posto, info, token) {
     // que ENCERRA um silencio ja chega dizendo se a maquina esteve viva
     // tentando o tempo todo. E' o unico jeito de saber isso: durante o
     // silencio, por definicao, nada chega aqui.
-    agenteFalhasSeguidas: falhasDeQuemBate(dados.rede),
+    // presenca do vigia nao mede rede: nao zera o que a batida normal contou
+    agenteFalhasSeguidas: soPresenca ? ((atual && atual.agenteFalhasSeguidas) || 0) : falhasDeQuemBate(dados.rede),
   };
 
   // A instancia _Boot so existe quando a instalacao conseguiu criar a tarefa
@@ -1018,6 +1161,17 @@ async function heartbeat(codigo, posto, info, token) {
   // degradacao - dado de fora nunca decide sozinho a cor do card.
   const anydeskOk = sanitizarEstadoAnydesk(dados.anydeskServico);
   if (anydeskOk) patch.anydeskServico = anydeskOk;
+  // O vigia interno inclui o ID que acabou de ler do executável AnyDesk na
+  // própria batida. Aceitamos a mesma regra da telemetria: máquina moderna
+  // precisa provar o token; legado sem token continua compatível até atualizar.
+  const anydeskIdHeartbeat = sanitizarAnydeskId(dados.anydeskId);
+  const leituraAnydeskAutenticada = !(atual && atual.agentToken) || tokensBatem(token, atual.agentToken);
+  if (anydeskIdHeartbeat && leituraAnydeskAutenticada
+    && (anydeskIdHeartbeat !== (atual && atual.anydeskId) || (atual && atual.anydeskIdFonte) !== 'maquina')) {
+    patch.anydeskId = anydeskIdHeartbeat;
+    patch.anydeskIdEm = Date.now();
+    patch.anydeskIdFonte = 'maquina';
+  }
   if (linkNovo) {
     patch.link = linkNovo;
     patch.linkEm = Date.now();
@@ -1055,6 +1209,21 @@ async function heartbeat(codigo, posto, info, token) {
     patch.ipHistorico = comMudancaDeIp(atual && atual.ipHistorico, 'publico', atual && atual.ip, patch.ip);
   }
 
+  // AGENTE OCUPADO (v116): o vigia informa a etapa em que o laco empacou.
+  // So com token (senao qualquer um pintaria uma maquina de amarelo), e so a
+  // MESMA instancia que registrou limpa - a de boot batendo nao prova que a
+  // de login destravou.
+  const tokenDoBeat = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
+  const ocupadoAntes = (atual && atual.agenteOcupado) || null;
+  if (soPresenca && tokenDoBeat) {
+    const o = sanitizarOcupado(dados.ocupado);
+    if (o) patch.agenteOcupado = { ...o, em: Date.now() };
+  } else if (!soPresenca && ocupadoAntes && instanciaValida(dados.instancia) === ocupadoAntes.instancia) {
+    patch.agenteOcupado = null;
+  }
+
+  const mudouOcupado = patch.agenteOcupado !== undefined && !mesmoOcupado(patch.agenteOcupado, ocupadoAntes);
+
   // ---- decide se ESTA batida vira gravacao no Firestore ----
   // A leitura ja tinha sido resolvida (espelho em memoria); a ESCRITA nao.
   // Gravar toda batida dava, com ~40 maquinas a cada 25s, ~138 mil escritas
@@ -1076,6 +1245,8 @@ async function heartbeat(codigo, posto, info, token) {
     || patch.abertoDesde !== anterior.abertoDesde
     || (patch.tailscale !== undefined && !mesmoTailscale(patch.tailscale, anterior.tailscale || null))
     || patch.redeHistorico !== undefined      // virada de dia da rede
+    // entrou/saiu de uma etapa presa: e o que o painel mostra
+    || mudouOcupado
     // reinício e mudança de link são eventos: não podem esperar o
     // PERSIST_MS, senão um restart do servidor apagaria o rastro
     // a marca de bateria (avisei / rearmei) nao pode esperar o PERSIST_MS:
@@ -1107,7 +1278,8 @@ async function heartbeat(codigo, posto, info, token) {
   // leitura a reler as 52. Como o espelho acabou de ser atualizado na linha
   // acima com o que esta batida gravou, basta derrubar a LISTA derivada:
   // ela é recalculada a partir da memória, sem tocar no Firestore.
-  if (eventosNovos.length || patch.tailscale !== undefined) cacheBase.invalidar();
+  // travou/destravou tambem: e o que o painel precisa mostrar na hora
+  if (eventosNovos.length || patch.tailscale !== undefined || mudouOcupado) cacheBase.invalidar();
   // token confere? (maquina legada sem token cadastrado nunca passa aqui -
   // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
   const tokenOk = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
@@ -1118,7 +1290,7 @@ async function heartbeat(codigo, posto, info, token) {
   // o comando PowerShell do Master e ainda o consumia, deixando a maquina de
   // verdade sem receber)
   let comandoPendente = null;
-  if (tokenOk && atual.tipo === 'interno' && atual.comandoPendenteId) {
+  if (!soPresenca && tokenOk && atual.tipo === 'interno' && atual.comandoPendenteId) {
     // souAdmin: o agente diz se esta rodando elevado (a instancia SYSTEM diz
     // true; a de login, usuario comum, false). soComandoAdmin: a sondagem da
     // instancia SYSTEM enquanto cede a vez - "so me de comando que exige admin,
@@ -1151,6 +1323,11 @@ async function heartbeat(codigo, posto, info, token) {
   // pesquisar de tempos em tempos custaria milhares de leituras por dia (§3).
   const politicaLigada = !!(atual && atual.politica && atual.politica.papelDeParedeAtivo);
   const arteDaMaquina = politicaLigada ? await papelDeParedeDe(codigo, posto || 'principal') : null;
+  // versão do modelo básico: só pra quem NÃO tem arte (com arte, logo novo
+  // não muda nada na tela). Leva o nome da máquina junto: renomear no NOC
+  // redesenha o nome escrito na tela.
+  const versaoModeloBasico = arteDaMaquina ? null
+    : versaoModeloBasicoDe(await versaoLogosDe(codigo).catch(() => 0), atual);
   return {
     mensagemPendente,
     comandoPendente,
@@ -1160,6 +1337,7 @@ async function heartbeat(codigo, posto, info, token) {
     noPulsoPrint: !!(atual && atual.noPulsoPrint),
     capturarAgora,
     versaoAplicacao: versaoAplicacao(atual && atual.politicaVersao, arteDaMaquina),
+    versaoModeloBasico,
     // Pedido one-shot também viaja no heartbeat. A versão da política é o
     // gatilho normal, mas um marcador local antigo ou uma corrida entre as
     // instâncias de login/SYSTEM não pode deixar a leitura presa para sempre.
@@ -1203,8 +1381,37 @@ function mesmoTailscale(a, b) {
     && a.nome === b.nome && a.versao === b.versao;
 }
 
-function motivosDeDegradacao(doc) {
+const INSTANCIAS_AGENTE = ['login', 'sistema'];
+function instanciaValida(v) { return INSTANCIAS_AGENTE.includes(v) ? v : null; }
+function sanitizarOcupado(bruto) {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const etapa = String(bruto.etapa || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 80);
+  const desde = Number(bruto.desde);
+  const instancia = instanciaValida(bruto.instancia);
+  if (!etapa || !Number.isFinite(desde) || desde <= 0 || !instancia) return null;
+  // relogio da maquina pode estar adiantado: "desde" no futuro vira agora
+  return { etapa, desde: Math.min(desde, Date.now()), instancia };
+}
+function mesmoOcupado(a, b) {
+  if (!a || !b) return a === b;
+  return a.etapa === b.etapa && a.desde === b.desde && a.instancia === b.instancia;
+}
+// ocupado ha mais que isto vira motivo de degradacao. Comando longo (a
+// limpeza de programas) passa de alguns minutos sem estar travado; 10min
+// sem terminar uma volta ja e motivo pra olhar.
+const AGENTE_OCUPADO_LIMIAR_MS = 10 * 60 * 1000;
+// o registro so vale enquanto o vigia continua batendo: sem presenca nova, a
+// maquina ou destravou (e a batida normal limpa) ou caiu (e ai e offline)
+const AGENTE_OCUPADO_FRESCO_MS = 3 * 60 * 1000;
+
+function motivosDeDegradacao(doc, agora = Date.now()) {
   const motivos = [];
+  const oc = doc.agenteOcupado;
+  if (oc && oc.etapa && agora - Number(oc.em || 0) < AGENTE_OCUPADO_FRESCO_MS
+    && agora - Number(oc.desde || 0) >= AGENTE_OCUPADO_LIMIAR_MS) {
+    const min = Math.floor((agora - Number(oc.desde)) / 60000);
+    motivos.push(`agente ocupado há ${min}min em: ${oc.etapa}${oc.instancia === 'sistema' ? ' (instância de sistema)' : ''}`);
+  }
   const link = doc.link || null;
   if (link && link.ethernetCaida) motivos.push('Ethernet caída');
   if (link && link.tipo === 'wifi' && !link.ethernetCaida) motivos.push('só no Wi-Fi');
@@ -1283,9 +1490,50 @@ const CAMPOS_SO_DO_DETALHE = [
   'ultimoComandoTexto', 'ultimoComandoResultado', 'ultimoComandoErro',
   'atalhosDesktop', 'atalhosBarraTarefas',
 ];
+// DISPOSITIVO COM TIPO VIRA CARD. Pedido do Master (23/09): "apos colocar
+// [o Tipo] podem virar Card automaticamente? PULSE, ZEBRA, BEMATECH, TOTEM" e
+// "sempre usando o MAC como fixador, pois o IP pode mudar e preciso saber
+// quando o IP daquele MAC mudar".
+//
+// Por que so os COM TIPO: a lista de dispositivos saiu do resumo de proposito
+// (e a varredura inteira da rede - celular, TV, MAC aleatorio - e foi ela que
+// estourou os 5 GB do Render em 20/08). Tipo e o mesmo criterio que o
+// alarme de troca de IP ja usa pra "equipamento conhecido" (acompanhaIpPorMac),
+// entao so volta o punhado que alguem categorizou, com poucos campos.
+//
+// O MAC e a identidade; o IP e so o endereco de agora. Por isso vai junto a
+// ULTIMA troca registrada no ipHistorico daquele MAC (de, para, quando).
+//
+// estado usa o MESMO limiar do alarme (DISPOSITIVO_OFFLINE_LIMIAR_MS): quem
+// le o card e quem recebe o alerta tem que ver a mesma coisa. E nao e "ao
+// vivo": dispositivo nao tem agente, quem o enxerga e a varredura do host,
+// ~1x por hora - o card diz "visto ha X", nunca uma bolinha em tempo real.
+const DISPOSITIVOS_COM_TIPO_MAX = 30;
+function dispositivosComTipoDe(doc, agora) {
+  const lista = Array.isArray(doc && doc.dispositivos) ? doc.dispositivos : [];
+  const quando = agora || Date.now();
+  return lista
+    .filter((d) => d && d.mac && d.tipo)
+    .slice(0, DISPOSITIVOS_COM_TIPO_MAX)
+    .map((d) => {
+      const hist = Array.isArray(d.ipHistorico) ? d.ipHistorico : [];
+      const ultima = hist.length ? hist[hist.length - 1] : null;
+      const semVerHaMs = quando - (d.visto || 0);
+      const estado = d.ativo !== false ? 'na-rede'
+        : (semVerHaMs >= DISPOSITIVO_OFFLINE_LIMIAR_MS ? 'sem-rede' : 'sem-confirmacao');
+      return {
+        mac: d.mac, ip: d.ip || null, visto: d.visto || null, estado,
+        apelido: d.apelido || null, nome: d.nome || null, fabricante: d.fabricante || null,
+        tipo: d.tipo, tipoRotulo: d.tipoRotulo || null, monitorar: !!d.monitorar, marca: d.marca || null,
+        ipMudou: ultima && ultima.de ? { de: ultima.de, para: ultima.para || d.ip || null, em: ultima.em || null } : null,
+      };
+    });
+}
 function resumoDe(doc) {
   const copia = { ...doc };
   CAMPOS_SO_DO_DETALHE.forEach((campo) => { delete copia[campo]; });
+  const comTipo = dispositivosComTipoDe(doc);
+  if (comTipo.length) copia.dispositivosComTipo = comTipo;
   return copia;
 }
 async function listarResumo() {
@@ -1382,7 +1630,7 @@ async function tokenDoComputador(codigo, posto) {
 const ITENS_ESTACAO_APROVAVEIS = [
   'nopulso', 'anydesk', 'rdp-dominos', 'degust', 'gestor-pedidos-ifood',
   'gestor-pedidos-99food', 'gerenciadorlinxfood', 'advancedip', 'teamviewer',
-  'suporte-linx-whatsapp', 'google-chrome',
+  'suporte-linx-whatsapp', 'google-chrome', 'gcom',
 ];
 function normalizarNomeAtalho(valor) {
   const nome = String(valor || '').trim().toLocaleLowerCase('pt-BR')
@@ -1589,7 +1837,7 @@ async function registrarProgramas(codigo, posto, lista, token) {
   return { novos, sumidos: sumidosAlerta, nome, primeira };
 }
 
-async function configuracaoAgente(codigo, posto, token) {
+async function configuracaoAgente(codigo, posto, token, { unidadeNome } = {}) {
   const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
   if (!snap.exists) throw new Error('Computador não encontrado.');
   const atual = snap.data();
@@ -1607,12 +1855,31 @@ async function configuracaoAgente(codigo, posto, token) {
   // so resolve a arte quando a maquina de fato aplica papel de parede: quem
   // esta com a chave desligada nao paga leitura de config nem de unidades
   const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo, posto) : null;
+  // o modelo básico vale pra quem não tem arte E pra tela sem imagem de quem
+  // está com a chave desligada - então resolve os logos nos dois casos
+  const logos = arte ? null : await logosDaUnidade(codigo).catch(() => null);
   return {
     noPulsoPrint: !!atual.noPulsoPrint,
     capturarAgora,
     politica,
     politicaVersao: Number(atual.politicaVersao || 0),
     versaoAplicacao: versaoAplicacao(atual.politicaVersao, arte),
+    // papel de parede ligado e NENHUMA arte que sirva pra esta máquina (nem
+    // dela, nem do grupo/marca, nem a padrão): o agente aplica só o carimbo
+    // (loja + máquina) na tela preta. Vai como campo próprio em vez de o
+    // agente deduzir pelo 404 da imagem: o 404 também sai quando o Storage
+    // falha a leitura, e aí uma arte que existe viraria tela preta.
+    papelDeParedeSemArte: !!politica.papelDeParedeAtivo && !arte,
+    versaoModeloBasico: arte ? null : versaoModeloBasicoDe(logos ? logos.versao : 0, atual),
+    // o que o modelo básico escreve e quais logos a máquina deve baixar (a
+    // imagem sai pela rota da própria máquina, com o token dela)
+    modeloBasico: arte ? null : {
+      maquina: String(atual.nome || '').trim() || posto,
+      linha: linhaDoCarimbo(logos && logos.marca, unidadeNome || codigo),
+      marcaRotulo: logos && logos.marca ? (unidades.MARCAS_LABEL[logos.marca] || logos.marca) : null,
+      logoMarca: !!(logos && logos.logoMarca),
+      logoGrupo: !!(logos && logos.logoGrupo),
+    },
   };
 }
 
@@ -1831,16 +2098,24 @@ async function moverComputador(codigoAtual, posto, codigoNovo) {
   return semSegredo(registro);
 }
 
-// Master configura o ID do AnyDesk daquele computador pra acesso remoto
-// rapido - funciona mesmo se o computador nunca mandou heartbeat ainda, por
-// isso o merge:true (nao exige ja existir)
+// O valor digitado pelo Master fica apenas como referência de cadastro. Quando
+// a própria máquina já confirmou seu ID, uma edição manual jamais a substitui:
+// o botão de acesso deve apontar para o número que o AnyDesk local devolveu.
 async function definirAnydeskId(codigo, posto, anydeskId) {
   const id = docIdFor(codigo, posto);
   const limpo = sanitizarAnydeskId(anydeskId);
-  const patchAnydesk = { codigo, posto, anydeskId: limpo || null };
+  const snap = await COLLECTION.doc(id).get();
+  const atual = snap.exists ? snap.data() : null;
+  const patchAnydesk = { codigo, posto, anydeskIdManual: limpo || null, anydeskIdManualEm: Date.now() };
+  // Mantém compatibilidade para máquinas que ainda nunca falaram com o agente.
+  // Assim que o vigia fizer a leitura local, registrarTelemetria prevalece.
+  if (!atual || atual.anydeskIdFonte !== 'maquina') {
+    patchAnydesk.anydeskId = limpo || null;
+    patchAnydesk.anydeskIdFonte = limpo ? 'cadastro' : null;
+  }
   await COLLECTION.doc(id).set(patchAnydesk, { merge: true });
   espelharEscrita(id, patchAnydesk);
-  return { codigo, posto, anydeskId: limpo || null };
+  return { codigo, posto, anydeskId: (atual && atual.anydeskIdFonte === 'maquina') ? atual.anydeskId : (limpo || null), fonte: (atual && atual.anydeskIdFonte === 'maquina') ? 'maquina' : 'cadastro' };
 }
 
 // AnyDesk exibe um identificador público numérico. Aceitar somente esse
@@ -1936,6 +2211,11 @@ async function registrarTelemetria(codigo, posto, dados, token) {
       patch.ramAlertaPendente = depois.nivel;
     }
   }
+  const hardware = nocMaquina.sanitizarHardware(dados && dados.hardware);
+  if (hardware && JSON.stringify(hardware) !== JSON.stringify(atual.hardware || null)) {
+    patch.hardware = hardware;
+    patch.hardwareMedidoEm = agora;
+  }
   const disco = nocMaquina.sanitizarDisco(dados && dados.disco);
   if (disco) {
     const antes = nocMaquina.avaliarDisco(atual.disco);
@@ -1979,9 +2259,10 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   const anydeskTelemetria = sanitizarEstadoAnydesk(dados && dados.anydeskServico);
   if (anydeskTelemetria && JSON.stringify(anydeskTelemetria) !== JSON.stringify(atual.anydeskServico || null)) patch.anydeskServico = anydeskTelemetria;
   const anydeskIdTelemetria = sanitizarAnydeskId(dados && dados.anydeskId);
-  if (anydeskIdTelemetria && anydeskIdTelemetria !== atual.anydeskId) {
+  if (anydeskIdTelemetria && (anydeskIdTelemetria !== atual.anydeskId || atual.anydeskIdFonte !== 'maquina')) {
     patch.anydeskId = anydeskIdTelemetria;
     patch.anydeskIdEm = agora;
+    patch.anydeskIdFonte = 'maquina';
   }
   const linkTelemetria = sanitizarLink(dados && dados.link);
   if (linkTelemetria) {
@@ -2292,11 +2573,16 @@ const COMANDO_DIAGNOSTICO_DESEMPENHO = [
   '$cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property LoadPercentage -Average',
   'if ($cpu.Count -gt 0 -and $null -ne $cpu.Average) { $linhas.Add("CPU agora: $([math]::Round($cpu.Average))%") }',
   '$volumes = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Size) { "DISCO $($_.DeviceID): $([math]::Round($_.FreeSpace/1GB,1)) GB livres de $([math]::Round($_.Size/1GB,1)) GB" } }',
-  '$linhas.AddRange(@($volumes))',
+  // [string[]] NAO e enfeite: List[string].AddRange so aceita
+  // IEnumerable[string], e @(...) no PowerShell produz object[], que NAO
+  // converte. Sem o cast, a PRIMEIRA linha de disco derruba o diagnostico
+  // inteiro com "Cannot convert argument collection" - e era isso que o
+  // Master via no cartao da maquina em vez do relatorio.
+  '$linhas.AddRange([string[]]@($volumes))',
   '$fisicos = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object { "DISCO FÍSICO: $($_.FriendlyName) · saúde $($_.HealthStatus) · operacional $($_.OperationalStatus)" })',
-  'if ($fisicos) { $linhas.AddRange($fisicos) }',
+  'if ($fisicos) { $linhas.AddRange([string[]]@($fisicos)) }',
   '$top = Get-Process -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 6 | ForEach-Object { "$($_.ProcessName): $([math]::Round($_.WorkingSet64/1MB)) MB" }',
-  'if ($top) { $linhas.Add("MAIORES CONSUMOS:"); $linhas.AddRange(@($top)) }',
+  'if ($top) { $linhas.Add("MAIORES CONSUMOS:"); $linhas.AddRange([string[]]@($top)) }',
   '$desde = (Get-Date).AddDays(-7)',
   '$linhas.Add("EVENTOS CRÍTICOS DOS ÚLTIMOS 7 DIAS:")',
   'try {',
@@ -2357,6 +2643,31 @@ const COMANDO_LIMPEZA_SEGURA = [
   'try { Clear-RecycleBin -Force -ErrorAction Stop; $lixeira = "limpa" } catch { $lixeira = "não disponível/contém itens em uso" }',
   '$depois = & $espacoLivre',
   '"OTIMIZAÇÃO SEGURA: $apagados item(ns) temporário(s) removido(s) · $falhas pulado(s) por uso/permissão · Lixeira: $lixeira. Espaço livre antes: $antes · depois: $depois. Nenhum programa, documento ou download foi removido."',
+].join('\n');
+
+// Corrige SOMENTE limites deixados no carregamento do Windows (por exemplo,
+// "Memória máxima" no msconfig). Não tenta "forçar" RAM que um Windows de
+// 32 bits ou o hardware reservado para vídeo não pode entregar. Assim o
+// resultado explica a causa real antes de uma alteração e só pede reinício
+// quando um limite BCD foi realmente removido.
+const COMANDO_CORRIGIR_MEMORIA_LIMITADA = [
+  '$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+  'if (-not $admin) { throw "A correção de memória exige o NOCZenith elevado (SYSTEM)." }',
+  '$os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop',
+  '$pc = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop',
+  '$instalada = [math]::Round([double]$pc.TotalPhysicalMemory / 1GB, 2)',
+  '$utilizavel = [math]::Round([double]$os.TotalVisibleMemorySize / 1MB, 2)',
+  '$reservada = [math]::Max(0, [math]::Round($instalada - $utilizavel, 2))',
+  '$arquitetura = [string]$os.OSArchitecture',
+  '"MEMÓRIA: instalada $instalada GB · utilizável $utilizavel GB · diferença/reserva $reservada GB · Windows $arquitetura."',
+  'if ($arquitetura -notmatch "64") { "NÃO ALTERADO: este é um Windows 32 bits, que usa cerca de 3,5 GB no máximo. Para usar toda a RAM, instale Windows 64 bits."; exit 0 }',
+  '$bcdAntes = (& bcdedit /enum "{current}" 2>&1 | Out-String)',
+  '$temRemover = $bcdAntes -match "(?im)^\\s*removememory\\s+"',
+  '$temTruncar = $bcdAntes -match "(?im)^\\s*truncatememory\\s+"',
+  'if (-not $temRemover -and -not $temTruncar) { "NÃO ALTERADO: não há limite de memória no boot do Windows. A diferença exibida é reserva de hardware/BIOS ou módulo de RAM; verifique vídeo integrado, encaixe e diagnóstico da memória."; exit 0 }',
+  'if ($temRemover) { & bcdedit /deletevalue "{current}" removememory; if ($LASTEXITCODE -ne 0) { throw "Não foi possível remover o limite removememory." } }',
+  'if ($temTruncar) { & bcdedit /deletevalue "{current}" truncatememory; if ($LASTEXITCODE -ne 0) { throw "Não foi possível remover o limite truncatememory." } }',
+  '"CORRIGIDO: limite de inicialização removido. Reinicie a máquina para o Windows recalcular a memória utilizável."',
 ].join('\n');
 
 // Remove suites e aplicativos do Office usando SOMENTE os desinstaladores
@@ -2733,46 +3044,28 @@ const COMANDO_ABORTAR_REINICIO = [
   'try { shutdown /a; "Reinicio abortado." } catch { "Nao havia reinicio em contagem." }',
 ].join('\n');
 
-const COMANDO_RESET_SENHA = [
-  '# Requer: agente rodando como SYSTEM (Boot NOCZenith) ou admin elevado',
-  'try {',
-  '  # Excluir contas de sistema e admin (em inglês E português)',
-  '  $usuariosExcluir = @("Administrator", "Administrador", "Guest", "Convidado", "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE", "DefaultAccount", "Público")',
-  '  $usuarios = Get-LocalUser | Where-Object { $_.Name -notin $usuariosExcluir }',
-  '  ',
-  '  # Preferir "User" se existir; senão pega o primeiro não-admin',
-  '  $usuario = $usuarios | Where-Object { $_.Name -eq "User" } | Select-Object -First 1',
-  '  if (-not $usuario) {',
-  '    $usuario = $usuarios | Select-Object -First 1',
-  '  }',
-  '  $usuario = $usuario | Select-Object -ExpandProperty Name',
-  '  ',
-  '  if ($usuario) {',
-  '    $charset = "abcdefghijklmnopqrstuvwxyz0123456789"',
-  '    $senha = ""',
-  '    1..16 | ForEach-Object { $senha += $charset.Substring((Get-Random -Maximum $charset.Length), 1) }',
-  '    ',
-  '    # Tenta 1: Set-LocalUser (PowerShell 5.1+, mais novo)',
-  '    try {',
-  '      $pass = ConvertTo-SecureString $senha -AsPlainText -Force',
-  '      Set-LocalUser -Name $usuario -Password $pass -ErrorAction Stop',
-  '      "✓ Senha resetada para $usuario. Nova: $senha"',
-  '    } catch {',
-  '      # Tenta 2: net user como fallback',
-  '      $resultado = & cmd /c "net user $usuario $senha" 2>&1',
-  '      if ($LASTEXITCODE -eq 0) {',
-  '        "✓ Senha resetada para $usuario. Nova: $senha"',
-  '      } else {',
-  '        "Erro: REQUER ADMIN - execute o agente NOCZenith como Administrador ou SYSTEM"',
-  '      }',
-  '    }',
-  '  } else {',
-  '    "Erro: nenhum usuario local encontrado para resetar."',
-  '  }',
-  '} catch {',
-  '  "Erro: $_"',
-  '}',
-].join('\n');
+// Nome tratado como dado literal: nunca interpolar em codigo PowerShell executavel.
+function comandoResetSenha(nomeConta) {
+  if (typeof nomeConta !== 'string' || !nomeConta.trim() || nomeConta.trim().length > 20 || /[\x00-\x1f\x7f"/\\[\]:;|=,+*?<>@]/.test(nomeConta)) {
+    throw new Error('Informe um nome de conta local válido (até 20 caracteres).');
+  }
+  const literal = nomeConta.trim().replace(/'/g, "''");
+  return [
+    "$usuario = '" + literal + "'",
+    'try {',
+    '  $conta = @(Get-LocalUser -ErrorAction Stop | Where-Object { $_.Name -eq $usuario })',
+    '  if ($conta.Count -ne 1) { throw "Conta local nao encontrada: $usuario" }',
+    '  if ($conta[0].SID.Value -match "-(500|501|503|504)$") { throw "Conta interna do Windows protegida." }',
+    '  if (-not $conta[0].Enabled) { throw "A conta esta desabilitada." }',
+    '  $pass = New-Object System.Security.SecureString',
+    '  Set-LocalUser -Name $conta[0].Name -Password $pass -ErrorAction Stop',
+    '  "Senha removida da conta $usuario."',
+    '} catch {',
+    '  "Erro ao remover a senha de ${usuario}: $_"',
+    '  exit 1',
+    '}',
+  ].join('\n');
+}
 
 // Dispara um comando fixo numa LISTA de alvos escolhida pelo painel (1
 // máquina, uma unidade inteira, ou várias unidades de uma vez). Mesma
@@ -3290,9 +3583,9 @@ async function marcarComandoExpiradoSemAdmin(comandoId, codigo, posto, msg) {
 }
 
 // Não há como cancelar com segurança um PowerShell que já chegou à máquina.
-// Mas, se ela não devolve resultado dentro do teto, o estado "entregue" deixa
-// de ser honesto. Fecha como erro e libera SOMENTE a vaga que ainda pertence
-// a este comando; uma resposta tardia é descartada por marcarComandoExecutado.
+// Portanto timeout NÃO libera a vaga: sem confirmação de término, promover o
+// próximo comando poderia executar dois comandos ao mesmo tempo na máquina.
+// Erro devolvido normalmente pelo agente continua liberando a fila na hora.
 async function marcarComandoTravado(comandoId, codigo, posto) {
   const comandoRef = COMANDOS_COLLECTION.doc(String(comandoId || ''));
   const computadorRef = COLLECTION.doc(docIdFor(codigo, posto));
@@ -3303,13 +3596,13 @@ async function marcarComandoTravado(comandoId, codigo, posto) {
     const comando = comandoSnap.data();
     const entregueEm = new Date(comando.entregueEm || 0).getTime();
     if (comando.status !== 'entregue' || !Number.isFinite(entregueEm) || Date.now() - entregueEm < COMANDO_EXECUCAO_TIMEOUT_MS) return;
+    if (comando.timeoutDetectadoEm) return;
     const computadorSnap = await tx.get(computadorRef);
     const agora = new Date().toISOString();
-    const erro = 'Tempo limite de execução atingido: o agente não devolveu resultado em 10 minutos. Verifique a máquina e envie novamente se necessário.';
-    tx.update(comandoRef, { status: 'erro', erro, executadoEm: agora });
+    const erro = 'O agente não devolveu resultado em 10 minutos. A fila permanece bloqueada até esta máquina confirmar o término, evitando dois comandos simultâneos.';
+    tx.update(comandoRef, { timeoutDetectadoEm: agora, avisoTimeout: erro });
     if (computadorSnap.exists && computadorSnap.data().comandoPendenteId === String(comandoId)) {
-      const fila = filaDeComandos(computadorSnap.data()).filter((id) => id !== String(comandoId));
-      tx.update(computadorRef, { comandosFilaIds: fila, comandoPendenteId: fila[0] || null, comandoAguardandoElevacaoDesde: null });
+      tx.update(computadorRef, { comandoTravadoDesde: agora });
     }
     travou = true;
   });
@@ -3414,9 +3707,8 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   const snap = await comandoRef.get();
   if (!snap.exists) throw new Error('Comando não encontrado.');
   const comando = snap.data();
-  // Resultado atrasado de uma execução que o servidor já classificou como
-  // travada não pode "ressuscitar" o comando nem liberar uma nova vaga da
-  // máquina. O agente recebe 409 e registra no log, sem expor saída na tela.
+  // Mesmo após alerta de timeout, "entregue" permanece aguardando a resposta
+  // autenticada que comprova o término e pode liberar a próxima vaga.
   if (comando.status !== 'entregue') {
     throw new Error(comando.status === 'erro'
       ? 'O resultado chegou depois do limite e o comando já foi fechado como erro.'
@@ -3454,9 +3746,12 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
     comandosFilaIds: filaRestante,
     comandoPendenteId: filaRestante[0] || null,
     comandoAguardandoElevacaoDesde: null,
+    comandoTravadoDesde: null,
     ultimoComandoEm: patch.executadoEm,
     ultimoComandoTexto: String(comando.comando || '').slice(0, 200),
-    ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 2000) : null,
+    // 4000: a leitura do log do agente (ação "Ler log do agente") traz ~40
+    // linhas; em 2000 a parte mais recente - a que diz onde travou - sumia
+    ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 4000) : null,
     ultimoComandoErro: patch.erro ? String(patch.erro).slice(0, 500) : null,
     ...(inventarioAtalhos ? { atalhosDesktop: inventarioAtalhos, atalhosDesktopEm: Date.now() } : {}),
     ...(eventoZebra ? { eventos: [...((compSnap.data() || {}).eventos || []), eventoZebra].slice(-EVENTOS_MAX) } : {}),
@@ -3799,9 +4094,8 @@ async function varrerAlertas() {
         });
       }
     }
-    // Comando que chegou ao agente mas não retornou: fecha a fila em vez de
-    // mantê-la indefinidamente em "executando". A função confirma o status e
-    // o horário no documento do comando dentro de transação antes de alterar.
+    // Comando que chegou ao agente mas não retornou: alerta uma vez e mantém a
+    // fila bloqueada. Só a resposta autenticada da máquina libera o próximo.
     if (candidato.comandoPendenteId && !candidato.comandoAguardandoElevacaoDesde) {
       try {
         const travou = await marcarComandoTravado(candidato.comandoPendenteId, candidato.codigo, candidato.posto);
@@ -3809,7 +4103,7 @@ async function varrerAlertas() {
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
             tipo: 'comando-travado',
-            motivo: 'O agente não devolveu resultado em 10 minutos; a fila foi liberada com erro.',
+            motivo: 'O agente não devolveu resultado em 10 minutos; a fila foi bloqueada por segurança até a máquina confirmar o término.',
           });
         }
       } catch (e) { /* a próxima varredura tenta novamente */ }
@@ -4409,6 +4703,7 @@ module.exports = {
   // precisa comecar cada cenario do zero
   _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
+  sanitizarAcessosConhecidos, acessoConhecidoDe, idAnydeskLimpo,
   listarCatalogoProgramas, salvarCatalogoProgramas, comandoInstalarCatalogo, comandoRemoverPrograma, programaPodeSerRemovido,
   definirArteDaMaquina, removerArteDaMaquina,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
@@ -4426,11 +4721,15 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora, medidorDaUnidade, normalizarEntradaApelido, enderecoAtualDoMac,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
-  COMANDO_REDE_DESTRAVAR, COMANDO_RESET_SENHA,
+  dispositivosComTipoDe, resumoDe,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
+  COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
+  sanitizarOcupado, AGENTE_OCUPADO_LIMIAR_MS,
+  logosDaUnidade, versaoLogosDe, versaoModeloBasicoDe, linhaDoCarimbo, chaveLogoCarimbo, TIPOS_LOGO_CARIMBO,
+  definirLogoCarimbo, removerLogoCarimbo, logoCarimboSalvo, logoCarimboDaMaquina,
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,

@@ -42,7 +42,7 @@
     lista.innerHTML = abertos.map((a) => {
       const nivel = a.critico ? 'critico' : 'atencao';
       const estado = a.estado === 'voltou' ? 'normalizado' : nivel;
-      return `<article class="i ${nivel}"><div class="it"><i class="dot"></i><div><h2>${esc(a.titulo || tipo(a))}</h2><div class="u">${esc(tipo(a))}${a.atendidoPorEmail ? ` · ${esc(a.atendidoPorEmail)}` : ''}</div></div><span class="nivel">${estado}</span></div>${a.resumo ? `<p class="motivo">${esc(a.resumo)}</p>` : ''}${ciclo(a) ? `<p class="tempo">${esc(ciclo(a))}</p>` : ''}<div class="foot"><span class="tempo">registrado ${esc(tempo(a.criadoEm))}</span><span>${a.url ? `<a class="abrir" href="${esc(a.url)}">Abrir →</a>` : ''}${dados.podeAtender ? `<button class="abrir" type="button" style="background:#181d24;color:#b8ff3c;cursor:pointer;font-weight:700" onclick="window.nocAtender('${esc(a.id)}')">✓ Atender</button>` : ''}</span></div></article>`;
+      return `<article class="i ${nivel}"><div class="it"><i class="dot"></i><div><h2>${esc(a.titulo || tipo(a))}</h2><div class="u">${esc(tipo(a))}${a.atendidoPorEmail ? ` · ${esc(a.atendidoPorEmail)}` : ''}</div></div><span class="nivel">${estado}</span></div>${a.resumo ? `<p class="motivo">${esc(a.resumo)}</p>` : ''}${ciclo(a) ? `<p class="tempo">${esc(ciclo(a))}</p>` : ''}<div class="foot"><span class="tempo">registrado ${esc(tempo(a.criadoEm))}</span><span>${a.url ? `<a class="abrir" href="${esc(a.url)}">Abrir →</a>` : ''}${dados.podeAtender ? `<button class="abrir" type="button" style="background:#181d24;color:var(--accent,#b8ff3c);cursor:pointer;font-weight:700" onclick="window.nocAtender('${esc(a.id)}')">✓ Atender</button>` : ''}</span></div></article>`;
     }).join('');
   }
   window.nocAtender = atender;

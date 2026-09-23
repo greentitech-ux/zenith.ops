@@ -49,20 +49,68 @@ const TIPOS_ACAO = ['comando_maquina', 'acao_sistema'];
 // antes, pra saber o nome exato em cada maquina) e a LIMPEZA com essa lista.
 //
 // A limpeza roda como o usuario logado (ver vigiaScript.js): app da Loja,
-// atalho-app do Chrome e OneDrive saem sem Administrador; TeamViewer e
-// AteraAgent sao instalacao de maquina e ficam PULADOS quando o NOCZenith
-// nao e' admin - a saida diz isso, maquina por maquina. Mexe SO nos nomes da
-// lista: Chrome, Drive, Gmail e PDV nao aparecem aqui de proposito.
-// Teto do comando: 4000 caracteres (ver validarDados).
+// atalho-app do Chrome e OneDrive saem sem Administrador; o que e instalacao
+// de MAQUINA (TeamViewer, AteraAgent, Play Games, Update Health Tools, Edge)
+// fica PULADO quando o NOCZenith nao e admin - a saida diz isso, maquina por
+// maquina. Mexe SO nos nomes da lista: Chrome, Drive, Gmail e PDV nao
+// aparecem aqui de proposito.
+//
+// 22/09/2026 o Master mandou incluir Google Play Games, Microsoft Update
+// Health Tools e o MICROSOFT EDGE. O Edge foi decisao consciente dele depois
+// de eu levantar o custo: o agente usa a politica do Edge (junto com a do
+// Chrome) pra instalar o app NoPulso, entao nestas maquinas o app passa a
+// depender so do Chrome. A trava programaPodeSerRemovido() do lojaStatus.js
+// continua barrando o Edge na remocao AVULSA pelo painel - o que ele liberou
+// foi este procedimento revisado, nao remover componente do Windows a clique.
+// Teto do comando: 8000 caracteres (ver validarDados).
 const MODELO_INVENTARIO = `# Inventario de programas instalados (NoPulso) - so LE, nao muda nada.
 $k = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
 $p = @(Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and -not $_.SystemComponent } | Sort-Object DisplayName -Unique | ForEach-Object { '{0} | {1} | {2}' -f $_.DisplayName, $_.DisplayVersion, $_.Publisher })
 $a = @(Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object { -not $_.IsFramework -and $_.SignatureKind -ne 'System' } | Sort-Object Name | ForEach-Object { '{0} | {1} | app da Loja' -f $_.Name, $_.Version })
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$cv = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion' -ErrorAction SilentlyContinue
+"Windows: $($cv.ProductName) | edicao $($cv.EditionID) | versao $($cv.DisplayVersion) | build $($cv.CurrentBuild).$($cv.UBR)"
 "Administrador: $admin"; "PROGRAMAS ($($p.Count)):"; $p | Select-Object -First 300; ''; "APPS DA LOJA ($($a.Count)):"; $a | Select-Object -First 200`;
 
-const MODELO_LIMPEZA = `# Limpeza de programas basicos (NoPulso). Roda como o usuario logado.
-# Lista do Master (06/09/2026). Mexe SO nestes nomes; o resto da maquina fica como esta.
+// REMOCAO DO EDGE - um unico texto, usado pela Limpeza E pela acao avulsa
+// "Remover o Microsoft Edge". Duas copias divergiriam na primeira correcao, e
+// esta ja teve tres: o UninstallString do registro nao serve (o setup do Edge
+// exige --uninstall --system-level --force-uninstall), o Windows 11 recente
+// recusa sem a destrava AllowUninstall, e o desinstalador DEIXA PARA TRAS o
+// atalho da area de trabalho, o do Iniciar e o pino da barra - foi o que o
+// Master viu na tela depois de a limpeza dizer OK.
+//
+// Espera $R (lista de saida) e $admin de quem usa. As duas chaves de registro
+// sao reversiveis: apagar EdgeUpdateDev e o valor em EdgeUpdate desfaz tudo.
+const TRECHO_EDGE = `# --- Microsoft Edge (decisao do Master 22/09) ---
+$edgeApp = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application','C:\\Program Files\\Microsoft\\Edge\\Application'
+$se = @(Get-ChildItem $edgeApp -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'Installer\\setup.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1)
+if (-not $se.Count) { $R.Add('NAO TINHA: Microsoft Edge') }
+elseif (-not $admin) { $R.Add('PULADO: Microsoft Edge - precisa de Administrador') }
+else {
+  try { $kd = 'HKLM:\\SOFTWARE\\Microsoft\\EdgeUpdateDev'; if (-not (Test-Path $kd)) { New-Item -Path $kd -Force -ErrorAction Stop | Out-Null }; New-ItemProperty -Path $kd -Name AllowUninstall -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null } catch {}
+  Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  try {
+    Start-Process -FilePath $se[0] -ArgumentList '--uninstall --system-level --force-uninstall' -Wait -WindowStyle Hidden
+    Start-Sleep -Seconds 3
+    if (@(Get-ChildItem $edgeApp -Directory -ErrorAction SilentlyContinue).Count) { $R.Add('FALHOU: Microsoft Edge - este Windows nao permite desinstalar') }
+    else { $R.Add('OK: Microsoft Edge') }
+  } catch { $R.Add("FALHOU: Microsoft Edge - $($_.Exception.Message)") }
+  # o icone orfao e pior que o programa: some da lista mas continua na tela
+  $lnks = @((Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk'), (Join-Path $env:PUBLIC 'Desktop\\Microsoft Edge.lnk'))
+  foreach ($u in @(Get-ChildItem "$env:SystemDrive\\Users" -Directory -ErrorAction SilentlyContinue)) {
+    $lnks += (Join-Path $u.FullName 'Desktop\\Microsoft Edge.lnk')
+    $lnks += (Join-Path $u.FullName 'AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk')
+    $lnks += (Join-Path $u.FullName 'AppData\\Roaming\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar\\Microsoft Edge.lnk')
+  }
+  $qtd = 0
+  foreach ($l in ($lnks | Select-Object -Unique)) { if (Test-Path $l) { try { Remove-Item -LiteralPath $l -Force -ErrorAction Stop; $qtd++ } catch {} } }
+  $R.Add("OK: $qtd atalho(s) do Edge removido(s)")
+  # sem isto o Windows Update traz o Edge de volta em poucos dias
+  try { $ku = 'HKLM:\\SOFTWARE\\Microsoft\\EdgeUpdate'; if (-not (Test-Path $ku)) { New-Item -Path $ku -Force -ErrorAction Stop | Out-Null }; New-ItemProperty -Path $ku -Name DoNotUpdateToEdgeWithChromium -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null; $R.Add('OK: reinstalacao automatica do Edge bloqueada') } catch { $R.Add("FALHOU: bloqueio de reinstalacao - $($_.Exception.Message)") }
+}`;
+
+const MODELO_LIMPEZA = `# Limpeza de programas basicos (NoPulso). Lista do Master. Mexe SO nestes nomes.
 $ErrorActionPreference = 'Continue'
 $R = New-Object System.Collections.Generic.List[string]
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -72,13 +120,24 @@ function Rodar-Desinstalador($s, $extra) {
   $a = ("$a $extra").Trim()
   if ($a) { Start-Process -FilePath $exe -ArgumentList $a -Wait -WindowStyle Hidden } else { Start-Process -FilePath $exe -Wait -WindowStyle Hidden }
 }
-# 1) apps da Loja do Windows (por usuario, sem Administrador): Paint e Copilot
-foreach ($n in 'Microsoft.Paint','Microsoft.MSPaint','Microsoft.Copilot','Microsoft.Windows.Ai.Copilot.Provider') {
+# 1) apps da Loja (por usuario, sem Administrador). A lista CRESCE: o que o
+#    Master pede novo entra JUNTO com o que ja estava, nunca no lugar.
+#    O que NAO entra aqui, de proposito: Store e App Installer (sao quem
+#    atualiza o resto), Bloco de Notas, Calculadora, Ferramenta de Captura
+#    (o suporte usa pra pedir print), Seguranca do Windows, Fotos (sem ela e
+#    sem o Paint a maquina fica sem abrir imagem nenhuma), Teams e Outlook
+#    (se o grupo usa, quebra trabalho).
+foreach ($n in 'Microsoft.Paint','Microsoft.MSPaint','Microsoft.Copilot','Microsoft.Windows.Ai.Copilot.Provider','Microsoft.GamingApp',
+  'Microsoft.XboxApp','Microsoft.Xbox.TCUI','Microsoft.XboxGameOverlay','Microsoft.XboxGamingOverlay','Microsoft.XboxIdentityProvider','Microsoft.XboxSpeechToTextOverlay',
+  'Microsoft.MicrosoftSolitaireCollection','Microsoft.ZuneVideo','Microsoft.ZuneMusic','Clipchamp.Clipchamp','Microsoft.MixedReality.Portal',
+  'Microsoft.BingNews','Microsoft.BingWeather','Microsoft.BingFinance','Microsoft.BingSports',
+  'Microsoft.MicrosoftOfficeHub','Microsoft.Office.OneNote','Microsoft.Todos','Microsoft.People','Microsoft.windowscommunicationsapps','Microsoft.SkypeApp','Microsoft.YourPhone',
+  'Microsoft.GetHelp','Microsoft.Getstarted','Microsoft.WindowsFeedbackHub','Microsoft.WindowsMaps','Microsoft.3DBuilder','Microsoft.Print3D','Microsoft.WindowsSoundRecorder','Microsoft.Windows.DevHome') {
   $p = Get-AppxPackage -Name $n -ErrorAction SilentlyContinue
   if (-not $p) { $R.Add("NAO TINHA: $n"); continue }
   try { $p | Remove-AppxPackage -ErrorAction Stop; $R.Add("OK: $n (app da Loja)") } catch { $R.Add("FALHOU: $n - $($_.Exception.Message)") }
 }
-# 2) atalhos-app do Chrome (por usuario): Apresentacoes, Planilhas, Textos, YouTube
+# 2) atalhos-app do Chrome (por usuario)
 $hkcu = Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue
 foreach ($n in 'Apresentações','Planilhas','Textos','YouTube') {
   $e = @($hkcu | Where-Object { $_.DisplayName -eq $n -and $_.UninstallString -like '*chrome*' })
@@ -89,9 +148,9 @@ foreach ($n in 'Apresentações','Planilhas','Textos','YouTube') {
 Get-Process OneDrive -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 $od = @("$env:LOCALAPPDATA\\Microsoft\\OneDrive\\OneDriveSetup.exe","$env:SystemRoot\\SysWOW64\\OneDriveSetup.exe","$env:SystemRoot\\System32\\OneDriveSetup.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($od) { try { Start-Process -FilePath $od -ArgumentList '/uninstall' -Wait -WindowStyle Hidden; $R.Add('OK: Microsoft OneDrive') } catch { $R.Add("FALHOU: OneDrive - $($_.Exception.Message)") } } else { $R.Add('NAO TINHA: Microsoft OneDrive') }
-# 4) programas de maquina (precisam de Administrador): TeamViewer, AteraAgent
+# 4) programas de maquina (precisam de Administrador)
 $hklm = Get-ItemProperty 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue
-foreach ($n in 'TeamViewer','AteraAgent') {
+foreach ($n in 'TeamViewer','AteraAgent','Google Play Games','Microsoft Update Health Tools') {
   $e = @($hklm | Where-Object { $_.DisplayName -like "$n*" -and $_.UninstallString })
   if (-not $e.Count) { $R.Add("NAO TINHA: $n"); continue }
   if (-not $admin) { $R.Add("PULADO: $n - precisa de Administrador (o NOCZenith roda como usuario comum nesta maquina)"); continue }
@@ -103,6 +162,7 @@ foreach ($n in 'TeamViewer','AteraAgent') {
     } catch { $R.Add("FALHOU: $($x.DisplayName) - $($_.Exception.Message)") }
   }
 }
+${TRECHO_EDGE}
 "Administrador: $admin"; $R -join "\`n"`;
 
 // A senha NAO esta aqui: {{SEGREDO:ANYDESK_SENHA}} e' trocado pelo valor da
@@ -126,21 +186,97 @@ $id = ((& $exe --get-id 2>&1) | Out-String).Trim()
 if (-not $id) { "FALHOU: o AnyDesk nao respondeu ao --get-id (servico parado?)"; return }
 "OK: senha de acesso definida · AnyDesk ID: $id"`;
 
+// ACAO AVULSA "Remover o Microsoft Edge". Existe separada da Limpeza porque o
+// Master quis tirar SO o Edge de uma maquina, sem mexer nos outros 34 nomes.
+//
+// A TRAVA E O CORACAO DISTO. Em 22/09 a DOM-SM-DISPATCH tinha o chrome.exe no
+// disco, assinado e integro, e mesmo assim ele quebrava ao abrir (violacao de
+// acesso dentro do chrome.dll). Existir o arquivo NAO prova que a loja tem
+// navegador. Como a acao roda pelo agente - e a que exige Administrador roda
+// como SYSTEM, sem sessao grafica - nao da pra "abrir o Chrome e ver". O que
+// da pra fazer sem tela, e e o que esta aqui: contar os relatorios de falha
+// do Chrome das ultimas 24h em TODOS os perfis. Chrome que nao abre gera um
+// por tentativa; Chrome saudavel gera menos de um por dia.
+const MODELO_REMOVER_EDGE = `# Remover o Microsoft Edge (NoPulso). Mexe SO no Edge.
+$ErrorActionPreference = 'Continue'
+$R = New-Object System.Collections.Generic.List[string]
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$chrome = @(Get-ChildItem "$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe","\${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe","$env:SystemDrive\\Users\\*\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe" -ErrorAction SilentlyContinue | Select-Object -First 1)
+if (-not $chrome.Count) { "PULADO: esta maquina nao tem Chrome. Remover o Edge deixaria a loja sem navegador - o NoPulso roda no navegador."; return }
+$quebras = @(Get-ChildItem "$env:SystemDrive\\Users\\*\\AppData\\Local\\Google\\Chrome\\User Data\\Crashpad\\reports\\*" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddDays(-1) })
+if ($quebras.Count -ge 5) { "PULADO: o Chrome desta maquina quebrou $($quebras.Count) vezes nas ultimas 24h. Conserte o Chrome ANTES de tirar o Edge."; return }
+$R.Add("Chrome: $($chrome[0].VersionInfo.ProductVersion) | falhas em 24h: $($quebras.Count)")
+${TRECHO_EDGE}
+# A barra de tarefas so redesenha quando o Explorer recarrega. O pino ja foi
+# apagado do disco acima; a politica de estacao termina no proximo logon.
+$R.Add('AVISO: o icone some da barra no proximo logon do operador.')
+"Administrador: $admin"; $R -join "\`n"`;
+
+// LER O LOG DO AGENTE (pedido do Master, 23/09/2026). Nasceu do
+// DOM-TIROL-MENU.BOARD: 33min calado, voltou sozinho, e o porque so estava no
+// NOCZenith.log DENTRO da maquina - o servidor nao guarda nada. So LE.
+// Roda como SYSTEM (requerAdmin) de proposito: e a unica instancia que
+// enxerga o log de TODOS os perfis e a linha de comando das copias do agente,
+// e continua respondendo quando a instancia do usuario e que esta presa.
+// O tamanho e contado pra caber nos 4000 caracteres que a ficha guarda:
+// quanto mais logs, menos linhas de cada - a mais recente vem primeiro.
+const MODELO_LER_LOG = `# Ler o log do agente (NoPulso). So LE.
+$ErrorActionPreference = 'SilentlyContinue'
+$R = New-Object System.Collections.Generic.List[string]
+$logs = @(Get-ChildItem "$env:SystemDrive\\Users\\*\\AppData\\Local\\NOCZenith\\NOCZenith.log", "$env:SystemRoot\\System32\\config\\systemprofile\\AppData\\Local\\NOCZenith\\NOCZenith.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3)
+$procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object { [string]$_.CommandLine -match 'NOCZenith' })
+$R.Add("Copias do agente rodando: $($procs.Count)")
+foreach ($p in $procs) {
+  $dono = ''; try { $dono = [string](Invoke-CimMethod -InputObject $p -MethodName GetOwner).User } catch {}
+  $cpu = ''; try { $cpu = [math]::Round((Get-Process -Id $p.ProcessId).CPU, 1) } catch {}
+  $papel = if ([string]$p.CommandLine -match 'Servico|servico') { 'sistema' } else { 'login' }
+  $R.Add("  PID $($p.ProcessId) | $papel | $dono | desde $(([datetime]$p.CreationDate).ToString('dd/MM HH:mm')) | CPU $($cpu)s")
+}
+if (-not $logs.Count) { $R.Add("Nenhum NOCZenith.log encontrado nesta maquina."); $R -join "\`n"; return }
+$porLog = [math]::Floor(36 / $logs.Count)
+foreach ($l in $logs) {
+  $quem = if ($l.FullName -match 'systemprofile') { 'sistema' } else { ($l.FullName -split '\\\\')[2] }
+  $R.Add('')
+  $R.Add("== $quem | ultima escrita $($l.LastWriteTime.ToString('dd/MM HH:mm:ss'))")
+  foreach ($linha in @(Get-Content -LiteralPath $l.FullName -Tail $porLog)) {
+    $t = [string]$linha
+    if ($t.Length -gt 140) { $t = $t.Substring(0, 140) + '...' }
+    $R.Add($t)
+  }
+}
+$R -join "\`n"`;
+
 const MODELOS_COMANDO = [
+  {
+    id: 'ler-log-agente',
+    nome: 'Ler log do agente',
+    descricao: 'Só LÊ: traz as últimas linhas do NOCZenith.log de cada perfil da máquina (e da instância de sistema) e quantas cópias do agente estão rodando, com dono, desde quando e CPU. É o que diz ONDE o agente parou quando a máquina ficou calada. Roda pela instância de sistema, então responde mesmo com a do usuário presa. Não muda nada.',
+    requerAprovacao: false,
+    requerAdmin: true,
+    comando: MODELO_LER_LOG,
+  },
   {
     id: 'inventario-programas',
     nome: 'Inventário de programas instalados',
-    descricao: 'Só LÊ: lista os programas e apps da Loja instalados na máquina, com versão e fabricante, e diz se o NOCZenith está rodando como Administrador. Rode em massa antes de qualquer limpeza, pra saber o nome exato em cada máquina. Não muda nada.',
+    descricao: 'Só LÊ: diz a edição e o build do Windows, lista os programas e apps da Loja instalados na máquina, com versão e fabricante, e diz se o NOCZenith está rodando como Administrador. Rode em massa antes de qualquer limpeza, pra saber o nome exato em cada máquina. Não muda nada.',
     requerAprovacao: false,
     comando: MODELO_INVENTARIO,
   },
   {
     id: 'limpeza-programas-basicos',
     nome: 'Limpeza: programas básicos que não usamos',
-    descricao: 'REMOVE da máquina: Paint, Copilot, os atalhos-app do Chrome (Apresentações, Planilhas, Textos, YouTube), Microsoft OneDrive, TeamViewer e AteraAgent. Só rode a mando do Master. TeamViewer e AteraAgent precisam de Administrador (sem isso ficam PULADOS na saída). AteraAgent é agente de gestão remota: se for o da própria equipe, NÃO remova. Rode o inventário antes.',
+    descricao: 'REMOVE da máquina, tudo numa passada só: Paint, Copilot, os atalhos-app do Chrome (Apresentações, Planilhas, Textos, YouTube), Google Play Games, Microsoft OneDrive, Microsoft Update Health Tools, Microsoft Edge, TeamViewer, AteraAgent e os nativos que não servem para a operação — Xbox e sobreposição de jogos, Paciência, Filmes e TV, Groove, Clipchamp, Realidade Misturada, Notícias, Clima, Dinheiro, Esportes, Microsoft 365 (atalho), OneNote, To Do, Pessoas, Email e Calendário, Skype, Vincular ao Celular, Obter Ajuda, Dicas, Hub de Feedback, Mapas, 3D Builder, Print 3D, Gravador de Som e Dev Home. FICAM de propósito: Microsoft Store e App Installer (atualizam o resto), Bloco de Notas, Calculadora, Ferramenta de Captura, Segurança do Windows, Fotos (sem ela e sem o Paint a máquina não abre imagem nenhuma), Teams e Outlook. Só rode a mando do Master. O que é instalação de máquina (TeamViewer, AteraAgent, Play Games, Update Health Tools, Edge) precisa de Administrador - sem isso fica PULADO na saída. AteraAgent é agente de gestão remota: se for o da própria equipe, NÃO remova. O Edge é decisão do Master de 22/09: tirar ele deixa o app NoPulso dependendo só do Chrome, e em Windows 11 recente a Microsoft bloqueia a remoção (sai FALHOU). Rode o inventário antes.',
     requerAprovacao: true,
     requerAdmin: true,
     comando: MODELO_LIMPEZA,
+  },
+  {
+    id: 'remover-edge',
+    nome: 'Remover o Microsoft Edge',
+    descricao: 'REMOVE só o Microsoft Edge: desinstala pelo setup dele (o UninstallString do registro não funciona), apaga o atalho da Área de Trabalho, do Iniciar e o pino da barra em TODOS os perfis, e bloqueia a reinstalação automática pelo Windows Update. Precisa de Administrador. Ela se RECUSA a rodar em máquina sem Chrome, ou cujo Chrome esteja quebrando (5+ falhas em 24h) - sem navegador a loja não abre o NoPulso. Em Windows 11 recente a Microsoft pode bloquear a remoção: aí sai FALHOU, e isso é informação, não defeito. As duas chaves de registro são reversíveis.',
+    requerAprovacao: true,
+    requerAdmin: true,
+    comando: MODELO_REMOVER_EDGE,
   },
   {
     id: 'anydesk-senha-acesso',
@@ -219,8 +355,19 @@ function validarDados(dados) {
     ativo: dados.ativo !== false,
   };
   if (tipo === 'comando_maquina') {
-    const comando = String(dados.comando || '').trim().slice(0, 4000);
+    // NUNCA TRUNCAR UM POWERSHELL. O slice(0, 4000) cortava em silencio: o
+    // comando chegava PELA METADE na maquina e podia executar parte das
+    // coisas - um if aberto que fecha por acaso, uma lista de remocao cortada
+    // no meio. Agora recusa e diz o tamanho, que e o unico jeito de quem
+    // escreveu descobrir antes de rodar nas 52.
+    //
+    // Teto em 8000: o modelo de limpeza ja passou de 4000 quando o Master
+    // mandou incluir Play Games, Update Health Tools e o Edge, e a lista
+    // continua crescendo por desenho ("tudo que resolver um problema vamos
+    // criar um processo").
+    const comando = String(dados.comando || '').trim();
     if (!comando) throw new Error('Escreva o comando PowerShell dessa ação.');
+    if (comando.length > 8000) throw new Error(`O comando tem ${comando.length} caracteres e o limite é 8000. Divida em duas ações em vez de encurtar no olho - PowerShell cortado no meio roda pela metade.`);
     registro.comando = comando;
     registro.executorSistema = null;
   } else {
@@ -416,6 +563,7 @@ const TAREFAS_NOC = {
   reiniciar: { verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
   abortar: { verbo: 'Abortar o reinício de', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
   anydesk: { verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
+  'corrigir-memoria-limitada': { verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
   rede: { verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede' },
   zebra: { verbo: 'Resetar as Zebras de', comando: async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)), origem: 'manutencao-zebra' },
 };
@@ -424,11 +572,11 @@ async function nocComando(params) {
   const p = params || {};
   await resolverAtor(p);
   const t = TAREFAS_NOC[String(p.tarefa || '')];
-  if (!t) throw new Error('Tarefa do NOC inválida - use reiniciar, abortar, anydesk, zebra ou rede.');
+  if (!t) throw new Error('Tarefa do NOC inválida - use reiniciar, abortar, anydesk, zebra, rede ou corrigir-memoria-limitada.');
   const alvos = Array.isArray(p.alvos) ? p.alvos.filter((a) => a && a.codigo && a.posto) : [];
   if (!alvos.length) throw new Error('Diga quais computadores (lista de {codigo, posto}).');
   if (alvos.length > 200) throw new Error('Muitos alvos de uma vez - divida em lotes.');
-  const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, { origem: t.origem });
+  const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, { origem: t.origem, requerAdmin: !!t.requerAdmin });
   const ok = resultados.filter((r) => r.ok).length;
   // quem NÃO entrou diz por quê (sem agentToken, já tem comando pendente...)
   // - senão "0 de 1" vira adivinhação
@@ -484,8 +632,24 @@ async function executarAcaoDoAgente(acaoId, parametros) {
   return executor(params);
 }
 
+// Entrada programatica para integracoes confiaveis (Claude/Cowork, por
+// exemplo). Continua limitada a esta lista fechada: a integracao nunca envia
+// JavaScript, PowerShell ou nome de funcao arbitrario. O gateway externo
+// resolve e fixa o Master em `porId` antes de chegar aqui.
+async function executarAcaoSistema(executorSistema, parametros) {
+  if (!EXECUTORES_SISTEMA_VALIDOS.includes(executorSistema)) {
+    throw new Error(`Ação de sistema não permitida: ${executorSistema}`);
+  }
+  const executor = EXECUTORES_SISTEMA[executorSistema];
+  if (!executor) throw new Error(`Ação de sistema indisponível: ${executorSistema}`);
+  // Todas as ações expostas ao gateway precisam comprovar novamente que o
+  // ator configurado ainda existe, está ativo e continua sendo Master.
+  await resolverAtor(parametros || {});
+  return executor(parametros || {});
+}
+
 module.exports = {
   TIPOS_ACAO, EXECUTORES_SISTEMA_VALIDOS, PARAMETROS_EXECUTOR, MODELOS_COMANDO, validarDados,
   listar, listarAtivas, obter, criar, atualizar, remover,
-  obterContexto, salvarContexto, executarAcaoDoAgente,
+  obterContexto, salvarContexto, executarAcaoDoAgente, executarAcaoSistema,
 };

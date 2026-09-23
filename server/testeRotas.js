@@ -4133,7 +4133,7 @@ setTimeout(async () => {
     'rh-colaborador.html', 'solicitacao-publica.html', 'ticket-publico.html', 'assinar.html',
     // preencher.html: o solicitante preenche por um link, sem login - o
     // token de preenchimento na URL É a credencial (mesmo caso do assinar)
-    'preencher.html', 'fornecedor-cadastro.html',
+    'preencher.html', 'fornecedor-cadastro.html', 'reuniao-publica.html',
   ];
   const dirPublico = require('path').join(__dirname, 'public');
   const semToken = require('fs').readdirSync(dirPublico)
@@ -6404,8 +6404,21 @@ setTimeout(async () => {
       'o aparelho sai marcado como zebra (é o que decide o chip na linha)': !!disp && disp.marca === 'zebra',
       'a ficha tem o chip de status sempre na linha, lendo impressoras{}':
         /disp-imp-chip/.test(html) && /c\.impressoras/.test(html),
+      // O chip saiu da linha e virou chipZebraHtml(), usado pela lista E pelo
+      // card do dispositivo (23/09). A guarda "só Zebra" ficou na chamada -
+      // a asserção segue a guarda, ancorada na linha exata, não um texto solto.
       "o chip só aparece pra Zebra (não inventa status pra outro aparelho)":
-        /d\.marca !== 'zebra'/.test(html),
+        /const impChip = d\.marca === 'zebra' \? chipZebraHtml\(estadoZebra\) : '';/.test(html),
+      // e o chip roda de verdade: cada nível vira a palavra e a cor certas
+      'o chip da Zebra traduz o nível lido (ok / atenção / parada / sem confirmação)': (() => {
+        const mZ = /function chipZebraHtml\(st\)\{[\s\S]*?\n\}/.exec(html);
+        if (!mZ) return false;
+        const chip = new Function('tempoRelativo', 'escapeHtml', mZ[0] + '\nreturn chipZebraHtml;')(() => 'há 1min', (v) => String(v));
+        return /OK/.test(chip({ nivel: 'ok', fila: 0 })) && /var\(--ok\)/.test(chip({ nivel: 'ok' }))
+          && /atenção/.test(chip({ nivel: 'atencao', motivos: ['Pouco papel'] }))
+          && /parada/.test(chip({ nivel: 'critico', motivos: ['Sem papel'] })) && /var\(--bad\)/.test(chip({ nivel: 'critico' }))
+          && /sem confirmação/.test(chip(null));
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okZebraFicha = !falhas.length;
@@ -7039,9 +7052,8 @@ setTimeout(async () => {
     const login3 = await bater({ souAdmin: false }); // login pega
     await ls.marcarComandoExecutado(cmdComum2.id, { resultado: 'ok' }, { codigo: UNI, posto, token: tk });
 
-    // EXECUÇÃO SEM RETORNO: depois da entrega, um agente travado não pode
-    // segurar a única vaga da máquina indefinidamente. A varredura fecha o
-    // registro como erro, libera a vaga e a resposta tardia não o ressuscita.
+    // EXECUÇÃO SEM RETORNO: timeout alerta, mas não promove o próximo comando.
+    // Sem prova de término, liberar permitiria duas execuções na mesma máquina.
     const cmdTravado = await ls.enfileirarComando(UNI, posto, 'echo travado', { origem: 'agente' });
     await bater({ souAdmin: false });
     dbA.collection('lojaStatusComandos').doc(cmdTravado.id).set({ entregueEm: new Date(Date.now() - 11 * 60 * 1000).toISOString() }, { merge: true });
@@ -7049,10 +7061,8 @@ setTimeout(async () => {
     const transTravado = (await ls.varrerAlertas()).filter((t) => t.codigo === UNI && t.tipo === 'comando-travado');
     const cmdTravadoData = (await dbA.collection('lojaStatusComandos').doc(cmdTravado.id).get()).data();
     const depoisTravado = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
-    let respostaTardiaTravado = false;
-    try { await ls.marcarComandoExecutado(cmdTravado.id, { resultado: 'tarde' }, { codigo: UNI, posto, token: tk }); } catch (e) { respostaTardiaTravado = /depois do limite/i.test(e.message); }
-    const canceladoAposErro = await ls.cancelarComandoPendente(cmdTravado.id, 'master@teste.local');
-    const cmdTravadoCancelado = (await dbA.collection('lojaStatusComandos').doc(cmdTravado.id).get()).data();
+    const respostaTardiaTravado = await ls.marcarComandoExecutado(cmdTravado.id, { resultado: 'tarde' }, { codigo: UNI, posto, token: tk });
+    const depoisDaConfirmacao = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
 
     // EXPIRACAO: comando-admin numa maquina sem executor elevado (instalada sem
     // Administrador). Envelhece a espera e a varredura desiste, liberando a vaga.
@@ -7088,13 +7098,12 @@ setTimeout(async () => {
       'comando comum continua indo pra instância de login': !!login2.comandoPendente && /comum/.test(login2.comandoPendente.comando),
        'a sondagem só-admin da SYSTEM não rouba comando comum': !sondaSoAdmin.comandoPendente,
        'o comando comum sobra pra login pegar': !!login3.comandoPendente && /comum2/.test(login3.comandoPendente.comando),
-       'comando entregue sem retorno vira erro, libera a vaga e não aceita resposta tardia':
-         transTravado.length === 1 && cmdTravadoData.status === 'erro' && !depoisTravado.comandoPendenteId
-         && /tempo limite de execução/i.test(cmdTravadoData.erro || '') && respostaTardiaTravado,
-       'comando com erro pode ser cancelado sem apagar o erro original':
-         canceladoAposErro.canceladoAposErro === true && cmdTravadoCancelado.status === 'cancelado'
-         && /tempo limite de execução/i.test(cmdTravadoCancelado.erro || '')
-         && cmdTravadoCancelado.canceladoPor === 'master@teste.local',
+       'timeout alerta e mantém a fila bloqueada até a máquina confirmar término':
+         transTravado.length === 1 && cmdTravadoData.status === 'entregue'
+         && depoisTravado.comandoPendenteId === cmdTravado.id
+         && !!cmdTravadoData.timeoutDetectadoEm && /fila permanece bloqueada/i.test(cmdTravadoData.avisoTimeout || ''),
+       'a resposta tardia autenticada encerra o comando e só então libera a vaga':
+         respostaTardiaTravado.status === 'executado' && !depoisDaConfirmacao.comandoPendenteId,
        // expiração
       'comando-admin sem executor elevado expira e libera a vaga':
         transExp.length === 1 && !depoisExp.comandoPendenteId
@@ -12072,7 +12081,18 @@ setTimeout(async () => {
     const limpeza = modelos.find((m) => m.id === 'limpeza-programas-basicos') || {};
     const inventario = modelos.find((m) => m.id === 'inventario-programas') || {};
     const cmd = String(limpeza.comando || '');
-    const pedidos = ['Microsoft.Paint', 'Microsoft.Copilot', 'TeamViewer', 'Apresentações', 'AteraAgent', 'OneDrive', 'Planilhas', 'Textos', 'YouTube'];
+    // A lista do Master é CUMULATIVA: "nao e so com os que pedi agora e junto
+    // com os que ja tinha". Por isso os antigos continuam aqui embaixo, ao
+    // lado dos nativos que entraram em 22/09.
+    const pedidos = ['Microsoft.Paint', 'Microsoft.Copilot', 'TeamViewer', 'Apresentações', 'AteraAgent', 'OneDrive', 'Planilhas', 'Textos', 'YouTube',
+      'Microsoft.XboxGamingOverlay', 'Microsoft.ZuneVideo', 'Microsoft.BingNews', 'Microsoft.BingWeather', 'Microsoft.MicrosoftOfficeHub',
+      'Microsoft.Office.OneNote', 'Microsoft.WindowsMaps', 'Microsoft.MicrosoftSolitaireCollection', 'Microsoft.YourPhone'];
+    // O que a limpeza NUNCA pode levar junto. Store e App Installer porque são
+    // quem atualiza os apps; Captura porque o suporte pede print por ela;
+    // Fotos porque, sem ela e sem o Paint, a máquina não abre imagem nenhuma;
+    // Teams e Outlook porque quebram trabalho se o grupo usar.
+    const intocaveis = ['Microsoft.WindowsStore', 'Microsoft.DesktopAppInstaller', 'Microsoft.WindowsNotepad', 'Microsoft.WindowsCalculator',
+      'Microsoft.ScreenSketch', 'Microsoft.SecHealthUI', 'Microsoft.Windows.Photos', 'MSTeams', 'MicrosoftTeams', 'Microsoft.OutlookForWindows'];
     const validados = modelos.map((m) => { try { return ag.validarDados({ ...m, tipo: 'comando_maquina' }); } catch (e) { return null; } });
     const htmlN = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
     const fnNova = /function abrirModalNovaAcao\(\)\{[\s\S]*?\n\}/.exec(htmlN);
@@ -12081,11 +12101,20 @@ setTimeout(async () => {
     const conf = {
       'a rota é só do Master (sem login: 401; usuário comum do NOC: 403)': semLogin.status === 401 && comComum.status === 403 && comMaster.status === 200,
       'há os dois modelos: inventário (só lê) e limpeza': !!inventario.comando && !!limpeza.comando,
-      'cada modelo passa na validação da ação e cabe inteiro no teto de 4000':
-        validados.every((v, i) => v && v.comando === modelos[i].comando) && modelos.every((m) => m.comando.length <= 4000),
+      // O TETO SUBIU PRA 8000 em 22/09: a limpeza passou de 4000 quando o
+      // Master mandou incluir Play Games, Update Health Tools e o Edge. E o
+      // que importa aqui nunca foi o numero: e o modelo chegar INTEIRO.
+      // Antes a validacao truncava em silencio, e PowerShell cortado no meio
+      // roda pela metade - agora ela recusa e diz o tamanho.
+      'cada modelo passa na validação da ação e chega inteiro (nada truncado)':
+        validados.every((v, i) => v && v.comando === modelos[i].comando) && modelos.every((m) => m.comando.length <= 8000),
       'a limpeza cobre a lista do Master, nome por nome': pedidos.every((n) => cmd.includes(n)),
       // o que NAO pode ser removido nunca aparece no comando
       'a limpeza não encosta em Chrome, Drive, Gmail nem PDV': !/Google Chrome|Google Drive|Gmail|Bematech|Gcom|Gestor de Pedidos/i.test(cmd),
+      // o comentário do modelo CITA esses nomes pra explicar por que ficam -
+      // então a busca é pelo nome entre aspas, que é como ele entra na lista
+      'a limpeza não leva junto Store, Captura, Fotos, Teams nem Outlook':
+        intocaveis.every((n) => !cmd.includes(`'${n}'`)),
       'programa de máquina fica PULADO sem Administrador, com o motivo na saída':
         /IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/.test(cmd)
         && /if \(-not \$admin\) \{ \$R\.Add\("PULADO: \$n - precisa de Administrador/.test(cmd),
@@ -12093,6 +12122,14 @@ setTimeout(async () => {
         /"OK: /.test(cmd) && /"NAO TINHA: /.test(cmd) && /"FALHOU: /.test(cmd),
       'a limpeza nasce exigindo aprovação; o inventário não': limpeza.requerAprovacao === true && inventario.requerAprovacao === false,
       'o inventário só lê (nenhum Remove/Uninstall/Stop nele)': !/Remove-|Uninstall\b|Stop-Process|msiexec/.test(String(inventario.comando || '').replace(/Uninstall\\\*/g, '')),
+      // O inventario e quem responde "da pra padronizar o Iniciar nesta
+      // maquina?": ConfigureStartPins so existe do Windows 11 22H2 (build
+      // 22621) pra cima, e Home ignora politica. Sem edicao e build na saida a
+      // resposta seria chute - por isso eles vem antes da lista, na 1a linha.
+      'o inventário diz edição e build do Windows (é o que decide o Iniciar padronizado)':
+        /EditionID/.test(String(inventario.comando || ''))
+        && /CurrentBuild/.test(String(inventario.comando || ''))
+        && /^"Windows: /m.test(String(inventario.comando || '')),
       // a tela
       'o formulário de NOVA ação oferece o seletor de modelo; o de editar esconde':
         /id="acao-modelo"/.test(htmlN) && !!fnNova && /carregarModelosAcao\(\)/.test(fnNova[0]) && /acao-modelo-wrap'\)\.classList\.remove\('hidden'\)/.test(fnNova[0])
@@ -12493,7 +12530,7 @@ setTimeout(async () => {
         && !(DOCS.get('lojaStatus/POL2__PC1') || {}).ultimoProgramaNovoEm,
       // agente: a divisão HKCU x HKLM é o coração disso
       'papel de parede é HKCU e NÃO roda na instância de boot (SYSTEM não tem área de trabalho)':
-        /function Aplicar-PapelDeParede\(\$ligado\) \{\n  if \(\$Servico\) \{ return \}/.test(psPol)
+        /function Aplicar-PapelDeParede\(\$ligado, \$semArte = \$false, \$modelo = \$null\) \{\n  if \(\$Servico\) \{ return \}/.test(psPol)
         && psPol.includes('HKCU:\\Control Panel\\Desktop'),
       'USB e instalação são HKLM e exigem Administrador':
         /function Aplicar-BloqueioUsb\(\$ligado\) \{\n  if \(-not \(Sou-Admin\)\) \{ return \$false \}/.test(psPol)
@@ -12506,7 +12543,11 @@ setTimeout(async () => {
       'só reaplica quando a versão muda (não reescreve o registro a cada volta do laço)':
         /if \(\(Versao-PoliticaAplicada\) -eq \$versao\) \{ return \}/.test(psPol),
       'sem Administrador a instância de boot NÃO marca como aplicada (tenta de novo depois)':
-        /if \(\$Servico -and -not \(\$okUsb -and \$okInst\)\)/.test(psPol),
+        // presa ao texto EXATO da linha, esta asserção passou a reprovar quando o
+        // porteiro ficou MAIS rigoroso (ganhou $okEstacao e $okBarra) - sem defeito
+        // nenhum. O que importa é a regra: a trava de USB e a de instalação têm que
+        // estar no porteiro da instância de boot. Termo a mais é bem-vindo.
+        /if \(\$Servico -and -not \(\$okUsb -and \$okInst[^)]*\)\)/.test(psPol),
       'a tela do NOC tem as 4 chaves por máquina, só pro Master':
         // as 4 chaves saem do MESMO catálogo que o servidor sanitiza - se uma
         // sumir daqui, ela deixa de existir na tela sem ninguém notar
@@ -12604,6 +12645,22 @@ setTimeout(async () => {
     const htmlPp = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
     const indexPp = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
 
+    // corpo de UMA função do .ps1: da assinatura até a próxima declaração na
+    // coluna 0. Sem isso, toda asserção sobre função virava asserção sobre o
+    // arquivo inteiro.
+    const corpoPs = (nome) => {
+      const i = psPp.indexOf('function ' + nome);
+      if (i < 0) return '';
+      // O FIM E A CHAVE QUE FECHA A FUNCAO (linha com "}" na coluna 0), nao o
+      // "function" seguinte. Com o "function" seguinte, o comentario que explica
+      // a PROXIMA funcao entrava no corpo desta - e a asserção passava a falar de
+      // texto que não é dela. Foi assim que um comentário citando GetFolderPath
+      // reprovou a asserção do Aplicar-BarraTarefas sem nenhum defeito no agente.
+      const fim = psPp.indexOf('\n}\n', i);
+      const prox = psPp.indexOf('\nfunction ', i + 1);
+      const j = (fim >= 0 && (prox < 0 || fim < prox)) ? fim + 3 : (prox < 0 ? psPp.length : prox);
+      return psPp.slice(i, j);
+    };
     const conf = {
       // A ARTE CARREGA DUAS LOGOS (grupo + marca), e Domino's existe nas duas
       // redes: sem a chave por grupo, a Dom Carrão mostraria a logo do GBE.
@@ -12673,22 +12730,277 @@ setTimeout(async () => {
       // só busca a política inteira quando o número muda.
       'o heartbeat leva a versão, e o agente interno reage a ela (antes só aplicava ao reiniciar)':
         typeof (await ls.heartbeat('PPDOM', 'PC1', { userAgent: 'NOCZenith/1.0' }, 'tokdom')).versaoAplicacao === 'string'
-        && /\$resp\.inventarioAtalhosPendenteEm -or \(\$null -ne \$resp\.versaoAplicacao -and "v\$VersaoScript\|\$\(\$resp\.versaoAplicacao\)" -ne \(Versao-PoliticaAplicada\)\)/.test(psPp)
+        && /\$resp\.inventarioAtalhosPendenteEm -or \(\$null -ne \$resp\.versaoAplicacao -and -not \(Politica-EstaAplicada/.test(psPp)
         && (() => {
           const inicio = psPp.indexOf('function Sincronizar-Politica');
           return psPp.indexOf('Enviar-InventarioAtalhos', inicio)
-            < psPp.indexOf('if ((Versao-PoliticaAplicada) -eq $versao) { return }', inicio);
+            < psPp.indexOf('if (Politica-EstaAplicada $versaoServidor) { return }', inicio);
         })()
         && /try \{ Sincronizar-Politica \}/.test(psPp),
       'o agente envia o inventário sem sessão do painel, autenticado pelo token da máquina':
         /ROTA_LOJA_INVENTARIO_ATALHOS_RE\.test\(path\)/.test(indexPp)
         && indexPp.indexOf("app.post('/api/loja-status/:codigo/computadores/:posto/inventario-atalhos'")
           < indexPp.indexOf("app.use('/api', auth.requireAuth);"),
-      'somente o usuário logado inventaria atalhos e respeita Área de Trabalho redirecionada':
-        /function Enviar-InventarioAtalhos \{[\s\S]*?if \(\$Servico\) \{ return \$false \}[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)/.test(psPp),
-      'a aplicação e a barra usam o mesmo Desktop real que o inventário encontrou':
-        /function Aplicar-BarraTarefas[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)[\s\S]*?foreach \(\$origem in @\(\$desktopUsuario/.test(psPp)
-        && /function Aplicar-PerfilEstacao[\s\S]*?GetFolderPath\(\[Environment\+SpecialFolder\]::DesktopDirectory\)[\s\S]*?\$areas = @\(\$desktopUsuario, \$env:PUBLIC/.test(psPp),
+      // v101: as DUAS instâncias inventariam (a de boot resolve o operador pelo
+      // console); sem operador presente ela não envia, e é isso que impede a
+      // corrida antiga de mandar listas vazias. Nenhuma confia no Desktop do
+      // PROCESSO: quando o agente roda como SYSTEM, esse Desktop é o do SYSTEM.
+      // Cada asserção olha SÓ o corpo da própria função. Com [\s\S]*? solto o
+      // regex atravessava o fim da função e ia achar a chamada em OUTRA mais
+      // abaixo: sabotar Aplicar-BarraTarefas passava no teste. Sabotagem só
+      // vale se a asserção estiver presa ao trecho que ela afirma.
+      'as duas instâncias inventariam, resolvendo as pastas pelo perfil do operador (não pelo processo)':
+        /Pastas-AreaDeTrabalho \$perfilUsuario/.test(corpoPs('Enviar-InventarioAtalhos'))
+        && !/if \(\$Servico\) \{ return \$false \}/.test(corpoPs('Enviar-InventarioAtalhos')),
+      'a limpeza e a barra usam a MESMA resolução de pastas que o inventário':
+        /Pastas-AreaDeTrabalho \$perfilUsuario/.test(corpoPs('Aplicar-BarraTarefas'))
+        && !/GetFolderPath|\$env:USERPROFILE/.test(corpoPs('Aplicar-BarraTarefas'))
+        && /\$areas = @\(Pastas-AreaDeTrabalho \$perfilUsuario\)/.test(corpoPs('Aplicar-PerfilEstacao')),
+      // Os pinos vivem no registro (Taskband), nao na pasta - por isso trocar so
+      // os .lnk deixava icone morto. Mas reiniciar o Explorer pra aplicar isso
+      // apagava a tela da loja, abria janela de pasta e sumia com a barra, com
+      // o caixa aberto: o Master viu e mandou voltar.
+      //
+      // Decisão do Master (22/09): "só o desafixar já ajuda". Não há API pra
+      // FIXAR no Win10/11 - a única via é layout por política, que TRAVA a
+      // barra pro operador, e ele não quis. Então a barra só perde o que não
+      // está aprovado, pelo verbo do shell (o mesmo do botão direito), que
+      // acerta pasta e registro de uma vez, na hora, sem reiniciar nada.
+      'a barra é limpa pelo verbo de desafixar, não pelo registro': (() => {
+        const fn = corpoPs('Desafixar-DaBarra');
+        if (!fn) return false;
+        return /Shell\.Application/.test(fn) && /\$item\.Verbs\(\)/.test(fn) && /\$v\.DoIt\(\)/.test(fn)
+          && /Desafixar da barra de tarefas\|Unpin from taskbar/.test(fn)
+          && /Desafixar-DaBarra \$item\.FullName/.test(corpoPs('Aplicar-BarraTarefas'))
+          // o caminho velho não pode voltar: ele nunca convergia
+          && !/Reconstruir-BarraTarefas/.test(psPp)
+          && !/Remove-ItemProperty[^\n]*Favorites/.test(psPp);
+      })(),
+      // o COM conversa com o Explorer da PRÓPRIA sessão: SYSTEM e a instância
+      // do técnico que instalou não alcançam a barra do operador
+      'só a instância do operador tenta desafixar':
+        /if \(\$Servico -or \(\$operador -and \(\$operador -ine \$env:USERNAME\)\)\) \{ Escrever-Log/.test(corpoPs('Aplicar-BarraTarefas')),
+      // o agente NÃO mexe nos arquivos: quem desafixa é o shell. Copiar .lnk
+      // pra essa pasta nunca fixou nada, e apagar deixava ícone morto na barra
+      // apontando pra um arquivo que já tinha ido pro backup.
+      'o agente não apaga nem copia .lnk na pasta de pinos': (() => {
+        const fn = corpoPs('Aplicar-BarraTarefas');
+        if (!fn) return false;
+        return !/Remove-Item/.test(fn) && !/Copy-Item/.test(fn) && !/New-Item/.test(fn);
+      })(),
+      // esvaziar a barra por não ter achado nada seria pior que não mexer
+      'o aprovado é mantido item a item; a barra nunca é esvaziada de uma vez':
+        /if \(\(Atalho-EstaAprovado \$item \$permitidos\) -or \(\$permitidos -contains \(Chave-Atalho \$item\)\)\) \{ \$ficou \+= 1; continue \}/.test(corpoPs('Aplicar-BarraTarefas')),
+      // nenhuma parte do agente pode matar processo do operador pra padronizar
+      // a barra: o custo e a loja piscar no meio do expediente
+      'o agente inteiro não encerra Explorer em lugar nenhum':
+        !/Stop-Process[^\n]*explorer/i.test(psPp) && !/Get-Process -Name explorer/.test(psPp),
+      // ---- a instância de login precisa nascer elevada ------------------
+      // Relato do Master (22/09): "estou rodando no powershell admin por que
+      // nao fica como admin". A ficha da máquina respondia "Administrador:
+      // False" e todo comando que pede privilégio saía "PULADO: precisa de
+      // Administrador" - mesmo tendo instalado num PowerShell elevado.
+      //
+      // A causa: a tarefa de login era registrada SEM -Principal, e o
+      // Agendador usa RunLevel Limited nesse caso. Token restrito mesmo para
+      // quem é Administrador. A tarefa de BOOT sempre teve -RunLevel Highest;
+      // a de login, não - e é ela quem trabalha quando alguém está logado.
+      'a tarefa de login é registrada com RunLevel Highest quando dá': (() => {
+        if (!/New-ScheduledTaskPrincipal -UserId \(\[Security\.Principal\.WindowsIdentity\]::GetCurrent\(\)\.Name\) -LogonType Interactive -RunLevel Highest/.test(psPp)) return false;
+        // PRESO AO CAMINHO NORMAL. Com '-Principal' solto, a sabotagem que
+        // esvaziava o ramo principal passava batida: o ramo de reserva ainda
+        // mencionava o principal e a assercao ficava verde.
+        return /if \(\$config -and \$principalLogin\) \{ Register-ScheduledTask -TaskName \$NomeTarefa[^\n]*-Settings \$config -Principal \$principalLogin -Force/.test(psPp);
+      })(),
+      // só quando a instalação está elevada: aí sabemos que o usuário pode
+      'a elevação só é pedida quando a instalação rodou como Administrador':
+        /if \(\$ehAdmin\) \{ try \{ \$principalLogin = New-ScheduledTaskPrincipal/.test(psPp)
+        && psPp.indexOf('$ehAdmin = ([Security.Principal.WindowsPrincipal]') < psPp.indexOf('$principalLogin = New-ScheduledTaskPrincipal'),
+      // agente limitado é melhor que agente nenhum: se o principal falhar,
+      // registra como antes em vez de deixar a máquina sem agente
+      'principal que falha não impede a tarefa de ser criada':
+        /elseif \(\$config\) \{ Register-ScheduledTask -TaskName \$NomeTarefa[^\n]*-Settings \$config -Force/.test(psPp)
+        && /else \{ Register-ScheduledTask -TaskName \$NomeTarefa -Action \$acao -Trigger \$gatilho -Force/.test(psPp),
+      // sem isso o Master instala, vê "instalado" e só descobre que ficou
+      // limitado quando um comando falha lá na frente
+      'o log diz se a tarefa ficou elevada ou não':
+        /tarefa de login criada COM ELEVACAO/.test(psPp)
+        && /tarefa de login criada SEM elevacao/.test(psPp),
+      // ---- a instância elevada não pode depender de reinício -----------
+      // 22/09, Dom Bessa, as duas já na v111: a GERENCIA (ligada há 1h, tinha
+      // reiniciado) ficou PERFEITA e a DISPATCH (ligada há 11 DIAS) não.
+      //
+      // A tarefa de login sempre teve gatilho de repetição de 5 min. A de
+      // BOOT tinha só -AtStartup, e a instalação nunca a iniciava - então numa
+      // máquina que não reinicia a instância elevada simplesmente NUNCA subia.
+      // E é ela quem remove atalho de C:\Users\Public\Desktop e quem executa
+      // comando-admin. Máquina de loja fica semanas de pé.
+      'a tarefa de boot tem o gatilho de repetição, não só -AtStartup': (() => {
+        if (!/\$gatilhoBoot = @\(\(New-ScheduledTaskTrigger -AtStartup\)\) \+ @\(\(Gatilhos-DaTarefa\)\[1\]\)/.test(psPp)) return false;
+        // e o índice [1] de Gatilhos-DaTarefa é MESMO o de repetição
+        const g = corpoPs('Gatilhos-DaTarefa');
+        const iRep = g.indexOf('$gatilhoRepeticao');
+        const iLogon = g.indexOf('$gatilhoLogon');
+        return iLogon > 0 && iRep > iLogon
+          && /RepetitionInterval \(New-TimeSpan -Minutes 5\)/.test(g)
+          && /return @\(\$gatilhoLogon, \$gatilhoRepeticao\)/.test(g);
+      })(),
+      'a instalação sobe a tarefa de boot na hora, não só no próximo reinício': (() => {
+        const iReg = psPp.indexOf('Register-ScheduledTask -TaskName ($NomeTarefa + "_Boot")');
+        const iStart = psPp.indexOf('Start-ScheduledTask -TaskName ($NomeTarefa + "_Boot")');
+        return iReg > 0 && iStart > iReg;
+      })(),
+      // o gatilho repetido só é seguro porque o agendador descarta o disparo
+      // quando a tarefa já está de pé - senão seria uma cópia nova a cada 5min
+      'disparo repetido não empilha cópia (IgnoreNew nas duas tarefas)':
+        /New-ScheduledTaskSettingsSet[^\n]*-MultipleInstances IgnoreNew/.test(psPp)
+        && /Register-ScheduledTask -TaskName \(\$NomeTarefa \+ "_Boot"\)[^\n]*-Settings \$config/.test(psPp),
+      // ---- quem tem Administrador precisa aplicar a política ----------
+      // 22/09, DOM-BESSA-DISPATCH já na v110: Microsoft Edge e Advanced IP
+      // Scanner continuaram na Área de Trabalho mesmo desmarcados. A ficha da
+      // máquina explicou: "Administrador: False".
+      //
+      // Com usuário logado, a instância de boot (SYSTEM, a ÚNICA elevada)
+      // cede a vez e dá 'continue' - quem aplica a política é a de LOGIN, sem
+      // elevação. Atalho em C:\Users\Public\Desktop, que é onde todo
+      // instalador "para todos os usuários" põe o dele, não podia ser
+      // removido. E a falha devolvia $false, então o porteiro nunca carimbava
+      // a versão e a máquina reexecutava tudo a cada volta, pra sempre.
+      'a instância elevada aplica a política mesmo cedendo a vez': (() => {
+        const fn = corpoPs('Sondar-ComandoAdmin');
+        if (!fn) return false;
+        return /if \(\$resp -and \$null -ne \$resp\.versaoAplicacao[^\n]*Politica-EstaAplicada[^\n]*\) \{ Sincronizar-Politica \}/.test(fn)
+          // tem que ser a instância de boot, e SÓ quando ela está cedendo
+          && /if \(\$Servico\) \{ Sondar-ComandoAdmin \}/.test(psPp);
+      })(),
+      // a sondagem JÁ fazia esse heartbeat de 90 em 90s: a política pega
+      // carona nele. Uma requisição nova por volta do laço seriam ~52 por
+      // 22s, o tipo de custo que a §3 existe pra impedir.
+      'a política pega carona no heartbeat que a sondagem já fazia': (() => {
+        const fn = corpoPs('Sondar-ComandoAdmin');
+        if (!fn) return false;
+        const chamadas = (fn.match(/Invoke-RestMethod/g) || []).length;
+        return chamadas === 1
+          && fn.indexOf('Invoke-RestMethod') < fn.indexOf('Sincronizar-Politica')
+          && /ProximaSondaAdminEm[^\n]*\+ 90000/.test(fn);
+      })(),
+      // falha na área pública é quase sempre privilégio, e repetir não
+      // resolve - o log diz isso pra ninguém caçar defeito onde não há
+      'o log separa falha de privilégio na área pública das outras':
+        /Eh-AreaPublica \$item\.FullName\) \{ " \(Area de Trabalho PUBLICA - precisa de Administrador/.test(corpoPs('Aplicar-PerfilEstacao')),
+      // ---- a limpeza precisa enxergar PASTA e ARQUIVO -----------------
+      // Relato do Master (22/09): "apos rodar continuou com pastas que nao
+      // escolhi". A tela lista tudo e deixa marcar qualquer item; a limpeza
+      // pedia -File E filtrava .lnk/.url/.rdp, então pasta e planilha NUNCA
+      // saíam por mais que ele as deixasse desmarcadas. A tela prometia o que
+      // o agente não tinha como cumprir.
+      'a limpeza enxerga pasta e arquivo comum, não só atalho': (() => {
+        const fn = corpoPs('Aplicar-PerfilEstacao');
+        if (!fn) return false;
+        return /Get-ChildItem -LiteralPath \$area -Force/.test(fn)
+          && !/Get-ChildItem -LiteralPath \$area -File/.test(fn)
+          && !/Extension\.ToLowerInvariant\(\) -in @\("\.lnk"/.test(fn);
+      })(),
+      // desktop.ini é da PASTA, não do operador: leva junto o ícone e o nome
+      // da Área de Trabalho se for removido
+      'desktop.ini nunca entra na lista de remoção':
+        /\$protegidos = @\("desktop\.ini"\)/.test(corpoPs('Aplicar-PerfilEstacao'))
+        && /if \(\$protegidos -contains \(\[string\]\$item\.Name\)\.ToLowerInvariant\(\)\) \{ continue \}/.test(corpoPs('Aplicar-PerfilEstacao')),
+      // copiar pasta recursivamente pode levar minutos e gigabytes na máquina
+      // da loja; o próprio move já é o backup
+      'pasta sai de MOVE, arquivo de COPY':
+        /if \(\$item\.PSIsContainer\) \{ Move-Item -LiteralPath \$item\.FullName/.test(corpoPs('Aplicar-PerfilEstacao'))
+        && /else \{ Copy-Item -LiteralPath \$item\.FullName/.test(corpoPs('Aplicar-PerfilEstacao')),
+      // antes, UM item que não podia ser copiado cancelava a limpeza inteira
+      // (return $false) e a máquina nunca convergia
+      'item que falhou ao ser guardado não é removido, e não cancela o resto': (() => {
+        const fn = corpoPs('Aplicar-PerfilEstacao');
+        if (!fn) return false;
+        // só o caminho do Copy alimenta $guardados, e a remoção varre $guardados
+        return /\[void\]\$guardados\.Add\(\$item\)/.test(fn)
+          && /foreach \(\$item in \$guardados\) \{ try \{ Remove-Item/.test(fn)
+          && !/limpeza cancelada/.test(fn);
+      })(),
+      // O ERRO QUE ISSO EVITA: com a regra de catálogo valendo pra pasta,
+      // marcar "RDP Dominos" aprovaria a PASTA "Dominos Pizza" da Área de
+      // Trabalho - que não tem nada a ver com o RDP e ninguém pediu pra manter.
+      'regra de catálogo só vale pra atalho; pasta só fica se o Master marcou': (() => {
+        const fn = corpoPs('Atalho-EstaAprovado');
+        if (!fn) return false;
+        const iMarcado = fn.indexOf('$personalizados -contains (Chave-Atalho $item)');
+        const iTrava = fn.indexOf('if ($item.PSIsContainer -or ($ext -notin');
+        const iPrimeiraRegra = fn.indexOf('$permitidos -contains "nopulso"');
+        return iMarcado > 0 && iTrava > iMarcado && iPrimeiraRegra > iTrava;
+      })(),
+      // ---- arrumar os ícones depois de limpar ----------------------------
+      // Pedido do Master: "apos remover ele arrumar os icones na area de
+      // trabalho". Tirar atalho deixa buraco na grade, porque o Windows guarda
+      // a POSIÇÃO de cada ícone e não reaproveita o lugar do que saiu.
+      // Reiniciar o Explorer resolveria e está PROIBIDO (piscava a tela da
+      // loja); o caminho é pedir o rearranjo à própria Área de Trabalho.
+      'os ícones são rearranjados sem reiniciar nada': (() => {
+        const fn = corpoPs('Organizar-IconesAreaDeTrabalho');
+        if (!fn) return false;
+        return /0x1016/.test(fn) && /SendMessageTimeout/.test(fn)
+          && /SHELLDLL_DefView/.test(fn) && /SysListView32/.test(fn)
+          && !/Stop-Process/.test(fn) && !/explorer/i.test(fn);
+      })(),
+      // o SYSTEM não alcança a Área de Trabalho do operador (sessão 0): pra ele
+      // sobra marcar alinhar-à-grade no hive, que vale no próximo logon
+      'sem sessão do operador, o rearranjo vira marca no registro (não some calado)': (() => {
+        const fn = corpoPs('Organizar-IconesAreaDeTrabalho');
+        return /if \(-not \$Servico\) \{/.test(fn) && /Bags\\1\\Desktop/.test(fn)
+          && /FFlags/.test(fn) && /-bor 0x5/.test(fn)
+          && /Raiz-RegistroDoOperador/.test(fn);
+      })(),
+      'o rearranjo só roda quando algo saiu de verdade (não mexe de graça)':
+        /if \(\$script:AreaMudou\) \{ try \{ \[void\]\(Organizar-IconesAreaDeTrabalho\)/.test(corpoPs('Sincronizar-Politica'))
+        && /\$script:AreaMudou = \$true/.test(corpoPs('Aplicar-PerfilEstacao'))
+        && /\$script:AreaMudou = \$true/.test(corpoPs('Arquivar-DadosDaEstacao'))
+        && /\$script:AreaMudou = \$false/.test(corpoPs('Organizar-IconesAreaDeTrabalho')),
+      // ---- o conserto que tinha ficado pela metade -------------------------
+      // A Área de Trabalho já saía do perfil do OPERADOR, mas Documentos,
+      // Imagens, Vídeos e Música continuavam no GetFolderPath do PROCESSO.
+      // Instalado pelo técnico logado como Administrador, o arquivamento movia
+      // os documentos DELE e deixava os do operador onde estavam.
+      'o arquivamento lê as pastas do perfil do operador, nunca do processo':
+        !/GetFolderPath/.test(corpoPs('Arquivar-DadosDaEstacao'))
+        && /Pasta-DeDados \$perfil "MyDocuments"/.test(corpoPs('Arquivar-DadosDaEstacao'))
+        && /Pasta-DeDados \$perfil \$null @\("Downloads"\)/.test(corpoPs('Arquivar-DadosDaEstacao')),
+      'GetFolderPath só entra quando o perfil resolvido é o do próprio processo': (() => {
+        const fn = corpoPs('Pasta-DeDados');
+        if (!/GetFolderPath/.test(fn)) return false;
+        const linhas = fn.split('\n');
+        const iGuard = linhas.findIndex((l) => /\$perfilUsuario\)\.TrimEnd[\s\S]*\$env:USERPROFILE\)\.TrimEnd/.test(l));
+        const iUso = linhas.findIndex((l) => /GetFolderPath/.test(l));
+        return iGuard >= 0 && iUso > iGuard;
+      })(),
+      'a pasta redirecionada pro OneDrive também é encontrada':
+        /Join-Path \(Join-Path \$perfilUsuario "OneDrive"\) \$n/.test(corpoPs('Pasta-DeDados')),
+      // mesma doença, outro lugar: HKCU: é o hive de QUEM RODA o agente
+      'a Lixeira é escondida no hive do operador, não no de quem roda o agente':
+        // a metade que olhava a Reconstruir-BarraTarefas saiu: aquela função
+        // não existe mais, e corpoPs('') passaria vazio - asserção que não
+        // pode falhar não é asserção
+        /Raiz-RegistroDoOperador/.test(corpoPs('Aplicar-VisibilidadeLixeira'))
+        && !/HKCU:/.test(corpoPs('Aplicar-VisibilidadeLixeira')),
+      // Atalho-EstaAprovado lê $script:AtalhosPersonalizados. Sem carregar aqui,
+      // com arquivarDados ligado e modo != aplicar, o arquivamento decidia com a
+      // lista da política ANTERIOR e levava atalho marcado pra ficar.
+      'o arquivamento carrega os atalhos personalizados antes de decidir o que fica': (() => {
+        const fn = corpoPs('Arquivar-DadosDaEstacao');
+        const iCarga = fn.indexOf('$script:AtalhosPersonalizados = @($estacao.atalhosPersonalizados)');
+        // a CHAMADA, não a menção: o comentário logo acima da carga cita o nome
+        // da função e fazia o índice do 'uso' cair antes do da carga
+        const iUso = fn.indexOf('(Atalho-EstaAprovado $item $permitidos)');
+        return iCarga > 0 && iUso > iCarga;
+      })(),
+      // o movimento já aconteceu: se a marca não grava, a exceção derrubava o
+      // Sincronizar-Politica e no tick seguinte tudo era movido OUTRA vez
+      'falhar ao gravar o marcador não faz o arquivamento repetir o movimento':
+        /try \{ Set-Content -LiteralPath \$marca[^\n]*\} catch \{ Escrever-Log/.test(corpoPs('Arquivar-DadosDaEstacao')),
+      'o pino "Remote Desktop Connection" / "Área de Trabalho Remota" conta como RDP Dominos':
+        /rdp-dominos[^\n]*remote desktop\|trabalho remota\|mstsc/.test(psPp),
       'autoatualização valida a sintaxe e preserva a última cópia válida antes de substituir':
         /Language\.Parser\]::ParseInput\(\$novoConteudo/.test(psPp)
         && /Atualizacao recusada: o arquivo novo tem erro de sintaxe/.test(psPp)
@@ -12750,7 +13062,8 @@ setTimeout(async () => {
       'a arte se ajusta à tela sem cortar laterais, logos ou identificação':
         /if \(\$ligado\) \{[\s\S]{0,700}Name WallpaperStyle -Value "6"/.test(psPp),
       'desligar so mexe se a imagem for nossa, ou se a tela estiver apagada':
-        /if \(-not \$nossa -and \$atual -ne ""\) \{ return \$true \}/.test(psPp)
+        /if \(-not \$nossa -and -not \$semImagem\) \{ return \$true \}/.test(psPp)
+        && /\$semImagem = Tela-SemImagem/.test(psPp)
         && psPp.includes('Web\\Wallpaper\\Windows\\img0.jpg'),
       'quem ligou o papel de parede deixa marca, pra saber que foi nosso':
         /papel-de-parede-aplicado\.txt/.test(psPp)
@@ -12760,7 +13073,8 @@ setTimeout(async () => {
       'o agente compara a versão de aplicação, com queda pra política se o servidor for antigo':
         /\$versaoServidor = "\$\(\$cfg\.versaoAplicacao\)"/.test(psPp)
         && /\$versaoServidor = "\$\(\$cfg\.politicaVersao\)"/.test(psPp)
-        && /\$versao = "v\$VersaoScript\|\$versaoServidor"/.test(psPp),
+        && /\$versao = "p\|\$versaoServidor"/.test(psPp)
+        && /function Politica-EstaAplicada/.test(psPp),
       // agente novo = 52 maquinas baixando de novo; sem subir a versao,
       // ninguem baixa e a mudanca toda fica so no servidor
       'a versão do vigia subiu junto (senão nenhuma máquina pega o script novo)':
@@ -12822,6 +13136,559 @@ setTimeout(async () => {
   } catch (e) { okDiagPapel = false; console.log('  erro: ' + e.message); }
   if (!okDiagPapel) ruins += 1;
   console.log(`${okDiagPapel ? '✓' : '✗'} Papel de parede: diagnóstico "por que não subiu em todos?" (ligado/sem arte/offline por máquina)`);
+
+  // ------------------------------------------------------------------
+  // MODELO BÁSICO: MÁQUINA SEM ARTE (pedido do Master, 23/09/2026).
+  // "conseguiríamos rodar só o carimbo das máquinas na tela preta quando não
+  // tiver imagem? ... com a logo do grupo ou da unidade ... mantém o modelo de
+  // subir a arte do jeito que está".
+  //
+  // O que tranca:
+  //  - a ARTE continua mandando (máquina com arte nunca vê o modelo);
+  //  - logo novo NÃO mexe na versão da política (senão um PNG reaplicaria
+  //    Área de Trabalho/arquivamento/barra no parque inteiro);
+  //  - o agente só troca a tela que está SEM imagem, ou quando a política
+  //    pede e não há arte - imagem de quem pôs nunca é pisada;
+  //  - falha não vira laço de leitura (§3): retenta de hora em hora.
+  // As asserções do agente RODAM o PowerShell (pwsh) com o desenho e o
+  // registro do Windows simulados - texto no fonte não prova o fluxo.
+  let okModeloBasico = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const uni = require('/home/user/adyen-monitor/server/unidades.js');
+    const emp = require('/home/user/adyen-monitor/server/empresas.js');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const cab = { Authorization: 'Bearer ' + token };
+    const SENHA = process.env.MASTER_PASSWORD;
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const U = 'DOM19940'; // Dom Tirol: o nome canônico sai do index.js
+    DOCS.set('unidadesExtras/uniLcTirol', { id: 'uniLcTirol', codigo: U, nome: 'Dom Tirol', marca: 'dominos', areas: [], tiposSolicitacao: [] });
+    uni.invalidar();
+    // o grupo é o que o cadastro de empresas diz (a Dom Tirol já está na
+    // semente do Grupo Bravo); só cria um se não houver
+    let GRUPO = ((await emp.empresaDaUnidade(U)) || {}).id;
+    if (!GRUPO) {
+      DOCS.set('empresas/empLcBravo', { id: 'empLcBravo', nome: 'Grupo Bravo LC', ativa: true, tipoNegocio: 'alimentacao', unidades: [U] });
+      emp.invalidarCache();
+      GRUPO = 'empLcBravo';
+    }
+    GRUPO = String(GRUPO);
+    // sem arte NENHUMA no parque durante o teste (o bloco de arte acima subiu
+    // a do parque); o original volta no fim
+    const CFG_ID = 'lojaStatusConfig/geral';
+    const cfgOriginal = DOCS.get(CFG_ID) ? JSON.parse(JSON.stringify(DOCS.get(CFG_ID))) : null;
+    DOCS.set(CFG_ID, { ...(cfgOriginal || {}), papelDeParede: null, papelDeParedePorMarca: {}, logosCarimbo: {} });
+    await ls.setConfig({});
+
+    await ls.cadastrarComputador(U, 'PDV Tirol', 'interno');
+    await ls.cadastrarComputador(U, 'VM Tirol', 'interno');
+    const postoDe = async (nome) => (await ls.listar()).find((c) => c.codigo === U && c.nome === nome).posto;
+    const pOn = await postoDe('PDV Tirol');
+    const pOff = await postoDe('VM Tirol');
+    await ls.definirPolitica(U, pOn, { papelDeParedeAtivo: true });
+    const tkOn = await ls.garantirAgentToken(U, pOn);
+    const tkOff = await ls.garantirAgentToken(U, pOff);
+    const hb = async (p, tk) => ls.heartbeat(U, p, { userAgent: 'NOCZenith/1.0' }, tk);
+    const cfgRota = async (p, tk) => {
+      const r = await pedir(`/api/loja-status/${U}/computadores/${p}/configuracao-agente`, { 'x-noc-token': tk });
+      return r.status === 200 ? JSON.parse(r.corpo) : { erro: r.status };
+    };
+
+    const hbOn0 = await hb(pOn, tkOn);
+    const hbOff0 = await hb(pOff, tkOff);
+    const cfgOn0 = await cfgRota(pOn, tkOn);
+    const cfgOff0 = await cfgRota(pOff, tkOff);
+
+    // ---- logos ----
+    const semSenha = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'marca', id: 'dominos' }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const tipoRuim = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'loja', id: 'dominos', password: SENHA }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const marcaRuim = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'marca', id: 'pizzahut', password: SENHA }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const naoImagem = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'marca', id: 'dominos', password: SENHA }, { nome: 'd.txt', tipo: 'text/plain', buffer: Buffer.from('oi') }, 'imagem', cab, 'PUT');
+    const logoGrupoAntes = await pedir(`/api/loja-status/${U}/computadores/${pOn}/logo-carimbo/grupo`, { 'x-noc-token': tkOn });
+    const envMarca = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'marca', id: 'dominos', password: SENHA }, { nome: 'd.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const hbOn1 = await hb(pOn, tkOn);
+    const hbOff1 = await hb(pOff, tkOff);
+    const cfgOn1 = await cfgRota(pOn, tkOn);
+    const logoMaq = await pedir(`/api/loja-status/${U}/computadores/${pOn}/logo-carimbo/marca`, { 'x-noc-token': tkOn });
+    const logoSemToken = await pedir(`/api/loja-status/${U}/computadores/${pOn}/logo-carimbo/marca`, {});
+    const logoMaster = await pedir('/api/loja-status/logo-carimbo?tipo=marca&id=dominos', cab);
+    const envGrupo = await postarMultipart('/api/loja-status/logo-carimbo', { tipo: 'grupo', id: GRUPO, password: SENHA }, { nome: 'g.png', tipo: 'image/png', buffer: png }, 'imagem', cab, 'PUT');
+    const cfgOn2 = await cfgRota(pOn, tkOn);
+    const lista = await pedir('/api/loja-status/papel-de-parede-marcas', cab);
+    const listaJ = lista.status === 200 ? JSON.parse(lista.corpo) : {};
+    const remSemSenha = await enviarJson('DELETE', '/api/loja-status/logo-carimbo', { tipo: 'grupo', id: GRUPO }, cab);
+    const rem = await enviarJson('DELETE', '/api/loja-status/logo-carimbo', { tipo: 'grupo', id: GRUPO, password: SENHA }, cab);
+    const cfgOn3 = await cfgRota(pOn, tkOn);
+
+    // ---- com arte: a arte manda, o modelo some ----
+    await ls.definirArteDaMaquina(U, pOn, { caminho: 'x.png', tipo: 'image/png', versao: 7, em: Date.now() });
+    const hbOnArte = await hb(pOn, tkOn);
+    const cfgOnArte = await cfgRota(pOn, tkOn);
+
+    // ---- agente (pwsh) ----
+    const ps = vg.montarScriptVigia({ codigo: U, posto: pOn, tipo: 'interno', agentToken: tkOn, maquinaNome: 'PDV Tirol', unidadeNome: 'Dom Tirol' });
+    const ps2 = vg.montarScriptVigia({ codigo: U, posto: pOn, tipo: 'atendimento', agentToken: tkOn, maquinaNome: 'PDV Tirol', unidadeNome: 'Dom Tirol' });
+    const corpo = (fonte, nome) => {
+      const i = fonte.indexOf('function ' + nome);
+      if (i < 0) return '';
+      return fonte.slice(i, fonte.indexOf('\n}\n', i) + 3);
+    };
+    const pwshBin = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh']
+      .filter(Boolean).find((c) => { try { return require('fs').statSync(c).isFile(); } catch (e) { return false; } });
+    let ag = null;
+    if (pwshBin) {
+      const fs2 = require('fs'); const os2 = require('os'); const path2 = require('path');
+      const dir = fs2.mkdtempSync(path2.join(os2.tmpdir(), 'modelo-basico-'));
+      const funcs = ['Tamanho-TelaPrincipal', 'Caminho-ModeloBasico', 'Baixar-LogoCarimbo', 'Novo-ModeloBasico', 'Tela-SemImagem',
+        'Gravar-ModeloBasicoNaTela', 'Caminho-VersaoModeloBasico', 'Versao-ModeloBasicoAplicada', 'Aplicar-ModeloBasicoDaConfig',
+        'Atualizar-ModeloBasico', 'Aplicar-PapelDeParede'].map((n) => corpo(ps, n));
+      const harness = `
+$ErrorActionPreference = "Continue"
+$Servico = $false
+$UrlPapelDeParede = "http://x/arte"
+$UrlLogoCarimbo = "http://x/logo"
+$UrlConfiguracaoAgente = "http://x/cfg"
+$CabecalhosAgente = @{}
+$NomeMaquinaArte = "PDV Tirol"; $NomeLojaArte = "Dom Tirol"
+$script:ModeloBasicoFalhouEm = $null
+$global:LOG = New-Object System.Collections.ArrayList
+$global:REG = @{}
+$global:BAIXOU = New-Object System.Collections.ArrayList
+$global:DESENHOS = 0
+$global:CFG_LIDAS = 0
+function Escrever-Log($m) { [void]$global:LOG.Add([string]$m) }
+function Get-ItemProperty { param($Path, $Name, $ErrorAction) if (-not $global:REG.ContainsKey($Name)) { throw "sem valor" }; return [pscustomobject]@{ $Name = $global:REG[$Name] } }
+function Set-ItemProperty { param($Path, $Name, $Value, $ErrorAction, $Type) $global:REG[$Name] = $Value }
+function rundll32.exe { }
+function Invoke-WebRequest { param($Uri, $Headers, $OutFile, $TimeoutSec, [switch]$UseBasicParsing, [switch]$PassThru) [void]$global:BAIXOU.Add([string]$Uri); if ($global:FALHAR_DOWNLOAD) { throw "rede caiu" }; Set-Content -LiteralPath $OutFile -Value "img"; return [pscustomobject]@{ Headers = @{} } }
+function Invoke-RestMethod { param($Uri, $Headers, $TimeoutSec) $global:CFG_LIDAS++; if ($global:FALHAR_CFG) { throw "sem rede" }; return $global:CFG }
+function Carimbar-NomeNaArte($o, $d) { return $d }
+function Desenhar-ModeloBasico([string]$saida, $modelo, $arqMarca, $arqGrupo) { $global:DESENHOS++; $global:ULTIMO = @{ marca = [string]$arqMarca; grupo = [string]$arqGrupo; linha = [string]$modelo.linha }; if ($global:FALHAR_DESENHO) { throw "GDI+ falhou" }; Set-Content -LiteralPath $saida -Value "png"; return $saida }
+${funcs.join('\n')}
+function Tela-Logica { return @($global:TL[0], $global:TL[1]) }
+function Get-CimInstance { param($ClassName, $ErrorAction) return $global:CIM }
+$pasta = Split-Path -Parent $PSCommandPath
+$modeloArq = Join-Path $pasta "papel-de-parede-modelo-basico.png"
+$marca = Join-Path $pasta "papel-de-parede-aplicado.txt"
+$verArq = Join-Path $pasta "modelo-basico-versao.txt"
+function Zerar { $global:REG = @{}; $global:BAIXOU.Clear(); $global:DESENHOS = 0; $global:CFG_LIDAS = 0; $global:FALHAR_DOWNLOAD = $false; $global:FALHAR_DESENHO = $false; $global:FALHAR_CFG = $false; $script:ModeloBasicoFalhouEm = $null; Remove-Item -LiteralPath $marca, $verArq, $modeloArq -ErrorAction SilentlyContinue }
+$modelo = [pscustomobject]@{ maquina = "PDV Tirol"; linha = "DOMINO'S · TIROL"; marcaRotulo = "Domino's"; logoMarca = $true; logoGrupo = $false }
+$r = @{}
+$existente = Join-Path $pasta "foto-de-alguem.jpg"; Set-Content -LiteralPath $existente -Value "x"
+
+# 1. ligado e sem arte: modelo, sem baixar arte; so o logo que existe
+Zerar
+$ret = Aplicar-PapelDeParede $true $true $modelo
+$r.s1 = @{ ret = $ret; wall = $global:REG["Wallpaper"]; baixou = @($global:BAIXOU); marca = (Test-Path $marca); desenhos = $global:DESENHOS }
+# 2. ligado e sem arte, desenho falhou: nao segura a politica, nao mexe na tela, apaga a versao do modelo
+Zerar; Set-Content -LiteralPath $verArq -Value "1|x"; $global:FALHAR_DESENHO = $true
+$ret = Aplicar-PapelDeParede $true $true $modelo
+$r.s2 = @{ ret = $ret; temWall = $global:REG.ContainsKey("Wallpaper"); versao = (Test-Path $verArq) }
+# 3. ligado COM arte: o fluxo da arte de sempre, o modelo nem entra
+Zerar
+$ret = Aplicar-PapelDeParede $true $false $null
+$r.s3 = @{ ret = $ret; wall = $global:REG["Wallpaper"]; baixou = @($global:BAIXOU); desenhos = $global:DESENHOS }
+# 4. ligado sem arte, logo nao baixou: nao desenha sem o logo
+Zerar; $global:FALHAR_DOWNLOAD = $true
+$ret = Aplicar-PapelDeParede $true $true $modelo
+$r.s4 = @{ ret = $ret; desenhos = $global:DESENHOS; temWall = $global:REG.ContainsKey("Wallpaper") }
+# 5. desligado, tela vazia, nao e nossa: modelo, sem gravar a marca de aplicado
+Zerar; $global:REG["Wallpaper"] = ""
+$ret = Aplicar-PapelDeParede $false $false $modelo
+$r.s5 = @{ ret = $ret; wall = $global:REG["Wallpaper"]; marca = (Test-Path $marca) }
+# 6. desligado, imagem de alguem: nao mexe
+Zerar; $global:REG["Wallpaper"] = $existente
+$ret = Aplicar-PapelDeParede $false $false $modelo
+$r.s6 = @{ ret = $ret; wall = $global:REG["Wallpaper"]; desenhos = $global:DESENHOS }
+# 7. desligado, arquivo local que sumiu (tela preta igual): modelo
+Zerar; $global:REG["Wallpaper"] = (Join-Path $pasta "sumiu.jpg")
+$null = Aplicar-PapelDeParede $false $false $modelo
+$r.s7 = @{ wall = $global:REG["Wallpaper"] }
+# 8. desligado, caminho de rede fora do ar: nao e tela preta de certeza, nao mexe
+Zerar; $global:REG["Wallpaper"] = "\\\\servidor\\artes\\fundo.jpg"
+$null = Aplicar-PapelDeParede $false $false $modelo
+$r.s8 = @{ wall = $global:REG["Wallpaper"]; desenhos = $global:DESENHOS }
+# 9. desligado e era nossa: devolve o padrao do Windows (como sempre)
+Zerar; Set-Content -LiteralPath $marca -Value "x"; $global:REG["Wallpaper"] = $existente
+$env:SystemRoot = $pasta; New-Item -ItemType Directory -Force -Path (Join-Path $pasta "Web/Wallpaper/Windows") | Out-Null
+$img0 = Join-Path $pasta "Web\\Wallpaper\\Windows\\img0.jpg"; Set-Content -LiteralPath $img0 -Value "x"
+$null = Aplicar-PapelDeParede $false $false $modelo
+$r.s9 = @{ wall = $global:REG["Wallpaper"]; desenhos = $global:DESENHOS; marca = (Test-Path $marca) }
+# 10. batida: tela vazia -> modelo e grava a versao
+Zerar; $global:REG["Wallpaper"] = ""
+$global:CFG = [pscustomobject]@{ modeloBasico = $modelo; politica = [pscustomobject]@{ papelDeParedeAtivo = $false }; papelDeParedeSemArte = $false }
+Atualizar-ModeloBasico "5|PDV Tirol"
+$r.s10 = @{ wall = $global:REG["Wallpaper"]; versao = (Versao-ModeloBasicoAplicada) }
+# 11. batida: imagem de alguem -> nao mexe, mas grava a versao (nao repete)
+Zerar; $global:REG["Wallpaper"] = $existente
+Atualizar-ModeloBasico "5|PDV Tirol"
+$r.s11 = @{ wall = $global:REG["Wallpaper"]; versao = (Versao-ModeloBasicoAplicada); desenhos = $global:DESENHOS }
+# 12. batida: desenho falhou -> sem versao, e a proxima batida NAO le de novo (1h)
+Zerar; $global:REG["Wallpaper"] = ""; $global:FALHAR_DESENHO = $true
+Atualizar-ModeloBasico "5|PDV Tirol"
+$lidas1 = $global:CFG_LIDAS
+Atualizar-ModeloBasico "5|PDV Tirol"; Atualizar-ModeloBasico "5|PDV Tirol"
+$r.s12 = @{ versao = (Versao-ModeloBasicoAplicada); lidas1 = $lidas1; lidasDepois = $global:CFG_LIDAS }
+# 13. batida: politica pede e nao ha arte -> aplica mesmo com imagem, e grava a marca
+Zerar; $global:REG["Wallpaper"] = $existente
+$global:CFG = [pscustomobject]@{ modeloBasico = $modelo; politica = [pscustomobject]@{ papelDeParedeAtivo = $true }; papelDeParedeSemArte = $true }
+Atualizar-ModeloBasico "6|PDV Tirol"
+$r.s13 = @{ wall = $global:REG["Wallpaper"]; marca = (Test-Path $marca) }
+# 14. batida: o nosso modelo ja na tela conta como "sem imagem" (redesenha com logo novo)
+Zerar; Set-Content -LiteralPath $modeloArq -Value "velho"; $global:REG["Wallpaper"] = $modeloArq
+$global:CFG = [pscustomobject]@{ modeloBasico = $modelo; politica = [pscustomobject]@{ papelDeParedeAtivo = $false }; papelDeParedeSemArte = $false }
+Atualizar-ModeloBasico "7|PDV Tirol"
+$r.s14 = @{ desenhos = $global:DESENHOS }
+# 15. tamanho da tela
+$fazCim = { param($w, $h) ,@([pscustomobject]@{ CurrentHorizontalResolution = $w; CurrentVerticalResolution = $h }) }
+$global:TL = @(1280, 720); $global:CIM = & $fazCim 1920 1080; $a = @(Tamanho-TelaPrincipal)
+$global:TL = @(1080, 1920); $global:CIM = & $fazCim 1920 1080; $b = @(Tamanho-TelaPrincipal)
+$global:TL = @(0, 0); $global:CIM = @(); $c = @(Tamanho-TelaPrincipal)
+$global:TL = @(1280, 1024); $global:CIM = & $fazCim 1920 1080; $d = @(Tamanho-TelaPrincipal)
+$r.s15 = @{ dpi = "$($a[0])x$($a[1])"; emPe = "$($b[0])x$($b[1])"; nada = "$($c[0])x$($c[1])"; outroMonitor = "$($d[0])x$($d[1])" }
+$r.modeloArq = $modeloArq; $r.existente = $existente; $r.img0 = $img0
+$r | ConvertTo-Json -Depth 6 -Compress
+`;
+      const arq = path2.join(dir, 'h.ps1');
+      fs2.writeFileSync(arq, harness);
+      const out = require('child_process').spawnSync(pwshBin, ['-NoProfile', '-NonInteractive', '-File', arq], { encoding: 'utf8', timeout: 120000 });
+      try { ag = JSON.parse(String(out.stdout).trim().split('\n').pop()); } catch (e) { ag = { erro: (out.stdout || '') + (out.stderr || '') }; }
+      if (ag && ag.erro) console.log('  pwsh: ' + String(ag.erro).slice(0, 800));
+      else if (out.stderr && out.stderr.trim()) console.log('  pwsh stderr: ' + out.stderr.slice(0, 800));
+    }
+    const temPw = !!pwshBin;
+    const a = ag || {};
+    const lsTx = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+
+    const conf = {
+      // ---- servidor ----
+      'a linha da unidade sai sem repetir a marca ("DOMINO\'S · TIROL")':
+        ls.linhaDoCarimbo('dominos', 'Dom Tirol') === "DOMINO'S · TIROL"
+        && ls.linhaDoCarimbo('spoleto', 'Spo Praça Aero Recife') === 'SPOLETO · PRAÇA AERO RECIFE'
+        && ls.linhaDoCarimbo(null, 'Loja Nova') === 'LOJA NOVA',
+      'sem arte, a política ligada pede o modelo básico, com o nome canônico da loja':
+        cfgOn0.papelDeParedeSemArte === true && cfgOn0.modeloBasico && cfgOn0.modeloBasico.linha === "DOMINO'S · TIROL"
+        && cfgOn0.modeloBasico.maquina === 'PDV Tirol' && cfgOn0.modeloBasico.marcaRotulo === "Domino's",
+      'com a chave desligada o modelo também vai (é pra tela sem imagem), mas a política não pede':
+        cfgOff0.papelDeParedeSemArte === false && !!cfgOff0.modeloBasico,
+      'antes de qualquer logo, nenhum logo é prometido à máquina':
+        cfgOn0.modeloBasico && cfgOn0.modeloBasico.logoMarca === false && cfgOn0.modeloBasico.logoGrupo === false
+        && logoGrupoAntes.status === 404,
+      'o logo pede a senha do Master, só aceita marca/grupo que existem e só imagem':
+        semSenha.status === 400 && tipoRuim.status === 400 && marcaRuim.status === 400 && naoImagem.status === 400
+        && envMarca.status === 200 && envGrupo.status === 200,
+      // O RISCO QUE ISTO EVITA: logo pela versão da política = TODA máquina
+      // sem arte reaplicando Área de Trabalho, arquivamento e barra por um PNG.
+      'subir logo NÃO mexe na versão da política - só na versão do modelo básico':
+        hbOn1.versaoAplicacao === hbOn0.versaoAplicacao && hbOff1.versaoAplicacao === hbOff0.versaoAplicacao
+        && hbOn1.versaoModeloBasico !== hbOn0.versaoModeloBasico && hbOff1.versaoModeloBasico !== hbOff0.versaoModeloBasico
+        && hbOn0.versaoModeloBasico === '0|PDV Tirol',
+      // se as duas contas divergissem a máquina redesenharia a cada batida
+      'heartbeat e configuração dão a MESMA versão do modelo':
+        cfgOn1.versaoModeloBasico === hbOn1.versaoModeloBasico,
+      'a máquina baixa o logo DELA com o token; sem token é recusado':
+        cfgOn1.modeloBasico.logoMarca === true && logoMaq.status === 200 && logoSemToken.status === 403,
+      'o Master vê o logo e a lista diz o que já subiu':
+        logoMaster.status === 200
+        && (listaJ.logosCarimbo && listaJ.logosCarimbo.marcas || []).some((m) => m.id === 'dominos' && m.temLogo === true)
+        && (listaJ.logosCarimbo && listaJ.logosCarimbo.grupos || []).some((g) => g.id === GRUPO && g.temLogo === true),
+      'logo do grupo vale pra unidade do grupo; removido, some da máquina':
+        cfgOn2.modeloBasico.logoGrupo === true && remSemSenha.status === 400 && rem.status === 200
+        && cfgOn3.modeloBasico.logoGrupo === false && cfgOn3.modeloBasico.logoMarca === true,
+      'com arte, a arte manda: nem modelo nem versão do modelo':
+        cfgOnArte.modeloBasico === null && cfgOnArte.papelDeParedeSemArte === false && hbOnArte.versaoModeloBasico === null,
+      // ---- script ----
+      'o agente subiu de versão (senão nenhuma máquina pega o modelo)': vg.VERSAO_VIGIA >= 115,
+      'o logo sai da rota da PRÓPRIA máquina':
+        new RegExp(`\\$UrlLogoCarimbo = "[^"]*/api/loja-status/${U}/computadores/${pOn}/logo-carimbo"`).test(ps),
+      'o laço interno redesenha pela versão do modelo, só na instância de login':
+        /if \(-not \$Servico -and \$null -ne \$resp\.versaoModeloBasico -and "\$\(\$resp\.versaoModeloBasico\)" -ne \(Versao-ModeloBasicoAplicada\)\) \{/.test(ps),
+      // quiosque não tem heartbeat no agente: só passa pelo Sincronizar-Politica,
+      // e o gancho tem de vir ANTES do porteiro que sai com a política aplicada
+      'quiosque também recebe: o gancho vem antes do porteiro da política':
+        (() => { const c = corpo(ps2, 'Sincronizar-Politica'); const g = c.indexOf('Aplicar-ModeloBasicoDaConfig $cfg'); const p = c.indexOf('if (Politica-EstaAplicada $versaoServidor) { return }'); return g > 0 && p > g; })(),
+      'o desenho não trava o arquivo do logo nem usa JPEG':
+        /FromStream\(\$ms\)/.test(corpo(ps, 'Abrir-ImagemSemTravar')) && /ImageFormat\]::Png/.test(corpo(ps, 'Desenhar-ModeloBasico')),
+      // ---- agente rodando ----
+      'AGENTE: ligado sem arte aplica o modelo sem baixar arte, e só o logo que existe': !temPw ? 'pular'
+        : a.s1 && a.s1.ret === true && a.s1.wall === a.modeloArq && a.s1.marca === true && a.s1.desenhos === 1
+          && a.s1.baixou.length === 1 && a.s1.baixou[0] === 'http://x/logo/marca',
+      'AGENTE: desenho falhou não segura a política nem mexe na tela, e reabre a versão do modelo': !temPw ? 'pular'
+        : a.s2 && a.s2.ret === true && a.s2.temWall === false && a.s2.versao === false,
+      'AGENTE: com arte, o fluxo da arte é o de sempre (o modelo nem entra)': !temPw ? 'pular'
+        : a.s3 && a.s3.ret === true && /papel-de-parede-nome\.png$/.test(a.s3.wall) && a.s3.baixou[0] === 'http://x/arte' && a.s3.desenhos === 0,
+      'AGENTE: logo prometido que não baixou = não desenha sem ele': !temPw ? 'pular'
+        : a.s4 && a.s4.desenhos === 0 && a.s4.temWall === false,
+      'AGENTE: desligado + tela vazia = modelo, sem se declarar dono da tela': !temPw ? 'pular'
+        : a.s5 && a.s5.wall === a.modeloArq && a.s5.marca === false,
+      'AGENTE: imagem de quem pôs nunca é pisada': !temPw ? 'pular'
+        : a.s6 && a.s6.wall === a.existente && a.s6.desenhos === 0 && a.s11 && a.s11.wall === a.existente && a.s11.desenhos === 0,
+      'AGENTE: arquivo local que sumiu conta como tela preta; caminho de rede não': !temPw ? 'pular'
+        : a.s7 && a.s7.wall === a.modeloArq && a.s8 && a.s8.desenhos === 0 && /servidor/.test(a.s8.wall),
+      'AGENTE: desligar o que era nosso ainda devolve o padrão do Windows': !temPw ? 'pular'
+        : a.s9 && a.s9.wall === a.img0 && a.s9.desenhos === 0 && a.s9.marca === false,
+      'AGENTE: pela batida, tela vazia ganha o modelo e a versão fica gravada': !temPw ? 'pular'
+        : a.s10 && a.s10.wall === a.modeloArq && a.s10.versao === '5|PDV Tirol' && a.s11.versao === '5|PDV Tirol',
+      // §3: sem isso, desenho quebrado = 1 leitura do Firestore a cada 25s
+      'AGENTE: falhou = não grava versão e não relê a configuração a cada batida': !temPw ? 'pular'
+        : a.s12 && a.s12.versao === '' && a.s12.lidas1 === 1 && a.s12.lidasDepois === 1,
+      'AGENTE: política pedindo e sem arte, aplica e marca como nossa': !temPw ? 'pular'
+        : a.s13 && a.s13.wall === a.modeloArq && a.s13.marca === true,
+      'AGENTE: o modelo antigo na tela é redesenhado (logo novo chega)': !temPw ? 'pular'
+        : a.s14 && a.s14.desenhos === 1,
+      'AGENTE: tamanho em pixel de verdade, em pé no Makeline, e sem chute de outro monitor': !temPw ? 'pular'
+        : a.s15 && a.s15.dpi === '1920x1080' && a.s15.emPe === '1080x1920' && a.s15.nada === '1920x1080' && a.s15.outroMonitor === '1280x1024',
+      'custo: o heartbeat não resolve logo nenhum enquanto não existir logo':
+        /if \(!Object\.values\(logos\)\.some\(\(l\) => l && l\.caminho\)\) return 0;/.test(lsTx),
+    };
+    const pulou = Object.entries(conf).filter(([, v]) => v === 'pular').map(([n]) => n);
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okModeloBasico = !falhas.length;
+    if (pulou.length) console.log(`  (sem pwsh: ${pulou.length} asserção(ões) do agente puladas)`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (grupo=${GRUPO} envGrupo=${envGrupo.status} on2=${JSON.stringify(cfgOn2.modeloBasico)} rem=${rem.status}/${remSemSenha.status} on3=${JSON.stringify(cfgOn3.modeloBasico)} on0=${JSON.stringify(cfgOn0).slice(0, 300)} hb0=${JSON.stringify(hbOn0.versaoModeloBasico)} hb1=${JSON.stringify(hbOn1.versaoModeloBasico)} ag=${JSON.stringify(ag).slice(0, 900)})`);
+    for (const p of [pOn, pOff]) await ls.removerComputador(U, p);
+    if (cfgOriginal) DOCS.set(CFG_ID, cfgOriginal);
+    await ls.setConfig({});
+  } catch (e) { okModeloBasico = false; console.log('  erro: ' + e.message); }
+  if (!okModeloBasico) ruins += 1;
+  console.log(`${okModeloBasico ? '✓' : '✗'} Papel de parede: máquina sem arte ganha o modelo básico (logo do grupo + logo da marca + nome), sem pisar em imagem de ninguém`);
+
+  // ------------------------------------------------------------------
+  // "‹" DO CABEÇALHO ABRIA O CÓDIGO DO sw.js (celular, 23/09/2026).
+  // Tocar numa notificação abre a tela pelo service worker (openWindow /
+  // navigate), e aí o document.referrer da tela é o /sw.js. A seta de voltar
+  // aceitava qualquer endereço interno como "página anterior" e levava ao
+  // arquivo. RODA a função de verdade (extraída do nav-menu.js), com location
+  // simulado - texto no fonte não prova que o /sw.js foi recusado.
+  let okVoltarSw = false;
+  try {
+    const src = require('fs').readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
+    const i = src.indexOf('  function origemInternaSegura(valor) {');
+    const j = src.indexOf('\n  }\n', i);
+    const corpoFn = src.slice(i, j + 4);
+    const origemInternaSegura = new Function('location', `${corpoFn}; return origemInternaSegura;`)({ origin: 'https://www.nopulso.com.br', pathname: '/loja-status' });
+    const O = 'https://www.nopulso.com.br';
+    const conf = {
+      'a função foi achada no nav-menu.js': i > 0 && typeof origemInternaSegura === 'function',
+      'o referrer /sw.js (notificação) não vira "voltar"': origemInternaSegura(O + '/sw.js') === null,
+      'arquivo de qualquer tipo também não (manifest, ícone, script)':
+        origemInternaSegura(O + '/manifest.json') === null && origemInternaSegura(O + '/icon-192.png') === null
+        && origemInternaSegura(O + '/nav-menu.js') === null,
+      'rota de API não é tela': origemInternaSegura(O + '/api/me') === null,
+      'tela sem extensão e tela .html continuam valendo (com a query)':
+        origemInternaSegura(O + '/meu-dia') === '/meu-dia' && origemInternaSegura(O + '/painel.html?u=1') === '/painel.html?u=1',
+      'a mesma tela, a raiz e outro domínio continuam recusados':
+        origemInternaSegura(O + '/loja-status') === null && origemInternaSegura(O + '/') === null
+        && origemInternaSegura('https://exemplo.com/meu-dia') === null,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okVoltarSw = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okVoltarSw = false; console.log('  erro: ' + e.message); }
+  if (!okVoltarSw) ruins += 1;
+  console.log(`${okVoltarSw ? '✓' : '✗'} Menu: a seta "‹" nunca volta pra arquivo (o /sw.js da notificação abria o código no celular)`);
+
+  // ------------------------------------------------------------------
+  // VIGIA DE TRAVAMENTO + LER LOG DO AGENTE (v116, pedido do Master 23/09).
+  // DOM-TIROL-MENU.BOARD ficou 33min "calado", voltou sozinho, e o porquê só
+  // existia no NOCZenith.log dentro da máquina. O laço principal empacava num
+  // passo da política (Área de Trabalho/barra) e a máquina sumia do NOC.
+  //
+  // O que tranca:
+  //  - laço preso NÃO some do NOC: o vigia bate presença com a ETAPA, e a
+  //    máquina fica degradada com o motivo;
+  //  - presença não recebe comando nem consome aviso (se perderiam);
+  //  - só quem tem o token registra "ocupado", e só a MESMA instância limpa;
+  //  - desafixar da barra desiste em 15s; o ZIP roda fora do laço;
+  //  - "Ler log do agente" lê arquivo de verdade e cabe na ficha.
+  // O agente RODA no pwsh (vigia contra um servidor HTTP local de verdade).
+  let okVigia = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const acoes = require('/home/user/adyen-monitor/server/agenteAcoes.js');
+    const fs3 = require('fs'); const os3 = require('os'); const path3 = require('path'); const cp3 = require('child_process');
+    const U = 'VIGIA_T';
+    await ls.cadastrarComputador(U, 'MENU.BOARD Teste', 'interno');
+    const P = (await ls.listar()).find((c) => c.codigo === U && c.nome === 'MENU.BOARD Teste').posto;
+    const TK = await ls.garantirAgentToken(U, P);
+    const agora = Date.now();
+    const bate = (info, tk = TK) => ls.heartbeat(U, P, { userAgent: 'NOCZenith/1.0 (Windows NT; PowerShell)', ...info }, tk);
+    await bate({ instancia: 'login' });
+    await ls.enfileirarComando(U, P, 'Write-Output ok', { origem: 'teste-vigia' });
+    const ocupado15 = { etapa: 'Politica: barra de tarefas', desde: agora - 15 * 60000, instancia: 'login' };
+    const pres = await bate({ soPresenca: true, instancia: 'login', ocupado: ocupado15, userAgent: 'outro' });
+    const docPres = (await ls.listar()).find((c) => c.codigo === U && c.posto === P) || {};
+    const presSemToken = await bate({ soPresenca: true, instancia: 'login', ocupado: { ...ocupado15, etapa: 'forjado' } }, 'errado');
+    const docSemToken = (await ls.listar()).find((c) => c.codigo === U && c.posto === P) || {};
+    // a de SISTEMA batendo não limpa o ocupado da de login
+    const beatSistema = await bate({ instancia: 'sistema', souAdmin: true, soComandoAdmin: true });
+    const docAposSistema = (await ls.listar()).find((c) => c.codigo === U && c.posto === P) || {};
+    // aviso chega com a máquina presa: a presença não pode consumir
+    await ls.enviarMensagem(U, P, 'Aviso de teste', 'master@teste');
+    const pres2 = await bate({ soPresenca: true, instancia: 'login', ocupado: ocupado15 });
+    // a de LOGIN voltando: limpa, e recebe o comando e o aviso que a presença NÃO consumiu
+    const beatLogin = await bate({ instancia: 'login' });
+    const docAposLogin = (await ls.listar()).find((c) => c.codigo === U && c.posto === P) || {};
+    // saída grande do comando cabe (log do agente)
+    let guardou4000 = false;
+    if (beatLogin.comandoPendente) {
+      await ls.marcarComandoExecutado(beatLogin.comandoPendente.comandoId, { resultado: 'L'.repeat(5000) }, { codigo: U, posto: P, token: TK });
+      const bruto = DOCS.get(`lojaStatus/${U}__${P}`) || {};
+      guardou4000 = String(bruto.ultimoComandoResultado || '').length === 4000;
+    }
+    const mot = (oc, emAtras) => ls.motivosDeDegradacao({ agenteOcupado: { ...oc, em: agora - emAtras } }, agora);
+
+    // ---- agente ----
+    const ps = vg.montarScriptVigia({ codigo: U, posto: P, tipo: 'interno', agentToken: TK, maquinaNome: 'M' });
+    const psQ = vg.montarScriptVigia({ codigo: U, posto: P, tipo: 'atendimento', agentToken: TK, maquinaNome: 'M' });
+    const corpo = (fonte, nome) => { const i = fonte.indexOf('function ' + nome); return i < 0 ? '' : fonte.slice(i, fonte.indexOf('\n}\n', i) + 3); };
+    const linhaDe = (fonte, re) => (fonte.split('\n').find((l) => re.test(l)) || '');
+    const pwshBin = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh']
+      .filter(Boolean).find((c) => { try { return fs3.statSync(c).isFile(); } catch (e) { return false; } });
+    let ag = null; const recebidos = [];
+    if (pwshBin) {
+      const srv = require('http').createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { try { recebidos.push({ corpo: JSON.parse(b), token: req.headers['x-noc-token'] }); } catch (e) {} res.end('{}'); }); });
+      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      const porta = srv.address().port;
+      const dir = fs3.mkdtempSync(path3.join(os3.tmpdir(), 'vigia-'));
+      fs3.mkdirSync(path3.join(dir, 'arq'));
+      for (let i = 0; i < 30; i++) fs3.writeFileSync(path3.join(dir, 'arq', `f${i}.txt`), 'x'.repeat(2000));
+      const defs = [
+        linhaDe(ps, /^\$script:Pulso = \$null$/),
+        corpo(ps, 'Agora-Ms'), corpo(ps, 'Pulso-Tick'), corpo(ps, 'Marcar-Etapa'), corpo(ps, 'Iniciar-VigiaDeTravamento'),
+        corpo(ps, 'Iniciar-ZipEmSegundoPlano'), corpo(ps, 'Desafixar-DaBarra'),
+      ];
+      const iCorpo = ps.indexOf('$script:CorpoDesafixar = {');
+      const blocoCorpo = ps.slice(iCorpo, ps.indexOf('\n}\n', iCorpo) + 3);
+      const harness = `
+$ErrorActionPreference = "Continue"
+$Servico = $false
+$CabecalhosAgente = @{ "X-NOC-Token" = "${TK}" }
+$CaminhoLog = "${dir}/NOCZenith.log"
+$global:LOG = New-Object System.Collections.ArrayList
+function Escrever-Log($m) { [void]$global:LOG.Add([string]$m) }
+${defs.join('\n')}
+${blocoCorpo}
+$script:PrazoDesafixarMs = 15000
+$script:BarraTravou = $false
+$r = @{}
+# 1. vigia: laço andando = nenhuma presença; laço parado = presença com a etapa
+Iniciar-VigiaDeTravamento "http://127.0.0.1:${porta}/hb" "${U}" "${P}"
+$script:Pulso.esperaS = 1; $script:Pulso.limiteMs = 2500
+for ($i = 0; $i -lt 5; $i++) { Pulso-Tick; Start-Sleep -Milliseconds 800 }
+$r.presencasAndando = [int]$script:Pulso.presencas
+Marcar-Etapa "Politica: barra de tarefas"
+Start-Sleep -Seconds 5
+$r.presencasParado = [int]$script:Pulso.presencas
+# 2. desafixar: corpo que pendura -> desiste no prazo, e os outros pinos do ciclo nem tentam
+$script:CorpoDesafixar = { param($a) Start-Sleep -Seconds 30; $true }
+$script:PrazoDesafixarMs = 1500
+$t = [Diagnostics.Stopwatch]::StartNew(); $a1 = Desafixar-DaBarra "x.lnk"; $r.travouMs = $t.ElapsedMilliseconds
+$t = [Diagnostics.Stopwatch]::StartNew(); $a2 = Desafixar-DaBarra "y.lnk"; $r.segundoMs = $t.ElapsedMilliseconds
+$r.travouRet = $a1; $r.segundoRet = $a2; $r.logTravou = (@($global:LOG) -join " | ")
+$script:BarraTravou = $false
+$script:CorpoDesafixar = { param($a) $true }
+$r.normal = Desafixar-DaBarra "z.lnk"
+$script:CorpoDesafixar = { param($a) $false }
+$r.semVerbo = Desafixar-DaBarra "w.lnk"
+# 3. ZIP fora do laço: volta na hora, e o .zip só aparece inteiro
+$t = [Diagnostics.Stopwatch]::StartNew(); $z = Iniciar-ZipEmSegundoPlano "${dir}/arq"; $r.zipVoltouMs = $t.ElapsedMilliseconds
+$r.zipLogo = (Test-Path "${dir}/arq.zip")
+for ($i = 0; $i -lt 40 -and -not (Test-Path "${dir}/arq.zip"); $i++) { Start-Sleep -Milliseconds 250 }
+Start-Sleep -Milliseconds 300
+$r.zipFim = (Test-Path "${dir}/arq.zip"); $r.parcial = @(Get-ChildItem "${dir}" -Filter "*.parcial*").Count
+$r.zipLog = (Get-Content "${dir}/NOCZenith.log" -ErrorAction SilentlyContinue) -join " | "
+$r | ConvertTo-Json -Compress
+`;
+      const arq = path3.join(dir, 'h.ps1');
+      fs3.writeFileSync(arq, harness);
+      const out = await new Promise((resolve) => {
+        const pr = cp3.spawn(pwshBin, ['-NoProfile', '-NonInteractive', '-File', arq]);
+        let o = '', e = ''; pr.stdout.on('data', (c) => { o += c; }); pr.stderr.on('data', (c) => { e += c; });
+        const tmo = setTimeout(() => pr.kill('SIGKILL'), 120000);
+        pr.on('close', () => { clearTimeout(tmo); resolve({ o, e }); });
+      });
+      srv.close();
+      try { ag = JSON.parse(out.o.trim().split('\n').pop()); } catch (e) { ag = { erro: out.o + out.e }; }
+      if (ag.erro) console.log('  pwsh: ' + String(ag.erro).slice(0, 800));
+      else if (out.e.trim()) console.log('  pwsh stderr: ' + out.e.slice(0, 600));
+    }
+    // ---- ação "Ler log do agente": roda o modelo contra arquivos de verdade ----
+    const acao = (acoes.MODELOS_COMANDO || []).find((m) => m.id === 'ler-log-agente');
+    let saidaLog = null;
+    if (pwshBin && acao) {
+      const raiz = fs3.mkdtempSync(path3.join(os3.tmpdir(), 'lerlog-'));
+      const mk = (quem, n, prefixo) => { const d = path3.join(raiz, 'Users', quem, 'AppData', 'Local', 'NOCZenith'); fs3.mkdirSync(d, { recursive: true }); fs3.writeFileSync(path3.join(d, 'NOCZenith.log'), Array.from({ length: n }, (_, k) => `2026-09-23 23:${String(k % 60).padStart(2, '0')}:00 - ${prefixo} ${k + 1}${' .'.repeat(k === n - 1 ? 120 : 0)}`).join('\n')); };
+      mk('operador', 400, 'linha-operador');
+      mk('tecnico', 300, 'linha-tecnico');
+      // o do operador é o mais RECENTE: tem de vir primeiro
+      const agoraS = Date.now() / 1000;
+      fs3.utimesSync(path3.join(raiz, 'Users', 'tecnico', 'AppData', 'Local', 'NOCZenith', 'NOCZenith.log'), agoraS - 3600, agoraS - 3600);
+      fs3.utimesSync(path3.join(raiz, 'Users', 'operador', 'AppData', 'Local', 'NOCZenith', 'NOCZenith.log'), agoraS - 60, agoraS - 60);
+      const arqL = path3.join(raiz, 'l.ps1');
+      fs3.writeFileSync(arqL, `$env:SystemDrive = "${raiz}"; $env:SystemRoot = "${raiz}/Windows"\nfunction Get-CimInstance { @() }\n& { ${acao.comando} }`);
+      const r = cp3.spawnSync(pwshBin, ['-NoProfile', '-NonInteractive', '-File', arqL], { encoding: 'utf8', timeout: 60000 });
+      saidaLog = String(r.stdout || '') + String(r.stderr || '');
+    }
+    const temPw = !!pwshBin; const a = ag || {};
+    const mutante = /Remove-Item|Set-Item|Set-Content|Stop-|Start-Process|Invoke-WebRequest|Invoke-RestMethod|New-Item/;
+    const sLoop = ps.indexOf("Iniciar-VigiaDeTravamento $UrlHeartbeat");
+    const conf = {
+      // ---- servidor ----
+      'presença mantém a máquina no ar e grava a etapa presa': !!docPres.online && docPres.agenteOcupado && docPres.agenteOcupado.etapa === 'Politica: barra de tarefas',
+      'presença NÃO entrega comando nem consome o aviso, e não troca o userAgent':
+        !pres.comandoPendente && !pres.mensagemPendente && !pres2.comandoPendente && !pres2.mensagemPendente
+        && docPres.userAgent === 'NOCZenith/1.0 (Windows NT; PowerShell)',
+      'ocupado há 15min = degradado, com a etapa no motivo':
+        docPres.estado === 'degradado' && (docPres.degradacao || []).some((m) => /ocupado há 15min em: Politica: barra de tarefas/.test(m)),
+      'sem o token ninguém pinta a máquina de amarelo': !!presSemToken && docSemToken.agenteOcupado && docSemToken.agenteOcupado.etapa === 'Politica: barra de tarefas',
+      'a instância de sistema batendo NÃO limpa o ocupado da de login': !!beatSistema && docAposSistema.agenteOcupado && docAposSistema.agenteOcupado.instancia === 'login',
+      'a de login voltando limpa, e recebe o comando e o aviso guardados':
+        !docAposLogin.agenteOcupado && docAposLogin.estado === 'operacional' && !!beatLogin.comandoPendente && !!beatLogin.mensagemPendente,
+      'ocupado curto (comando longo) ou vigia calado não degradam':
+        mot({ ...ocupado15, desde: agora - 3 * 60000 }, 10000).length === 0 && mot(ocupado15, 5 * 60000).length === 0 && mot(ocupado15, 10000).length === 1,
+      'ocupado forjado sem etapa/instância é descartado':
+        ls.sanitizarOcupado({ etapa: '', desde: 1, instancia: 'login' }) === null && ls.sanitizarOcupado({ etapa: 'x', desde: 1, instancia: 'root' }) === null,
+      'a ficha guarda 4000 caracteres da saída (o fim do log não some)': guardou4000,
+      // ---- ação ----
+      'a ação "Ler log do agente" está no catálogo, só lê, roda como sistema e sem aprovação':
+        !!acao && acao.requerAdmin === true && acao.requerAprovacao === false && !mutante.test(acao.comando) && acao.comando.length < 8000,
+      'AÇÃO: traz o fim de cada log, o mais recente primeiro, e cabe na ficha': !temPw ? 'pular'
+        : !!saidaLog && /linha-operador 400/.test(saidaLog) && /linha-tecnico 300/.test(saidaLog)
+          && !/linha-operador 300\b/.test(saidaLog) && !/linha-tecnico 200\b/.test(saidaLog)
+          && saidaLog.indexOf('linha-operador') < saidaLog.indexOf('linha-tecnico'),
+      'AÇÃO: linha comprida é cortada e o total cabe nos 4000': !temPw ? 'pular'
+        : !!saidaLog && /\.\.\.$/m.test(saidaLog) && saidaLog.length < 4000,
+      // ---- agente (texto do laço) ----
+      'o agente subiu de versão': vg.VERSAO_VIGIA >= 116,
+      'toda volta do laço começa avisando o vigia (e a cedência também)': /const linhasCedencia = \[\n\s+'    Pulso-Tick',/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8')),
+      'o vigia sobe ANTES da política de subida (era ela que empacava)':
+        sLoop > 0 && sLoop < ps.indexOf('try { Sincronizar-Politica }', sLoop),
+      'quiosque não liga o vigia (lá quem bate é o navegador)': !/Iniciar-VigiaDeTravamento \$UrlHeartbeat/.test(psQ),
+      'cada passo da política diz o nome dele':
+        ['Politica: barra de tarefas', 'Politica: Area de Trabalho', 'Politica: arquivamento', 'Politica: papel de parede'].every((e) => corpo(ps, 'Sincronizar-Politica').includes(`Marcar-Etapa "${e}"`)),
+      'a batida normal diz a instância': /\$corpo\.instancia = \$\(if \(\$Servico\) \{ "sistema" \} else \{ "login" \}\)/.test(ps),
+      // ---- agente rodando ----
+      'AGENTE: laço andando = vigia quieto': !temPw ? 'pular' : a.presencasAndando === 0,
+      'AGENTE: laço parado = presença com a etapa, o token e sem pegar comando': !temPw ? 'pular'
+        : a.presencasParado >= 1 && recebidos.length >= 1 && recebidos.every((x) => x.corpo.soPresenca === true && x.token === TK)
+          && recebidos.some((x) => x.corpo.ocupado && x.corpo.ocupado.etapa === 'Politica: barra de tarefas' && x.corpo.ocupado.instancia === 'login'),
+      'AGENTE: desafixar pendurado desiste no prazo e larga os outros pinos do ciclo': !temPw ? 'pular'
+        : a.travouRet === false && a.travouMs < 5000 && a.segundoRet === false && a.segundoMs < 500 && /nao respondeu ao desafixar/.test(a.logTravou || ''),
+      'AGENTE: desafixar normal continua funcionando': !temPw ? 'pular' : a.normal === true && a.semVerbo === false,
+      'AGENTE: o ZIP volta na hora e só aparece inteiro': !temPw ? 'pular'
+        : a.zipVoltouMs < 3000 && a.zipLogo === false && a.zipFim === true && a.parcial === 0 && /ZIP pronto/.test(a.zipLog || ''),
+    };
+    const pulou = Object.entries(conf).filter(([, v]) => v === 'pular').map(([n]) => n);
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okVigia = !falhas.length;
+    if (pulou.length) console.log(`  (sem pwsh: ${pulou.length} asserção(ões) do agente puladas)`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pres=${JSON.stringify({ oc: docPres.agenteOcupado, est: docPres.estado, deg: docPres.degradacao, ua: docPres.userAgent })} login=${JSON.stringify({ oc: docAposLogin.agenteOcupado, est: docAposLogin.estado, cmd: !!beatLogin.comandoPendente, msg: !!beatLogin.mensagemPendente })} ag=${JSON.stringify(ag).slice(0, 700)} recebidos=${recebidos.length} log=${String(saidaLog).slice(0, 400)})`);
+    await ls.removerComputador(U, P);
+  } catch (e) { okVigia = false; console.log('  erro: ' + e.message); }
+  if (!okVigia) ruins += 1;
+  console.log(`${okVigia ? '✓' : '✗'} NOC: agente preso não some (vigia bate "ocupado em X", máquina degradada), barra com prazo, ZIP fora do laço e "Ler log do agente"`);
 
   // ------------------------------------------------------------------
   // MEDIDOR DE QUEDAS DA UNIDADE (pedido do Master, 14/09/2026)
@@ -14122,7 +14989,13 @@ setTimeout(async () => {
     let parseOk = null;
     try {
       const fs = require('fs'); const { execFileSync } = require('child_process');
-      const pw = '/tmp/claude-0/-home-user-adyen-monitor/a18c6316-378b-5396-aa44-12a815dac3c3/scratchpad/pwsh/pwsh';
+      // Onde procurar o pwsh. O caminho fixo aqui era o scratchpad de UMA
+      // sessao antiga: fora dela o arquivo nao existe, entao este parse estava
+      // desligado sem ninguem notar (parseOk=null passa). Agora tenta PWSH_BIN,
+      // o PATH e os lugares usuais - e continua pulando quando nao ha pwsh.
+      const candidatosPw = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh'].filter(Boolean);
+      try { candidatosPw.push(require('child_process').execSync('command -v pwsh 2>/dev/null', { encoding: 'utf8' }).trim()); } catch (e) {}
+      const pw = candidatosPw.find((c) => c && fs.existsSync(c)) || '';
       if (fs.existsSync(pw)) {
         parseOk = scripts.every((sc, i) => {
           const f = `/tmp/_vg_${i}.ps1`; fs.writeFileSync(f, sc);
@@ -14234,6 +15107,682 @@ setTimeout(async () => {
   } catch (e) { okPixNome = false; console.log('  erro: ' + e.message); }
   if (!okPixNome) ruins += 1;
   console.log(`${okPixNome ? '✓' : '✗'} Monitor: pedido Pix que mudou de status mostra o nome do cliente (não a conta da Adyen nem o nome do cartão)`);
+
+  // ------------------------------------------------------------------
+  // LIMPEZA DE PROGRAMAS. Lista nova do Master (22/09): atera, copilot, Google
+  // Play Games, OneDrive, Microsoft Edge e Microsoft Update Health Tools.
+  //
+  // O Edge foi decisão dele DEPOIS de eu trazer o custo: o agente usa a
+  // política do Edge (junto com a do Chrome) pra instalar o app NoPulso, então
+  // nessas máquinas o app passa a depender só do Chrome. A trava da remoção
+  // AVULSA continua de pé - o que ele liberou foi este procedimento revisado.
+  let okLimpeza = false;
+  try {
+    const srcAcoes = require('fs').readFileSync(__dirname + '/agenteAcoes.js', 'utf8');
+    const lsL = require(__dirname + '/lojaStatus.js');
+    const htmlL = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    // o modelo é template literal: desfaz os escapes como o Node faria
+    // O modelo passou a interpolar ${TRECHO_EDGE} (fonte unica da remocao do
+    // Edge), entao render sem ele estoura "TRECHO_EDGE is not defined".
+    const bruto = (nome) => {
+      const chave = `const ${nome} = `;
+      const ini = srcAcoes.indexOf(chave) + chave.length;
+      let i = ini + 1;
+      while (i < srcAcoes.length) { if (srcAcoes[i] === '\\') { i += 2; continue; } if (srcAcoes[i] === '`') break; i += 1; }
+      return srcAcoes.slice(ini, i + 1);
+    };
+    const modelo = new Function('TRECHO_EDGE', 'return ' + bruto('MODELO_LIMPEZA'))(new Function('return ' + bruto('TRECHO_EDGE'))());
+    const conf = {
+      'a limpeza remove os seis que o Master pediu':
+        ['Microsoft.Copilot', 'AteraAgent', 'Google Play Games', 'Microsoft OneDrive', 'Microsoft Edge', 'Microsoft Update Health Tools']
+          .every((n) => modelo.includes(n)),
+      // o setup do Edge não sai pelo UninstallString do registro
+      // -ArgumentList no padrao de proposito: as flags tambem aparecem no
+      // COMENTARIO do modelo que explica por que o Edge precisa delas, e a
+      // assercao sem ancora passava verde com o comando trocado por /S /silent
+      'o Edge sai pelo setup dele, não pelo UninstallString':
+        /-ArgumentList '--uninstall --system-level --force-uninstall'/.test(modelo)
+        && /Microsoft\\Edge\\Application/.test(modelo),
+      // Windows 11 recente bloqueia: a saída precisa dizer isso em vez de
+      // deixar o Master achando que removeu
+      'quando o Windows não deixa remover o Edge, a saída diz':
+        /este Windows nao permite desinstalar/.test(modelo)
+        && /Get-ChildItem \$edgeApp[\s\S]{0,200}Count\) \{ \$R\.Add\('FALHOU: Microsoft Edge/.test(modelo),
+      'o que é instalação de máquina fica PULADO sem Administrador':
+        /PULADO: \$n - precisa de Administrador/.test(modelo)
+        && /PULADO: Microsoft Edge - precisa de Administrador/.test(modelo),
+      // a remoção avulsa pelo painel continua barrando o Edge: o Master
+      // liberou ESTE procedimento, não remover componente do Windows a clique
+      'a trava da remoção avulsa do Edge continua de pé':
+        lsL.programaPodeSerRemovido('Microsoft Edge') === false
+        && lsL.programaPodeSerRemovido('Google Play Games') === true,
+      // O ERRO QUE ISSO EVITA: o comando era cortado em slice(0, 4000) sem
+      // avisar. PowerShell cortado no meio roda pela metade.
+      'comando grande demais é recusado, nunca truncado':
+        // \.slice pra nao casar com o COMENTARIO que explica o defeito antigo
+        // ("O slice(0, 4000) cortava em silencio") - foi o que me deu falso
+        // vermelho na primeira rodada
+        !/\.slice\(0, 4000\)/.test(srcAcoes)
+        && /O comando tem \$\{comando\.length\} caracteres e o limite é 8000/.test(srcAcoes),
+      'o modelo cabe no limite': modelo.length > 0 && modelo.length <= 8000,
+      // pedido do Master: "colocar ele em manutencao"
+      'as ações de comando aparecem na Janela de Manutenção':
+        /⚙️ Ações nas máquinas/.test(htmlL)
+        && /renderAcoesNaManutencao\(\);/.test(htmlL)
+        // a MESMA lista e o MESMO modal - nada duplicado
+        && /a\.tipo === 'comando_maquina' && a\.ativo/.test(htmlL)
+        && /manut-acoes-lista[\s\S]{0,4000}?abrirRodarAcao/.test(htmlL),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okLimpeza = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (modelo=${modelo.length} chars)`);
+  } catch (e) { okLimpeza = false; console.log('  erro: ' + e.message); }
+  if (!okLimpeza) ruins += 1;
+  console.log(`${okLimpeza ? '✓' : '✗'} NOC: limpeza de programas (com Edge, por decisão do Master) e ações na Manutenção`);
+
+  // ------------------------------------------------------------------
+  // CANCELAR VÁRIOS COMANDOS DE UMA VEZ. Pedido do Master (22/09): "opção de
+  // selecionar mais de um comando operacional que esteja com a tag cancelar
+  // para cancelar mais de 1 de uma única vez".
+  //
+  // Isto é um teste DE COMPORTAMENTO, não de texto: o código sai do HTML e
+  // roda aqui com fetch/confirm/senha de mentira. O que ele trava:
+  //   - a senha do Master é pedida UMA vez pro lote, não uma por comando
+  //     (senão o "de uma vez" não existe na prática);
+  //   - só vai pro servidor o que REALMENTE pode ser cancelado - marcar e
+  //     depois trocar de filtro não pode derrubar comando já executando;
+  //   - falha no meio do lote não some: o resto continua e o Master vê o
+  //     número dos dois lados.
+  let okLote = false;
+  try {
+    const htmlQ = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const mHelper = htmlQ.match(/const podeCancelarComando = [^\n]+/);
+    const ini = htmlQ.indexOf('// A barra do lote só aparece');
+    const fim = htmlQ.indexOf('async function carregarComandosRecentes');
+    if (!mHelper || ini < 0 || fim < 0 || fim < ini) throw new Error('não achei o bloco do cancelamento em lote no HTML');
+    const trecho = mHelper[0] + '\n' + htmlQ.slice(ini, fim);
+
+    // --- dublês. O elemento da barra guarda o innerHTML pra eu poder olhar.
+    const barra = { className: '', innerHTML: '' };
+    const doc = { getElementById: (id) => (id === 'comandos-lote' ? barra : null) };
+    const enviados = [];
+    let senhas = 0; let confirmou = 0; const avisos = [];
+    // Um id recusado pelo servidor, pra provar que o lote não para no primeiro
+    // erro. Ele é o do MEIO de propósito: com a recusa no último, um `break`
+    // no catch passaria despercebido - foi o que escapou na 1a sabotagem.
+    const fetchFalso = async (url, opc) => {
+      enviados.push({ url, body: JSON.parse(opc.body) });
+      if (url.includes('c2')) return { ok: false, json: async () => ({ error: 'já foi entregue' }) };
+      return { ok: true, json: async () => ({ ok: true }) };
+    };
+    const fabricar = (estado) => {
+      const ctx = new Function('document', 'fetch', 'confirm', 'alert', 'pedirSenhaMaster',
+        'renderComandosRecentes', 'carregarComandosRecentes', 'estado', `
+        let COMANDOS_RECENTES = estado.lista;
+        let COMANDOS_MARCADOS = estado.marcados;
+        let FILTRO_COMANDOS = estado.filtro;
+        ${trecho}
+        return { renderLoteComandos, marcarComandoLote, marcarTodosComandosLote,
+                 cancelarComandosSelecionados, podeCancelarComando,
+                 verMarcados: () => [...COMANDOS_MARCADOS] };
+      `);
+      return ctx(doc, fetchFalso, () => { confirmou += 1; return true; }, (m) => avisos.push(m),
+        async () => { senhas += 1; return 'senha-do-master'; },
+        () => {}, async () => {}, estado);
+    };
+
+    const lista = [
+      { id: 'c1', status: 'pendente', nomeComputador: 'PDV01' },
+      { id: 'c2', status: 'erro', nomeComputador: 'PDV02' },
+      { id: 'c3', status: 'pendente', nomeComputador: 'PDV03' },
+      { id: 'c4', status: 'entregue', nomeComputador: 'PDV04' },
+      { id: 'c5', status: 'executado', nomeComputador: 'PDV05' },
+    ];
+
+    // 1) marcar todos só pega os canceláveis (c1, c2, c3) - nunca o que já
+    //    está na máquina
+    const a = fabricar({ lista, marcados: new Set(), filtro: 'todos' });
+    a.marcarTodosComandosLote(true);
+    const soCancelaveis = JSON.stringify(a.verMarcados()) === JSON.stringify(['c1', 'c2', 'c3']);
+
+    // 2) o lote inteiro: uma senha, uma confirmação, três DELETEs
+    const b = fabricar({ lista, marcados: new Set(['c1', 'c2', 'c3']), filtro: 'todos' });
+    await b.cancelarComandosSelecionados(null);
+    const umaSenha = senhas === 1 && confirmou === 1;
+    const tresDeletes = enviados.length === 3
+      && enviados.every((e) => e.body.password === 'senha-do-master')
+      && ['c1', 'c2', 'c3'].every((id) => enviados.some((e) => e.url.endsWith('/' + id)));
+    // c2 foi recusado: o aviso tem os dois números e o nome da máquina, e o
+    // c3 (depois dele) precisa ter sido enviado assim mesmo
+    const contouParcial = avisos.length === 1 && /2 de 3 cancelados/.test(avisos[0]) && /PDV02/.test(avisos[0]);
+
+    // 3) marcado que DEIXOU de ser cancelável não vai pro servidor
+    enviados.length = 0; senhas = 0; confirmou = 0; avisos.length = 0;
+    const c = fabricar({ lista, marcados: new Set(['c4', 'c5']), filtro: 'todos' });
+    await c.cancelarComandosSelecionados(null);
+    const naoVazaExecutando = enviados.length === 0 && senhas === 0;
+
+    // 4) a barra não aparece com menos de dois canceláveis: com um só o ✕ da
+    //    linha já resolve
+    const d = fabricar({ lista, marcados: new Set(), filtro: 'todos' });
+    d.renderLoteComandos([lista[0]]);
+    const escondeComUm = !/visivel/.test(barra.className) && barra.innerHTML === '';
+    d.renderLoteComandos([lista[0], lista[1]]);
+    const apareceComDois = /visivel/.test(barra.className) && /Selecionar os 2 canceláveis/.test(barra.innerHTML);
+    // sem nada marcado o botão fica travado - não dá pra "cancelar 0"
+    const botaoTravadoVazio = /id="cmd-lote-botao"[^>]*disabled/.test(barra.innerHTML);
+
+    const conf = {
+      'selecionar todos pega só o que é cancelável': soCancelaveis,
+      'uma senha e uma confirmação pro lote inteiro': umaSenha,
+      'cada comando marcado vira um DELETE com a senha': tresDeletes,
+      'recusa no meio do lote não para o resto e aparece no resultado': contouParcial,
+      'marcado que já saiu da fila não é enviado': naoVazaExecutando,
+      'a barra some com um cancelável só': escondeComUm,
+      'a barra aparece a partir de dois': apareceComDois,
+      'sem seleção o botão do lote fica travado': botaoTravadoVazio,
+      // O return adiantado do filtro vazio pulava a barra e ela ficava na
+      // tela do filtro anterior. Aqui é asserção de TEXTO porque a função
+      // inteira não roda fora do navegador - mas ancorada na linha exata.
+      'filtro sem nenhum comando também apaga a barra':
+        /Nenhum comando neste filtro\.<\/div>'; renderLoteComandos\(\[\]\); return;/.test(htmlQ),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okLote = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okLote = false; console.log('  erro: ' + e.message); }
+  if (!okLote) ruins += 1;
+  console.log(`${okLote ? '✓' : '✗'} NOC: cancelar vários comandos da fila de uma vez`);
+
+  // ------------------------------------------------------------------
+  // REMOVER O EDGE como ação avulsa do catálogo. Pedido do Master (22/09):
+  // "quero remover o EDGE desinstalar e remover da area de trabalho" e depois
+  // "coloque no catalogo de acoes entao".
+  //
+  // O QUE ISTO TRAVA, e por que cada um custou caro:
+  //   - UM texto só pro Edge (TRECHO_EDGE), usado pela Limpeza E pela ação
+  //     avulsa: duas cópias divergiriam na primeira correção;
+  //   - o atalho sai junto com o programa - a Limpeza dizia OK e o ícone
+  //     continuava na tela do Master;
+  //   - e o PORTEIRO: a DOM-SM-DISPATCH tinha chrome.exe íntegro e assinado
+  //     que mesmo assim quebrava ao abrir. Tirar o Edge dali teria deixado a
+  //     loja sem navegador nenhum, e o NoPulso roda no navegador.
+  let okEdge = false;
+  try {
+    const srcE = require('fs').readFileSync(__dirname + '/agenteAcoes.js', 'utf8');
+    const bruto = (nome) => {
+      const chave = `const ${nome} = `;
+      const ini = srcE.indexOf(chave) + chave.length;
+      let i = ini + 1;
+      while (i < srcE.length) { if (srcE[i] === '\\') { i += 2; continue; } if (srcE[i] === '`') break; i += 1; }
+      return srcE.slice(ini, i + 1);
+    };
+    // PWSH_BIN, o PATH e os lugares usuais. Devolve undefined quando nao ha
+    // pwsh nesta maquina - e ai a assercao PULA, em vez de passar verde por
+    // ausencia de ferramenta.
+    const pwsh = () => {
+      const cp0 = require('child_process'); const fs0 = require('fs');
+      const cand = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh'].filter(Boolean);
+      try { cand.push(cp0.execSync('command -v pwsh 2>/dev/null', { encoding: 'utf8' }).trim()); } catch (e) {}
+      return cand.filter(Boolean).find((c) => { try { return fs0.statSync(c).isFile(); } catch (e) { return false; } });
+    };
+    const EDGE = new Function('return ' + bruto('TRECHO_EDGE'))();
+    const limpeza = new Function('TRECHO_EDGE', 'return ' + bruto('MODELO_LIMPEZA'))(EDGE);
+    const remover = new Function('TRECHO_EDGE', 'return ' + bruto('MODELO_REMOVER_EDGE'))(EDGE);
+    // o porteiro sozinho, rodado de verdade: mesma extração do harness
+    const porteiro = remover.split('\n').filter((l) => /\$chrome =|if \(-not \$chrome|\$quebras =|if \(\$quebras/.test(l)).join('\n');
+
+    const conf = {
+      // fonte única: o texto do Edge aparece inteiro nos DOIS modelos
+      'a remoção do Edge tem um texto só, usado pela Limpeza e pela ação avulsa':
+        EDGE.length > 400 && limpeza.includes(EDGE) && remover.includes(EDGE)
+        && /\$\{TRECHO_EDGE\}/.test(bruto('MODELO_LIMPEZA')) && /\$\{TRECHO_EDGE\}/.test(bruto('MODELO_REMOVER_EDGE')),
+      'o Edge sai pelo setup dele, com a destrava do Windows 11':
+        /-ArgumentList '--uninstall --system-level --force-uninstall'/.test(EDGE)
+        && /EdgeUpdateDev[\s\S]{0,200}AllowUninstall/.test(EDGE),
+      // O ERRO QUE ISSO EVITA: desinstalar e deixar o ícone órfão na tela.
+      //
+      // ASSERÇÃO DE COMPORTAMENTO, não de texto. A versão anterior só
+      // procurava os caminhos no fonte, e uma sabotagem que zerava a lista
+      // logo antes do laço de remoção passou VERDE: os caminhos continuavam
+      // escritos ali, só não removiam nada. Agora o bloco roda no pwsh contra
+      // arquivos de verdade e o teste confere que eles SUMIRAM.
+      'o atalho do Edge sai junto, em todos os perfis, e o pino da barra também': (() => {
+        if (!pwsh()) return 'pular';
+        const cp = require('child_process'); const fs2 = require('fs'); const os2 = require('os');
+        const linhas = EDGE.split('\n');
+        const a = linhas.findIndex((l) => l.includes("$lnks = @((Join-Path $env:ProgramData"));
+        const b = linhas.findIndex((l) => l.includes('atalho(s) do Edge removido'));
+        if (a < 0 || b < a) return false;
+        const bloco = linhas.slice(a, b + 1).join('\n');
+        // Em Linux a barra invertida é caractere comum de nome, então o
+        // Join-Path do próprio código cria os MESMOS alvos que ele procura -
+        // sem eu redigitar caminho nenhum, que seria outra chance de divergir.
+        const harness = [
+          '$R = New-Object System.Collections.Generic.List[string]',
+          "$base = Join-Path ([IO.Path]::GetTempPath()) ('edge-' + [Guid]::NewGuid().ToString('N').Substring(0,8))",
+          "$env:ProgramData = Join-Path $base 'pd'; $env:PUBLIC = Join-Path $base 'pub'",
+          "$u = @((Join-Path $base 'u1'), (Join-Path $base 'u2'))",
+          'New-Item -ItemType Directory -Path $env:ProgramData,$env:PUBLIC -Force | Out-Null',
+          'New-Item -ItemType Directory -Path $u -Force | Out-Null',
+          "$esperados = @((Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk'), (Join-Path $env:PUBLIC 'Desktop\\Microsoft Edge.lnk'))",
+          'foreach ($x in $u) {',
+          "  $esperados += (Join-Path $x 'Desktop\\Microsoft Edge.lnk')",
+          "  $esperados += (Join-Path $x 'AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk')",
+          "  $esperados += (Join-Path $x 'AppData\\Roaming\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar\\Microsoft Edge.lnk')",
+          '}',
+          'foreach ($e in $esperados) { New-Item -ItemType File -Path $e -Force | Out-Null }',
+          // um arquivo que NAO e do Edge: se o bloco apagar este, e faxina demais
+          "$inocente = Join-Path $base 'u1/Desktop\\Google Chrome.lnk'",
+          'New-Item -ItemType File -Path $inocente -Force | Out-Null',
+          'function Get-ChildItem { param([Parameter(ValueFromRemainingArguments=$true)]$r) $u | ForEach-Object { [pscustomobject]@{ FullName = $_ } } }',
+          bloco,
+          '$sobraram = @($esperados | Where-Object { Test-Path $_ }).Count',
+          '"qtd=$qtd sobraram=$sobraram inocente=" + (Test-Path $inocente)',
+        ].join('\n');
+        const arq = os2.tmpdir() + '/edge-atalhos.ps1';
+        fs2.writeFileSync(arq, harness);
+        const saida = String(cp.execFileSync(pwsh(), ['-NoProfile', '-File', arq], { encoding: 'utf8', timeout: 30000 }));
+        // 8 alvos criados, 8 removidos, nenhum sobrou, e o Chrome intacto
+        return /qtd=8 sobraram=0 inocente=True/.test(saida);
+      })(),
+      'a reinstalação automática pelo Windows Update fica bloqueada':
+        /DoNotUpdateToEdgeWithChromium/.test(EDGE),
+      // Procurar "requerAprovacao: true" no texto NAO basta: em objeto do
+      // JavaScript a ULTIMA chave repetida vence, entao acrescentar um
+      // "requerAprovacao: false" depois desliga a aprovacao com o "true"
+      // ainda escrito ali em cima - e a assercao antiga passava verde.
+      // Por isso conta as ocorrencias: uma so, e com o valor certo.
+      'a ação avulsa está no catálogo, exigindo aprovação e Administrador':
+        (() => {
+          const m = /\{\s*id: 'remover-edge',[\s\S]*?\n  \},/.exec(srcE);
+          if (!m) return false;
+          const umaVez = (chave, valor) => {
+            const todas = m[0].match(new RegExp(chave + ':\\s*(true|false)', 'g')) || [];
+            return todas.length === 1 && todas[0] === `${chave}: ${valor}`;
+          };
+          return umaVez('requerAprovacao', 'true') && umaVez('requerAdmin', 'true')
+            && /comando: MODELO_REMOVER_EDGE/.test(m[0]);
+        })(),
+      'os dois modelos cabem no limite de 8000': limpeza.length <= 8000 && remover.length <= 8000,
+      // o porteiro rodado DE VERDADE no PowerShell, com Get-ChildItem dublado
+      'o porteiro recusa máquina sem Chrome e máquina com Chrome quebrando': (() => {
+        const pwshBin = pwsh();
+        if (!pwshBin) return 'pular';
+        const cp = require('child_process'); const fs2 = require('fs');
+        const arq = require('os').tmpdir() + '/porteiro-edge.ps1';
+        const rodar = (nChrome, nQuebras) => {
+          const sb = [
+            '$R = New-Object System.Collections.Generic.List[string]',
+            'function Get-ChildItem {',
+            '  param([Parameter(ValueFromRemainingArguments=$true)]$rest)',
+            "  $alvo = ($rest | Where-Object { $_ -is [string] }) -join ' '",
+            `  if ($alvo -match 'Crashpad') { @(${nQuebras > 0 ? `1..${nQuebras} | ForEach-Object { [pscustomobject]@{ LastWriteTime = (Get-Date) } }` : ''}) }`,
+            `  elseif ($alvo -match 'chrome\\.exe') { @(${nChrome > 0 ? `1..${nChrome} | ForEach-Object { [pscustomobject]@{ VersionInfo = [pscustomobject]@{ ProductVersion = '153.0' } } }` : ''}) }`,
+            '  else { @() }',
+            '}',
+            porteiro,
+            "'PASSOU'",
+          ].join('\n');
+          fs2.writeFileSync(arq, '& ([scriptblock]::Create((Get-Content -Raw $args[0])))');
+          const alvo2 = arq + '.corpo.ps1';
+          fs2.writeFileSync(alvo2, sb);
+          return String(cp.execFileSync(pwshBin, ['-NoProfile', '-File', arq, alvo2], { encoding: 'utf8', timeout: 30000 }));
+        };
+        const ok0 = /PASSOU/.test(rodar(1, 0));
+        const ok4 = /PASSOU/.test(rodar(1, 4));
+        const bloq5 = /PULADO: o Chrome desta maquina quebrou 5/.test(rodar(1, 5)) && !/PASSOU/.test(rodar(1, 5));
+        const semChrome = /PULADO: esta maquina nao tem Chrome/.test(rodar(0, 0)) && !/PASSOU/.test(rodar(0, 0));
+        return ok0 && ok4 && bloq5 && semChrome;
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
+    okEdge = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (edge=${EDGE.length} limpeza=${limpeza.length} remover=${remover.length})`);
+  } catch (e) { okEdge = false; console.log('  erro: ' + e.message); }
+  if (!okEdge) ruins += 1;
+  console.log(`${okEdge ? '✓' : '✗'} NOC: ação "Remover o Microsoft Edge" (com a trava do navegador da loja)`);
+
+  // ------------------------------------------------------------------
+  // DISPOSITIVO COM TIPO VIRA CARD. Pedido do Master (23/09): "apos colocar
+  // [o Tipo] podem virar Card automaticamente?" e "sempre usando o MAC como
+  // fixador, pois o IP pode mudar e preciso saber quando o IP daquele MAC
+  // mudar".
+  //
+  // O que trava, dos dois lados, rodando de verdade:
+  //   - so volta ao resumo o que tem TIPO - a lista inteira saiu de proposito
+  //     depois do estouro de banda de 20/08, e nao pode voltar por engano;
+  //   - o MAC e a identidade: o mesmo MAC visto por dois hosts vira UM card,
+  //     e o IP de antes aparece quando muda;
+  //   - o estado usa o MESMO limiar do alarme;
+  //   - o card nao pulsa (nao e ao vivo).
+  let okDispCard = false;
+  try {
+    const lsD = require(__dirname + '/lojaStatus.js');
+    const agora = Date.now();
+    const H = 60 * 60 * 1000;
+    const doc = {
+      codigo: 'Dominos Tirol', posto: 'host1', nome: 'DOM-TIROL-HOST01',
+      dispositivos: [
+        { mac: '00:15:5d:29:37:01', ip: '10.161.160.163', visto: agora, ativo: true, tipo: 'gcom', tipoRotulo: 'GCOM', apelido: 'GCOM19940',
+          ipHistorico: [{ de: '10.161.160.150', para: '10.161.160.160', em: agora - 5 * 24 * H }, { de: '10.161.160.160', para: '10.161.160.163', em: agora - 2 * H }] },
+        { mac: '00:15:5d:29:37:00', ip: '10.161.160.162', visto: agora - 30 * 60 * 1000, ativo: false, tipo: 'pulse', tipoRotulo: 'PULSE' },
+        { mac: 'aa:bb:cc:00:00:01', ip: '10.161.160.170', visto: agora - 3 * H, ativo: false, tipo: 'totem', tipoRotulo: 'Totem' },
+        // celular sem Tipo: NAO pode voltar ao resumo
+        { mac: '5a:11:22:33:44:55', ip: '10.161.160.199', visto: agora, ativo: true },
+      ],
+    };
+    const comTipo = lsD.dispositivosComTipoDe(doc, agora);
+    const porMac = Object.fromEntries(comTipo.map((d) => [d.mac, d]));
+    const resumo = lsD.resumoDe(doc);
+    const semTipo = lsD.resumoDe({ codigo: 'X', posto: 'p', dispositivos: [{ mac: '5a:00:00:00:00:01', ip: '1.1.1.1', visto: agora, ativo: true }] });
+    const muitos = lsD.dispositivosComTipoDe({ dispositivos: Array.from({ length: 50 }, (_, i) => ({ mac: `m${i}`, tipo: 'impressora', ativo: true, visto: agora })) }, agora);
+
+    // ---- a tela: extrai as funções e roda com dublês mínimos
+    const htmlD = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const ini = htmlD.indexOf('const ESTADO_DISP_PARA_STATUS');
+    const fim = htmlD.indexOf('function renderDispositivosCard');
+    if (ini < 0 || fim < ini) throw new Error('não achei o bloco dos cards de dispositivo no HTML');
+    const tela = new Function('COMPUTADORES', 'UNIDADES_NOMES', 'tempoRelativo', 'escapeHtml', 'escapeJs', 'chipZebraHtml',
+      htmlD.slice(ini, fim) + '\nreturn { dispositivosComTipoDaGrade, dispCardHtml };')(
+      [], {}, (t) => `há ${Math.round((Date.now() - t) / 60000)}min`,
+      (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
+      (v) => String(v == null ? '' : v).replace(/'/g, "\\'"),
+      () => '<span class="disp-imp-chip">🖨️ OK</span>');
+    const hostA = { codigo: 'Dominos Tirol', posto: 'a', nome: 'HOST-A', ipLocal: '10.161.160.164',
+      dispositivosComTipo: [
+        // o HOST-A viu a GCOM há 90min, ainda no IP antigo; o HOST-B a viu há
+        // 5min, já no novo. MAC igual, IP diferente: tem que ser UM card, no
+        // IP novo. Agrupar por IP (o erro que o Master quer evitar) daria dois.
+        { mac: '00:15:5D:29:37:01', ip: '10.161.160.160', visto: agora - 90 * 60 * 1000, estado: 'na-rede', tipo: 'gcom' },
+        // mesmo IP do HOST-B, que tem agente: já é card, não pode duplicar
+        { mac: 'cc:cc:cc:cc:cc:cc', ip: '10.161.160.180', visto: agora, estado: 'na-rede', tipo: 'totem' },
+      ] };
+    const hostB = { codigo: 'Dominos Tirol', posto: 'b', nome: 'HOST-B', ipLocal: '10.161.160.180',
+      dispositivosComTipo: [{ mac: '00:15:5d:29:37:01', ip: '10.161.160.163', visto: agora - 5 * 60 * 1000, estado: 'na-rede', tipo: 'gcom' }] };
+    // mesma MAC em OUTRA loja: são dois aparelhos, dois cards
+    const hostC = { codigo: 'Dominos Bessa', posto: 'c', nome: 'HOST-C',
+      dispositivosComTipo: [{ mac: '00:15:5d:29:37:01', ip: '192.168.0.9', visto: agora, estado: 'na-rede', tipo: 'gcom' }] };
+    const grade = tela.dispositivosComTipoDaGrade([hostA, hostB, hostC]);
+    const gcomTirol = grade.filter((x) => x.codigo === 'Dominos Tirol' && x.mac.toLowerCase() === '00:15:5d:29:37:01');
+    const card = tela.dispCardHtml({ ...porMac['00:15:5d:29:37:01'], codigo: 'Dominos Tirol', hostNome: 'HOST-A', hostPosto: 'a' });
+    const cardSemRede = tela.dispCardHtml({ ...porMac['aa:bb:cc:00:00:01'], codigo: 'Dominos Tirol', hostNome: 'HOST-A', hostPosto: 'a' });
+
+    const conf = {
+      // SERVIDOR
+      'o resumo leva só o que tem Tipo (o celular fica fora)': comTipo.length === 3 && !porMac['5a:11:22:33:44:55'],
+      'a lista inteira de dispositivos continua fora do resumo (banda)': resumo.dispositivos === undefined && Array.isArray(resumo.dispositivosComTipo),
+      'máquina sem nenhum dispositivo com Tipo não ganha campo novo': !('dispositivosComTipo' in semTipo),
+      'o estado usa o limiar do alarme: visto agora / 30min sem aparecer / 3h sem aparecer':
+        porMac['00:15:5d:29:37:01'].estado === 'na-rede'
+        && porMac['00:15:5d:29:37:00'].estado === 'sem-confirmacao'
+        && porMac['aa:bb:cc:00:00:01'].estado === 'sem-rede',
+      'a troca de IP que vai no card é a ÚLTIMA daquele MAC, com o IP de antes':
+        !!porMac['00:15:5d:29:37:01'].ipMudou
+        && porMac['00:15:5d:29:37:01'].ipMudou.de === '10.161.160.160'
+        && porMac['00:15:5d:29:37:01'].ipMudou.para === '10.161.160.163',
+      'tem teto por máquina (não vira a varredura inteira de novo)': muitos.length === 30,
+      // TELA
+      'o mesmo MAC visto por dois hosts vira UM card, com a leitura mais recente':
+        gcomTirol.length === 1 && gcomTirol[0].hostNome === 'HOST-B' && gcomTirol[0].ip === '10.161.160.163',
+      'o mesmo MAC em outra loja é outro aparelho: outro card': grade.some((x) => x.codigo === 'Dominos Bessa'),
+      'dispositivo no IP de um computador com agente não duplica o card': !grade.some((x) => x.mac === 'cc:cc:cc:cc:cc:cc'),
+      'o card mostra que o IP daquele MAC mudou, e qual era o de antes, destacado nas primeiras 24h':
+        /IP alterado/.test(card) && /antes 10\.161\.160\.160/.test(card) && /disp-card-ipmudou recente/.test(card),
+      'o card traz o MAC (a identidade) e o IP atual': /MAC 00:15:5d:29:37:01/.test(card) && /10\.161\.160\.163/.test(card),
+      'sumido há 3h aparece como "sem rede", com a mesma palavra do alerta': /sem rede · visto/.test(cardSemRede) && /status-offline/.test(cardSemRede),
+      // o card não pulsa: não é ao vivo
+      'a bolinha do card de dispositivo não pulsa': /\.disp-card \.status-dot\{animation:none;\}/.test(htmlD) && /class="equip-tile disp-card /.test(card),
+      'filtro que esconde todos os computadores não esconde os dispositivos':
+        /renderFantasmas\(\);[\s\S]{0,200}renderDispositivosCard\(\);[\s\S]*?const grid = document\.getElementById\('grid-equip'\)/.test(htmlD),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n]) => n);
+    okDispCard = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDispCard = false; console.log('  erro: ' + e.message); }
+  if (!okDispCard) ruins += 1;
+  console.log(`${okDispCard ? '✓' : '✗'} NOC: dispositivo com Tipo vira card, identificado pelo MAC, mostrando quando o IP muda`);
+
+  // ------------------------------------------------------------------
+  // PROCEDIMENTOS DE SOCORRO. Pedido do Master (22/09): "tudo que resolver um
+  // problema vamos criar um processo, organize o tipo da solução para não
+  // ficar um scroll imenso e ficar olhando um a um para saber o que faz".
+  //
+  // O que estas asserções travam é o que torna o catálogo USÁVEL na emergência,
+  // e cada uma já custou caro uma vez:
+  //   - cabe no console (o primeiro que montei tinha 23 mil caracteres);
+  //   - é uma linha só (bloco multi-linha embaralha ao colar);
+  //   - se eleva sozinho (meia hora perdida em "Acesso a um recurso CIM");
+  //   - não depende de rede (a máquina que precisa dele está sem DNS).
+  let okSocorro = false;
+  try {
+    const proc = require(__dirname + '/procedimentosSocorro.js');
+    const socRede = require(__dirname + '/socorroRedeScript.js');
+    const cabS = { Authorization: 'Bearer ' + token };
+    const respS = await pedir('/api/loja-status/procedimentos-socorro', cabS);
+    const semSessao = await pedir('/api/loja-status/procedimentos-socorro');
+    const corpoS = respS.status === 200 ? JSON.parse(respS.corpo) : {};
+    const cats = corpoS.categorias || [];
+    const todos = cats.reduce((a, c) => a.concat(c.procedimentos || []), []);
+    const dns = todos.find((p) => p.id === 'socorro-dns');
+    const srcIdxS = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlS = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    // O COMANDO E CODIFICADO, e olhar o texto cru da falso verde: foi assim
+    // que a sabotagem "passa a baixar o script de uma URL" escapou na
+    // primeira rodada. Toda asserção sobre o CONTEUDO abre o base64 antes.
+    const abrirComando = (cmd) => {
+      const utf16 = String(cmd).match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/);
+      if (utf16) return Buffer.from(utf16[1], 'base64').toString('utf16le');
+      const utf8 = String(cmd).match(/FromBase64String\('([A-Za-z0-9+/=]+)'\)/);
+      if (utf8) return Buffer.from(utf8[1], 'base64').toString('utf8');
+      return String(cmd);
+    };
+    const conf = {
+      'a rota responde agrupada por categoria, com procedimento dentro':
+        respS.status === 200 && cats.length >= 2 && todos.length >= 2
+        && cats.every((c) => c.id && c.rotulo && Array.isArray(c.procedimentos) && c.procedimentos.length),
+      // catálogo vazio é pior que nenhum: some a categoria em vez de mostrar (0)
+      'categoria sem procedimento não aparece':
+        proc.listarPorCategoria('https://x').every((c) => c.procedimentos.length > 0),
+      // "qual destes é o meu caso?" vem ANTES de "o que este comando executa"
+      'cada procedimento diz QUANDO usar, não só o que faz':
+        todos.every((p) => p.titulo && p.quando && p.faz && p.origem),
+      // O ERRO QUE ISSO EVITA: o primeiro comando que montei tinha 23.830
+      // caracteres (duplo -EncodedCommand em UTF-16 infla 7x). O console do
+      // Windows corta perto de 8191 - ele simplesmente não colava.
+      'todo comando cabe no console do Windows e é uma linha só':
+        todos.every((p) => p.comando && p.comando.length < 8191 && !p.comando.includes('\n')),
+      // a máquina que precisa do socorro de rede está SEM DNS: baixar de uma
+      // URL, como o reparo faz, seria pedir justamente o que falta
+      'o socorro de rede não baixa nada - o script vai dentro do comando':
+        !!dns && !/Invoke-WebRequest|Invoke-RestMethod|DownloadString|Start-BitsTransfer/i.test(abrirComando(dns.comando)),
+      // os dois comandos sao CODIFICADOS (um -EncodedCommand em UTF-16, o outro
+      // base64 de UTF-8), entao 'RunAs' nao aparece no texto visivel - olhar o
+      // comando cru dava falso negativo. O que vale e o conteudo decodificado.
+      // -Verb RunAs é o que ELEVA, e todo procedimento precisa ter. O IsInRole
+      // é só do socorro de rede, que evita abrir uma segunda janela quando já
+      // está elevado - o reparo sempre passa pelo UAC.
+      'o comando se eleva sozinho (sem isso o Master bate em PermissionDenied)':
+        todos.every((p) => /-Verb RunAs/.test(abrirComando(p.comando)))
+        && !!dns && /IsInRole/.test(abrirComando(dns.comando)),
+      // se o DNS atual resolve, mexer é quebrar nome interno de graça
+      'o socorro só troca o DNS quando o atual NÃO resolve':
+        /if \(\$dnsOk\) \{/.test(socRede.DIAGNOSTICO)
+        && socRede.DIAGNOSTICO.indexOf('if ($dnsOk) {') < socRede.DIAGNOSTICO.indexOf('Set-DnsClientServerAddress')
+        && /NADA foi alterado/.test(socRede.DIAGNOSTICO),
+      'o socorro diz como voltar ao DNS que estava lá':
+        /Pra voltar como estava/.test(socRede.DIAGNOSTICO) && /ResetServerAddresses/.test(socRede.DIAGNOSTICO),
+      // é tela de Master: diferente do reparo-noczenith.ps1, que é público
+      // porque o agente caído precisa baixar sozinho
+      'a rota fica atrás do login':
+        srcIdxS.indexOf("app.use('/api', auth.requireAuth);")
+          < srcIdxS.indexOf("app.get('/api/loja-status/procedimentos-socorro'")
+        && semSessao.status === 401,
+      // agrupado e FECHADO: é o que impede a lista de virar rolagem
+      'a tela agrupa por categoria e abre fechada':
+        /🧰 Procedimentos de socorro/.test(htmlS)
+        && /<details[^>]*><summary[^>]*>\$\{c\.icone\}/.test(htmlS)
+        && /carregarProcedimentosSocorro\(\);/.test(htmlS),
+      // a tela nunca monta texto de comando - mesma regra da Janela de Manutenção
+      'o texto do comando vem do servidor, não da tela':
+        !/powershell -NoProfile -ExecutionPolicy Bypass/.test(htmlS)
+        && /SOCORRO_PROCS\[id\]/.test(htmlS),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSocorro = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (http=${respS.status} semSessao=${semSessao.status} cats=${cats.length} procs=${todos.length} tamanhos=${todos.map((p) => (p.comando || '').length).join(',')})`);
+  } catch (e) { okSocorro = false; console.log('  erro: ' + e.message); }
+  if (!okSocorro) ruins += 1;
+  console.log(`${okSocorro ? '✓' : '✗'} NOC: procedimentos de socorro - agrupados, colam no console e se elevam sozinhos`);
+
+  // ------------------------------------------------------------------
+  // O QUE O BENI VÊ DO NOC. A consulta do Cowork (consultar_noc) é o único
+  // jeito de perguntar "quem já baixou a versão nova?" sem abrir a tela.
+  //
+  // Ela projetava `m.nomeComputador || m.hostname` - dois campos que NÃO
+  // existem no resumo - então `maquina` vinha null em todas as 52, e a
+  // resposta não sabia de qual computador estava falando. E a versão do
+  // agente, que o resumo já carrega de graça, não era projetada: dava pra
+  // dizer quem estava online, nunca quem estava atualizado.
+  let okNocBeni = false;
+  try {
+    const cw = require(__dirname + '/coworkApi.js');
+    const lsB = require(__dirname + '/lojaStatus.js');
+    const UNIB = 'TESTE_NOC_BENI';
+    await lsB.cadastrarComputador(UNIB, 'PC da Cozinha', 'interno');
+    const postoB = (await lsB.listar()).find((c) => c.codigo === UNIB && c.nome === 'PC da Cozinha').posto;
+    const tkB = await lsB.garantirAgentToken(UNIB, postoB);
+    // a máquina reporta a versão do NOCZenith, do mesmo jeito que o agente faz
+    const respEstado = await postarJson(`/api/loja-status/${UNIB}/computadores/${postoB}/estado-agente`, { versao: 107 }, { 'x-noc-token': tkB });
+    const resumoB = (await lsB.listarResumo()).find((c) => c.codigo === UNIB && c.posto === postoB);
+    DOCS.set('users/mst-noc-beni', { email: 'master-noc@teste.local', role: 'master', active: true, nome: 'Master do NOC' });
+    const masterAntes = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'master-noc@teste.local';
+    let linha = null;
+    let erroBeni = null;
+    try {
+      const r = await cw.executar({ nome: 'consultar_noc', entrada: { unidade: UNIB } });
+      linha = (r.resultado || []).find((m) => m.codigo === UNIB && m.posto === postoB);
+    } catch (e) { erroBeni = e.message; } finally {
+      if (masterAntes === undefined) delete process.env.NOPULSO_AGENT_MASTER;
+      else process.env.NOPULSO_AGENT_MASTER = masterAntes;
+    }
+    const srcCw = require('fs').readFileSync(__dirname + '/coworkApi.js', 'utf8');
+    const conf = {
+      // esta vem PRIMEIRO de proposito: se o report de versao falhar, o teste
+      // aponta o report - e nao a projeção, que foi onde eu fui olhar quando
+      // vi versaoAgente null uma vez e perdi tempo no lugar errado.
+      'a máquina consegue reportar a versão do agente (HTTP 200)': respEstado.status === 200,
+      'a consulta responde (o Master do ambiente resolve)': !erroBeni && !!linha,
+      'a linha diz de QUAL computador está falando': !!linha && linha.maquina === 'PC da Cozinha',
+      'a linha leva a versão do NOCZenith que a máquina reportou': !!linha && linha.versaoAgente === 107,
+      // a prova de que o código antigo não podia funcionar: os campos que ele
+      // lia não existem no resumo
+      'os campos que não existem saíram da projeção': !/m\.nomeComputador|m\.hostname/.test(srcCw),
+      // a prova de que o código antigo NÃO podia funcionar, vinda do dado e
+      // não do texto: o resumo tem `nome` e `agenteVersao`, e não tem
+      // `nomeComputador` nem `hostname` - os dois que ele lia.
+      'o resumo tem nome e agenteVersao, e não tem nomeComputador nem hostname': (() => {
+        const doc = resumoB;
+        return !!doc && doc.nome === 'PC da Cozinha' && doc.agenteVersao === 107
+          && doc.nomeComputador === undefined && doc.hostname === undefined;
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okNocBeni = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (linha=${JSON.stringify(linha)} resumo=${JSON.stringify(resumoB)} estado=${respEstado.status}:${String(respEstado.corpo).slice(0,120)} erro=${erroBeni})`);
+  } catch (e) { okNocBeni = false; console.log('  erro: ' + e.message); }
+  if (!okNocBeni) ruins += 1;
+  console.log(`${okNocBeni ? '✓' : '✗'} Beni: a consulta do NOC diz o nome da máquina e a versão do NOCZenith`);
+
+  // ------------------------------------------------------------------
+  // ACESSO REMOTO CONHECIDO. Pedido do Master: alerta que dispara pela propria
+  // equipe vira ruido e faz o Master parar de olhar o que importa. O ID do
+  // AnyDesk de QUEM ACESSA entra numa lista e aquele acesso deixa de tocar o
+  // celular - mas NUNCA sai do historico: a lista nao pode virar um jeito de
+  // entrar na loja sem deixar rastro.
+  let okAcessoConhecido = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const srcIndex = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlAr = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const lista = [{ id: '123 456 789', nome: 'Sidney' }, { id: 'abc', nome: 'lixo' }, { id: '12', nome: 'curto demais' }, { id: '123456789', nome: 'repetido' }];
+    const saneada = ls.sanitizarAcessosConhecidos(lista);
+    const casa = (d) => ls.acessoConhecidoDe(d, lista);
+    // PROVA DE COMPORTAMENTO. Ler o fonte nao basta: uma sabotagem que
+    // filtrava o historico passou pela leitura de texto sem ser vista. Aqui a
+    // rota roda de verdade, com o push trocado por um espiao.
+    const pushMod = require(__dirname + '/push.js');
+    const notifyAntes = pushMod.notifyAcessoRemotoDetectado;
+    const tocou = [];
+    let comportamento = { soConhecido: -1, comEstranho: -1, comNumeroMaior: -1 };
+    let eventosConhecido = [];
+    const cfgAntes = await ls.getConfig();
+    try {
+      pushMod.notifyAcessoRemotoDetectado = async (...a) => { tocou.push(a); };
+      await ls.setConfig({ pushAcessoRemoto: true, acessosConhecidos: [{ id: '123456789', nome: 'Sidney' }] });
+      const cabC = { Authorization: 'Bearer ' + token };
+      await postarJson('/api/loja-status/CONHECIDO_TESTE/computadores', { nome: 'PC Conhecido', tipo: 'interno' }, cabC);
+      const rotaC = '/api/loja-status/CONHECIDO_TESTE/computadores/principal/acesso-remoto';
+      await postarJson(rotaC, { detalhe: 'AnyDesk · incoming session from 123456789', sessao: true }, {});
+      const soConhecido = tocou.length;
+      await postarJson(rotaC, { detalhe: 'AnyDesk · incoming session from 555444333', sessao: true }, {});
+      const comEstranho = tocou.length;
+      // o ID cadastrado como PEDACO de um numero maior: e' outro acesso, tem
+      // que tocar o celular - senao bastaria um ID vizinho pra entrar calado
+      await postarJson(rotaC, { detalhe: 'AnyDesk · incoming session from 1234567890123', sessao: true }, {});
+      const comNumeroMaior = tocou.length;
+      comportamento = { soConhecido, comEstranho, comNumeroMaior };
+      const dC = JSON.parse((await pedir('/api/loja-status/CONHECIDO_TESTE/computadores/principal/detalhe', cabC)).corpo);
+      eventosConhecido = (dC.eventos || []).filter((e) => e.tipo === 'sessao-remota');
+    } finally {
+      pushMod.notifyAcessoRemotoDetectado = notifyAntes;
+      await ls.setConfig({ pushAcessoRemoto: cfgAntes.pushAcessoRemoto === true, acessosConhecidos: [] });
+    }
+    const conf = {
+      'o ID entra so com digito, sem repetir, e o invalido e descartado':
+        saneada.length === 1 && saneada[0].id === '123456789' && saneada[0].nome === 'Sidney'
+        && !saneada.some((a) => a.id === '12'),
+      'acesso de ID cadastrado e reconhecido na linha crua do log':
+        !!casa('AnyDesk · incoming session from 123456789') && casa('AnyDesk · incoming session from 123456789').nome === 'Sidney',
+      'acesso de ID nao cadastrado NAO e reconhecido': !casa('AnyDesk · incoming session from 555444333'),
+      // o erro caro: um ID de 9 digitos casando dentro de um de 13 silenciaria
+      // acesso de estranho - por isso a busca e ancorada em nao-digito
+      'ID cadastrado nao casa quando e pedaco de um numero maior': !casa('AnyDesk · session 1234567890123 started'),
+      'sem lista, nada e reconhecido': !ls.acessoConhecidoDe('incoming 123456789', []) && !ls.acessoConhecidoDe('incoming 123456789', null),
+      // as quatro de baixo passam pela ROTA de verdade, nao pelo fonte
+      'na rota: acesso de ID cadastrado nao toca o celular': comportamento.soConhecido === 0,
+      'na rota: acesso de ID estranho continua tocando o celular': comportamento.comEstranho === 1,
+      'na rota: ID cadastrado dentro de um numero maior NAO silencia o alerta': comportamento.comNumeroMaior === 2,
+      'na rota: o acesso conhecido continua no historico da maquina, com o ID':
+        eventosConhecido.length === 3 && eventosConhecido.some((e) => /123456789/.test(e.detalhe || '')),
+      // o push e poupado; o evento ja foi gravado ANTES, e continua la
+      'o push e poupado so quando o acesso e conhecido':
+        /const conhecido = ehSessao[\s\S]{0,200}acessoConhecidoDe\(req\.body\.detalhe/.test(srcIndex)
+        && /if \(ehSessao && !conhecido && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIndex),
+      // a LINHA do registrarAcessoRemoto nao pode mencionar 'conhecido': filtrar
+      // o historico transformaria a lista num jeito de entrar sem deixar rastro
+      'o evento continua no historico (registrarAcessoRemoto roda antes e sem filtro)':
+        srcIndex.indexOf('lojaStatus.registrarAcessoRemoto') < srcIndex.indexOf('const conhecido = ehSessao')
+        && (() => {
+          const i = srcIndex.indexOf('lojaStatus.registrarAcessoRemoto');
+          const ini = srcIndex.lastIndexOf('\n', i) + 1;
+          return !/conhecido/.test(srcIndex.slice(ini, srcIndex.indexOf('\n', i)));
+        })(),
+      'mexer na lista pede a senha do Master (silenciar alerta e ato sensivel)':
+        /if \(req\.body\.acessosConhecidos !== undefined\) \{\s*\n\s*if \(!\(await exigirSenhaDoMaster\(req, res\)\)\) return;/.test(srcIndex),
+      'o toggle de push NAO passou a pedir senha':
+        /if \(req\.body\.pushAcessoRemoto !== undefined\) patch\.pushAcessoRemoto = req\.body\.pushAcessoRemoto === true;/.test(srcIndex),
+      'a tela tem onde cadastrar e diz que o histórico continua':
+        /adicionarAcessoConhecido\(\)/.test(htmlAr) && /removerAcessoConhecido\(/.test(htmlAr)
+        && /não toca o celular/.test(htmlAr) && /continua no histórico/.test(htmlAr),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAcessoConhecido = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (push=${JSON.stringify(comportamento)} eventos=${eventosConhecido.length})`);
+  } catch (e) { okAcessoConhecido = false; console.log('  erro: ' + e.message); }
+  if (!okAcessoConhecido) ruins += 1;
+  console.log(`${okAcessoConhecido ? '✓' : '✗'} NOC: ID de AnyDesk conhecido não toca o celular, mas continua no histórico`);
 
   // ------------------------------------------------------------------
   // SENHA DO ANYDESK EM MASSA. Pedido do Master (07/09/2026): "colocar uma
@@ -14657,8 +16206,10 @@ setTimeout(async () => {
       'a versão do vigia subiu, senão as 52 máquinas não baixam a versão nova': vg.VERSAO_VIGIA >= 23,
       'o script continua começando com # NOCZenith (a trava do download)': script.startsWith('# NOCZenith'),
       // o push: so sessao toca o celular do Master
+      // o !conhecido entrou depois (ID de AnyDesk da equipe nao toca o celular);
+      // o ehSessao continua fixado aqui, que e a garantia original
       'só a sessão vira push; o serviço conectado nunca mais toca o celular':
-        /if \(ehSessao && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
+        /if \(ehSessao && !conhecido && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
       // presa ao HTML inline e ao rótulo em texto, esta asserção quebrou quando
       // os eventos viraram cardEvento() - sem nenhum defeito real. O que
       // importa não é a marcação: é a sessão sair em VERMELHO e o serviço
@@ -15038,8 +16589,52 @@ setTimeout(async () => {
       'mostra espaço livre e saúde do disco físico': /Win32_LogicalDisk/.test(cmd) && /Get-PhysicalDisk/.test(cmd),
       'não reinicia, encerra processo ou inicia programa': !/shutdown|Stop-Process|Restart-Service|Start-Process/i.test(cmd),
       'a tela permite pedir o diagnóstico para a máquina selecionada': /manutEnviar\('diagnostico-desempenho'\)/.test(htmlDiag) && /Diagnosticar falha/.test(htmlDiag),
+      // O DEFEITO QUE ISSO EVITA, e que ficou 
+      // meses verde aqui: as asserções acima só liam TEXTO, e o comando
+      // NUNCA rodou. List[string].AddRange exige IEnumerable[string], mas
+      // @(...) no PowerShell produz object[], que não converte - então a
+      // primeira linha de disco derrubava tudo e o Master via
+      // "Cannot convert argument collection" no cartão da máquina em vez do
+      // relatório. Agora o comando roda de verdade no pwsh, com os cmdlets
+      // do Windows dublados, e o teste confere a SAÍDA.
+      'o diagnóstico roda inteiro e devolve o relatório (não um erro)': (() => {
+        const cp0 = require('child_process'); const fs0 = require('fs'); const os0 = require('os');
+        const cand = [process.env.PWSH_BIN, '/tmp/pwsh/pwsh', '/usr/bin/pwsh', '/usr/local/bin/pwsh', '/opt/microsoft/powershell/7/pwsh'].filter(Boolean);
+        try { cand.push(cp0.execSync('command -v pwsh 2>/dev/null', { encoding: 'utf8' }).trim()); } catch (e) {}
+        const bin = cand.filter(Boolean).find((c) => { try { return fs0.statSync(c).isFile(); } catch (e) { return false; } });
+        if (!bin) return 'pular';
+        // dublês: não simulam o Windows, só fazem o comando PERCORRER os
+        // AddRange com dados de verdade (duas unidades, um disco, eventos)
+        const stubs = [
+          'function Get-CimInstance { param([Parameter(ValueFromRemainingArguments=$true)]$r)',
+          "  $a = ($r | Where-Object { $_ -is [string] }) -join ' '",
+          "  if ($a -match 'OperatingSystem') { [pscustomobject]@{ FreePhysicalMemory = 2097152; TotalVisibleMemorySize = 8388608 } }",
+          "  elseif ($a -match 'Processor') { [pscustomobject]@{ LoadPercentage = 37 } }",
+          "  elseif ($a -match 'LogicalDisk') { @([pscustomobject]@{ DeviceID='C:'; Size=500GB; FreeSpace=40GB }, [pscustomobject]@{ DeviceID='D:'; Size=100GB; FreeSpace=90GB }) }",
+          '  else { @() } }',
+          "function Get-PhysicalDisk { @([pscustomobject]@{ FriendlyName='ST500LM034'; HealthStatus='Warning'; OperationalStatus='OK' }) }",
+          'function Get-WinEvent { param([Parameter(ValueFromRemainingArguments=$true)]$r)',
+          "  @([pscustomobject]@{ Id=41; TimeCreated=(Get-Date); ProviderName='Microsoft-Windows-Kernel-Power'; Message='reinicializado sem ser desligado corretamente' }) }",
+        ].join('\n');
+        const arq = os0.tmpdir() + '/diag-desempenho-teste.ps1';
+        fs0.writeFileSync(arq, stubs + '\n' + cmd);
+        // spawnSync, nao execFileSync: a MethodException do PowerShell sai em
+        // STDERR e o script termina com codigo 0 assim mesmo. Com execFileSync
+        // eu lia so o stdout e o defeito passava despercebido - foi o que
+        // deixou a 3a sabotagem escapar.
+        const r0 = cp0.spawnSync(bin, ['-NoProfile', '-File', arq], { encoding: 'utf8', timeout: 30000 });
+        const saida = String(r0.stdout || '') + String(r0.stderr || '');
+        return !/MethodException|Cannot convert argument/.test(saida)
+          && /DISCO C:/.test(saida) && /DISCO D:/.test(saida)
+          && /DISCO F[ÍI]SICO: ST500LM034/.test(saida)
+          // o RÓTULO "MAIORES CONSUMOS:" e um Add que roda ANTES do AddRange,
+          // entao ele sobrevive ao defeito. O que prova o AddRange e a LINHA
+          // DE PROCESSO logo abaixo dele - "nome: N MB".
+          && /MAIORES CONSUMOS:\s*\n\S+: \d+ MB/.test(saida)
+          && /ID 41/.test(saida);
+      })(),
     };
-    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true && v !== 'pular').map(([n]) => n);
     okDiagnosticoReinicio = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okDiagnosticoReinicio = false; console.log('  erro: ' + e.message); }
@@ -16485,7 +18080,7 @@ setTimeout(async () => {
       // COR pelo estado (ok/atencao/critico/sem leitura), sempre na linha da
       // Zebra. Quem so tem alarme de rede continua com o 🔔 seco.
       'o chip separa a Zebra (lê status) de quem só tem alarme de rede':
-        /d\.marca !== 'zebra'/.test(html) && /disp-imp-chip/.test(html) && /🖨️/.test(html),
+        /const impChip = d\.marca === 'zebra' \? chipZebraHtml\(estadoZebra\) : '';/.test(html) && /disp-imp-chip/.test(html) && /🖨️/.test(html),
       'tipo do aparelho aparece na propria linha': /d\.tipoRotulo \? `<span class="disp-tipo-chip"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
@@ -22206,7 +23801,12 @@ setTimeout(async () => {
         suspeitos.length === 0 || (console.log(`  suspeitos: ${suspeitos.join(' · ')}`), false),
       // a própria linha que quebrou, pra não voltar em silêncio
       'a RAM entra no mesmo array do resto da ficha (infoBits)':
-        /if\(c\.ram && c\.ram\.totalGb != null\)\{\s*\n\s*infoBits\.push\(`🧠 <b>RAM:<\/b>/.test(noc),
+        // Estava presa a adjacencia: exigia o push na linha SEGUINTE ao if. O
+        // commit do inventario de hardware pos quatro linhas no meio (modulos,
+        // tipo, frequencia) e reprovou sem defeito nenhum - a RAM continua indo
+        // pro infoBits, que e o que esta asserção diz. O que importa e o push
+        // estar DENTRO do if, nao colado nele.
+        /if\(c\.ram && c\.ram\.totalGb != null\)\{[\s\S]{0,800}?infoBits\.push\(`🧠 <b>RAM:<\/b>/.test(noc),
       // a ordem importa: a ficha só aparece DEPOIS de montada, então qualquer
       // erro ao montar significa "cliquei e não aconteceu nada"
       'a ficha é montada antes de ser mostrada (por isso um erro ali some com ela)':
@@ -22891,7 +24491,7 @@ setTimeout(async () => {
       // de UMA posição. A agenda usa a MESMA credencial: copiar o caminho
       // faria duas cópias que envelhecem separado.
       'a autenticação com o Google mora num módulo só, e o sheetsSync usa ele':
-        /function getAccessToken\(\) \{\n  return googleAuth\.tokenDeAcesso\(SHEETS_SCOPE/.test(sheets)
+        /function getAccessToken\(\) \{\r?\n  return googleAuth\.tokenDeAcesso\(SHEETS_SCOPE(?:,|\))/.test(sheets)
         && !/jwt\.sign/.test(sheets) && !/oauth2\.googleapis\.com/.test(sheets)
         && /module\.exports = \{ tokenDeAcesso, configurado, limparCache, TOKEN_URL \};/.test(gauth),
       'o cache é POR ESCOPO E USUÁRIO (pedir a agenda não derruba o token da planilha)':
@@ -22904,7 +24504,8 @@ setTimeout(async () => {
       'a sala é pedida ao Calendar com conferenceData, e o convite vai junto':
         /conferenceSolutionKey: \{ type: 'hangoutsMeet' \}/.test(require('fs').readFileSync(__dirname + '/reuniaoGoogle.js', 'utf8'))
         && /conferenceDataVersion=1&sendUpdates=all/.test(require('fs').readFileSync(__dirname + '/reuniaoGoogle.js', 'utf8'))
-        && rg.CALENDAR_SCOPE === 'https://www.googleapis.com/auth/calendar.events',
+        && rg.CALENDAR_SCOPE === 'https://www.googleapis.com/auth/calendar.events'
+        && rg.USUARIO_DONO_PADRAO === 'admin@solutionstitech.com',
       'hora vira janela com fuso nomeado, e reunião que passa da meia-noite não termina antes de começar':
         rg.janela('2026-09-14', '16:00', 60).fim === '2026-09-14T17:00:00'
         && rg.janela('2026-09-14', '23:30', 90).fim === '2026-09-15T01:00:00',
@@ -24270,7 +25871,15 @@ setTimeout(async () => {
     const reparoR = require(__dirname + '/reparoNocZenithScript');
     const vigiaR = require(__dirname + '/vigiaScript');
     const scriptR = reparoR.montarScriptReparoNocZenith();
-    const comandoR = reparoR.montarComandoReparoNocZenith();
+    const comandoR = reparoR.montarComandoReparoNocZenith('https://www.nopulso.com.br');
+    // o comando montado SEM base tem que cair no endereco antigo, nunca ficar vazio
+    const comandoPadraoR = reparoR.montarComandoReparoNocZenith();
+    const internoPadraoR = (() => {
+      const e = comandoPadraoR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)$/);
+      const el = e ? Buffer.from(e[1], 'base64').toString('utf16le') : '';
+      const i = el.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/);
+      return i ? Buffer.from(i[1], 'base64').toString('utf16le') : '';
+    })();
     const b64ElevadorR = comandoR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)$/);
     const elevadorR = b64ElevadorR ? Buffer.from(b64ElevadorR[1], 'base64').toString('utf16le') : '';
     const b64InternoR = elevadorR.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/);
@@ -24319,6 +25928,26 @@ setTimeout(async () => {
         && internoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
         && /MaximumRedirection 0/.test(internoR)
         && !/[a-f0-9]{48}/i.test(comandoR),
+      // 22/09: numa maquina de loja o comando morreu em "O nome remoto nao pode
+      // ser resolvido: 'www.nopulso.com.br'". E justamente a maquina que mais
+      // precisa do reparo - o agente dela esta caido e nao ha outro caminho.
+      // O endereco antigo nunca pode ser desligado (§4), entao ele e a rede de
+      // seguranca: o comando tenta os DOIS.
+      'o comando tenta o endereço oficial E o adyen-monitor (loja com DNS restrito)':
+        internoR.includes('https://www.nopulso.com.br/api/loja-status/reparo-noczenith.ps1')
+        && internoR.includes('https://adyen-monitor.onrender.com/api/loja-status/reparo-noczenith.ps1')
+        && /foreach \(\$u in \$us\)/.test(internoR)
+        && /if \(-not \$ok\) \{ throw/.test(internoR),
+      // o endereço NUNCA cravado (§4): sai do APP_BASE_URL de quem chama
+      'sem base informada o comando cai no endereço antigo, e não fica vazio':
+        internoPadraoR.includes('https://adyen-monitor.onrender.com/api/loja-status/reparo-noczenith.ps1')
+        && !internoPadraoR.includes('www.nopulso.com.br')
+        && !/const url = 'https:/.test(fsR.readFileSync(__dirname + '/reparoNocZenithScript.js', 'utf8')),
+      // portal cativo e proxy de loja devolvem pagina de erro com HTTP 200:
+      // aquilo seria salvo como .ps1 e EXECUTADO. Mesma trava do "# NOCZenith".
+      'o que foi baixado é conferido antes de executar':
+        internoR.includes("-notlike '# Reparo seguro do NOCZenith*'")
+        && internoR.indexOf('-notlike') < internoR.indexOf('& $f'),
     };
     const falhasR = Object.entries(confR).filter(([, v]) => !v).map(([n]) => n);
     okReparoNocZenith = !falhasR.length;

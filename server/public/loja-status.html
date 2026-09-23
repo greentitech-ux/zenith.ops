@@ -291,6 +291,18 @@
   .ev-dot.warn{background:var(--warn);}
   .ev-corpo{flex:1;min-width:0;}.ev-topo{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}.ev-data{flex:none;color:var(--muted);font-size:10px;white-space:nowrap;}.ev-detalhe{margin-top:3px;line-height:1.45;word-break:break-word;color:var(--muted);}.ev-meta{margin-top:4px;font-size:10.5px;color:var(--muted);}.ev-agrupado{border-left:2px solid var(--warn);background:color-mix(in srgb,var(--warn) 5%,transparent);}
   .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);flex:none;}
+  /* CARD DE DISPOSITIVO COM TIPO (pedido do Master, 23/09). Mesmo desenho do
+     card de computador, com UMA diferença deliberada: a bolinha NÃO pulsa.
+     O pulso diz "ao vivo" - e dispositivo não é: não tem agente, quem o
+     enxerga é a varredura de rede do host, ~1x por hora. Pulsar aqui seria
+     mentir sobre o ritmo do dado. */
+  .disp-card .status-dot{animation:none;}
+  .disp-cards-titulo{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px;font-weight:700;margin:16px 0 8px;}
+  .disp-card-mac{font-family:var(--mono);font-size:10px;color:var(--muted);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .disp-card-mac:hover{color:var(--accent);}
+  .disp-card-ipmudou{font-family:var(--mono);font-size:10px;color:var(--muted);overflow-wrap:anywhere;line-height:1.35;}
+  .disp-card-ipmudou.recente{color:var(--warn);font-weight:700;}
+  .disp-card-host{font-family:var(--mono);font-size:9.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .equip-tile-status{font-family:var(--mono);font-size:10px;font-weight:700;}
   .equip-tile-status.online{color:var(--ok);}
   .equip-tile-status.offline{color:var(--bad);}
@@ -385,10 +397,14 @@
   .fantasmas-head:hover #fantasmas-acao,.fantasmas-head:focus-visible #fantasmas-acao{color:var(--accent);}
 
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
-  .prog-abas{display:flex;gap:6px;margin:4px 0 2px;}
-  .prog-aba{flex:1 1 0;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:8px;padding:8px 10px;font:inherit;font-size:12.5px;cursor:pointer;}
-  .prog-aba:hover{color:var(--text);border-color:var(--accent);}
-  .prog-aba.ativa{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:700;}
+  /* As abas de Programas reúnem inventário, comandos e estação. O contêiner
+     rola horizontalmente no celular em vez de esmagar quatro decisões numa
+     largura que não comporta seus nomes. */
+  .prog-abas{display:flex;gap:7px;margin:4px 0 12px;padding:3px;overflow-x:auto;overscroll-behavior-x:contain;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.025);scrollbar-width:thin;}
+  .prog-aba{flex:1 0 max-content;min-height:38px;border:1px solid transparent;background:transparent;color:var(--muted);border-radius:8px;padding:8px 12px;font:600 12.5px var(--sans);cursor:pointer;white-space:nowrap;transition:color .15s ease,background .15s ease,border-color .15s ease,transform .15s ease;}
+  .prog-aba:hover{color:var(--text);border-color:var(--line);background:var(--panel2);}
+  .prog-aba:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .prog-aba.ativa{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:800;box-shadow:0 3px 12px rgba(184,255,60,.18);}
   .prog-dia{font:10.5px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;}
   .prog-linha{display:flex;gap:8px;align-items:baseline;padding:6px 2px;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.4;}
   .prog-sinal{flex:none;font:11px var(--mono);width:16px;text-align:center;}
@@ -397,6 +413,18 @@
   .prog-linha.saiu span{color:var(--muted);}
   .prog-vazio{color:var(--muted);font-size:12.5px;padding:16px 2px;line-height:1.5;}
   .prog-rodape{color:var(--muted);font:11px var(--mono);margin-top:12px;}
+  .prog-manut-intro{display:flex;align-items:flex-start;gap:10px;padding:12px 13px;margin-bottom:12px;border:1px solid rgba(184,255,60,.24);border-radius:11px;background:linear-gradient(120deg,rgba(184,255,60,.10),rgba(184,255,60,.025));}
+  .prog-manut-intro b{display:block;font-size:13px;color:var(--text);margin-bottom:3px;}
+  .prog-manut-intro p{margin:0;color:var(--muted);font-size:11.5px;line-height:1.45;}
+  .prog-manut-grade{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;}
+  .prog-manut-card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--panel2);}
+  .prog-manut-card h4{margin:0;font-size:12.5px;line-height:1.25;color:var(--text);}
+  .prog-manut-card p{margin:0;min-height:3.1em;color:var(--muted);font-size:11px;line-height:1.4;}
+  .prog-manut-card button{width:100%;margin-top:auto;}
+  .prog-manut-card.perigo{border-color:rgba(255,91,91,.3);}
+  .prog-manut-card.perigo h4{color:var(--warn);}
+  .prog-manut-aviso{padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:12px;line-height:1.5;}
+  @media(max-width:520px){.prog-abas{margin-left:-4px;margin-right:-4px;border-radius:10px;}.prog-aba{flex-basis:auto;padding-inline:10px;font-size:12px;}.prog-manut-grade{grid-template-columns:1fr;}.prog-manut-card p{min-height:0;}}
   .overlay.hidden{display:none!important;}
   /* Painel aberto DE DENTRO de outro (Programas, Mensagem, Editar, Aparelho...)
      ficava ATRÁS de quem o chamou: todos são .overlay com o MESMO z-index, e
@@ -515,21 +543,30 @@
   .cmd-datas{display:none;gap:6px;align-items:center;font:10px var(--mono);color:var(--muted);}.cmd-datas.visivel{display:flex;}
   .cmd-datas input{width:132px;background:var(--panel);border:1px solid var(--line);border-radius:7px;color:var(--text);padding:6px;font:11px var(--mono);}
   .cmd-lista{display:grid;gap:8px;max-height:470px;overflow:auto;padding-right:2px;}
-  .cmd-linha{display:grid;grid-template-columns:auto minmax(150px,1fr) minmax(130px,.7fr) auto;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:11px;padding:11px 12px;}
+  .cmd-linha{display:grid;grid-template-columns:auto auto minmax(150px,1fr) minmax(130px,.7fr) auto;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:11px;padding:11px 12px;}
   .cmd-linha.pendente{border-left-color:var(--warn);} .cmd-linha.entregue{border-left-color:var(--accent);} .cmd-linha.executado{border-left-color:var(--ok);} .cmd-linha.erro{border-left-color:var(--bad);}
   .cmd-linha.cancelado{border-left-color:var(--muted);opacity:.72;}
   .cmd-alvo{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cmd-meta{font:10.5px var(--mono);color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cmd-tipo{font-size:11px;color:var(--text);line-height:1.35;}.cmd-hora{font:10px var(--mono);color:var(--muted);margin-top:4px;}
   .cmd-status{font:10px var(--mono);white-space:nowrap;text-transform:uppercase;}.cmd-status.pendente{color:var(--warn);}.cmd-status.entregue{color:var(--accent);}.cmd-status.executado{color:var(--ok);}.cmd-status.erro{color:var(--bad);}.cmd-status.cancelado{color:var(--muted);}
+  /* Cancelar em lote. A caixa so existe na linha que PODE ser cancelada; nas
+     outras fica um vazio do mesmo tamanho pra coluna nao desalinhar. */
+  .cmd-marca{display:flex;align-items:center;justify-content:center;width:16px;}
+  .cmd-marca input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;margin:0;}
+  .cmd-lote{display:none;align-items:center;gap:10px;flex-wrap:wrap;background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:9px 12px;margin:0 0 8px;}
+  .cmd-lote.visivel{display:flex;}
+  .cmd-lote label{display:flex;align-items:center;gap:7px;font:10.5px var(--mono);color:var(--muted);cursor:pointer;}
+  .cmd-lote label input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;margin:0;}
+  .cmd-lote-conta{font:10.5px var(--mono);color:var(--text);margin-left:auto;}
   .cmd-estado{display:grid;justify-items:end;gap:6px;text-align:right;}.cmd-cancelar{border:1px solid rgba(255,91,91,.55);background:rgba(255,91,91,.08);color:#ff8a8a;border-radius:7px;padding:4px 7px;font:10px var(--mono);cursor:pointer;}.cmd-cancelar:hover{background:rgba(255,91,91,.18);}.cmd-cancelar:disabled{opacity:.55;cursor:wait;}
   @media(max-width:640px){
     .cmd-toolbar{padding:10px;}.cmd-periodos:before{width:100%;}.cmd-datas{width:100%;}.cmd-datas input{flex:1;min-width:0;}
     /* No telefone não há "coluna de tabela": destino vem primeiro, inteiro e
        alinhado à esquerda. A ação e o estado viram linhas abaixo, sem brigar
        pelo espaço horizontal nem esconder nome de unidade/máquina. */
-    .cmd-linha{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"indicador destino" "tipo tipo" "estado estado";gap:7px 9px;align-items:start;}
-    .cmd-indicador{grid-area:indicador;margin-top:4px;}.cmd-destino{grid-area:destino;min-width:0;}.cmd-tipo-bloco{grid-area:tipo;padding-left:18px;}.cmd-estado{grid-area:estado;display:flex;align-items:center;justify-items:normal;justify-content:space-between;gap:8px;text-align:left;padding-left:18px;border-top:1px solid var(--line);padding-top:8px;}.cmd-alvo{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;}.cmd-meta{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35;}.cmd-tipo{white-space:normal;font-size:10.5px;}.cmd-lista{max-height:400px;}
+    .cmd-linha{grid-template-columns:auto auto minmax(0,1fr);grid-template-areas:"marca indicador destino" "tipo tipo tipo" "estado estado estado";gap:7px 9px;align-items:start;}
+    .cmd-marca{grid-area:marca;margin-top:3px;align-items:flex-start;}.cmd-indicador{grid-area:indicador;margin-top:4px;}.cmd-destino{grid-area:destino;min-width:0;}.cmd-tipo-bloco{grid-area:tipo;padding-left:43px;}.cmd-estado{grid-area:estado;display:flex;align-items:center;justify-items:normal;justify-content:space-between;gap:8px;text-align:left;padding-left:43px;border-top:1px solid var(--line);padding-top:8px;}.cmd-alvo{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;}.cmd-meta{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35;}.cmd-tipo{white-space:normal;font-size:10.5px;}.cmd-lista{max-height:400px;}
   }
 </style>
 <link rel="stylesheet" href="/noc-workbench.css">
@@ -603,7 +640,8 @@
         </div>
         <button type="button" class="btn-secundario" onclick="carregarComandosRecentes()">↻ Atualizar</button>
       </div>
-      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Acompanhe destino, ação, estado e horário sem expor PowerShell ou saída. O <b>✕ Cancelar</b> remove comandos ainda na fila ou encerra registros com erro. Comandos executando ou concluídos continuam protegidos contra cancelamento enganoso. Execuções sem retorno por mais de 10 minutos são marcadas como erro automaticamente.</div>
+      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Acompanhe destino, ação, estado e horário sem expor PowerShell ou saída. O <b>✕ Cancelar</b> remove comandos ainda na fila ou encerra registros com erro — marque a caixa de várias linhas para cancelar todas de uma vez, com uma senha só. Comandos executando ou concluídos continuam protegidos contra cancelamento enganoso. Execuções sem retorno por mais de 10 minutos são marcadas como erro automaticamente.</div>
+      <div class="cmd-lote" id="comandos-lote"></div>
       <div class="cmd-lista" id="comandos-lista"></div>
     </div>
   </div>
@@ -644,6 +682,14 @@
   </div>
 
   <div id="grid-equip" class="equip-grid"></div>
+
+  <!-- Dispositivos com Tipo viram card (pedido do Master, 23/09). Separados
+       da grade de computadores de propósito: não entram nos KPIs, e o ritmo
+       do dado é outro - ver renderDispositivosCard() -->
+  <div id="disp-cards-bloco" class="hidden">
+    <div class="disp-cards-titulo">📡 Dispositivos com tipo <span class="uni-panel-sub">identificados pelo MAC · vistos pela varredura de rede do host, cerca de 1x por hora</span></div>
+    <div id="grid-dispositivos" class="equip-grid"></div>
+  </div>
 
   <!-- Computadores que nunca foram cadastrados: o heartbeat bateu num posto
        que não existe no banco (link/atalho velho de um computador removido/
@@ -691,6 +737,21 @@
   </div>
   <!-- papel de parede do parque: UMA imagem pra rede toda; cada computador
        decide se aplica, na política do card dele -->
+  <!-- ACESSOS REMOTOS CONHECIDOS: o ID do AnyDesk de QUEM ACESSA (o computador
+       da TI), nao o da loja. Vale pras 52 maquinas de uma vez. Silencia o
+       push, nunca o historico - ver acessoConhecidoDe no lojaStatus.js. -->
+  <div data-recolher>
+  <div class="agente-titulo" data-recolher-titulo><h2>🔕 Acessos remotos conhecidos</h2></div>
+  <div class="agente-sub">
+    O ID do AnyDesk de quem <b>acessa</b> — o seu computador, o do técnico — não o da loja. Cadastre uma vez e vale para todas as máquinas. Acesso vindo de um ID desta lista <b>não toca o celular</b>, mas continua no histórico da máquina, com o nome de quem é.
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+    <input id="ar-id" inputmode="numeric" maxlength="20" placeholder="ID do AnyDesk (só números)" style="flex:1 1 170px;min-width:0;">
+    <input id="ar-nome" maxlength="60" placeholder="De quem é (ex.: Sidney)" style="flex:1 1 150px;min-width:0;">
+    <button type="button" class="btn-ghost" onclick="adicionarAcessoConhecido()">Adicionar</button>
+  </div>
+  <div id="ar-lista" style="margin-bottom:18px;"></div>
+  </div>
   <div data-recolher>
   <div class="agente-titulo" data-recolher-titulo><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
@@ -711,6 +772,20 @@
     <span class="msg hidden" id="msg-pp-diag"></span>
   </div>
   <div id="pp-diag" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
+  <!-- MODELO BÁSICO: máquina SEM arte (ou com a tela sem imagem) monta sozinha
+       logo do grupo + logo da marca + nome da máquina + "MARCA · UNIDADE".
+       A arte acima continua mandando: isto só entra onde ela não existe. -->
+  <h3 style="font-size:13px;margin:4px 0 6px;">Modelo básico — máquina sem arte</h3>
+  <div class="agente-sub">
+    Onde não há arte (e em máquina com a tela preta, sem imagem nenhuma), o agente monta sozinho: <b>logo do grupo</b> em cima, <b>logo da marca</b> num cartão branco, o <b>nome da máquina</b> e a linha <b>MARCA · UNIDADE</b>. A arte que você sobe acima continua valendo onde existe. Suba um PNG por marca (vai sobre o cartão branco) e um por grupo (vai sobre o fundo escuro — use a versão <b>clara</b>, de fundo transparente). Sem o logo da marca, o cartão leva o nome dela escrito; sem o do grupo, o topo fica vazio.
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+    <select id="lc-alvo" style="max-width:220px;"></select>
+    <input type="file" id="lc-arquivo" accept="image/png,image/jpeg" style="max-width:260px;">
+    <button type="button" class="btn-mini ok" onclick="enviarLogoCarimbo()">Enviar logo</button>
+    <span class="msg hidden" id="msg-lc"></span>
+  </div>
+  <div id="lc-lista" style="font-size:11.5px;color:var(--muted);margin-bottom:18px;"></div>
   </div>
   <div data-recolher>
   <div class="agente-titulo" data-recolher-titulo>
@@ -863,6 +938,32 @@
       ⚠️ Máquina com NOCZenith instalado <b>sem Administrador</b> (versões antigas) só volta ao monitoramento quando <b>alguém fizer login no Windows</b> depois do reinício - foi isso que deixou o parque mudo em agosto.
       Pra ela voltar sozinha, reinstale uma vez pelo "📋 Copiar comando" num PowerShell <b>como Administrador</b> (v17+ cria a tarefa de boot).
     </div>
+    <!-- PROCEDIMENTOS DE SOCORRO. Pedido do Master: "tudo que resolver um
+         problema vamos criar um processo, organize o tipo da solucao para nao
+         ficar um scroll imenso". Dai: agrupado por categoria e FECHADO por
+         padrao. Cada item diz QUANDO usar antes do que faz - na emergencia a
+         pergunta e "qual destes e o meu caso?".
+         Isto NAO roda pelo agente: e o que se cola na maquina que nao responde
+         a comando nenhum (ver server/procedimentosSocorro.js). -->
+    <details style="margin:0 0 10px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel2);">
+      <summary style="cursor:pointer;font-weight:700;font-size:13px;">🧰 Procedimentos de socorro <span class="sub" style="font-weight:400;">· pra colar na máquina que não responde</span></summary>
+      <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0;">
+        Máquina muda no NOC não recebe comando - o agente dela não alcança o servidor. Estes são pra copiar aqui e colar lá, por AnyDesk ou presencialmente. Todos pedem o UAC sozinhos.
+      </div>
+      <div id="socorro-lista"><div class="sub">carregando…</div></div>
+    </details>
+    <!-- ACOES NAS MAQUINAS. Pedido do Master: "colocar ele em manutencao" - o
+         comando de Limpeza morava so na seção do agente, longe de onde ele
+         cuida do parque. Aqui e' a MESMA lista (AGENTE_ACOES) e o MESMO modal
+         de rodar: nada e duplicado, so fica ao alcance. Diferente do socorro
+         acima, estas rodam PELO AGENTE - a maquina precisa estar respondendo. -->
+    <details style="margin:0 0 10px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel2);">
+      <summary style="cursor:pointer;font-weight:700;font-size:13px;">⚙️ Ações nas máquinas <span class="sub" style="font-weight:400;">· rodam pelo agente, numa máquina ou em massa</span></summary>
+      <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0;">
+        A máquina precisa estar respondendo. O que exige aprovação continua passando pela fila do Master.
+      </div>
+      <div id="manut-acoes-lista"><div class="sub">carregando…</div></div>
+    </details>
     <!-- BUSCA. Com o parque inteiro na lista, achar UMA maquina era rolar
          unidade por unidade. Casa com nome da maquina, unidade, posto e IP
          local - o Master costuma chegar pelo IP que viu no card. -->
@@ -923,10 +1024,12 @@
        <button type="button" class="btn-ghost" id="manut-gcom-wcf" onclick="manutEnviar('gcomWcf')" title="Encerra somente GcomClient.WCF.exe nas VMs marcadas como GCOM; a própria VM o inicia novamente">🟥 Encerrar GCOM</button>
        <button type="button" class="btn-ghost" id="manut-diagnostico" onclick="manutEnviar('diagnostico-desempenho')" title="Lê eventos de tela azul, falha de disco/hardware, minidumps e consumo atual; não altera a máquina">🩺 Diagnosticar falha</button>
        <button type="button" class="btn-ghost" id="manut-limpeza-segura" onclick="manutEnviar('limpeza-segura')" title="Remove apenas temporários do Windows e do usuário, além da Lixeira; mede o espaço livre antes e depois; não reinicia a máquina">🧹 Liberar espaço seguro</button>
+       <button type="button" class="btn-ghost" id="manut-memoria-limitada" onclick="manutEnviar('corrigir-memoria-limitada')" title="Remove somente limites indevidos de memória na inicialização do Windows 64 bits; exige reinício e explica quando a causa é Windows 32 bits ou hardware">🧠 Corrigir memória limitada</button>
        <button type="button" class="btn-ghost" id="manut-remover-office" onclick="manutEnviar('remover-office')" title="Remove qualquer versão detectada do Microsoft Office/Microsoft 365; documentos do usuário são preservados">🗑️ Remover Office</button>
        <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
       <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
-      <button type="button" class="btn-ghost" id="manut-reset-senha" onclick="manutEnviar('reset-senha')" title="Reseta a senha do Windows para a senha padrão da loja - a máquina executa na próxima batida">🔑 Reset de Senha</button>
+      <label for="manut-reset-conta">Conta para remover a senha</label><input id="manut-reset-conta" maxlength="20" placeholder="Ex.: SUPORTE" autocomplete="off">
+      <button type="button" class="btn-ghost" id="manut-reset-senha" onclick="manutEnviar('reset-senha')" title="Remove a senha da conta informada na próxima batida">🔑 Reset de Senha</button>
       <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar('abortar')" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
       <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar('reiniciar')">🔁 Reiniciar selecionados</button>
     </div>
@@ -1154,10 +1257,11 @@
     <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
       <h3 id="prog-titulo" style="margin:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Programas</h3>
     </div>
-    <div class="prog-abas">
-      <button type="button" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
-      <button type="button" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
-      <button type="button" class="prog-aba" id="prog-aba-estacao" onclick="trocarAbaProgramas('estacao')">Área de Trabalho</button>
+    <div class="prog-abas" role="tablist" aria-label="Seções de programas e manutenção">
+      <button type="button" role="tab" aria-selected="true" aria-controls="prog-corpo" class="prog-aba ativa" id="prog-aba-mudancas" onclick="trocarAbaProgramas('mudancas')">Mudanças</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-atuais" onclick="trocarAbaProgramas('atuais')">Instalados agora</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-manutencao" onclick="trocarAbaProgramas('manutencao')">Manutenção</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="prog-corpo" class="prog-aba" id="prog-aba-estacao" onclick="trocarAbaProgramas('estacao')">Área de Trabalho</button>
     </div>
     <div id="prog-acoes-master" class="hidden" style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2,rgba(255,255,255,.03));">
       <div style="font-weight:700;font-size:13px;margin-bottom:7px;">Gerenciar por catálogo</div>
@@ -1177,7 +1281,7 @@
       </details>
     </div>
     <input type="search" id="prog-busca" placeholder="Buscar programa..." oninput="pintarProgramas()" style="margin:10px 0 6px;">
-    <div id="prog-corpo"></div>
+    <section id="prog-corpo" role="tabpanel" aria-live="polite"></section>
   </div></div>
 </div>
 <div class="overlay hidden" id="detalhe-comp-overlay">
@@ -1652,7 +1756,7 @@ function atualizarConteudoDetalhe(codigo, c){
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
   if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
   if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
-  if(c.anydeskId) infoBits.push(`🖥️ AnyDesk: <b>${escapeHtml(c.anydeskId)}</b> <button type="button" class="btn-copiar-ip" title="Copiar ID do AnyDesk" onclick="copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">📋</button>`);
+  if(c.anydeskId) infoBits.push(`🖥️ AnyDesk: <b>${escapeHtml(c.anydeskId)}</b> <button type="button" class="btn-copiar-ip" title="Copiar ID do AnyDesk" onclick="copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">📋</button>${c.anydeskIdFonte === 'maquina' ? ' <span class="sub">· lido do AnyDesk desta máquina</span>' : ' <span class="sub">· referência cadastrada; aguardando leitura local</span>'}`);
   // quem ligou e pra que hora - a mesma informação que evita o chamado de
   // "o computador reiniciou sozinho de madrugada"
   const planoDet = planoReinicioDe(c);
@@ -1727,7 +1831,9 @@ function atualizarConteudoDetalhe(codigo, c){
   if(c.ultimoComandoEm && !ultimoFoiZebra){
     const saida = c.ultimoComandoErro
       ? `<span style="color:var(--bad);">erro: ${escapeHtml(c.ultimoComandoErro)}</span>`
-      : `<span style="color:var(--ok);white-space:pre-wrap;">${escapeHtml((c.ultimoComandoResultado||'(sem saída)')).slice(0,600)}</span>`;
+      // saída inteira, rolando dentro da caixa: cortar em 600 escondia
+      // justamente o fim do log do agente (a linha de onde ele parou)
+      : `<pre style="color:var(--ok);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;margin:4px 0 0;font:inherit;">${escapeHtml(c.ultimoComandoResultado||'(sem saída)')}</pre>`;
     infoBits.push(`🖥️ último comando · ${escapeHtml(tempoRelativo(c.ultimoComandoEm))}<br><span style="font-size:11px;">${saida}</span>`);
   }
   // saude do HD (SMART/espaco) e varredura da rede local - ver nocMaquina.js.
@@ -1770,7 +1876,24 @@ function atualizarConteudoDetalhe(codigo, c){
   // acontece nada" no celular: a unica que abria era a que estava fora e
   // ainda nao tinha medida de RAM.
   if(c.ram && c.ram.totalGb != null){
-    infoBits.push(`🧠 <b>RAM:</b> ${c.ram.totalGb} GB${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}${c.ramMedidaEm ? ` <span class="sub">· medido ${formatarRelativo(c.ramMedidaEm)}</span>` : ''}`);
+    const mods = c.hardware && Array.isArray(c.hardware.memoria) ? c.hardware.memoria : [];
+    const tipos = [...new Set(mods.map(m=>m.tipo).filter(t=>t && t!=='Desconhecido'))];
+    const freqs = [...new Set(mods.map(m=>Number(m.frequenciaMhz)).filter(Number.isFinite))];
+    const detalhesRam = [tipos.join('/'), freqs.length === 1 ? `${freqs[0]} MHz` : (freqs.length > 1 ? `${Math.min(...freqs)}–${Math.max(...freqs)} MHz` : ''), mods.length ? `${mods.length} módulo(s)` : ''].filter(Boolean).join(' · ');
+    infoBits.push(`🧠 <b>RAM:</b> ${c.ram.totalGb} GB${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}${detalhesRam ? ` <span class="sub">· ${escapeHtml(detalhesRam)}</span>` : ''}${c.ramMedidaEm ? ` <span class="sub">· medido ${formatarRelativo(c.ramMedidaEm)}</span>` : ''}`);
+  }
+  if(c.hardware && c.hardware.processador){
+    const p = c.hardware.processador;
+    const detalhesCpu = [p.nucleos ? `${p.nucleos} núcleo(s)` : '', p.threads ? `${p.threads} thread(s)` : '', p.frequenciaMaxMhz ? `até ${(p.frequenciaMaxMhz/1000).toLocaleString('pt-BR',{maximumFractionDigits:2})} GHz` : ''].filter(Boolean).join(' · ');
+    infoBits.push(`⚙️ <b>Processador:</b> ${escapeHtml(p.nome || 'não identificado')}${detalhesCpu ? ` <span class="sub">· ${escapeHtml(detalhesCpu)}</span>` : ''}`);
+  }
+  if(c.hardware && c.hardware.placaMae){
+    const p = c.hardware.placaMae;
+    infoBits.push(`🔌 <b>Placa-mãe:</b> ${escapeHtml([p.fabricante,p.modelo].filter(Boolean).join(' · '))}`);
+  }
+  if(c.hardware && c.hardware.bios){
+    const b = c.hardware.bios;
+    infoBits.push(`🧩 <b>BIOS:</b> ${escapeHtml([b.fabricante,b.versao].filter(Boolean).join(' · '))}`);
   }
   // regra da casa: reiniciar 1x por semana (ver UPTIME_REINICIAR_DIAS)
   if(c.uptimeHoras != null){
@@ -1820,28 +1943,7 @@ function atualizarConteudoDetalhe(codigo, c){
       // guarda por MAC (ver impressoras{} no lojaStatus.js). Só aparece pra
       // aparelho marcado como Zebra - é o único que responde o ~HS.
       const estadoZebra = d.marca === 'zebra' ? ((c.impressoras || {})[d.mac] || null) : null;
-      const impChip = (() => {
-        if (d.marca !== 'zebra') return '';
-        const st = estadoZebra;
-        let cor = 'var(--warn,#e0a800)', rotulo = 'sem confirmação', titulo = 'Impressora Zebra — ainda não houve uma leitura de status. Isso não significa que ela está desligada.';
-        if (st) {
-          const quando = st.em ? ` · lido ${tempoRelativo(st.em)}` : '';
-          if (st.nivel === 'ok') {
-            cor = 'var(--ok)'; rotulo = 'OK';
-            titulo = `Imprimindo normal${st.fila != null ? ` · fila ${st.fila}` : ''}${quando}`;
-          } else if (st.nivel === 'atencao') {
-            cor = 'var(--warn,#e0a800)'; rotulo = 'atenção';
-            titulo = `${(st.motivos || []).join(' · ') || 'Atenção'}${quando}`;
-          } else if (st.nivel === 'critico') {
-            cor = 'var(--bad)'; rotulo = 'parada';
-            titulo = `${(st.motivos || []).join(' · ') || 'Parou de imprimir'}${quando}`;
-          } else {
-            cor = 'var(--warn,#e0a800)'; rotulo = 'sem confirmação';
-            titulo = `Ainda não consegui confirmar o status pela porta da Zebra${st.semRespostaEm ? ` · última tentativa ${tempoRelativo(st.semRespostaEm)}` : quando}. Isso não prova que ela está offline.`;
-          }
-        }
-        return `<span class="disp-imp-chip" style="color:${cor};" title="${escapeHtml(titulo)}">🖨️ ${escapeHtml(rotulo)}</span>`;
-      })();
+      const impChip = d.marca === 'zebra' ? chipZebraHtml(estadoZebra) : '';
       // 📡 e' o ponto de medicao da loja: quem bate o olho na lista precisa
       // saber por qual aparelho a queda da unidade esta sendo contada
       const medidorChip = d.medidorQuedas
@@ -1922,13 +2024,8 @@ function atualizarConteudoDetalhe(codigo, c){
     ${c.anydeskId ? `<a class="btn-icone" data-dica="Abrir no AnyDesk" aria-label="Abrir no AnyDesk" href="anydesk:${escapeHtml(c.anydeskId)}" onclick="cliqueAnydeskDetalhe(event,'${escapeJs(c.anydeskId)}')">🖥️</a>` : ''}
     <button type="button" class="btn-icone" data-dica="Mensagem na tela da loja" aria-label="Mensagem na tela da loja" onclick="abrirModalMensagem('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">💬</button>
     <button type="button" class="btn-icone" data-dica="Copiar o link desta máquina" aria-label="Copiar o link desta máquina" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗</button>
-    <button type="button" class="btn-icone" data-dica="Copiar o comando de instalação pro PowerShell da loja" aria-label="Copiar o comando de instalação pro PowerShell da loja" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋</button>
-    <button type="button" class="btn-icone" data-dica="Baixar o agente NOC-NoPulso" aria-label="Baixar o agente NOC-NoPulso" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
     ${c.noPulsoPrint ? `<button type="button" class="btn-icone" data-dica="Capturar a tela desta máquina agora" aria-label="Capturar a tela desta máquina agora" onclick="capturarAgora('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📸</button>` : ''}
-    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Diagnóstico de rede: ping por esta máquina" aria-label="Diagnóstico de rede: ping por esta máquina" onclick="abrirDiagnosticoPing('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">⌁</button>` : ''}
-    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Console PowerShell nesta máquina" aria-label="Console PowerShell" onclick="abrirConsoleNoc('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">⌨️</button>` : ''}
-    ${c.tipo === 'interno' ? `<button type="button" class="btn-icone" data-dica="Reiniciar este computador" aria-label="Reiniciar este computador" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁</button>` : ''}
-    <button type="button" class="btn-icone" data-dica="Programas desta máquina" aria-label="Programas desta máquina" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
+    <button type="button" class="btn-icone" data-dica="Programas, manutenção e Área de Trabalho" aria-label="Programas, manutenção e Área de Trabalho" onclick="abrirProgramas('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📦</button>
     <button type="button" class="btn-icone perigo" data-dica="Remover do NOC" aria-label="Remover do NOC" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
   `;
   renderPoliticaComputador(codigo, c);
@@ -2038,9 +2135,11 @@ async function enviarConsoleNoc(){
 }
 
 // ================= PROGRAMAS DA MÁQUINA =================
-// Janela própria, com duas abas, porque são duas perguntas diferentes:
+// Janela própria, com quatro abas porque cada uma responde uma decisão distinta:
 //   "o que mudou aqui?"      -> Mudanças (o histórico entrou/saiu)
 //   "o que tem instalado?"   -> Instalados agora (a última varredura inteira)
+//   "como intervenho?"       -> Manutenção (comandos e recuperação do agente)
+//   "o que fica visível?"    -> Área de Trabalho (perfil da estação)
 // Nenhuma leitura nova no Firestore: o agente já manda a lista, o servidor já
 // a guarda, e a ficha da máquina já trouxe tudo (ver detalhar/listar).
 let PROG_ATUAL = null;
@@ -2169,15 +2268,122 @@ async function removerProgramaAtual(nome){
 }
 function trocarAbaProgramas(aba){
   PROG_ABA = aba;
-  document.getElementById('prog-aba-mudancas').classList.toggle('ativa', aba==='mudancas');
-  document.getElementById('prog-aba-atuais').classList.toggle('ativa', aba==='atuais');
-  document.getElementById('prog-aba-estacao').classList.toggle('ativa', aba==='estacao');
-  document.getElementById('prog-acoes-master').classList.toggle('hidden', aba==='estacao' || !IS_MASTER || PROG_ATUAL?.tipo !== 'interno');
+  ['mudancas','atuais','manutencao','estacao'].forEach(nome => {
+    const botao = document.getElementById(`prog-aba-${nome}`);
+    if(!botao) return;
+    const ativa = aba===nome;
+    botao.classList.toggle('ativa', ativa);
+    botao.setAttribute('aria-selected', String(ativa));
+    botao.tabIndex = ativa ? 0 : -1;
+  });
+  const mostraCatalogo = (aba==='mudancas' || aba==='atuais') && IS_MASTER && PROG_ATUAL?.tipo === 'interno';
+  document.getElementById('prog-acoes-master').classList.toggle('hidden', !mostraCatalogo);
+  document.getElementById('prog-busca').classList.toggle('hidden', aba==='manutencao' || aba==='estacao');
   pintarProgramas();
+}
+function abrirManutencaoDestaMaquina(codigo, posto, nome){
+  // A janela de manutenção já tem as confirmações, senha e aviso de dois
+  // minutos. Fechamos Programas antes para o retorno não deixar dois painéis
+  // sobrepostos; o detalhe continua a origem visual da ação.
+  fecharProgramas();
+  reiniciarDesteComputador(codigo, posto, nome);
+}
+// Ações que antes apareciam só no rodapé da janela de manutenção em lote.
+// Aqui elas ficam no contexto da máquina aberta, mas continuam exigindo a
+// confirmação e a senha Master antes de entrar na mesma fila operacional.
+const PROG_MANUTENCOES = [
+  ['anydesk','🖥️ Reiniciar AnyDesk','Reinicia somente o serviço de acesso remoto; o computador e o caixa continuam ligados.'],
+  ['gsurfRsa','💳 Reiniciar GSurfRSA','Reinicia o Listener TEF desta máquina. Pode interromper uma transação em curso por alguns segundos.'],
+  ['gcomWcf','🟥 Encerrar GCOM','Finaliza somente o processo GcomClient.WCF; a VM o inicia novamente pelo mecanismo padrão.'],
+  ['diagnostico-desempenho','🩺 Diagnosticar falha','Lê tela azul, disco, hardware, minidumps e consumo atual. Não altera a máquina.'],
+  ['limpeza-segura','🧹 Liberar espaço seguro','Remove temporários e Lixeira, medindo antes e depois. Não toca em documentos, Downloads ou programas.'],
+  ['corrigir-memoria-limitada','🧠 Corrigir memória limitada','Em Windows 64 bits, remove somente limites indevidos da inicialização. Em Windows 32 bits ou com reserva de hardware, explica a causa sem forçar alteração. Exige reinício quando corrigir.', 'perigo'],
+  ['remover-office','🗑️ Remover Office','Desinstala Office/Microsoft 365 detectado; preserva documentos do usuário.', 'perigo'],
+  ['rede','🌐 Destravar a rede','Limpa DNS e renova DHCP; a conexão pode cair por alguns segundos.', 'perigo'],
+  ['zebra','🖨️ Resetar Zebra','Limpa a fila e reinicia as Zebras cadastradas na unidade; o computador não é reiniciado.'],
+  ['reset-senha','🔑 Reset de Senha','Remove a senha da conta local informada. O Windows pode bloquear a remoção por política de senha.', 'perigo'],
+  ['abortar','🛑 Abortar reinício','Cancela somente um reinício que ainda esteja na contagem de dois minutos.'],
+];
+async function executarManutencaoDoPrograma(tarefa){
+  const c = PROG_ATUAL;
+  const item = PROG_MANUTENCOES.find(x=>x[0]===tarefa);
+  if(!c || !item || c.tipo !== 'interno') return;
+  const nome = c.nome || c.posto;
+  const nomeConta = tarefa === 'reset-senha' ? document.getElementById('prog-reset-conta').value.trim() : undefined;
+  if(tarefa === 'reset-senha' && !nomeConta){ alert('Informe o nome da conta do Windows.'); document.getElementById('prog-reset-conta').focus(); return; }
+  if(!confirm(`${item[1].replace(/^\S+\s/,'')} em ${nome}?\n\n${item[2]}${nomeConta ? `\nConta: ${nomeConta} (ficará sem senha).` : ''}\n\nA ação será registrada e enviada somente para esta máquina.`)) return;
+  const password = await pedirSenhaMaster(`autorizar: ${item[1].replace(/^\S+\s/,'')}`);
+  if(password === null) return;
+  const botoes = [...document.querySelectorAll(`[data-manut-programa="${tarefa}"]`)];
+  botoes.forEach(b=>b.disabled=true);
+  try{
+    const r = await fetch('/api/loja-status/manutencao/reiniciar', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({alvos:[{codigo:c.codigo,posto:c.posto}],tarefa,nomeConta,abortar:tarefa==='abortar',password}),
+    });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui enviar a manutenção.');
+    alert(d.pendenteAprovacao ? 'Enviado para aprovação do Master.' : `${item[1]} enfileirado. O resultado aparece na atividade desta máquina.`);
+    await carregar();
+  }catch(e){ alert(e.message); }
+  finally{ botoes.forEach(b=>b.disabled=false); }
+}
+function pintarManutencaoProgramas(corpo){
+  const c = PROG_ATUAL;
+  const nome = escapeHtml(c.nome || c.posto);
+  const codigo = escapeJs(c.codigo);
+  const posto = escapeJs(c.posto);
+  const tipo = escapeJs(c.tipo || 'atendimento');
+  const nomeJs = escapeJs(c.nome || c.posto);
+  const interno = c.tipo === 'interno';
+  const acoesInternas = interno ? `
+    <article class="prog-manut-card">
+      <h4>⌁ Diagnóstico de rede</h4>
+      <p>Executa ping a um IP privado a partir desta máquina. O resultado fica no histórico do NOC.</p>
+      <button type="button" class="btn-ghost" onclick="abrirDiagnosticoPing('${codigo}','${posto}','${nomeJs}')">Testar rede</button>
+    </article>
+    <article class="prog-manut-card">
+      <h4>⌨️ Console operacional</h4>
+      <p>Envia um único comando PowerShell, auditado e com confirmação de senha Master.</p>
+      <button type="button" class="btn-ghost" onclick="abrirConsoleNoc('${codigo}','${posto}','${nomeJs}')">Abrir console</button>
+    </article>
+    <article class="prog-manut-card perigo">
+      <h4>🔁 Reiniciar com aviso</h4>
+      <p>Abre a manutenção com esta máquina já selecionada. A loja recebe aviso de 2 minutos.</p>
+      <button type="button" class="btn-ghost" onclick="abrirManutencaoDestaMaquina('${codigo}','${posto}','${nomeJs}')">Preparar reinício</button>
+    </article>
+    ${PROG_MANUTENCOES.map(([tarefa,titulo,descricao,classe])=>`<article class="prog-manut-card ${classe||''}">
+      <h4>${titulo}</h4><p>${descricao}</p>
+      ${tarefa === 'reset-senha' ? '<label for="prog-reset-conta">Nome da conta do Windows</label><input id="prog-reset-conta" type="text" maxlength="20" placeholder="Ex.: SUPORTE ou DOMINO&#39;S" autocomplete="off" style="width:100%;box-sizing:border-box;margin:8px 0 12px;">' : ''}
+      <button type="button" class="btn-ghost" data-manut-programa="${tarefa}" onclick="executarManutencaoDoPrograma('${tarefa}')">Executar nesta máquina</button>
+    </article>`).join('')}` : `
+    <article class="prog-manut-aviso">Este equipamento é de atendimento. Comandos de rede, console e reinício são exclusivos de computadores internos.</article>`;
+  corpo.innerHTML = `
+    <div class="prog-manut-intro">
+      <span aria-hidden="true">🛠️</span>
+      <div><b>Manutenção de ${nome}</b><p>Ferramentas operacionais centralizadas aqui. Cada ação preserva as confirmações e o registro no NOC.</p></div>
+    </div>
+    <div class="prog-manut-grade">
+      <article class="prog-manut-card">
+        <h4>📋 Instalar ou reparar o agente</h4>
+        <p>Copia o comando individual desta máquina para instalar com privilégio elevado e iniciar junto ao Windows.</p>
+        <button type="button" class="btn-primary" onclick="copiarComandoVigia('${codigo}','${posto}','${tipo}')">Copiar comando</button>
+      </article>
+      <article class="prog-manut-card">
+        <h4>🛡️ Baixar o agente</h4>
+        <p>Baixa o script individualizado para uso sem área de transferência ou por suporte local.</p>
+        <button type="button" class="btn-ghost" onclick="baixarVigia('${codigo}','${posto}','${tipo}')">Baixar script</button>
+      </article>
+      ${acoesInternas}
+    </div>`;
 }
 function pintarProgramas(){
   const corpo = document.getElementById('prog-corpo');
   if(!PROG_ATUAL){ corpo.innerHTML=''; return; }
+  if(PROG_ABA==='manutencao'){
+    pintarManutencaoProgramas(corpo);
+    return;
+  }
   if(PROG_ABA==='estacao'){
     // Reusa a mesma política e os mesmos botões da ficha do NOC: não há uma
     // segunda configuração concorrente. A aba só coloca o contexto "o que há
@@ -2490,6 +2696,109 @@ function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-uni
 // computadores de verdade (passaram pelo cadastro, tem nome) - os "fantasmas"
 // (heartbeat de posto nunca cadastrado, ver renderFantasmas) ficam de fora
 // dos KPIs/Por unidade/grade principal pra nao inflar as contagens
+// Status da Zebra (papel, cabeça, fila) - UM texto só, usado pela lista de
+// dispositivos da máquina E pelo card do dispositivo. Antes morava inline na
+// lista; o card copiaria e as duas versões divergiriam na primeira correção.
+function chipZebraHtml(st){
+  let cor = 'var(--warn,#e0a800)', rotulo = 'sem confirmação', titulo = 'Impressora Zebra — ainda não houve uma leitura de status. Isso não significa que ela está desligada.';
+  if (st) {
+    const quando = st.em ? ` · lido ${tempoRelativo(st.em)}` : '';
+    if (st.nivel === 'ok') {
+      cor = 'var(--ok)'; rotulo = 'OK';
+      titulo = `Imprimindo normal${st.fila != null ? ` · fila ${st.fila}` : ''}${quando}`;
+    } else if (st.nivel === 'atencao') {
+      cor = 'var(--warn,#e0a800)'; rotulo = 'atenção';
+      titulo = `${(st.motivos || []).join(' · ') || 'Atenção'}${quando}`;
+    } else if (st.nivel === 'critico') {
+      cor = 'var(--bad)'; rotulo = 'parada';
+      titulo = `${(st.motivos || []).join(' · ') || 'Parou de imprimir'}${quando}`;
+    } else {
+      cor = 'var(--warn,#e0a800)'; rotulo = 'sem confirmação';
+      titulo = `Ainda não consegui confirmar o status pela porta da Zebra${st.semRespostaEm ? ` · última tentativa ${tempoRelativo(st.semRespostaEm)}` : quando}. Isso não prova que ela está offline.`;
+    }
+  }
+  return `<span class="disp-imp-chip" style="color:${cor};" title="${escapeHtml(titulo)}">🖨️ ${escapeHtml(rotulo)}</span>`;
+}
+// ---------------------------------------------------------------------
+// DISPOSITIVO COM TIPO VIRA CARD. O servidor manda, dentro de cada máquina,
+// só os dispositivos que ALGUÉM categorizou (dispositivosComTipo) - ver
+// dispositivosComTipoDe no lojaStatus.js.
+//
+// O MAC é a identidade. A mesma Zebra pode ser vista por dois hosts da mesma
+// loja: aqui ela vira UM card, e vale a leitura mais recente. A chave é
+// unidade+MAC - o IP entra só como endereço de agora.
+//
+// Não duplica computador: quem já tem o NOCZenith já é card. O agente não
+// informa o próprio MAC, então o cruzamento é pelo IP local ATUAL na mesma
+// unidade - só para esconder o repetido; a identidade do card segue o MAC.
+const ESTADO_DISP_PARA_STATUS = { 'na-rede':'online', 'sem-confirmacao':'degradado', 'sem-rede':'offline' };
+function dispositivosComTipoDaGrade(computadores){
+  const lista = computadores || COMPUTADORES;
+  const ipsComAgente = new Set(lista.filter(c => c.nome && c.ipLocal).map(c => `${c.codigo}|${c.ipLocal}`));
+  const porChave = new Map();
+  lista.forEach(c => {
+    (c.dispositivosComTipo || []).forEach(d => {
+      if(!d || !d.mac) return;
+      if(d.ip && ipsComAgente.has(`${c.codigo}|${d.ip}`)) return;
+      const chave = `${c.codigo}|${String(d.mac).toLowerCase()}`;
+      const atual = porChave.get(chave);
+      if(atual && (atual.visto || 0) >= (d.visto || 0)) return;
+      porChave.set(chave, { ...d, codigo: c.codigo, hostNome: c.nome || null, hostPosto: c.posto, estadoZebra: d.marca === 'zebra' ? ((c.impressoras || {})[d.mac] || null) : null });
+    });
+  });
+  return [...porChave.values()];
+}
+function dispCardHtml(x){
+  const status = ESTADO_DISP_PARA_STATUS[x.estado] || 'nunca';
+  const nome = x.apelido || x.nome || x.fabricante || 'sem nome';
+  const unidade = UNIDADES_NOMES[x.codigo] || x.codigo;
+  const visto = x.visto ? tempoRelativo(x.visto) : 'nunca';
+  // Mesmas palavras que a tela e o alerta já usam: "sem rede" (título do
+  // push), "não apareceu na última varredura" (bolinha da lista).
+  const texto = x.estado === 'na-rede' ? `na rede · visto ${visto}`
+    : x.estado === 'sem-rede' ? `sem rede · visto ${visto}`
+    : `não apareceu na última varredura · visto ${visto}`;
+  // O pedido: "preciso saber quando o IP daquele MAC mudar". A última troca
+  // fica no card, com o IP de antes; nas primeiras 24h ela se destaca.
+  let ipMudou = '';
+  if(x.ipMudou && x.ipMudou.de){
+    const recente = x.ipMudou.em && (Date.now() - x.ipMudou.em) < 24*60*60*1000;
+    ipMudou = `<div class="disp-card-ipmudou${recente ? ' recente' : ''}" title="IP mudou de ${escapeHtml(x.ipMudou.de)} para ${escapeHtml(x.ipMudou.para || x.ip || '')}">↪ IP alterado ${escapeHtml(x.ipMudou.em ? tempoRelativo(x.ipMudou.em) : '')} · antes ${escapeHtml(x.ipMudou.de)}</div>`;
+  }
+  const zebra = x.marca === 'zebra' ? chipZebraHtml(x.estadoZebra) : '';
+  const sino = x.monitorar ? `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>` : '';
+  return `<div class="equip-tile disp-card status-${status}" data-codigo="${escapeHtml(x.codigo)}" data-mac="${escapeHtml(x.mac)}" onclick="abrirDetalheComputador('${escapeJs(x.codigo)}','${escapeJs(x.hostPosto)}')" title="Abrir ${escapeHtml(x.hostNome || 'o host')}, que enxerga este dispositivo">
+    <div class="equip-tile-head">
+      <span class="status-dot ${status}"></span>
+      <span class="equip-tile-nome" title="${escapeHtml(unidade)}">${escapeHtml(unidade)}</span>
+      ${sino}<span class="tipo-badge">${escapeHtml(x.tipoRotulo || x.tipo)}</span>
+    </div>
+    <div class="equip-tile-unidade" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>
+    <div class="equip-tile-status ${status}">${escapeHtml(texto)}</div>
+    ${zebra ? `<div>${zebra}</div>` : ''}
+    ${x.ip ? `<div class="equip-tile-ip" title="Copiar IP" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(x.ip)}','IP')">🌐 ${escapeHtml(x.ip)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
+    <div class="disp-card-mac" title="Copiar MAC" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(x.mac)}','MAC')">MAC ${escapeHtml(x.mac)} <span class="equip-tile-ip-copy">📋</span></div>
+    ${ipMudou}
+    ${x.hostNome ? `<div class="disp-card-host">visto por ${escapeHtml(x.hostNome)}</div>` : ''}
+  </div>`;
+}
+function renderDispositivosCard(){
+  const bloco = document.getElementById('disp-cards-bloco');
+  const grid = document.getElementById('grid-dispositivos');
+  if(!bloco || !grid) return;
+  let lista = dispositivosComTipoDaGrade();
+  // clique num KPI de computador (servidor/estação) é foco em computador
+  if(FILTRO_SERVIDOR) lista = [];
+  if(FILTRO_UNIDADE) lista = lista.filter(x => x.codigo === FILTRO_UNIDADE);
+  if(FILTRO_STATUS) lista = lista.filter(x => ESTADO_DISP_PARA_STATUS[x.estado] === FILTRO_STATUS);
+  if(FILTRO_TEXTO){
+    lista = lista.filter(x => `${x.apelido||''} ${x.nome||''} ${x.tipoRotulo||''} ${x.ip||''} ${x.mac||''} ${UNIDADES_NOMES[x.codigo]||x.codigo}`.toLowerCase().includes(FILTRO_TEXTO));
+  }
+  const ORDEM = { 'sem-rede':0, 'sem-confirmacao':1, 'na-rede':2 };
+  lista.sort((a,b) => (ORDEM[a.estado] ?? 9) - (ORDEM[b.estado] ?? 9) || (a.apelido||a.nome||'').localeCompare(b.apelido||b.nome||'', 'pt-BR'));
+  bloco.classList.toggle('hidden', !lista.length);
+  grid.innerHTML = lista.map(dispCardHtml).join('');
+}
 function computadoresReais(){ return COMPUTADORES.filter(c => c.nome); }
 
 function renderKpis(){
@@ -2760,6 +3069,9 @@ function render(){
   renderKpis();
   renderUnidades();
   renderFantasmas();
+  // antes do return adiantado lá embaixo: filtro que esconde todos os
+  // computadores não pode esconder junto os dispositivos da loja
+  renderDispositivosCard();
   if(ULTIMO_REDE_DADOS) renderRede(ULTIMO_REDE_DADOS);
   const grid = document.getElementById('grid-equip');
   let lista = computadoresReais();
@@ -2906,6 +3218,12 @@ async function carregar(){
 // resultado. Quem precisa investigar abre a ficha da máquina; esta visão é
 // para saber se a execução está andando sem espalhar PowerShell pela tela.
 let COMANDOS_RECENTES = [];
+// Seleção do cancelamento em lote. Guarda só ids: a lista é recarregada a
+// cada ação e um objeto guardado aqui ficaria velho na mão.
+let COMANDOS_MARCADOS = new Set();
+// Mesma regra do ✕ da linha e do servidor: fila ou erro. Uma função só
+// pras três leituras (linha, barra do lote e o envio) não divergirem.
+const podeCancelarComando = (c) => c && (c.status==='pendente' || c.status==='erro');
 let FILTRO_COMANDOS = 'todos';
 let PERIODO_COMANDOS = '7d';
 let COMANDOS_CARREGADOS = false;
@@ -2959,25 +3277,85 @@ function renderComandosRecentes(){
   filtros.innerHTML = opcoes.map(([id,nome])=>`<button type="button" class="cmd-filtro ${FILTRO_COMANDOS===id?'ativo':''}" onclick="selecionarFiltroComandos('${id}')">${nome}</button>`).join('');
   periodos.innerHTML = opcoesPeriodo.map(([id,nome])=>`<button type="button" class="cmd-filtro ${PERIODO_COMANDOS===id?'ativo':''}" onclick="selecionarPeriodoComandos('${id}')">${nome}</button>`).join('');
   const visiveis = COMANDOS_RECENTES.filter(c=>FILTRO_COMANDOS==='todos'||c.status===FILTRO_COMANDOS);
+  // Quem some do filtro (ou deixou de ser cancelável) sai da seleção: marcar e
+  // depois trocar de filtro não pode cancelar um comando que o Master não vê.
+  const cancelaveisVisiveis = visiveis.filter(podeCancelarComando);
+  const idsVisiveis = new Set(cancelaveisVisiveis.map(c=>c.id));
+  [...COMANDOS_MARCADOS].forEach(id=>{ if(!idsVisiveis.has(id)) COMANDOS_MARCADOS.delete(id); });
   const ativos = COMANDOS_RECENTES.filter(c=>c.status==='pendente'||c.status==='entregue').length;
   const periodo=intervaloComandos().rotulo;
   sub.textContent = COMANDOS_RECENTES.length ? `${ativos} ativo${ativos===1?'':'s'} · ${COMANDOS_RECENTES.length} registro${COMANDOS_RECENTES.length===1?'':'s'} · ${periodo}` : `nenhum comando em ${periodo}`;
-  if(!visiveis.length){ lista.innerHTML='<div class="empty" style="padding:16px;">Nenhum comando neste filtro.</div>'; return; }
+  // o return adiantado também apaga a barra: sem isso ela ficava na tela do
+  // filtro anterior, oferecendo cancelar o que não está mais listado
+  if(!visiveis.length){ lista.innerHTML='<div class="empty" style="padding:16px;">Nenhum comando neste filtro.</div>'; renderLoteComandos([]); return; }
   lista.innerHTML = visiveis.map(c=>{
     const status = ROTULO_STATUS_COMANDO[c.status] || 'desconhecido';
     const classe = ROTULO_STATUS_COMANDO[c.status] ? c.status : '';
     const unidade = UNIDADES_NOMES[c.unidadeCodigo || c.codigo] || c.codigo || 'sem unidade';
     const quando = c.canceladoEm || c.executadoEm || c.entregueEm || c.criadoEm;
     const admin = c.requerAdmin ? ' · admin' : '';
-    const podeCancelar = c.status==='pendente'||c.status==='erro';
+    const podeCancelar = podeCancelarComando(c);
     const cancelarTitulo = c.status==='erro' ? 'Marcar este erro como cancelado' : 'Cancelar antes da entrega';
+    const marcado = COMANDOS_MARCADOS.has(c.id);
     return `<div class="cmd-linha ${classe}">
+      <span class="cmd-marca">${podeCancelar?`<input type="checkbox" ${marcado?'checked':''} onchange="marcarComandoLote('${escapeJs(c.id)}',this.checked)" aria-label="Selecionar para cancelar em lote">`:''}</span>
       <span class="cmd-indicador" aria-hidden="true">${c.status==='erro'?'●':c.status==='executado'?'●':'◌'}</span>
       <div class="cmd-destino"><div class="cmd-alvo" title="${escapeHtml(c.nomeComputador || c.posto)}">${escapeHtml(c.nomeComputador || c.posto || 'Computador')}</div><div class="cmd-meta">${escapeHtml(unidade)} · ${escapeHtml(c.posto || '')}${admin}</div></div>
       <div class="cmd-tipo-bloco"><div class="cmd-tipo">${escapeHtml(c.nomeComando || 'Comando operacional')}</div><div class="cmd-hora">${escapeHtml(fmtDataHora(quando))} · ${escapeHtml(tempoRelativo(quando))}</div></div>
       <div class="cmd-estado"><span class="cmd-status ${classe}">${status}</span>${podeCancelar?`<button type="button" class="cmd-cancelar" onclick="cancelarComandoFila('${escapeJs(c.id)}',this)" aria-label="Cancelar comando" title="${cancelarTitulo}">✕ Cancelar</button>`:''}</div>
     </div>`;
   }).join('');
+  renderLoteComandos(cancelaveisVisiveis);
+}
+// A barra do lote só aparece quando há mais de um cancelável na tela: com um
+// só, o ✕ da própria linha já resolve e a barra seria mobília.
+function renderLoteComandos(cancelaveis){
+  const barra = document.getElementById('comandos-lote');
+  if(!barra) return;
+  if(cancelaveis.length < 2){ barra.className='cmd-lote'; barra.innerHTML=''; return; }
+  const marcados = COMANDOS_MARCADOS.size;
+  const todos = marcados === cancelaveis.length;
+  barra.className='cmd-lote visivel';
+  barra.innerHTML = `<label><input type="checkbox" ${todos?'checked':''} onchange="marcarTodosComandosLote(this.checked)">Selecionar os ${cancelaveis.length} canceláveis desta lista</label>
+    <button type="button" class="cmd-cancelar" id="cmd-lote-botao" onclick="cancelarComandosSelecionados(this)" ${marcados?'':'disabled'}>✕ Cancelar ${marcados} selecionado${marcados===1?'':'s'}</button>
+    <span class="cmd-lote-conta">${marcados} de ${cancelaveis.length} marcado${marcados===1?'':'s'}</span>`;
+}
+function marcarComandoLote(id, ligado){
+  if(ligado) COMANDOS_MARCADOS.add(id); else COMANDOS_MARCADOS.delete(id);
+  renderComandosRecentes();
+}
+function marcarTodosComandosLote(ligado){
+  COMANDOS_MARCADOS.clear();
+  if(ligado) COMANDOS_RECENTES.filter(c=>(FILTRO_COMANDOS==='todos'||c.status===FILTRO_COMANDOS)&&podeCancelarComando(c)).forEach(c=>COMANDOS_MARCADOS.add(c.id));
+  renderComandosRecentes();
+}
+// Uma senha para o lote inteiro, não uma por comando: o Master aprova a AÇÃO,
+// não cada linha. O servidor continua conferindo a senha em cada DELETE.
+async function cancelarComandosSelecionados(botao){
+  const alvos = COMANDOS_RECENTES.filter(c=>COMANDOS_MARCADOS.has(c.id) && podeCancelarComando(c));
+  if(!alvos.length) return;
+  const comErro = alvos.filter(c=>c.status==='erro').length;
+  const naFila = alvos.length - comErro;
+  const partes = [];
+  if(naFila) partes.push(`${naFila} ainda na fila (${naFila===1?'será removido':'serão removidos'} antes de chegar à máquina)`);
+  if(comErro) partes.push(`${comErro} com erro (${comErro===1?'o registro será marcado':'os registros serão marcados'} como cancelado, sem desfazer nada na máquina)`);
+  if(!confirm(`Cancelar ${alvos.length} comandos?\n\n${partes.join('\n')}`)) return;
+  const password = await pedirSenhaMaster(`cancelar ${alvos.length} comandos de uma vez`);
+  if(password===null) return;
+  if(botao){ botao.disabled=true; botao.textContent='Cancelando…'; }
+  let ok=0; const falhas=[];
+  for(const c of alvos){
+    try{
+      const r=await fetch('/api/loja-status/comandos/'+encodeURIComponent(c.id),{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error||'recusado pelo servidor');
+      ok++; COMANDOS_MARCADOS.delete(c.id);
+    }catch(e){ falhas.push(`${c.nomeComputador||c.posto||'Computador'}: ${e.message}`); }
+  }
+  await carregarComandosRecentes();
+  // Falha parcial é o caso normal aqui (um comando pode ter sido entregue no
+  // meio do lote), então o resultado diz o número dos dois lados.
+  if(falhas.length) alert(`${ok} de ${alvos.length} cancelados.\n\nNão deu pra cancelar:\n${falhas.join('\n')}`);
 }
 async function carregarComandosRecentes(){
   const lista = document.getElementById('comandos-lista');
@@ -3059,6 +3437,10 @@ function abrirManutencao(){
   document.getElementById('manut-status').classList.add('hidden');
   renderManutLista();
   renderManutDias();
+  // uma vez por sessao, e so ao abrir: o catalogo e texto fixo, nao ha por que
+  // buscar de novo a cada abertura da janela
+  carregarProcedimentosSocorro();
+  renderAcoesNaManutencao();
   abrirOverlay('manut-overlay');
 }
 function fecharManutencao(){ fecharOverlay('manut-overlay'); }
@@ -3163,6 +3545,7 @@ function atualizarContagemManut(){
   document.getElementById('manut-gcom-wcf').disabled = !n;
   document.getElementById('manut-diagnostico').disabled = !n;
   document.getElementById('manut-limpeza-segura').disabled = !n;
+  document.getElementById('manut-memoria-limitada').disabled = !n;
   document.getElementById('manut-zebra').disabled = !n;
   document.getElementById('manut-rede').disabled = !n;
   document.getElementById('manut-agendar').disabled = !n;
@@ -3286,6 +3669,7 @@ const MANUT_TAREFAS = {
   gcomWcf: { botao: 'manut-gcom-wcf', rotulo: 'Encerramento do GcomClient.WCF' },
   'diagnostico-desempenho': { botao: 'manut-diagnostico', rotulo: 'Diagnóstico de falha' },
   'limpeza-segura': { botao: 'manut-limpeza-segura', rotulo: 'Liberação de espaço seguro' },
+  'corrigir-memoria-limitada': { botao: 'manut-memoria-limitada', rotulo: 'Correção de memória limitada' },
   'remover-office': { botao: 'manut-remover-office', rotulo: 'Remoção do Microsoft Office' },
   zebra: { botao: 'manut-zebra', rotulo: 'Reset das Zebras' },
   rede: { botao: 'manut-rede', rotulo: 'Destrave da rede' },
@@ -3297,6 +3681,8 @@ async function manutEnviar(tarefa){
   if(tarefa === false || !MANUT_TAREFAS[tarefa]) tarefa = 'reiniciar';
   const alvos = [...MANUT_MARCADOS].map(k => { const [codigo, posto] = k.split('|'); return { codigo, posto }; });
   if(!alvos.length) return;
+  const nomeConta = tarefa === 'reset-senha' ? document.getElementById('manut-reset-conta').value.trim() : undefined;
+  if(tarefa === 'reset-senha' && !nomeConta){ alert('Informe o nome da conta do Windows.'); document.getElementById('manut-reset-conta').focus(); return; }
   const senha = document.getElementById('manut-senha').value;
   const st = document.getElementById('manut-status');
   if(!senha){ st.textContent = 'Digite sua senha de Master.'; st.className='msg err'; st.classList.remove('hidden'); return; }
@@ -3314,7 +3700,7 @@ async function manutEnviar(tarefa){
     if(!confirm(`Resetar as impressoras Zebra marcadas em ${unidades} unidade(s)?\n\nA fila da impressora é descartada e ela reinicia (volta em ~30s). O computador NÃO é tocado.\n\nSó vai pras impressoras marcadas como Zebra no cadastro de dispositivos.`)) return;
   }
   if(tarefa === 'reset-senha'){
-    if(!confirm(`Resetar a senha do Windows em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nA senha volta pra padrão da loja. Cada máquina executa na próxima batida (até ~25s).\n\nOs usuários precisarão fazer novo login com a senha nova.`)) return;
+    if(!confirm(`Remover a senha da conta "${nomeConta}" em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nA conta informada ficará sem senha. Cada máquina executa na próxima batida (até ~25s).\n\nO Windows pode bloquear a remoção por política de senha.`)) return;
   }
   if(tarefa === 'anydesk'){
     // confirmacao mais leve, e dizendo o que NAO acontece: a duvida de quem
@@ -3330,6 +3716,9 @@ async function manutEnviar(tarefa){
   if(tarefa === 'limpeza-segura'){
     if(!confirm(`Liberar espaço seguro em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO NOC remove apenas temporários do Windows, temporários do usuário e itens da Lixeira. Não remove documentos, Downloads, programas ou dados do sistema, e NÃO reinicia a máquina. O resultado informa o espaço livre antes e depois.`)) return;
   }
+  if(tarefa === 'corrigir-memoria-limitada'){
+    if(!confirm(`Corrigir limite de memória em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nEm Windows 64 bits, o NOC remove apenas os limites removememory/truncatememory da inicialização, se existirem. A correção exige reiniciar a máquina.\n\nSe for Windows 32 bits ou reserva de hardware/BIOS, ele não força alteração: apenas informa a causa.`)) return;
+  }
   if(tarefa === 'remover-office'){
     if(!confirm(`REMOVER o Microsoft Office/Microsoft 365 de ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nWord, Excel, Outlook, PowerPoint, Project e Visio detectados poderão ser desinstalados e os aplicativos abertos serão interrompidos. Documentos do usuário NÃO serão apagados.\n\nA remoção não reinicia sozinha; reinicie as máquinas depois da manutenção.`)) return;
   }
@@ -3339,7 +3728,7 @@ async function manutEnviar(tarefa){
   try{
     const r = await fetch('/api/loja-status/manutencao/reiniciar', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ alvos, tarefa, abortar: tarefa === 'abortar', password: senha }),
+      body: JSON.stringify({ alvos, tarefa, nomeConta, abortar: tarefa === 'abortar', password: senha }),
     });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || 'Não consegui enviar.');
@@ -3584,6 +3973,74 @@ function copiarIpLocal(ip){
 // pra colar no PowerShell da loja. Baixa e instala contornando o Controle de
 // Aplicativo Inteligente do Windows 11 (que bloqueia .ps1 baixado pelo
 // navegador). Ver montarComandoInstalacao/rota comando-instalacao no servidor.
+// AS ACOES DE COMANDO, dentro da Manutencao. Mesma lista da seção do agente
+// (AGENTE_ACOES) e mesmo modal de rodar - aqui so fica ao alcance de quem esta
+// cuidando do parque. So 'comando_maquina' ativa: acao de sistema nao tem alvo
+// de maquina, e inativa nao deve tentar.
+async function renderAcoesNaManutencao(){
+  const el = document.getElementById('manut-acoes-lista');
+  if(!el) return;
+  if(!AGENTE_ACOES.length){ try { await carregarAgenteAcoes(); } catch(e){} }
+  const itens = (AGENTE_ACOES||[]).filter(a => a.tipo === 'comando_maquina' && a.ativo);
+  if(!itens.length){ el.innerHTML = '<div class="sub">Nenhuma ação de comando cadastrada.</div>'; return; }
+  el.innerHTML = itens.map((a)=>`<div style="border-top:1px solid var(--line);padding:8px 0 6px;">
+    <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;">
+      <b style="font-size:12.5px;">${escapeHtml(a.nome)}</b>
+      ${a.requerAprovacao ? '<span class="sub" style="font-size:10px;">requer aprovação</span>' : ''}
+      ${a.requerAdmin ? '<span class="sub" style="font-size:10px;">precisa de Administrador</span>' : ''}
+    </div>
+    <div class="sub" style="margin:3px 0;">${escapeHtml(a.descricao)}</div>
+    <button type="button" class="btn-mini ok" style="margin-top:5px;" onclick="abrirRodarAcao('${escapeJs(a.id)}','${escapeJs(a.nome)}')">▶️ Rodar</button>
+  </div>`).join('');
+}
+
+// PROCEDIMENTOS DE SOCORRO. A lista vem do servidor (procedimentosSocorro.js)
+// pra o texto do comando ter UMA fonte - a tela nunca monta comando.
+let SOCORRO_CARREGADO = false;
+async function carregarProcedimentosSocorro(){
+  if(SOCORRO_CARREGADO) return;
+  const el = document.getElementById('socorro-lista');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/loja-status/procedimentos-socorro');
+    if(!r.ok) throw new Error('não consegui carregar os procedimentos.');
+    const { categorias } = await r.json();
+    if(!categorias || !categorias.length){ el.innerHTML = '<div class="sub">Nenhum procedimento cadastrado ainda.</div>'; SOCORRO_CARREGADO = true; return; }
+    SOCORRO_PROCS = {};
+    el.innerHTML = categorias.map((c)=>{
+      const itens = c.procedimentos.map((p)=>{
+        SOCORRO_PROCS[p.id] = p;
+        return `<div style="border-top:1px solid var(--line);padding:8px 0 6px;">
+          <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;">
+            <b style="font-size:12.5px;">${escapeHtml(p.titulo)}</b>
+            ${p.precisaAdmin ? '<span class="sub" style="font-size:10px;">pede Administrador</span>' : ''}
+          </div>
+          <div class="sub" style="margin:3px 0;"><b>Quando:</b> ${escapeHtml(p.quando)}</div>
+          <div class="sub" style="margin:3px 0;"><b>O que faz:</b> ${escapeHtml(p.faz)}</div>
+          ${p.cuidado ? `<div class="sub" style="margin:3px 0;color:var(--warn);"><b>Atenção:</b> ${escapeHtml(p.cuidado)}</div>` : ''}
+          <button type="button" class="btn-mini" style="margin-top:5px;" onclick="copiarProcedimentoSocorro('${escapeJs(p.id)}')">📋 Copiar comando</button>
+        </div>`;
+      }).join('');
+      return `<details style="margin-bottom:6px;"><summary style="cursor:pointer;font-size:12.5px;">${c.icone} ${escapeHtml(c.rotulo)} <span class="sub">(${c.procedimentos.length})</span></summary>${itens}</details>`;
+    }).join('');
+    SOCORRO_CARREGADO = true;
+  }catch(e){ el.innerHTML = '<div class="sub">' + escapeHtml(e.message) + '</div>'; }
+}
+let SOCORRO_PROCS = {};
+async function copiarProcedimentoSocorro(id){
+  const p = SOCORRO_PROCS[id];
+  if(!p) return;
+  const passos = 'No computador da loja:\n'
+    + '1) Abra o PowerShell (menu Iniciar > digite PowerShell)\n'
+    + '2) Cole (Ctrl+V) e aperte Enter\n'
+    + '3) Clique em Sim na confirmação do Windows (UAC) - o comando se eleva sozinho\n\n'
+    + 'A janela fica aberta com o resultado. Me mande essa tela se não resolver.';
+  let copiou = false;
+  try { await navigator.clipboard.writeText(p.comando); copiou = true; } catch(e){ /* clipboard bloqueado (http/permissão) */ }
+  if(copiou) alert(`"${p.titulo}" copiado! ✅\n\n${passos}`);
+  else prompt(`Copie este comando (Ctrl+C) e cole no PowerShell da loja:\n\n${passos}`, p.comando);
+}
+
 async function copiarComandoVigia(codigo, posto, tipo, prefixo){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
@@ -3803,7 +4260,84 @@ async function carregarMarcasPapelDeParede(){
       ? `Sem arte própria (caem na arte da marca ou na padrão): <b>${semArte.map(escapeHtml).join(' · ')}</b>`
       : 'Todas as combinações de grupo e marca com arte própria.';
     atualizarVerPapelDeParede();
+    renderLogosCarimbo(d.logosCarimbo);
   }catch(e){ /* a seção continua utilizável só com a arte padrão */ }
+}
+
+// ---- LOGOS DO MODELO BÁSICO (máquina sem arte) ----
+function renderLogosCarimbo(lc){
+  const sel = document.getElementById('lc-alvo');
+  const lista = document.getElementById('lc-lista');
+  if(!sel || !lista || !lc) return;
+  const itens = [
+    ...(lc.marcas||[]).map(m=>({ tipo:'marca', ...m })),
+    ...(lc.grupos||[]).map(g=>({ tipo:'grupo', ...g })),
+  ];
+  const marcado = sel.value;
+  const opc = (i)=>{ const v = `${i.tipo}:${i.id}`; return `<option value="${escapeHtml(v)}"${v===marcado?' selected':''}>${escapeHtml(i.label)}${i.temLogo?' ✓':''}</option>`; };
+  sel.innerHTML = `<optgroup label="Logo da marca">${itens.filter(i=>i.tipo==='marca').map(opc).join('')}</optgroup>`
+    + `<optgroup label="Logo do grupo">${itens.filter(i=>i.tipo==='grupo').map(opc).join('')}</optgroup>`;
+  const linha = (i)=>{
+    return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:3px 0;">`
+      + `<span style="min-width:150px;color:var(--text)">${escapeHtml(i.label)}</span>`
+      + (i.temLogo
+        ? `<span style="color:var(--ok)">✓ enviado</span> <button type="button" class="btn-mini" onclick="verLogoCarimbo('${escapeHtml(i.tipo)}','${escapeHtml(i.id)}')">👁 Ver</button> <button type="button" class="btn-mini" onclick="removerLogoCarimbo('${escapeHtml(i.tipo)}','${escapeHtml(i.id)}')">Remover</button>`
+        : `<span>falta</span>`)
+      + `</div>`;
+  };
+  lista.innerHTML = `<b style="color:var(--text)">Marcas</b>${itens.filter(i=>i.tipo==='marca').map(linha).join('')}`
+    + `<div style="margin-top:8px;"><b style="color:var(--text)">Grupos</b></div>${itens.filter(i=>i.tipo==='grupo').map(linha).join('')}`;
+}
+// a rota é só do Master: um <a href> não leva o token, então busca pelo
+// fetch (que leva) e abre a imagem numa aba
+async function verLogoCarimbo(tipo, id){
+  const aba = window.open('', '_blank');
+  try{
+    const r = await fetch(`/api/loja-status/logo-carimbo?tipo=${encodeURIComponent(tipo)}&id=${encodeURIComponent(id)}`);
+    if(!r.ok) throw new Error('Não achei esse logo.');
+    const url = URL.createObjectURL(await r.blob());
+    if(aba) aba.location.href = url; else window.open(url, '_blank');
+  }catch(e){ if(aba) aba.close(); alert(e.message); }
+}
+async function enviarLogoCarimbo(){
+  const input = document.getElementById('lc-arquivo');
+  const msg = document.getElementById('msg-lc');
+  msg.classList.add('hidden');
+  const arquivo = (input.files||[])[0];
+  const alvo = (document.getElementById('lc-alvo')||{}).value || '';
+  const [tipo, id] = alvo.split(':');
+  if(!tipo || !id){ msg.textContent='Escolha a marca ou o grupo.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  if(!arquivo){ msg.textContent='Escolha a imagem.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const senha = await pedirSenhaMaster('enviar o logo do modelo básico');
+  if(senha===null) return;
+  try{
+    const fd = new FormData();
+    fd.append('imagem', arquivo);
+    fd.append('password', senha);
+    fd.append('tipo', tipo);
+    fd.append('id', id);
+    const r = await fetch('/api/loja-status/logo-carimbo', { method:'PUT', body: fd });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui enviar.');
+    const rotulo = document.getElementById('lc-alvo').selectedOptions[0].textContent.replace(' ✓','');
+    await carregarMarcasPapelDeParede();
+    window.zenithRascunhos?.limparAnexoEnviado(input);
+    msg.textContent = `Logo de ${rotulo} enviado. As máquinas sem arte redesenham na próxima batida.`;
+    msg.className = 'msg'; msg.classList.remove('hidden');
+  }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+async function removerLogoCarimbo(tipo, id){
+  const msg = document.getElementById('msg-lc');
+  const senha = await pedirSenhaMaster('remover o logo do modelo básico');
+  if(senha===null) return;
+  try{
+    const r = await fetch('/api/loja-status/logo-carimbo', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tipo, id, password: senha }) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Não consegui remover.');
+    await carregarMarcasPapelDeParede();
+    msg.textContent = 'Logo removido. As máquinas sem arte redesenham na próxima batida.';
+    msg.className = 'msg'; msg.classList.remove('hidden');
+  }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 
 // "por que não subiu em todos?": lê o estado por máquina e resume — quantas vão
@@ -3822,8 +4356,8 @@ async function carregarDiagnosticoPapel(){
     const naoAplica = ['desligado','sem-marca','sem-arte'];
     const rotulo = {
       'desligado':'🖼️ desligado no card (ligue a política da máquina)',
-      'sem-marca':'sem marca no perfil da unidade (não casa arte de grupo/marca)',
-      'sem-arte':'sem arte pra essa marca/grupo (nem padrão)',
+      'sem-marca':'sem marca no perfil da unidade (não casa arte de grupo/marca) — fica com o modelo básico',
+      'sem-arte':'sem arte pra essa marca/grupo (nem padrão) — fica com o modelo básico',
       'offline':'offline (aplica quando a máquina voltar)',
     };
     const linhaMaq = (x)=>`${escapeHtml(x.nome)} <span style="color:var(--muted)">(${escapeHtml(x.codigo)})</span>`;
@@ -3924,7 +4458,18 @@ const ATALHOS_PADRAO_PDV = [
   ['gestor-pedidos-99food','Gestor de Pedidos 99Food'], ['gerenciadorlinxfood','GerenciadorLinxFood'],
   ['advancedip','Advanced IP Scanner'], ['teamviewer','TeamViewer'],
   ['suporte-linx-whatsapp','Suporte Linx WhatsApp'], ['google-chrome','Google Chrome'],
+  ['gcom','GCOM (Client, DB, Service, Suporte)'],
 ];
+// QUAL painel de estação está na tela. Os DOIS existem ao mesmo tempo: a aba
+// 📦 Programas clona o innerHTML da ficha (ver montarProgramas), e fechar a aba
+// não limpa esse clone. Pegar sempre o #prog-estacao fazia o salvar ler o clone
+// ESCONDIDO em vez dos checkboxes que o Master acabou de marcar na ficha - a
+// lista voltava sozinha para o que o clone tinha. Vale o painel visível.
+function raizEstacao(){
+  const candidatos = [document.getElementById('prog-estacao'), document.getElementById('detalhe-comp-politica')];
+  return candidatos.find((el) => el && el.offsetParent !== null) || candidatos.find(Boolean) || null;
+}
+
 function renderPoliticaComputador(codigo, c){
   const el = document.getElementById('detalhe-comp-politica');
   // painel opcional: se um dia ele sair do HTML, a ficha continua abrindo
@@ -3945,12 +4490,15 @@ function renderPoliticaComputador(codigo, c){
   const chaveVisual = (nome)=>String(nome||'').toLocaleLowerCase('pt-BR').replace(/\.(lnk|url|rdp)$/i,'').trim();
   const atalhosDetectadosHtml = atalhosDetectados.length
     ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:210px;overflow:auto;padding:2px 1px;">${atalhosDetectados.map(a=>{
-      const nome = chaveVisual(a.nome); const selecionavel=['atalho','link','rdp'].includes(a.tipo); const marcado = atalhosPersonalizados.includes(nome);
+      const nome = chaveVisual(a.nome); const selecionavel = true; const marcado = atalhosPersonalizados.includes(nome);
       return `<label class="btn-mini" style="cursor:${selecionavel?'pointer':'default'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:${selecionavel?'1':'.6'};" title="${escapeHtml(`${a.nome||''} · ${a.origem==='publica'?'Área Pública':'Usuário'}`)}"><input type="checkbox" data-estacao-atalho-custom="${escapeHtml(nome)}" ${marcado?'checked':''} ${selecionavel?'':'disabled'} style="width:auto;margin-right:4px;accent-color:var(--accent);">${escapeHtml(a.nome||'Item')} <small style="color:var(--muted);">${escapeHtml(a.tipo||'')}</small></label>`;
     }).join('')}</div>`
     : '<div style="font-size:11.5px;color:var(--muted);">Ainda não há uma leitura. Clique em “Ler atalhos atuais”; ela não altera a máquina.</div>';
   const barraTarefasHtml = barraTarefasDetectada.length
-    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:150px;overflow:auto;padding:2px 1px;">${barraTarefasDetectada.map(a=>`<span class="btn-mini" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default;">${escapeHtml(a.nome||'Item')}</span>`).join('')}</div>`
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px;max-height:150px;overflow:auto;padding:2px 1px;">${barraTarefasDetectada.map(a=>{
+      const nome = chaveVisual(a.nome); const marcado = barraTarefasAprovada.includes(nome);
+      return `<label class="btn-mini" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(a.nome||'')}"><input type="checkbox" data-estacao-barra-custom="${escapeHtml(nome)}" ${marcado?'checked':''} style="width:auto;margin-right:4px;accent-color:var(--accent);">${escapeHtml(a.nome||'Item')}</label>`;
+    }).join('')}</div>`
     : '<div style="font-size:11.5px;color:var(--muted);">Aguardando a leitura da barra de tarefas.</div>';
   const aviso = c.tipo === 'interno' ? '' : '<div style="font-size:11px;color:var(--warn);margin-top:6px;">Pendrive e instalação precisam de Administrador na máquina - quem aplica é a tarefa de boot do NOCZenith.</div>';
   const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
@@ -3975,7 +4523,7 @@ function renderPoliticaComputador(codigo, c){
       <details open><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Área de Trabalho (${atalhosDetectados.length})</summary>
       ${atalhosDetectadosHtml}
       </details>
-      <details style="margin-top:9px;"><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Barra de tarefas atual (${barraTarefasDetectada.length})</summary>${barraTarefasHtml}<small style="display:block;color:var(--muted);margin-top:6px;">A lista acima define o padrão. Esta seção é apenas conferência da barra que a máquina informou.</small></details>
+      <details style="margin-top:9px;"><summary style="cursor:pointer;font-size:12px;margin-bottom:6px;">Barra de tarefas atual (${barraTarefasDetectada.length})</summary>${barraTarefasHtml}<small style="display:block;color:var(--muted);margin-top:6px;">Marque aqui o que FICA fixado na barra. O que não estiver marcado (nem na coluna Barra acima) sai.</small></details>
       <label style="display:flex;gap:8px;align-items:flex-start;margin-top:9px;cursor:pointer;"><input type="checkbox" data-estacao="ocultarLixeira" ${estacao.ocultarLixeira?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Ocultar Lixeira da Área de Trabalho</b><small style="display:block;color:var(--muted);">Não esvazia a Lixeira nem apaga arquivos. Desmarcar volta a exibir o ícone.</small></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;"><input type="checkbox" data-estacao="aplicar" ${estacao.aplicar?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);"><span style="font-size:12.5px;"><b>Aplicar lista aprovada</b><small style="display:block;color:var(--warn);">Guarda os atalhos atuais antes de retirar os não aprovados da Área de Trabalho e da barra clássica. Documentos e outros arquivos não são removidos.</small></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin-top:9px;cursor:pointer;"><input type="checkbox" data-estacao="arquivarDados" ${estacao.arquivarDados?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--bad);"><span style="font-size:12.5px;"><b>Arquivar dados do usuário e gerar ZIP</b><small style="display:block;color:var(--warn);">Move itens fora da lista da Área de Trabalho e todo o conteúdo de Downloads/Documentos para C:\\NoPulsoBackup\\Dados, depois cria ZIP. Windows e programas não entram.</small></span></label>
@@ -4045,7 +4593,7 @@ async function salvarPoliticaComputador(codigo, posto){
 }
 
 async function salvarPerfilEstacao(codigo, posto){
-  const raiz = document.getElementById('prog-estacao') || document.getElementById('detalhe-comp-politica');
+  const raiz = raizEstacao();
   const msg = raiz?.querySelector('#prog-msg-estacao, #msg-estacao');
   const ativa = !!raiz?.querySelector('[data-estacao="ativa"]')?.checked;
   const aplicar = ativa && !!raiz?.querySelector('[data-estacao="aplicar"]')?.checked;
@@ -4053,7 +4601,12 @@ async function salvarPerfilEstacao(codigo, posto){
   const arquivarDados = aplicar && !!raiz?.querySelector('[data-estacao="arquivarDados"]')?.checked;
   const atalhosAprovados = [...(raiz?.querySelectorAll('[data-estacao-atalho]:checked')||[])].map(el=>el.dataset.estacaoAtalho);
   const atalhosPersonalizados = [...(raiz?.querySelectorAll('[data-estacao-atalho-custom]:checked')||[])].map(el=>el.dataset.estacaoAtalhoCustom);
-  const barraTarefasAprovada = [...(raiz?.querySelectorAll('[data-estacao-barra]:checked')||[])].map(el=>el.dataset.estacaoBarra);
+  // duas origens para a MESMA lista: os ids do catalogo (coluna "Barra") e os
+  // nomes reais marcados na leitura da maquina. O agente casa pelos dois.
+  const barraTarefasAprovada = [...new Set([
+    ...[...(raiz?.querySelectorAll('[data-estacao-barra]:checked')||[])].map(el=>el.dataset.estacaoBarra),
+    ...[...(raiz?.querySelectorAll('[data-estacao-barra-custom]:checked')||[])].map(el=>el.dataset.estacaoBarraCustom),
+  ])];
   const gerenciarBarraTarefas = aplicar && barraTarefasAprovada.length > 0;
   if(aplicar && !confirm(arquivarDados ? `Arquivar dados desta máquina? Itens fora da lista da Área de Trabalho e todo o conteúdo de Downloads/Documentos serão movidos para C:\\NoPulsoBackup\\Dados e compactados em ZIP.` : `Aplicar esta lista nesta máquina? Os atalhos fora dela serão primeiro copiados para C:\\NoPulsoBackup\\Atalhos e só depois removidos.`)) return;
   const senha = await pedirSenhaMaster('salvar a Área de Trabalho padronizada');
@@ -4070,7 +4623,7 @@ async function salvarPerfilEstacao(codigo, posto){
 }
 
 async function inventariarAtalhosComputador(codigo, posto){
-  const raiz = document.getElementById('prog-estacao') || document.getElementById('detalhe-comp-politica');
+  const raiz = raizEstacao();
   const msg = raiz?.querySelector('#prog-msg-estacao, #msg-estacao');
   const solicitadoEm = Date.now();
   const senha = await pedirSenhaMaster('ler os atalhos atuais desta máquina');
@@ -4080,19 +4633,34 @@ async function inventariarAtalhosComputador(codigo, posto){
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:senha}) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui solicitar a leitura.');
-    msg.textContent = 'Leitura solicitada ao usuário logado. A lista será atualizada aqui assim que o NOCZenith responder.';
+    // O agente só vê o pedido no PRÓXIMO batimento (login 20s, boot 25s) e ainda
+    // precisa varrer as pastas e responder. 32s de espera davam vermelho em
+    // máquina lenta com a leitura chegando logo depois - e o texto mandava
+    // "tentar de novo" sem dizer o que faltou. Agora espera ~76s e, se não vier,
+    // diz QUAL das duas coisas aconteceu com o dado que a ficha já tem: o agente
+    // bateu depois do pedido (vivo, mas ninguém pôde ler) ou não bateu (calado).
+    msg.textContent = 'Leitura solicitada. O NOCZenith vê o pedido no próximo batimento (até 25s) e responde em seguida.';
     msg.className='msg'; msg.classList.remove('hidden');
-    for(let tentativa=0; tentativa<8; tentativa++){
+    let ultimo = null;
+    for(let tentativa=0; tentativa<19; tentativa++){
       await new Promise(resolve=>setTimeout(resolve, 4000));
       const detalhe = await buscarDetalheComp(codigo, posto);
+      if(detalhe) ultimo = detalhe;
       if(detalhe && Number(detalhe.atalhosDesktopEm||0) >= solicitadoEm){
         atualizarDetalheSeAberto();
         if(PROG_ATUAL && PROG_ABA==='estacao'){ PROG_ATUAL={...PROG_ATUAL,...detalhe}; pintarProgramas(); }
         return;
       }
     }
-    msg.textContent = 'A leitura continua pendente. Confirme que o NOCZenith está ativo no usuário logado e tente novamente.';
-    msg.className='msg err'; msg.classList.remove('hidden');
+    const bateuDepois = !!(ultimo && Number(ultimo.ultimoHeartbeatEm||0) >= solicitadoEm);
+    if(!bateuDepois){
+      msg.textContent = `O NOCZenith não deu sinal desde o pedido (último sinal ${ultimo ? tempoRelativo(ultimo.ultimoHeartbeatEm) : 'desconhecido'}). A máquina está calada ou o agente parou - a leitura só chega quando ele voltar.`;
+      msg.className='msg err';
+    } else {
+      msg.textContent = 'O agente está batendo, mas não respondeu a leitura. Ela precisa de alguém logado no console da máquina (a instância de boot só lê com operador presente) ou de agente a partir da v101 - confira a versão na ficha. A lista atualiza sozinha quando a leitura vier.';
+      msg.className='msg';
+    }
+    msg.classList.remove('hidden');
   }catch(e){ msg.textContent=e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 
@@ -4804,10 +5372,52 @@ function pintarBtnPushAr(){
   b.style.color = PUSH_AR ? 'var(--ok)' : 'var(--muted)';
 }
 async function carregarConfigPushAr(){
-  try{ const c = await fetch('/api/loja-status/config').then(r=>r.ok?r.json():{}); PUSH_AR = c.pushAcessoRemoto === true; }
-  catch(e){ PUSH_AR = false; }
+  try{
+    const c = await fetch('/api/loja-status/config').then(r=>r.ok?r.json():{});
+    PUSH_AR = c.pushAcessoRemoto === true;
+    ACESSOS_CONHECIDOS = Array.isArray(c.acessosConhecidos) ? c.acessosConhecidos : [];
+  }
+  catch(e){ PUSH_AR = false; ACESSOS_CONHECIDOS = []; }
   pintarBtnPushAr();
+  pintarAcessosConhecidos();
 }
+let ACESSOS_CONHECIDOS = [];
+function pintarAcessosConhecidos(){
+  const el = document.getElementById('ar-lista');
+  if(!el) return;
+  if(!ACESSOS_CONHECIDOS.length){ el.innerHTML = '<div class="sub">Nenhum ID cadastrado — todo acesso remoto alerta.</div>'; return; }
+  el.innerHTML = ACESSOS_CONHECIDOS.map((a)=>`<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;padding:7px 10px;margin-bottom:6px;background:var(--panel2);">
+    <span style="font-family:var(--mono);font-weight:700;">${escapeHtml(a.id)}</span>
+    <span class="sub" style="flex:1 1 auto;min-width:0;">${escapeHtml(a.nome||'sem nome')}</span>
+    <button type="button" class="btn-mini" onclick="removerAcessoConhecido('${escapeJs(a.id)}')">✕</button>
+  </div>`).join('');
+}
+async function salvarAcessosConhecidos(lista){
+  const senha = await pedirSenhaMaster('alterar a lista de acessos remotos conhecidos');
+  if(senha===null) return false;
+  try{
+    const c = await fetch('/api/loja-status/config', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acessosConhecidos: lista, password: senha }) }).then(r=>r.json());
+    if(c && c.error) throw new Error(c.error);
+    ACESSOS_CONHECIDOS = Array.isArray(c.acessosConhecidos) ? c.acessosConhecidos : [];
+    pintarAcessosConhecidos();
+    return true;
+  }catch(e){ alert('Não consegui salvar: ' + e.message); return false; }
+}
+async function adicionarAcessoConhecido(){
+  const id = (document.getElementById('ar-id').value||'').replace(/\D/g,'');
+  const nome = (document.getElementById('ar-nome').value||'').trim();
+  if(!/^\d{6,16}$/.test(id)){ alert('O ID do AnyDesk é um número de 6 a 16 dígitos.'); return; }
+  if(ACESSOS_CONHECIDOS.some(a=>a.id===id)){ alert('Esse ID já está cadastrado.'); return; }
+  if(await salvarAcessosConhecidos([...ACESSOS_CONHECIDOS, { id, nome }])){
+    document.getElementById('ar-id').value=''; document.getElementById('ar-nome').value='';
+  }
+}
+async function removerAcessoConhecido(id){
+  const a = ACESSOS_CONHECIDOS.find(x=>x.id===id);
+  if(!confirm(`Tirar ${a&&a.nome?a.nome:id} da lista? Acessos vindos desse ID voltam a alertar no celular.`)) return;
+  await salvarAcessosConhecidos(ACESSOS_CONHECIDOS.filter(x=>x.id!==id));
+}
+
 async function togglePushAcessoRemoto(){
   const novo = !PUSH_AR;
   if(novo && !confirm('Ligar o alerta de acesso remoto no celular?\n\nComo a TI usa AnyDesk/TeamViewer/DWService (que ficam conectados o tempo todo), isso pode gerar bastante notificação. O evento continua no histórico do computador de qualquer jeito.')) return;
