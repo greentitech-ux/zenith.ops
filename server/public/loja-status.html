@@ -114,6 +114,11 @@
   /* ---- filtros ---- */
   .filtro-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;}
   .filtro-bar input[type=text]{flex:1 1 220px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:13px;font-family:var(--sans);}
+  .busca-com-limpar{position:relative;flex:1 1 220px;min-width:0;}
+  .busca-com-limpar input[type=text]{width:100%;padding-right:38px;box-sizing:border-box;}
+  .busca-com-limpar button{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:22px;line-height:1;cursor:pointer;}
+  .busca-com-limpar button:hover{background:rgba(255,255,255,.08);color:var(--text);}
+  .busca-com-limpar button.hidden{display:none;}
   .filtro-bar input[type=text]:focus{outline:none;border-color:var(--accent);}
   .filtro-bar select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:12.5px;font-family:var(--sans);}
   .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
@@ -673,7 +678,10 @@
   </div>
 
   <div class="filtro-bar">
-    <input type="text" id="filtro-texto" placeholder="🔎 Buscar por computador ou unidade..." oninput="onFiltroTexto()">
+    <div class="busca-com-limpar">
+      <input type="text" id="filtro-texto" placeholder="🔎 Buscar por computador ou unidade..." oninput="onFiltroTexto()">
+      <button type="button" id="limpar-filtro-texto" class="hidden" onclick="limparFiltroTexto()" title="Limpar busca" aria-label="Limpar busca">×</button>
+    </div>
     <select id="filtro-unidade" onchange="onFiltroUnidade()">
       <option value="">Todas as unidades</option>
     </select>
@@ -2662,7 +2670,18 @@ function filtrarGrupoKpi(ev, st, grupo, n){
   else { FILTRO_STATUS = st; FILTRO_SERVIDOR = grupo; }
   render();
 }
-function onFiltroTexto(){ FILTRO_TEXTO = document.getElementById('filtro-texto').value.trim().toLowerCase(); render(); }
+function onFiltroTexto(){
+  const campo = document.getElementById('filtro-texto');
+  FILTRO_TEXTO = campo.value.trim().toLowerCase();
+  document.getElementById('limpar-filtro-texto').classList.toggle('hidden', !campo.value);
+  render();
+}
+function limparFiltroTexto(){
+  const campo = document.getElementById('filtro-texto');
+  campo.value = '';
+  onFiltroTexto();
+  campo.focus();
+}
 function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-unidade').value; render(); }
 
 // computadores de verdade (passaram pelo cadastro, tem nome) - os "fantasmas"
