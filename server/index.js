@@ -5197,6 +5197,9 @@ app.post('/api/refund-requests', auth.requireAuth, async (req, res) => {
     if (tarefaOrigemId) {
       const preparada = await tarefas.prepararConversaoEmSolicitacao(String(tarefaOrigemId), acessoDasTarefas(req), 'estorno');
       if (preparada.jaTemSolicitacao) {
+        if (preparada.tipoExistente !== 'estorno') {
+          return res.status(409).json({ error: 'Esta tarefa já foi convertida em uma solicitação. Abra o ticket vinculado para continuar.' });
+        }
         const existente = await refunds.getOne(preparada.ticketId);
         if (existente) return res.json(existente);
         return res.status(409).json({ error: 'Esta tarefa já foi convertida; recarregue o Meu Dia para abrir o estorno vinculado.' });
@@ -11868,6 +11871,9 @@ app.post('/api/solicitacoes', auth.requireAuth, upload.array('anexos', 4), async
       // Um reenvio depois de a Central já ter criado o ticket deve devolver o
       // mesmo registro, nunca abrir outro com o mesmo assunto/protocolo.
       if (preparada.jaTemSolicitacao) {
+        if (preparada.tipoExistente !== 'solicitacao') {
+          return res.status(409).json({ error: 'Esta tarefa já foi convertida em um estorno. Abra o ticket vinculado para continuar.' });
+        }
         const existente = await solicitacoes.getOne(preparada.tarefa.solicitacaoId);
         if (existente) return res.json(existente);
         return res.status(409).json({ error: 'Esta tarefa já foi convertida; recarregue o Meu Dia para abrir a solicitação vinculada.' });

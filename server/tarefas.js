@@ -768,8 +768,12 @@ async function prepararConversaoEmSolicitacao(id, acesso, tipoDestino = 'solicit
   // assunto; a tela deve abrir o ticket original, onde status/tipo evoluem
   // mantendo o Ticket #.
   if (tarefa.vinculo?.id) throw new Error('Esta tarefa já pertence ao Ticket #' + (tarefa.numeroTicket || tarefa.vinculo.numeroTicket) + '. Abra o ticket vinculado para mudar o tipo ou o andamento.');
-  const campoDestino = tipoDestino === 'estorno' ? 'estornoId' : 'solicitacaoId';
-  if (tarefa[campoDestino]) return { tarefa, numeroTicket: tarefa.numeroTicket || null, jaTemSolicitacao: true, ticketId: tarefa[campoDestino] };
+  // Triagem tem UMA decisão de destino. Não é permitido promover primeiro a
+  // estorno e depois abrir uma solicitação comum (ou o inverso), porque isso
+  // criaria dois cards independentes para o mesmo pedido e mesmo protocolo.
+  const tipoExistente = tarefa.estornoId ? 'estorno' : (tarefa.solicitacaoId ? 'solicitacao' : null);
+  const ticketExistente = tarefa.estornoId || tarefa.solicitacaoId || null;
+  if (ticketExistente) return { tarefa, numeroTicket: tarefa.numeroTicket || null, jaTemSolicitacao: true, ticketId: ticketExistente, tipoExistente };
   if (tarefa.numeroTicket != null) return { tarefa, numeroTicket: tarefa.numeroTicket, jaTemSolicitacao: false };
   // Compatibilidade para tarefas antigas: a primeira conversão reserva o
   // número que elas não receberam antes desta regra existir.
