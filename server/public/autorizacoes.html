@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0d10">
+<title>Autorizações · NoPulso</title>
+<link rel="manifest" href="/manifest.json">
+<script src="/tema.js"></script><script src="/digital.js" defer></script>
+<link rel="stylesheet" href="/style.css">
+<!-- AUTORIZAÇÕES (Master, 23/09/2026): "o Beniboy e o Claude resolvem, eu só
+     faço a autorização; ela chega no celular e eu aprovo com a senha ou a
+     digital, sempre dando a digital como primeira opção".
+     O push de cada pedido abre esta tela no pedido (?id=). O que aparece em
+     "detalhes" é montado pelo SERVIDOR a partir do que vai rodar - não é um
+     texto do modelo. -->
+<style>
+:root{--bg:#0b0d10;--panel:#12161b;--panel2:#181d24;--line:#27313b;--text:#e7ecf1;--muted:#8c99a7;--accent:#b8ff3c;--accent2:#5cc8ff;--ok:#3ddc97;--warn:#ffbd59;--bad:#ff6b6b;--sans:Arial,sans-serif;--mono:ui-monospace,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg,#0b0d10);color:var(--text,#e7ecf1);font-family:var(--sans,system-ui,sans-serif);padding:0 16px 48px}
+header{position:sticky;top:0;z-index:40;background:var(--bg,#0b0d10);border-bottom:1px solid var(--line,#232a33);margin:0 -16px 16px;padding:12px 16px}
+.header-top{display:flex;align-items:center;gap:10px}.header-copy{min-width:0}
+.eyebrow{font-family:var(--mono,monospace);font-size:10px;letter-spacing:.1em;color:var(--accent);margin-bottom:3px}
+.page-title{margin:0;font-size:20px;line-height:1.1}
+.hamburger-btn{width:34px;height:34px;border-radius:8px;padding:0;flex:none;background:var(--panel2,#181d24);color:var(--text,#e7ecf1);border:1px solid var(--line,#232a33)}
+main{max-width:640px;margin:0 auto}
+.muted{color:var(--muted,#7d8896);font-size:13px;line-height:1.45}
+h2{font-size:12px;font-family:var(--mono,monospace);letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#7d8896);margin:22px 0 10px;font-weight:600}
+.pedido{background:var(--panel,#12161b);border:1px solid var(--line,#232a33);border-radius:13px;padding:15px;margin-bottom:12px}
+.pedido.foco{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.origem{display:inline-block;font:11px var(--mono,monospace);padding:3px 8px;border-radius:20px;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);color:var(--accent2,#5cc8ff);margin-bottom:8px}
+.resumo{font-size:16px;font-weight:700;line-height:1.35;margin:0 0 4px;overflow-wrap:anywhere}
+.detalhes{margin:10px 0 0;padding:10px 12px;background:var(--panel2,#181d24);border-radius:9px;display:grid;gap:6px}
+.detalhes div{display:grid;grid-template-columns:minmax(90px,34%) 1fr;gap:8px;font-size:13px}
+.detalhes dt{color:var(--muted,#7d8896);font:12px var(--mono,monospace)}
+.detalhes dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.erro{color:var(--bad,#ff5c5c);font-size:13px;margin-top:8px}
+.acoes{display:grid;gap:8px;margin-top:14px}
+button{border:1px solid var(--line,#232a33);background:var(--panel2,#181d24);color:var(--text,#e7ecf1);border-radius:10px;padding:12px 14px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;width:100%}
+button:disabled{opacity:.6;cursor:default}
+.primario{background:var(--accent);color:#0b0d10;border-color:var(--accent);font-size:15px;padding:14px}
+.linha{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.recusar{color:var(--bad,#ff5c5c)}
+.senha{display:grid;gap:8px}
+.senha input{width:100%;padding:12px;background:var(--panel2,#181d24);color:var(--text,#e7ecf1);border:1px solid var(--line,#232a33);border-radius:10px;font:15px var(--sans,system-ui,sans-serif)}
+.senha input:focus{outline:none;border-color:var(--accent)}
+.feito{margin-top:10px;font-size:13.5px}
+.feito.ok{color:var(--ok,#3ddc97)}
+pre.saida{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);border-radius:9px;padding:10px;font:12px var(--mono,monospace);margin:8px 0 0;max-height:260px;overflow:auto}
+.decidido{opacity:.75}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<script src="/nav-menu.js"></script><script src="/recolher.js"></script>
+<script>
+const authToken=localStorage.getItem('authToken');if(!authToken)location='/';
+const fetchOriginal=fetch.bind(window);
+window.fetch=(url,opcoes={})=>fetchOriginal(url,{...opcoes,headers:{...(opcoes.headers||{}),...(String(url).startsWith('/api/')?{Authorization:'Bearer '+authToken}:{})}}).then(r=>{if(r.status===401){localStorage.removeItem('authToken');location='/'}return r});
+</script>
+<header><div class="header-top"><button type="button" class="hamburger-btn" aria-label="Abrir menu" title="Menu">☰</button><div class="header-copy"><div class="eyebrow">NOPULSO · SOLUTIONS TI TECH</div><h1 class="page-title">🔐 Autorizações</h1></div></div></header>
+<main>
+  <p class="muted" id="intro">O que o Claude, o Beniboy ou um QA Master prepararam e só roda com a sua autorização.</p>
+  <div id="pendentes"><p class="muted">Carregando…</p></div>
+  <h2 id="tit-decididos" class="hidden">Decididas recentemente</h2>
+  <div id="decididos"></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ORIGEM={cowork:'🤖 Claude · Cowork',beniboy:'💬 Beniboy',qa:'🧪 QA Master'};
+const FOCO=new URLSearchParams(location.search).get('id')||'';
+let LISTA=[];
+let DIGITAL=false;
+const FEITOS=new Map(); // id -> resultado mostrado uma vez (senha temporária inclusive)
+
+function quando(iso){if(!iso)return '';const m=Math.round((Date.now()-Date.parse(iso))/60000);if(m<1)return 'agora';if(m<60)return 'há '+m+' min';const h=Math.round(m/60);if(h<48)return 'há '+h+'h';return new Date(iso).toLocaleDateString('pt-BR')}
+function vence(iso){if(!iso)return '';const m=Math.round((Date.parse(iso)-Date.now())/60000);if(m<=0)return ' · venceu';if(m<60)return ' · vence em '+m+' min';return ' · vence em '+Math.round(m/60)+'h'}
+function vencido(a){return a.status==='pendente'&&a.expiraEm&&Date.parse(a.expiraEm)<=Date.now()}
+function aberto(a){return (a.status==='pendente'||a.status==='erro')&&!vencido(a)}
+
+function cartao(a){
+  const feito=FEITOS.get(a.id);
+  const det=(a.detalhes||[]).length?`<dl class="detalhes">${a.detalhes.map(d=>`<div><dt>${esc(d.rotulo)}</dt><dd>${esc(d.valor)}</dd></div>`).join('')}</dl>`:'';
+  const cabeca=`<span class="origem">${esc(ORIGEM[a.origem]||ORIGEM.qa)}</span><p class="resumo">${esc(a.resumo||a.tipo)}</p><div class="muted">${esc(a.criadoPorEmail||'')} · ${quando(a.criadoEm)}${aberto(a)?vence(a.expiraEm):''}</div>${det}`;
+  if(feito){
+    return `<article class="pedido" id="p-${esc(a.id)}">${cabeca}<div class="feito ok">✅ Autorizado e executado.</div>${feito.saida?`<pre class="saida">${esc(feito.saida)}</pre><button type="button" style="margin-top:8px" onclick="copiar('${esc(a.id)}')">Copiar resultado</button><div class="muted" style="margin-top:6px">Este resultado aparece só agora - não fica gravado.</div>`:''}</article>`;
+  }
+  if(!aberto(a)){
+    const rot={aprovado:'✅ Autorizado',rejeitado:'❌ Recusado',expirado:'⌛ Venceu',pendente:'⌛ Venceu'}[a.status]||a.status;
+    return `<article class="pedido decidido">${cabeca}<div class="feito">${rot}${a.decididoPorEmail?' · '+esc(a.decididoPorEmail):''}${a.decididoEm?' · '+quando(a.decididoEm):''}${a.motivoRejeicao?'<br>Motivo: '+esc(a.motivoRejeicao):''}</div></article>`;
+  }
+  // digital PRIMEIRO; senha é a alternativa. Sem digital neste aparelho, a
+  // senha aparece direto (não dá pra esconder a única saída)
+  const senhaAberta=!DIGITAL;
+  return `<article class="pedido${a.id===FOCO?' foco':''}" id="p-${esc(a.id)}">${cabeca}
+    ${a.status==='erro'?`<div class="erro">⚠️ Autorizado antes, mas falhou ao executar: ${esc(a.erroExecucao||'')}. Pode autorizar de novo.</div>`:''}
+    <div class="acoes">
+      ${DIGITAL?`<button type="button" class="primario" id="dig-${esc(a.id)}" onclick="autorizarDigital('${esc(a.id)}')">👆 Autorizar com a digital</button>`:''}
+      <div class="senha${senhaAberta?'':' hidden'}" id="sen-${esc(a.id)}">
+        <input type="password" id="inp-${esc(a.id)}" autocomplete="new-password" placeholder="sua senha" onkeydown="if(event.key==='Enter')autorizarSenha('${esc(a.id)}')">
+        <button type="button" class="${DIGITAL?'':'primario'}" onclick="autorizarSenha('${esc(a.id)}')">Autorizar com a senha</button>
+      </div>
+      <div class="linha">
+        ${DIGITAL?`<button type="button" onclick="mostrarSenha('${esc(a.id)}')">🔑 Usar senha</button>`:''}
+        <button type="button" class="recusar"${DIGITAL?'':' style="grid-column:1/-1"'} onclick="recusar('${esc(a.id)}')">Recusar</button>
+      </div>
+      <div class="erro hidden" id="err-${esc(a.id)}"></div>
+    </div>
+    ${DIGITAL?'':'<div class="muted" style="margin-top:8px">Pra autorizar com a digital, ative a biometria ao entrar no NoPulso por este celular.</div>'}
+  </article>`;
+}
+
+function pintar(){
+  const abertos=LISTA.filter(aberto).sort((a,b)=>(b.id===FOCO)-(a.id===FOCO)||Date.parse(b.criadoEm)-Date.parse(a.criadoEm));
+  const feitos=LISTA.filter(a=>FEITOS.has(a.id));
+  const decididos=LISTA.filter(a=>!aberto(a)&&!FEITOS.has(a.id)).sort((a,b)=>Date.parse(b.decididoEm||b.criadoEm)-Date.parse(a.decididoEm||a.criadoEm)).slice(0,15);
+  $('#pendentes').innerHTML=[...feitos,...abertos].map(cartao).join('')||'<p class="muted">Nada esperando autorização agora.</p>';
+  $('#tit-decididos').classList.toggle('hidden',!decididos.length);
+  $('#decididos').innerHTML=decididos.map(cartao).join('');
+}
+
+async function carregar(){
+  const r=await fetch('/api/qa-aprovacoes');
+  if(r.status===403){$('#pendentes').innerHTML='<p class="muted">Só o Master autoriza estes pedidos.</p>';return}
+  if(!r.ok){$('#pendentes').innerHTML='<p class="muted">Não consegui carregar os pedidos.</p>';return}
+  LISTA=await r.json();
+  pintar();
+  if(FOCO){const el=document.getElementById('p-'+FOCO);if(el)el.scrollIntoView({block:'center'})}
+}
+
+function erro(id,msg){const el=$('#err-'+id);if(!el)return alert(msg);el.textContent=msg;el.classList.remove('hidden')}
+function mostrarSenha(id){$('#sen-'+id).classList.remove('hidden');$('#inp-'+id).focus()}
+
+async function enviar(id,comprovante){
+  const r=await fetch('/api/qa-aprovacoes/'+encodeURIComponent(id)+'/aprovar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:comprovante})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.error||'Não consegui autorizar.');
+  FEITOS.set(id,{saida:d.resultadoParaMaster||''});
+  const a=LISTA.find(x=>x.id===id);if(a)Object.assign(a,{status:'aprovado',decididoEm:new Date().toISOString()});
+  pintar();
+}
+async function autorizarDigital(id){
+  const b=$('#dig-'+id);b.disabled=true;b.textContent='Toque no sensor…';
+  try{const d=await window.nopulsoDigital.confirmarComDigital();await enviar(id,d.confirmacao)}
+  catch(x){
+    b.disabled=false;b.textContent='👆 Autorizar com a digital';
+    // cancelar o sensor não é erro: a pessoa só desistiu
+    if(x&&(x.name==='NotAllowedError'||x.name==='AbortError'))return;
+    erro(id,x.message||'Não consegui confirmar a digital. Use a senha.');
+  }
+}
+async function autorizarSenha(id){
+  const inp=$('#inp-'+id);if(!inp.value)return erro(id,'Digite sua senha.');
+  try{await enviar(id,inp.value)}catch(x){inp.value='';erro(id,x.message)}
+}
+async function recusar(id){
+  const motivo=prompt('Motivo da recusa (opcional - o Claude/Beniboy lê isso pra ajustar o pedido):');
+  if(motivo===null)return;
+  const r=await fetch('/api/qa-aprovacoes/'+encodeURIComponent(id)+'/rejeitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({motivo})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)return erro(id,d.error||'Não consegui recusar.');
+  await carregar();
+}
+async function copiar(id){const t=(FEITOS.get(id)||{}).saida||'';try{await navigator.clipboard.writeText(t);alert('Copiado.')}catch(e){prompt('Copie:',t)}}
+
+(async()=>{
+  // espera o digital.js (defer) antes de decidir o que é primeiro
+  await new Promise(r=>document.readyState==='complete'?r():addEventListener('load',r));
+  try{DIGITAL=!!(window.nopulsoDigital&&await window.nopulsoDigital.disponivel())}catch(e){DIGITAL=false}
+  await carregar();
+  // voltou pro app (tocou no push com a tela já aberta): pedidos novos
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)carregar()});
+})();
+</script>
+</body>
+</html>

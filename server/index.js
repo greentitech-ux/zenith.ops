@@ -5753,6 +5753,9 @@ const EXECUTORES_QA = {
   // dinamico - re-le o catalogo (Master-editavel) no momento da aprovacao
   // em vez de chamar uma funcao fixa como os demais
   'agente.executarAcao': (p) => agenteAcoes.executarAcaoDoAgente(p.acaoId, p.parametros),
+  // pedido do Claude/Cowork (ver coworkApi.executarAutorizado): roda o que
+  // ficou gravado no pedido, com o ator Master configurado
+  'cowork.executar': (p) => coworkApi.executarAutorizado(p),
   'agente.acoes.criar': (p) => agenteAcoes.criar(p),
   'agente.acoes.editar': (p) => agenteAcoes.atualizar(p.id, p.dados, p.atualizadoPorEmail),
   'agente.acoes.excluir': (p) => agenteAcoes.remover(p.id),
@@ -5770,7 +5773,7 @@ async function desviarSeQaMaster(req, res, tipo, resumo, payload) {
   const pendente = await qaAprovacoes.criar({
     tipo, resumo, payload, criadoPorId: req.user.id, criadoPorEmail: req.user.email,
   });
-  push.notifyQaAprovacaoPendente(resumo, req.user.email).catch((e) => console.error('Falha ao notificar aprovação QA pendente:', e.message));
+  push.notifyQaAprovacaoPendente(resumo, req.user.email, { id: pendente.id, origem: 'qa' }).catch((e) => console.error('Falha ao notificar aprovação QA pendente:', e.message));
   res.status(202).json({ pendenteAprovacao: true, id: pendente.id, resumo });
   return true;
 }
@@ -5787,24 +5790,55 @@ app.get('/api/qa-aprovacoes', requireMasterDeVerdade, async (req, res) => {
   res.json(await qaAprovacoes.listar());
 });
 
+// APROVAR = AUTORIZAR. Desde 23/09/2026 (Master: "só faço a autorização,
+// ela chega no celular e eu aprovo com a senha ou a digital, sempre dando a
+// digital como primeira opção") toda aprovação da fila confere a identidade de
+// novo - a tela manda o comprovante da digital (ver passkeys.js) ou a senha no
+// campo `password`. Antes bastava estar logado: um celular desbloqueado com o
+// app aberto aprovava criar acesso ou comando em máquina de loja.
+//
+// Uma aprovação por vez por pedido: dois toques rápidos (ou dois aparelhos)
+// não podem rodar a mesma ação duas vezes.
+const aprovacoesEmCurso = new Set();
 app.post('/api/qa-aprovacoes/:id/aprovar', requireMasterDeVerdade, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (aprovacoesEmCurso.has(id)) return res.status(409).json({ error: 'Essa autorização já está sendo executada.' });
+  aprovacoesEmCurso.add(id);
   try {
-    const pendente = await qaAprovacoes.obter(req.params.id);
+    const pendente = await qaAprovacoes.obter(id);
     if (!pendente) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     if (pendente.status === 'aprovado') return res.status(400).json({ error: 'Essa ação já foi aprovada e executada.' });
     if (pendente.status === 'rejeitado') return res.status(400).json({ error: 'Essa ação já foi rejeitada.' });
+    if (pendente.status === 'expirado') return res.status(400).json({ error: 'Esse pedido venceu. Peça de novo se ainda fizer sentido.' });
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    if (pendente.expiraEm && Date.parse(pendente.expiraEm) <= Date.now()) {
+      await qaAprovacoes.marcarDecidido(id, { status: 'expirado', decididoPorEmail: req.user.email });
+      return res.status(400).json({ error: 'Esse pedido venceu antes da autorização. Peça de novo se ainda fizer sentido.' });
+    }
     const executor = EXECUTORES_QA[pendente.tipo];
     if (!executor) return res.status(500).json({ error: `Tipo de ação desconhecido: ${pendente.tipo}` });
+    let saida;
     try {
-      await executor(pendente.payload || {});
+      saida = await executor(pendente.payload || {});
     } catch (execErr) {
-      await qaAprovacoes.marcarDecidido(req.params.id, { status: 'erro', decididoPorEmail: req.user.email, erroExecucao: execErr.message });
+      await qaAprovacoes.marcarDecidido(id, { status: 'erro', decididoPorEmail: req.user.email, erroExecucao: execErr.message });
       return res.status(400).json({ error: `Aprovado, mas a ação falhou ao executar: ${execErr.message}` });
     }
-    const atualizado = await qaAprovacoes.marcarDecidido(req.params.id, { status: 'aprovado', decididoPorEmail: req.user.email });
-    res.json(atualizado);
+    // o que fica gravado (e o Claude lê) nunca leva senha temporária; a tela
+    // do Master recebe o resultado inteiro, uma vez, nesta resposta
+    const ehCowork = pendente.tipo === 'cowork.executar' && saida && typeof saida === 'object';
+    const paraMaster = ehCowork ? saida.resultado : (typeof saida === 'string' ? saida : null);
+    // só o do Claude é gravado (ele já vem sem segredo). O de uma ação do
+    // catálogo do Beniboy pode trazer senha temporária no texto: vai só pra
+    // tela do Master
+    const persistido = ehCowork ? saida.resultadoPersistido : undefined;
+    const atualizado = await qaAprovacoes.marcarDecidido(id, { status: 'aprovado', decididoPorEmail: req.user.email, resultado: persistido });
+    console.log(`[autorizacao] ${req.user.email} autorizou ${pendente.tipo}: ${pendente.resumo}`);
+    res.json({ ...atualizado, payload: undefined, resultadoParaMaster: paraMaster });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  } finally {
+    aprovacoesEmCurso.delete(id);
   }
 });
 

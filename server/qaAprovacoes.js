@@ -37,14 +37,24 @@ async function obter(id) {
 // rodar de verdade quando aprovado (ver EXECUTORES_QA em index.js), nunca
 // exposto fora de rotas de Master (pode conter dado sensível, ex: nova
 // senha de reset)
+//
+// `origem` (qa | cowork | beniboy) e `detalhes` (linhas rótulo/valor) são o
+// que a tela de autorização mostra: o Master aprova vendo EXATAMENTE o que vai
+// rodar, montado aqui a partir do payload - nunca um texto livre do modelo.
+// `expiraEm`: pedido de agente vence (reiniciar uma máquina aprovado dois
+// dias depois já não é o que se pediu).
 async function criar({
-  tipo, resumo, payload, criadoPorId, criadoPorEmail,
+  tipo, resumo, payload, criadoPorId, criadoPorEmail, origem = 'qa', detalhes = [], expiraEm = null,
 }) {
   const ref = COLLECTION.doc();
   const registro = {
     id: ref.id,
     tipo,
     resumo: String(resumo || '').slice(0, 300),
+    origem: ['qa', 'cowork', 'beniboy'].includes(origem) ? origem : 'qa',
+    detalhes: (Array.isArray(detalhes) ? detalhes : []).slice(0, 20)
+      .map((d) => ({ rotulo: String(d.rotulo || '').slice(0, 60), valor: String(d.valor == null ? '' : d.valor).slice(0, 600) })),
+    expiraEm: expiraEm || null,
     payload: payload || {},
     status: 'pendente',
     criadoPorId: criadoPorId || null,
@@ -61,16 +71,19 @@ async function criar({
 }
 
 // 'aprovado' (executor rodou com sucesso) | 'rejeitado' (Master recusou,
-// nunca executa) | 'erro' (Master aprovou mas o executor falhou - fica
+// nunca executa) | 'expirado' (passou do prazo, nunca executa) | 'erro' (Master aprovou mas o executor falhou - fica
 // visível pro Master decidir se tenta aprovar de novo ou rejeita)
+// `resultado`: o que a ação devolveu, SEM segredo - é o que o Claude lê de
+// volta (consultar_autorizacao) pra seguir o atendimento
 async function marcarDecidido(id, {
-  status, decididoPorEmail, motivoRejeicao, erroExecucao,
+  status, decididoPorEmail, motivoRejeicao, erroExecucao, resultado,
 }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Solicitação de aprovação não encontrada.');
   const patch = {
     status,
+    ...(resultado !== undefined ? { resultado: String(resultado == null ? '' : resultado).slice(0, 1000) } : {}),
     decididoPorEmail: decididoPorEmail || null,
     decididoEm: new Date().toISOString(),
     motivoRejeicao: motivoRejeicao || null,

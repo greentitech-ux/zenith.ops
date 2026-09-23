@@ -921,14 +921,23 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     // da fila, então sobrevive até a aprovação e a um restart.
     const parametros = { ...(input.parametros || {}), porId: chat.logado.id };
     if (acao.requerAprovacao) {
-      await qaAprovacoes.criar({
+      const pedido = await qaAprovacoes.criar({
         tipo: 'agente.executarAcao',
         resumo,
+        origem: 'beniboy',
+        // a tela de autorização mostra a AÇÃO do catálogo e os parâmetros que
+        // vão rodar - não o resumo que o modelo escreveu
+        detalhes: [{ rotulo: 'Ação', valor: acao.nome },
+          ...Object.entries(input.parametros || {}).filter(([k]) => k !== 'porId').map(([k, v]) => ({ rotulo: k, valor: typeof v === 'object' ? JSON.stringify(v) : String(v) }))],
+        expiraEm: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         payload: { acaoId: input.acaoId, parametros },
         criadoPorId: chat.logado.id,
         criadoPorEmail: `${chat.logado.username} (via Beniboy)`,
       });
-      return `Ação "${acao.nome}" preparada e enviada pra aprovação do Master (fica visível em NOC-NoPulso).`;
+      // até aqui o pedido do Beniboy ficava parado sem avisar ninguém
+      require('./push').notifyQaAprovacaoPendente(resumo, `${chat.logado.username} (via Beniboy)`, { id: pedido.id, origem: 'beniboy' })
+        .catch((e) => console.error('Falha ao avisar autorização do Beniboy:', e.message));
+      return `Ação "${acao.nome}" preparada e enviada pra autorização do Master no celular (digital ou senha).`;
     }
     try {
       const resultadoAcao = await agenteAcoes.executarAcaoDoAgente(input.acaoId, parametros);

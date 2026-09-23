@@ -5393,7 +5393,7 @@ function renderAgenteAprovacoes(){
       <div class="qa-meta">${escapeHtml(a.criadoPorEmail||'')} · ${formatarRelativo(a.criadoEm)}</div>
       ${a.status==='erro' ? `<div class="qa-erro">⚠️ Aprovado antes, mas falhou ao executar: ${escapeHtml(a.erroExecucao||'')} - pode tentar aprovar de novo.</div>` : ''}
       <div class="qa-acoes">
-        <button type="button" class="btn-primary" style="padding:6px 12px;font-size:12px;" onclick="aprovarAgenteQa('${a.id}')">✅ Aprovar</button>
+        <button type="button" class="btn-primary" style="padding:6px 12px;font-size:12px;" onclick="aprovarAgenteQa('${a.id}')">🔐 Autorizar</button>
         <button type="button" class="btn-mini" style="color:var(--bad);" onclick="rejeitarAgenteQa('${a.id}')">❌ Rejeitar</button>
       </div>
     </div>
@@ -5413,12 +5413,9 @@ function renderAgenteHistorico(){
     </div>
   `).join('');
 }
-async function aprovarAgenteQa(id){
-  const res = await fetch('/api/qa-aprovacoes/'+id+'/aprovar', {method:'POST'});
-  const data = await res.json().catch(()=>({}));
-  if(!res.ok) alert(data.error || 'Erro ao aprovar.');
-  await carregarAgenteAprovacoes();
-}
+// autorizar pede a digital (ou a senha) desde 23/09/2026 - é tudo na tela
+// de Autorizações, a mesma que o push do celular abre
+function aprovarAgenteQa(id){ location.href = '/autorizacoes.html?id=' + encodeURIComponent(id); }
 async function rejeitarAgenteQa(id){
   const motivo = prompt('Motivo da rejeição (opcional):') || '';
   const res = await fetch('/api/qa-aprovacoes/'+id+'/rejeitar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo})});

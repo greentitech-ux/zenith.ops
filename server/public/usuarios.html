@@ -1418,7 +1418,7 @@ function renderAprovacoesQa(){
       <div class="qa-meta">${escapeHtml(a.criadoPorEmail||'')} · ${formatarRelativo(a.criadoEm)}</div>
       ${a.status==='erro' ? `<div class="qa-erro">⚠️ Aprovado antes, mas falhou ao executar: ${escapeHtml(a.erroExecucao||'')} - pode tentar aprovar de novo.</div>` : ''}
       <div class="qa-acoes">
-        <button type="button" class="primary" style="padding:6px 12px;font-size:12px;" onclick="aprovarQa('${a.id}')">✅ Aprovar</button>
+        <button type="button" class="primary" style="padding:6px 12px;font-size:12px;" onclick="aprovarQa('${a.id}')">🔐 Autorizar</button>
         <button type="button" class="danger" style="padding:6px 12px;font-size:12px;" onclick="rejeitarQa('${a.id}')">❌ Rejeitar</button>
       </div>
     </div>
@@ -1427,13 +1427,9 @@ function renderAprovacoesQa(){
 function abrirAprovacoesQa(){ document.getElementById('qa-aprovacoes-overlay').classList.add('show'); carregarAprovacoesQa(); }
 function fecharAprovacoesQa(){ document.getElementById('qa-aprovacoes-overlay').classList.remove('show'); }
 document.getElementById('qa-aprovacoes-overlay').addEventListener('click', (e)=>{ if(e.target.id==='qa-aprovacoes-overlay') fecharAprovacoesQa(); });
-async function aprovarQa(id){
-  const res = await fetch('/api/qa-aprovacoes/'+id+'/aprovar', {method:'POST'});
-  const data = await res.json().catch(()=>({}));
-  if(!res.ok){ alert(data.error||'Erro ao aprovar.'); }
-  await carregarAprovacoesQa();
-  await carregarUsuarios();
-}
+// autorizar pede a digital (ou a senha) desde 23/09/2026 - é tudo na tela
+// de Autorizações, a mesma que o push do celular abre
+function aprovarQa(id){ location.href = '/autorizacoes.html?id=' + encodeURIComponent(id); }
 async function rejeitarQa(id){
   const motivo = prompt('Motivo da rejeição (opcional):') || '';
   const res = await fetch('/api/qa-aprovacoes/'+id+'/rejeitar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo})});

@@ -43,9 +43,13 @@ Corpo:
 }
 ```
 
-Ações sensíveis respondem `409 CONFIRMACAO_NECESSARIA` até o agente obter confirmação explícita do Master e repetir a mesma intenção com `"confirmar": true`. Toda chamada exige uma chave de idempotência, para uma repetição de rede não criar dois usuários, tickets ou reuniões.
+**Ações sensíveis não executam na hora (desde 23/09/2026).** `enviar_email`, `concluir_tarefa`, `cancelar_tarefa`, `criar_usuario`, `desbloquear_usuario`, `criar_nova_senha` e `executar_noc` viram um **pedido de autorização**: a resposta traz `pendente: true` e `autorizacaoId`, e o celular do Master toca (push). Ele abre `/autorizacoes.html` e autoriza com a **digital** (primeira opção) ou a senha; só então o servidor executa exatamente o que ficou gravado no pedido. O agente acompanha com `consultar_autorizacao` (`pendente` · `aprovado` + `resultado` · `rejeitado` + motivo · `expirado` · `erro`) e só diz que foi feito depois de `aprovado`. Pedido vence em 24h (comando no NOC: 2h).
 
-Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Elas só aparecem na resposta da ação confirmada e não são gravadas na auditoria.
+Antes disso a trava era um `"confirmar": true` mandado pelo próprio modelo — ou seja, nenhuma do lado do NoPulso. O campo ainda é aceito e ignorado.
+
+Toda chamada de escrita exige uma chave de idempotência, para uma repetição de rede não criar dois pedidos, usuários, tickets ou reuniões.
+
+Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Aparecem **só na tela do Master**, na hora em que ele autoriza — não vão para o agente, para o pedido gravado nem para a auditoria.
 
 ## Ferramentas iniciais
 
