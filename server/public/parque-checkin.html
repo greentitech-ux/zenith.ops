@@ -881,6 +881,22 @@ function calcularTotalAtual(){
   const linhas = listaCriancasPreenchidas();
   return valorEntradasPreview(linhas) + PRECO_MEIA * contarMeiasCobrando(linhas);
 }
+// Campo obrigatorio dentro de bloco escondido TRAVA o envio: o navegador
+// roda a validacao nativa, tenta focar o campo pra reclamar, nao consegue
+// (display:none) e cancela o submit SEM disparar o evento - o botao
+// "Registrar check-in" simplesmente nao faz nada e nenhuma mensagem
+// aparece na tela. Pegava TODA venda de valor zero (5%CP / cortesia),
+// porque a secao de pagamento fica escondida com a linha de forma de
+// pagamento ainda vazia e obrigatoria dentro; e tambem uma linha de
+// crianca em branco, quando a etapa 2 sai da tela. Campo disabled e'
+// ignorado pela validacao nativa - quem valida de verdade continua sendo
+// validarEtapa(), o handler de submit e o servidor (ver criar/
+// criarComPlanosIndividuais em parque.js)
+function sincronizarValidacaoNativa(){
+  document.querySelectorAll('#form-checkin [required]').forEach(el=>{
+    el.disabled = !!el.closest('.hidden, .etapa-escondida');
+  });
+}
 function atualizarPreviewValor(){
   const linhas = listaCriancasPreenchidas();
   const temCortesiaGeral = linhas.some(l=>l.querySelector('.crianca-plano')?.value==='cortesia');
@@ -919,6 +935,7 @@ function atualizarPreviewValor(){
   // reavaliar se o termo aplicado ainda corresponde ao que está na tela
   if(typeof atualizarGateTermo === 'function') atualizarGateTermo();
   document.getElementById('wrap-pagamentos').classList.toggle('hidden', total<=0);
+  sincronizarValidacaoNativa();
   if(total>0){
     reconciliarPagamentos(total);
     atualizarBotaoPagamento(total);
@@ -1728,17 +1745,29 @@ function resetarForm(){
 // iguais, para não alterar preço, estoque ou a regra de assinatura.
 let ETAPA_ATUAL = 1;
 const ETAPAS_INFO = { 1: 'identificação do responsável', 2: 'tempo, horário e participantes', 3: 'termo de responsabilidade', 4: 'pagamento e confirmação' };
+// campo de etapa escondida fica disabled pra nao travar o submit nativo
+// (ver sincronizarValidacaoNativa) - e checkValidity() de campo disabled
+// devolve true sempre, o que deixaria passar um obrigatorio em branco no
+// pulo direto de um indicador de etapa pro outro. Religa so pra conferir e
+// devolve o estado logo em seguida
+function campoDaEtapaValido(id){
+  const el = document.getElementById(id);
+  const eraDisabled = el.disabled;
+  el.disabled = false;
+  const ok = el.checkValidity();
+  if(!ok) el.reportValidity();
+  el.disabled = eraDisabled;
+  return ok;
+}
 function validarEtapa(etapa){
   if(etapa === 1){
     for(const id of ['f-unidade','f-nome','f-contato']){
-      const el = document.getElementById(id);
-      if(!el.checkValidity()){ el.reportValidity(); return false; }
+      if(!campoDaEtapaValido(id)) return false;
     }
   }
   if(etapa === 2){
     for(const id of ['f-data','f-horario-previsto']){
-      const el = document.getElementById(id);
-      if(!el.checkValidity()){ el.reportValidity(); return false; }
+      if(!campoDaEtapaValido(id)) return false;
     }
     if(!coletarCriancas().length){ alert('Cadastre pelo menos uma criança para continuar.'); return false; }
     const invalidas = criancasComNascimentoInvalido('#lista-criancas .crianca-linha');
@@ -1761,6 +1790,7 @@ function atualizarNavegacaoEtapas(){
   document.getElementById('etapa-resumo').textContent = `Etapa ${ETAPA_ATUAL} de 4 · ${ETAPAS_INFO[ETAPA_ATUAL]}`;
   document.getElementById('btn-etapa-voltar').classList.toggle('hidden', ETAPA_ATUAL === 1);
   document.getElementById('btn-etapa-avancar').classList.toggle('hidden', ETAPA_ATUAL === 4);
+  sincronizarValidacaoNativa();
 }
 function irParaEtapa(destino, validar = true){
   if(destino < 1 || destino > 4) return;
