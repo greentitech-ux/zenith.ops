@@ -122,6 +122,7 @@ const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
 const coworkApi = require('./coworkApi');
 const vigiaScript = require('./vigiaScript');
+const agenteAndroid = require('./agenteAndroid');
 const reparoNocZenithScript = require('./reparoNocZenithScript');
 const procedimentosSocorro = require('./procedimentosSocorro');
 const loginCustom = require('./loginCustom');
@@ -338,6 +339,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/rh/campos-config-publico',
   '/api/loja-status/heartbeat',
   '/api/loja-status/vigia-versao',
+  '/api/loja-status/agente-android/versao',
   '/api/loja-status/reparo-noczenith.ps1',
   '/assinar.html',
   '/reuniao-publica.html',
@@ -2024,6 +2026,15 @@ app.get('/api/loja-status/vigia-versao', (req, res) => {
   res.json({ versao: vigiaScript.VERSAO_VIGIA });
 });
 
+// O MESMO pra o agente de tablet/celular (ver agenteAndroid.js). Publica pelo
+// mesmo motivo da do vigia: quem pergunta e' o aparelho, que nao tem sessao
+// de usuario. Nao devolve nada sobre a loja - so o numero da versao e de onde
+// baixar.
+app.get('/api/loja-status/agente-android/versao', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ versao: agenteAndroid.VERSAO_AGENTE_ANDROID, url: agenteAndroid.urlDoApk() });
+});
+
 // Resgate para agentes derrubados por uma versao invalida. E publico porque
 // o conteudo e totalmente generico: a identidade/token continua somente na
 // copia local da propria maquina. O script valida origem, parser, versao e
@@ -2244,6 +2255,12 @@ app.get('/api/loja-status/:codigo/computadores/:posto/comando-instalacao', auth.
       // A tela usa isto apenas para explicar o que o comando vai fazer. A
       // decisao vem do cadastro da maquina, nunca de um flag do navegador.
       elevacaoAutomatica: !ehServidor,
+      // O MESMO computador, se for tablet/celular Android, se inscreve por
+      // este link em vez do comando de PowerShell (ver agenteAndroid.js).
+      // Sai da MESMA rota e do MESMO agentToken de proposito: duas formas de
+      // instalar que pegassem o token de lugares diferentes acabariam
+      // discordando, e a maquina ficaria com dois cadastros.
+      linkAndroid: agenteAndroid.montarLinkInscricao({ codigo, posto, agentToken, base: APP_BASE_URL }),
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

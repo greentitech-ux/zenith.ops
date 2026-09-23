@@ -26100,8 +26100,12 @@ $r | ConvertTo-Json -Compress
 
     // o aviso: uma vez por descarga, e rearma quando volta a carregar
     const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    // abertoDesde entra em mudouAlgoQueImporta (ver lojaStatus.js), entao
+    // variar ele e' como o teste forca a batida a virar gravacao de verdade -
+    // em producao a maioria das batidas so atualiza o espelho (PERSIST_MS)
+    let abertura = 1;
     const bater = (aparelho) => postarJson('/api/loja-status/heartbeat',
-      { unidade: '19855', posto: 'TABLET-T', userAgent: 'Mozilla/5.0 (Linux; Android 14)', aparelho }, cab);
+      { unidade: '19855', posto: 'TABLET-T', userAgent: 'Mozilla/5.0 (Linux; Android 14)', abertoDesde: abertura++, aparelho }, cab);
     const cheio = { bateria: { porcento: 80, carregando: false } };
     const baixo = { bateria: { porcento: 12, carregando: false } };
     const critico = { bateria: { porcento: 6, carregando: false } };
@@ -26140,10 +26144,33 @@ $r | ConvertTo-Json -Compress
     await bater(baixo);                    // avisa de novo
     const apos3 = await ateContar(apos2 + 1);
 
+    // ROTA PUBLICA, DADO HOSTIL: o heartbeat nao exige sessao (a maquina da
+    // loja nao tem uma), entao quem souber codigo+posto - os dois viajam no
+    // link do quiosque - posta o que quiser. Um objeto gigante incharia o
+    // documento que o espelho le inteiro pras 52 maquinas (CLAUDE.md §3), e
+    // campo torto viraria texto estranho no card de quem decide.
+    const lixo = 'x'.repeat(50000);
+    const bruto = {
+      bateria: { porcento: 999, carregando: 'talvez' },        // fora da faixa
+      armazenamento: { usadoGb: -5, totalGb: 'muito', usadoPct: 12 },
+      so: { nome: lixo, versao: lixo },
+      rede: { tipo: lixo, geracao: lixo, downlinkMbps: 1e12 },
+      campoQueNaoExiste: lixo,
+      toque: 'sim',
+    };
+    const limpo = ls.sanitizarAparelho(bruto) || {};
+    // e ponta a ponta: o lixo passa pela rota publica de verdade e, depois
+    // dele, a maquina continua contando presenca normal
+    await bater(bruto);
+    await folga();
+    const guardadoAposLixo = (docDoTablet() || {}).aparelho || {};
+    await bater(cheio);
+    await folga();
+
     const doc = docDoTablet() || {};
 
     const conf = {
-      'o aparelho contou, e o NOC guardou': !!doc.aparelho && doc.aparelho.bateria.porcento === 12,
+      'o aparelho contou, e o NOC guardou': !!doc.aparelho && typeof doc.aparelho.bateria.porcento === 'number',
       'o aviso de bateria sai na primeira vez': apos1 === antes + 1,
       'e NÃO repete a cada batida (seria push de 25 em 25s)': apos2 === apos1,
       'a marca de "já avisei" fica gravada': marcaDepoisDoAviso === true,
@@ -26160,12 +26187,13 @@ $r | ConvertTo-Json -Compress
       // CLAUDE.md §3: o heartbeat já escreve a cada 25s - a telemetria entra
       // NA MESMA escrita, sem operação nova
       'a telemetria pega carona na escrita que já existia':
-        /\.\.\.\(dados\.aparelho \? \{ aparelho: \{ \.\.\.dados\.aparelho, em: Date\.now\(\) \} \} : \{\}\)/.test(srcLs)
+        /\.\.\.\(aparelhoLimpo \? \{ aparelho: \{ \.\.\.aparelhoLimpo, em: Date\.now\(\) \} \} : \{\}\)/.test(srcLs)
         && !/COLLECTION\.doc\(id\)\.set\(\{ aparelho/.test(srcLs),
       // navegador que não sabe responder manda nulo - e nulo não pode apagar
       // o que outro navegador já contou no mesmo aparelho
       'nulo não apaga o que já estava gravado':
-        /dados\.aparelho \? \{ aparelho/.test(srcLs),
+        /aparelhoLimpo \? \{ aparelho/.test(srcLs)
+        && /const aparelhoLimpo = sanitizarAparelho\(dados\.aparelho\);/.test(srcLs),
       'as três telas que batem presença mandam o aparelho':
         telas.every((t) => /aparelho: await \(window\.aparelhoTelemetria/.test(t))
         && telas.every((t) => /<script src="\/aparelho\.js"><\/script>/.test(t)),
@@ -26185,6 +26213,25 @@ $r | ConvertTo-Json -Compress
       'o push é do NOC (Master/Suporte), nunca da loja':
         /if \(!podeReceberCritico\(sub\)\) continue;/.test(fsA.readFileSync(__dirname + '/push.js', 'utf8').slice(
           fsA.readFileSync(__dirname + '/push.js', 'utf8').indexOf('async function notifyBateriaAparelho'))),
+      // lista fechada (ver sanitizarAparelho): o que nao esta nela nao entra
+      'campo inventado nao entra': !('campoQueNaoExiste' in limpo),
+      'numero fora da faixa e descartado, nao remendado':
+        limpo.bateria === undefined && limpo.armazenamento === undefined
+        && !(limpo.rede && limpo.rede.downlinkMbps !== undefined),
+      'texto de 50 mil letras nao incha o documento que as 52 maquinas releem':
+        JSON.stringify(limpo).length < 200,
+      '"talvez" nao vira true': limpo.toque === undefined,
+      'aparelho sem nada util nao vale uma escrita':
+        ls.sanitizarAparelho({ toque: true }) === null && ls.sanitizarAparelho([1, 2]) === null,
+      'o que e valido continua passando inteiro':
+        JSON.stringify(ls.sanitizarAparelho({ bateria: { porcento: 12, carregando: false } }))
+          === '{"bateria":{"porcento":12,"carregando":false}}',
+      // ponta a ponta, na rota publica
+      'o lixo nao chega ao documento': !('campoQueNaoExiste' in guardadoAposLixo)
+        && JSON.stringify(guardadoAposLixo).length < 300,
+      // telemetria torta nao pode derrubar a PRESENCA da maquina
+      'lixo na telemetria nao derruba a batida seguinte':
+        !!doc.aparelho && doc.aparelho.bateria.porcento === 80,
       'o disparo sai do heartbeat, sem travar a resposta':
         /if \(avisoBateria\) \{/.test(srcIdxA) && /push\.notifyBateriaAparelho\(req\.body\.unidade, req\.body\.posto, avisoBateria\)/.test(srcIdxA),
     };
@@ -26194,6 +26241,105 @@ $r | ConvertTo-Json -Compress
   } catch (e) { okAparelhoMovel = false; console.log('  erro: ' + e.message); }
   if (!okAparelhoMovel) ruins += 1;
   console.log(`${okAparelhoMovel ? '✓' : '✗'} Tablet/celular no NOC: bateria, espaço, rede e sistema - avisando uma vez por descarga`);
+
+  // ------------------------------------------------------------------
+  // AGENTE ANDROID: O QUE RODA COM O NOPULSO FECHADO.
+  //
+  // Master (23/09/2026): "precisa rodar mesmo que o nopulso nao esteja
+  // aberto". O quiosque no navegador so conta bateria com a aba aberta, e
+  // isso nao tem conserto no navegador (getBattery nao existe em service
+  // worker). Entao a parte que roda fechada e um app de verdade, em android/.
+  //
+  // O que este teste protege: o agente nao pode virar um SEGUNDO jeito de ser
+  // maquina no NOC. Ele bate no mesmo heartbeat, manda os mesmos campos e
+  // passa pela mesma lista fechada - e os dois lados (Kotlin e JS) tem que
+  // continuar falando a mesma lingua depois de qualquer mexida.
+  let okAgenteAndroid = false;
+  try {
+    const fsB = require('fs');
+    const raiz = __dirname + '/../android';
+    const ls2 = require(__dirname + '/lojaStatus.js');
+    const agente = require(__dirname + '/agenteAndroid.js');
+    const gradle = fsB.readFileSync(raiz + '/app/build.gradle.kts', 'utf8');
+    const manifesto = fsB.readFileSync(raiz + '/app/src/main/AndroidManifest.xml', 'utf8');
+    const telemetria = fsB.readFileSync(raiz + '/app/src/main/java/br/com/nopulso/agente/Telemetria.kt', 'utf8');
+    const servico = fsB.readFileSync(raiz + '/app/src/main/java/br/com/nopulso/agente/ServicoAgente.kt', 'utf8');
+    const batida = fsB.readFileSync(raiz + '/app/src/main/java/br/com/nopulso/agente/Batida.kt', 'utf8');
+    const fluxo = fsB.readFileSync(__dirname + '/../.github/workflows/agente-android.yml', 'utf8');
+
+    // a rota de versao e publica (o aparelho nao tem sessao) - sem token
+    const versaoBruta = await pedir('/api/loja-status/agente-android/versao');
+    const versaoResp = versaoBruta.status === 200 ? JSON.parse(versaoBruta.corpo) : null;
+
+    // CRUZAMENTO KOTLIN x JS: todo campo que o agente MANDA tem que ser um
+    // campo que o sanitizarAparelho ACEITA. Se divergirem, o servidor
+    // descarta em silencio e o NOC mostra o tablet sem bateria - sem erro
+    // nenhum pra investigar.
+    const camposQueOAgenteManda = [...telemetria.matchAll(/aparelho\.put\("(\w+)"/g)].map((m) => m[1]);
+    const exemplo = {
+      bateria: { porcento: 50, carregando: false },
+      armazenamento: { usadoGb: 1, totalGb: 2, usadoPct: 50 },
+      rede: { tipo: 'wifi', downlinkMbps: 10 },
+      so: { nome: 'Android', versao: '14', movel: true },
+      toque: true,
+    };
+    const aceitos = Object.keys(ls2.sanitizarAparelho(exemplo) || {});
+
+    const conf = {
+      'a rota de versao responde sem login': !!versaoResp && typeof versaoResp.versao === 'number',
+      // a versao do servidor e a do APK sao o mesmo numero em dois arquivos:
+      // divergir significa tablet que nunca atualiza, ou que atualiza pra
+      // uma versao que nao existe
+      'a versao do servidor casa com a do APK': (() => {
+        const noApk = Number((gradle.match(/versionCode = (\d+)/) || [])[1]);
+        return noApk === agente.VERSAO_AGENTE_ANDROID;
+      })(),
+      'todo campo que o agente manda e aceito pelo servidor':
+        camposQueOAgenteManda.length >= 4
+        && camposQueOAgenteManda.every((c) => aceitos.includes(c)),
+      // 90s e o LIMIAR_OFFLINE_MS: bater mais devagar faz o NOC declarar a
+      // loja fora do ar a cada oscilacao de rede
+      'o agente bate rapido o bastante pro limiar de offline do NOC': (() => {
+        const ms = Number(String((servico.match(/INTERVALO_MS = ([\d_]+)L/) || [])[1] || '').replace(/_/g, ''));
+        return ms > 0 && ms * 2 < 90 * 1000;
+      })(),
+      // sem isto o tablet sai do NOC depois de uma queda de energia e so
+      // volta quando alguem for ate a loja abrir o app
+      'o agente volta sozinho depois do tablet reiniciar':
+        /android\.intent\.action\.BOOT_COMPLETED/.test(manifesto)
+        && /START_STICKY/.test(servico),
+      // servico comum/alarme entram em Doze e param de bater
+      'roda em primeiro plano, que e o unico que o Android nao mata':
+        /foregroundServiceType="specialUse"/.test(manifesto)
+        && /startForeground\(/.test(servico),
+      // rota nova de telemetria seria um segundo jeito de ser maquina
+      'o agente usa o heartbeat que ja existe, sem rota nova':
+        /\/api\/loja-status\/heartbeat/.test(batida)
+        && !/api\/agente-android\/(telemetria|batida)/.test(batida),
+      // link de inscricao: esquema proprio pra troca de dominio nao quebrar
+      'o link de inscricao carrega unidade, posto, token e endereco': (() => {
+        const link = agente.montarLinkInscricao({ codigo: '19855', posto: 'TAB1', agentToken: 'abc', base: 'https://x.com/' });
+        return link.startsWith('nopulso://inscrever?')
+          && link.includes('u=19855') && link.includes('p=TAB1')
+          && link.includes('t=abc') && link.includes(encodeURIComponent('https://x.com'));
+      })(),
+      'o link sai da MESMA rota e do MESMO token do comando de instalacao':
+        /linkAndroid: agenteAndroid\.montarLinkInscricao\(\{ codigo, posto, agentToken, base: APP_BASE_URL \}\)/
+          .test(fsB.readFileSync(__dirname + '/index.js', 'utf8')),
+      // o CI do APK nao pode encostar no servidor, que nao tem CI de proposito
+      'o build do APK so roda quando android/ muda':
+        /paths:/.test(fluxo) && /'android\/\*\*'/.test(fluxo) && !/server\//.test(fluxo),
+      // chave de assinatura nunca no repositorio, e nunca cravada no build
+      'a chave de assinatura vem de fora do repositorio':
+        /System\.getenv\("ANDROID_KEYSTORE_FILE"\)/.test(gradle)
+        && /\*\.jks/.test(fsB.readFileSync(raiz + '/.gitignore', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAgenteAndroid = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAgenteAndroid = false; console.log('  erro: ' + e.message); }
+  if (!okAgenteAndroid) ruins += 1;
+  console.log(`${okAgenteAndroid ? '✓' : '✗'} Agente Android: roda com o NoPulso fechado, pelo heartbeat que ja existe`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

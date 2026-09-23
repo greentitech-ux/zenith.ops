@@ -1061,7 +1061,10 @@ async function heartbeat(codigo, posto, info, token) {
   // sabia que ja tinha avisado e mandava push de novo, pra sempre.
   // A batida de "so presenca" vem do agente Windows e nunca traz aparelho,
   // entao cai fora sozinha em precisaAvisarBateria.
-  const avisoBateria = precisaAvisarBateria(atual, dados.aparelho);
+  // rota publica: o aparelho passa pela lista fechada ANTES de qualquer uso -
+  // tanto pra decidir o aviso quanto pra ser gravado
+  const aparelhoLimpo = sanitizarAparelho(dados.aparelho);
+  const avisoBateria = precisaAvisarBateria(atual, aparelhoLimpo);
   // presenca (online/offline, IP, userAgent) continua SEM exigir token - e
   // telemetria de baixo risco e nao pode deixar maquina legada (que ainda
   // nao atualizou o NOCZenith, entao nao manda token) sumir do painel. Ja o
@@ -1100,12 +1103,12 @@ async function heartbeat(codigo, posto, info, token) {
     // Só sobrescreve quando a batida TROUXE o dado: navegador que não sabe
     // responder (iOS não tem API de bateria) manda nulo, e nulo aqui não
     // pode apagar o que um navegador melhor já contou no mesmo aparelho.
-    ...(dados.aparelho ? { aparelho: { ...dados.aparelho, em: Date.now() } } : {}),
+    ...(aparelhoLimpo ? { aparelho: { ...aparelhoLimpo, em: Date.now() } } : {}),
     // a marca de "já avisei desta vez" zera sozinha quando o tablet volta a
     // ter carga (ou entra no carregador): sem isso, ou o aviso repete a cada
     // 25s, ou sai uma vez só e nunca mais, nem na próxima descarga
     ...(avisoBateria ? { bateriaAvisadaEm: Date.now() }
-      : bateriaVoltou(atual, dados.aparelho) ? { bateriaAvisadaEm: null } : {}),
+      : bateriaVoltou(atual, aparelhoLimpo) ? { bateriaAvisadaEm: null } : {}),
     // Quantas batidas seguidas quem bate TENTOU e nao conseguiu entregar
     // antes desta. Quem conta e o proprio agente/aba (ele incrementa a cada
     // falha e manda o contador na primeira batida que passa), entao a batida
@@ -1362,6 +1365,75 @@ function sanitizarEstadoAnydesk(v) {
 // Tailscale é inventário de conexão, nunca uma fonte de autorização. A lista
 // fechada impede que o endpoint público grave objetos grandes/arbitrários no
 // Firestore. Dados ausentes permanecem ausentes para os agentes antigos.
+// O QUE O NAVEGADOR/AGENTE DIZ DO APARELHO, tratado como dado HOSTIL.
+//
+// /api/loja-status/heartbeat e' rota PUBLICA (tem que ser: a maquina da loja
+// nao tem sessao de usuario). Entao o corpo dela e' texto de estranho ate
+// provar o contrario - e o `aparelho` estava entrando cru no documento, do
+// jeito que chegou.
+//
+// Dois estragos que isso abre, e nenhum deles precisa de invasor esperto:
+//  1. CUSTO (CLAUDE.md §3): o Firestore cobra por documento, e documento tem
+//     teto de 1 MiB. Quem soubesse codigo+posto (os dois viajam no link do
+//     quiosque) podia postar um objeto gigante e inchar o documento - que o
+//     espelho em memoria le INTEIRO, pras 52 maquinas, a cada recarga.
+//  2. A tela: o card do NOC escreve esses campos. String solta num lugar onde
+//     a tela espera numero vira texto estranho no painel de quem decide.
+//
+// Lista fechada, igual ao sanitizarTailscale logo abaixo: o que nao esta aqui
+// nao entra. Campo que vier torto e' descartado sozinho, em vez de derrubar a
+// batida inteira - presenca de maquina nao pode depender de telemetria.
+function numeroEntre(valor, minimo, maximo, casas) {
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n < minimo || n > maximo) return null;
+  const fator = Math.pow(10, casas);
+  return Math.round(n * fator) / fator;
+}
+function sanitizarAparelho(bruto) {
+  if (!bruto || typeof bruto !== 'object' || Array.isArray(bruto)) return null;
+  const saida = {};
+
+  const bat = bruto.bateria;
+  if (bat && typeof bat === 'object') {
+    const porcento = numeroEntre(bat.porcento, 0, 100, 0);
+    if (porcento !== null) saida.bateria = { porcento, carregando: bat.carregando === true };
+  }
+
+  const arm = bruto.armazenamento;
+  if (arm && typeof arm === 'object') {
+    const totalGb = numeroEntre(arm.totalGb, 0, 100000, 2);
+    const usadoGb = numeroEntre(arm.usadoGb, 0, 100000, 2);
+    const usadoPct = numeroEntre(arm.usadoPct, 0, 100, 0);
+    if (totalGb !== null && usadoGb !== null && usadoPct !== null) {
+      saida.armazenamento = { usadoGb, totalGb, usadoPct };
+    }
+  }
+
+  const rede = bruto.rede;
+  if (rede && typeof rede === 'object') {
+    const r = {};
+    const tipo = String(rede.tipo || '').trim().slice(0, 20);
+    const geracao = String(rede.geracao || '').trim().slice(0, 10);
+    const downlinkMbps = numeroEntre(rede.downlinkMbps, 0, 10000, 2);
+    if (tipo) r.tipo = tipo;
+    if (geracao) r.geracao = geracao;
+    if (downlinkMbps !== null) r.downlinkMbps = downlinkMbps;
+    if (Object.keys(r).length) saida.rede = r;
+  }
+
+  const so = bruto.so;
+  if (so && typeof so === 'object') {
+    const nome = String(so.nome || '').trim().slice(0, 20);
+    if (nome) saida.so = { nome, versao: String(so.versao || '').trim().slice(0, 20) || null, movel: so.movel === true };
+  }
+
+  if (typeof bruto.toque === 'boolean') saida.toque = bruto.toque;
+
+  // so bateria/armazenamento/rede/so contam como "contou alguma coisa": um
+  // objeto com apenas `toque` nao vale uma escrita
+  return Object.keys(saida).some((k) => k !== 'toque') ? saida : null;
+}
+
 function sanitizarTailscale(bruto) {
   if (!bruto || typeof bruto !== 'object') return null;
   const estados = ['Running', 'Stopped', 'NeedsLogin', 'NoState', 'desconhecido', 'erro'];
@@ -4734,5 +4806,5 @@ module.exports = {
   resumoEnderecoAgentes,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, pedirInventarioAtalhos, registrarInventarioAtalhos, noPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
-  BATERIA_BAIXA, BATERIA_CRITICA,
+  BATERIA_BAIXA, BATERIA_CRITICA, sanitizarAparelho,
 };
