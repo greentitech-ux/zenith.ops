@@ -26326,6 +26326,15 @@ $r | ConvertTo-Json -Compress
       'o link sai da MESMA rota e do MESMO token do comando de instalacao':
         /linkAndroid: agenteAndroid\.montarLinkInscricao\(\{ codigo, posto, agentToken, base: APP_BASE_URL \}\)/
           .test(fsB.readFileSync(__dirname + '/index.js', 'utf8')),
+      // a tela: quem inscreve um tablet e o Suporte, na mesma Manutencao onde
+      // ja copia o comando do Windows - e pela MESMA rota, pra nao existirem
+      // dois caminhos que peguem o token de lugares diferentes
+      'o NOC oferece o link de inscricao junto do comando do Windows': (() => {
+        const noc = fsB.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+        return /onclick="copiarLinkAndroid\('\$\{codigo\}','\$\{posto\}','\$\{tipo\}'\)"/.test(noc)
+          && /async function copiarLinkAndroid\(codigo, posto, tipo\)\{/.test(noc)
+          && /copiarLinkAndroid[\s\S]{0,600}comando-instalacao\?tipo=/.test(noc);
+      })(),
       // o CI do APK nao pode encostar no servidor, que nao tem CI de proposito
       'o build do APK so roda quando android/ muda':
         /paths:/.test(fluxo) && /'android\/\*\*'/.test(fluxo) && !/server\//.test(fluxo),

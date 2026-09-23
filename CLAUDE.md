@@ -29,6 +29,10 @@ Rótulo na tela pode mudar; **o identificador não**.
 | `adyen-monitor.onrender.com` | — | os 52 agentes apontam pra lá e o link já foi mandado pra cliente |
 | seção "NOC Zenith" | `loja-status.html` | é nome de seção interna, não marca de produto — fica |
 | `start_url: "/"` | `manifest.json` | o heartbeat depende de reabrir a raiz e ler a unidade salva no navegador — `name`/`short_name`/ícones podem mudar |
+| `br.com.nopulso.agente` | `android/app/build.gradle.kts` | é o `applicationId` do agente Android. Trocar não atualiza — instala um app **separado**, e cada tablet precisa de desinstalação na mão |
+| a chave de assinatura do APK | secret `ANDROID_KEYSTORE_BASE64` | o Android só aceita atualizar um app por outro assinado com a **mesma** chave. Chave perdida = reinstalar em cada tablet |
+| esquema `nopulso://inscrever` | `agenteAndroid.js`, `AndroidManifest.xml` | é o link que inscreve tablet. Esquema próprio de propósito: troca de domínio não pode quebrar a inscrição |
+| `VERSAO_AGENTE_ANDROID` ↔ `versionCode` | `agenteAndroid.js` ↔ `build.gradle.kts` | são o mesmo número em dois arquivos. Divergir = tablet que nunca atualiza. O `testeRotas.js` reprova |
 | `normalizarCodigoUnidade()`, `UNIDADES_APELIDOS`, `merchantAccountCode` | `migracaoUnidades.js`, Adyen | espaços de código de unidade. Rebranding é visual; o dado continua igual — inclui os 3 testes de fold do `testeRotas.js`, que são a prova de que o histórico antigo ainda é encontrado |
 
 ### Decisão fechada: mapa da planilha e códigos de unidade

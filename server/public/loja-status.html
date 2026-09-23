@@ -2382,6 +2382,11 @@ function pintarManutencaoProgramas(corpo){
         <p>Baixa o script individualizado para uso sem área de transferência ou por suporte local.</p>
         <button type="button" class="btn-ghost" onclick="baixarVigia('${codigo}','${posto}','${tipo}')">Baixar script</button>
       </article>
+      <article class="prog-manut-card">
+        <h4>📱 Inscrever tablet ou celular</h4>
+        <p>Para aparelho Android, no lugar do comando do Windows: o link abaixo inscreve o agente e ele passa a reportar mesmo com o NoPulso fechado.</p>
+        <button type="button" class="btn-ghost" onclick="copiarLinkAndroid('${codigo}','${posto}','${tipo}')">Copiar link de inscrição</button>
+      </article>
       ${acoesInternas}
     </div>`;
 }
@@ -4095,6 +4100,38 @@ async function copiarComandoVigia(codigo, posto, tipo, prefixo){
     } else {
       prompt(`${prefixo ? prefixo + ' ' : ''}Copie este comando (Ctrl+C) e cole no PowerShell da loja:\n\n${passos}`, comando);
     }
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+// TABLET/CELULAR ANDROID: a mesma maquina, inscrita de outro jeito.
+//
+// Sai da MESMA rota e do MESMO agentToken do comando do Windows (ver
+// linkAndroid em index.js) de proposito - duas formas de instalar que
+// pegassem o token de lugares diferentes acabariam discordando, e a maquina
+// ficaria com dois cadastros no NOC.
+//
+// O link nao se "cola" num terminal: quem abre e o proprio tablet. Por isso o
+// texto fala em mandar pro aparelho, e nao em colar em lugar nenhum.
+async function copiarLinkAndroid(codigo, posto, tipo){
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
+    if(!resp.ok) throw new Error('Erro ao gerar o link de inscrição.');
+    const { linkAndroid } = await resp.json();
+    if(!linkAndroid) throw new Error('Este servidor ainda não gera link de inscrição de Android.');
+    const passos = 'No tablet ou celular (Android):\n'
+      + '1) Instale o aplicativo NoPulso Agente\n'
+      + '2) Mande este link pro aparelho (WhatsApp, e-mail, ou digite no navegador dele)\n'
+      + '3) Abra o link NO APARELHO - ele já se inscreve e começa a reportar\n\n'
+      + 'A partir daí ele aparece no NOC como qualquer outra máquina, com bateria e '
+      + 'espaço, mesmo com o NoPulso fechado. Uma notificação fixa do agente fica na '
+      + 'barra do aparelho: é o Android que exige, e é ela que impede o sistema de '
+      + 'matar o monitoramento.';
+    let copiou = false;
+    try { await navigator.clipboard.writeText(linkAndroid); copiou = true; } catch(e){ /* clipboard bloqueado (http/permissão) */ }
+    if(copiou) alert(`Link de inscrição copiado! ✅\n\n${passos}`);
+    else prompt(`Copie este link (Ctrl+C) e mande pro aparelho:\n\n${passos}`, linkAndroid);
   }catch(e){
     alert(e.message);
   }
