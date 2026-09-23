@@ -120,6 +120,10 @@
   .busca-com-limpar button:hover{background:rgba(255,255,255,.08);color:var(--text);}
   .busca-com-limpar button{display:none;}
   .busca-com-limpar.tem-texto button{display:block;}
+  /* o ✕ aparece sempre que a caixa TEM texto, venha de onde vier (digitado,
+     colado, devolvido pelo navegador ao voltar de outra tela) - nao so
+     quando o oninput rodou */
+  .busca-com-limpar input:not(:placeholder-shown) ~ button{display:block;}
   .filtro-bar input[type=text]:focus{outline:none;border-color:var(--accent);}
   .filtro-bar select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:12.5px;font-family:var(--sans);}
   .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
@@ -680,7 +684,11 @@
 
   <div class="filtro-bar">
     <div class="busca-com-limpar">
-      <input type="text" id="filtro-texto" placeholder="🔎 Buscar por computador ou unidade..." oninput="onFiltroTexto()">
+      <!-- data-zenith-sem-rascunho: o guarda-rascunho do tema.js devolvia o
+           texto depois de recarregar SEM avisar a tela - a caixa mostrava
+           "suporte", a lista nao filtrava e o ✕ ficava escondido (23/09).
+           A busca e da tela aberta; recarregou, comeca limpa como o filtro. -->
+      <input type="text" id="filtro-texto" placeholder="🔎 Buscar por computador ou unidade..." oninput="onFiltroTexto()" autocomplete="off" data-zenith-sem-rascunho>
       <button type="button" id="limpar-filtro-texto" onclick="limparFiltroTexto()" title="Apagar texto do filtro" aria-label="Apagar texto do filtro">×</button>
     </div>
     <select id="filtro-unidade" onchange="onFiltroUnidade()">
@@ -2715,6 +2723,15 @@ function limparFiltroTexto(){
   onFiltroTexto();
   campo.focus();
 }
+// o que esta NA CAIXA e o filtro - sempre. Se algum caminho por fora (o
+// navegador restaurando o campo ao voltar de outra tela) mudar o texto sem
+// disparar o oninput, o proximo desenho ja filtra por ele e mostra o ✕
+function sincronizarBuscaDoCampo(){
+  const campo = document.getElementById('filtro-texto');
+  if(!campo) return;
+  FILTRO_TEXTO = campo.value.trim().toLowerCase();
+  campo.closest('.busca-com-limpar')?.classList.toggle('tem-texto', !!campo.value.trim());
+}
 function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-unidade').value; render(); }
 
 // computadores de verdade (passaram pelo cadastro, tem nome) - os "fantasmas"
@@ -3090,6 +3107,7 @@ async function carregarQuedas(periodo){
 }
 
 function render(){
+  sincronizarBuscaDoCampo();
   renderKpis();
   renderUnidades();
   renderFantasmas();

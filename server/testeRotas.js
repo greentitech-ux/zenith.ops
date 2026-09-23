@@ -26623,6 +26623,32 @@ $r | ConvertTo-Json -Depth 4 -Compress
   console.log(`${okDigitalConfirma ? '✓' : '✗'} Digital no lugar da senha: comprovante só do próprio acesso, curto, e em toda confirmação`);
 
   // ------------------------------------------------------------------
+  // NOC: A BUSCA NAO PODE MOSTRAR UM FILTRO QUE NAO ESTA FILTRANDO.
+  //
+  // Master (23/09/2026, print do celular): "Falta o x de limpa filtro". A
+  // caixa mostrava "suporte" depois de recarregar - o guarda-rascunho do
+  // tema.js devolvia o texto sem disparar o oninput - então a lista NÃO
+  // filtrava e o ✕ (que só aparecia pela classe posta no oninput) sumia.
+  let okBuscaNoc = false;
+  try {
+    const h = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const tag = (h.match(/<input[^>]*id="filtro-texto"[^>]*>/) || [''])[0];
+    const corpoRender = (h.match(/function render\(\)\{([\s\S]*?)\n\}/) || ['', ''])[1];
+    const conf = {
+      'o texto da busca não volta sozinho depois de recarregar': /\sdata-zenith-sem-rascunho[\s>]/.test(tag) && /autocomplete="off"/.test(tag),
+      'o ✕ aparece sempre que a caixa tem texto (não só depois do oninput)':
+        /\.busca-com-limpar input:not\(:placeholder-shown\) ~ button\{display:block;\}/.test(h) && /placeholder="/.test(tag),
+      'todo desenho filtra pelo que está NA caixa': /^\s*sincronizarBuscaDoCampo\(\);/.test(corpoRender)
+        && /function sincronizarBuscaDoCampo\(\)\{[\s\S]*?FILTRO_TEXTO = campo\.value\.trim\(\)\.toLowerCase\(\);/.test(h),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBuscaNoc = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBuscaNoc = false; console.log('  erro: ' + e.message); }
+  if (!okBuscaNoc) ruins += 1;
+  console.log(`${okBuscaNoc ? '✓' : '✗'} NOC: a busca tem ✕ e nunca mostra filtro que não está filtrando`);
+
+  // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
   //
   // Master (23/09/2026): "quero poder monitorar tanto celular como tablet -
