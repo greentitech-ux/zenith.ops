@@ -619,13 +619,9 @@ function painelHtml(chat){
   const nivel = nivelDe(chat);
   const colInfo = COLUNAS.find(c=>c.key===statusAtual);
   const tickets = chat.ticketsVinculados || [];
-  // O protocolo é só referência enquanto a conversa está em triagem. Quando
-  // ele gera trabalho, passa a ser Ticket # clicável e leva para o documento
-  // que continua aquele mesmo assunto. Se houver os dois destinos, os atalhos
-  // explícitos evitam escolher no escuro entre tarefa e chamado.
-  const destinoPrincipal = chat.chamadoId
-    ? `/tecnico.html?ticket=${encodeURIComponent(chat.numeroTicket)}`
-    : (chat.tarefaId ? `/tarefas.html?tarefa=${encodeURIComponent(chat.tarefaId)}` : null);
+  // Todo trabalho que nasce da conversa começa no Meu Dia. Só depois a
+  // triagem decide se será mesmo uma solicitação/chamado de TI.
+  const destinoPrincipal = chat.tarefaId ? `/tarefas.html?tarefa=${encodeURIComponent(chat.tarefaId)}` : null;
   const protocoloHtml = chat.numeroTicket
     ? (destinoPrincipal
       ? `<a href="${destinoPrincipal}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700;">Ticket #${escapeHtml(chat.numeroTicket)}</a>`
@@ -653,7 +649,6 @@ function painelHtml(chat){
   } else {
     acoes.push(`<button type="button" class="btn-icone" data-dica="Reabrir" aria-label="Reabrir" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️</button>`);
   }
-  if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-icone" data-dica="Gerar chamado remoto" aria-label="Gerar chamado remoto" onclick="gerarChamadoRemoto('${chat.id}')">🎫</button>`);
   if(!chat.tarefaId) acoes.push(`<button type="button" class="btn-icone" data-dica="Gerar tarefa" aria-label="Gerar tarefa" onclick="gerarTarefa('${chat.id}')">📝</button>`);
   else acoes.push(`<a class="btn-icone" data-dica="Tarefa gerada - abrir o Meu Dia" aria-label="Tarefa gerada - abrir o Meu Dia" href="/tarefas.html">📝</a>`);
   if(IS_MASTER) acoes.push(`<button type="button" class="btn-icone" data-dica="Baixar PDF da conversa" aria-label="Baixar PDF da conversa" onclick="baixarPdfConversa('${chat.id}')">📄</button>`);
@@ -886,27 +881,9 @@ async function enviarResposta(id){
   }
 }
 
-// vira chamado REMOTO vinculado, no nome de quem esta atendendo - registro
-// da atuacao no banco de evidencias mesmo quando o Beniboy/time resolve pelo
-// proprio chat. Usa a loja ja identificada na conversa (lojaContexto), se
-// houver - senao o chamado nasce como "Suporte remoto" (ver rota no index.js)
-async function gerarChamadoRemoto(id){
-  const chat = ITENS.find(c=>c.id===id);
-  if(!chat) return;
-  if(!confirm('Gerar um chamado remoto vinculado a essa conversa, atribuído a você?')) return;
-  try{
-    const resp = await fetch(`/api/suporte-chats/${id}/gerar-chamado`, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unidade: chat.lojaContexto || undefined }),
-    });
-    const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error || 'Erro ao gerar chamado.');
-    await carregarLista();
-  }catch(err){ alert(err.message); }
-}
-
-// Nem todo atendimento precisa virar chamado técnico. Quando exige
-// acompanhamento, a tarefa nasce com o mesmo protocolo do chat, já atribuída
-// a quem está atendendo e com a unidade/contexto conhecidos pela conversa.
+// Quando exige acompanhamento, a tarefa nasce com o mesmo protocolo do chat,
+// já atribuída a quem está atendendo. Master/Suporte decide depois se ela
+// merece virar uma solicitação de Suporte de TI.
 async function gerarTarefa(id){
   const chat = ITENS.find(c=>c.id===id);
   if(!chat) return;

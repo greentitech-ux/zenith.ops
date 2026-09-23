@@ -173,7 +173,10 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
   // Se o ticket nasceu ao converter uma tarefa manual, aquela tarefa É a
   // execução original. Atualizá-la aqui evita duas cópias do mesmo trabalho e
   // garante que Central e Meu Dia cheguem ao mesmo estado.
-  const origemId = tipo === 'solicitacao' ? String(ticket.origemTarefa?.id || '').trim() : '';
+  // Uma tarefa de triagem pode virar tanto solicitação comum quanto estorno.
+  // Em ambos os casos ela é o trabalho original; criar a cópia automática do
+  // ticket faria o mesmo pedido aparecer duas vezes no Meu Dia.
+  const origemId = String(ticket.origemTarefa?.id || '').trim();
   if (origemId) {
     const origemRef = COLLECTION.doc(origemId);
     const origemSnap = await origemRef.get();
@@ -182,7 +185,8 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       const concluida = statusDoTicket(ticket) === 'CONCLUIDA';
       const reaberta = !concluida && atual.status === 'CONCLUIDA';
       const patch = {
-        solicitacaoId: ticket.id, numeroTicket: ticket.numeroTicket || atual.numeroTicket || null,
+        ...(tipo === 'estorno' ? { estornoId: ticket.id } : { solicitacaoId: ticket.id }),
+        numeroTicket: ticket.numeroTicket || atual.numeroTicket || null,
         status: statusDoTicket(ticket), atualizadoEm: agora,
         ...(concluida && !atual.concluidaEm ? {
           concluidaEm: ticket.execucaoFinalizadaEm || agora,
@@ -298,7 +302,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -339,7 +343,13 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
     eventoGoogleId: reuniao.eventoGoogleId || null,
     responsavelId: (responsavel || usuario).id, responsavelEmail: (responsavel || usuario).email || null, responsavelNome: nomeUsuario(responsavel || usuario),
     criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
-    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [],
+    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo,
+    anexos: (Array.isArray(anexosIniciais) ? anexosIniciais : []).slice(0, 5)
+      .map((a) => ({ nome: String(a?.nome || 'Anexo').slice(0, 200), path: String(a?.path || ''), tipo: String(a?.tipo || 'application/octet-stream') }))
+      .filter((a) => a.path),
+    // Dados de triagem não são exibidos na descrição. Servem apenas para que
+    // Master/Suporte decidam, depois, se o pedido merece virar uma solicitação.
+    triagem: triagem && typeof triagem === 'object' ? triagem : null,
     colaboradores: equipe, colaboradoresIds: equipe.map((p) => p.id), participantesApenasAcompanham: !!participantesApenasAcompanham,
     unidade: unidade || null, unidadeNome: unidadeNome || unidade || null,
     // passos ja nascem desmarcados: a serie recorrente repete a CHECKLIST, nao
@@ -748,7 +758,7 @@ async function atualizarUnidade(id, acesso, { unidade, unidadeNome } = {}) {
   return { ...tarefa, unidade: unidade || null, unidadeNome: unidadeNome || unidade || null, comentarios, atualizadoEm: agora };
 }
 
-async function prepararConversaoEmSolicitacao(id, acesso) {
+async function prepararConversaoEmSolicitacao(id, acesso, tipoDestino = 'solicitacao') {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
@@ -758,7 +768,8 @@ async function prepararConversaoEmSolicitacao(id, acesso) {
   // assunto; a tela deve abrir o ticket original, onde status/tipo evoluem
   // mantendo o Ticket #.
   if (tarefa.vinculo?.id) throw new Error('Esta tarefa já pertence ao Ticket #' + (tarefa.numeroTicket || tarefa.vinculo.numeroTicket) + '. Abra o ticket vinculado para mudar o tipo ou o andamento.');
-  if (tarefa.solicitacaoId) return { tarefa, numeroTicket: tarefa.numeroTicket || null, jaTemSolicitacao: true };
+  const campoDestino = tipoDestino === 'estorno' ? 'estornoId' : 'solicitacaoId';
+  if (tarefa[campoDestino]) return { tarefa, numeroTicket: tarefa.numeroTicket || null, jaTemSolicitacao: true, ticketId: tarefa[campoDestino] };
   if (tarefa.numeroTicket != null) return { tarefa, numeroTicket: tarefa.numeroTicket, jaTemSolicitacao: false };
   // Compatibilidade para tarefas antigas: a primeira conversão reserva o
   // número que elas não receberam antes desta regra existir.
