@@ -459,6 +459,14 @@ async function definirApelidoDispositivo(codigo, mac, entrada) {
   return { codigo, mac: macOk, apelido: limpo || null, tipo, monitorar, marca, medidorQuedas };
 }
 
+// BATERIA DE TABLET (ver public/aparelho.js). Dois limiares, não um: 20% é
+// "ainda dá tempo de ligar na tomada", 10% é "vai apagar no meio do
+// serviço". São escolha de produto, não medida de nada - por isso ficam aqui
+// nomeados, e a tela do NOC lê os MESMOS números (loja-status.html), senão o
+// card pinta de vermelho um valor que o servidor não considera crítico.
+const BATERIA_BAIXA = 20;
+const BATERIA_CRITICA = 10;
+
 const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
 function tipoValido(tipo) { return TIPOS_COMPUTADOR.includes(tipo) ? tipo : 'atendimento'; }
 
@@ -875,6 +883,24 @@ const CARENCIA_POS_BOOT_MS = Number(process.env.LOJA_STATUS_CARENCIA_BOOT_MS) >=
   : 2 * 60 * 1000;
 const processoIniciadoEm = Date.now();
 
+// true quando o aparelho saiu do nível que gerou aviso - é o que permite
+// avisar de novo na próxima descarga sem repetir a cada batida
+function bateriaVoltou(atual, aparelho) {
+  const b = aparelho && aparelho.bateria;
+  if (!b || typeof b.porcento !== 'number') return false;
+  if (!(atual && atual.bateriaAvisadaEm)) return false;
+  return b.carregando || b.porcento > BATERIA_BAIXA;
+}
+// o aviso sai UMA vez por descarga, e só pra aparelho que está na tomada de
+// ninguém: tablet carregando não é problema, é tablet carregando
+function precisaAvisarBateria(atual, aparelho) {
+  const b = aparelho && aparelho.bateria;
+  if (!b || typeof b.porcento !== 'number' || b.carregando) return null;
+  if (b.porcento > BATERIA_BAIXA) return null;
+  if (atual && atual.bateriaAvisadaEm) return null;
+  return { porcento: b.porcento, critica: b.porcento <= BATERIA_CRITICA };
+}
+
 async function heartbeat(codigo, posto, info, token) {
   const id = docIdFor(codigo, posto || 'principal');
   const ref = COLLECTION.doc(id);
@@ -888,6 +914,12 @@ async function heartbeat(codigo, posto, info, token) {
   const atual = memoria.get(id) || null;
   const mensagemPendente = (atual && atual.mensagemPendente) || null;
   const dados = info || {};
+  // BATERIA: decidido com o estado ANTERIOR a esta batida (`atual`), e o
+  // resultado entra no MESMO patch la embaixo. Ja foi um `ref.set` separado,
+  // depois do patch - e ai a marca ia pro banco mas nao pro espelho em
+  // memoria, que e de onde a proxima batida le: 25s depois o servidor nao
+  // sabia que ja tinha avisado e mandava push de novo, pra sempre.
+  const avisoBateria = precisaAvisarBateria(atual, dados.aparelho);
   // presenca (online/offline, IP, userAgent) continua SEM exigir token - e
   // telemetria de baixo risco e nao pode deixar maquina legada (que ainda
   // nao atualizou o NOCZenith, entao nao manda token) sumir do painel. Ja o
@@ -919,6 +951,19 @@ async function heartbeat(codigo, posto, info, token) {
     // donos do heartbeat (so ele escreve), entao o read-then-write aqui nao
     // repete a corrida que avisadoOffline teve com a varredura.
     ...metricasDeRede(atual, dados.rede),
+    // APARELHO (tablet/celular): bateria, armazenamento, tipo de rede e
+    // sistema, do jeito que o navegador entrega (ver public/aparelho.js).
+    // Master (23/09/2026): "temos celulares e tablets no parque".
+    //
+    // Só sobrescreve quando a batida TROUXE o dado: navegador que não sabe
+    // responder (iOS não tem API de bateria) manda nulo, e nulo aqui não
+    // pode apagar o que um navegador melhor já contou no mesmo aparelho.
+    ...(dados.aparelho ? { aparelho: { ...dados.aparelho, em: Date.now() } } : {}),
+    // a marca de "já avisei desta vez" zera sozinha quando o tablet volta a
+    // ter carga (ou entra no carregador): sem isso, ou o aviso repete a cada
+    // 25s, ou sai uma vez só e nunca mais, nem na próxima descarga
+    ...(avisoBateria ? { bateriaAvisadaEm: Date.now() }
+      : bateriaVoltou(atual, dados.aparelho) ? { bateriaAvisadaEm: null } : {}),
     // Quantas batidas seguidas quem bate TENTOU e nao conseguiu entregar
     // antes desta. Quem conta e o proprio agente/aba (ele incrementa a cada
     // falha e manda o contador na primeira batida que passa), entao a batida
@@ -1033,6 +1078,10 @@ async function heartbeat(codigo, posto, info, token) {
     || patch.redeHistorico !== undefined      // virada de dia da rede
     // reinício e mudança de link são eventos: não podem esperar o
     // PERSIST_MS, senão um restart do servidor apagaria o rastro
+    // a marca de bateria (avisei / rearmei) nao pode esperar o PERSIST_MS:
+    // um restart no meio da janela apagaria o "ja avisei" e o push sairia
+    // de novo assim que a maquina batesse
+    || patch.bateriaAvisadaEm !== undefined
     || eventosNovos.length > 0;
   const desdeUltimaGravacao = Date.now() - (ultimaGravacaoEm.get(id) || 0);
   const precisaPersistir = mudouAlgoQueImporta || desdeUltimaGravacao >= PERSIST_MS;
@@ -1115,6 +1164,9 @@ async function heartbeat(codigo, posto, info, token) {
     // gatilho normal, mas um marcador local antigo ou uma corrida entre as
     // instâncias de login/SYSTEM não pode deixar a leitura presa para sempre.
     inventarioAtalhosPendenteEm: Number(atual && atual.inventarioAtalhosPendenteEm || 0) || null,
+    // quem dispara o push é o index.js, como nos outros avisos - aqui só sai
+    // o fato, uma vez por descarga (ver precisaAvisarBateria)
+    avisoBateria,
   };
 }
 
@@ -4383,4 +4435,5 @@ module.exports = {
   resumoEnderecoAgentes,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, pedirInventarioAtalhos, registrarInventarioAtalhos, noPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
+  BATERIA_BAIXA, BATERIA_CRITICA,
 };

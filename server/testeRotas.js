@@ -24444,6 +24444,128 @@ setTimeout(async () => {
   if (!okPasskey) ruins += 1;
   console.log(`${okPasskey ? '✓' : '✗'} Passkey: entrar com digital/rosto sem pular nenhuma trava do login por senha`);
 
+  // ------------------------------------------------------------------
+  // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
+  //
+  // Master (23/09/2026): "quero poder monitorar tanto celular como tablet -
+  // temos celulares e tablets no parque".
+  //
+  // Não há agente pra Android/iOS (o NOCZenith é PowerShell, e nem iOS nem
+  // Android rodam página em segundo plano de forma confiável). O que existe
+  // é o quiosque batendo presença, e o que faltava era saber do APARELHO:
+  // bateria, armazenamento, rede e sistema.
+  //
+  // O que este teste protege: o dado tem que vir do aparelho (nunca chutado),
+  // não pode custar operação nova no Firestore, e o aviso de bateria tem que
+  // sair UMA vez por descarga - um push a cada 25s seria o fim do NOC.
+  let okAparelhoMovel = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const fsA = require('fs');
+    const coletor = fsA.readFileSync(__dirname + '/public/aparelho.js', 'utf8');
+    const nocHtml = fsA.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const srcLs = fsA.readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+    const srcIdxA = fsA.readFileSync(__dirname + '/index.js', 'utf8');
+    const telas = ['atendimento', 'abastecimento', 'index']
+      .map((t) => fsA.readFileSync(__dirname + `/public/${t}.html`, 'utf8'));
+
+    // o aviso: uma vez por descarga, e rearma quando volta a carregar
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const bater = (aparelho) => postarJson('/api/loja-status/heartbeat',
+      { unidade: '19855', posto: 'TABLET-T', userAgent: 'Mozilla/5.0 (Linux; Android 14)', aparelho }, cab);
+    const cheio = { bateria: { porcento: 80, carregando: false } };
+    const baixo = { bateria: { porcento: 12, carregando: false } };
+    const critico = { bateria: { porcento: 6, carregando: false } };
+    const carregando = { bateria: { porcento: 9, carregando: true } };
+
+    const alertasDeBateria = () => [...DOCS.entries()]
+      .filter(([k, v]) => k.startsWith('alertasCentral/') && v && v.tipo === 'bateria-aparelho').length;
+    const docDoTablet = () => {
+      const achado = [...DOCS.entries()].find(([k]) => k.startsWith('lojaStatus/') && k.includes('TABLET-T'));
+      return achado ? achado[1] : null;
+    };
+
+    // o push sai FORA da resposta do heartbeat de propósito: a batida das 52
+    // máquinas não pode esperar o envio (ver index.js). Então contar logo
+    // depois do await do POST pegaria o alerta antes dele existir - daí o
+    // teto: espera até aparecer, e desiste (falhando) se não aparecer.
+    const ateContar = async (alvo) => {
+      for (let i = 0; i < 60 && alertasDeBateria() < alvo; i++) await new Promise((r) => setTimeout(r, 10));
+      return alertasDeBateria();
+    };
+    // "não repetiu" precisa da mesma folga, senão passa só por chegar antes
+    const folga = () => new Promise((r) => setTimeout(r, 120));
+
+    await bater(cheio);
+    await folga();
+    const antes = alertasDeBateria();
+    await bater(baixo);                    // 1o aviso
+    const apos1 = await ateContar(antes + 1);
+    const marcaDepoisDoAviso = !!(docDoTablet() || {}).bateriaAvisadaEm;
+    await bater(critico);                  // não repete
+    await folga();
+    const apos2 = alertasDeBateria();
+    await bater(carregando);               // rearma
+    await folga();
+    const marcaAposCarregar = (docDoTablet() || {}).bateriaAvisadaEm;
+    await bater(baixo);                    // avisa de novo
+    const apos3 = await ateContar(apos2 + 1);
+
+    const doc = docDoTablet() || {};
+
+    const conf = {
+      'o aparelho contou, e o NOC guardou': !!doc.aparelho && doc.aparelho.bateria.porcento === 12,
+      'o aviso de bateria sai na primeira vez': apos1 === antes + 1,
+      'e NÃO repete a cada batida (seria push de 25 em 25s)': apos2 === apos1,
+      'a marca de "já avisei" fica gravada': marcaDepoisDoAviso === true,
+      'aparelho voltando a carregar rearma o aviso': marcaAposCarregar === null,
+      'e a próxima descarga avisa de novo': apos3 === apos2 + 1,
+      'crítico é separado de baixo (recado x alguém levanta agora)':
+        ls.BATERIA_CRITICA < ls.BATERIA_BAIXA && ls.BATERIA_CRITICA === 10 && ls.BATERIA_BAIXA === 20,
+      // se a tela e o servidor discordarem, o card pinta de vermelho o que o
+      // servidor não considera crítico
+      'a tela do NOC usa os MESMOS limiares do servidor': (() => {
+        const daTela = (nome) => Number((nocHtml.match(new RegExp(`const ${nome} = (\\d+);`)) || [])[1]);
+        return daTela('BATERIA_BAIXA') === ls.BATERIA_BAIXA && daTela('BATERIA_CRITICA') === ls.BATERIA_CRITICA;
+      })(),
+      // CLAUDE.md §3: o heartbeat já escreve a cada 25s - a telemetria entra
+      // NA MESMA escrita, sem operação nova
+      'a telemetria pega carona na escrita que já existia':
+        /\.\.\.\(dados\.aparelho \? \{ aparelho: \{ \.\.\.dados\.aparelho, em: Date\.now\(\) \} \} : \{\}\)/.test(srcLs)
+        && !/COLLECTION\.doc\(id\)\.set\(\{ aparelho/.test(srcLs),
+      // navegador que não sabe responder manda nulo - e nulo não pode apagar
+      // o que outro navegador já contou no mesmo aparelho
+      'nulo não apaga o que já estava gravado':
+        /dados\.aparelho \? \{ aparelho/.test(srcLs),
+      'as três telas que batem presença mandam o aparelho':
+        telas.every((t) => /aparelho: await \(window\.aparelhoTelemetria/.test(t))
+        && telas.every((t) => /<script src="\/aparelho\.js"><\/script>/.test(t)),
+      // nada de número inventado: sem API, o campo não vai
+      'o coletor só manda o que o navegador entrega':
+        /if \(!navigator\.getBattery\) return Promise\.resolve\(null\);/.test(coletor)
+        && /if \(!navigator\.storage \|\| !navigator\.storage\.estimate\)/.test(coletor)
+        && /return Object\.keys\(saida\)\.length > 1 \? saida : null;/.test(coletor),
+      // tablet que dorme some do NOC e vira alarme falso de loja offline
+      'o quiosque segura a tela acordada, e repõe quando volta pro primeiro plano':
+        /navigator\.wakeLock\.request\('screen'\)/.test(coletor)
+        && /visibilityState === 'visible' && !travaTela/.test(coletor)
+        && /if \(window\.manterTelaAcordada\) window\.manterTelaAcordada\(\);/.test(
+          fsA.readFileSync(__dirname + '/public/atendimento.html', 'utf8')),
+      'o card só mostra o que o aparelho contou (iOS não tem bateria)':
+        /if\(ap && ap\.bateria && typeof ap\.bateria\.porcento === 'number'\)\{/.test(nocHtml),
+      'o push é do NOC (Master/Suporte), nunca da loja':
+        /if \(!podeReceberCritico\(sub\)\) continue;/.test(fsA.readFileSync(__dirname + '/push.js', 'utf8').slice(
+          fsA.readFileSync(__dirname + '/push.js', 'utf8').indexOf('async function notifyBateriaAparelho'))),
+      'o disparo sai do heartbeat, sem travar a resposta':
+        /if \(avisoBateria\) \{/.test(srcIdxA) && /push\.notifyBateriaAparelho\(req\.body\.unidade, req\.body\.posto, avisoBateria\)/.test(srcIdxA),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAparelhoMovel = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAparelhoMovel = false; console.log('  erro: ' + e.message); }
+  if (!okAparelhoMovel) ruins += 1;
+  console.log(`${okAparelhoMovel ? '✓' : '✗'} Tablet/celular no NOC: bateria, espaço, rede e sistema - avisando uma vez por descarga`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

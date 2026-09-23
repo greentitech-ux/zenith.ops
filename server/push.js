@@ -1282,6 +1282,38 @@ async function notifyRedeUnidade(unidadeNome, codigo, resumo, caiu) {
   }
 }
 
+// BATERIA DE TABLET/CELULAR no ponto de venda (ver public/aparelho.js).
+// Master (23/09/2026): "temos celulares e tablets no parque". O aparelho que
+// apaga no meio do serviço é o quiosque do salão - e hoje ninguém sabe que
+// ele está em 8% sem ir olhar.
+//
+// Mesmo público do resto do NOC (Master ou tag Suporte, ver
+// podeReceberCritico): a loja NÃO recebe. E crítico só abaixo do segundo
+// limiar - "20%" é recado, "8%" é alguém precisa levantar agora.
+async function notifyBateriaAparelho(codigo, posto, aviso) {
+  const onde = [posto, codigo].filter(Boolean).join(' · ');
+  const dados = {
+    title: aviso.critica ? `🪫 Bateria crítica · ${onde}` : `🔋 Bateria baixa · ${onde}`,
+    body: `O aparelho está com ${aviso.porcento}% e não está carregando.`,
+    tag: `bateria-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+    critical: !!aviso.critica,
+  };
+  await alertasCentral.registrar({ tipo: 'bateria-aparelho', titulo: dados.title, resumo: dados.body, url: dados.url, critico: !!aviso.critica });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (bateria):', err.message);
+    }
+  }
+}
+
 async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispositivo, mac, tipoRotulo) {
   const nome = apelido || mac;
   const { icone, rotulo } = rotuloTipoDispositivo(tipoDispositivo, tipoRotulo);
@@ -1607,7 +1639,7 @@ module.exports = {
   notifyProgramaNovo,
   notifyProgramaSumido,
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
+  notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyBateriaAparelho, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyRamAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyComandoTravado, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,

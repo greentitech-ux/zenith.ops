@@ -32,6 +32,7 @@
   @media (prefers-reduced-motion:reduce){ .seta{animation:none;} }
 </style>
 <script src="/tema.js"></script>
+<script src="/aparelho.js"></script>
 </head>
 <body>
 
@@ -109,7 +110,10 @@ async function heartbeat(codigo, posto){
     const r = await fetch('/api/loja-status/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde(), rede }),
+      // o que o navegador sabe do aparelho (bateria, armazenamento, rede, SO)
+      // viaja de carona: nenhuma requisição a mais, nenhuma escrita a mais
+      // (ver aparelho.js)
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde(), rede, aparelho: await (window.aparelhoTelemetria ? window.aparelhoTelemetria() : Promise.resolve(null)) }),
     });
     if(r.ok){
       _redeUltimaLatencia = Date.now() - t0;
@@ -147,6 +151,10 @@ async function boot(){
     }catch(e){ /* segue sem contexto de loja - o Beniboy pergunta normal */ }
     heartbeat(unidadeFixa, postoFixo);
     setInterval(() => heartbeat(unidadeFixa, postoFixo), 25 * 1000);
+    // tablet de quiosque que dorme para de bater presença e some do NOC - a
+    // loja aparece offline sem nada ter acontecido. Só vale nesta tela, que é
+    // a permanente; onde o navegador não tiver a trava, segue como antes.
+    if (window.manterTelaAcordada) window.manterTelaAcordada();
   }
   const s = document.createElement('script');
   s.src = '/suporte-chat.js';

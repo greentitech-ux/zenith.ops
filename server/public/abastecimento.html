@@ -274,6 +274,7 @@
   .btn-primary:disabled{opacity:.5;cursor:default;}
 </style>
 <script src="/tema.js"></script>
+<script src="/aparelho.js"></script>
 </head>
 <body>
 
@@ -744,7 +745,7 @@ async function heartbeatLoja(codigo, posto){
     await _rawFetch('/api/loja-status/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde(), rede }),
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde(), rede, aparelho: await (window.aparelhoTelemetria ? window.aparelhoTelemetria() : Promise.resolve(null)) }),
     });
     _redeUltimaLatencia = Date.now() - t0;
     _redeFalhasSeguidas = 0;

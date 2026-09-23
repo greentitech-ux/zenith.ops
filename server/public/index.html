@@ -102,6 +102,7 @@
   /* ===== fim login: balão ===== */
 </style>
 <script src="/tema.js"></script>
+<script src="/aparelho.js"></script>
 </head>
 <body>
 
@@ -591,7 +592,7 @@ async function heartbeatLoja(codigo, posto){
     const r = await fetch('/api/loja-status/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesdeLoja(), rede }),
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesdeLoja(), rede, aparelho: await (window.aparelhoTelemetria ? window.aparelhoTelemetria() : Promise.resolve(null)) }),
     });
     if(r.ok){
       _redeUltimaLatencia = Date.now() - t0;

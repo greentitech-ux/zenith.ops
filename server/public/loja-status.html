@@ -1335,6 +1335,9 @@ const ESTADO_LABEL = {
   offline: 'Indisponível',
   nunca: 'Sem agente',
 };
+// limiares de bateria — iguais aos de lojaStatus.js (o teste compara)
+const BATERIA_BAIXA = 20;
+const BATERIA_CRITICA = 10;
 function statusDe(c){
   if(!c.ultimoHeartbeatEm) return 'nunca';
   if(!c.online) return 'offline';
@@ -1673,6 +1676,31 @@ function atualizarConteudoDetalhe(codigo, c){
   }
   const disp = resumoDispositivo(c.userAgent);
   if(disp) infoBits.push(`💻 ${escapeHtml(disp)}`);
+  // APARELHO DE NAVEGADOR (tablet/celular de quiosque, ver public/aparelho.js).
+  // Só aparece quando o aparelho REALMENTE contou - iOS não tem API de
+  // bateria, e linha vazia é pior que linha nenhuma.
+  // os mesmos limiares do servidor (BATERIA_BAIXA/BATERIA_CRITICA em
+  // lojaStatus.js): se divergirem, o card pinta de vermelho um valor que o
+  // servidor não considera crítico - e o teste reprova
+  const ap = c.aparelho || null;
+  if(ap && ap.bateria && typeof ap.bateria.porcento === 'number'){
+    // a cor é a mesma gramática de gravidade do resto do NOC (ok/warn/bad),
+    // não uma escala nova: bateria baixa é o que faz o tablet morrer no meio
+    // do serviço
+    const p = ap.bateria.porcento;
+    const cor = ap.bateria.carregando ? 'var(--ok)' : (p <= BATERIA_CRITICA ? 'var(--bad)' : (p <= BATERIA_BAIXA ? 'var(--warn,#e0a800)' : 'var(--text)'));
+    infoBits.push(`${ap.bateria.carregando ? '🔌' : '🔋'} Bateria: <b style="color:${cor};">${p}%</b>${ap.bateria.carregando ? ' · carregando' : ''}`);
+  }
+  if(ap && ap.armazenamento && ap.armazenamento.totalGb){
+    infoBits.push(`💾 Espaço do app: <b>${ap.armazenamento.usadoGb} GB</b> de ${ap.armazenamento.totalGb} GB (${ap.armazenamento.usadoPct}%)`);
+  }
+  if(ap && ap.rede && (ap.rede.tipo || ap.rede.geracao)){
+    const via = ap.rede.tipo === 'wifi' ? 'Wi-Fi' : (ap.rede.tipo === 'cellular' ? 'dados móveis' : (ap.rede.tipo || ap.rede.geracao));
+    infoBits.push(`📡 Conexão: <b>${escapeHtml(String(via))}</b>${ap.rede.geracao && ap.rede.tipo ? ` · ${escapeHtml(ap.rede.geracao)}` : ''}${ap.rede.downlinkMbps ? ` · ~${ap.rede.downlinkMbps} Mbps` : ''}`);
+  }
+  if(ap && ap.so && ap.so.nome){
+    infoBits.push(`📱 Sistema: <b>${escapeHtml(ap.so.nome)}${ap.so.versao ? ' ' + escapeHtml(ap.so.versao) : ''}</b>`);
+  }
   if(c.abertoDesde) infoBits.push(`⏱️ aberto ${escapeHtml(tempoRelativo(c.abertoDesde))}`);
   if(status!=='nunca') infoBits.push(`📶 sinal ${escapeHtml(tempoRelativo(c.ultimoHeartbeatEm))}`);
   // Zebra não é "último comando" genérico: logo abaixo do sinal fica o resumo

@@ -1801,8 +1801,12 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // a entrega do comando/chat (ver lojaStatus.heartbeat); presenca/IP nao
     // dependem dele, pra maquina legada nao sumir do painel
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, avisoBateria } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
+      // o que o navegador sabe do aparelho (bateria, armazenamento, rede, SO
+      // - ver public/aparelho.js). Entra na MESMA escrita do heartbeat, que
+      // já acontece a cada 25s: telemetria de tablet não custa operação nova.
+      aparelho: req.body.aparelho,
       // medicao de link (ver redeDiagnostico.js). Vem do agente/navegador e
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
       // e o redeDiagnostico.sanitizarAmostra, chamado la dentro.
@@ -1817,6 +1821,13 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       soComandoAdmin: req.body.soComandoAdmin === true,
     }, token);
     res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao });
+    // BATERIA DO TABLET (ver public/aparelho.js). Sai uma vez por descarga -
+    // o aparelho voltando a carregar rearma o aviso. Vai pro mesmo público
+    // do NOC (Master/Suporte), nunca pra loja.
+    if (avisoBateria) {
+      push.notifyBateriaAparelho(req.body.unidade, req.body.posto, avisoBateria)
+        .catch((e) => console.error('[bateria] falha ao avisar:', e.message));
+    }
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
