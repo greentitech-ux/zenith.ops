@@ -30,7 +30,7 @@ const FERRAMENTAS = Object.freeze({
   criar_usuario: { descricao: 'Cria acesso copiando permissões de um usuário-modelo.', risco: 'alto', obrigatorios: ['modelo', 'email', 'username'], confirmar: true, devolveSegredo: true },
   desbloquear_usuario: { descricao: 'Desbloqueia um acesso existente sem trocar a senha.', risco: 'alto', obrigatorios: ['usuario'], confirmar: true },
   criar_nova_senha: { descricao: 'Gera e aplica senha temporária aleatória; Master precisa repassá-la com segurança.', risco: 'alto', obrigatorios: ['usuario'], confirmar: true, devolveSegredo: true },
-  executar_noc: { descricao: 'Enfileira uma ação fechada do NOC em computadores. Resetar Zebra só é permitido em unidade com marca Domino\'s configurada e Zebra monitorada.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], confirmar: true },
+  executar_noc: { descricao: 'Enfileira uma ação fechada do NOC em computadores. Resetar Zebra só é permitido em unidade com marca Domino\'s configurada e Zebra monitorada. Para "TEF parou", use gsurf-rsa: reinicia o GSurfRSA Listener somente nas cinco unidades autorizadas e pode interromper uma transação por alguns segundos.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], confirmar: true },
 });
 
 function listarFerramentas() {
@@ -172,6 +172,21 @@ async function despachar(nome, entrada, ator) {
         if (!zebras.length) {
           throw new Error(`Reset de Zebra recusado para ${codigo}: não há impressora Zebra monitorada com IP atual nesta unidade.`);
         }
+      }
+    }
+    if (tarefa === 'gsurf-rsa') {
+      // O TEF só usa este listener nas unidades abaixo. A permissão é por
+      // código canônico da unidade, nunca por trecho do nome exibido.
+      const unidadesTefAutorizadas = new Set([
+        "Domino's Carrinho Aeroporto Recife",
+        'Dominos Praça Aeroporto Recife',
+        'Spoleto Praça Aeroporto Recife',
+        'Spoleto Shopping Recife',
+        'Spoleto Shopping Tacaruna',
+      ]);
+      const naoAutorizadas = [...new Set(alvos.map((a) => String(a.codigo)))].filter((codigo) => !unidadesTefAutorizadas.has(codigo));
+      if (naoAutorizadas.length) {
+        throw new Error(`TEF parou / GSurfRSA recusado para: ${naoAutorizadas.join(', ')}. Permitido somente em Dom Car Aero Recife, Dom Praça Aero Recife, Spo Praça Aero Recife, Spo Shop Recife e Spo Shop Tacaruna.`);
       }
     }
   }

@@ -563,7 +563,7 @@ const TAREFAS_NOC = {
   reiniciar: { verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
   abortar: { verbo: 'Abortar o reinício de', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
   anydesk: { verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
-  'gsurf-rsa': { verbo: 'Reiniciar o GSurfRSA Listener de', comando: lojaStatus.COMANDO_REINICIAR_GSURF_RSA, origem: 'manutencao-gsurf-rsa', requerAdmin: true },
+  'gsurf-rsa': { verbo: 'TEF parou — reiniciar o GSurfRSA Listener de', comando: lojaStatus.COMANDO_REINICIAR_GSURF_RSA, origem: 'manutencao-gsurf-rsa', requerAdmin: true },
   'corrigir-memoria-limitada': { verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
   rede: { verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede' },
   zebra: { verbo: 'Resetar as Zebras de', comando: async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)), origem: 'manutencao-zebra' },
