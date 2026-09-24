@@ -4,6 +4,9 @@ Painel operacional de um grupo de franquias. O produto chama **NoPulso**;
 o repositório ainda se chama `adyen-monitor`/`zenith.ops` por motivo
 histórico. HTML/CSS/JS inline por página, sem framework e sem build step.
 
+**Responda sempre em português** — no chat, nos commits e nos documentos.
+Pedido do Master, que não quer ter de repetir.
+
 Este arquivo tem só o que quebra produção se for ignorado. O contexto
 longo está em:
 
