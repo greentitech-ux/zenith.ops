@@ -116,6 +116,7 @@ const PROPRIEDADES_COMUNS = {
   avisar: { type: 'boolean', description: 'comentar_tarefa: false = só registra, sem push pros participantes.' },
   responsavelEmail: { type: 'string', description: 'E-mail ou username do responsável. Sem ele, a tarefa fica com o Master.' },
   formularioId: { type: 'string', description: 'Id interno do formulário (vem de criar_formulario/obter_formulario).' },
+  gcom: { type: 'boolean', description: 'consultar_noc: true = só as máquinas marcadas "Possui GCOM" no cadastro; false = só as sem.' },
   estornoId: { type: 'string', description: 'Id interno do estorno (vem de obter_estorno).' },
   protocolo: { type: 'string', description: 'Número de protocolo que o portal do Conecta devolveu.' },
   destino: { type: 'string', enum: ['conecta'], description: 'Pra onde o documento vai depois de assinado. Hoje: conecta (portal - o envio lá é feito por você, no navegador).' },
@@ -149,7 +150,7 @@ const PARAMETROS = Object.freeze({
   registrar_disputa_aceita: ['disputaId', 'observacao'],
   consultar_autorizacao: ['autorizacaoId'],
   preparar_reuniao: ['termo', 'unidade', 'limite'],
-  consultar_noc: ['unidade'],
+  consultar_noc: ['unidade', 'gcom'],
   pesquisar_emails: ['consulta', 'limite'],
   ler_email: ['emailId'],
   enviar_email: ['para', 'assunto', 'texto'],
@@ -960,7 +961,12 @@ async function despachar(nome, entrada, ator) {
   }
   if (nome === 'consultar_noc') {
     const unidade = String(p.unidade || '').trim().toLocaleLowerCase('pt-BR');
-    return (await lojaStatus.listarResumo()).filter((m) => !unidade || String(m.codigo || '').toLocaleLowerCase('pt-BR').includes(unidade) || String(m.nomeUnidade || '').toLocaleLowerCase('pt-BR').includes(unidade)).slice(0, 200).map((m) => ({
+    // "Possui GCOM" é o checkbox do cadastro da máquina (temGcom)
+    const soGcom = typeof p.gcom === 'boolean' ? p.gcom : null;
+    return (await lojaStatus.listarResumo())
+      .filter((m) => !unidade || String(m.codigo || '').toLocaleLowerCase('pt-BR').includes(unidade) || String(m.nomeUnidade || '').toLocaleLowerCase('pt-BR').includes(unidade))
+      .filter((m) => soGcom === null || !!m.temGcom === soGcom)
+      .slice(0, 200).map((m) => ({
       codigo: m.codigo, posto: m.posto, unidade: m.nomeUnidade || m.codigo,
       // O nome do computador vive em `nome`. nomeComputador e hostname nao
       // existem no resumo, entao isto voltava null em TODAS as maquinas e a
@@ -971,6 +977,7 @@ async function despachar(nome, entrada, ator) {
       // responder "quem ja baixou a versao nova?" sem abrir a tela do NOC -
       // e o resumo ja traz o campo, entao nao custa leitura nenhuma.
       versaoAgente: m.agenteVersao || null,
+      gcom: !!m.temGcom,
     }));
   }
   if (nome === 'executar_noc') {

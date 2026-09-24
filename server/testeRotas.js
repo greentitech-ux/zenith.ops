@@ -27661,6 +27661,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const conectaDeNovo = await tenta(() => cw.executar({ nome: 'registrar_envio_conecta', entrada: { formularioId: criado.formularioId, protocolo: 'CNT-2' }, idempotencyKey: 'prep-k7' }));
     const chat = (await cw.executar({ nome: 'ler_chat_ticket', entrada: { numero: String(N) } })).resultado;
     const tudoProClaude = JSON.stringify([est, criado, valida, obtido, cons, ticket]);
+    // "Possui GCOM" no consultar_noc, com filtro
+    const lsP = require(__dirname + '/lojaStatus.js');
+    await lsP.cadastrarComputador('PPGCOM', 'PC-COM-GCOM', 'interno', false, true);
+    await lsP.cadastrarComputador('PPGCOM', 'PC-SEM-GCOM', 'interno', false, false);
+    const soGcom = (await cw.executar({ nome: 'consultar_noc', entrada: { unidade: 'PPGCOM', gcom: true } })).resultado;
+    const todosPp = (await cw.executar({ nome: 'consultar_noc', entrada: { unidade: 'PPGCOM' } })).resultado;
 
     const conf = {
       'schema: cada ferramenta expõe só o que usa': JSON.stringify(props('consultar_ticket')) === '["numero"]' && props('ler_email').join() === 'emailId',
@@ -27691,6 +27697,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'consultar_autorizacao devolve o resultado com o PDF': cons.status === 'aprovado' && /ASSINADO/.test(cons.resultado || ''),
       'o PDF sai com o carimbo da assinatura eletrônica': pdf.status === 200 && /ASSINADO ELETRONICAMENTE/.test(txtPdf) && /digital/.test(txtPdf),
       'envio ao Conecta registrado com protocolo, uma vez só': conecta.enviadoConecta.protocolo === 'CNT-2026-0099' && !conectaDeNovo.ok,
+      'consultar_noc devolve gcom e filtra por ele': todosPp.length === 2 && soGcom.length === 1 && soGcom[0].maquina === 'PC-COM-GCOM' && soGcom[0].gcom === true && todosPp.some((m) => m.gcom === false),
       'o ticket do estorno recebe o registro da assinatura e do envio': (chat.mensagens || []).some((m) => /assinou eletronicamente/.test(m.texto)) && (chat.mensagens || []).some((m) => /CNT-2026-0099/.test(m.texto)),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);

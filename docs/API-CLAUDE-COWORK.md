@@ -80,6 +80,7 @@ Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Ap
 - **Conecta é um portal:**
   - O Claude baixa o PDF assinado (`obter_formulario` → `pdf`, link de 2h) e envia no navegador.
   - Depois registra com `registrar_envio_conecta` e o `protocolo`. Só formulário ASSINADO, uma vez só, com comentário no ticket.
+- `consultar_noc` devolve `gcom` (o "Possui GCOM" do cadastro da máquina) e aceita o filtro `gcom=true/false`.
 - Fluxo #12029: `obter_estorno numero=12029` → `criar_formulario tipo=estorno numero=12029` → `validar_formulario` → `pedir_assinatura destino=conecta` → digital do Master → `obter_formulario` (PDF) → portal do Conecta → `registrar_envio_conecta protocolo=…`. Só estorno **APROVADO** vira formulário.
 
 **Defesa de chargeback (desde 24/09/2026):**
