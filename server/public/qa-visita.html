@@ -230,8 +230,13 @@ async function carregarLista(){
 }
 
 async function criarVisita(){
+  // TRAVA: a visita vira laudo assinado, então abrir é um ato identificado.
+  // O helper do tema.js oferece senha ou digital conforme o aparelho.
+  const prova = await window.pedirConfirmacao('iniciar a vistoria desta loja');
+  if(prova === null) return;
   try{
     const v = await api('/api/qualidade/visitas', { method:'POST', body: JSON.stringify({
+      password: prova,
       modeloId: $('n-modelo').value,
       loja: $('n-loja').value, data: $('n-data').value, horario: $('n-horario').value,
       representanteLoja: $('n-repr').value, nutricionista: $('n-nutri').value,

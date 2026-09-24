@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Documentos da unidade · NoPulso</title>
+<title>Pasta da unidade · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -58,11 +58,14 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Q.A · Documentos da unidade</div>
-        <h1>Documentos</h1>
+        <div class="eyebrow">Q.A · Pasta da unidade</div>
+        <h1>Pasta</h1>
       </div>
     </div>
-    <button class="btn-primary" onclick="abrirNovo()">+ Documento</button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="semearDominos()" title="Cria os 21 documentos do boletim da Domino's, sem data - a loja preenche">Exigências Domino's</button>
+      <button class="btn-primary" onclick="abrirNovo()">+ Documento</button>
+    </div>
   </div>
 </header>
 
@@ -168,12 +171,17 @@ function pintar(){
           </div>
           ${d.observacao ? `<div class="sub">${escapeHtml(d.observacao)}</div>` : ''}
           <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-            ${d.arquivo && d.arquivo.path
-              ? `<a class="btn-arq" href="/api/qualidade/documentos/${encodeURIComponent(d.id)}/arquivo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📎 ${escapeHtml(d.arquivo.nome||'arquivo')}</a>`
-              : '<span class="sub">sem arquivo</span>'}
-            <label class="btn-arq">📷 ${d.arquivo&&d.arquivo.path?'Trocar':'Anexar/escanear'}
+            ${d.origem && d.origem.tipo === 'visita'
+              // laudo de visita: o PDF é gerado na hora, então o link vai pra
+              // VISITA e não pro Storage - assim a pasta serve sempre a
+              // versão atual, com as ações corretivas já respondidas
+              ? `<a class="btn-arq" href="/api/qualidade/visitas/${encodeURIComponent(d.origem.visitaId)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 Abrir o laudo${d.origem.nota!=null?' · nota '+escapeHtml(String(d.origem.nota).replace('.',',')):''}</a>`
+              : (d.arquivo && d.arquivo.path
+                ? `<a class="btn-arq" href="/api/qualidade/documentos/${encodeURIComponent(d.id)}/arquivo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📎 ${escapeHtml(d.arquivo.nome||'arquivo')}</a>`
+                : '<span class="sub">sem arquivo</span>')}
+            ${d.origem && d.origem.tipo === 'visita' ? '' : `<label class="btn-arq">📷 ${d.arquivo&&d.arquivo.path?'Trocar':'Anexar/escanear'}
               <input type="file" accept="image/*,application/pdf" capture="environment" onchange="enviarArquivo('${escapeHtml(d.id)}', this)">
-            </label>
+            </label>`}
             <button class="btn-arq" onclick="editar('${escapeHtml(d.id)}')">Editar</button>
             <button class="btn-x" title="Remover" onclick="remover('${escapeHtml(d.id)}')">✕</button>
           </div>
@@ -207,6 +215,20 @@ async function enviarArquivo(id, input){
       { method:'POST', body: fd, headers: { Authorization: 'Bearer ' + AUTH_TOKEN } });
     if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Falha ao enviar o arquivo.'); }
     window.zenithRascunhos?.limparAnexoEnviado(input);
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+
+// Semeia a pasta com o que a franqueadora exige. Cria SEM DATA - a validade
+// quem preenche é a loja, olhando o documento na mão.
+async function semearDominos(){
+  const uni = $('f-unidade').value || (UNIDADES[0]||{}).codigo;
+  if(!uni) return alert('Cadastre uma unidade antes.');
+  const nome = (UNIDADES.find(u=>u.codigo===uni)||{}).nome || uni;
+  if(!confirm(`Criar na pasta de ${nome} os documentos que a Domino's exige?\n\nEles entram SEM data de validade — você preenche cada uma olhando o documento.`)) return;
+  try{
+    const r = await api(`/api/qualidade/documentos/exigencias/dominos`, { method:'POST', body: JSON.stringify({ unidade: uni, unidadeNome: nome }) });
+    alert(`${r.criados} criado(s)${r.jaExistiam?` · ${r.jaExistiam} já existia(m)`:''}.`);
     await carregar();
   }catch(e){ alert(e.message); }
 }

@@ -4791,6 +4791,37 @@ app.get('/api/qualidade/documentos/sugestoes', auth.requireAuth, (req, res) => {
   res.json(qualidadeDocumentos.sugestoes());
 });
 
+// O QUE A FRANQUEADORA EXIGE (ver EXIGENCIAS). Hoje só a Domino's, que foi a
+// que o Master anexou - as outras marcas entram na mesma estrutura.
+app.get('/api/qualidade/documentos/exigencias/:marca', auth.requireAuth, (req, res) => {
+  const pacote = qualidadeDocumentos.exigenciasDe(req.params.marca);
+  if (!pacote) return res.status(404).json({ error: 'Não tenho a lista dessa marca ainda.' });
+  res.json(pacote);
+});
+
+// SEMEAR a pasta com a lista da marca: cria os que faltam, SEM VALIDADE -
+// a data quem preenche é a loja, olhando o documento. Inventar validade aqui
+// seria inventar o dado que o alerta inteiro usa pra decidir (CLAUDE.md §6).
+app.post('/api/qualidade/documentos/exigencias/:marca', auth.requireAuth, async (req, res) => {
+  try {
+    const unidade = (req.body || {}).unidade;
+    if (!podeNaUnidadeQA(req, unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    const pacote = qualidadeDocumentos.exigenciasDe(req.params.marca);
+    if (!pacote) return res.status(404).json({ error: 'Não tenho a lista dessa marca ainda.' });
+    const jaTem = new Set((await qualidadeDocumentos.listar(unidade)).map((d) => String(d.nome).toLowerCase()));
+    const criados = [];
+    for (const item of pacote.itens) {
+      if (jaTem.has(item.nome.toLowerCase())) continue;
+      criados.push(await qualidadeDocumentos.salvar({
+        unidade, unidadeNome: (req.body || {}).unidadeNome, nome: item.nome,
+        validade: null, avisarDiasAntes: item.avisarDiasAntes,
+        observacao: `Exigência ${pacote.nome} · renovação ${item.periodicidadeLabel}`,
+      }, req.user && req.user.email));
+    }
+    res.json({ criados: criados.length, jaExistiam: pacote.itens.length - criados.length });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/qualidade/documentos', auth.requireAuth, async (req, res) => {
   try {
     if (!podeNaUnidadeQA(req, (req.body || {}).unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
@@ -4846,9 +4877,23 @@ app.get('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
   try { res.json(await qualidade.listarVisitas()); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// TRAVA PRA ABRIR A VISITA (Master, 24/09/2026: "para iniciar a vistoria
+// quero que peça a Senha/Digital").
+//
+// Por que aqui e não na tela: o laudo é assinado e vira documento de
+// auditoria. Quem abre a visita está dizendo "fui eu que vim nesta loja
+// hoje" - e uma trava que só existe no navegador é uma trava que não existe,
+// bastaria chamar a rota direto.
+//
+// auth.verifyPassword aceita a senha OU o comprovante da digital (ver
+// passkeys.emitirConfirmacao), então esta única linha cobre as duas.
 app.post('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
-  try { res.json(await qualidade.criarVisita(req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+  try {
+    const confere = await auth.verifyPassword(req.user.id, (req.body || {}).password);
+    if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a visita não foi aberta.' });
+    res.json(await qualidade.criarVisita(req.body || {}, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/qualidade/visitas/:id', auth.requireAuth, async (req, res) => {
@@ -4929,7 +4974,28 @@ app.post('/api/qualidade/visitas/:id/assinar', auth.requireAuth, async (req, res
 
 app.post('/api/qualidade/visitas/:id/concluir', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
-  try { res.json(await qualidade.concluirVisita(req.params.id, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+  try {
+    const fim = await qualidade.concluirVisita(req.params.id, req.user && req.user.email);
+    // O LAUDO VAI PRA PASTA DA UNIDADE assim que fecha (Master, 24/09/2026:
+    // "o relatório assim que finalizado fica disponível na área de
+    // armazenamento"). Fica junto do alvará, do AVCB e do resto - que é
+    // onde alguém procura quando a fiscalização chega.
+    //
+    // Entra apontando pra VISITA, não como arquivo: o PDF é gerado sob
+    // demanda, então a pasta sempre serve a versão atual. Feito aqui e não
+    // dentro de qualidade.js pra os dois módulos não se importarem em ciclo.
+    if (fim.unidade || fim.loja) {
+      await qualidadeDocumentos.salvar({
+        unidade: fim.unidade || fim.loja,
+        unidadeNome: fim.unidadeNome || fim.loja,
+        nome: `Laudo da visita técnica · ${String(fim.data || '').split('-').reverse().join('/')}`,
+        // laudo não vence: é o retrato de um dia
+        validade: null,
+        origem: { tipo: 'visita', visitaId: fim.id, nota: fim.nota, faixa: fim.faixa },
+      }, req.user && req.user.email).catch((e) => console.error('[qa] laudo não entrou na pasta:', e.message));
+    }
+    res.json(fim);
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/formularios', requireSection('formularios'), async (req, res) => {

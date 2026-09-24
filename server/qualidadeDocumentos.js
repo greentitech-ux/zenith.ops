@@ -62,6 +62,71 @@ function sugestoes() {
   ];
 }
 
+// ---------------------------------------------------------------------
+// EXIGÊNCIAS POR MARCA.
+//
+// Transcrição do BOLETIM DE QUALIDADE · DOCUMENTAÇÃO DOMINO'S (2025), que o
+// Master anexou - a própria franqueadora dizendo o que a loja tem que ter em
+// mãos e de quanto em quanto tempo. Não é lista que eu montei.
+//
+// A periodicidade vem do boletim e serve pra DUAS coisas: mostrar na tela de
+// quanto em quanto tempo renova, e sugerir com quantos dias de antecedência
+// avisar (`avisarDiasAntes`) - alvará anual precisa de mais aviso que troca
+// de filtro. O número continua editável em cada documento.
+//
+// "documento único" vira SEM VALIDADE: AVCB e alvará de funcionamento não
+// renovam periodicamente, e tratá-los como vencíveis encheria a tela de
+// alarme falso.
+const DIAS_POR_PERIODICIDADE = {
+  diario: 1, mensal: 7, semestral: 30, anual: 45, cinco_anos: 90, unico: null, conforme_documento: 30,
+};
+const EXIGENCIAS = {
+  dominos: {
+    nome: "Domino's",
+    fonte: 'Boletim de Qualidade · Documentação Domino’s (2025)',
+    itens: [
+      { nome: 'Certificado de calibração dos termômetros', periodicidade: 'anual' },
+      { nome: 'Certificado de calibração da balança', periodicidade: 'anual' },
+      { nome: 'Placas de visitação', periodicidade: 'unico' },
+      { nome: 'Tabela nutricional', periodicidade: 'unico' },
+      { nome: 'Planilhas de temperatura', periodicidade: 'diario' },
+      { nome: 'Planilhas de recebimento de mercadorias', periodicidade: 'conforme_documento' },
+      { nome: 'Cronograma de limpeza', periodicidade: 'diario' },
+      { nome: 'Manual de Boas Práticas, POPs e FISPQs', periodicidade: 'conforme_documento' },
+      { nome: 'Certificado de limpeza das caixas d’água', periodicidade: 'semestral' },
+      { nome: 'Potabilidade da água', periodicidade: 'semestral' },
+      { nome: 'Certificado de troca de filtro', periodicidade: 'semestral' },
+      { nome: 'AVCB', periodicidade: 'unico' },
+      { nome: 'Alvará de funcionamento', periodicidade: 'unico' },
+      { nome: 'PPRA/PGR', periodicidade: 'anual' },
+      { nome: 'PCMSO', periodicidade: 'anual' },
+      { nome: 'ASOs', periodicidade: 'anual' },
+      { nome: 'Controle de pragas', periodicidade: 'mensal' },
+      { nome: 'Certificado de inspeção sanitária', periodicidade: 'conforme_documento' },
+      { nome: 'Certificado ServSafe', periodicidade: 'cinco_anos' },
+      { nome: 'Código de defesa do consumidor', periodicidade: 'unico' },
+      { nome: 'Guia de Segurança dos Alimentos', periodicidade: 'anual' },
+    ],
+  },
+};
+const PERIODICIDADE_LABEL = {
+  diario: 'diário', mensal: 'mensal', semestral: 'semestral', anual: 'anual',
+  cinco_anos: 'a cada 5 anos', unico: 'documento único', conforme_documento: 'conforme o documento',
+};
+
+function exigenciasDe(marca) {
+  const pacote = EXIGENCIAS[String(marca || '').toLowerCase()];
+  if (!pacote) return null;
+  return {
+    ...pacote,
+    itens: pacote.itens.map((i) => ({
+      ...i,
+      periodicidadeLabel: PERIODICIDADE_LABEL[i.periodicidade] || i.periodicidade,
+      avisarDiasAntes: DIAS_POR_PERIODICIDADE[i.periodicidade] || DIAS_AVISO_PADRAO,
+    })),
+  };
+}
+
 function hojeISO() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 }
@@ -112,7 +177,7 @@ async function obter(id) {
   return comSituacao(snap.data(), hojeISO());
 }
 
-async function salvar({ id, unidade, unidadeNome, nome, validade, avisarDiasAntes, itemChecklistId, observacao, arquivo }, email) {
+async function salvar({ id, unidade, unidadeNome, nome, validade, avisarDiasAntes, itemChecklistId, observacao, arquivo, origem }, email) {
   const nomeLimpo = String(nome || '').trim().slice(0, 160);
   if (!nomeLimpo) throw new Error('Dê um nome ao documento.');
   const uni = String(unidade || '').trim();
@@ -130,6 +195,12 @@ async function salvar({ id, unidade, unidadeNome, nome, validade, avisarDiasAnte
     itemChecklistId: String(itemChecklistId || '').trim() || null,
     observacao: String(observacao || '').trim().slice(0, 600) || null,
     arquivo: arquivo || (anterior && anterior.arquivo) || null,
+    // DE ONDE ESSE DOCUMENTO VEIO. O laudo de uma visita entra na pasta
+    // apontando pra visita ({ tipo:'visita', visitaId }), e NÃO como arquivo
+    // no Storage: o PDF é gerado sob demanda de propósito (uma ação
+    // corretiva respondida hoje já sai na próxima abertura). Congelar um PDF
+    // aqui faria a pasta guardar a versão velha pra sempre.
+    origem: origem || (anterior && anterior.origem) || null,
     criadoEm: (anterior && anterior.criadoEm) || new Date().toISOString(),
     criadoPorEmail: (anterior && anterior.criadoPorEmail) || email || null,
     atualizadoEm: new Date().toISOString(),
@@ -195,5 +266,6 @@ async function marcarAvisado(id, situacao) {
 module.exports = {
   DIAS_AVISO_PADRAO, MAX_DIAS_AVISO, SITUACOES, SITUACAO_LABEL,
   sugestoes, situacaoDe, comSituacao, hojeISO, diasEntre,
+  EXIGENCIAS, PERIODICIDADE_LABEL, DIAS_POR_PERIODICIDADE, exigenciasDe,
   listar, obter, salvar, anexar, remover, varrerVencimentos, marcarAvisado,
 };

@@ -27403,7 +27403,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
         // postarJson devolve { status, corpo } - o corpo é texto
         const json = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
-        const criada = json(await postarJson('/api/qualidade/visitas', { loja: 'TESTE QA', data: '2026-09-23' }, cabQ));
+        const criada = json(await postarJson('/api/qualidade/visitas', { loja: 'TESTE QA', data: '2026-09-23', password: process.env.MASTER_PASSWORD }, cabQ));
         if (!criada || !criada.id) return false;
         for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
           await postarJson(`/api/qualidade/visitas/${criada.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
@@ -27425,11 +27425,59 @@ $r | ConvertTo-Json -Depth 4 -Compress
         // passaria num teste de status, e o laudo estaria quebrado
         return pdf.status === 200 && pdf.buffer.slice(0, 4).toString() === '%PDF' && pdf.buffer.length > 1000;
       })(),
+      // ---- TRAVA PRA ABRIR A VISITA (Master, 24/09) ----
+      // O laudo é assinado e vira documento de auditoria: abrir a visita é
+      // um ato identificado. Trava só na tela não é trava - bastaria chamar
+      // a rota direto, e é isso que este teste impede.
+      'sem senha/digital a visita NÃO abre': await (async () => {
+        const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
+        const antes = (await q.listarVisitas()).length;
+        const sem = await postarJson('/api/qualidade/visitas', { loja: 'SEM SENHA' }, cabQ);
+        const errada = await postarJson('/api/qualidade/visitas', { loja: 'SENHA ERRADA', password: 'nao-e-essa' }, cabQ);
+        const depois = (await q.listarVisitas()).length;
+        return sem.status === 400 && errada.status === 400
+          && /Senha ou digital/.test(sem.corpo)
+          // e nenhuma visita ficou criada pela metade
+          && depois === antes;
+      })(),
+      // a MESMA conferência aceita a digital: auth.verifyPassword já trata o
+      // comprovante da passkey como senha (ver passkeys.emitirConfirmacao)
+      'a trava aceita senha OU digital, sem rota separada': (() => {
+        const authSrc = fsQ.readFileSync(__dirname + '/auth.js', 'utf8');
+        return /require\('\.\/passkeys'\)\.confirmacaoValida\(password, userId\)/.test(authSrc)
+          && /auth\.verifyPassword\(req\.user\.id, \(req\.body \|\| \{\}\)\.password\)/.test(idxQ);
+      })(),
+      // o diálogo é do tema.js, carregado por todas as telas - o
+      // loja-status.html tem a própria cópia SÓ com senha, e mais uma cópia
+      // viraria o caso do menu: N telas, N comportamentos
+      'o diálogo de confirmação é compartilhado, e fala o contrato certo': (() => {
+        const tema = fsQ.readFileSync(__dirname + '/public/tema.js', 'utf8');
+        return /window\.pedirConfirmacao = pedirConfirmacao;/.test(tema)
+          && /confirmar\/disponivel/.test(tema)
+          && /var opcoes = inicioJson\.opcoes;/.test(tema)
+          && /chave: inicioJson\.chave,/.test(tema)
+          && /resposta: \{/.test(tema);
+      })(),
+      // ---- O LAUDO VAI PRA PASTA DA UNIDADE ----
+      'concluir a visita arquiva o laudo na pasta': await (async () => {
+        const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
+        const json3 = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
+        const v = json3(await postarJson('/api/qualidade/visitas', { loja: 'LOJA PASTA', data: '2026-09-24', password: process.env.MASTER_PASSWORD }, cabQ));
+        for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
+          await postarJson(`/api/qualidade/visitas/${v.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
+        }
+        await postarJson(`/api/qualidade/visitas/${v.id}/concluir`, {}, cabQ);
+        const qd2 = require(__dirname + '/qualidadeDocumentos.js');
+        const naPasta = (await qd2.listar('LOJA PASTA')).find((d) => d.origem && d.origem.visitaId === v.id);
+        // aponta pra VISITA e não pro Storage: o PDF é gerado na hora, então
+        // a pasta serve sempre a versão atual
+        return !!naPasta && naPasta.origem.tipo === 'visita' && naPasta.validade === null && !naPasta.arquivo;
+      })(),
       // ---- ASSINATURA (Master, 24/09): quem assina está NA loja ----
       'assinatura só aceita imagem de verdade, e com teto': await (async () => {
         const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
         const json2 = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
-        const criada = json2(await postarJson('/api/qualidade/visitas', { loja: 'TESTE ASSIN' }, cabQ));
+        const criada = json2(await postarJson('/api/qualidade/visitas', { loja: 'TESTE ASSIN', password: process.env.MASTER_PASSWORD }, cabQ));
         const lixo = await postarJson(`/api/qualidade/visitas/${criada.id}/assinar`, { quem: 'loja', nome: 'X', imagem: 'javascript:alert(1)' }, cabQ);
         const gigante = await postarJson(`/api/qualidade/visitas/${criada.id}/assinar`, { quem: 'loja', nome: 'X', imagem: 'data:image/png;base64,' + 'A'.repeat(q.MAX_IMAGEM_CHARS + 10) }, cabQ);
         const papelErrado = await postarJson(`/api/qualidade/visitas/${criada.id}/assinar`, { quem: 'sindico', nome: 'X', imagem: 'data:image/png;base64,AAAA' }, cabQ);
@@ -27451,7 +27499,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
         const json2 = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
         const fechar = async (loja, data) => {
-          const v = json2(await postarJson('/api/qualidade/visitas', { loja, data }, cabQ));
+          const v = json2(await postarJson('/api/qualidade/visitas', { loja, data, password: process.env.MASTER_PASSWORD }, cabQ));
           for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
             await postarJson(`/api/qualidade/visitas/${v.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
           }
@@ -27461,7 +27509,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
           return v.id;
         };
         await fechar('LOJA COMPARA', '2026-08-01');
-        const segunda = json2(await postarJson('/api/qualidade/visitas', { loja: 'LOJA COMPARA', data: '2026-09-01' }, cabQ));
+        const segunda = json2(await postarJson('/api/qualidade/visitas', { loja: 'LOJA COMPARA', data: '2026-09-01', password: process.env.MASTER_PASSWORD }, cabQ));
         const vista = json2(await pedir(`/api/qualidade/visitas/${segunda.id}`, cabQ));
         return !!vista.anterior
           && vista.anterior.nota === 9.73
@@ -27471,7 +27519,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'visita de outra loja não vira "a anterior"': await (async () => {
         const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
         const json2 = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
-        const nova = json2(await postarJson('/api/qualidade/visitas', { loja: 'LOJA SOZINHA' }, cabQ));
+        const nova = json2(await postarJson('/api/qualidade/visitas', { loja: 'LOJA SOZINHA', password: process.env.MASTER_PASSWORD }, cabQ));
         const vista = json2(await pedir(`/api/qualidade/visitas/${nova.id}`, cabQ));
         return vista.anterior === null;
       })(),
@@ -27485,7 +27533,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'depois de concluída, a rota recusa alterar o checklist': await (async () => {
         const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
         const json = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
-        const criada = json(await postarJson('/api/qualidade/visitas', { loja: 'TESTE TRAVA' }, cabQ));
+        const criada = json(await postarJson('/api/qualidade/visitas', { loja: 'TESTE TRAVA', password: process.env.MASTER_PASSWORD }, cabQ));
         for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
           await postarJson(`/api/qualidade/visitas/${criada.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
         }
@@ -27849,6 +27897,31 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'o alerta tem ícone na Central':
         /'qa-documento': \{ icone: '📄'/.test(fsD.readFileSync(__dirname + '/public/central-alertas.html', 'utf8')),
       // PONTA A PONTA na rota
+      // ---- EXIGÊNCIAS DA FRANQUEADORA (boletim da Domino's, 2025) ----
+      'a lista da Domino\'s tem os 21 documentos do boletim': (() => {
+        const p = qd.exigenciasDe('dominos');
+        return !!p && p.itens.length === 21
+          && p.itens.some((i) => /AVCB/.test(i.nome) && i.periodicidade === 'unico')
+          && p.itens.some((i) => /caixas d’água/.test(i.nome) && i.periodicidade === 'semestral')
+          && p.itens.some((i) => /ServSafe/i.test(i.nome) && i.periodicidade === 'cinco_anos');
+      })(),
+      // "documento único" (AVCB, alvará) não renova: tratar como vencível
+      // encheria a tela de alarme falso
+      'documento único não vira vencido':
+        qd.situacaoDe({ validade: null }, '2026-09-24').situacao === 'sem_validade',
+      // semear NÃO pode inventar data - é ela que o alerta inteiro usa
+      'semear cria sem validade, e repetir não duplica': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const um = await postarJson('/api/qualidade/documentos/exigencias/dominos', { unidade: '19821', unidadeNome: 'Dom Sao Miguel' }, cabD);
+        if (um.status !== 200) return false;
+        const r1 = JSON.parse(um.corpo);
+        const dois = JSON.parse((await postarJson('/api/qualidade/documentos/exigencias/dominos', { unidade: '19821', unidadeNome: 'Dom Sao Miguel' }, cabD)).corpo);
+        const daUnidade = (await qd.listar('19821'));
+        return r1.criados === 21 && dois.criados === 0 && dois.jaExistiam === 21
+          && daUnidade.every((d) => d.validade === null && d.situacao === 'sem_validade');
+      })(),
+      'marca que eu não tenho responde 404, não inventa lista':
+        (await pedir('/api/qualidade/documentos/exigencias/spoleto', token ? { Authorization: 'Bearer ' + token } : {})).status === 404,
       'a rota guarda e devolve com a situação calculada': await (async () => {
         const cabD = token ? { Authorization: 'Bearer ' + token } : {};
         const r = await postarJson('/api/qualidade/documentos', {

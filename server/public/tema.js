@@ -1812,6 +1812,133 @@
       [].concat(campo || []).forEach(function (c) { if (c) guardarCampo(c); });
     }
     window.zenithRascunhos = { limpar: limparNo, limparCampoEnviado: limparCampoEnviado, limparAnexoEnviado: limparAnexoEnviado, restaurar: agendarRestauracao, sincronizar: sincronizar };
+
+    // =================================================================
+    // CONFIRMAR COM SENHA **OU** DIGITAL, de qualquer tela.
+    //
+    // O servidor já resolvia isto há tempos: auth.verifyPassword aceita
+    // tanto a senha quanto o comprovante da digital (passkeys). O que
+    // faltava era do lado da tela - e o loja-status.html tinha a própria
+    // cópia, só com senha. Mais uma tela com a própria cópia e viraria o
+    // caso do menu: N telas, N comportamentos, e a digital só em algumas.
+    //
+    // Devolve a STRING que a rota espera no campo `password` (a senha
+    // digitada ou o comprovante de 3 minutos), ou null se a pessoa
+    // desistiu. Quem chama não precisa saber qual das duas veio.
+    function pedirConfirmacao(acaoTexto) {
+      return new Promise(function (resolve) {
+        var fundo = document.createElement('div');
+        fundo.setAttribute('role', 'dialog');
+        fundo.setAttribute('aria-modal', 'true');
+        fundo.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px;';
+        var cx = document.createElement('div');
+        cx.style.cssText = 'background:var(--panel,#12161b);border:1px solid var(--line,#232a33);border-radius:14px;padding:16px;width:100%;max-width:380px;color:var(--text,#e7ecf1);font-family:var(--sans,sans-serif);';
+        // autocomplete="new-password": o navegador NÃO pode preencher a senha
+        // salva aqui. Se preenchesse, a trava viraria um clique pra quem
+        // estivesse com o aparelho destravado - o oposto de "confirme que é
+        // você". Só a tela de login pede a senha salva (ver a trava no
+        // testeRotas.js, que pegou isto).
+        cx.innerHTML = '<div style="font-size:14px;font-weight:700;margin-bottom:4px;">Confirme que é você</div>'
+          + '<div style="font-size:12.5px;color:var(--muted,#7d8896);line-height:1.5;margin-bottom:10px;">Para ' + String(acaoTexto || 'esta ação') + '.</div>'
+          + '<input type="password" autocomplete="new-password" placeholder="Sua senha" style="width:100%;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);border-radius:9px;color:inherit;padding:10px;font-size:14px;font-family:inherit;box-sizing:border-box;">'
+          + '<div data-erro style="display:none;color:var(--bad,#ff5c5c);font-size:12px;margin-top:6px;"></div>'
+          + '<button type="button" data-digital style="display:none;width:100%;margin-top:10px;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);color:inherit;border-radius:9px;padding:10px;font-size:13px;cursor:pointer;font-family:inherit;">👆 Usar a digital</button>'
+          + '<div style="display:flex;gap:8px;margin-top:12px;">'
+          + '<button type="button" data-cancel style="flex:1;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);color:inherit;border-radius:9px;padding:10px;font-size:13px;cursor:pointer;font-family:inherit;">Cancelar</button>'
+          + '<button type="button" data-ok style="flex:1;background:var(--accent,#b8ff3c);color:#0b0d10;border:none;border-radius:9px;padding:10px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">Confirmar</button>'
+          + '</div>';
+        fundo.appendChild(cx);
+        document.body.appendChild(fundo);
+        var input = cx.querySelector('input');
+        var erro = cx.querySelector('[data-erro]');
+        var btnDigital = cx.querySelector('[data-digital]');
+        var token = function () { try { return localStorage.getItem('authToken') || ''; } catch (e) { return ''; } };
+        var cabecalho = function () { return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() }; };
+        var fechar = function (valor) { try { document.body.removeChild(fundo); } catch (e) {} resolve(valor); };
+
+        cx.querySelector('[data-cancel]').onclick = function () { fechar(null); };
+        cx.querySelector('[data-ok]').onclick = function () {
+          if (!input.value) { erro.textContent = 'Digite sua senha.'; erro.style.display = 'block'; return; }
+          fechar(input.value);
+        };
+        input.onkeydown = function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); cx.querySelector('[data-ok]').click(); }
+          else if (e.key === 'Escape') { e.preventDefault(); fechar(null); }
+        };
+        setTimeout(function () { try { input.focus(); } catch (e) {} }, 50);
+
+        // O botão da digital só aparece quando ESTE aparelho tem credencial
+        // deste acesso (o servidor responde) - oferecer e falhar é pior que
+        // não oferecer.
+        fetch('/api/auth/passkey/confirmar/disponivel', { headers: cabecalho() })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || !d.disponivel || !window.PublicKeyCredential) return;
+            btnDigital.style.display = 'block';
+            btnDigital.onclick = function () {
+              erro.style.display = 'none';
+              btnDigital.disabled = true;
+              btnDigital.textContent = 'Aguardando a digital...';
+              confirmarPelaDigital(cabecalho).then(function (comprovante) {
+                if (comprovante) return fechar(comprovante);
+                btnDigital.disabled = false;
+                btnDigital.textContent = '👆 Usar a digital';
+                erro.textContent = 'Não consegui confirmar a digital - use a senha.';
+                erro.style.display = 'block';
+              });
+            };
+          })
+          .catch(function () { /* sem digital: a senha resolve */ });
+      });
+    }
+
+    // base64url <-> bytes, o que o WebAuthn exige na entrada e na saída
+    function b64urlParaBytes(s) {
+      var t = String(s).replace(/-/g, '+').replace(/_/g, '/');
+      var bin = atob(t + '==='.slice((t.length + 3) % 4));
+      var out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out.buffer;
+    }
+    function bytesParaB64url(buf) {
+      var bytes = new Uint8Array(buf); var bin = '';
+      for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    async function confirmarPelaDigital(cabecalho) {
+      try {
+        var inicio = await fetch('/api/auth/passkey/confirmar/inicio', { method: 'POST', headers: cabecalho(), body: '{}' });
+        if (!inicio.ok) return null;
+        // o servidor devolve { chave, opcoes }: a chave amarra esta tentativa
+        // ao desafio guardado, e volta junto no /fim
+        var inicioJson = await inicio.json();
+        var opcoes = inicioJson.opcoes;
+        opcoes.challenge = b64urlParaBytes(opcoes.challenge);
+        (opcoes.allowCredentials || []).forEach(function (c) { c.id = b64urlParaBytes(c.id); });
+        var cred = await navigator.credentials.get({ publicKey: opcoes });
+        if (!cred) return null;
+        var corpo = {
+          chave: inicioJson.chave,
+          resposta: {
+            id: cred.id,
+            rawId: bytesParaB64url(cred.rawId),
+            type: cred.type,
+            clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {},
+            response: {
+              clientDataJSON: bytesParaB64url(cred.response.clientDataJSON),
+              authenticatorData: bytesParaB64url(cred.response.authenticatorData),
+              signature: bytesParaB64url(cred.response.signature),
+              userHandle: cred.response.userHandle ? bytesParaB64url(cred.response.userHandle) : null,
+            },
+          },
+        };
+        var fim = await fetch('/api/auth/passkey/confirmar/fim', { method: 'POST', headers: cabecalho(), body: JSON.stringify(corpo) });
+        if (!fim.ok) return null;
+        var d = await fim.json();
+        return d.confirmacao || null;
+      } catch (e) { return null; }
+    }
+    window.pedirConfirmacao = pedirConfirmacao;
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', agendarRestauracao);
     else agendarRestauracao();
   })();
