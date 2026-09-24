@@ -3810,5 +3810,24 @@ boot();
 <script src="/suporte-chat.js"></script>
 <script src="/recolher.js"></script>
 <script src="/nav-menu.js"></script>
+<script>
+// AO VIVO (24/09/2026). A loja lanca o fechamento enquanto o escritorio acompanha a lista: sem
+// isto, o escritorio cobrava lancamento que ja tinha entrado (20 pontos).
+// A ligacao mora no tema.js (zenithAoVivo), que todas as telas ja carregam:
+// uma conexao por pagina, rajada junta, e NAO redesenha por cima de quem
+// esta digitando - repintar apagaria o campo em edicao.
+window.zenithAoVivo && zenithAoVivo([
+  'fechamento-lancado',
+  'fechamento-atualizado',
+  'fechamento-editado-direto',
+  'fechamento-excluido',
+  'fechamento-restaurado',
+  'fechamento-edicao-solicitada',
+  'fechamento-edicao-decidida',
+  'sangria-lancada',
+  'sangria-atualizada',
+  'sangria-excluida',
+], () => carregar());
+</script>
 </body>
 </html>

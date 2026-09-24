@@ -994,7 +994,12 @@ function conectarStream(){
     // pausar item / fechar loja no agregador (ver chamar_coordenador_agregador
     // em suporteBot.js): o pedido ja esta na conversa como nota interna - so
     // traz a lista na hora, sem esperar o poll de 60s
-    es.addEventListener('beniboy-agregador', ()=>{
+    // O NOME ESTAVA ERRADO ate 24/09: a tela ouvia `beniboy-agregador`, que o
+    // servidor NUNCA mandou - ele manda `agregador-pedido` (3 pontos no
+    // index.js). Ou seja, este trecho existia e nao fazia nada: a lista so
+    // vinha no poll de 60s, justamente no painel que existe pra avisar na
+    // hora que a loja pausou item ou fechou.
+    es.addEventListener('agregador-pedido', ()=>{
       carregarLista();
     });
   }catch(e){ /* sem SSE, so atualiza no reload/poll */ }
