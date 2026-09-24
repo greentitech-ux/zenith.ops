@@ -6392,6 +6392,26 @@ app.post('/api/loja-status/:codigo/computadores/:posto/programas/instalar', auth
   }
 });
 
+// SIIGMA BOX: ação fechada (ver comandoInstalarSiigmaBox). Só o Master, com a
+// senha de novo, e só o código de ativação vem de fora - o endereço é fixo.
+app.post('/api/loja-status/:codigo/computadores/:posto/programas/instalar-siigma', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const codigo = String(req.body?.codigoSiigma || '').trim();
+    if (!lojaStatus.codigoSiigmaValido(codigo)) return res.status(400).json({ error: 'Código do Siigma Box inválido - são 6 a 12 letras/números.' });
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador) return res.status(404).json({ error: 'Computador não encontrado.' });
+    // roda na sessão do usuário logado (instalador com janela): sem requerAdmin
+    const registro = await lojaStatus.enfileirarComando(req.params.codigo, req.params.posto, lojaStatus.comandoInstalarSiigmaBox(codigo), {
+      origem: 'programas-instalar-siigma',
+    });
+    console.log(`[NOC] ${req.user.email} pediu instalação do Siigma Box em ${req.params.codigo}/${req.params.posto}`);
+    res.json({ ok: true, comandoId: registro.id, mensagem: 'Siigma Box foi colocado na fila do NOCZenith. O resultado aparece quando a máquina executar.' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/loja-status/:codigo/computadores/:posto/programas/remover', auth.requireMaster, async (req, res) => {
   try {
     if (!(await exigirSenhaDoMaster(req, res))) return;

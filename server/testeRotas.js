@@ -27667,6 +27667,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
     await lsP.cadastrarComputador('PPGCOM', 'PC-SEM-GCOM', 'interno', false, false);
     const soGcom = (await cw.executar({ nome: 'consultar_noc', entrada: { unidade: 'PPGCOM', gcom: true } })).resultado;
     const todosPp = (await cw.executar({ nome: 'consultar_noc', entrada: { unidade: 'PPGCOM' } })).resultado;
+    // Siigma Box: ação FECHADA (só o código de ativação vem de fora, o
+    // endereço é cravado). Prova: URL oficial + código, TLS 1.2, e código
+    // fora do formato é barrado antes de virar comando.
+    const cmdSiigma = lsP.comandoInstalarSiigmaBox('7NM9436C');
+    const siigmaBarra = (v) => { try { lsP.comandoInstalarSiigmaBox(v); return false; } catch (e) { return true; } };
 
     const conf = {
       'schema: cada ferramenta expõe só o que usa': JSON.stringify(props('consultar_ticket')) === '["numero"]' && props('ler_email').join() === 'emailId',
@@ -27697,6 +27702,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'consultar_autorizacao devolve o resultado com o PDF': cons.status === 'aprovado' && /ASSINADO/.test(cons.resultado || ''),
       'o PDF sai com o carimbo da assinatura eletrônica': pdf.status === 200 && /ASSINADO ELETRONICAMENTE/.test(txtPdf) && /digital/.test(txtPdf),
       'envio ao Conecta registrado com protocolo, uma vez só': conecta.enviadoConecta.protocolo === 'CNT-2026-0099' && !conectaDeNovo.ok,
+      'Siigma Box: comando fechado, do site oficial, com o código e TLS 1.2': /capture\.siigma\.com\.br\/box\/SiigmaBox-/.test(cmdSiigma) && cmdSiigma.includes("'7NM9436C'") && /Tls12/.test(cmdSiigma) && lsP.codigoSiigmaValido('7NM9436C'),
+      'Siigma Box: código fora do formato é barrado antes de virar comando': siigmaBarra('http://mau.com/x.exe') && siigmaBarra('7NM 9436') && siigmaBarra('$(calc)') && siigmaBarra('') && !lsP.codigoSiigmaValido('a b'),
       'consultar_noc devolve gcom e filtra por ele': todosPp.length === 2 && soGcom.length === 1 && soGcom[0].maquina === 'PC-COM-GCOM' && soGcom[0].gcom === true && todosPp.some((m) => m.gcom === false),
       'o ticket do estorno recebe o registro da assinatura e do envio': (chat.mensagens || []).some((m) => /assinou eletronicamente/.test(m.texto)) && (chat.mensagens || []).some((m) => /CNT-2026-0099/.test(m.texto)),
     };

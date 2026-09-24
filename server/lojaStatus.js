@@ -193,6 +193,42 @@ function comandoRemoverPrograma(nome) {
     'if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) { "OK: remoção concluída. A lista será atualizada na próxima varredura." } else { "FALHOU: o desinstalador retornou o código $($p.ExitCode)."; exit $p.ExitCode }',
   ].join('\n');
 }
+// SIIGMA BOX (pedido do Master, 24/09/2026). É uma AÇÃO FECHADA, igual à
+// instalação por catálogo e à remoção acima: a operação é fixa no código e o
+// único dado que vem de fora é o CÓDIGO DE ATIVAÇÃO de 8 caracteres que a
+// contabilidade gera. NÃO é campo de comando livre - o endereço é cravado
+// aqui (só a Siigma), e o código entra sozinho na URL depois de validado.
+// Assim o Master instala o Siigma Box na máquina escolhida pelo painel, com
+// a senha dele, sem precisar entrar por AnyDesk.
+//
+// Roda na sessão do usuário logado (não elevado): o instalador do Siigma abre
+// janela e registra o início automático no perfil de quem usa o caixa - por
+// isso NÃO vai pela instância SYSTEM.
+const SIIGMA_BOX_URL = (codigo) => `https://capture.siigma.com.br/box/SiigmaBox-${codigo}.exe`;
+function codigoSiigmaValido(codigo) {
+  return /^[A-Za-z0-9]{6,12}$/.test(String(codigo || '').trim());
+}
+function comandoInstalarSiigmaBox(codigo) {
+  const cod = String(codigo || '').trim().toUpperCase();
+  // repete a validação na fronteira do comando: ninguém monta a URL sem um
+  // código no formato certo (é o que impede injetar caminho ou parâmetro)
+  if (!codigoSiigmaValido(cod)) throw new Error('Código do Siigma Box inválido - são 6 a 12 letras/números, sem espaço nem símbolo.');
+  return [
+    "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'",
+    `$cod = ${aspasPowerShell(cod)}`,
+    // URL cravada: o código só preenche o nome do arquivo, e o host é sempre
+    // o oficial da Siigma
+    `$url = 'https://capture.siigma.com.br/box/SiigmaBox-' + $cod + '.exe'`,
+    '$f = Join-Path $env:TEMP ("SiigmaBox-" + $cod + ".exe")',
+    'try { Invoke-WebRequest -Uri $url -OutFile $f -UseBasicParsing -TimeoutSec 120 } catch { "FALHOU: não consegui baixar o instalador ($($_.Exception.Message)). O código pode ter vencido (vale 24h) - peça outro à contabilidade."; exit 1 }',
+    'if (-not (Test-Path $f)) { "FALHOU: o instalador não foi baixado."; exit 1 }',
+    'Start-Process $f',
+    'Start-Sleep -Seconds 90',
+    '$pasta = Test-Path \'C:\\SiigmaCupom\'',
+    'if ($pasta) { "OK: Siigma Box instalado. Pasta C:\\SiigmaCupom criada."; Get-ChildItem \'C:\\SiigmaCupom\' -ErrorAction SilentlyContinue | Select-Object Name, LastWriteTime | Format-Table -AutoSize | Out-String }',
+    'else { "ATENÇÃO: o instalador rodou, mas a pasta C:\\SiigmaCupom ainda não apareceu. Pode estar pedindo confirmação na tela da máquina - confira pelo AnyDesk." }',
+  ].join('\n');
+}
 // ---- PAPEL DE PAREDE: UMA ARTE POR MARCA, NAO UMA POR MAQUINA ----
 //
 // O que muda de um PDV pro outro e so o NOME da maquina, e quem carimba o
@@ -4837,7 +4873,7 @@ module.exports = {
   _resetarEstadoInternet,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
   sanitizarAcessosConhecidos, acessoConhecidoDe, idAnydeskLimpo,
-  listarCatalogoProgramas, salvarCatalogoProgramas, comandoInstalarCatalogo, comandoRemoverPrograma, programaPodeSerRemovido,
+  listarCatalogoProgramas, salvarCatalogoProgramas, comandoInstalarCatalogo, comandoRemoverPrograma, programaPodeSerRemovido, comandoInstalarSiigmaBox, codigoSiigmaValido,
   definirArteDaMaquina, removerArteDaMaquina,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
