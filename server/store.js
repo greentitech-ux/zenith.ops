@@ -115,7 +115,7 @@ async function pruneOld(cutoffMs) {
   const cutoff = cutoffMs ?? (Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const pedidosProtegidos = new Set(
     allOrders()
-      .filter((o) => o.fraudeSuspeita || o.history.some((h) => CHARGEBACK_STATUSES.includes(h.status)))
+      .filter((o) => o.fraudeSuspeita || o.history.some((h) => CHARGEBACK_STATUSES.includes(h.status) || EVENTOS_PROTEGIDOS.has(h.eventCode)))
       .map((o) => o.pedidoId)
   );
 
@@ -239,6 +239,11 @@ const CHARGEBACK_STATUSES = [
   'DISPUTE_DEFENSE_PERIOD_ENDED',
   'RETRIEVAL_REQUEST',
 ];
+// eventos de disputa que não entram no painel de chargebacks mas também não
+// podem ser apagados pela limpeza de 2 dias: o aviso de fraude chega dias
+// ANTES do chargeback, e é dele que sai a defesa e o bloqueio do cartão (ver
+// defesaChargeback.js). Pedido de informação do banco é o mesmo caso.
+const EVENTOS_PROTEGIDOS = new Set(['NOTIFICATION_OF_FRAUD', 'REQUEST_FOR_INFORMATION', 'SECOND_CHARGEBACK', 'INFORMATION_SUPPLIED', 'PREARBITRATION_WON', 'PREARBITRATION_LOST', 'ISSUER_RESPONSE_TIMEFRAME_EXPIRED']);
 // so os eventos que marcam a abertura do chargeback em si (nao a reversao/fim
 // de prazo) contam como "data do chargeback" pro filtro de periodo do painel
 const ABERTURA_CHARGEBACK_STATUSES = ['CHARGEBACK', 'NOTIFICATION_OF_CHARGEBACK'];

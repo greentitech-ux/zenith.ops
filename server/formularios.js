@@ -1682,6 +1682,9 @@ async function gerarPdf(r, res, opcoes) {
 module.exports = {
   dispositivoDaAssinatura,
   MAX_ANEXOS,
+  // anexarDocumentos: a defesa de chargeback (defesaChargeback.js) junta as
+  // evidências do mesmo jeito, sem uma segunda cópia desse código
+  anexarDocumentos,
   encaixeNaA4, TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
   nomeArquivoPdf, beneficiarioDoFormulario,
   pedirComprovanteDeposito, comprovanteObrigatorio, temDepositanteProprio,

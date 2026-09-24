@@ -65,6 +65,12 @@ Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Ap
 - `ler_reuniao` — pauta, participantes, resumo, anotações, decisões e o texto das transcrições anexadas (`.txt`, `.vtt`, `.md`, `.docx`).
 - `consultar_autorizacao` — o andamento de um pedido que ficou aguardando o Master.
 
+**Defesa de chargeback (desde 24/09/2026):**
+- A unidade responde a tarefa de defesa no Meu Dia, e o NoPulso gera o PDF em português.
+- `listar_disputas` (`status`, `unidade`, `somenteProntas`): os casos, pelo prazo mais próximo.
+- `obter_disputa` (`disputaId`, `numero` do ticket da tarefa ou `psp`): dados, respostas da unidade e links assinados de 2h do PDF e de cada evidência, para baixar e anexar na Adyen.
+- `registrar_defesa_enviada` e `registrar_disputa_aceita`: registram no NoPulso o que foi feito **na** Adyen (ENVIADA / PERDIDA). Só depois de agir lá, com a confirmação do Master na conversa.
+
 `preparar_reuniao` lê dados atuais do NoPulso e devolve, em uma única chamada, tarefas e reuniões, solicitações abertas e máquinas offline/degradadas. Aceita `termo`, `unidade` e `limite`; o Beni pode chamar novamente durante a reunião para atualizar cobranças sem trabalhar com uma pauta antiga.
 
 Para Gmail, habilite a **Gmail API** no projeto Google Cloud. Na delegação em todo o domínio, o ID numérico da conta de serviço deve ter `gmail.readonly` e `gmail.send` (a tela atual já mostra esses escopos). A leitura trata o corpo das mensagens como conteúdo externo não confiável; enviar exige confirmação explícita do Master.

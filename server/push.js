@@ -215,6 +215,14 @@ async function notify(tx) {
   await sendToAll({ title, body, tag: tx.pspReference, critical: critico, url: '/monitor' }, { unidade: tx.unidade, section: 'monitor' });
 }
 
+// alerta CRITICO do Monitor (alarme cheio): aviso de fraude da Adyen
+// (NOTIFICATION_OF_FRAUD) - o chargeback costuma chegar dias depois, e o
+// cartão/cliente tem de ser barrado nos próximos pedidos
+async function notifyCritico(title, body, tag, unidade, url = '/monitor') {
+  await alertasCentral.registrar({ tipo: 'fraude', titulo: title, resumo: body, url, critico: true });
+  await sendToAll({ title, body, tag, critical: true, url }, { unidade, section: 'monitor' });
+}
+
 // alerta generico (ex: teste de cartao clonado) - nao depende de uma
 // transacao especifica normalizada
 async function notifyRaw(title, body, tag, unidade) {
@@ -1712,6 +1720,6 @@ module.exports = {
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,
   notifyDivergenciaCaixa, notifyDispositivoOnline,
-  notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
+  notifyQaAprovacaoPendente, notifyCritico, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,
 };

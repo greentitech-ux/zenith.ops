@@ -122,6 +122,7 @@ const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
 const coworkApi = require('./coworkApi');
 const enderecoAntigo = require('./enderecoAntigo');
+const defesaChargeback = require('./defesaChargeback');
 const vigiaScript = require('./vigiaScript');
 const agenteAndroid = require('./agenteAndroid');
 const qualidade = require('./qualidade');
@@ -332,6 +333,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/atendimento.html',
   '/api/meta/unidades-publico',
   '/api/meta/endereco',
+  '/api/defesa-arquivo',
   '/api/refund-requests/publico',
   '/api/solicitacoes/publico',
   '/api/bot/solicitacoes',
@@ -861,6 +863,21 @@ app.get('/api/meta/unidades-publico', async (req, res) => {
 // (o endereco antigo continua respondendo enquanto o subdominio
 // do Render estiver ligado). Publica e sem Firestore: devolve o APP_BASE_URL
 // que ja esta em memoria. O tema.js e estatico e nao sabe o endereco sozinho.
+// arquivo da defesa de chargeback por link assinado (2h): é assim que o
+// Claude baixa o PDF e as evidências no navegador pra anexar na Adyen, sem
+// sessão do NoPulso. O token só abre arquivo de defesa ou de tarefa.
+app.get('/api/defesa-arquivo', async (req, res) => {
+  const alvo = defesaChargeback.lerLink(req.query.t, process.env.JWT_SECRET || '');
+  if (!alvo) return res.status(403).json({ error: 'Link vencido ou inválido. Peça um novo.' });
+  const bytes = await storage.baixarArquivo(alvo.caminho);
+  if (!bytes) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+  const tipo = /\.pdf$/i.test(alvo.nome) ? 'application/pdf' : /\.png$/i.test(alvo.nome) ? 'image/png' : 'image/jpeg';
+  res.setHeader('Content-Type', tipo);
+  res.setHeader('Content-Disposition', `attachment; filename="${String(alvo.nome).replace(/[^\w.-]/g, '_')}"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(bytes);
+});
+
 app.get('/api/meta/endereco', (req, res) => {
   res.json({ oficial: APP_BASE_URL });
 });
@@ -2799,6 +2816,37 @@ app.post('/api/reunioes/publica/:token/comentarios', async (req, res) => {
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
 app.use('/api', auth.requireAuth);
+
+// ---------- DEFESA DE CHARGEBACK (ver defesaChargeback.js) ----------
+async function gerarDefesaAoConcluir(tarefa) {
+  const masters = (await users.list()).filter((u) => u.active !== false && u.role === 'master');
+  return defesaChargeback.aoConcluirTarefa({ tarefa, storage, push, masters, nomeUnidade: (c) => nomeCanonicoUnidade(c, c) });
+}
+// a tela desenha o questionário daqui: a pergunta e a validação são uma coisa só
+app.get('/api/defesa-chargeback/questionario', (req, res) => {
+  res.json({ questoes: defesaChargeback.QUESTOES, evidencias: defesaChargeback.EVIDENCIAS, opcaoAceitar: defesaChargeback.OPCAO_ACEITAR, obrigatoriasAoAceitar: [...defesaChargeback.OBRIGATORIAS_AO_ACEITAR] });
+});
+app.patch('/api/tarefas/:id/defesa', async (req, res) => {
+  try {
+    const atualizada = await tarefas.salvarDefesa(req.params.id, acessoDasTarefas(req), req.body?.respostas || {});
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json({ ...atualizada, faltando: defesaChargeback.faltando(atualizada.defesaChargeback.respostas, atualizada.anexos) });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+// prévia do PDF (sem gravar): quem responde vê exatamente o que vai pra Adyen
+app.get('/api/tarefas/:id/defesa.pdf', async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefa.defesaChargeback || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Defesa não encontrada.' });
+    const caso = await disputes.getOne(tarefa.defesaChargeback.disputaId);
+    if (!caso) return res.status(404).json({ error: 'O caso desta defesa não foi encontrado.' });
+    const evidencias = (tarefa.anexos || []).filter((a) => a && a.evidencia && /pdf|png|jpe?g/i.test(a.tipo || ''));
+    const pdf = await defesaChargeback.gerarPdf({ caso, tarefa, anexosDeEvidencia: evidencias, nomeUnidade: (c) => nomeCanonicoUnidade(c, c) });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="defesa-chargeback-${String(caso.pedidoId || caso.id).slice(0, 40).replace(/[^\w-]/g, '_')}.pdf"`);
+    res.send(pdf.bytes);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 
 // quem ainda usa o endereço antigo, por tipo e por dia - o que diz se já dá
 // pra desligar o subdomínio do Render (NOC, só Master)
@@ -11833,8 +11881,14 @@ app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('
     }
     const tarefa = await tarefas.getOne(req.params.id);
     if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    // evidência da defesa de chargeback: só o que entra no PDF que vai pra
+    // Adyen (JPG, PNG, PDF) - WebP e ZIP ficariam de fora sem ninguém ver
+    const evidencia = String(req.body?.evidencia || '').trim() || null;
+    if (evidencia && !/^(image\/(png|jpe?g)|application\/pdf)$/i.test(file.mimetype || '')) {
+      return res.status(400).json({ error: 'Evidência da defesa precisa ser foto (JPG ou PNG) ou PDF.' });
+    }
     const caminho = await storage.salvarArquivo(req.params.id, file, 'tarefas');
-    const atualizada = await tarefas.adicionarAnexo(req.params.id, acessoDasTarefas(req), { nome: file.originalname, path: caminho, tipo: file.mimetype, tamanho: file.size });
+    const atualizada = await tarefas.adicionarAnexo(req.params.id, acessoDasTarefas(req), { nome: file.originalname, path: caminho, tipo: file.mimetype, tamanho: file.size, evidencia });
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
   } catch (err) {
@@ -12098,7 +12152,10 @@ app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
           }
           // A sincronização acima já concluiu a tarefa vinculada. Só tarefas
           // sem solicitação precisam da conclusão local aqui.
-          if (!solicitacaoIdDaTarefa(tarefa) && tarefa.vinculo?.tipo !== 'estorno') await tarefas.concluir(id, { ...acesso, observacao: 'Conclusão em lote.' });
+          if (!solicitacaoIdDaTarefa(tarefa) && tarefa.vinculo?.tipo !== 'estorno') {
+            const feita = await tarefas.concluir(id, { ...acesso, observacao: 'Conclusão em lote.' });
+            if (feita.defesaChargeback) await gerarDefesaAoConcluir(feita).catch((e) => console.error('PDF da defesa:', e.message));
+          }
         } else await tarefas.atualizarStatus(id, acesso, status);
         resultado.push({ id, ok: true });
       } catch (err) { resultado.push({ id, ok: false, erro: err.message }); }
@@ -12287,6 +12344,12 @@ app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
     }
     const concluida = await tarefas.concluir(req.params.id, { ...acesso, observacao: req.body?.observacao });
     broadcast('tarefas-atualizada', { id: concluida.id, unidade: concluida.unidade }, 'tarefas');
+    if (concluida.defesaChargeback) {
+      // o PDF da defesa sai na hora: é ele que o Claude anexa na Adyen. Falhar
+      // aqui não desfaz a conclusão - o caso guarda o erro e o PDF pode ser
+      // gerado de novo pela tela (defesa.pdf)
+      try { concluida.defesaPdf = await gerarDefesaAoConcluir(concluida); } catch (e) { concluida.defesaPdfErro = e.message; }
+    }
     res.json(concluida);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -17147,6 +17210,16 @@ function aquecerBoot(promessa, ms) {
     // NOC_VARREDURA_MS ajusta sem deploy.
     const VARREDURA_MS = Number(process.env.NOC_VARREDURA_MS) > 0
       ? Number(process.env.NOC_VARREDURA_MS) : 60 * 1000;
+    // DEFESA DE CHARGEBACK (defesaChargeback.js): a cada 3 min abre/atualiza o
+    // caso de cada disputa que a Adyen mandou, cria a tarefa de defesa e cobra
+    // quem não respondeu. Lê os pedidos do store em memória (sem Firestore).
+    const rodarDefesaChargeback = () => defesaChargeback.sincronizar({
+      store, users, tarefas, push, nomeUnidade: (c) => nomeCanonicoUnidade(c, c), masterPreferido: String(process.env.MASTER_EMAIL || '').trim().toLowerCase(),
+    }).then((r) => { if (r && (r.casosNovos || r.tarefasCriadas || r.avisosFraude)) console.log('[chargeback]', JSON.stringify(r)); })
+      .catch((err) => console.error('Erro na defesa de chargeback:', err.message));
+    setTimeout(rodarDefesaChargeback, 20 * 1000);
+    setInterval(rodarDefesaChargeback, 3 * 60 * 1000);
+
     setInterval(() => {
       rodarVarreduraLojaStatus().catch((err) => console.error('Erro na varredura de conectividade das lojas:', err.message));
       // liberação em ondas do agente: avalia pilotas contra o espelho (sem
