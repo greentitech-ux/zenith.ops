@@ -4785,7 +4785,13 @@ app.get('/api/qualidade/visitas/:id', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
   try {
     const visita = await qualidade.obterVisita(req.params.id);
-    res.json({ ...visita, apontamentos: qualidade.apontamentosDe(visita) });
+    res.json({
+      ...visita,
+      apontamentos: qualidade.apontamentosDe(visita),
+      // o que ficou pendente na visita anterior da MESMA loja: sai da lista
+      // já em cache, não custa leitura nova (CLAUDE.md §3)
+      anterior: await qualidade.pendenciasDaAnterior(visita),
+    });
   } catch (err) { res.status(404).json({ error: err.message }); }
 });
 
@@ -4838,10 +4844,17 @@ app.get('/api/qualidade/visitas/:id/pdf', auth.requireAuth, async (req, res) => 
     const nome = `visita-qa-${String(visita.loja || visita.unidade || 'unidade').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${visita.data || ''}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${nome}"`);
-    await qualidadeReport.gerarPdf(visita, qualidade.apontamentosDe(visita), res);
+    await qualidadeReport.gerarPdf(visita, qualidade.apontamentosDe(visita), res, await qualidade.pendenciasDaAnterior(visita));
   } catch (err) {
     if (!res.headersSent) res.status(400).json({ error: err.message });
   }
+});
+
+// ASSINATURA DA VISITA. Quem assina está na loja, com a pessoa do lado -
+// assina no próprio aparelho (ver assinarVisita). Vale depois de concluída.
+app.post('/api/qualidade/visitas/:id/assinar', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try { res.json(await qualidade.assinarVisita(req.params.id, req.body || {})); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/qualidade/visitas/:id/concluir', auth.requireAuth, async (req, res) => {

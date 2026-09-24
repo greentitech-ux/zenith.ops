@@ -71,6 +71,11 @@
   .btn-foto input{display:none;}
   .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
+  .anterior{background:var(--warn-dim);border:1px solid var(--warn);border-radius:10px;padding:11px;margin-bottom:10px;}
+  .anterior b{color:var(--warn);}
+  .assin-modal{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;}
+  .assin-cx{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;width:100%;max-width:460px;}
+  .assin-cx canvas{display:block;width:100%;height:170px;background:#fff;border-radius:9px;touch-action:none;}
   .hidden{display:none!important;}
   .visita-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer;}
   .visita-row:last-child{border-bottom:none;}
@@ -137,10 +142,31 @@
     </div>
     <div class="sub" id="v-cabecalho" style="margin-top:7px;"></div>
   </div>
+  <div id="v-anterior"></div>
   <div id="v-setores"></div>
+  <div class="card hidden" id="v-assinaturas">
+    <h2 style="margin:0 0 4px;font-size:14px;">Assinaturas</h2>
+    <p class="sub" style="margin:0 0 10px;">Colha na hora, com a pessoa do lado — entra no laudo.</p>
+    <div id="assin-estado"></div>
+  </div>
   <div class="card hidden" id="v-laudo">
     <a id="v-laudo-link" target="_blank" rel="noopener" class="btn-primary" style="display:block;text-align:center;text-decoration:none;">📄 Abrir o laudo em PDF</a>
     <p class="sub" style="margin:8px 0 0;text-align:center;">Gerado na hora — uma ação corretiva respondida hoje já sai na próxima vez que você abrir.</p>
+  </div>
+
+  <div id="assin-modal" class="assin-modal hidden">
+    <div class="assin-cx">
+      <div style="font-size:13.5px;font-weight:700;margin-bottom:8px;" id="assin-titulo"></div>
+      <label for="assin-nome">Nome de quem assina</label>
+      <input id="assin-nome" placeholder="Nome completo">
+      <label>Assine no quadro</label>
+      <canvas id="assin-pad"></canvas>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="btn" onclick="limparPad()">Limpar</button>
+        <button class="btn" onclick="fecharAssin()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="enviarAssinatura()">Confirmar</button>
+      </div>
+    </div>
   </div>
   <div class="card" id="v-fechar">
     <button class="btn-primary" style="width:100%;" onclick="concluir()">Concluir visita</button>
@@ -235,6 +261,9 @@ function pintarVisita(){
   const concluida = v.status === 'CONCLUIDA';
   $('v-fechar').classList.toggle('hidden', concluida);
   $('v-laudo').classList.toggle('hidden', !concluida);
+  $('v-assinaturas').classList.toggle('hidden', !concluida);
+  pintarAnterior(v.anterior);
+  pintarAssinaturas(v.assinaturas||{});
   // o navegador abre o PDF numa aba nova e não manda header nenhum: o token
   // vai na URL, igual à foto do chat da Central (requireAuth aceita os dois)
   $('v-laudo-link').href = `/api/qualidade/visitas/${encodeURIComponent(v.id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
@@ -290,6 +319,72 @@ function pintarItem(item, concluida){
       </label>`}
     </div>` : ''}
   </div>`;
+}
+
+// O QUE FICOU PENDENTE DA ÚLTIMA VISITA. Aparece no topo porque é a
+// primeira coisa a conferir ao chegar na loja - cobrar o que já foi
+// apontado vale mais que apontar de novo.
+function pintarAnterior(ant){
+  const el = $('v-anterior');
+  if(!ant){ el.innerHTML=''; return; }
+  const pend = ant.pendentes || [];
+  el.innerHTML = `<div class="anterior">
+    <div style="font-size:12.5px;"><b>Visita anterior</b> · ${escapeHtml(ant.data||'')} · nota ${ant.nota==null?'—':escapeHtml(String(ant.nota).replace('.',','))}</div>
+    ${pend.length
+      ? `<div class="sub" style="margin-top:6px;">${pend.length} apontamento(s) ainda sem confirmação de correção:</div>
+         <ul style="margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.5;">
+           ${pend.slice(0,8).map(p=>`<li>${escapeHtml(p.texto)}</li>`).join('')}
+         </ul>${pend.length>8?`<div class="sub" style="margin-top:4px;">e mais ${pend.length-8}.</div>`:''}`
+      : '<div class="sub" style="margin-top:6px;">Nada pendente da última vez.</div>'}
+  </div>`;
+}
+
+function pintarAssinaturas(assin){
+  $('assin-estado').innerHTML = [['loja','Representante da loja'],['responsavel','Responsável técnico']].map(([k,rot])=>{
+    const a = assin[k];
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12.5px;font-weight:700;">${escapeHtml(rot)}</div>
+        <div class="sub">${a && a.imagem ? 'assinado por '+escapeHtml(a.nome||'—') : 'ainda não assinou'}</div>
+      </div>
+      ${a && a.imagem ? '<span class="pill">✓</span>' : `<button class="btn" onclick="abrirAssin('${k}','${escapeHtml(rot)}')">Assinar</button>`}
+    </div>`;
+  }).join('');
+}
+
+// ---- quadro de assinatura (mesmo desenho do assinar.html) ----
+let PAD_CTX = null, PAD_DESENHOU = false, PAD_QUEM = null;
+function abrirAssin(quem, rotulo){
+  PAD_QUEM = quem;
+  $('assin-titulo').textContent = rotulo;
+  $('assin-nome').value = '';
+  $('assin-modal').classList.remove('hidden');
+  const canvas = $('assin-pad');
+  // resolução 2x pro traço não sair serrilhado no PDF
+  const largura = canvas.clientWidth || 420;
+  canvas.width = largura*2; canvas.height = 340;
+  PAD_CTX = canvas.getContext('2d');
+  PAD_CTX.fillStyle='#fff'; PAD_CTX.fillRect(0,0,canvas.width,canvas.height);
+  PAD_CTX.strokeStyle='#111'; PAD_CTX.lineWidth=4; PAD_CTX.lineCap='round'; PAD_CTX.lineJoin='round';
+  PAD_DESENHOU = false;
+  let tracando = false;
+  const ponto = (e)=>{ const r=canvas.getBoundingClientRect(); return { x:(e.clientX-r.left)*(canvas.width/r.width), y:(e.clientY-r.top)*(canvas.height/r.height) }; };
+  canvas.onpointerdown = (e)=>{ e.preventDefault(); canvas.setPointerCapture(e.pointerId); tracando=true; PAD_DESENHOU=true; const p=ponto(e); PAD_CTX.beginPath(); PAD_CTX.moveTo(p.x,p.y); PAD_CTX.lineTo(p.x+.1,p.y+.1); PAD_CTX.stroke(); };
+  canvas.onpointermove = (e)=>{ if(!tracando) return; e.preventDefault(); const p=ponto(e); PAD_CTX.lineTo(p.x,p.y); PAD_CTX.stroke(); };
+  canvas.onpointerup = canvas.onpointercancel = ()=>{ tracando=false; };
+}
+function limparPad(){ const c=$('assin-pad'); PAD_CTX.fillStyle='#fff'; PAD_CTX.fillRect(0,0,c.width,c.height); PAD_DESENHOU=false; }
+function fecharAssin(){ $('assin-modal').classList.add('hidden'); PAD_QUEM=null; }
+async function enviarAssinatura(){
+  const nome = $('assin-nome').value.trim();
+  if(!nome) return alert('Escreva o nome de quem está assinando.');
+  if(!PAD_DESENHOU) return alert('Assine no quadro antes de confirmar.');
+  try{
+    await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/assinar`,
+      { method:'POST', body: JSON.stringify({ quem: PAD_QUEM, nome, imagem: $('assin-pad').toDataURL('image/png') }) });
+    fecharAssin();
+    await recarregar();
+  }catch(e){ alert(e.message); }
 }
 
 async function responder(itemId, resposta){

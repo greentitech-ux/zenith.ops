@@ -99,7 +99,7 @@ function espacoDoCliente(doc, texto, largura) {
   doc.moveDown(0.3);
 }
 
-async function gerarPdf(visita, apontamentos, res) {
+async function gerarPdf(visita, apontamentos, res, anterior) {
   const doc = new PDFDocument({ margin: 40, size: 'A4' });
   const largura = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   doc.pipe(res);
@@ -134,6 +134,27 @@ async function gerarPdf(visita, apontamentos, res) {
     doc.font('Helvetica').fillColor(COR.texto).fontSize(11).text(String(v));
     doc.moveDown(0.3);
   });
+
+  // COMPARAÇÃO COM A VISITA ANTERIOR DA MESMA LOJA. É pra isso que a nota
+  // existe: número solto não diz nada, número contra o da última vez diz se
+  // a loja está melhorando. Só aparece quando existe visita anterior - sem
+  // ela, nada é inventado.
+  if (anterior && anterior.nota !== null && anterior.nota !== undefined && visita.nota !== null) {
+    const delta = Math.round((visita.nota - anterior.nota) * 100) / 100;
+    const subiu = delta > 0;
+    const corDelta = delta === 0 ? COR.fraco : (subiu ? COR.positiva : COR.negativa);
+    doc.moveDown(0.5);
+    doc.font('Helvetica-Bold').fillColor(COR.fraco).fontSize(8).text('COMPARADO COM A VISITA ANTERIOR');
+    doc.font('Helvetica').fillColor(COR.texto).fontSize(11)
+      .text(`${notaBR(anterior.nota)} em ${dataBR(anterior.data)}`, { continued: true })
+      .fillColor(corDelta).font('Helvetica-Bold')
+      .text(`   ${delta === 0 ? 'sem mudança' : (subiu ? '▲ +' : '▼ ') + notaBR(Math.abs(delta))}`);
+    if (anterior.pendentes && anterior.pendentes.length) {
+      doc.moveDown(0.2);
+      doc.font('Helvetica').fillColor(COR.negativa).fontSize(10)
+        .text(`${anterior.pendentes.length} apontamento(s) da visita anterior ainda sem confirmação de correção.`);
+    }
+  }
 
   // ---------- APONTAMENTOS ----------
   if (!apontamentos.length) {
@@ -172,6 +193,32 @@ async function gerarPdf(visita, apontamentos, res) {
     const nao = a.corrigido === false ? 'X' : ' ';
     doc.fontSize(10).fillColor(COR.texto).font('Helvetica-Bold')
       .text(`CORRIGIDO:    SIM (  ${sim}  )      NÃO (  ${nao}  )`);
+  }
+
+  // ---------- ASSINATURAS ----------
+  // Só sai a página quando alguém assinou. Linha de assinatura em branco num
+  // laudo entregue sugere que faltou alguém - e não é isso: é que a
+  // assinatura é opcional, feita na loja quando dá.
+  const assin = visita.assinaturas || {};
+  const assinados = ['loja', 'responsavel'].filter((k) => assin[k] && assin[k].imagem);
+  if (assinados.length) {
+    doc.addPage();
+    doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text('ASSINATURAS');
+    doc.moveDown(0.6);
+    for (const chave of assinados) {
+      const a = assin[chave];
+      const y = doc.y;
+      try {
+        doc.image(Buffer.from(String(a.imagem).split(',')[1], 'base64'), doc.page.margins.left, y, { fit: [largura, 90] });
+      } catch (e) { /* assinatura ilegível não derruba o laudo */ }
+      doc.y = y + 95;
+      doc.moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.margins.left + largura * 0.7, doc.y).stroke(COR.linha);
+      doc.moveDown(0.3);
+      doc.fontSize(10).fillColor(COR.texto).font('Helvetica-Bold').text(a.nome || '—');
+      doc.fontSize(8).fillColor(COR.fraco).font('Helvetica')
+        .text(`${chave === 'loja' ? 'Representante da loja' : 'Responsável técnico'} · ${dataBR(String(a.assinadoEm || '').slice(0, 10))}`);
+      doc.moveDown(1.2);
+    }
   }
 
   doc.end();

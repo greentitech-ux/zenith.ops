@@ -498,6 +498,14 @@ async function salvarAcaoCorretiva(id, itemId, { acaoCorretiva, responsavel, pra
 // relidas a cada abertura da visita.
 const MAX_FOTOS_POR_ITEM = 6;
 
+// ASSINATURA. Mesmo mecanismo do formularios.js: PNG do canvas como data
+// URL dentro do próprio documento. Não vai pro Storage de propósito - o
+// laudo precisa fechar mesmo se o Storage estiver fora, e 300 mil
+// caracteres de base64 (~220 KB) cabem folgado no teto de 1 MiB.
+const MAX_IMAGEM_CHARS = 300000;
+const QUEM_ASSINA = ['loja', 'responsavel'];
+const QUEM_ASSINA_LABEL = { loja: 'Representante da loja', responsavel: 'Responsável técnico' };
+
 async function anexarFoto(id, itemId, foto) {
   const snap = await COLLECTION.doc(String(id)).get();
   if (!snap.exists) throw new Error('Visita não encontrada.');
@@ -528,6 +536,75 @@ async function fotoDe(id, itemId, indice) {
   return foto;
 }
 
+// ASSINATURA DA VISITA (Master, 24/09/2026).
+//
+// Quem assina está NA LOJA, com a pessoa do lado - por isso assina no
+// próprio aparelho, e não por link como no formularios.js. Link faz sentido
+// quando o assinante está longe; aqui ele está a um braço de distância, e
+// mandar link seria inventar uma espera que não existe.
+//
+// Continua valendo DEPOIS de concluída: a visita fecha o checklist, mas a
+// assinatura pode vir logo em seguida, enquanto a gerente lê o resumo.
+async function assinarVisita(id, { quem, nome, imagem }) {
+  if (!QUEM_ASSINA.includes(quem)) throw new Error('Assinatura inválida.');
+  const img = String(imagem || '');
+  if (!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(img)) {
+    throw new Error('Assinatura inválida - desenhe no quadro e tente de novo.');
+  }
+  if (img.length > MAX_IMAGEM_CHARS) throw new Error('Assinatura grande demais - limpe o quadro e assine de novo.');
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  const assinaturas = {
+    ...(visita.assinaturas || {}),
+    [quem]: {
+      imagem: img,
+      nome: String(nome || '').trim().slice(0, 80) || null,
+      assinadoEm: new Date().toISOString(),
+    },
+  };
+  await COLLECTION.doc(String(id)).set({ assinaturas }, { merge: true });
+  cacheLista.invalidar();
+  return assinaturas[quem];
+}
+
+// A VISITA ANTERIOR DA MESMA LOJA.
+//
+// É o que fecha o ciclo da ação corretiva: quem chega na loja precisa saber
+// o que ficou pendente da última vez, e o laudo precisa dizer se a nota
+// subiu ou caiu. Sai da lista JÁ EM CACHE (createCache), então não custa
+// leitura nova no Firestore (CLAUDE.md §3).
+function mesmaLoja(a, b) {
+  const chave = (v) => String(v.unidade || v.loja || '').trim().toLowerCase();
+  return !!chave(a) && chave(a) === chave(b);
+}
+async function visitaAnteriorDe(visita) {
+  const lista = await listarVisitas();
+  const anteriores = lista
+    .filter((v) => v.id !== visita.id && v.status === 'CONCLUIDA' && mesmaLoja(v, visita))
+    .filter((v) => String(v.concluidaEm || '') < String(visita.concluidaEm || visita.criadoEm || ''))
+    .sort((a, b) => String(b.concluidaEm).localeCompare(String(a.concluidaEm)));
+  return anteriores[0] || null;
+}
+
+// O que ficou pendente na visita anterior - com foto e ação corretiva, pra
+// ela conferir item por item se a loja corrigiu.
+async function pendenciasDaAnterior(visita) {
+  const anterior = await visitaAnteriorDe(visita);
+  if (!anterior) return null;
+  const snap = await COLLECTION.doc(String(anterior.id)).get();
+  if (!snap.exists) return null;
+  const doc = snap.data();
+  const apontamentos = apontamentosDe(doc).filter((a) => a.corrigido !== true);
+  return {
+    id: anterior.id,
+    data: anterior.data,
+    nota: anterior.nota,
+    faixa: anterior.faixa,
+    pendentes: apontamentos,
+  };
+}
+
 async function concluirVisita(id, email) {
   const snap = await COLLECTION.doc(String(id)).get();
   if (!snap.exists) throw new Error('Visita não encontrada.');
@@ -538,6 +615,20 @@ async function concluirVisita(id, email) {
   // loja - e nota errada em laudo é pior que laudo atrasado
   if (conta.respondidos < conta.total) {
     throw new Error(`Faltam ${conta.total - conta.respondidos} item(ns) para concluir.`);
+  }
+  // FOTO OBRIGATÓRIA NO QUE ESTÁ NÃO CONFORME (Master, 24/09/2026).
+  //
+  // O relatório do São Braz é um álbum: a foto é o que faz a loja reconhecer
+  // o problema sem discussão, e o que sustenta a cobrança na visita
+  // seguinte. Apontamento sem foto vira a palavra de um contra a do outro.
+  //
+  // A mensagem NOMEIA os itens - "faltam 3 fotos" faria ela caçar quais na
+  // mão, com a loja esperando.
+  const semFoto = apontamentosDe({ ...visita, respostas: visita.respostas })
+    .filter((a) => !(a.fotos || []).length)
+    .map((a) => a.texto);
+  if (semFoto.length) {
+    throw new Error(`Falta foto em ${semFoto.length} apontamento(s): ${semFoto.slice(0, 3).join(' · ')}${semFoto.length > 3 ? ` · e mais ${semFoto.length - 3}` : ''}`);
   }
   const patch = {
     status: 'CONCLUIDA',
@@ -621,4 +712,6 @@ module.exports = {
   criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
   salvarAcaoCorretiva, concluirVisita, listarVisitas, apontamentosDe,
   MAX_FOTOS_POR_ITEM, anexarFoto, fotoDe,
+  QUEM_ASSINA, QUEM_ASSINA_LABEL, MAX_IMAGEM_CHARS, assinarVisita,
+  visitaAnteriorDe, pendenciasDaAnterior,
 };

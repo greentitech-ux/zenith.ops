@@ -27411,6 +27411,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
         // um não conforme, pra o laudo ter apontamento de verdade
         await postarJson(`/api/qualidade/visitas/${criada.id}/item/estrados-prateleiras`, { resposta: 'nao-conforme', observacao: 'Caixa no chão.' }, cabQ);
         await postarJson(`/api/qualidade/visitas/${criada.id}/item/estrados-prateleiras/acao`, { acaoCorretiva: 'Subir em estrado.', responsavel: 'Gerente', prazo: '2026-10-01' }, cabQ);
+        // SEM FOTO a visita não fecha (regra nova) - e a mensagem tem que
+        // dizer QUAL item falta, senão ela caça na mão com a loja esperando
+        const semFoto = await postarJson(`/api/qualidade/visitas/${criada.id}/concluir`, {}, cabQ);
+        if (semFoto.status !== 400 || !/Falta foto/.test(semFoto.corpo) || !/estrados|chão/i.test(semFoto.corpo)) return false;
+        await q.anexarFoto(criada.id, 'estrados-prateleiras', { nome: 'caixa.jpg', path: 'qualidade/caixa.jpg', tipo: 'image/jpeg' });
         const fim = json(await postarJson(`/api/qualidade/visitas/${criada.id}/concluir`, {}, cabQ));
         if (!fim || fim.status !== 'CONCLUIDA') return false;
         // 37 de 38 = 9,73 (trunca)
@@ -27419,6 +27424,62 @@ $r | ConvertTo-Json -Depth 4 -Compress
         // %PDF nos primeiros bytes: a rota respondendo 200 com JSON de erro
         // passaria num teste de status, e o laudo estaria quebrado
         return pdf.status === 200 && pdf.buffer.slice(0, 4).toString() === '%PDF' && pdf.buffer.length > 1000;
+      })(),
+      // ---- ASSINATURA (Master, 24/09): quem assina está NA loja ----
+      'assinatura só aceita imagem de verdade, e com teto': await (async () => {
+        const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
+        const json2 = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
+        const criada = json2(await postarJson('/api/qualidade/visitas', { loja: 'TESTE ASSIN' }, cabQ));
+        const lixo = await postarJson(`/api/qualidade/visitas/${criada.id}/assinar`, { quem: 'loja', nome: 'X', imagem: 'javascript:alert(1)' }, cabQ);
+        const gigante = await postarJson(`/api/qualidade/visitas/${criada.id}/assinar`, { quem: 'loja', nome: 'X', imagem: 'data:image/png;base64,' + 'A'.repeat(q.MAX_IMAGEM_CHARS + 10) }, cabQ);
+        const papelErrado = await postarJson(`/api/qualidade/visitas/${criada.id}/assinar`, { quem: 'sindico', nome: 'X', imagem: 'data:image/png;base64,AAAA' }, cabQ);
+        const boa = await postarJson(`/api/qualidade/visitas/${criada.id}/assinar`, { quem: 'loja', nome: 'Marcela', imagem: 'data:image/png;base64,AAAA' }, cabQ);
+        return lixo.status === 400 && gigante.status === 400 && papelErrado.status === 400 && boa.status === 200;
+      })(),
+      // a assinatura fica no DOCUMENTO, não no Storage: o laudo precisa
+      // fechar mesmo com o Storage fora
+      'a assinatura não depende do Storage': (() => {
+        const mod = fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8');
+        // o que importa é o require, não a palavra: os comentários citam
+        // Storage justamente pra explicar onde a FOTO mora
+        return /const MAX_IMAGEM_CHARS = 300000;/.test(mod)
+          && !/require\('\.\/storage'\)/.test(mod)
+          && /\[quem\]: \{\s*\n\s*imagem: img,/.test(mod);
+      })(),
+      // ---- COMPARAÇÃO COM A VISITA ANTERIOR ----
+      'a visita enxerga a anterior da MESMA loja, com o que ficou pendente': await (async () => {
+        const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
+        const json2 = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
+        const fechar = async (loja, data) => {
+          const v = json2(await postarJson('/api/qualidade/visitas', { loja, data }, cabQ));
+          for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
+            await postarJson(`/api/qualidade/visitas/${v.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
+          }
+          await postarJson(`/api/qualidade/visitas/${v.id}/item/unhas`, { resposta: 'nao-conforme', observacao: 'sem esmalte' }, cabQ);
+          await q.anexarFoto(v.id, 'unhas', { nome: 'u.jpg', path: 'qualidade/u.jpg', tipo: 'image/jpeg' });
+          await postarJson(`/api/qualidade/visitas/${v.id}/concluir`, {}, cabQ);
+          return v.id;
+        };
+        await fechar('LOJA COMPARA', '2026-08-01');
+        const segunda = json2(await postarJson('/api/qualidade/visitas', { loja: 'LOJA COMPARA', data: '2026-09-01' }, cabQ));
+        const vista = json2(await pedir(`/api/qualidade/visitas/${segunda.id}`, cabQ));
+        return !!vista.anterior
+          && vista.anterior.nota === 9.73
+          && (vista.anterior.pendentes || []).some((p) => /unhas/i.test(p.texto));
+      })(),
+      // loja diferente não pode puxar a visita de outra
+      'visita de outra loja não vira "a anterior"': await (async () => {
+        const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
+        const json2 = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
+        const nova = json2(await postarJson('/api/qualidade/visitas', { loja: 'LOJA SOZINHA' }, cabQ));
+        const vista = json2(await pedir(`/api/qualidade/visitas/${nova.id}`, cabQ));
+        return vista.anterior === null;
+      })(),
+      'o laudo mostra a comparação e as assinaturas': (() => {
+        const rep = fsQ.readFileSync(__dirname + '/qualidadeReport.js', 'utf8');
+        return /COMPARADO COM A VISITA ANTERIOR/.test(rep)
+          && /ASSINATURAS/.test(rep)
+          && /gerarPdf\(visita, apontamentos, res, anterior\)/.test(rep);
       })(),
       // concluída não aceita mais resposta - agora pela ROTA, não só no módulo
       'depois de concluída, a rota recusa alterar o checklist': await (async () => {
@@ -27433,10 +27494,16 @@ $r | ConvertTo-Json -Depth 4 -Compress
         return depois.status === 400 && /concluída/.test(depois.corpo);
       })(),
       // foto vai pro Storage; documento guarda só o caminho (§3)
-      'a foto vai pro Storage, nunca pro Firestore':
-        /storage\.salvarArquivo\(req\.params\.id, req\.file, 'qualidade'\)/.test(idxQ)
-        && /path: String\(foto\.path \|\| ''\)/.test(fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8'))
-        && !/base64/.test(fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8')),
+      'a foto vai pro Storage, nunca pro Firestore': (() => {
+        const mod = fsQ.readFileSync(__dirname + '/qualidade.js', 'utf8');
+        const i = mod.indexOf('async function anexarFoto');
+        const corpo = mod.slice(i, i + 900);
+        // escopo na FUNÇÃO da foto: a assinatura usa base64 de propósito
+        // (data URL no documento), e olhar o arquivo inteiro confundiria as
+        // duas coisas
+        return /storage\.salvarArquivo\(req\.params\.id, req\.file, 'qualidade'\)/.test(idxQ)
+          && i > 0 && /path: String\(foto\.path \|\| ''\)/.test(corpo) && !/base64/.test(corpo);
+      })(),
       // §2: relatório tem hex próprio, o CSS do app não alcança o PDF
       'o laudo usa hex próprio, e não token de CSS': (() => {
         const rep = fsQ.readFileSync(__dirname + '/qualidadeReport.js', 'utf8');
