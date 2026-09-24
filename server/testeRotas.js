@@ -26907,19 +26907,40 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // expirado, erro). Se `coluna()` deixar algum de fora, o pedido some da
       // tela sem erro nenhum - e `expirado` e `erro` sao justamente os que
       // ninguem lembra de testar na mao.
-      'a tela tem as três colunas, e os cinco estados caem em alguma delas': (() => {
-        const temTodas = /id="col-pendente"/.test(htmlAut) && /id="col-aprovado"/.test(htmlAut) && /id="col-rejeitado"/.test(htmlAut);
+      // CINCO COLUNAS, UMA POR ESTADO. O que este teste protege é o que não se
+      // vê olhando a tela: se `coluna()` deixar um estado de fora, o pedido
+      // some sem erro nenhum - e `expirado` e `erro` são justamente os que
+      // ninguém lembra de testar na mão.
+      'a tela tem as cinco colunas, e cada estado cai na sua': (() => {
+        const ids = ['col-pendente', 'col-erro', 'col-aprovado', 'col-rejeitado', 'col-expirado'];
+        if (!ids.every((i) => htmlAut.includes(`id="${i}"`))) return false;
         // roda a MESMA função da tela, com um estado de cada
         const fn = (htmlAut.match(/function coluna\(a\)\{[\s\S]*?\n\}/) || [])[0];
-        if (!fn || !temTodas) return false;
-        const coluna = new Function('FEITOS', 'aberto', 'vencido', `${fn}; return coluna;`)(
-          new Map(), (a) => (a.status === 'pendente' || a.status === 'erro') && !(a.status === 'pendente' && a.expiraEm), () => false);
+        if (!fn) return false;
+        const coluna = new Function('FEITOS', 'vencido', `${fn}; return coluna;`)(
+          new Map(), (a) => a.status === 'pendente' && a.expiraEm === 'passou');
         return coluna({ status: 'pendente' }) === 'pendente'
-          && coluna({ status: 'erro' }) === 'pendente'          // voltou pra mão do Master: "pode autorizar de novo"
+          && coluna({ status: 'erro' }) === 'erro'
           && coluna({ status: 'aprovado' }) === 'aprovado'
           && coluna({ status: 'rejeitado' }) === 'rejeitado'
-          && coluna({ status: 'expirado' }) === 'rejeitado';    // nunca executou, como o recusado
+          && coluna({ status: 'expirado' }) === 'expirado'
+          // o pendente que passou do prazo nunca mais roda: conta como Venceu
+          && coluna({ status: 'pendente', expiraEm: 'passou' }) === 'expirado'
+          // e as cinco colunas são cinco DESTINOS diferentes - dobrar dois
+          // num só fazia o título dizer uma coisa e o cartão dentro, outra
+          && new Set(['pendente', 'erro', 'aprovado', 'rejeitado', 'expirado']
+            .map((st) => coluna({ status: st }))).size === 5;
       })(),
+      // o nome da coluna é a MESMA palavra do selo do cartão (CLAUDE.md §5)
+      'a coluna usa a palavra que o cartão já usava': /⚠️ Não rodou<\/span>/.test(htmlAut)
+        && /erro:'⚠️ Não rodou'/.test(htmlAut)
+        && /expirado:'⌛ Venceu'/.test(htmlAut) && />Venceu<\/span>/.test(htmlAut)
+        && /rejeitado:'❌ Recusado'/.test(htmlAut) && />Recusado<\/span>/.test(htmlAut),
+      // as duas colunas que pedem AÇÃO vêm primeiro: no celular elas empilham,
+      // então a ordem é a prioridade de quem chegou pelo push
+      'as colunas que pedem ação vêm antes das de desfecho':
+        htmlAut.indexOf('id="col-pendente"') < htmlAut.indexOf('id="col-erro"')
+        && htmlAut.indexOf('id="col-erro"') < htmlAut.indexOf('id="col-aprovado"'),
       // o resultado de uma ação que acabou de rodar aparece UMA vez e não
       // fica gravado (pode ser senha temporária). Ele fica ACIMA das colunas:
       // numa coluna, no celular, estaria abaixo da dobra - e seria o único
@@ -26928,10 +26949,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /<div id="agora"><\/div>/.test(htmlAut)
         && htmlAut.indexOf('<div id="agora">') < htmlAut.indexOf('class="colunas"')
         && /\$\('#agora'\)\.innerHTML=agora\.map\(cartao\)/.test(htmlAut),
-      // três colunas lado a lado em 390px seria pior que a lista de antes - e
-      // o celular é de onde o Master autoriza, chegando pelo push
-      'no celular as colunas empilham, e só viram colunas no desktop':
-        /@media\(min-width:900px\)\{ \.colunas\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/.test(htmlAut),
+      // cinco colunas lado a lado em 390px seria pior que a lista de antes - e
+      // o celular é de onde o Master autoriza, chegando pelo push. `auto-fit`
+      // acha sozinho quantas cabem, sem uma parede de breakpoints.
+      'no celular as colunas empilham, e a largura decide quantas cabem':
+        /grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,230px\),1fr\)\)/.test(htmlAut)
+        && !/grid-template-columns:repeat\(5,/.test(htmlAut),
       // ---- O CASO REAL DE 24/09 ----
       // O Claude pediu pra cancelar uma tarefa duplicada, o Master autorizou,
       // e falhou com "Só dá pra cancelar tarefa em aberto" - ela já estava
