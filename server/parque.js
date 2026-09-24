@@ -209,17 +209,30 @@ function aplicarNiverAutomatico(criancas, dataUtilizacao, categoriaPcd) {
 // mesmo estilo do aniversariante, so que a gratuidade e' escolhida manual
 // (checkbox por crianca), nao pela data de nascimento. Sem opts (correcao,
 // venda normal), comportamento identico ao de sempre.
-function valorEntradaCriancas(criancas, unitario, tempoMinutos, tabela, opts) {
+// A REGRA DO NIVER EM DOIS PEDACOS, num lugar so - os dois caminhos de venda
+// (tempo unico e plano por crianca) e a TELA usam exatamente isto. Quando a
+// regra morava so dentro do valorEntradaCriancas, o caminho de plano por
+// crianca simplesmente nao tinha niver (ver criarComPlanosIndividuais).
+function niverElegivelTempo(tempoMinutos, tabela) {
+  if (!tabela) return true; // chamador antigo sem tabela: comportamento de antes
+  return tempoMinutos === 60 || (tempoMinutos === 30 && tabela.niverAplicar30 === true);
+}
+function valorNiverDe(precoBase, tabela) {
   const t = tabela || {};
-  const elegivel = !tabela || tempoMinutos === 60 || (tempoMinutos === 30 && t.niverAplicar30 === true);
   const valorCheio = Number.isFinite(t.niverValorCheio) && t.niverValorCheio > 0 ? t.niverValorCheio : null;
+  if (valorCheio != null) return valorCheio;
   const desconto = Math.max(0, Math.min(100, Number.isFinite(t.niverDesconto) ? t.niverDesconto : NIVER_DESCONTO_PADRAO)) / 100;
+  return precoBase * (1 - desconto);
+}
+
+function valorEntradaCriancas(criancas, unitario, tempoMinutos, tabela, opts) {
+  const elegivel = niverElegivelTempo(tempoMinutos, tabela);
   const gratuidadeAtiva = !!(opts && opts.gratuidadeAtiva);
   const unitarioPagante = (opts && Number.isFinite(opts.unitarioPagante)) ? opts.unitarioPagante : unitario;
   return (criancas || []).reduce((soma, c) => {
     if (gratuidadeAtiva && c.gratuita !== false) return soma;
     const precoBase = gratuidadeAtiva ? unitarioPagante : unitario;
-    if (c.niver && elegivel) return soma + (valorCheio != null ? valorCheio : precoBase * (1 - desconto));
+    if (c.niver && elegivel) return soma + valorNiverDe(precoBase, tabela);
     return soma + precoBase;
   }, 0);
 }
@@ -537,15 +550,30 @@ async function criarComPlanosIndividuais(args, tabela) {
   const base = sanitizarCriancas(criancas);
   if (!base.length) throw new Error('Cadastre pelo menos uma criança.');
   const tempoPadrao = temposValidos(tabela).includes(Number(args.tempoMinutos)) ? Number(args.tempoMinutos) : temposValidos(tabela)[0];
+  // NIVER TAMBEM AQUI (Saltiverso, 24/09/2026).
+  //
+  // Este caminho somava `plano.valor` cheio e nunca chamava o niver: quem
+  // vendia escolhendo o plano CRIANCA A CRIANCA nunca via o desconto de
+  // aniversariante, nem na tela nem no servidor. E como os dois concordavam
+  // no valor cheio, a venda salvava normal - o desconto simplesmente nao
+  // acontecia, sem erro nenhum na tela. Foi assim que chegou como "nao esta
+  // pegando o desconto".
+  //
+  // Aqui a elegibilidade e POR CRIANCA, e nao do check-in inteiro: cada uma
+  // tem o seu tempo contratado. PCD e cortesia seguem de fora, como sempre.
   const criancasOk = base.map((crianca) => {
     const plano = planoIndividual(crianca.plano, tabela, tempoPadrao);
+    const niver = !plano.categoriaTempo && !plano.gratuita
+      && niverElegivelTempo(plano.tempoMinutos, tabela)
+      && ehNiver(crianca.dataNascimento, dataUtilizacao);
     return {
       ...crianca,
       plano: plano.chave,
       categoriaTempo: plano.categoriaTempo,
       tempoMinutos: plano.tempoMinutos,
       gratuita: plano.gratuita,
-      valorEntrada: plano.valor,
+      niver,
+      valorEntrada: niver ? valorNiverDe(plano.valor, tabela) : plano.valor,
     };
   });
   const temCortesia = criancasOk.some((c) => c.plano === 'cortesia');
@@ -1697,6 +1725,7 @@ async function emissoesParaAlertar() {
 }
 
 module.exports = {
+  niverElegivelTempo, valorNiverDe, valorEntradaCriancas,
   METODOS_PAGAMENTO, FORMAS_PAGAMENTO_SPLIT, PRECO_MEIA, valorPorTempo, valorDoCheckin,
   // exportado pro teste conferir que a TELA e o SERVIDOR enxergam o mesmo
   // aniversariante - foi a divergencia dos dois que travou o check-in

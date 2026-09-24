@@ -18791,8 +18791,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'campo em branco não vira aniversariante': vazio === false,
       // sem isto o conserto seria só no ehNiverAuto e os dois pontos que leem
       // o campo continuariam entregando texto cru pra outra função qualquer
-      'os dois pontos que calculam o total leem o MESMO campo de nascimento':
-        (htmlCk.match(/ehNiverAuto\(l\.querySelector\('\.crianca-nasc'\)\.value/g) || []).length === 2,
+      // eram DOIS até 24/09; o terceiro é o modo "plano por criança", que
+      // simplesmente não tinha niver (ver o bloco do Saltiverso abaixo)
+      'os três pontos que calculam o total leem o MESMO campo de nascimento':
+        (htmlCk.match(/ehNiverAuto\(l\.querySelector\('\.crianca-nasc'\)\.value/g) || []).length === 3,
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okNiverDigitado = !falhas.length;
@@ -29092,6 +29094,110 @@ $r | ConvertTo-Json -Depth 4 -Compress
   } catch (e) { okCbAuto = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
   if (!okCbAuto) ruins += 1;
   console.log(`${okCbAuto ? '✓' : '✗'} Chargeback sem Chrome: pagamento guardado 180 dias, data certa da compra, tarefa nascendo preenchida e prazo vencido fechado`);
+
+  // ------------------------------------------------------------------
+  // O NIVER NO MODO "PLANO POR CRIANÇA" (Saltiverso, 24/09/2026).
+  //
+  // Reclamação da loja: "não está pegando o desconto de aniversariante".
+  //
+  // O que era: `criar()` desvia pra `criarComPlanosIndividuais` quando a
+  // venda escolhe o plano CRIANÇA A CRIANÇA - e esse caminho somava
+  // `plano.valor` cheio, sem NUNCA chamar o niver. A tela fazia a mesma
+  // conta, também sem niver. Como os dois concordavam, a venda salvava
+  // normal e o desconto simplesmente não acontecia: nenhum erro, nenhum
+  // aviso, nada na tela. Só a loja percebendo no caixa.
+  //
+  // Este teste cobre os DOIS lados, porque um lado sozinho continuaria
+  // "passando" com o outro cego - foi assim que o bug sobreviveu.
+  let okNiverPlano = false;
+  try {
+    const fsN = require('fs');
+    const pq = require(__dirname + '/parque.js');
+    const htmlN = fsN.readFileSync(__dirname + '/public/parque-checkin.html', 'utf8');
+    const tabela = { niverDesconto: 50, niverValorCheio: 0, niverAplicar30: false };
+    // nasceu 22/08, entra em 26/08: 4 dias, dentro da janela de 7
+    const NASC = '2006-08-22', USO = '2026-08-26', FORA = '2009-04-05';
+
+    // a regra, do jeito que os dois caminhos de venda agora compartilham
+    const eleg60 = pq.niverElegivelTempo(60, tabela);
+    const eleg90 = pq.niverElegivelTempo(90, tabela);
+    const eleg30 = pq.niverElegivelTempo(30, tabela);
+    const eleg30Lig = pq.niverElegivelTempo(30, { ...tabela, niverAplicar30: true });
+    const meio = pq.valorNiverDe(50, tabela);
+    const cheio = pq.valorNiverDe(50, { ...tabela, niverValorCheio: 25 });
+
+    // o caminho de TEMPO ÚNICO, que já funcionava, não pode ter mudado
+    const antes = pq.valorEntradaCriancas([{ niver: true }, { niver: false }], 50, 60, tabela);
+
+    const conf = {
+      // a regra virou dois pedaços compartilhados: sem isso o modo de plano
+      // por criança teria a SUA cópia, e as duas divergiriam na 1ª correção
+      'a elegibilidade por tempo é uma regra só, usada pelos dois caminhos':
+        eleg60 === true && eleg90 === false && eleg30 === false && eleg30Lig === true
+        && /niverElegivelTempo\(plano\.tempoMinutos, tabela\)/.test(fsN.readFileSync(__dirname + '/parque.js', 'utf8')),
+      'valor cheio manda quando preenchido; senão é o percentual': meio === 25 && cheio === 25
+        && pq.valorNiverDe(50, { ...tabela, niverDesconto: 20 }) === 40,
+      'o caminho de tempo único continua igual ao que já era': antes === 75,
+      // O CONSERTO: plano por criança passa a ter niver
+      'plano por criança: a aniversariante paga com desconto e as outras, cheio': await (async () => {
+        const r = await pq.criar({
+          unidade: 'Saltiverso Manaira', unidadeNome: 'Saltiverso Manaira',
+          responsavel: { nome: 'Mãe', contato: '83999990000' }, dataUtilizacao: USO,
+          tempoMinutos: 60, termoAssinado: true, metodoPagamento: 'pix',
+          criancas: [
+            { nome: 'Ani', dataNascimento: NASC, plano: 'normal:60', meia: false },
+            { nome: 'Irmã', dataNascimento: FORA, plano: 'normal:60', meia: false },
+          ],
+          // valor de propósito errado: o servidor recusa dizendo o total certo,
+          // e é dele que a 2ª chamada parte. O preço da tabela é editável,
+          // então cravar um número aqui seria o teste inventando a tabela.
+          pagamentos: [{ forma: 'pix', valor: 0.01 }],
+          criadoPorId: 'u1', criadoPorEmail: 'u1@teste.local',
+        }).catch((e) => ({ erro: e.message }));
+        // o valor exato depende da tabela real do teste; o que importa é a
+        // RELAÇÃO: a aniversariante paga menos que a irmã, e está marcada
+        if (r.erro) {
+          // a soma dos pagamentos precisa bater - o erro traz o total certo
+          const total = Number((/valor total \(R\$([\d.]+)\)/.exec(r.erro) || [])[1]);
+          if (!Number.isFinite(total)) return false;
+          const r2 = await pq.criar({
+            unidade: 'Saltiverso Manaira', unidadeNome: 'Saltiverso Manaira',
+            responsavel: { nome: 'Mãe', contato: '83999990000' }, dataUtilizacao: USO,
+            tempoMinutos: 60, termoAssinado: true, metodoPagamento: 'pix',
+            criancas: [
+              { nome: 'Ani', dataNascimento: NASC, plano: 'normal:60', meia: false },
+              { nome: 'Irmã', dataNascimento: FORA, plano: 'normal:60', meia: false },
+            ],
+            pagamentos: [{ forma: 'pix', valor: total }],
+            criadoPorId: 'u1', criadoPorEmail: 'u1@teste.local',
+          });
+          const ani = (r2.criancas || []).find((c) => c.nome === 'Ani');
+          const irma = (r2.criancas || []).find((c) => c.nome === 'Irmã');
+          return !!ani && !!irma && ani.niver === true && irma.niver === false
+            && ani.valorEntrada < irma.valorEntrada
+            && ani.valorEntrada === pq.valorNiverDe(irma.valorEntrada, await pq.getConfigPrecos());
+        }
+        return false;
+      })(),
+      // A TELA TEM QUE DAR O MESMO NÚMERO: a soma das formas de pagamento é
+      // conferida contra o total no servidor, então discordar trava a venda
+      'a tela calcula o mesmo, no mesmo lugar em que o servidor calcula':
+        /function valorPlanoComNiver\(linha, dataUso\)\{/.test(htmlN)
+        && /return linhas\.reduce\(\(soma,l\)=>soma\+valorPlanoComNiver\(l, dataUsoPlano\)\.valor,0\)/.test(htmlN)
+        // e a atendente VÊ o 🎂 neste modo - sem isso ela não tem como saber
+        // se pegou, que é como o bug passou meses sem ninguém notar
+        && /niverPlano\?` · 🎂 Niver \$\{niverLabel\} \(\$\{niverPlano\}\)`/.test(htmlN),
+      // PCD e cortesia seguem de fora, como em todo o resto do parque
+      'PCD e cortesia continuam sem niver no plano por criança':
+        /const niver = !plano\.categoriaTempo && !plano\.gratuita/.test(fsN.readFileSync(__dirname + '/parque.js', 'utf8'))
+        && /if\(plano==='pcd30'\|\|plano==='pcd60'\|\|plano==='pcd-cortesia'\) return \{ valor:d\.valor, niver:false \}/.test(htmlN),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okNiverPlano = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okNiverPlano = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
+  if (!okNiverPlano) ruins += 1;
+  console.log(`${okNiverPlano ? '✓' : '✗'} Parque: o desconto de aniversariante também pega quando o plano é escolhido criança a criança`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

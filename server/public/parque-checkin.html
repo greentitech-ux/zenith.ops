@@ -841,9 +841,30 @@ function valorNiverPorCrianca(unit){
 // soma da entrada crianca a crianca: quem esta na gratuidade paga 0, quem
 // nao esta paga o preco cheio (ou o niver, se elegivel) - mesma logica do
 // servidor (ver valorEntradaCriancas em parque.js)
+// valor de UMA criança no modo "plano por criança", já com o niver. Tem que
+// dar EXATAMENTE o mesmo número que o servidor (ver criarComPlanosIndividuais
+// em parque.js): a soma das formas de pagamento é conferida lá contra o total,
+// então tela e servidor discordando trava a venda sem saída.
+//
+// Até 24/09 este modo não tinha niver em lado nenhum - por isso a venda
+// salvava normal e o desconto só não acontecia. Elegibilidade é POR CRIANÇA:
+// cada uma tem o seu tempo contratado aqui.
+function valorPlanoComNiver(linha, dataUso){
+  const plano = linha.querySelector('.crianca-plano').value;
+  const d = detalhesPlanoIndividual(plano);
+  if(d.gratuita || !d.valor) return { valor:d.valor, niver:false };
+  if(plano==='pcd30'||plano==='pcd60'||plano==='pcd-cortesia') return { valor:d.valor, niver:false };
+  const m = /^normal:(\d+)$/.exec(plano||'');
+  const minutos = m ? Number(m[1]) : null;
+  const elegivel = minutos===60 || (minutos===30 && TABELA_PRECOS.niverAplicar30===true);
+  const l = linha;
+  if(!elegivel || !l.querySelector('.crianca-nasc') || !ehNiverAuto(l.querySelector('.crianca-nasc').value, dataUso)) return { valor:d.valor, niver:false };
+  return { valor: valorNiverPorCrianca(d.valor), niver:true };
+}
 function valorEntradasPreview(linhas){
   if(linhas.some(l=>l.querySelector('.crianca-plano'))){
-    return linhas.reduce((soma,l)=>soma+detalhesPlanoIndividual(l.querySelector('.crianca-plano').value).valor,0);
+    const dataUsoPlano = document.getElementById('f-data').value;
+    return linhas.reduce((soma,l)=>soma+valorPlanoComNiver(l, dataUsoPlano).valor,0);
   }
   const gratuidadeAtiva = modoGratuidadeAtivo();
   const unit = valorUnitarioAtual();
@@ -914,10 +935,15 @@ function atualizarPreviewValor(){
   const niverLabel = TABELA_PRECOS.niverValorCheio > 0 ? `R$${TABELA_PRECOS.niverValorCheio}` : `${TABELA_PRECOS.niverDesconto}% off`;
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
   if(linhas.some(l=>l.querySelector('.crianca-plano'))){
-    const itens = linhas.map(l=>detalhesPlanoIndividual(l.querySelector('.crianca-plano').value));
+    // o 🎂 aparece aqui também: sem ele, a atendente não tem como saber se o
+    // desconto pegou - e foi exatamente assim que ele passou meses não
+    // pegando neste modo, sem ninguém notar
+    const dataUsoPlano = document.getElementById('f-data').value;
+    const itens = linhas.map(l=>({ ...detalhesPlanoIndividual(l.querySelector('.crianca-plano').value), ...valorPlanoComNiver(l, dataUsoPlano) }));
     const gratuitas = itens.filter(i=>i.gratuita).length;
-    const pago = itens.filter(i=>!i.gratuita).map(i=>i.label).join(' + ');
-    document.getElementById('valor-detalhe').textContent = `${gratuitas?`${gratuitas} cortesia(s) · `:''}${pago||'sem cobrança'} + meias dos ingressos pagos`;
+    const niverPlano = itens.filter(i=>i.niver).length;
+    const pago = itens.filter(i=>!i.gratuita).map(i=>`${i.label}${i.niver?' 🎂':''}`).join(' + ');
+    document.getElementById('valor-detalhe').textContent = `${gratuitas?`${gratuitas} cortesia(s) · `:''}${pago||'sem cobrança'}${niverPlano?` · 🎂 Niver ${niverLabel} (${niverPlano})`:''} + meias dos ingressos pagos`;
   } else if(gratuidadeAtiva){
     const gratuitas = linhas.filter(criancaEhGratuita).length;
     const pagantes = n - gratuitas;
