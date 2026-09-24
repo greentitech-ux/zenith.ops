@@ -27459,19 +27459,40 @@ $r | ConvertTo-Json -Depth 4 -Compress
           && /resposta: \{/.test(tema);
       })(),
       // ---- O LAUDO VAI PRA PASTA DA UNIDADE ----
-      'concluir a visita arquiva o laudo na pasta': await (async () => {
+      // A visita fecha e o laudo entra na Pasta EMPILHANDO num lugar só, em
+      // vez de criar uma entrada por visita (Master, 24/09/2026: "visitas e
+      // avaliações... precisa ser algo que vá anexando e criando o
+      // empilhamento"). Três anos de visita = UMA pilha com a última na
+      // frente, não três laudos soltos na lista da loja.
+      'concluir a visita empilha o laudo num lugar só da pasta': await (async () => {
         const cabQ = token ? { Authorization: 'Bearer ' + token } : {};
         const json3 = (r) => { try { return JSON.parse(r.corpo); } catch (e) { return null; } };
-        const v = json3(await postarJson('/api/qualidade/visitas', { loja: 'LOJA PASTA', data: '2026-09-24', password: process.env.MASTER_PASSWORD }, cabQ));
-        for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
-          await postarJson(`/api/qualidade/visitas/${v.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
-        }
-        await postarJson(`/api/qualidade/visitas/${v.id}/concluir`, {}, cabQ);
+        const fechar = async (data) => {
+          const v = json3(await postarJson('/api/qualidade/visitas', { loja: 'LOJA PASTA', data, password: process.env.MASTER_PASSWORD }, cabQ));
+          for (const item of q.itensDoModelo(q.MODELO_PADRAO)) {
+            await postarJson(`/api/qualidade/visitas/${v.id}/item/${item.id}`, { resposta: 'conforme' }, cabQ);
+          }
+          await postarJson(`/api/qualidade/visitas/${v.id}/concluir`, {}, cabQ);
+          return v.id;
+        };
+        const antiga = await fechar('2025-09-01');
+        const nova = await fechar('2026-09-24');
         const qd2 = require(__dirname + '/qualidadeDocumentos.js');
-        const naPasta = (await qd2.listar('LOJA PASTA')).find((d) => d.origem && d.origem.visitaId === v.id);
-        // aponta pra VISITA e não pro Storage: o PDF é gerado na hora, então
-        // a pasta serve sempre a versão atual
-        return !!naPasta && naPasta.origem.tipo === 'visita' && naPasta.validade === null && !naPasta.arquivo;
+        const laudos = (await qd2.listar('LOJA PASTA'))
+          .filter((d) => (d.versoes || []).some((v) => v.origem && v.origem.tipo === 'visita'));
+        if (laudos.length !== 1) return false;
+        const pasta = laudos[0];
+        return pasta.versoes.length === 2
+          // a mais recente na frente, e é ela que o documento passa a apontar
+          && pasta.versoes[0].origem.visitaId === nova
+          && pasta.versoes[1].origem.visitaId === antiga
+          && pasta.origem.visitaId === nova
+          && pasta.ultimaEm === '2026-09-24'
+          // aponta pra VISITA e não pro Storage: o PDF é gerado na hora, então
+          // a pasta serve sempre a versão atual
+          && !pasta.arquivo && !pasta.versoes[0].arquivo
+          // laudo não vence - é avaliação, cobrada por cadência
+          && pasta.tipo === 'avaliacao' && pasta.validade === null;
       })(),
       // ---- ASSINATURA (Master, 24/09): quem assina está NA loja ----
       'assinatura só aceita imagem de verdade, e com teto': await (async () => {
@@ -27850,10 +27871,24 @@ $r | ConvertTo-Json -Depth 4 -Compress
         const gravado = [...DOCS.entries()].find(([k]) => k === `qualidadeDocumentos/${id}`);
         return !!gravado && !('situacao' in gravado[1]) && !('dias' in gravado[1]);
       })(),
-      // RENOVAR tem que voltar a avisar - senão o documento cala pra sempre
-      'renovar a validade rearma o aviso':
-        /const mudouValidade = !anterior \|\| anterior\.validade !== registro\.validade;/.test(modD)
-        && /registro\.avisadoSituacao = mudouValidade \? null/.test(modD),
+      // RENOVAR tem que voltar a avisar - senão o documento cala pra sempre.
+      // PONTA A PONTA: olhar o código casaria com o nome da variável, e
+      // renomear passaria batido. O que importa é o registro voltar a poder
+      // falar depois da renovação - e CONTINUAR calado quando só o texto
+      // mudou, senão todo salvamento vira aviso repetido.
+      'renovar a validade rearma o aviso': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const base = { unidade: '19706', unidadeNome: 'Mooca', nome: 'Bombeiro REARMA', avisarDiasAntes: 30 };
+        const id = JSON.parse((await postarJson('/api/qualidade/documentos', { ...base, validade: '2026-10-01' }, cabD)).corpo).id;
+        await qd.marcarAvisado(id, 'a_vencer');
+        const calou = (await qd.obter(id)).avisadoSituacao === 'a_vencer';
+        await postarJson('/api/qualidade/documentos', { ...base, id, validade: '2027-10-01' }, cabD);
+        const rearmou = (await qd.obter(id)).avisadoSituacao === null;
+        await qd.marcarAvisado(id, 'a_vencer');
+        await postarJson('/api/qualidade/documentos', { ...base, id, validade: '2027-10-01', observacao: 'so um texto' }, cabD);
+        const seguiuCalado = (await qd.obter(id)).avisadoSituacao === 'a_vencer';
+        return calou && rearmou && seguiuCalado;
+      })(),
       // avisa quando falta pouco E de novo quando vence: a segunda é a que
       // vira risco de fiscalização
       'avisa por situação, não uma vez só':
@@ -27871,7 +27906,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // o arquivo escaneado tem MBs: Storage, nunca Firestore (§3)
       'o arquivo vai pro Storage, só o caminho fica no documento':
         /storage\.salvarArquivo\(req\.params\.id, req\.file, 'qualidade-documentos'\)/.test(idxD)
-        && /path: String\(arquivo\.path \|\| ''\)/.test(modD),
+        && /path: String\(\(arquivo && arquivo\.path\) \|\| ''\)/.test(modD),
       // a pasta é DA unidade: ninguém vê a do vizinho
       'unidade não enxerga nem escreve na pasta de outra':
         /function podeNaUnidadeQA\(req, unidade\)/.test(idxD)
@@ -27898,9 +27933,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /'qa-documento': \{ icone: '📄'/.test(fsD.readFileSync(__dirname + '/public/central-alertas.html', 'utf8')),
       // PONTA A PONTA na rota
       // ---- EXIGÊNCIAS DA FRANQUEADORA (boletim da Domino's, 2025) ----
-      'a lista da Domino\'s tem os 21 documentos do boletim': (() => {
+      'a lista da Domino\'s tem os 21 documentos do boletim, mais as 2 avaliações': (() => {
         const p = qd.exigenciasDe('dominos');
-        return !!p && p.itens.length === 21
+        return !!p && p.itens.length === 23
+          && p.itens.filter((i) => i.tipo === 'validade').length === 21
           && p.itens.some((i) => /AVCB/.test(i.nome) && i.periodicidade === 'unico')
           && p.itens.some((i) => /caixas d’água/.test(i.nome) && i.periodicidade === 'semestral')
           && p.itens.some((i) => /ServSafe/i.test(i.nome) && i.periodicidade === 'cinco_anos');
@@ -27917,11 +27953,149 @@ $r | ConvertTo-Json -Depth 4 -Compress
         const r1 = JSON.parse(um.corpo);
         const dois = JSON.parse((await postarJson('/api/qualidade/documentos/exigencias/dominos', { unidade: '19821', unidadeNome: 'Dom Sao Miguel' }, cabD)).corpo);
         const daUnidade = (await qd.listar('19821'));
-        return r1.criados === 21 && dois.criados === 0 && dois.jaExistiam === 21
+        return r1.criados === 23 && dois.criados === 0 && dois.jaExistiam === 23
           && daUnidade.every((d) => d.validade === null && d.situacao === 'sem_validade');
       })(),
+      // milkymoo é marca REAL do parque (unidades.js) e eu não recebi a lista
+      // dela - é exatamente o caso que não pode virar lista inventada
       'marca que eu não tenho responde 404, não inventa lista':
-        (await pedir('/api/qualidade/documentos/exigencias/spoleto', token ? { Authorization: 'Bearer ' + token } : {})).status === 404,
+        (await pedir('/api/qualidade/documentos/exigencias/milkymoo', token ? { Authorization: 'Bearer ' + token } : {})).status === 404
+        && !qd.EXIGENCIAS.milkymoo,
+      // ---- O EMPILHAMENTO (Master, 24/09/2026) ----
+      // "precisa ser algo que vá anexando e criando o empilhamento, sempre o
+      // que estará válido será o mais recente mesmo que vencido... podendo
+      // escolher os anteriores até para efeito de comparação, evolução".
+      //
+      // Antes, anexar TROCAVA o arquivo: subir a avaliação deste ano apagava
+      // a do ano passado, que é justamente com a qual se compara.
+      'anexar EMPILHA - a versão anterior continua na pilha e abre': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const id = JSON.parse((await postarJson('/api/qualidade/documentos', {
+          unidade: '19706', unidadeNome: 'Mooca', nome: 'Alvara PILHA', validade: '2025-01-01',
+        }, cabD)).corpo).id;
+        const subir = (arq, data, validade) => postarMultipart(
+          `/api/qualidade/documentos/${id}/arquivo`, { data, validade },
+          { nome: arq, tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 teste') }, 'arquivo', cabD);
+        if ((await subir('alvara2024.pdf', '2024-03-01', '2025-03-01')).status !== 200) return false;
+        if ((await subir('alvara2025.pdf', '2025-04-01', '2026-04-01')).status !== 200) return false;
+        const doc = await qd.obter(id);
+        const antiga = doc.versoes[1];
+        return doc.versoes.length === 2
+          && doc.arquivo.nome === 'alvara2025.pdf'
+          // a validade do documento passa a ser a DA VERSÃO DO TOPO
+          && doc.validade === '2026-04-01'
+          && antiga.arquivo.nome === 'alvara2024.pdf'
+          // e a antiga continua servível, que é o ponto da comparação
+          && (await pedir(`/api/qualidade/documentos/${id}/versao/${antiga.id}/arquivo`, cabD)).status === 200;
+      })(),
+      // A ORDEM É A DATA DO DOCUMENTO, não a do envio: quem escaneia em
+      // outubro a avaliação de março quer ela no lugar de março. Ordenar
+      // pelo envio jogaria o papel velho pra frente e a pasta passaria a
+      // servir o documento errado.
+      'a pilha ordena pela data do documento, não pela do envio': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const id = JSON.parse((await postarJson('/api/qualidade/documentos', {
+          unidade: '19706', unidadeNome: 'Mooca', nome: 'NFS ORDEM', tipo: 'avaliacao', cadenciaDias: 365,
+        }, cabD)).corpo).id;
+        const subir = (arq, data) => postarMultipart(
+          `/api/qualidade/documentos/${id}/arquivo`, { data },
+          { nome: arq, tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4') }, 'arquivo', cabD);
+        await subir('nfs2026.pdf', '2026-02-10');
+        await subir('nfs2025.pdf', '2025-02-10'); // escaneada depois, mas é mais VELHA
+        const doc = await qd.obter(id);
+        return doc.versoes[0].arquivo.nome === 'nfs2026.pdf'
+          && doc.arquivo.nome === 'nfs2026.pdf'
+          && doc.ultimaEm === '2026-02-10';
+      })(),
+      // "SEMPRE O QUE ESTARÁ VÁLIDO SERÁ O MAIS RECENTE MESMO QUE VENCIDO".
+      // Um alvará vencido continua sendo o alvará da loja até chegar o novo.
+      // Se a pasta "ajudasse" servindo a versão anterior ainda no prazo, ela
+      // esconderia o vencimento - bem no dia da fiscalização.
+      'o topo vale mesmo vencido, e não cede lugar pro anterior': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const id = JSON.parse((await postarJson('/api/qualidade/documentos', {
+          unidade: '19706', unidadeNome: 'Mooca', nome: 'Sanitaria VENCIDA',
+        }, cabD)).corpo).id;
+        const subir = (arq, data, validade) => postarMultipart(
+          `/api/qualidade/documentos/${id}/arquivo`, { data, validade },
+          { nome: arq, tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4') }, 'arquivo', cabD);
+        await subir('antiga.pdf', '2024-01-01', '2030-01-01'); // mais velha, mas AINDA no prazo
+        await subir('atual.pdf', '2025-01-01', '2025-06-01'); // mais nova e VENCIDA
+        const doc = await qd.obter(id);
+        return doc.arquivo.nome === 'atual.pdf' && doc.validade === '2025-06-01' && doc.situacao === 'vencido';
+      })(),
+      // Tirar a versão errada da pilha faz a de baixo voltar a valer - é por
+      // isso que o registro é re-sincronizado, e não só filtrado.
+      'tirar o topo faz a de baixo voltar a valer': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const id = JSON.parse((await postarJson('/api/qualidade/documentos', {
+          unidade: '19706', unidadeNome: 'Mooca', nome: 'Potabilidade DESFAZ',
+        }, cabD)).corpo).id;
+        const subir = (arq, data, validade) => postarMultipart(
+          `/api/qualidade/documentos/${id}/arquivo`, { data, validade },
+          { nome: arq, tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4') }, 'arquivo', cabD);
+        await subir('boa.pdf', '2025-01-01', '2026-01-01');
+        await subir('errada.pdf', '2026-01-01', '2027-01-01');
+        const topo = (await qd.obter(id)).versoes[0];
+        const r = await pedirJsonDelete(`/api/qualidade/documentos/${id}/versao/${topo.id}`, cabD);
+        const doc = await qd.obter(id);
+        return r.status === 200 && doc.versoes.length === 1
+          && doc.arquivo.nome === 'boa.pdf' && doc.validade === '2026-01-01';
+      })(),
+      // ---- AVALIAÇÃO DA FRANQUEADORA: não vence, ATRASA ----
+      // "visitas e avaliações não têm validade mas acontecem no mínimo 1 vez
+      // por ano". A de 2025 continua sendo documento legítimo em 2026 - o
+      // que está errado é fazer um ano que ninguém aparece. Chamá-la de
+      // "vencida" seria mentir sobre o papel, e a operação decide em cima
+      // dessa palavra.
+      'avaliação é cobrada por cadência e nunca é chamada de vencida': (() => {
+        const av = (ultima) => qd.situacaoDe({ tipo: 'avaliacao', ultimaEm: ultima, avisarDiasAntes: 30 }, '2026-09-24');
+        return av('2026-06-01').situacao === 'valido' && av('2026-06-01').situacaoLabel === 'Em dia'
+          && av('2025-10-10').situacao === 'a_vencer' && av('2025-10-10').situacaoLabel === 'Chegando a hora'
+          && av('2025-09-01').situacao === 'vencido' && av('2025-09-01').situacaoLabel === 'Atrasada'
+          && av(null).situacao === 'sem_validade' && av(null).situacaoLabel === 'Sem registro'
+          // a severidade continua UMA só - é ela que ordena a tela e o push
+          && qd.SITUACOES.length === 4
+          // e o documento com validade segue falando a língua dele
+          && qd.situacaoDe({ validade: '2026-09-23' }, '2026-09-24').situacaoLabel === 'Vencido'
+          // o push fala a mesma língua, senão o alerta desmente a tela
+          && /Avaliação atrasada/.test(pushD) && !/Documento vencido · \$\{onde\}` : `📄 Documento a vencer · \$\{onde\}`,\n  const quando = venceu/.test(pushD)
+          && /const ehAvaliacao = doc\.tipo === 'avaliacao';/.test(pushD)
+          // 365 é o PISO que o Master deu, não estimativa minha
+          && qd.CADENCIA_PADRAO_DIAS === 365;
+      })(),
+      'as três marcas têm a avaliação, e só a Domino\'s tem lista de documentos': (() => {
+        const d = qd.exigenciasDe('dominos');
+        const sp = qd.exigenciasDe('spoleto');
+        const sb = qd.exigenciasDe('saobraz');
+        return d.itens.filter((i) => i.tipo === 'avaliacao').length === 2
+          && d.itens.some((i) => /Consultor/.test(i.nome) && i.tipo === 'avaliacao')
+          && d.itens.some((i) => /NFS/.test(i.nome) && i.tipo === 'avaliacao')
+          && sp.itens.length === 1 && sp.itens[0].tipo === 'avaliacao'
+          && sb.itens.length === 1 && sb.itens[0].tipo === 'avaliacao'
+          // e a lista da Domino's NÃO foi copiada pras outras: seria inventar
+          // exigência de outra franqueadora, e a loja semearia 21 papéis que
+          // talvez ninguém peça (CLAUDE.md §6)
+          && !sp.itens.some((i) => /AVCB/.test(i.nome))
+          && !sb.itens.some((i) => /AVCB/.test(i.nome));
+      })(),
+      // A MARCA VEM DO PERFIL DA UNIDADE, não do nome da loja: "Spoleto
+      // Domino's Aeroporto Recife" tem as duas no nome, e deduzir semearia a
+      // lista da franqueadora errada sem ninguém perceber.
+      'a marca vem do perfil da unidade, e sem marca a tela não chuta': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const r = await pedir('/api/qualidade/documentos/marca/19706', cabD);
+        if (r.status !== 200) return false;
+        const d = JSON.parse(r.corpo);
+        return d.marca === null && d.temPacote === false
+          && /const perfil = await unidadesExtras\.perfil\(String\(req\.params\.unidade\)\)/.test(idxD);
+      })(),
+      // O histórico mora DENTRO do registro: subcoleção custaria uma leitura
+      // por versão em toda abertura da pasta (CLAUDE.md §3)
+      'o histórico não custa leitura extra no Firestore':
+        /versoes: \(anterior && Array\.isArray\(anterior\.versoes\)\) \? anterior\.versoes : \[\]/.test(modD)
+        && !/collection\('qualidadeDocumentos'\)[\s\S]{0,400}\.collection\(/.test(modD)
+        && qd.MAX_VERSOES === 120,
       'a rota guarda e devolve com a situação calculada': await (async () => {
         const cabD = token ? { Authorization: 'Bearer ' + token } : {};
         const r = await postarJson('/api/qualidade/documentos', {

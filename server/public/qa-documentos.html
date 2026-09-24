@@ -48,6 +48,19 @@
   .btn-arq{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:11.5px;cursor:pointer;color:var(--text);}
   .btn-arq input{display:none;}
   .hidden{display:none!important;}
+  /* O HISTORICO fica recolhido: a pasta tem que abrir mostrando o que VALE.
+     Quem quer comparar com o ano passado abre - e e uma pessoa por vez, nao
+     todo mundo que so quer saber se o alvara esta em dia. */
+  details.hist{margin-top:8px;}
+  details.hist>summary{cursor:pointer;font-size:11.5px;color:var(--muted);list-style:none;padding:4px 0;}
+  details.hist>summary::-webkit-details-marker{display:none;}
+  details.hist>summary::before{content:'▸ ';}
+  details.hist[open]>summary::before{content:'▾ ';}
+  details.hist>summary:hover{color:var(--accent);}
+  .versao{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0 6px 12px;border-left:2px solid var(--line);font-size:11.5px;color:var(--muted);}
+  .versao.topo{border-left-color:var(--accent);}
+  .versao .quando{font-family:var(--mono);color:var(--text);}
+  .tag-atual{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--panel2);color:var(--accent);border-radius:99px;padding:1px 7px;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -63,7 +76,7 @@
       </div>
     </div>
     <div style="display:flex;gap:8px;">
-      <button class="btn" onclick="semearDominos()" title="Cria os 21 documentos do boletim da Domino's, sem data - a loja preenche">Exigências Domino's</button>
+      <button class="btn" id="btn-marca" onclick="semearMarca()" title="Cria os documentos que a franqueadora exige, sem data - a loja preenche">Exigências da marca</button>
       <button class="btn-primary" onclick="abrirNovo()">+ Documento</button>
     </div>
   </div>
@@ -85,19 +98,54 @@
   </div>
   <div class="linha">
     <div>
+      <label for="f-tipo">O que é</label>
+      <select id="f-tipo" onchange="trocarTipo()">
+        <option value="validade">Documento com validade</option>
+        <option value="avaliacao">Avaliação / visita (não vence)</option>
+      </select>
+    </div>
+    <div id="cx-validade">
       <label for="f-validade">Validade</label>
       <input id="f-validade" type="date">
+    </div>
+    <div id="cx-cadencia" style="display:none;">
+      <label for="f-cadencia">Acontece a cada quantos dias</label>
+      <input id="f-cadencia" type="number" min="1" max="3650" value="365">
     </div>
     <div>
       <label for="f-aviso">Avisar quantos dias antes</label>
       <input id="f-aviso" type="number" min="1" max="365" value="30">
     </div>
   </div>
+  <p class="sub" id="dica-tipo" style="margin:6px 0 0;"></p>
   <label for="f-obs">Observação</label>
   <input id="f-obs" placeholder="opcional">
   <div style="display:flex;gap:8px;margin-top:14px;">
     <button class="btn" onclick="fecharForm()">Cancelar</button>
     <button class="btn-primary" style="flex:1;" onclick="salvar()">Salvar</button>
+  </div>
+</div>
+
+<div class="card" id="cx-versao" style="display:none;">
+  <h2 style="margin:0 0 4px;font-size:14px;">Nova versão de <span id="v-nome"></span></h2>
+  <p class="sub" style="margin:0 0 8px;">A anterior não some: ela desce na pilha e continua aberta pra comparar.</p>
+  <label for="v-arquivo">Arquivo (foto ou PDF)</label>
+  <input id="v-arquivo" type="file" accept="image/*,application/pdf" capture="environment">
+  <div class="linha">
+    <div>
+      <label for="v-data">Data do documento</label>
+      <input id="v-data" type="date">
+    </div>
+    <div id="cx-v-validade">
+      <label for="v-validade">Validade</label>
+      <input id="v-validade" type="date">
+    </div>
+  </div>
+  <label for="v-obs">Observação desta versão</label>
+  <input id="v-obs" placeholder="opcional">
+  <div style="display:flex;gap:8px;margin-top:14px;">
+    <button class="btn" onclick="fecharVersao()">Cancelar</button>
+    <button class="btn-primary" style="flex:1;" id="v-enviar" onclick="enviarVersao()">Enviar versão</button>
   </div>
 </div>
 
@@ -107,8 +155,16 @@
 const $ = (id) => document.getElementById(id);
 const AUTH_TOKEN = localStorage.getItem('authToken') || '';
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-const SIT_LABEL = { valido:'Válido', a_vencer:'A vencer', vencido:'Vencido', sem_validade:'Sem validade' };
-let DOCS = [], UNIDADES = [], EDIT_ID = null;
+// UMA severidade, DOIS vocabulários - o mesmo par que o servidor usa
+// (ROTULO_SITUACAO no qualidadeDocumentos.js). Avaliação não vence: atrasa.
+// O servidor já manda `situacaoLabel` pronto; este mapa é só a rede de
+// segurança pra registro antigo que ainda não passou por lá.
+const SIT_LABEL = {
+  validade: { valido:'Válido', a_vencer:'A vencer', vencido:'Vencido', sem_validade:'Sem validade' },
+  avaliacao:{ valido:'Em dia', a_vencer:'Chegando a hora', vencido:'Atrasada', sem_validade:'Sem registro' },
+};
+const rotulo = (d) => d.situacaoLabel || (SIT_LABEL[d.tipo==='avaliacao'?'avaliacao':'validade']||{})[d.situacao] || d.situacao;
+let DOCS = [], UNIDADES = [], EDIT_ID = null, VERSAO_DOC = null, MARCA = null;
 
 async function api(caminho, opcoes){
   const r = await fetch(caminho, Object.assign({
@@ -122,7 +178,24 @@ async function api(caminho, opcoes){
 
 function fmtData(iso){ return iso ? String(iso).split('-').reverse().join('/') : '—'; }
 
-function abrirNovo(){ EDIT_ID=null; $('form-titulo').textContent='Novo documento'; $('f-nome').value=''; $('f-validade').value=''; $('f-aviso').value=30; $('f-obs').value=''; $('cx-form').style.display='block'; }
+// O tipo troca a PERGUNTA do formulário: "até quando vale" contra "de quanto
+// em quanto tempo acontece". Mostrar os dois campos ao mesmo tempo convidaria
+// a preencher validade numa avaliação, que é justamente o que ela não tem.
+function trocarTipo(){
+  const av = $('f-tipo').value === 'avaliacao';
+  $('cx-validade').style.display = av ? 'none' : '';
+  $('cx-cadencia').style.display = av ? '' : 'none';
+  $('dica-tipo').textContent = av
+    ? 'Avaliação e visita não vencem — a pasta cobra pelo tempo desde a mais recente.'
+    : 'A data de validade está impressa no documento.';
+}
+
+function abrirNovo(){
+  EDIT_ID=null; $('form-titulo').textContent='Novo documento';
+  $('f-nome').value=''; $('f-validade').value=''; $('f-aviso').value=30;
+  $('f-tipo').value='validade'; $('f-cadencia').value=365; $('f-obs').value='';
+  trocarTipo(); $('cx-form').style.display='block';
+}
 function fecharForm(){ $('cx-form').style.display='none'; EDIT_ID=null; }
 function editar(id){
   const d = DOCS.find(x=>x.id===id); if(!d) return;
@@ -130,9 +203,12 @@ function editar(id){
   $('form-titulo').textContent = 'Editar documento';
   $('f-unidade').value = d.unidade;
   $('f-nome').value = d.nome;
+  $('f-tipo').value = d.tipo === 'avaliacao' ? 'avaliacao' : 'validade';
+  $('f-cadencia').value = d.cadenciaDias || 365;
   $('f-validade').value = d.validade || '';
   $('f-aviso').value = d.avisarDiasAntes || 30;
   $('f-obs').value = d.observacao || '';
+  trocarTipo();
   $('cx-form').style.display='block';
   window.scrollTo({ top:0, behavior:'smooth' });
 }
@@ -147,8 +223,59 @@ async function carregar(){
     DOCS = docs; UNIDADES = unis;
     $('f-unidade').innerHTML = (unis||[]).map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome||u.codigo)}</option>`).join('');
     $('sugestoes').innerHTML = (sug||[]).map(s=>`<option value="${escapeHtml(s.nome)}">`).join('');
+    $('f-unidade').onchange = carregarMarca;
+    await carregarMarca();
     pintar();
   }catch(e){ $('lista').innerHTML = `<div class="sub">${escapeHtml(e.message)}</div>`; }
+}
+
+// A MARCA vem do SERVIDOR, do perfil da unidade - a tela não deduz do nome.
+// "Spoleto Domino's Aeroporto Recife" tem as duas marcas no nome, e chutar
+// semearia a lista da franqueadora errada.
+async function carregarMarca(){
+  const b = $('btn-marca'); const uni = $('f-unidade').value;
+  MARCA = null;
+  if(!uni){ b.disabled = true; b.textContent = 'Exigências da marca'; return; }
+  const nomeUni = (UNIDADES.find(u=>u.codigo===uni)||{}).nome || uni;
+  try{
+    MARCA = await api('/api/qualidade/documentos/marca/'+encodeURIComponent(uni));
+  }catch(e){ MARCA = null; }
+  b.disabled = false;
+  // o botão diz de QUAL unidade está falando: ele semeia a pasta de uma loja
+  // só, e o seletor que manda nisso está dentro do formulário
+  if(!MARCA || !MARCA.marca){
+    b.textContent = 'Exigências da marca';
+    b.title = `${nomeUni} ainda não tem marca definida no perfil da unidade.`;
+  } else if(!MARCA.temPacote){
+    b.textContent = `Exigências ${MARCA.marcaLabel}`;
+    b.title = `${nomeUni} · ainda não recebi a lista de documentos da ${MARCA.marcaLabel}.`;
+  } else {
+    b.textContent = `Exigências ${MARCA.marcaLabel}`;
+    b.title = `${nomeUni} · ${MARCA.itens} item(ns) · ${MARCA.fonte}`;
+  }
+}
+
+function linhaVersao(d, v, ehTopo){
+  const quem = v.enviadoPorEmail ? ` · ${escapeHtml(String(v.enviadoPorEmail).split('@')[0])}` : '';
+  const quando = v.data ? fmtData(v.data) : fmtData(String(v.enviadoEm||'').slice(0,10));
+  // uma versão é OU um arquivo no Storage OU um apontamento pra visita, cujo
+  // PDF é gerado na hora - por isso o link muda de destino, não o desenho
+  const laudo = v.origem && v.origem.tipo === 'visita';
+  const href = laudo
+    ? `/api/qualidade/visitas/${encodeURIComponent(v.origem.visitaId)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}`
+    : `/api/qualidade/documentos/${encodeURIComponent(d.id)}/versao/${encodeURIComponent(v.id)}/arquivo?token=${encodeURIComponent(AUTH_TOKEN)}`;
+  const chamada = laudo
+    ? `📄 Abrir o laudo${v.origem.nota!=null?' · nota '+escapeHtml(String(v.origem.nota).replace('.',',')):''}`
+    : `📎 ${escapeHtml((v.arquivo&&v.arquivo.nome)||'arquivo')}`;
+  return `<div class="versao ${ehTopo?'topo':''}">
+    <span class="quando">${escapeHtml(quando)}</span>
+    ${ehTopo ? '<span class="tag-atual">atual</span>' : ''}
+    ${v.validade ? `<span>vence ${escapeHtml(fmtData(v.validade))}</span>` : ''}
+    <a class="btn-arq" href="${href}" target="_blank" rel="noopener">${chamada}</a>
+    ${v.observacao ? `<span>${escapeHtml(v.observacao)}</span>` : ''}
+    <span>${quem}</span>
+    <button class="btn-x" title="Tirar esta versão da pilha" onclick="tirarVersao('${escapeHtml(d.id)}','${escapeHtml(v.id)}')">✕</button>
+  </div>`;
 }
 
 function pintar(){
@@ -156,22 +283,32 @@ function pintar(){
   // vencido primeiro, depois a vencer: a tela abre no que precisa de ação
   const ordem = { vencido:0, a_vencer:1, valido:2, sem_validade:3 };
   const porUnidade = {};
-  DOCS.slice().sort((a,b)=>(ordem[a.situacao]-ordem[b.situacao]) || String(a.validade||'').localeCompare(String(b.validade||'')))
+  DOCS.slice().sort((a,b)=>(ordem[a.situacao]-ordem[b.situacao]) || String(a.prazo||'').localeCompare(String(b.prazo||'')))
     .forEach(d=>{ (porUnidade[d.unidadeNome||d.unidade] = porUnidade[d.unidadeNome||d.unidade]||[]).push(d); });
   $('lista').innerHTML = Object.entries(porUnidade).map(([uni,lista])=>`
     <div class="grupo-uni">${escapeHtml(uni)}</div>
-    ${lista.map(d=>`
+    ${lista.map(d=>{
+      const ehAv = d.tipo === 'avaliacao';
+      const versoes = d.versoes || [];
+      const ehLaudo = d.origem && d.origem.tipo === 'visita';
+      // a avaliação não fala de validade, fala de QUANDO FOI A ÚLTIMA
+      const linhaData = ehAv
+        ? (d.ultimaEm
+          ? `última em ${escapeHtml(fmtData(d.ultimaEm))}${d.prazo?` · prazo até ${escapeHtml(fmtData(d.prazo))}`:''}`
+          : 'nenhuma avaliação enviada ainda')
+        : (d.validade ? 'vence ' + escapeHtml(fmtData(d.validade)) : 'sem data de validade');
+      return `
       <div class="doc">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;font-weight:700;">${escapeHtml(d.nome)}</div>
           <div class="sub">
-            ${d.validade ? 'vence ' + escapeHtml(fmtData(d.validade)) : 'sem data de validade'}
+            ${linhaData}
             ${d.situacao==='a_vencer' ? ` · faltam ${d.dias} dia(s)` : ''}
             ${d.situacao==='vencido' ? ` · há ${Math.abs(d.dias)} dia(s)` : ''}
           </div>
           ${d.observacao ? `<div class="sub">${escapeHtml(d.observacao)}</div>` : ''}
           <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-            ${d.origem && d.origem.tipo === 'visita'
+            ${ehLaudo
               // laudo de visita: o PDF é gerado na hora, então o link vai pra
               // VISITA e não pro Storage - assim a pasta serve sempre a
               // versão atual, com as ações corretivas já respondidas
@@ -179,24 +316,29 @@ function pintar(){
               : (d.arquivo && d.arquivo.path
                 ? `<a class="btn-arq" href="/api/qualidade/documentos/${encodeURIComponent(d.id)}/arquivo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📎 ${escapeHtml(d.arquivo.nome||'arquivo')}</a>`
                 : '<span class="sub">sem arquivo</span>')}
-            ${d.origem && d.origem.tipo === 'visita' ? '' : `<label class="btn-arq">📷 ${d.arquivo&&d.arquivo.path?'Trocar':'Anexar/escanear'}
-              <input type="file" accept="image/*,application/pdf" capture="environment" onchange="enviarArquivo('${escapeHtml(d.id)}', this)">
-            </label>`}
+            ${ehLaudo ? '' : `<button class="btn-arq" onclick="abrirVersao('${escapeHtml(d.id)}')">＋ Nova versão</button>`}
             <button class="btn-arq" onclick="editar('${escapeHtml(d.id)}')">Editar</button>
             <button class="btn-x" title="Remover" onclick="remover('${escapeHtml(d.id)}')">✕</button>
           </div>
+          ${versoes.length ? `<details class="hist"><summary>Histórico · ${versoes.length} versã${versoes.length===1?'o':'es'}</summary>
+            ${versoes.map((v,i)=>linhaVersao(d,v,i===0)).join('')}
+          </details>` : ''}
         </div>
-        <span class="sit ${escapeHtml(d.situacao)}">${escapeHtml(SIT_LABEL[d.situacao]||d.situacao)}</span>
-      </div>`).join('')}`).join('');
+        <span class="sit ${escapeHtml(d.situacao)}">${escapeHtml(rotulo(d))}</span>
+      </div>`;
+    }).join('')}`).join('');
 }
 
 async function salvar(){
+  const av = $('f-tipo').value === 'avaliacao';
   const corpo = {
     id: EDIT_ID || undefined,
     unidade: $('f-unidade').value,
     unidadeNome: ($('f-unidade').selectedOptions[0]||{}).textContent || null,
     nome: $('f-nome').value.trim(),
-    validade: $('f-validade').value || null,
+    tipo: av ? 'avaliacao' : 'validade',
+    cadenciaDias: av ? (Number($('f-cadencia').value) || 365) : null,
+    validade: av ? null : ($('f-validade').value || null),
     avisarDiasAntes: Number($('f-aviso').value) || 30,
     observacao: $('f-obs').value.trim(),
   };
@@ -205,29 +347,61 @@ async function salvar(){
   catch(e){ alert(e.message); }
 }
 
-async function enviarArquivo(id, input){
-  const arquivo = input.files && input.files[0];
-  if(!arquivo) return;
-  const fd = new FormData(); fd.append('arquivo', arquivo);
+// ---- O EMPILHAMENTO ----
+// Cada envio é uma VERSÃO nova; a anterior desce e continua aberta. A data
+// pedida é a DO DOCUMENTO (a da avaliação, a da emissão) porque é ela que
+// define a ordem: quem escaneia em outubro a avaliação de março quer ela no
+// lugar de março, não na frente da de setembro.
+function abrirVersao(id){
+  const d = DOCS.find(x=>x.id===id); if(!d) return;
+  VERSAO_DOC = d;
+  $('v-nome').textContent = d.nome;
+  $('v-arquivo').value=''; $('v-data').value=''; $('v-validade').value=''; $('v-obs').value='';
+  $('cx-v-validade').style.display = d.tipo === 'avaliacao' ? 'none' : '';
+  $('cx-versao').style.display='block';
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+function fecharVersao(){ $('cx-versao').style.display='none'; VERSAO_DOC=null; }
+
+async function enviarVersao(){
+  if(!VERSAO_DOC) return;
+  const arquivo = $('v-arquivo').files && $('v-arquivo').files[0];
+  if(!arquivo) return alert('Escolha o arquivo ou tire a foto.');
+  const fd = new FormData();
+  fd.append('arquivo', arquivo);
+  if($('v-data').value) fd.append('data', $('v-data').value);
+  if(VERSAO_DOC.tipo !== 'avaliacao' && $('v-validade').value) fd.append('validade', $('v-validade').value);
+  if($('v-obs').value.trim()) fd.append('observacao', $('v-obs').value.trim());
+  const botao = $('v-enviar'); botao.disabled = true; botao.textContent = 'Enviando…';
   try{
     // sem Content-Type: o navegador põe o boundary do multipart sozinho
-    const r = await fetch(`/api/qualidade/documentos/${encodeURIComponent(id)}/arquivo`,
+    const r = await fetch(`/api/qualidade/documentos/${encodeURIComponent(VERSAO_DOC.id)}/arquivo`,
       { method:'POST', body: fd, headers: { Authorization: 'Bearer ' + AUTH_TOKEN } });
     if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Falha ao enviar o arquivo.'); }
-    window.zenithRascunhos?.limparAnexoEnviado(input);
+    window.zenithRascunhos?.limparAnexoEnviado($('v-arquivo'));
+    fecharVersao();
     await carregar();
   }catch(e){ alert(e.message); }
+  finally{ botao.disabled = false; botao.textContent = 'Enviar versão'; }
+}
+
+async function tirarVersao(id, versaoId){
+  if(!confirm('Tirar esta versão da pilha?\n\nSe ela for a atual, a de baixo volta a valer.')) return;
+  try{ await api(`/api/qualidade/documentos/${encodeURIComponent(id)}/versao/${encodeURIComponent(versaoId)}`, { method:'DELETE' }); await carregar(); }
+  catch(e){ alert(e.message); }
 }
 
 // Semeia a pasta com o que a franqueadora exige. Cria SEM DATA - a validade
 // quem preenche é a loja, olhando o documento na mão.
-async function semearDominos(){
-  const uni = $('f-unidade').value || (UNIDADES[0]||{}).codigo;
+async function semearMarca(){
+  const uni = $('f-unidade').value;
   if(!uni) return alert('Cadastre uma unidade antes.');
+  if(!MARCA || !MARCA.marca) return alert('Essa unidade ainda não tem marca definida no perfil.\n\nA marca é o Master quem define, em Unidades — ela não é deduzida do nome da loja.');
+  if(!MARCA.temPacote) return alert(`Ainda não recebi a lista de documentos da ${MARCA.marcaLabel}.`);
   const nome = (UNIDADES.find(u=>u.codigo===uni)||{}).nome || uni;
-  if(!confirm(`Criar na pasta de ${nome} os documentos que a Domino's exige?\n\nEles entram SEM data de validade — você preenche cada uma olhando o documento.`)) return;
+  if(!confirm(`Criar na pasta de ${nome} os ${MARCA.itens} itens que a ${MARCA.marcaLabel} exige?\n\nEles entram SEM data — você preenche cada uma olhando o documento.`)) return;
   try{
-    const r = await api(`/api/qualidade/documentos/exigencias/dominos`, { method:'POST', body: JSON.stringify({ unidade: uni, unidadeNome: nome }) });
+    const r = await api(`/api/qualidade/documentos/exigencias/${encodeURIComponent(MARCA.marca)}`, { method:'POST', body: JSON.stringify({ unidade: uni, unidadeNome: nome }) });
     alert(`${r.criados} criado(s)${r.jaExistiam?` · ${r.jaExistiam} já existia(m)`:''}.`);
     await carregar();
   }catch(e){ alert(e.message); }
@@ -239,6 +413,7 @@ async function remover(id){
   catch(e){ alert(e.message); }
 }
 
+trocarTipo();
 carregar();
 </script>
 <script src="/recolher.js"></script>

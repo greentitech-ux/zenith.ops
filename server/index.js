@@ -4791,17 +4791,44 @@ app.get('/api/qualidade/documentos/sugestoes', auth.requireAuth, (req, res) => {
   res.json(qualidadeDocumentos.sugestoes());
 });
 
-// O QUE A FRANQUEADORA EXIGE (ver EXIGENCIAS). Hoje só a Domino's, que foi a
-// que o Master anexou - as outras marcas entram na mesma estrutura.
+// O QUE A FRANQUEADORA EXIGE (ver EXIGENCIAS).
 app.get('/api/qualidade/documentos/exigencias/:marca', auth.requireAuth, (req, res) => {
   const pacote = qualidadeDocumentos.exigenciasDe(req.params.marca);
   if (!pacote) return res.status(404).json({ error: 'Não tenho a lista dessa marca ainda.' });
   res.json(pacote);
 });
 
+// A MARCA DA UNIDADE, resolvida NO SERVIDOR.
+//
+// A marca já existe no perfil da unidade (unidades.js) e é o Master quem
+// marca, uma vez - de propósito: "Spoleto Domino's Aeroporto Recife" tem as
+// duas no nome, e deduzir pelo nome tiraria a loja do pacote certo sem
+// ninguém perceber. A tela pergunta aqui em vez de adivinhar, e uma unidade
+// SEM marca responde `marca: null` - a tela então pede pro Master marcar,
+// em vez de semear a lista errada.
+app.get('/api/qualidade/documentos/marca/:unidade', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeNaUnidadeQA(req, req.params.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    const perfil = await unidadesExtras.perfil(String(req.params.unidade)).catch(() => null);
+    const marca = (perfil && perfil.marca) || null;
+    const pacote = marca ? qualidadeDocumentos.exigenciasDe(marca) : null;
+    res.json({
+      marca,
+      marcaLabel: marca ? (unidadesExtras.MARCAS_LABEL[marca] || marca) : null,
+      temPacote: !!pacote,
+      itens: pacote ? pacote.itens.length : 0,
+      fonte: pacote ? pacote.fonte : null,
+    });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 // SEMEAR a pasta com a lista da marca: cria os que faltam, SEM VALIDADE -
 // a data quem preenche é a loja, olhando o documento. Inventar validade aqui
 // seria inventar o dado que o alerta inteiro usa pra decidir (CLAUDE.md §6).
+//
+// As AVALIAÇÕES entram como `tipo: 'avaliacao'`: não vencem, são cobradas
+// por cadência (faz quanto tempo desde a última). Também nascem sem nada
+// empilhado - a primeira é a que a loja subir.
 app.post('/api/qualidade/documentos/exigencias/:marca', auth.requireAuth, async (req, res) => {
   try {
     const unidade = (req.body || {}).unidade;
@@ -4814,8 +4841,11 @@ app.post('/api/qualidade/documentos/exigencias/:marca', auth.requireAuth, async 
       if (jaTem.has(item.nome.toLowerCase())) continue;
       criados.push(await qualidadeDocumentos.salvar({
         unidade, unidadeNome: (req.body || {}).unidadeNome, nome: item.nome,
+        tipo: item.tipo, cadenciaDias: item.cadenciaDias,
         validade: null, avisarDiasAntes: item.avisarDiasAntes,
-        observacao: `Exigência ${pacote.nome} · renovação ${item.periodicidadeLabel}`,
+        observacao: item.tipo === 'avaliacao'
+          ? `Avaliação ${pacote.nome} · no mínimo ${item.periodicidadeLabel}`
+          : `Exigência ${pacote.nome} · renovação ${item.periodicidadeLabel}`,
       }, req.user && req.user.email));
     }
     res.json({ criados: criados.length, jaExistiam: pacote.itens.length - criados.length });
@@ -4829,20 +4859,30 @@ app.post('/api/qualidade/documentos', auth.requireAuth, async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-// ANEXAR/ESCANEAR. O arquivo vai pro Storage - um PDF escaneado tem MBs e
-// nunca pode entrar no documento do Firestore (CLAUDE.md §3).
+// ANEXAR/ESCANEAR EMPILHA - nunca substitui (Master, 24/09/2026: "precisa
+// ser algo que vá anexando e criando o empilhamento"). O arquivo vai pro
+// Storage; só o caminho fica no registro (CLAUDE.md §3).
+//
+// `data` é a data DO DOCUMENTO (a da avaliação, a da emissão) e é ela que
+// define a ordem da pilha - quem escaneia em outubro a avaliação de março
+// quer ela no lugar de março.
 app.post('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, upload.single('arquivo'), async (req, res) => {
   try {
     const atual = await qualidadeDocumentos.obter(req.params.id);
     if (!podeNaUnidadeQA(req, atual.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
     const caminho = await storage.salvarArquivo(req.params.id, req.file, 'qualidade-documentos');
-    res.json(await qualidadeDocumentos.anexar(req.params.id, {
-      nome: req.file.originalname, path: caminho, tipo: req.file.mimetype,
-    }));
+    res.json(await qualidadeDocumentos.empilhar(req.params.id, {
+      arquivo: { nome: req.file.originalname, path: caminho, tipo: req.file.mimetype },
+      // multipart: os campos chegam como texto no req.body
+      data: (req.body || {}).data || null,
+      validade: (req.body || {}).validade || null,
+      observacao: (req.body || {}).observacao || null,
+    }, req.user && req.user.email));
   } catch (err) { res.status(400).json({ error: storage.erroDeUpload ? storage.erroDeUpload(err) : err.message }); }
 });
 
+// O ARQUIVO QUE ESTÁ VALENDO (o topo da pilha).
 app.get('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, async (req, res) => {
   try {
     const doc = await qualidadeDocumentos.obter(req.params.id);
@@ -4850,6 +4890,27 @@ app.get('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, async (req, r
     if (!doc.arquivo || !doc.arquivo.path) return res.status(404).json({ error: 'Esse documento ainda não tem arquivo.' });
     storage.streamArquivo(doc.arquivo.path, doc.arquivo.tipo, res);
   } catch (err) { res.status(404).json({ error: err.message }); }
+});
+
+// UMA VERSÃO ANTERIOR, pra comparar ("podendo escolher os anteriores até
+// para efeito de comparação, evolução"). A permissão é a mesma do topo: o
+// histórico é do mesmo documento, da mesma unidade.
+app.get('/api/qualidade/documentos/:id/versao/:versaoId/arquivo', auth.requireAuth, async (req, res) => {
+  try {
+    const doc = await qualidadeDocumentos.obter(req.params.id);
+    if (!podeNaUnidadeQA(req, doc.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    const versao = (doc.versoes || []).find((v) => v.id === req.params.versaoId);
+    if (!versao || !versao.arquivo || !versao.arquivo.path) return res.status(404).json({ error: 'Essa versão não está na pilha.' });
+    storage.streamArquivo(versao.arquivo.path, versao.arquivo.tipo, res);
+  } catch (err) { res.status(404).json({ error: err.message }); }
+});
+
+app.delete('/api/qualidade/documentos/:id/versao/:versaoId', auth.requireAuth, async (req, res) => {
+  try {
+    const doc = await qualidadeDocumentos.obter(req.params.id);
+    if (!podeNaUnidadeQA(req, doc.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    res.json(await qualidadeDocumentos.removerVersao(req.params.id, req.params.versaoId, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.delete('/api/qualidade/documentos/:id', auth.requireAuth, async (req, res) => {
@@ -4984,15 +5045,32 @@ app.post('/api/qualidade/visitas/:id/concluir', auth.requireAuth, async (req, re
     // Entra apontando pra VISITA, não como arquivo: o PDF é gerado sob
     // demanda, então a pasta sempre serve a versão atual. Feito aqui e não
     // dentro de qualidade.js pra os dois módulos não se importarem em ciclo.
+    //
+    // E EMPILHA num lugar só, em vez de criar uma entrada por visita (Master,
+    // 24/09/2026: "visitas e avaliações não têm validade mas acontecem no
+    // mínimo 1 vez por ano... precisa ser algo que vá anexando e criando o
+    // empilhamento"). Depois de três anos a loja tem UMA pilha com a visita
+    // mais recente na frente, e não três laudos soltos na lista.
+    //
+    // Como avaliação e não como documento com validade: o laudo não vence -
+    // o que a pasta cobra é fazer um ano que ninguém visita.
     if (fim.unidade || fim.loja) {
-      await qualidadeDocumentos.salvar({
-        unidade: fim.unidade || fim.loja,
-        unidadeNome: fim.unidadeNome || fim.loja,
-        nome: `Laudo da visita técnica · ${String(fim.data || '').split('-').reverse().join('/')}`,
-        // laudo não vence: é o retrato de um dia
-        validade: null,
-        origem: { tipo: 'visita', visitaId: fim.id, nota: fim.nota, faixa: fim.faixa },
-      }, req.user && req.user.email).catch((e) => console.error('[qa] laudo não entrou na pasta:', e.message));
+      const email = req.user && req.user.email;
+      // await de propósito: quem fecha a visita tem que ver o laudo na pasta
+      // já na próxima tela, não "daqui a pouco"
+      await (async () => {
+        const slot = await qualidadeDocumentos.garantirSlot({
+          unidade: fim.unidade || fim.loja,
+          unidadeNome: fim.unidadeNome || fim.loja,
+          nome: 'Laudo da visita técnica',
+          tipo: 'avaliacao', cadenciaDias: 365, avisarDiasAntes: 45,
+        }, email);
+        await qualidadeDocumentos.empilhar(slot.id, {
+          origem: { tipo: 'visita', visitaId: fim.id, nota: fim.nota, faixa: fim.faixa },
+          data: fim.data || null,
+          observacao: fim.nota != null ? `Nota ${String(fim.nota).replace('.', ',')}` : null,
+        }, email);
+      })().catch((e) => console.error('[qa] laudo não entrou na pasta:', e.message));
     }
     res.json(fim);
   } catch (err) { res.status(400).json({ error: err.message }); }

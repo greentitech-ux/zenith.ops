@@ -625,11 +625,22 @@ async function publicoDocumentoQA(unidade) {
 async function notifyDocumentoQA(doc) {
   const venceu = doc.situacao === 'vencido';
   const onde = doc.unidadeNome || doc.unidade;
-  const quando = venceu
-    ? `venceu em ${String(doc.validade || '').split('-').reverse().join('/')}`
-    : `vence em ${doc.dias} dia(s)`;
+  const br = (iso) => String(iso || '').split('-').reverse().join('/');
+  // AVALIAÇÃO NÃO VENCE, ATRASA. A do consultor de 2025 continua sendo um
+  // documento legítimo - o que está errado é fazer um ano que ninguém
+  // aparece. Chamá-la de "vencida" seria mentir sobre o papel, e quem lê o
+  // push decide em cima disso.
+  const ehAvaliacao = doc.tipo === 'avaliacao';
+  const titulo = ehAvaliacao
+    ? (venceu ? `📊 Avaliação atrasada · ${onde}` : `📊 Avaliação a vencer o prazo · ${onde}`)
+    : (venceu ? `📄 Documento vencido · ${onde}` : `📄 Documento a vencer · ${onde}`);
+  const quando = ehAvaliacao
+    ? (venceu
+      ? `a última foi em ${br(doc.ultimaEm)}, há ${Math.abs(doc.dias)} dia(s) do prazo`
+      : `a última foi em ${br(doc.ultimaEm)}, fecha o prazo em ${doc.dias} dia(s)`)
+    : (venceu ? `venceu em ${br(doc.validade)}` : `vence em ${doc.dias} dia(s)`);
   const dados = {
-    title: venceu ? `📄 Documento vencido · ${onde}` : `📄 Documento a vencer · ${onde}`,
+    title: titulo,
     // tom de voz da casa (CLAUDE.md §5): o fato e o número, sem rodeio
     body: `${doc.nome} ${quando}.`,
     tag: `qa-doc-${doc.id}-${doc.situacao}`,

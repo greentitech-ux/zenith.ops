@@ -77,6 +77,10 @@ do esquema de seções.
 | Ajuda | `ajuda.html` | (sempre visível) | `docsMaster.js` | `/api/ajuda/topicos-master` | Autenticada | Central de documentação/POP, filtrada por permissão de quem lê. |
 | — | `alerta-beniboy.html` | — | nenhum (não chama API) | — | client-only | Tela de alarme sonoro/visual, parâmetros só via URL. |
 | — | `atendimento.html` | — | `unidades.js` | `/api/meta/unidades` | **Pública** | Chat público direto com o Beniboy (widget), sem WhatsApp. |
+| Visita Q.A | `qa-visita.html` | **tag de cargo `qa`** (não é seção) | `qualidade.js`, `qualidadeReport.js` | `/api/qualidade/visitas`, `/api/qualidade/visitas/:id/pdf` | Master/Admin/tag `qa` | Checklist de visita por setor, nota, apontamento com foto e assinatura na loja. Abrir a visita pede senha ou digital. |
+| Modelos Q.A | `qa-modelos.html` | **tag de cargo `qa`** | `qualidade.js` | `/api/qualidade/modelos` | Master/Admin (editar) | O checklist que a visita usa: setores, itens e criticidade. |
+| Pasta da unidade | `qa-documentos.html` | tag `qa` **ou** ter a unidade | `qualidadeDocumentos.js`, `unidades.js`, `push.js` | `/api/qualidade/documentos`, `.../:id/arquivo`, `.../:id/versao/:versaoId/arquivo`, `.../exigencias/:marca`, `.../marca/:unidade` | Master/Admin/tag `qa`/quem tem a unidade | Documentos da loja com validade **empilhados** (a versão do topo vale, as anteriores ficam pra comparar), avaliações da franqueadora cobradas por cadência, e o laudo de cada visita. |
+| Treinamento Q.A | `qa-treinamento.html` | **tag de cargo `qa`** | — (ainda sem módulo) | — | Master/Admin/tag `qa` | **Ainda não construída**, e a tela diz isso. Entrou no menu junto com a Visita porque o Master definiu a seção Q.A com as duas partes. |
 | — | `decidir.html` | — | `solicitacoes.js` | `/api/solicitacoes/decidir*` | **Pública** | Link público pra quem pediu a solicitação aprovar/recusar um orçamento. |
 | — | `estorno-cliente.html` | — | `refunds.js`, `unidades.js` | `/api/refund-requests/publico` | **Pública** | Formulário público de solicitação de estorno (link gerado pelo Beniboy). |
 | — | `solicitacao-publica.html` | — | `solicitacoes.js`, `unidades.js` | `/api/solicitacoes/publico` | **Pública** | Formulário público de abertura de solicitação (compra/manutenção/TI/...). |
@@ -101,6 +105,14 @@ mostrar/esconder o link do menu quanto (em conjunto com
 - **`central.html`/`central-historico.html`** não têm módulo backend
   próprio: agregam `solicitacoes.js` + `chamadosTI.js` +
   `chamadosManutencao.js` através de `centralCards.js`.
+- **Q.A é a única área que abre por TAG DE CARGO, não por seção de
+  permissão** (decisão do Master, 23/09/2026: "essa seção vira uma Tag
+  para ter acesso a ela... só Master, Admin ou quem tem a TAG, pois é um
+  Cargo Q.A"). Quem barra no servidor é `exigirQA()` em `index.js`, com o
+  mesmo critério do menu (`tags` no `nav-menu.js`) — esconder o item no
+  menu nunca é controle de acesso. A **Pasta** é a exceção dentro da
+  exceção: quem alimenta ela é a própria loja, então a porta é `tag qa`
+  **ou** ter aquela unidade na permissão (`podeNaUnidadeQA`).
 - Todo módulo de domínio novo (o próximo depois de `rh.js`, por exemplo)
   segue o mesmo esqueleto: coleção Firestore própria, `createCache()` de
   `liveCache.js`, funções `criar/listAll/listByUnidades/getOne/atualizar/
