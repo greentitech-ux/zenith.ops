@@ -27364,6 +27364,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const conf = {
       'sem credencial no Render, nada é chamado e a resposta diz o que falta': semConfig.apiConfigurada === false && chamadasSemConfig === 0 && /ADYEN_DISPUTES_API_KEY/.test(semConfig.aviso || ''),
       'com credencial, o Claude vê os motivos que a bandeira aceita e os documentos de cada um': prep.apiConfigurada === true && prep.motivos[0].codigo === 'ShippedToAVS' && prep.motivos[0].documentos[0].codigo === 'TIDorInvoice',
+      'sem ADYEN_DISPUTES_URL vale a Disputes API de produção, no host da Customer Area e sem prefixo de conta': ad.urlBase({}) === 'https://ca-live.adyen.com/ca/services/DisputeService/v30'
+        && ad.urlBase({ ADYEN_DISPUTES_URL: 'https://ca-test.adyen.com/ca/services/DisputeService/v30/' }) === 'https://ca-test.adyen.com/ca/services/DisputeService/v30',
       'o merchantAccountCode cru da transação ganha do mapa': prep.contaAdyen === 'DOM_TESTE_TIROL' && ad.contaDoCaso({ unidade: 'Dominos Tirol' }, []) === 'DOM_DO_MAPA',
       'enviar vira pedido de autorização: nada vai pra Adyen antes da digital': pedido.pendente === true && !!pedido.autorizacaoId && chamadasAntesDaDigital === 0,
       'aprovado, sobe o PDF no documento exigido e defende com o motivo': !!envio && envio.corpo.defenseDocuments[0].defenseDocumentTypeCode === 'TIDorInvoice'

@@ -11,7 +11,7 @@ Chargeback Automatizado" (Cowork), separando o que o código já tem, o que
 **A defesa é feita por gente e em português**, numa tarefa do Meu Dia.
 - Quem responde é o gerente da unidade, o Admin ou o Master.
 - A tarefa vira um PDF, que o Claude/Cowork anexa na Adyen.
-- A Disputes API fica opcional para depois, se houver credencial.
+- A Disputes API é opcional: com `ADYEN_DISPUTES_API_KEY` no Render, o Claude envia ou aceita pela API, sempre depois da digital do Master (`adyenDisputas.js`, `enviar_defesa_adyen` / `aceitar_disputa_adyen`). Sem a chave, segue o anexo manual.
 
 **Implementado** (`defesaChargeback.js`, fase 1 + a defesa manual da fase 2):
 - **Casos abertos sozinhos.** A cada 3 minutos, uma varredura sobre os pedidos em memória abre ou atualiza o caso na coleção `disputes`, com os mesmos status. Ela lê:

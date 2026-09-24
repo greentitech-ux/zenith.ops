@@ -9,26 +9,30 @@
 // Configuração no Render (nunca no código, nunca no chat):
 //   ADYEN_DISPUTES_API_KEY   chave de uma credencial com o papel
 //                            "API dispute management" (só esse papel)
-//   ADYEN_LIVE_PREFIX        prefixo live da conta (Customer Area ->
-//                            Developers -> API URLs), ex.: 1797a841fbb37ca7-AdyenDemo
-//   ou ADYEN_DISPUTES_URL    a URL base inteira (sobrepõe o prefixo; use a
-//                            de teste pra homologar)
+//   ADYEN_DISPUTES_URL       opcional: a URL base inteira. Sem ela vale a de
+//                            produção (URL_LIVE). Pra homologar, use a de
+//                            teste: https://ca-test.adyen.com/ca/services/DisputeService/v30
+//
+// A Disputes API mora no host da Customer Area (ca-live), SEM o prefixo da
+// conta: o prefixo "<xxx>-pal-live.adyenpayments.com" é da API de
+// pagamentos. É o que a biblioteca oficial da Adyen faz (@adyen/api-library,
+// disputesApi.js: ca-test -> ca-live). Com o host do pal, toda chamada
+// daria 404 em produção.
 //   ADYEN_MERCHANT_ACCOUNTS  opcional, JSON {"Dominos Bessa":"DOM_19706"}
 //                            pra caso antigo, de antes de o Monitor guardar
 //                            o merchantAccountCode cru em cada transação
 //
 // Sem chave ou sem URL, nada é chamado: a ferramenta responde o que falta.
 const VERSAO = 'v30';
+const URL_LIVE = `https://ca-live.adyen.com/ca/services/DisputeService/${VERSAO}`;
 
 function urlBase(env = process.env) {
   if (env.ADYEN_DISPUTES_URL) return String(env.ADYEN_DISPUTES_URL).replace(/\/$/, '');
-  if (env.ADYEN_LIVE_PREFIX) return `https://${env.ADYEN_LIVE_PREFIX}-pal-live.adyenpayments.com/pal/servlet/DisputeService/${VERSAO}`;
-  return null;
+  return URL_LIVE;
 }
 function configurada(env = process.env) {
   const falta = [];
   if (!env.ADYEN_DISPUTES_API_KEY) falta.push('ADYEN_DISPUTES_API_KEY');
-  if (!urlBase(env)) falta.push('ADYEN_LIVE_PREFIX (ou ADYEN_DISPUTES_URL)');
   return { ok: !falta.length, falta };
 }
 
@@ -90,4 +94,4 @@ async function aceitar({ pspDisputa, conta }, opcoes) {
   return { ok: true };
 }
 
-module.exports = { urlBase, configurada, contaDoCaso, chamar, motivosDeDefesa, defender, aceitar, VERSAO };
+module.exports = { URL_LIVE, urlBase, configurada, contaDoCaso, chamar, motivosDeDefesa, defender, aceitar, VERSAO };
