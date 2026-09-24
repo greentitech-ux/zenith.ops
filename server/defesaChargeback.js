@@ -498,7 +498,14 @@ function sugestoesDaAdyen(dados, historico) {
     const antes = historico.pedidos.filter((p) => p.aprovado && !p.teveDisputa && (!dados.dataCompra || String(p.em || '') < String(dados.dataCompra)));
     if (antes.length) {
       por('clienteRecorrente', 'Sim', 'Adyen (pedidos anteriores do mesmo cliente)');
-      por('historicoCliente', `${antes.length} pedido(s) aprovado(s) sem disputa desde ${dataBR(antes[0].em)}, pelo mesmo ${[...new Set(antes.flatMap((p) => p.ligadoPor))].join('/')}`, 'Adyen');
+      // "PELO MENOS", e não o número seco. O Monitor guarda poucos dias de
+      // venda comum (só o pedido COM disputa fica inteiro), então esta conta
+      // é um PISO, não o histórico do cliente. Num documento que vai pro
+      // banco, o número seco afirmaria mais do que o dado sustenta. E a
+      // loja, que sabe o total de verdade, leria "1 pedido" de um cliente de
+      // 50 e concluiria que o sistema errou - em vez de corrigir pra cima,
+      // que é o que a defesa precisa.
+      por('historicoCliente', `Pelo menos ${antes.length} pedido(s) aprovado(s) sem disputa desde ${dataBR(antes[0].em)}, pelo mesmo ${[...new Set(antes.flatMap((p) => p.ligadoPor))].join('/')} (conferido no Monitor - a loja pode ter mais).`, 'Adyen');
     }
   }
   return { campos, fontes };

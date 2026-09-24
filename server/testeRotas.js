@@ -27273,6 +27273,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'o servidor copia o telefone da Adyen pra defesa (sem passar pelo modelo)': resp1.telefoneCliente === '(87) 99876-4321' && selos1.telefoneCliente && /Adyen/.test(selos1.telefoneCliente.fonte),
       'endereço de entrega vira Delivery + endereço, e o histórico vira cliente recorrente':
         resp1.tipoPedido === 'Delivery' && /Rua das Flores/.test(resp1.endereco || '') && resp1.clienteRecorrente === 'Sim' && /1 pedido/.test(resp1.historicoCliente || ''),
+      // O Monitor guarda poucos dias de venda comum: a conta é um PISO, e o
+      // texto que vai pro banco tem que dizer isso. Número seco afirmaria
+      // mais do que o dado sustenta, e a loja leria "1 pedido" de um cliente
+      // de 50 como erro do sistema em vez de corrigir pra cima.
+      'o histórico do cliente entra como PISO, não como número fechado':
+        /^Pelo menos /.test(resp1.historicoCliente || '') && /a loja pode ter mais/.test(resp1.historicoCliente || ''),
       'resposta da unidade nunca é trocada pelo Claude': resp1.numeroPedido === '7781' && resp1.nomeCliente === 'Carla (como está no pedido)' && pre.jaRespondidosPelaUnidade.length === 1,
       'contestar/aceitar e a declaração são só da unidade': resp1.decisao === undefined && !resp1.declaracao && pre.recusados.length === 2,
       'campo fora do questionário é devolvido como inválido': pre.invalidos.some((x) => /inventado/.test(x)),
@@ -27282,6 +27288,30 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'a unidade mudou o valor: o selo daquele campo cai, os outros ficam': !selos2.canal && !!selos2.telefoneCliente && !!selos2.endereco,
       'defesa concluída não é mais pré-preenchida': /já foi concluída/.test(depoisConcluir || ''),
       'o que falta na defesa volta pro Claude cobrar': Array.isArray(pre.faltaNaDefesa) && pre.faltaNaDefesa.some((f) => /nota fiscal/i.test(f)),
+      // O SERVIDOR MANDAVA `tarefas-atualizada` EM 38 PONTOS E NINGUÉM OUVIA:
+      // nenhuma tela abria o EventSource pra esse evento. Com o Claude
+      // preenchendo a defesa DENTRO da tarefa, o gerente ficava olhando um
+      // formulário vazio que o servidor já tinha metade preenchida, e só
+      // descobria no F5.
+      'a tela do Meu Dia escuta o evento que o servidor já mandava': (() => {
+        const t = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+        return /new EventSource\('\/api\/stream\?token='/.test(t)
+          && /addEventListener\('tarefas-atualizada'/.test(t)
+          && /coworkApi\.configurar\(\{ aoAlterarTarefa:/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8'));
+      })(),
+      // recarregar por cima de quem está digitando reconstrói o formulário da
+      // defesa inteiro e apaga o campo em edição - "ajuda" que custa o
+      // trabalho da pessoa. Digitando, a tela avisa e deixa ELA escolher.
+      'a atualização ao vivo não redesenha por cima de quem está digitando': (() => {
+        const t = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+        return /function digitandoNaFicha\(\)/.test(t)
+          && /\(INPUT\|TEXTAREA\|SELECT\)/.test(t)
+          // o guarda é CONSULTADO nos DOIS caminhos: na tarefa aberta, que
+          // adia e avisa; e na lista atrás, que nem recarrega enquanto a
+          // pessoa escreve
+          && /if\(digitandoNaFicha\(\)\)\{ AVISO_MUDOU = true/.test(t)
+          && /if\(!digitandoNaFicha\(\)\) load\(\)/.test(t);
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okDefesaClaude = !falhas.length;
