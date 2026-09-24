@@ -323,7 +323,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null, defesaChargeback = null }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -368,6 +368,13 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
     anexos: (Array.isArray(anexosIniciais) ? anexosIniciais : []).slice(0, 5)
       .map((a) => ({ nome: String(a?.nome || 'Anexo').slice(0, 200), path: String(a?.path || ''), tipo: String(a?.tipo || 'application/octet-stream') }))
       .filter((a) => a.path),
+    // tarefa de DEFESA DE CHARGEBACK (defesaChargeback.js): liga a tarefa ao
+    // caso da Adyen; as respostas do questionário moram aqui, junto da tarefa
+    defesaChargeback: defesaChargeback && defesaChargeback.disputaId ? {
+      disputaId: String(defesaChargeback.disputaId), pedidoId: String(defesaChargeback.pedidoId || ''),
+      prazoDefesa: defesaChargeback.prazoDefesa || null, prazoInterno: defesaChargeback.prazoInterno || null,
+      motivo: String(defesaChargeback.motivo || '').slice(0, 200), respostas: {},
+    } : null,
     // Dados de triagem não são exibidos na descrição. Servem apenas para que
     // Master/Suporte decidam, depois, se o pedido merece virar uma solicitação.
     triagem: triagem && typeof triagem === 'object' ? triagem : null,
@@ -533,7 +540,12 @@ async function adicionarAnexo(id, acesso, anexo) {
     path: anexo.path, tipo: anexo.tipo || 'application/octet-stream', tamanho: Number(anexo.tamanho || 0),
     enviadoEm: new Date().toISOString(), enviadoPorId: acesso.usuario.id, enviadoPorNome: nomeUsuario(acesso.usuario),
     ...(anexo.transcricao ? { transcricao: true } : {}),
+    ...(anexo.evidencia ? { evidencia: String(anexo.evidencia) } : {}),
   };
+  if (item.evidencia) {
+    const ok = tarefa.defesaChargeback && require('./defesaChargeback').EVIDENCIAS.some((e) => e.id === item.evidencia);
+    if (!ok) throw new Error('Evidência de defesa só em tarefa de defesa de chargeback.');
+  }
   if (item.transcricao && !tarefa.ehReuniao) throw new Error('Transcrição só pode ser anexada em reunião.');
   await ref.update({ anexos: [...(tarefa.anexos || []), item].slice(-20), atualizadoEm: item.enviadoEm });
   return getOne(id);
@@ -681,6 +693,25 @@ async function adicionarComentario(id, { usuario, isMaster, isAdmin, unidades, t
   const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: corpo, porId: usuario.id, porNome: nomeUsuario(usuario), em: agora };
   await ref.update({ comentarios: [...(tarefa.comentarios || []), comentario].slice(-100), atualizadoEm: agora });
   return getOne(id);
+}
+
+// respostas do questionário da DEFESA DE CHARGEBACK (defesaChargeback.js):
+// quem participa responde (gerente, Admin, Master); a limpeza do que chega
+// é do módulo da defesa, que é quem sabe o que cada pergunta aceita
+async function salvarDefesa(id, acesso, respostas) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!tarefa.defesaChargeback) throw new Error('Esta tarefa não é de defesa de chargeback.');
+  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode responder esta defesa.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Esta defesa já foi concluída. Reabra a tarefa para mudar.');
+  const limpas = require('./defesaChargeback').limparRespostas(respostas);
+  const agora = new Date().toISOString();
+  await ref.update({
+    defesaChargeback: { ...tarefa.defesaChargeback, respostas: limpas, respondidoEm: agora, respondidoPorNome: nomeUsuario(acesso.usuario) },
+    atualizadoEm: agora,
+  });
+  return getOne(id, acesso);
 }
 
 async function atualizarDescricao(id, acesso, descricao) {
@@ -837,6 +868,12 @@ async function concluir(id, { usuario, isMaster, isAdmin, unidades, observacao }
   const tarefa = snap.data();
   if (!podeMoverStatus(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não concluir.');
   if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
+  // defesa de chargeback só conclui completa: é da conclusão que sai o PDF
+  // que vai pra Adyen, e defesa pela metade perde a disputa do mesmo jeito
+  if (tarefa.defesaChargeback) {
+    const falta = require('./defesaChargeback').faltando(tarefa.defesaChargeback.respostas, tarefa.anexos);
+    if (falta.length) throw new Error(`Falta na defesa: ${falta.slice(0, 5).join('; ')}${falta.length > 5 ? ` e mais ${falta.length - 5}` : ''}.`);
+  }
   const agora = new Date().toISOString();
   await ref.update({ status: 'CONCLUIDA', concluidaEm: agora, concluidaPorId: usuario.id, concluidaPorNome: nomeUsuario(usuario), observacaoConclusao: String(observacao || '').trim().slice(0, 1000), ...(tarefa.ehReuniao ? { 'linkExterno.ativo': false, 'linkExterno.encerradoEm': agora, 'linkExterno.encerradoPorNome': nomeUsuario(usuario) } : {}), atualizadoEm: agora });
   return getOne(id);
@@ -1173,4 +1210,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, listarAbertas, porNumero, LIMITE_ABERTAS_AGENTE, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, atualizarResumo, RESUMO_MAX, ehArquivoDeTranscricao, tipoDaTranscricao, textoDaTranscricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, listarAbertas, porNumero, LIMITE_ABERTAS_AGENTE, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, salvarDefesa, atualizarResumo, RESUMO_MAX, ehArquivoDeTranscricao, tipoDaTranscricao, textoDaTranscricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

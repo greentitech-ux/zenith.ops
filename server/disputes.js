@@ -73,7 +73,36 @@ async function remove(id) {
 }
 
 
+// CASO DA ADYEN (defesaChargeback.js): o mesmo registro, aberto sozinho
+// pelos eventos de disputa. Id fixo por pedido (`adyen_<pedido>`), então a
+// varredura pode rodar quantas vezes quiser sem duplicar. set com merge:
+// o que a pessoa escreveu no caso (notas, anexos) não é apagado.
+async function salvarCaso(id, patch) {
+  const agora = new Date().toISOString();
+  await COLLECTION.doc(id).set({ ...patch, id, atualizadoEm: agora }, { merge: true });
+  disputesCache.invalidar();
+  return getOne(id);
+}
+
+// o que o Claude/Cowork registra depois de agir NA Adyen (anexar a defesa
+// ou aceitar o chargeback): o NoPulso não fala com a Adyen, então é o
+// registro de quem fez, quando e o quê
+async function registrarAcao(id, { status, porNome, observacao, campo }) {
+  if (!STATUSES.includes(status)) throw new Error('status invalido');
+  const caso = await getOne(id);
+  if (!caso) throw new Error('Disputa não encontrada.');
+  const agora = new Date().toISOString();
+  const patch = {
+    status, atualizadoEm: agora,
+    [campo]: { em: agora, porNome: String(porNome || '').slice(0, 120), observacao: String(observacao || '').slice(0, 1000) },
+    historicoAcoes: [...(caso.historicoAcoes || []), { status, em: agora, porNome: String(porNome || '').slice(0, 120), observacao: String(observacao || '').slice(0, 300) }].slice(-30),
+  };
+  await COLLECTION.doc(id).update(patch);
+  disputesCache.invalidar();
+  return getOne(id);
+}
+
 module.exports = {
-  STATUSES, create, listAll, listByPedido, getOne, updateStatus, remove,
+  STATUSES, create, listAll, listByPedido, getOne, updateStatus, remove, salvarCaso, registrarAcao,
   invalidar: () => disputesCache.invalidar(),
 };

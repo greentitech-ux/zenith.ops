@@ -6,6 +6,36 @@ Chargeback Automatizado" (Cowork), separando o que o código já tem, o que
 `disputas_historico_2026-09-24.csv` — 265 disputas de 5 contas (DOM19940
 100, DOM_19798 67, DOM_19706 47, DOM_19633 35, DOM19911 16).
 
+## 0. Decisão do Master e o que já está no ar (24/09/2026)
+
+**A defesa é feita por gente e em português**, numa tarefa do Meu Dia.
+- Quem responde é o gerente da unidade, o Admin ou o Master.
+- A tarefa vira um PDF, que o Claude/Cowork anexa na Adyen.
+- A Disputes API fica opcional para depois, se houver credencial.
+
+**Implementado** (`defesaChargeback.js`, fase 1 + a defesa manual da fase 2):
+- **Casos abertos sozinhos.** A cada 3 minutos, uma varredura sobre os pedidos em memória abre ou atualiza o caso na coleção `disputes`, com os mesmos status. Ela lê:
+  - aviso de fraude, pedido de informação e aviso de chargeback;
+  - chargeback, fim de prazo e reversão;
+  - segundo chargeback e pré-arbitragem.
+- **Casos antigos:** não abre caso de disputa com mais de 60 dias.
+- **Tarefa de defesa** para o gerente da unidade:
+  - prioridade crítica;
+  - prazo interno = o menor entre o prazo da Adyen − 2 dias e 48h;
+  - aviso no celular ao nascer, lembrete em 24h e o Master chamado 12h antes do prazo;
+  - sem gerente cadastrado na unidade, a tarefa cai no Master.
+- **Questionário e evidências:** 20 perguntas e 6 evidências (JPG, PNG ou PDF). A tarefa não conclui pela metade. Quem responde pode decidir "Aceitar o chargeback", e aí só o essencial é exigido.
+- **PDF em português** com as evidências juntas.
+  - CPF, número de cartão e telefone saem mascarados.
+  - Aviso no caso quando o arquivo passa dos 2 MB da Adyen ou das 19 páginas da Mastercard.
+- **Proteção contra a limpeza de 2 dias:** o aviso de fraude e o pedido de informação não são mais apagados.
+- **Ferramentas do Cowork:**
+  - `listar_disputas`;
+  - `obter_disputa`, com o PDF e cada evidência por link assinado de 2h;
+  - `registrar_defesa_enviada`, que recusa se a defesa não foi gerada;
+  - `registrar_disputa_aceita`.
+- **Atenção:** a especificação original diz que a Adyen exige documento em inglês. Se a tela de defesa recusar o PDF em português, o Claude anexa junto uma carta curta em inglês com o resumo.
+
 ## 1. O que os números dizem (e o que muda na prioridade)
 
 | Fato do CSV | Consequência |

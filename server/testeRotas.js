@@ -26986,6 +26986,204 @@ $r | ConvertTo-Json -Depth 4 -Compress
   console.log(`${okConsultas ? '✓' : '✗'} Claude enxerga: ticket pelo número, tarefas, solicitações, chat, usuários e reunião`);
 
   // ------------------------------------------------------------------
+  // DEFESA DE CHARGEBACK SEM PERDER PRAZO (24/09/2026).
+  //
+  // De 265 chargebacks levantados, 163 venceram sem resposta. Aqui se prova o
+  // caminho inteiro, com o Firestore e o Storage de mentira mas o código de
+  // verdade: evento da Adyen -> caso -> tarefa no Meu Dia do GERENTE da
+  // unidade -> questionário + evidências -> a conclusão trava sem o
+  // obrigatório -> PDF em português sem CPF/telefone -> link temporário que o
+  // Claude usa pra anexar na Adyen. E os limites: o prazo manda, evento
+  // repetido não duplica, aviso de fraude não vira tarefa, e caso velho não
+  // enche o Meu Dia.
+  let okDefesa = false;
+  try {
+    const dc = require(__dirname + '/defesaChargeback.js');
+    const dispM = require(__dirname + '/disputes.js');
+    const tarM = require(__dirname + '/tarefas.js');
+    const authD = require(__dirname + '/auth.js');
+    const cw = require(__dirname + '/coworkApi.js');
+    const bcryptDf = require('bcryptjs');
+    const HORA = 3600000, DIA = 24 * HORA;
+    const T0 = Date.now();
+    const iso = (ms) => new Date(ms).toISOString();
+
+    // --- 1) a sequência da Adyen, pura ---
+    const seq = (atual, codigos, extra = {}) => dc.evoluirCaso(atual, codigos.map((c, i) => ({ eventCode: c, status: c, dataHora: iso(T0 - DIA + i * HORA), pspReference: 'D' + i, prazoDefesa: extra.prazo, motivo: extra.motivo })), T0);
+    const aberto = seq(null, ['NOTIFICATION_OF_CHARGEBACK'], { prazo: iso(T0 + 10 * DIA), motivo: 'No Cardholder Authorisation' });
+    const venceu = seq(null, ['NOTIFICATION_OF_CHARGEBACK', 'DISPUTE_DEFENSE_PERIOD_ENDED'], { prazo: iso(T0 + 10 * DIA) });
+    const enviadaVenceu = dc.evoluirCaso({ status: 'ENVIADA', eventosVistos: [] }, [{ eventCode: 'DISPUTE_DEFENSE_PERIOD_ENDED', dataHora: iso(T0), pspReference: 'x' }], T0);
+    const revertida = seq({ status: 'ENVIADA' }, ['CHARGEBACK_REVERSED']);
+    const segundo = seq({ status: 'ENVIADA' }, ['SECOND_CHARGEBACK']);
+    const soAviso = seq(null, ['NOTIFICATION_OF_FRAUD']);
+    const repetido = dc.evoluirCaso({ status: 'ABERTA', eventosVistos: aberto.eventosVistos }, [{ eventCode: 'NOTIFICATION_OF_CHARGEBACK', status: 'NOTIFICATION_OF_CHARGEBACK', dataHora: iso(T0 - DIA), pspReference: 'D0' }], T0);
+    const prazoPassado = seq(null, ['NOTIFICATION_OF_CHARGEBACK'], { prazo: iso(T0 - HORA) });
+
+    // --- 2) a varredura, com o time da unidade ---
+    const hashDf = bcryptDf.hashSync('SenhaDeTeste!2026', 4);
+    const U = (id, extra) => ({ id, email: `${id}@teste.local`, username: id, active: true, role: 'user', passwordHash: hashDf, permissions: { sections: ['tarefas'], unidades: ['Dominos Tirol'], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: iso(T0), ...extra });
+    const pessoas = [
+      U('df-gerente', { cargo: 'gerente', cargos: ['gerente'] }),
+      U('df-gerente2', { cargo: 'gerente', cargos: ['gerente'] }),
+      U('df-admin', { isAdmin: true }),
+      U('df-outra-loja', { cargo: 'gerente', cargos: ['gerente'], permissions: { sections: [], unidades: ['Dominos Bessa'], vaultSubgroups: [], tiposSolicitacao: [] } }),
+      { id: 'df-master', email: 'df-master@teste.local', username: 'dfmaster', role: 'master', active: true, passwordHash: hashDf },
+    ];
+    for (const p of pessoas) DOCS.set(`users/${p.id}`, p);
+    const usersFake = { list: async () => pessoas };
+    const pushLog = [];
+    const pushFake = {
+      notifyCritico: async (t, b, tag) => { pushLog.push({ tipo: 'critico', t, tag }); },
+      notifyUsuario: async (uid, t, b, tag) => { pushLog.push({ tipo: 'usuario', uid, t, tag }); },
+    };
+    const tx = (pedido, extra) => ({ merchantReference: pedido, unidade: 'Dominos Tirol', metodo: 'visa', last4: '4242', valor: 89.9, ...extra });
+    const TXS = [
+      tx('PED-CB', { pspReference: 'PAG1', eventCode: 'AUTHORISATION', status: 'APROVADO', dataHora: iso(T0 - 20 * DIA) }),
+      tx('PED-CB', { pspReference: 'DISP1', originalReference: 'PAG1', eventCode: 'NOTIFICATION_OF_CHARGEBACK', status: 'NOTIFICATION_OF_CHARGEBACK', dataHora: iso(T0 - HORA), prazoDefesa: iso(T0 + 12 * DIA), motivo: 'No Cardholder Authorisation' }),
+      tx('PED-FRAUDE', { pspReference: 'PAG2', eventCode: 'AUTHORISATION', status: 'APROVADO', dataHora: iso(T0 - 3 * DIA) }),
+      tx('PED-FRAUDE', { pspReference: 'NOF2', originalReference: 'PAG2', eventCode: 'NOTIFICATION_OF_FRAUD', status: 'NOTIFICATION_OF_FRAUD', dataHora: iso(T0 - HORA) }),
+      // aviso de fraude de 5 dias atrás (já estava guardado antes do deploy): abre o caso, mas não toca a sirene
+      tx('PED-FRAUDE-ANTIGA', { pspReference: 'PAG6', eventCode: 'AUTHORISATION', status: 'APROVADO', dataHora: iso(T0 - 9 * DIA) }),
+      tx('PED-FRAUDE-ANTIGA', { pspReference: 'NOF6', originalReference: 'PAG6', eventCode: 'NOTIFICATION_OF_FRAUD', status: 'NOTIFICATION_OF_FRAUD', dataHora: iso(T0 - 5 * DIA) }),
+      tx('PED-VELHO', { pspReference: 'PAG3', eventCode: 'CHARGEBACK', status: 'CHARGEBACK', dataHora: iso(T0 - 90 * DIA), prazoDefesa: iso(T0 - 70 * DIA) }),
+      tx('PED-NORMAL', { pspReference: 'PAG4', eventCode: 'AUTHORISATION', status: 'APROVADO', dataHora: iso(T0 - HORA) }),
+      tx('PED-SEMGERENTE', { unidade: 'Dominos Caruaru', pspReference: 'PAG5', eventCode: 'AUTHORISATION', status: 'APROVADO', dataHora: iso(T0 - 5 * DIA) }),
+      tx('PED-SEMGERENTE', { unidade: 'Dominos Caruaru', pspReference: 'DISP5', eventCode: 'CHARGEBACK', status: 'CHARGEBACK', dataHora: iso(T0 - HORA), prazoDefesa: iso(T0 + 1 * DIA), motivo: 'Cardholder dispute' }),
+    ];
+    const storeFake = { allTransactions: () => TXS };
+    dispM.invalidar();
+    const deps = (agora) => ({ store: storeFake, users: usersFake, tarefas: tarM, push: pushFake, agora, masterPreferido: 'df-master@teste.local' });
+    const r1 = await dc.sincronizar(deps(T0));
+    const casoCB = await dispM.getOne(dc.idDoCaso('PED-CB'));
+    const casoFr = await dispM.getOne(dc.idDoCaso('PED-FRAUDE'));
+    const casoVelho = await dispM.getOne(dc.idDoCaso('PED-VELHO'));
+    const casoSem = await dispM.getOne(dc.idDoCaso('PED-SEMGERENTE'));
+    const tarefaCB = casoCB && casoCB.tarefaId ? DOCS.get(`tarefas/${casoCB.tarefaId}`) : null;
+    const tarefaSem = casoSem && casoSem.tarefaId ? DOCS.get(`tarefas/${casoSem.tarefaId}`) : null;
+    const criticos1 = pushLog.filter((p) => p.tipo === 'critico').length;
+    const r2 = await dc.sincronizar(deps(T0 + 60000));
+    const criticos2 = pushLog.filter((p) => p.tipo === 'critico').length;
+    // lembrete depois de 24h sem resposta, e o Master chamado 12h antes do prazo interno
+    const r3 = await dc.sincronizar(deps(T0 + 25 * HORA));
+    const r4 = await dc.sincronizar(deps(Date.parse(casoCB.prazoInterno) - 11 * HORA));
+    const r5 = await dc.sincronizar(deps(Date.parse(casoCB.prazoInterno) - 10 * HORA));
+    const lembretes = pushLog.filter((p) => p.tag === `defesa-${casoCB.id}` && p.uid === 'df-gerente' && /ainda sem resposta/.test(p.t)).length;
+    const avisoDeCriacao = pushLog.filter((p) => p.tag === `defesa-${casoCB.id}` && p.uid === 'df-gerente' && /para defender/.test(p.t)).length;
+    const escalou = pushLog.filter((p) => p.tag === `defesa-escala-${casoCB.id}`).map((p) => p.uid);
+
+    // --- 3) a unidade responde pelo Meu Dia (HTTP de verdade) ---
+    const tkG = (await authD.login('df-gerente@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabG = { Authorization: 'Bearer ' + tkG };
+    const tkFora = (await authD.login('df-outra-loja@teste.local', 'SenhaDeTeste!2026')).token;
+    const quest = JSON.parse((await pedir('/api/defesa-chargeback/questionario', cabG)).corpo || '{}');
+    const parcial = await enviarJson('PATCH', `/api/tarefas/${tarefaCB.id}/defesa`, { respostas: { numeroPedido: '4412', tipoPedido: 'Delivery', canal: 'Nada disso' } }, cabG);
+    const parcialJ = JSON.parse(parcial.corpo || '{}');
+    const concluiCedo = await postarJson(`/api/tarefas/${tarefaCB.id}/concluir`, { password: 'SenhaDeTeste!2026' }, cabG);
+    const deFora = await enviarJson('PATCH', `/api/tarefas/${tarefaCB.id}/defesa`, { respostas: { numeroPedido: 'x' } }, { Authorization: 'Bearer ' + tkFora });
+    const completas = {
+      numeroPedido: '4412', canal: "App Domino's", tipoPedido: 'Delivery', itens: '1 pizza G calabresa - R$ 89,90',
+      nomeCliente: 'Maria Souza', telefoneCliente: '(81) 99876-1234', endereco: 'Rua do Sol, 100, Tirol, Natal - 59000-000, CPF 123.456.789-09',
+      clienteRecorrente: 'Sim', historicoCliente: '6 pedidos desde março', contatoCliente: 'Sim', resumoContato: 'Confirmou o pedido por telefone',
+      entregador: 'João (próprio)', horaSaida: '20:10', horaEntrega: '20:31', quemRecebeu: 'Maria', mesmaPessoa: 'Sim',
+      foraDoNormal: ['Nada fora do normal'], decisao: 'Contestar', declaracao: true,
+    };
+    await enviarJson('PATCH', `/api/tarefas/${tarefaCB.id}/defesa`, { respostas: completas }, cabG);
+    const semEvidencia = await postarJson(`/api/tarefas/${tarefaCB.id}/concluir`, { password: 'SenhaDeTeste!2026' }, cabG);
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+    const { PDFDocument } = require('pdf-lib');
+    const pdfEv = await PDFDocument.create(); pdfEv.addPage([300, 300]); const PDFEV = Buffer.from(await pdfEv.save());
+    const webp = await postarMultipart(`/api/tarefas/${tarefaCB.id}/anexos`, { evidencia: 'nota-fiscal' }, { nome: 'x.webp', tipo: 'image/webp', buffer: PNG }, 'anexo', cabG);
+    await postarMultipart(`/api/tarefas/${tarefaCB.id}/anexos`, { evidencia: 'nota-fiscal' }, { nome: 'cupom.png', tipo: 'image/png', buffer: PNG }, 'anexo', cabG);
+    await postarMultipart(`/api/tarefas/${tarefaCB.id}/anexos`, { evidencia: 'print-pedido' }, { nome: 'pedido.pdf', tipo: 'application/pdf', buffer: PDFEV }, 'anexo', cabG);
+    const faltaEntrega = await postarJson(`/api/tarefas/${tarefaCB.id}/concluir`, { password: 'SenhaDeTeste!2026' }, cabG);
+    await postarMultipart(`/api/tarefas/${tarefaCB.id}/anexos`, { evidencia: 'comprovante-entrega' }, { nome: 'porta.png', tipo: 'image/png', buffer: PNG }, 'anexo', cabG);
+    const previa = await pedirBinario(`/api/tarefas/${tarefaCB.id}/defesa.pdf`, cabG);
+    const conclui = await postarJson(`/api/tarefas/${tarefaCB.id}/concluir`, { password: 'SenhaDeTeste!2026' }, cabG);
+    dispM.invalidar();
+    const pronto = await dispM.getOne(casoCB.id);
+    const pdfBytes = pronto && pronto.defesaPdf ? ARQUIVOS.get(pronto.defesaPdf.path) : null;
+    const pdfTexto = pdfBytes ? textoDoPdf(pdfBytes) : '';
+    const paginas = pdfBytes ? (await PDFDocument.load(pdfBytes)).getPageCount() : 0;
+
+    // --- 4) o Claude pega o PDF e registra o que fez ---
+    DOCS.set('users/mst-defesa', { email: 'master-defesa@teste.local', role: 'master', active: true });
+    const masterAntesD = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'master-defesa@teste.local';
+    let lista, detalhe, envioAntes, envio, linkOk, linkMexido, linkForjado, vencido;
+    try {
+      lista = (await cw.executar({ nome: 'listar_disputas', entrada: { somenteProntas: true } })).resultado;
+      detalhe = (await cw.executar({ nome: 'obter_disputa', entrada: { psp: 'DISP1' } })).resultado;
+      try { await cw.executar({ nome: 'registrar_defesa_enviada', entrada: { disputaId: casoSem.id }, idempotencyKey: 'df-k0' }); envioAntes = 'passou'; } catch (e) { envioAntes = e.message; }
+      envio = await cw.executar({ nome: 'registrar_defesa_enviada', entrada: { disputaId: casoCB.id, observacao: 'anexado na Adyen' }, idempotencyKey: 'df-k1' });
+    } finally {
+      if (masterAntesD === undefined) delete process.env.NOPULSO_AGENT_MASTER; else process.env.NOPULSO_AGENT_MASTER = masterAntesD;
+    }
+    const caminhoLink = (u) => String(u || '').replace(/^https?:\/\/[^/]+/, '');
+    if (detalhe && detalhe.pdfDaDefesa) {
+      linkOk = await pedirBinario(caminhoLink(detalhe.pdfDaDefesa.link));
+      const t = new URL(detalhe.pdfDaDefesa.link).searchParams.get('t');
+      linkMexido = await pedirBinario('/api/defesa-arquivo?t=' + encodeURIComponent(t.slice(0, -2) + 'xx'));
+      const dadosForjados = Buffer.from(JSON.stringify({ p: 'users/df-master', n: 'x', e: Date.now() + 99999 })).toString('base64url');
+      const sigForjada = require('crypto').createHmac('sha256', process.env.JWT_SECRET).update(dadosForjados).digest('base64url');
+      linkForjado = dc.lerLink(`${dadosForjados}.${sigForjada}`, process.env.JWT_SECRET);
+      vencido = dc.lerLink(t, process.env.JWT_SECRET, Date.now() + dc.VALIDADE_LINK_MS + 1000);
+    }
+    dispM.invalidar();
+    const enviado = await dispM.getOne(casoCB.id);
+
+    const conf = {
+      // sequência
+      'aviso de chargeback abre o caso, defensável enquanto o prazo não passou': aberto.status === 'ABERTA' && aberto.defensavel === true,
+      'prazo vencido sem defesa = PERDIDA (o dinheiro que se perdia calado)': venceu.status === 'PERDIDA' && /sem resposta/.test(venceu.resultado),
+      'defesa já enviada não vira perdida só porque o prazo acabou': enviadaVenceu.status === 'ENVIADA',
+      'reversão = GANHA; segundo chargeback depois da defesa = PERDIDA': revertida.status === 'GANHA' && segundo.status === 'PERDIDA',
+      'aviso de fraude sozinho não abre disputa (MONITORANDO)': soAviso.status === 'MONITORANDO' && soAviso.defensavel === false,
+      'evento repetido não é aplicado de novo': repetido.novos.length === 0,
+      'com o prazo da Adyen já vencido, não é defensável': prazoPassado.defensavel === false,
+      // varredura
+      'o chargeback vira tarefa no Meu Dia do GERENTE da unidade': !!tarefaCB && tarefaCB.responsavelId === 'df-gerente' && tarefaCB.origem === 'chargeback' && tarefaCB.prioridade === 'critica',
+      'o outro gerente e o Admin da unidade participam; gerente de outra loja não':
+        !!tarefaCB && tarefaCB.colaboradoresIds.includes('df-gerente2') && tarefaCB.colaboradoresIds.includes('df-admin') && !tarefaCB.colaboradoresIds.includes('df-outra-loja'),
+      'prazo interno: até 48h e sempre antes do prazo da Adyen':
+        !!casoCB && Date.parse(casoCB.prazoInterno) <= T0 + 48 * HORA + 1000 && Date.parse(casoCB.prazoInterno) < Date.parse(iso(T0 + 12 * DIA)) - 2 * DIA,
+      'prazo curto da Adyen puxa o prazo interno pra antes (nunca depois)': !!casoSem && Date.parse(casoSem.prazoInterno) <= T0 + DIA,
+      'unidade sem gerente: a tarefa cai no Master, nunca fica sem dono': !!tarefaSem && tarefaSem.responsavelId === 'df-master',
+      'aviso de fraude: alarme uma vez, caso MONITORANDO, sem tarefa': !!casoFr && casoFr.status === 'MONITORANDO' && !casoFr.tarefaId && criticos1 === 1 && criticos2 === 1,
+      'caso de meses atrás não enche o Meu Dia': !casoVelho && r1.tarefasCriadas === 2,
+      'a varredura repetida não duplica nada': r2.tarefasCriadas === 0 && r2.casosNovos === 0,
+      'lembrete ao gerente depois de 24h, uma vez; Master chamado 12h antes, uma vez':
+        r3.lembretes >= 1 && lembretes === 1 && escalou.includes('df-master') && r4.escalonados >= 1 && r5.escalonados === 0,
+      'o gerente é avisado no celular quando a tarefa nasce': avisoDeCriacao === 1,
+      // questionário
+      'as perguntas e as evidências vêm do servidor': (quest.questoes || []).length === dc.QUESTOES.length && (quest.evidencias || []).length === dc.EVIDENCIAS.length,
+      'resposta fora da lista é descartada, e o que falta é informado': parcial.status === 200 && !parcialJ.defesaChargeback.respostas.canal && (parcialJ.faltando || []).length > 5,
+      'quem não é da unidade não responde a defesa': deFora.status >= 400,
+      'não conclui com a defesa pela metade (nem sem evidência)': concluiCedo.status === 400 && /Falta na defesa/.test(concluiCedo.corpo)
+        && semEvidencia.status === 400 && /nota fiscal/i.test(semEvidencia.corpo),
+      'delivery exige comprovante de entrega': faltaEntrega.status === 400 && /Comprovante de entrega/.test(faltaEntrega.corpo),
+      'evidência só em JPG, PNG ou PDF (o que entra no PDF da Adyen)': webp.status === 400,
+      'a prévia do PDF abre antes de concluir': previa.status === 200 && /^%PDF/.test(previa.buffer.slice(0, 4).toString()),
+      // PDF
+      'concluída, a defesa vira PDF guardado e o caso fica pronto': conclui.status === 200 && !!pronto && !!pronto.defesaProntaEm && !!pdfBytes && pronto.decisao === 'Contestar',
+      'o PDF está em português, com o motivo e as respostas': /Defesa de chargeback/.test(pdfTexto) && /titular do cart/.test(pdfTexto) && /Maria Souza/.test(pdfTexto),
+      'CPF e telefone não vão pro PDF (a Adyen recusa dado sensível)': !!pdfTexto && !/123\.456\.789-09/.test(pdfTexto) && !/99876/.test(pdfTexto) && /1234/.test(pdfTexto),
+      'as evidências entram no PDF (texto + 3 anexos)': paginas >= 4,
+      // Cowork
+      'o Claude acha a defesa pronta e pega o PDF e cada evidência por link': (lista.disputas || []).some((d) => d.disputaId === casoCB.id)
+        && !!detalhe.pdfDaDefesa && detalhe.evidencias.length === 3 && linkOk && linkOk.status === 200 && /^%PDF/.test(linkOk.buffer.slice(0, 4).toString()),
+      'link mexido, forjado pra outro arquivo ou vencido não abre nada': linkMexido && linkMexido.status === 403 && linkForjado === null && vencido === null,
+      'o telefone do cliente não vai pro Claude': !JSON.stringify(detalhe).includes('99876'),
+      'registrar ENVIADA sem a defesa gerada é recusado': /ainda não foi gerada/.test(envioAntes || ''),
+      'depois de anexar, o caso fica ENVIADA com quem e quando': envio.ok === true && enviado.status === 'ENVIADA' && /Claude/.test(enviado.envio.porNome),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDefesa = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [r1=${JSON.stringify(r1)} conclui=${conclui.status}:${String(conclui.corpo).slice(0, 160)} sem=${semEvidencia.status}:${String(semEvidencia.corpo).slice(0, 120)} pags=${paginas}]`);
+  } catch (e) { okDefesa = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
+  if (!okDefesa) ruins += 1;
+  console.log(`${okDefesa ? '✓' : '✗'} Defesa de chargeback: evento vira tarefa do gerente com prazo, questionário trava a conclusão, PDF sem dado sensível e link pro Claude`);
+
+  // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
   //
   // Master (23/09/2026): "quero poder monitorar tanto celular como tablet -

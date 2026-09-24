@@ -13,6 +13,8 @@ const googleGmail = require('./googleGmail');
 const unidades = require('./unidades');
 const qaAprovacoes = require('./qaAprovacoes');
 const centralChat = require('./centralChat');
+const disputes = require('./disputes');
+const defesaChargeback = require('./defesaChargeback');
 const storage = require('./storage');
 const push = require('./push');
 
@@ -27,6 +29,12 @@ const FERRAMENTAS = Object.freeze({
   ler_chat_ticket: { descricao: 'Lê a conversa de uma solicitação da Central (a caixa "Escrever uma mensagem..." do ticket). Informe o numero, ou solicitacaoId.', risco: 'leitura', obrigatorios: [] },
   listar_usuarios: { descricao: 'Lista acessos por cargo, unidade ou texto (nome, e-mail, username) - pra escolher o usuário-modelo de criar_usuario ou o responsável de uma tarefa. Não traz senha nem nada secreto.', risco: 'leitura', obrigatorios: [] },
   ler_reuniao: { descricao: 'Lê uma reunião do Meu Dia: pauta, participantes, resumo, anotações (comentários), decisões e o TEXTO das transcrições anexadas (.txt, .vtt, .md, .docx). Informe tarefaId ou numero.', risco: 'leitura', obrigatorios: [] },
+  // ---- defesa de chargeback (24/09/2026): a unidade responde no Meu Dia, o
+  // NoPulso gera o PDF, o Claude anexa na Adyen e registra aqui o que fez ----
+  listar_disputas: { descricao: 'Lista os casos de chargeback/aviso de fraude da Adyen com prazo, status (MONITORANDO, ABERTA, ENVIADA, GANHA, PERDIDA), tarefa de defesa e se a defesa já está pronta pra anexar. Filtros: status, unidade, somenteProntas.', risco: 'leitura', obrigatorios: [] },
+  obter_disputa: { descricao: 'Um caso completo: dados do pagamento, motivo, prazos, respostas da unidade e LINKS TEMPORÁRIOS (2h) do PDF da defesa e de cada evidência, pra baixar e anexar na Adyen. Informe disputaId, ou numero (ticket da tarefa), ou o PSP do pagamento/disputa.', risco: 'leitura', obrigatorios: [] },
+  registrar_defesa_enviada: { descricao: 'Registra no NoPulso que a defesa FOI anexada e enviada na Adyen (status ENVIADA). Use só depois de enviar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
+  registrar_disputa_aceita: { descricao: 'Registra no NoPulso que o chargeback foi ACEITO na Adyen, sem defesa (status PERDIDA). Use só depois de aceitar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
   consultar_autorizacao: { descricao: 'Consulta se o Master já autorizou (ou recusou) uma ação pedida antes, e o resultado dela.', risco: 'leitura', obrigatorios: ['autorizacaoId'] },
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
   consultar_noc: { descricao: 'Consulta o estado atual e compacto dos computadores monitorados.', risco: 'leitura', obrigatorios: [] },
@@ -73,6 +81,8 @@ const PROPRIEDADES_COMUNS = {
   responsavel: { type: 'string', description: 'Nome, e-mail ou username.' },
   cargo: { type: 'string', description: 'Tag de cargo, ex.: gerente, supervisor, suporte.' },
   solicitacaoId: { type: 'string' },
+  disputaId: { type: 'string' }, psp: { type: 'string', description: 'PSP do pagamento ou da disputa (Adyen).' },
+  somenteProntas: { type: 'boolean', description: 'Só as defesas prontas pra anexar na Adyen.' },
   incluirInativos: { type: 'boolean' },
   idempotencyKey: { type: 'string', description: 'UUID novo por intenção de escrita; reutilize apenas ao repetir a mesma chamada.' },
 };
@@ -313,8 +323,83 @@ async function lerReuniao(p) {
   };
 }
 
+// ---------- DEFESA DE CHARGEBACK ----------
+function casoCompacto(c) {
+  return {
+    disputaId: c.id, status: c.status, resultado: c.resultado || null, unidade: c.unidade,
+    valor: c.valor ?? null, dataCompra: c.dataCompra || null, cartao: [c.metodo ? String(c.metodo).toUpperCase() : '', c.last4 ? 'final ' + c.last4 : ''].filter(Boolean).join(' ') || null,
+    motivo: c.motivoAdyen ? `${defesaChargeback.traduzirMotivo(c.motivoAdyen).pt} (${c.motivoAdyen})` : null,
+    prazoAdyen: c.prazoDefesa || null, prazoInterno: c.prazoInterno || null,
+    pspPagamento: c.pspPagamento || null, pspDisputa: c.pspDisputa || null, pedidoAdyen: c.pedidoId,
+    tarefaId: c.tarefaId || null, tarefaTicket: c.tarefaNumero || null, responsavel: c.responsavelNome || null,
+    defesaPronta: !!c.defesaProntaEm, decisaoDaUnidade: c.decisao || null, avisoFraudeEm: c.avisoFraudeEm || null,
+    envio: c.envio || null, aceite: c.aceite || null,
+  };
+}
+async function listarDisputas(p) {
+  const unidade = minusc(p.unidade).trim(); const status = String(p.status || '').trim().toUpperCase();
+  const limite = limiteDe(p.limite, 40, 100);
+  const lista = (await disputes.listAll()).filter((c) => (!status || c.status === status)
+    && (!unidade || minusc(c.unidade).includes(unidade)) && (!p.somenteProntas || (c.defesaProntaEm && c.status === 'ABERTA')))
+    // o que vence primeiro vem primeiro
+    .sort((a, b) => String(a.prazoInterno || a.prazoDefesa || '9').localeCompare(String(b.prazoInterno || b.prazoDefesa || '9')));
+  return { total: lista.length, mostrando: Math.min(limite, lista.length), disputas: lista.slice(0, limite).map(casoCompacto) };
+}
+async function acharCaso(p) {
+  if (p.disputaId) return disputes.getOne(String(p.disputaId));
+  const todos = await disputes.listAll();
+  if (p.psp) return todos.find((c) => c.pspPagamento === p.psp || c.pspDisputa === p.psp || c.pedidoId === p.psp) || null;
+  if (p.numero) { const n = Number(String(p.numero).replace(/\D/g, '')); return todos.find((c) => Number(c.tarefaNumero) === n) || null; }
+  throw new Error('Informe disputaId, numero (ticket da tarefa) ou psp.');
+}
+async function obterDisputa(p) {
+  const c = await acharCaso(p);
+  if (!c) throw new Error('Disputa não encontrada.');
+  const tarefa = c.tarefaId ? await tarefas.getOne(c.tarefaId) : null;
+  const respostas = (tarefa && tarefa.defesaChargeback && tarefa.defesaChargeback.respostas) || {};
+  const segredo = process.env.JWT_SECRET || '';
+  const base = String(process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/$/, '');
+  const link = (caminho, nome) => `${base}/api/defesa-arquivo?t=${encodeURIComponent(defesaChargeback.assinarLink(caminho, nome, segredo))}`;
+  const evidencias = (c.evidencias && c.evidencias.length ? c.evidencias : ((tarefa && tarefa.anexos) || []).filter((a) => a.evidencia));
+  return {
+    ...casoCompacto(c),
+    tarefa: tarefa ? { status: tarefa.status, ticket: tarefa.numeroTicket, concluidaEm: tarefa.concluidaEm || null, concluidaPor: tarefa.concluidaPorNome || null } : null,
+    respostasDaUnidade: defesaChargeback.QUESTOES.filter((q) => respostas[q.id] != null && q.id !== 'telefoneCliente')
+      .map((q) => ({ pergunta: q.rotulo, resposta: Array.isArray(respostas[q.id]) ? respostas[q.id].join('; ') : String(respostas[q.id]) })),
+    faltaNaDefesa: tarefa && tarefa.defesaChargeback ? defesaChargeback.faltando(respostas, tarefa.anexos) : [],
+    pdfDaDefesa: c.defesaPdf ? { link: link(c.defesaPdf.path, c.defesaPdf.nome), paginas: c.defesaPdf.paginas, tamanhoKB: Math.round((c.defesaPdf.tamanho || 0) / 1024), avisos: c.defesaPdf.avisos || [] } : null,
+    evidencias: evidencias.map((a) => {
+      const e = defesaChargeback.EVIDENCIAS.find((x) => x.id === a.evidencia);
+      return { tipo: e ? e.rotulo : a.evidencia, nome: a.nome, link: link(a.path, a.nome) };
+    }),
+    linksValemAte: new Date(Date.now() + defesaChargeback.VALIDADE_LINK_MS).toISOString(),
+    comoAnexar: c.defesaPdf
+      ? 'Na Adyen: Disputes -> abra a disputa ' + (c.pspDisputa || '(ver pspPagamento)') + ' -> Defend -> anexe o PDF da defesa (e as evidências em separado se houver aviso de tamanho). Depois de enviar, chame registrar_defesa_enviada.'
+      : 'A defesa ainda não está pronta: a unidade precisa concluir a tarefa de defesa no Meu Dia.',
+  };
+}
+async function registrarNaDisputa(nome, p, ator) {
+  const c = await disputes.getOne(String(p.disputaId));
+  if (!c) throw new Error('Disputa não encontrada.');
+  if (['GANHA', 'PERDIDA'].includes(c.status)) throw new Error(`Essa disputa já está encerrada (${c.status}).`);
+  const porNome = `Claude (Cowork) · ${ator.username || ator.email}`;
+  if (nome === 'registrar_defesa_enviada') {
+    // sem PDF gerado não houve defesa pelo NoPulso - registrar ENVIADA aqui
+    // esconderia uma disputa que ainda pode vencer sem resposta
+    if (!c.defesaProntaEm) throw new Error('A defesa ainda não foi gerada: a tarefa da unidade não foi concluída.');
+    const r = await disputes.registrarAcao(c.id, { status: 'ENVIADA', porNome, observacao: p.observacao, campo: 'envio' });
+    return `Disputa ${r.id} registrada como ENVIADA.`;
+  }
+  const r = await disputes.registrarAcao(c.id, { status: 'PERDIDA', porNome, observacao: p.observacao || 'Chargeback aceito sem defesa.', campo: 'aceite' });
+  await disputes.salvarCaso(c.id, { resultado: 'chargeback aceito sem defesa' });
+  return `Disputa ${r.id} registrada como PERDIDA (aceita).`;
+}
+
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
+  if (nome === 'listar_disputas') return listarDisputas(p);
+  if (nome === 'obter_disputa') return obterDisputa(p);
+  if (nome === 'registrar_defesa_enviada' || nome === 'registrar_disputa_aceita') return registrarNaDisputa(nome, p, ator);
   if (nome === 'consultar_ticket') return consultarTicket(p.numero);
   if (nome === 'listar_tarefas') return listarTarefas(p);
   if (nome === 'listar_solicitacoes') return listarSolicitacoes(p);
