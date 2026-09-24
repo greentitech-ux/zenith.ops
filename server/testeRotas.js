@@ -13282,6 +13282,16 @@ setTimeout(async () => {
       'ligado + com arte + online = vai aplicar (ok)': !!de(pOk) && de(pOk).motivo === 'ok' && de(pOk).temArte === true,
       'ligado + com arte + offline = aplica quando voltar (offline)': !!de(pOff) && de(pOff).motivo === 'offline',
       'desligado no card = não aplica (desligado), mesmo com arte': !!de(pDes) && de(pDes).motivo === 'desligado',
+      // O MODELO BÁSICO (23/09) APLICA quando não há arte. O diagnóstico
+      // continuava dizendo "sem arte - não vai aplicar", e a máquina calada
+      // aparecia como "sem arte" em vez de "offline": o Master ia subir arte
+      // pra máquina que não recebe nada.
+      'ligado + sem arte + agente com modelo básico = aplica o modelo básico': ls.motivoDoPapel({ online: true, ativo: true, temArte: false, agenteVersao: 118 }) === 'modelo-basico',
+      'ligado + sem arte + agente anterior ao modelo básico = agente-antigo': ls.motivoDoPapel({ online: true, ativo: true, temArte: false, agenteVersao: 90 }) === 'agente-antigo'
+        && ls.motivoDoPapel({ online: true, ativo: true, temArte: false, agenteVersao: null }) === 'agente-antigo',
+      'máquina calada é offline antes de qualquer outro motivo': ls.motivoDoPapel({ online: false, ativo: false, temArte: false, agenteVersao: 90 }) === 'offline'
+        && ls.motivoDoPapel({ online: false, ativo: true, temArte: false, agenteVersao: 118 }) === 'offline',
+      'o painel não conta o modelo básico como "não vai aplicar"': /const naoAplica = \['offline','desligado','agente-antigo'\];/.test(html) && /'modelo-basico':/.test(html),
       'a rota Master do diagnóstico existe e chama a função': /papel-de-parede-diagnostico/.test(idx) && /diagnosticoPapelDeParede/.test(idx),
       'o painel do parque tem o botão e a função que lê o diagnóstico': /carregarDiagnosticoPapel\(\)/.test(html) && /papel-de-parede-diagnostico/.test(html),
     };
@@ -13594,6 +13604,26 @@ $r | ConvertTo-Json -Depth 6 -Compress
         : a.s14 && a.s14.desenhos === 1,
       'AGENTE: tamanho em pixel de verdade, em pé no Makeline, e sem chute de outro monitor': !temPw ? 'pular'
         : a.s15 && a.s15.dpi === '1920x1080' && a.s15.emPe === '1080x1920' && a.s15.nada === '1920x1080' && a.s15.outroMonitor === '1280x1024',
+      // v119: a tela que fica preta DEPOIS (fundo arquivado no ZIP) nunca mais
+      // era olhada - só se conferia quando mudava logo ou nome. A conferência
+      // agora roda sozinha de 10 em 10 min, no laço da instância logada, e
+      // não pode contar o NOSSO modelo como tela vazia (refaria o modelo e
+      // pagaria 1 leitura a cada 10 min pra sempre).
+      'v119: a instância logada confere a tela vazia no laço, de 10 em 10 min, também no Windows antigo': (() => {
+        const bloco = (s) => { const i = s.indexOf('function Vigiar-TelaVazia'); return i < 0 ? '' : s.slice(i, s.indexOf('\n}', i)); };
+        const antigo = vg.adaptarParaWindowsAntigo(ps);
+        return vg.VERSAO_VIGIA >= 119
+          && [ps, antigo].every((s) => /if \(-not \$Servico\) \{ try \{ Vigiar-TelaVazia \}/.test(s) && /TotalMinutes -lt 10\) \{ return \}/.test(bloco(s)) && /if \(\$Servico\) \{ return \}/.test(bloco(s)));
+      })(),
+      'v119: tela vazia com o modelo já montado volta pra ele sem rede; sem modelo, esquece a versão pra batida montar': (() => {
+        const i = ps.indexOf('function Vigiar-TelaVazia'); const b = ps.slice(i, ps.indexOf('\n}', i));
+        return /if \(Test-Path -LiteralPath \$pronto\)/.test(b) && /-Name Wallpaper -Value \$pronto/.test(b)
+          && /Remove-Item -LiteralPath \(Caminho-VersaoModeloBasico\)/.test(b) && !/Invoke-(WebRequest|RestMethod)/.test(b);
+      })(),
+      'v119: o nosso modelo com o arquivo no lugar NÃO é tela vazia (sem laço de leitura)': (() => {
+        const i = ps.indexOf('function Tela-Vazia'); const b = ps.slice(i, ps.indexOf('\n}', i));
+        return i >= 0 && !/Caminho-ModeloBasico/.test(b) && /Test-Path -LiteralPath \$atualExp/.test(b);
+      })(),
       'custo: o heartbeat não resolve logo nenhum enquanto não existir logo':
         /if \(!Object\.values\(logos\)\.some\(\(l\) => l && l\.caminho\)\) return 0;/.test(lsTx),
     };

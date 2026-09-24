@@ -4487,21 +4487,24 @@ async function carregarDiagnosticoPapel(){
     const maq = (await r.json()).maquinas || [];
     if(!maq.length){ alvo.innerHTML = 'Nenhum computador cadastrado.'; return; }
     const conta = (m)=>maq.filter(x=>x.motivo===m).length;
-    const naoAplica = ['desligado','sem-marca','sem-arte'];
+    // mesma ordem do servidor (motivoDoPapel): o primeiro motivo é o que impede
+    const naoAplica = ['offline','desligado','agente-antigo'];
     const rotulo = {
+      'offline':'offline — nada chega nela, nem arte nem modelo básico. Ligar a trava ou subir arte não adianta até ela voltar',
       'desligado':'🖼️ desligado no card (ligue a política da máquina)',
-      'sem-marca':'sem marca no perfil da unidade (não casa arte de grupo/marca) — fica com o modelo básico',
-      'sem-arte':'sem arte pra essa marca/grupo (nem padrão) — fica com o modelo básico',
-      'offline':'offline (aplica quando a máquina voltar)',
+      'agente-antigo':'sem arte, e o agente é anterior ao modelo básico (v115): a tela fica como está até ele atualizar',
+      'ok':'aplica a arte',
+      'modelo-basico':'sem arte: aplica o modelo básico (logo do grupo, logo da marca e nome da máquina)',
     };
-    const linhaMaq = (x)=>`${escapeHtml(x.nome)} <span style="color:var(--muted)">(${escapeHtml(x.codigo)})</span>`;
-    let html = `<b>${conta('ok')}</b> vão aplicar · <b>${conta('offline')}</b> offline · <b>${maq.filter(x=>naoAplica.includes(x.motivo)).length}</b> não vão aplicar do jeito que está`;
-    for(const mot of [...naoAplica,'offline']){
+    const quando = (ms)=>{ if(!ms) return ''; const h=Math.round((Date.now()-ms)/3600000); if(h<1) return ''; const idade = h<48 ? `há ${h}h` : `há ${Math.round(h/24)}d`; return ` · calada ${idade}`; };
+    const linhaMaq = (x)=>`${escapeHtml(x.nome)} <span style="color:var(--muted)">(${escapeHtml(x.codigo)}${x.agenteVersao?` · v${escapeHtml(String(x.agenteVersao))}`:''}${x.motivo==='offline'?escapeHtml(quando(x.ultimoContato)):''})</span>`;
+    let html = `<b>${conta('ok')+conta('modelo-basico')}</b> vão aplicar (${conta('ok')} com arte · ${conta('modelo-basico')} com o modelo básico) · <b>${maq.filter(x=>naoAplica.includes(x.motivo)).length}</b> não vão aplicar do jeito que está`;
+    for(const mot of [...naoAplica,'modelo-basico','ok']){
       const g = maq.filter(x=>x.motivo===mot);
       if(!g.length) continue;
       html += `<div style="margin-top:8px;"><b style="color:var(--text)">${escapeHtml(rotulo[mot])}</b> — ${g.length}<br>${g.map(linhaMaq).join(' · ')}</div>`;
     }
-    html += `<div style="margin-top:10px;">Máquina que aparece em "vão aplicar" mas continua sem trocar: aplica na próxima batida; se <b>ninguém estiver logado no Windows</b>, só quando alguém logar — a instância de sistema não tem área de trabalho. Agente antigo se atualiza sozinho.</div>`;
+    html += `<div style="margin-top:10px;">Máquina em "vão aplicar" que continua sem trocar: aplica na próxima batida, mas <b>só com alguém logado no Windows</b> — a instância de sistema não tem área de trabalho. O NOC ainda não recebe da máquina a confirmação de que trocou.</div>`;
     alvo.innerHTML = html;
   }catch(e){ alvo.innerHTML = 'Erro ao carregar o diagnóstico.'; }
 }

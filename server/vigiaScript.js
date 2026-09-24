@@ -36,7 +36,10 @@
 // 118: versao que nao sobe volta sozinha pra anterior (3 partidas sem dar a
 // primeira volta) e fica marcada como ruim; e o agente se identifica ao
 // perguntar a versao (liberacao em ondas, rolloutVigia.js).
-const VERSAO_VIGIA = 118;
+// 119: a tela que fica SEM imagem depois (arquivo do fundo arquivado no ZIP,
+// apagado) ganha o modelo basico - antes so se conferia quando mudava logo ou
+// nome, e a maquina que ficou preta depois nunca mais era olhada.
+const VERSAO_VIGIA = 119;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2110,6 +2113,48 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if ($atualExp -eq (Caminho-ModeloBasico)) { return $true }',
     '  return (-not $atualExp.StartsWith("\\\\") -and -not (Test-Path -LiteralPath $atualExp))',
     '}',
+    // TELA VAZIA DE VERDADE: o registro sem imagem, ou apontando pra arquivo
+    // local que sumiu (o Windows pinta preto). Diferente de Tela-SemImagem,
+    // aqui o nosso modelo basico COM o arquivo no lugar nao conta: esta
+    // checagem roda sozinha de 10 em 10 minutos e, se contasse, refaria o
+    // modelo (e pagaria a leitura) pra sempre.
+    'function Tela-Vazia {',
+    '  $atual = ""',
+    '  try { $atual = [string](Get-ItemProperty -Path "HKCU:\\Control Panel\\Desktop" -Name Wallpaper -ErrorAction Stop).Wallpaper } catch {}',
+    '  if ($atual -eq "") { return $true }',
+    '  $atualExp = [Environment]::ExpandEnvironmentVariables($atual)',
+    '  return (-not $atualExp.StartsWith("\\\\") -and -not (Test-Path -LiteralPath $atualExp))',
+    '}',
+    // O DEFEITO QUE ISTO CONSERTA (v119): a tela so era conferida quando a
+    // versao do modelo basico mudava (logo ou nome novo), e a versao ficava
+    // gravada mesmo quando nada era aplicado. Maquina que ficou preta DEPOIS
+    // (o fundo estava na Area de Trabalho e foi pro ZIP do arquivamento, ou
+    // alguem apagou o arquivo) nunca mais era olhada.
+    // Agora a instancia logada olha a tela a cada 10 min - registro e
+    // Test-Path, de graca. Vazia: se o modelo ja foi montado nesta maquina,
+    // aponta pra ele de novo, sem rede; se nunca foi, esquece a versao e a
+    // proxima batida monta (1 leitura, so quando a tela esta vazia de fato).
+    '$script:TelaConferidaEm = $null',
+    'function Vigiar-TelaVazia {',
+    '  if ($Servico) { return }   # SYSTEM nao tem area de trabalho',
+    '  if ($script:TelaConferidaEm -and ((Get-Date) - $script:TelaConferidaEm).TotalMinutes -lt 10) { return }',
+    '  $script:TelaConferidaEm = Get-Date',
+    '  if (-not (Tela-Vazia)) { return }',
+    '  $pronto = Caminho-ModeloBasico',
+    '  if (Test-Path -LiteralPath $pronto) {',
+    '    try {',
+    '      $chave = "HKCU:\\Control Panel\\Desktop"',
+    '      Set-ItemProperty -Path $chave -Name Wallpaper -Value $pronto -ErrorAction Stop',
+    '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "6" -ErrorAction Stop',
+    '      Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
+    '      rundll32.exe user32.dll,UpdatePerUserSystemParameters 1, True | Out-Null',
+    '      Escrever-Log "Papel de parede: a tela ficou sem imagem - devolvido o modelo basico."',
+    '      return',
+    '    } catch { Escrever-Log "Papel de parede: o Windows negou devolver o modelo basico ($($_.Exception.Message))." }',
+    '  }',
+    '  Remove-Item -LiteralPath (Caminho-VersaoModeloBasico) -Force -ErrorAction SilentlyContinue',
+    '  Escrever-Log "Papel de parede: a tela esta sem imagem - o modelo basico vai ser montado na proxima batida."',
+    '}',
     'function Gravar-ModeloBasicoNaTela($modelo) {',
     '  $arq = Novo-ModeloBasico $modelo',
     '  if (-not $arq) { return $false }',
@@ -3420,6 +3465,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      }',
     // modelo basico (maquina sem arte): versao propria, fora da politica -
     // ver Atualizar-ModeloBasico. Servidor antigo nao manda o campo: nada roda.
+    '      if (-not $Servico) { try { Vigiar-TelaVazia } catch { Escrever-Log "Papel de parede: nao conferi a tela ($($_.Exception.Message))" } }',
     '      if (-not $Servico -and $null -ne $resp.versaoModeloBasico -and "$($resp.versaoModeloBasico)" -ne (Versao-ModeloBasicoAplicada)) {',
     '        try { Atualizar-ModeloBasico "$($resp.versaoModeloBasico)" } catch { Escrever-Log "Modelo basico nao sincronizou: $($_.Exception.Message)" }',
     '      }',
