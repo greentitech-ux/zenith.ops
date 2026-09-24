@@ -671,5 +671,17 @@ boot();
 <script src="/suporte-chat.js"></script>
 <script src="/recolher.js"></script>
 <script src="/nav-menu.js"></script>
+<script>
+// AO VIVO (24/09/2026). Mesmo caso do fechamento: quem lanca e quem confere sao pessoas diferentes.
+// A ligacao mora no tema.js (zenithAoVivo), que todas as telas ja carregam:
+// uma conexao por pagina, rajada junta, e NAO redesenha por cima de quem
+// esta digitando - repintar apagaria o campo em edicao.
+window.zenithAoVivo && zenithAoVivo([
+  'entrega-lancada',
+  'entrega-editada-direto',
+  'entrega-edicao-solicitada',
+  'entrega-edicao-decidida',
+], () => carregar());
+</script>
 </body>
 </html>

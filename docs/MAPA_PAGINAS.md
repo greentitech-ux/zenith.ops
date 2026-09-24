@@ -137,3 +137,38 @@ mostrar/esconder o link do menu quanto (em conjunto com
 6. Se a página tiver card no Painel: registrar em `CARDS_POR_SECAO`
    (`painel.html`).
 7. Documentar em `/ajuda.html` e atualizar este arquivo.
+8. **Se a tela mostra lista que outra pessoa altera, ligar o ao vivo** —
+   uma linha antes do `</body>`:
+
+   ```html
+   <script>
+   window.zenithAoVivo && zenithAoVivo(['meu-evento-atualizado'], () => carregar());
+   </script>
+   ```
+
+## Ao vivo (SSE): o servidor avisa, a tela repinta
+
+O servidor empurra ~86 eventos por `/api/stream` (`broadcast()` no
+`index.js`). A ligação do lado da tela é **uma linha**, servida pelo
+`tema.js` — `window.zenithAoVivo(eventos, aoMudar)`. Ele mantém **uma
+conexão por página** (cada `EventSource` segura um cliente no `sseClients`
+do servidor), junta rajadas de 250ms e **não repinta enquanto a pessoa está
+digitando** — repintar reconstrói o formulário e apagaria o campo em edição;
+o aviso fica guardado e sai quando o foco sai.
+
+Não escreva `new EventSource` numa tela nova. Vira o caso do menu e do
+suporte-chat: N cópias, N comportamentos, e a correção que só chega em
+algumas.
+
+**O `testeRotas.js` cobra os dois lados** (teste "Ao vivo"):
+
+- evento emitido sem tela escutando → ou liga, ou declara em `SEM_TELA`
+  **com motivo**;
+- tela escutando um nome que o servidor nunca manda → é typo, e o trecho
+  existe sem fazer nada.
+
+O segundo caso é o que mais pega. Em 24/09/2026 a varredura achou **54
+eventos órfãos em 175 pontos de código** e dois nomes trocados que faziam
+painel inteiro não atualizar: a NOC ouvia `loja-status-mudou` mas a troca de
+política vinha como `loja-status-atualizado`, e o Beniboy ouvia
+`beniboy-agregador` enquanto o servidor manda `agregador-pedido`.

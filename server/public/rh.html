@@ -2691,5 +2691,20 @@ boot();
 <script src="/suporte-chat.js"></script>
 <script src="/recolher.js"></script>
 <script src="/nav-menu.js"></script>
+<script>
+// AO VIVO (24/09/2026). Ficha, check-in e advertencia mudam pela mao de quem esta na loja
+// enquanto o RH olha a lista daqui (36 pontos).
+// A ligacao mora no tema.js (zenithAoVivo), que todas as telas ja carregam:
+// uma conexao por pagina, rajada junta, e NAO redesenha por cima de quem
+// esta digitando - repintar apagaria o campo em edicao.
+window.zenithAoVivo && zenithAoVivo([
+  'rh-funcionario-criado',
+  'rh-funcionario-atualizado',
+  'rh-funcionario-excluido',
+  'rh-checkin-atualizado',
+  'rh-checkin-excluido',
+  'rh-advertencia-atualizada',
+], () => carregar());
+</script>
 </body>
 </html>

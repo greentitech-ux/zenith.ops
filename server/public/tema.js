@@ -1939,6 +1939,97 @@
       } catch (e) { return null; }
     }
     window.pedirConfirmacao = pedirConfirmacao;
+
+    // =================================================================
+    // AO VIVO, DE UM ARQUIVO SÓ (24/09/2026).
+    //
+    // O servidor manda 82 eventos pelo SSE - e 54 deles não tinham NINGUÉM
+    // escutando, em 175 pontos de código. A tela do parque recebia 39 avisos
+    // de check-in que morriam no vazio; o RH, 36; o fechamento, 20. Ninguém
+    // tinha errado: escrever a ligação do EventSource dá trabalho, e cada
+    // tela nova nascia sem ela.
+    //
+    // POR QUE AQUI. O `tema.js` já é carregado pelas 59 telas, então ligar o
+    // ao vivo passa a ser UMA linha na página. Copiar o EventSource pra cada
+    // tela viraria o caso do menu, do Beniboy e do suporte-chat: N cópias, N
+    // comportamentos, e a correção que só chega em algumas.
+    //
+    // UMA CONEXÃO POR PÁGINA. Cada EventSource é uma conexão HTTP aberta
+    // segurando um cliente no `sseClients` do servidor. Uma tela que
+    // assinasse três grupos de evento abriria três - com 52 lojas e o NOC
+    // aberto o dia todo, é conexão à toa no Render. Aqui a conexão é uma só
+    // e os assinantes se penduram nela.
+    //
+    // NÃO REDESENHA POR CIMA DE QUEM ESTÁ DIGITANDO. Recarregar redesenha a
+    // tela, e quem estava no meio de um campo perde o que escreveu - "ajuda"
+    // que custa o trabalho da pessoa. Digitando, o aviso fica guardado e sai
+    // assim que o campo perde o foco.
+    //
+    // E JUNTA AS RAJADAS. Concluir uma tarefa dispara vários eventos
+    // seguidos; sem juntar, seriam quatro recargas em meio segundo.
+    (function aoVivo() {
+      var fonte = null; var assinantes = []; var pendente = false; var timer = null;
+      function digitando() {
+        var a = document.activeElement;
+        if (!a) return false;
+        return /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable;
+      }
+      function disparar() {
+        if (digitando()) { pendente = true; return; }
+        pendente = false;
+        assinantes.forEach(function (s) {
+          if (!s.pendente) return;
+          s.pendente = false;
+          try { s.aoMudar(s.ultimo); } catch (e) { /* uma tela quebrada não derruba as outras */ }
+        });
+      }
+      function agendar() {
+        clearTimeout(timer);
+        timer = setTimeout(disparar, 250);
+      }
+      // quem estava digitando terminou: o que ficou guardado sai agora
+      document.addEventListener('focusout', function () { setTimeout(function () { if (pendente && !digitando()) disparar(); }, 60); });
+
+      function conectar() {
+        if (fonte) return fonte;
+        var token = '';
+        try { token = localStorage.getItem('authToken') || ''; } catch (e) { token = ''; }
+        if (!token || !window.EventSource) return null;
+        try { fonte = new EventSource('/api/stream?token=' + encodeURIComponent(token)); }
+        catch (e) { fonte = null; }
+        return fonte;
+      }
+
+      // A LIGAÇÃO, numa linha: zenithAoVivo([eventos], recarregar)
+      //
+      // `aoMudar` recebe os dados do último evento. Devolve uma função que
+      // desliga, pra tela que precise parar de ouvir.
+      function zenithAoVivo(eventos, aoMudar) {
+        var lista = [].concat(eventos || []).filter(Boolean);
+        if (!lista.length || typeof aoMudar !== 'function') return function () {};
+        var es = conectar();
+        if (!es) return function () {};
+        var assinante = { aoMudar: aoMudar, pendente: false, ultimo: null, vivo: true };
+        assinantes.push(assinante);
+        var mao = function (ev) {
+          if (!assinante.vivo) return;
+          var d = null;
+          try { d = ev && ev.data ? JSON.parse(ev.data) : null; } catch (e) { d = null; }
+          assinante.ultimo = d;
+          assinante.pendente = true;
+          agendar();
+        };
+        lista.forEach(function (nome) { es.addEventListener(nome, mao); });
+        return function desligar() {
+          assinante.vivo = false;
+          lista.forEach(function (nome) { try { es.removeEventListener(nome, mao); } catch (e) {} });
+        };
+      }
+      window.zenithAoVivo = zenithAoVivo;
+      // a tela que precisa decidir sozinha (a ficha aberta do Meu Dia) usa o
+      // mesmo critério de "está digitando" em vez de escrever o dela
+      window.zenithDigitando = digitando;
+    })();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', agendarRestauracao);
     else agendarRestauracao();
   })();

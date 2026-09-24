@@ -27305,22 +27305,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // descobria no F5.
       'a tela do Meu Dia escuta o evento que o servidor já mandava': (() => {
         const t = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
-        return /new EventSource\('\/api\/stream\?token='/.test(t)
-          && /addEventListener\('tarefas-atualizada'/.test(t)
+        // a ligação é a de UM arquivo só (tema.js), não um EventSource próprio
+        // desta tela - o teste "Ao vivo" cobre o helper e as outras telas
+        return /zenithAoVivo\('tarefas-atualizada'/.test(t)
+          && !/new EventSource/.test(t)
+          // e a ficha ABERTA se redesenha, não só a lista atrás
+          && /if\(aberta && L\.find\(x=>x\.id===aberta\)\) openT\(aberta\);/.test(t)
           && /coworkApi\.configurar\(\{ aoAlterarTarefa:/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8'));
-      })(),
-      // recarregar por cima de quem está digitando reconstrói o formulário da
-      // defesa inteiro e apaga o campo em edição - "ajuda" que custa o
-      // trabalho da pessoa. Digitando, a tela avisa e deixa ELA escolher.
-      'a atualização ao vivo não redesenha por cima de quem está digitando': (() => {
-        const t = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
-        return /function digitandoNaFicha\(\)/.test(t)
-          && /\(INPUT\|TEXTAREA\|SELECT\)/.test(t)
-          // o guarda é CONSULTADO nos DOIS caminhos: na tarefa aberta, que
-          // adia e avisa; e na lista atrás, que nem recarrega enquanto a
-          // pessoa escreve
-          && /if\(digitandoNaFicha\(\)\)\{ AVISO_MUDOU = true/.test(t)
-          && /if\(!digitandoNaFicha\(\)\) load\(\)/.test(t);
       })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -28576,6 +28567,164 @@ $r | ConvertTo-Json -Depth 4 -Compress
   } catch (e) { okDocsQA = false; console.log('  erro: ' + e.message); }
   if (!okDocsQA) ruins += 1;
   console.log(`${okDocsQA ? '✓' : '✗'} Q.A · Documentos: validade calculada, aviso que rearma ao renovar, e pasta que é da unidade`);
+
+  // ------------------------------------------------------------------
+  // AO VIVO: EVENTO QUE O SERVIDOR MANDA E NINGUÉM ESCUTA (24/09/2026).
+  //
+  // O servidor empurra 86 eventos pelo SSE. Em 24/09, 54 deles - em 175
+  // pontos de código - não tinham NENHUMA tela escutando: a chamada rodava,
+  // o payload saía, e morria. A tela do parque recebia 39 avisos de check-in
+  // no vazio; o RH, 36; o fechamento, 20.
+  //
+  // Ninguém tinha errado: ligar o EventSource na mão dá trabalho, e cada tela
+  // nova nascia sem ele. Por isso a ligação virou UMA linha do `tema.js`
+  // (zenithAoVivo) - e por isso existe este teste: sem ele, o buraco volta a
+  // crescer calado, um `broadcast` por vez.
+  //
+  // O TESTE OLHA OS DOIS LADOS, e o segundo é o que pega mais erro:
+  //   1. evento emitido sem ninguém escutando -> ou liga, ou declara aqui;
+  //   2. tela escutando um nome que o servidor NUNCA manda -> é typo, e o
+  //      trecho existe sem fazer nada. Achou dois assim: a NOC ouvia
+  //      `loja-status-mudou` mas a política vinha como `loja-status-atualizado`,
+  //      e o Beniboy ouvia `beniboy-agregador` enquanto o servidor manda
+  //      `agregador-pedido`.
+  let okSse = false;
+  try {
+    const fsS = require('fs');
+    const pathS = require('path');
+    // eventos de DOM: não são SSE, e um `addEventListener('click')` não pode
+    // virar "ninguém emite 'click'"
+    const DOM_EVENTOS = new Set(('click change input submit keydown keyup focus blur load error scroll resize '
+      + 'pointerdown pointermove pointerup pointercancel pointerover pointerout dragstart dragend transitionend '
+      + 'visibilitychange message paste drop dragover dragleave touchstart touchmove touchend animationend '
+      + 'contextmenu mouseenter mouseleave mouseover mouseout wheel beforeunload online offline popstate '
+      + 'hashchange storage keypress dblclick mousedown mouseup mousemove open close play pause ended canplay '
+      + 'loadedmetadata invalid reset select toggle copy cut focusin focusout compositionstart compositionend '
+      + 'appinstalled beforeinstallprompt pageshow notificationclick push pushsubscriptionchange release '
+      + 'DOMContentLoaded').split(' '));
+    // SEM TELA, E ESTÁ CERTO ASSIM. Cada linha diz POR QUE - "esqueci" não é
+    // motivo, e quem ligar a tela depois tira o nome daqui.
+    const SEM_TELA = new Map([
+      // chegam por PUSH e pela Central de alertas, que é onde a pessoa lê:
+      // o SSE é redundante, não um buraco
+      ['qa-documento', 'push + Central de alertas'],
+      ['rh-teste-vencido', 'push + Central de alertas'],
+      // telas que ainda não têm ao vivo. Não é decisão de arquitetura, é fila:
+      // são telas pequenas, de uma unidade só, e entram numa próxima.
+      ['saltiverso-venda-criada', 'tela do Saltiverso ainda sem ao vivo'],
+      ['saltiverso-venda-cancelada', 'tela do Saltiverso ainda sem ao vivo'],
+      ['saltiverso-cortesia-solicitada', 'tela do Saltiverso ainda sem ao vivo'],
+      ['saltiverso-cortesia-decidida', 'tela do Saltiverso ainda sem ao vivo'],
+      ['saltiverso-caixa-lancado', 'tela do Saltiverso ainda sem ao vivo'],
+      ['saltiverso-caixa-alteracao', 'tela do Saltiverso ainda sem ao vivo'],
+      ['saltiverso-caixa-alteracao-decidida', 'tela do Saltiverso ainda sem ao vivo'],
+      ['saltiverso-fechamento-criado', 'tela do Saltiverso ainda sem ao vivo'],
+      ['saltiverso-fechamento-corrigido', 'tela do Saltiverso ainda sem ao vivo'],
+      ['mensalista-criado', 'tela de mensalistas ainda sem ao vivo'],
+      ['mensalista-atualizado', 'tela de mensalistas ainda sem ao vivo'],
+      ['mensalista-excluido', 'tela de mensalistas ainda sem ao vivo'],
+      ['formulario-preenchido', 'tela de formulários ainda sem ao vivo'],
+      ['formulario-atualizado', 'tela de formulários ainda sem ao vivo'],
+      ['formulario-assinado', 'tela de formulários ainda sem ao vivo'],
+      ['fraude-limpeza', 'limpeza administrativa, sem tela que precise repintar'],
+      ['pedido-semanal-confirmado', 'tela do pedido semanal ainda sem ao vivo'],
+      ['rh-advertencia-chat', 'o carregar() do rh.html não repinta o chat aberto da advertência'],
+    ]);
+
+    const emite = new Map();
+    for (const arq of fsS.readdirSync(__dirname)) {
+      if (!arq.endsWith('.js') || arq === 'testeRotas.js') continue;
+      const src = fsS.readFileSync(pathS.join(__dirname, arq), 'utf8');
+      const soma = (nome) => emite.set(nome, (emite.get(nome) || 0) + 1);
+      for (const m of src.matchAll(/broadcast\('([a-z0-9:_-]+)'/g)) soma(m[1]);
+      // o nome vai no SEGUNDO argumento aqui - foi o que me escapou na
+      // primeira varredura e escondeu `mensagem-direta`
+      for (const m of src.matchAll(/broadcastParaUsuario\([^,]+,\s*'([a-z0-9:_-]+)'/g)) soma(m[1]);
+      for (const m of src.matchAll(/event: ([a-z0-9:_-]+)\\n/g)) soma(m[1]);
+    }
+    const ouve = new Map();
+    const anota = (nome, arq) => { if (!ouve.has(nome)) ouve.set(nome, new Set()); ouve.get(nome).add(arq); };
+    const varrer = (dir) => {
+      for (const nome of fsS.readdirSync(dir)) {
+        const alvo = pathS.join(dir, nome);
+        if (fsS.statSync(alvo).isDirectory()) { varrer(alvo); continue; }
+        if (!/\.(html|js)$/.test(nome) || nome.includes('chart.umd')) continue;
+        const src = fsS.readFileSync(alvo, 'utf8');
+        for (const m of src.matchAll(/addEventListener\('([a-z0-9:_-]+)'/g)) if (!DOM_EVENTOS.has(m[1])) anota(m[1], nome);
+        // assinatura por laço: ['a','b'].forEach(ev => es.addEventListener(ev, ...))
+        for (const m of src.matchAll(/\[([^\]]*?)\]\s*\.forEach\(\s*\(?\s*(\w+)\s*\)?\s*=>[\s\S]{0,220}?addEventListener\(\2\b/g)) {
+          for (const e of m[1].matchAll(/'([a-z0-9:_-]+)'/g)) if (!DOM_EVENTOS.has(e[1])) anota(e[1], nome);
+        }
+        // A LIGAÇÃO DE UMA LINHA DO TEMA.JS, e só na forma que de fato RODA.
+        // Contar todo `zenithAoVivo(` que aparece no arquivo mediria texto, não
+        // comportamento: uma tela com a guarda errada
+        // (`window.outraCoisa && zenithAoVivo(...)`) nunca chama, e o teste
+        // diria que ela escuta. Foi assim que este teste passou numa sabotagem
+        // - e teste que passa dos dois jeitos não é teste (CLAUDE.md §7).
+        for (const m of src.matchAll(/window\.zenithAoVivo && zenithAoVivo\(\s*(\[[^\]]*\]|'[a-z0-9:_-]+')/g)) {
+          for (const e of m[1].matchAll(/'([a-z0-9:_-]+)'/g)) anota(e[1], nome);
+        }
+      }
+    };
+    varrer(pathS.join(__dirname, 'public'));
+
+    const orfaos = [...emite.keys()].filter((n) => !ouve.has(n) && !SEM_TELA.has(n));
+    const fantasmas = [...ouve.keys()].filter((n) => !emite.has(n));
+    const declaradoSemMotivo = [...SEM_TELA.entries()].filter(([, motivo]) => !String(motivo || '').trim()).map(([n]) => n);
+    // um nome que ganhou tela depois não pode ficar declarado como "sem tela":
+    // a lista mente e a próxima pessoa confia nela
+    const declaradoAtoa = [...SEM_TELA.keys()].filter((n) => ouve.has(n) || !emite.has(n));
+    let torto = [];
+
+    const conf = {
+      'todo evento que o servidor manda tem tela escutando (ou motivo declarado)': !orfaos.length,
+      'nenhuma tela escuta um nome que o servidor nunca manda': !fantasmas.length,
+      'a lista de "sem tela" não tem nome sem motivo': !declaradoSemMotivo.length,
+      'a lista de "sem tela" não guarda nome que já tem tela (ou que ninguém manda)': !declaradoAtoa.length,
+      // a ligação é de UM arquivo só: copiar o EventSource pra cada tela
+      // viraria o caso do menu e do suporte-chat (N telas, N comportamentos)
+      'a ligação mora no tema.js, e as telas usam ela em uma linha': (() => {
+        const tema = fsS.readFileSync(__dirname + '/public/tema.js', 'utf8');
+        const telas = fsS.readdirSync(__dirname + '/public').filter((f) => f.endsWith('.html'));
+        const citam = telas.filter((f) => /zenithAoVivo\(/.test(fsS.readFileSync(__dirname + '/public/' + f, 'utf8')));
+        // toda tela que cita o helper tem que usar a GUARDA certa: com outra,
+        // a linha não roda e a tela fica muda sem ninguém perceber
+        torto = citam.filter((f) => {
+          const src = fsS.readFileSync(__dirname + '/public/' + f, 'utf8');
+          const chamadas = (src.match(/zenithAoVivo\(/g) || []).length;
+          const certas = (src.match(/window\.zenithAoVivo && zenithAoVivo\(/g) || []).length;
+          return chamadas !== certas;
+        });
+        return /window\.zenithAoVivo = zenithAoVivo;/.test(tema) && citam.length >= 8 && !torto.length;
+      })(),
+      // repintar reconstrói a tela: quem estava no meio de um campo perderia
+      // o que digitou. O aviso fica guardado e sai quando o foco sai.
+      'o ao vivo não redesenha por cima de quem está digitando': (() => {
+        const tema = fsS.readFileSync(__dirname + '/public/tema.js', 'utf8');
+        return /function digitando\(\) \{/.test(tema)
+          && /if \(digitando\(\)\) \{ pendente = true; return; \}/.test(tema)
+          && /\(INPUT\|TEXTAREA\|SELECT\)/.test(tema)
+          && /a\.isContentEditable/.test(tema);
+      })(),
+      // uma conexão por página: cada EventSource segura um cliente no
+      // sseClients do servidor, e uma tela com três assinaturas abriria três
+      'é uma conexão SSE por página, não uma por assinatura': (() => {
+        const tema = fsS.readFileSync(__dirname + '/public/tema.js', 'utf8');
+        return /function conectar\(\) \{\s*\n\s*if \(fonte\) return fonte;/.test(tema);
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSse = !falhas.length;
+    if (falhas.length) {
+      console.log(`  falhou em: ${falhas.join(' · ')}`);
+      if (orfaos.length) console.log(`  sem tela escutando: ${orfaos.join(', ')}`);
+      if (fantasmas.length) console.log(`  tela ouve nome que ninguém manda: ${fantasmas.map((n) => `${n} (${[...ouve.get(n)].join(', ')})`).join(' · ')}`);
+      if (declaradoAtoa.length) console.log(`  declarado "sem tela" à toa: ${declaradoAtoa.join(', ')}`);
+      if (torto.length) console.log(`  chama zenithAoVivo com a guarda errada (a linha não roda): ${torto.join(', ')}`);
+    }
+  } catch (e) { okSse = false; console.log('  erro: ' + e.message); }
+  if (!okSse) ruins += 1;
+  console.log(`${okSse ? '✓' : '✗'} Ao vivo: evento do servidor com tela escutando dos dois lados, de um arquivo só`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

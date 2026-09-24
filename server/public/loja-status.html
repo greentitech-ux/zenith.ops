@@ -5115,6 +5115,10 @@ function conectarStream(){
   try{
     const es = new EventSource('/api/stream?token=' + encodeURIComponent(AUTH_TOKEN));
     es.addEventListener('loja-status-mudou', () => { carregar(); });
+    // o servidor manda DOIS nomes: `-mudou` quando a maquina muda de estado, e
+    // `-atualizado` quando o Master troca a politica ou o perfil da estacao.
+    // A tela so ouvia o primeiro, entao a mudanca de politica so aparecia no F5
+    es.addEventListener('loja-status-atualizado', () => { carregar(); });
   }catch(e){ /* sem SSE, so atualiza no poll */ }
 }
 
