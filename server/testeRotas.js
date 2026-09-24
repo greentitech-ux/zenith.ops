@@ -27254,6 +27254,55 @@ $r | ConvertTo-Json -Depth 4 -Compress
         q.CRITICIDADES.length === 3 && !q.MODELO_PADRAO.pesos
         && q.pesoDoItem({ criticidade: 'imprescindivel' }, false) === 1
         && q.pesoDoItem({ criticidade: 'imprescindivel' }, true) === 3,
+      // ---- CONFIGURAÇÃO DO CHECKLIST (tela Modelos Q.A) ----
+      'a tela de modelos existe e está no menu com a tag':
+        fsQ.existsSync(__dirname + '/public/qa-modelos.html')
+        && /id: 'nav-qa-modelos'[^}]*tags: \['qa'\]/.test(nav),
+      // o Padrão mora no código (é a transcrição da planilha) - duplicar é o
+      // caminho, sobrescrever não pode ser
+      'o modelo Padrão não pode ser sobrescrito': await (async () => {
+        try { await q.salvarModelo({ id: 'padrao', nome: 'x', setores: [{ nome: 'S', itens: [{ texto: 'i' }] }] }, 'e@e'); return false; }
+        catch (e) { return /não pode ser usado/.test(e.message); }
+      })(),
+      'modelo sem nome, sem setor ou com setor vazio é recusado': await (async () => {
+        const falha = async (arg) => { try { await q.salvarModelo(arg, 'e@e'); return false; } catch (e) { return true; } };
+        return await falha({ nome: '', setores: [{ nome: 'S', itens: [{ texto: 'i' }] }] })
+          && await falha({ nome: 'M', setores: [] })
+          && await falha({ nome: 'M', setores: [{ nome: 'S', itens: [] }] });
+      })(),
+      // A GARANTIA QUE SUSTENTA O HISTÓRICO: corrigir o TEXTO de um item não
+      // pode trocar o id dele. É o id que amarra a resposta gravada numa
+      // visita de agosto ao item de hoje (CLAUDE.md §1: rótulo muda,
+      // identificador não).
+      'corrigir o texto de um item NÃO troca o id dele': (() => {
+        const v1 = q.normalizarSetores([{ nome: 'Higiene', itens: [{ texto: 'Unhas curtas' }] }]);
+        const idAntes = v1[0].itens[0].id;
+        const v2 = q.normalizarSetores([{ id: v1[0].id, nome: 'Higiene e saúde', itens: [{ id: idAntes, texto: 'Unhas curtas, limpas e sem esmalte' }] }]);
+        return idAntes === v2[0].itens[0].id && v2[0].itens[0].texto !== v1[0].itens[0].texto;
+      })(),
+      'dois itens com o mesmo texto ganham ids diferentes': (() => {
+        const v = q.normalizarSetores([{ nome: 'S', itens: [{ texto: 'Geladeira' }, { texto: 'Geladeira' }] }]);
+        return v[0].itens[0].id !== v[0].itens[1].id;
+      })(),
+      'criticidade fora da lista vira nulo, não entra crua': (() => {
+        const v = q.normalizarSetores([{ nome: 'S', itens: [{ texto: 'i', criticidade: 'urgentissimo' }] }]);
+        return v[0].itens[0].criticidade === null;
+      })(),
+      // o modelo inteiro viaja DENTRO de cada visita (o retrato) e o
+      // documento do Firestore tem teto de 1 MiB
+      'modelo tem teto de setores e de itens':
+        q.MAX_SETORES === 30 && q.MAX_ITENS_POR_SETOR === 80
+        && q.normalizarSetores([{ nome: 'S', itens: Array.from({ length: 200 }, (_, i) => ({ texto: 'i' + i })) }])[0].itens.length === 80,
+      // salvar modelo mexe no checklist de TODAS as visitas futuras
+      'só Master ou Admin salva modelo':
+        /app\.post\('\/api\/qualidade\/modelos'[\s\S]{0,220}Só Master ou Admin edita modelo de checklist/.test(idxQ),
+      // PONTA A PONTA: salva duas vezes e confere que a versão sobe (é ela
+      // que a visita guarda no retrato)
+      'a versão do modelo sobe a cada edição': await (async () => {
+        const um = await q.salvarModelo({ nome: 'Marca Teste', setores: [{ nome: 'S', itens: [{ texto: 'i' }] }] }, 'e@e');
+        const dois = await q.salvarModelo({ id: um.id, nome: 'Marca Teste', setores: [{ nome: 'S', itens: [{ texto: 'i' }] }] }, 'e@e');
+        return um.versao === 1 && dois.versao === 2 && dois.id === um.id;
+      })(),
       // a rota tem que existir de verdade, não só o módulo
       'a rota de visitas responde': (await pedir('/api/qualidade/visitas', token ? { Authorization: 'Bearer ' + token } : {})).status !== 404,
       // PONTA A PONTA: abre visita, responde os 38, conclui e baixa o laudo.

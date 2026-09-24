@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Modelos Q.A · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e; --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 80px;max-width:760px;margin-inline:auto;overflow-x:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-16px -12px 16px;padding:12px;border-bottom:1px solid var(--line);}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .sub{color:var(--muted);font-size:12px;line-height:1.5;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;}
+  .btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;}
+  .btn:hover{border-color:var(--accent);}
+  .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:9px;padding:10px 15px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .btn-x{background:none;border:none;color:var(--bad);font-size:16px;cursor:pointer;padding:0 6px;line-height:1;}
+  input,select{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px;font-size:13.5px;font-family:inherit;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:8px 0 3px;}
+  .modelo-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);}
+  .modelo-row:last-child{border-bottom:none;}
+  .pill{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:99px;background:var(--panel2);color:var(--muted);white-space:nowrap;}
+  .setor{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;}
+  .setor-cab{display:flex;align-items:center;gap:8px;padding:10px;background:var(--panel2);}
+  .setor-cab input{font-weight:700;}
+  .item-row{display:flex;align-items:center;gap:6px;padding:7px 10px;border-top:1px solid var(--line);}
+  .item-row select{width:auto;flex:none;font-size:11.5px;padding:6px 8px;}
+  .aviso{background:var(--warn-dim);border:1px solid var(--warn);border-radius:9px;padding:10px;font-size:12px;line-height:1.55;}
+  .hidden{display:none!important;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">Q.A · Modelos de checklist</div>
+        <h1 id="titulo">Modelos</h1>
+      </div>
+    </div>
+    <button class="btn-primary hidden" id="btn-salvar" onclick="salvar()">Salvar</button>
+  </div>
+</header>
+
+<div id="tela-lista">
+  <div class="card">
+    <p class="sub" style="margin:0 0 10px;">
+      O checklist que a visita usa. O <b>Padrão</b> é o da planilha de visita técnica
+      (6 setores, 38 itens) e não se edita — <b>duplique</b> pra criar o de uma marca
+      e mexer à vontade.
+    </p>
+    <div id="lista"><div class="sub">Carregando…</div></div>
+  </div>
+</div>
+
+<div id="tela-edita" class="hidden">
+  <div class="card">
+    <label for="m-nome">Nome do modelo</label>
+    <input id="m-nome" placeholder="Domino's">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;">
+      <input type="checkbox" id="m-pesos" style="width:auto;" onchange="avisoPeso()">
+      <span style="color:var(--text);font-size:13px;">Pesar por criticidade</span>
+    </label>
+    <p class="sub" style="margin:4px 0 0;">
+      Desligado, todo item vale 1 — a nota sai igual à da sua planilha.
+    </p>
+    <div id="aviso-peso" class="aviso hidden" style="margin-top:10px;">
+      <b>Isso muda a nota.</b> Com peso, um item <b>imprescindível</b> vale 3 e um
+      <b>recomendável</b> vale 1. A nota deste modelo deixa de ser comparável com as
+      visitas já feitas sem peso.
+    </div>
+  </div>
+
+  <div id="setores"></div>
+
+  <div class="card">
+    <button class="btn" onclick="addSetor()">+ Setor</button>
+    <button class="btn" style="float:right;" onclick="verLista()">Cancelar</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const AUTH_TOKEN = localStorage.getItem('authToken') || '';
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const CRITICIDADES = [['','— sem classificar'],['imprescindivel','Imprescindível'],['necessario','Necessário'],['recomendavel','Recomendável']];
+
+let MODELOS = [];
+let EDIT = null; // { id, nome, pesos, setores:[{id,nome,itens:[{id,texto,criticidade}]}] }
+
+async function api(caminho, opcoes){
+  const r = await fetch(caminho, Object.assign({
+    headers: { 'Content-Type':'application/json', Authorization: 'Bearer ' + AUTH_TOKEN },
+  }, opcoes||{}));
+  const t = await r.text();
+  let d = null; try { d = t ? JSON.parse(t) : null; } catch(e){}
+  if(!r.ok) throw new Error((d && d.error) || 'Falha na comunicação.');
+  return d;
+}
+
+function verLista(){
+  EDIT = null;
+  $('tela-lista').classList.remove('hidden');
+  $('tela-edita').classList.add('hidden');
+  $('btn-salvar').classList.add('hidden');
+  $('titulo').textContent = 'Modelos';
+  carregar();
+}
+
+async function carregar(){
+  try{
+    MODELOS = await api('/api/qualidade/modelos');
+    $('lista').innerHTML = MODELOS.map((m)=>{
+      const ehPadrao = m.id === 'padrao';
+      const itens = (m.setores||[]).reduce((n,s)=>n+((s.itens||[]).length),0);
+      return `<div class="modelo-row">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13.5px;font-weight:700;">${escapeHtml(m.nome)}</div>
+          <div class="sub">${(m.setores||[]).length} setor(es) · ${itens} itens${m.versao?' · versão '+escapeHtml(String(m.versao)):''}${m.pesos?' · com peso':''}</div>
+        </div>
+        ${ehPadrao ? '<span class="pill">da planilha</span>' : ''}
+        <button class="btn" onclick="duplicar('${escapeHtml(m.id)}')">Duplicar</button>
+        ${ehPadrao ? '' : `<button class="btn" onclick="editar('${escapeHtml(m.id)}')">Editar</button>`}
+      </div>`;
+    }).join('');
+  }catch(e){ $('lista').innerHTML = `<div class="sub">${escapeHtml(e.message)}</div>`; }
+}
+
+// DUPLICAR é o caminho normal pra criar o modelo de uma marca. Foi como o
+// Master descreveu: monta a primeira vez e aquilo vira um modelo. O Padrão
+// mora no código (é a transcrição da planilha) e por isso não se edita -
+// duplicar dá uma cópia igual, já com os 38 itens, livre pra mexer.
+function duplicar(id){
+  const base = MODELOS.find(m=>m.id===id);
+  if(!base) return;
+  EDIT = {
+    id: '', // id novo sai do nome, no servidor
+    nome: base.nome === 'Padrão' ? '' : base.nome + ' (cópia)',
+    pesos: !!base.pesos,
+    setores: JSON.parse(JSON.stringify(base.setores||[])),
+  };
+  abrirEditor('Novo modelo');
+}
+function editar(id){
+  const base = MODELOS.find(m=>m.id===id);
+  if(!base) return;
+  EDIT = { id: base.id, nome: base.nome, pesos: !!base.pesos, setores: JSON.parse(JSON.stringify(base.setores||[])) };
+  abrirEditor(base.nome);
+}
+function abrirEditor(titulo){
+  $('tela-lista').classList.add('hidden');
+  $('tela-edita').classList.remove('hidden');
+  $('btn-salvar').classList.remove('hidden');
+  $('titulo').textContent = titulo;
+  $('m-nome').value = EDIT.nome;
+  $('m-pesos').checked = EDIT.pesos;
+  avisoPeso();
+  pintarSetores();
+}
+function avisoPeso(){ $('aviso-peso').classList.toggle('hidden', !$('m-pesos').checked); }
+
+function pintarSetores(){
+  $('setores').innerHTML = EDIT.setores.map((s,iS)=>`
+    <div class="setor">
+      <div class="setor-cab">
+        <input value="${escapeHtml(s.nome||'')}" placeholder="Nome do setor" onchange="EDIT.setores[${iS}].nome=this.value">
+        <button class="btn-x" title="Remover setor" onclick="delSetor(${iS})">✕</button>
+      </div>
+      ${(s.itens||[]).map((i,iI)=>`
+        <div class="item-row">
+          <input value="${escapeHtml(i.texto||'')}" placeholder="O que conferir" onchange="EDIT.setores[${iS}].itens[${iI}].texto=this.value">
+          <select onchange="EDIT.setores[${iS}].itens[${iI}].criticidade=this.value||null">
+            ${CRITICIDADES.map(([v,l])=>`<option value="${v}" ${(i.criticidade||'')===v?'selected':''}>${escapeHtml(l)}</option>`).join('')}
+          </select>
+          <button class="btn-x" title="Remover item" onclick="delItem(${iS},${iI})">✕</button>
+        </div>`).join('')}
+      <div class="item-row"><button class="btn" onclick="addItem(${iS})">+ Item</button></div>
+    </div>`).join('');
+}
+function addSetor(){ EDIT.setores.push({ nome:'', itens:[{ texto:'' }] }); pintarSetores(); }
+function delSetor(iS){ if(!confirm('Remover este setor e os itens dele?')) return; EDIT.setores.splice(iS,1); pintarSetores(); }
+function addItem(iS){ EDIT.setores[iS].itens = EDIT.setores[iS].itens||[]; EDIT.setores[iS].itens.push({ texto:'' }); pintarSetores(); }
+function delItem(iS,iI){ EDIT.setores[iS].itens.splice(iI,1); pintarSetores(); }
+
+async function salvar(){
+  EDIT.nome = $('m-nome').value.trim();
+  EDIT.pesos = $('m-pesos').checked;
+  if(!EDIT.nome) return alert('Dê um nome ao modelo.');
+  try{
+    await api('/api/qualidade/modelos', { method:'POST', body: JSON.stringify(EDIT) });
+    verLista();
+  }catch(e){ alert(e.message); }
+}
+
+verLista();
+</script>
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>

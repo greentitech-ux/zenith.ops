@@ -97,6 +97,10 @@
     { grupo: 'Q.A', itens: [
       { id: 'nav-qa-visita', href: '/qa-visita.html', icone: '🥼', rotulo: 'Visita Q.A', tags: ['qa'] },
       { id: 'nav-qa-treinamento', href: '/qa-treinamento.html', icone: '🎓', rotulo: 'Treinamento Q.A', tags: ['qa'] },
+      // o checklist que a visita usa. Quem SALVA e Master/Admin (a rota
+      // exige), mas quem tem a tag ve a tela - conferir o roteiro antes de
+      // sair pra loja e parte do trabalho de quem visita.
+      { id: 'nav-qa-modelos', href: '/qa-modelos.html', icone: '📋', rotulo: 'Modelos Q.A', tags: ['qa'] },
     ] },
     { grupo: 'Saltiverso', itens: [
       { id: 'nav-parque-checkin', href: '/parque-checkin.html', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },

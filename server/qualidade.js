@@ -254,10 +254,59 @@ async function modeloPorId(id) {
   return snap.exists ? snap.data() : MODELO_PADRAO;
 }
 
+// Limites de um modelo. Não é paranoia: o modelo inteiro viaja DENTRO de
+// cada visita (o retrato, ver ARQUITETURA) e o Firestore tem teto de 1 MiB
+// por documento. Um checklist de mil itens inviabilizaria a visita toda.
+const MAX_SETORES = 30;
+const MAX_ITENS_POR_SETOR = 80;
+
+function idDeTexto(texto, usados, prefixo) {
+  const base = String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || prefixo;
+  let id = base;
+  let n = 2;
+  while (usados.has(id)) { id = `${base}-${n}`; n += 1; }
+  usados.add(id);
+  return id;
+}
+
+// O QUE A TELA MANDA, tratado como dado a conferir.
+//
+// O ID DE UM ITEM NUNCA É REGERADO quando ele já vem: é ele que amarra a
+// resposta gravada numa visita de agosto ao item de hoje (CLAUDE.md §1).
+// Item novo (sem id) ganha um id derivado do texto, único dentro do modelo.
+// Corrigir o TEXTO de um item existente é livre e não mexe no id - que é
+// exatamente a regra "rótulo muda, identificador não".
+function normalizarSetores(bruto) {
+  if (!Array.isArray(bruto) || !bruto.length) throw new Error('O modelo precisa de pelo menos um setor.');
+  const idsSetor = new Set();
+  const setores = bruto.slice(0, MAX_SETORES).map((s, iS) => {
+    const nome = String((s && s.nome) || '').trim().slice(0, 120);
+    if (!nome) throw new Error(`O setor ${iS + 1} precisa de um nome.`);
+    const idSetor = String((s && s.id) || '').trim() || idDeTexto(nome, idsSetor, `setor-${iS + 1}`);
+    idsSetor.add(idSetor);
+    const idsItem = new Set();
+    const itens = (Array.isArray(s.itens) ? s.itens : []).slice(0, MAX_ITENS_POR_SETOR).map((i, iI) => {
+      const texto = String((i && i.texto) || '').trim().slice(0, 400);
+      if (!texto) throw new Error(`Um item do setor "${nome}" está sem texto.`);
+      const idItem = String((i && i.id) || '').trim() || idDeTexto(texto, idsItem, `item-${iI + 1}`);
+      idsItem.add(idItem);
+      return {
+        id: idItem,
+        texto,
+        criticidade: CRITICIDADES.includes(i && i.criticidade) ? i.criticidade : null,
+      };
+    });
+    if (!itens.length) throw new Error(`O setor "${nome}" precisa de pelo menos um item.`);
+    return { id: idSetor, nome, itens };
+  });
+  return setores;
+}
+
 async function salvarModelo({ id, nome, setores, pesos }, email) {
   const limpo = String(nome || '').trim();
   if (!limpo) throw new Error('O modelo precisa de um nome.');
-  if (!Array.isArray(setores) || !setores.length) throw new Error('O modelo precisa de pelo menos um setor.');
+  const setoresLimpos = normalizarSetores(setores);
   const idFinal = String(id || '').trim() || limpo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
   if (!idFinal || idFinal === MODELO_PADRAO.id) throw new Error('Esse identificador de modelo não pode ser usado.');
   const anterior = (await MODELOS.doc(idFinal).get()).data();
@@ -268,7 +317,7 @@ async function salvarModelo({ id, nome, setores, pesos }, email) {
     // então mexer no modelo hoje nunca reescreve o que foi respondido antes.
     versao: Number(anterior && anterior.versao ? anterior.versao : 0) + 1,
     pesos: pesos === true,
-    setores,
+    setores: setoresLimpos,
     criadoEm: (anterior && anterior.criadoEm) || new Date().toISOString(),
     atualizadoEm: new Date().toISOString(),
     atualizadoPorEmail: email || null,
@@ -567,7 +616,8 @@ module.exports = {
   CRITICIDADES, CRITICIDADE_LABEL, PESO_POR_CRITICIDADE, pesoDoItem,
   FAIXA_POSITIVA_MIN, FAIXA_ATENCAO_MIN, FAIXA_LABEL,
   faixaDaNota, calcularNota, itensDoModelo, totalDeItens,
-  listarModelos, modeloPorId, salvarModelo, retratoDoModelo,
+  listarModelos, modeloPorId, salvarModelo, retratoDoModelo, normalizarSetores,
+  MAX_SETORES, MAX_ITENS_POR_SETOR,
   criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
   salvarAcaoCorretiva, concluirVisita, listarVisitas, apontamentosDe,
   MAX_FOTOS_POR_ITEM, anexarFoto, fotoDe,
