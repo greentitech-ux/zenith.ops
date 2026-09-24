@@ -599,6 +599,53 @@ function podeReceberAlertaRh(sub, unidade) {
 // RH: funcionario em teste completou os dias limite (ver
 // rh.DIAS_TESTE_ALERTA) sem decisao - aviso pro Master, Gerente/Ass.Gerente
 // DA UNIDADE e pro time de RH (ver podeReceberAlertaRh)
+// Q.A · DOCUMENTO DA UNIDADE VENCENDO OU VENCIDO.
+//
+// PÚBLICO (Master, 24/09/2026): "Master, quem tem a Tag de Q.A, Gerente da
+// unidade, admin do grupo de unidades ou da unidade".
+//
+// Vai por ID DE USUÁRIO, e não pelo filtro de inscrição como os outros
+// alertas daqui. Motivo: o `meta` da inscrição guarda só o cargo PRINCIPAL
+// (ver addSubscription), e quem acumula Suporte + Q.A tem 'suporte' como
+// principal - perderia o aviso justamente por ter dois chapéus. Pelo id, a
+// conta é feita sobre o conjunto de tags de verdade (tagsDe em users.js).
+async function publicoDocumentoQA(unidade) {
+  const todos = await users.list();
+  const alvo = String(unidade || '');
+  return todos.filter((u) => {
+    if (u.active === false) return false;
+    if (u.role === 'master' || u.isAdmin) return true;
+    if (users.temTag(u, 'qa')) return true;
+    const dele = (u.permissions && u.permissions.unidades) || [];
+    // gerente (ou assistente) DA unidade - ehCargoGerente trata os dois
+    return dele.includes(alvo) && users.tagsDe(u).some((c) => ehCargoGerente(c));
+  });
+}
+
+async function notifyDocumentoQA(doc) {
+  const venceu = doc.situacao === 'vencido';
+  const onde = doc.unidadeNome || doc.unidade;
+  const quando = venceu
+    ? `venceu em ${String(doc.validade || '').split('-').reverse().join('/')}`
+    : `vence em ${doc.dias} dia(s)`;
+  const dados = {
+    title: venceu ? `📄 Documento vencido · ${onde}` : `📄 Documento a vencer · ${onde}`,
+    // tom de voz da casa (CLAUDE.md §5): o fato e o número, sem rodeio
+    body: `${doc.nome} ${quando}.`,
+    tag: `qa-doc-${doc.id}-${doc.situacao}`,
+    url: '/qa-documentos',
+    critical: venceu,
+  };
+  await alertasCentral.registrar({
+    tipo: 'qa-documento', titulo: dados.title, resumo: dados.body, url: dados.url, critico: venceu,
+  });
+  const pessoas = await publicoDocumentoQA(doc.unidade);
+  for (const p of pessoas) {
+    await notifyUsuario(p.id, dados.title, dados.body, dados.tag, dados.url);
+  }
+  return { entregues: pessoas.length };
+}
+
 async function notifyRhTesteVencido(funcionario) {
   const dados = {
     title: '🧑‍💼 RH · decisão de teste pendente',
@@ -1646,7 +1693,7 @@ module.exports = {
   notifyProgramaNovo,
   notifyProgramaSumido,
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyBateriaAparelho, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
+  notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyBateriaAparelho, notifyDocumentoQA, publicoDocumentoQA, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyRamAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyComandoTravado, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,

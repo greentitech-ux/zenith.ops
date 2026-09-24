@@ -101,6 +101,8 @@
       // exige), mas quem tem a tag ve a tela - conferir o roteiro antes de
       // sair pra loja e parte do trabalho de quem visita.
       { id: 'nav-qa-modelos', href: '/qa-modelos', icone: '📋', rotulo: 'Modelos Q.A', tags: ['qa'] },
+      // a pasta é da UNIDADE: quem tem unidade vê, além de quem visita
+      { id: 'nav-qa-documentos', href: '/qa-documentos', icone: '📄', rotulo: 'Documentos da unidade', tagsOuUnidade: ['qa'] },
     ] },
     { grupo: 'Saltiverso', itens: [
       { id: 'nav-parque-checkin', href: '/parque-checkin', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },
@@ -499,6 +501,15 @@
     // mesma razão do gerenteOuSecoes logo acima: quem acumula Suporte + Q.A
     // tem uma delas como principal e perderia a outra.
     if (it.tags) return isAdmin || it.tags.some((t) => (me.cargos || []).includes(t) || me.cargo === t);
+    // TAG **OU** TER UNIDADE. É a regra da pasta de documentos do Q.A: quem
+    // VISITA entra pela tag, e quem É a loja entra por ter a unidade na
+    // permissão. Só a tag esconderia a tela de quem alimenta a pasta, que é
+    // justamente a unidade (Master, 24/09/2026).
+    if (it.tagsOuUnidade) {
+      return isAdmin
+        || it.tagsOuUnidade.some((t) => (me.cargos || []).includes(t) || me.cargo === t)
+        || me.unidades === null || (me.unidades || []).length > 0;
+    }
     if (it.secoes) return it.secoes.some((s) => temSecao(me, s));
     return true;
   }

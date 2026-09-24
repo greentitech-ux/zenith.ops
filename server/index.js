@@ -125,6 +125,7 @@ const enderecoAntigo = require('./enderecoAntigo');
 const vigiaScript = require('./vigiaScript');
 const agenteAndroid = require('./agenteAndroid');
 const qualidade = require('./qualidade');
+const qualidadeDocumentos = require('./qualidadeDocumentos');
 const qualidadeReport = require('./qualidadeReport');
 const reparoNocZenithScript = require('./reparoNocZenithScript');
 const procedimentosSocorro = require('./procedimentosSocorro');
@@ -4758,6 +4759,75 @@ function exigirQA(req, res) {
   res.status(403).json({ error: 'Acesso restrito ao setor Q.A.' });
   return false;
 }
+
+// ---------------------------------------------------------------------
+// Q.A · PASTA DE DOCUMENTOS DA UNIDADE (ver qualidadeDocumentos.js)
+//
+// A PORTA AQUI É MAIS LARGA que a do resto do Q.A, de propósito: quem
+// alimenta a pasta é a UNIDADE (Master: "as unidades poderão armazenar
+// documentação da unidade"). Então entra Master/Admin, quem tem a tag Q.A
+// (que visita), e quem tem ESSA unidade na permissão - e só essa.
+function podeNaUnidadeQA(req, unidade) {
+  if (req.isMaster || req.isAdmin || users.temTag(req.user, 'qa')) return true;
+  const minhas = (req.permissions && req.permissions.unidades) || [];
+  return !!unidade && minhas.includes(String(unidade));
+}
+function unidadesVisiveisQA(req) {
+  if (req.isMaster || req.isAdmin || users.temTag(req.user, 'qa')) return null; // todas
+  return new Set((req.permissions && req.permissions.unidades) || []);
+}
+
+app.get('/api/qualidade/documentos', auth.requireAuth, async (req, res) => {
+  try {
+    const permitidas = unidadesVisiveisQA(req);
+    const lista = await qualidadeDocumentos.listar(req.query.unidade || null);
+    res.json(permitidas ? lista.filter((d) => permitidas.has(String(d.unidade))) : lista);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// os nomes sugeridos saem do PRÓPRIO checklist - a pasta e a visita falam a
+// mesma língua sem a lista ser repetida em dois lugares
+app.get('/api/qualidade/documentos/sugestoes', auth.requireAuth, (req, res) => {
+  res.json(qualidadeDocumentos.sugestoes());
+});
+
+app.post('/api/qualidade/documentos', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeNaUnidadeQA(req, (req.body || {}).unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    res.json(await qualidadeDocumentos.salvar(req.body || {}, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// ANEXAR/ESCANEAR. O arquivo vai pro Storage - um PDF escaneado tem MBs e
+// nunca pode entrar no documento do Firestore (CLAUDE.md §3).
+app.post('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, upload.single('arquivo'), async (req, res) => {
+  try {
+    const atual = await qualidadeDocumentos.obter(req.params.id);
+    if (!podeNaUnidadeQA(req, atual.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+    const caminho = await storage.salvarArquivo(req.params.id, req.file, 'qualidade-documentos');
+    res.json(await qualidadeDocumentos.anexar(req.params.id, {
+      nome: req.file.originalname, path: caminho, tipo: req.file.mimetype,
+    }));
+  } catch (err) { res.status(400).json({ error: storage.erroDeUpload ? storage.erroDeUpload(err) : err.message }); }
+});
+
+app.get('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, async (req, res) => {
+  try {
+    const doc = await qualidadeDocumentos.obter(req.params.id);
+    if (!podeNaUnidadeQA(req, doc.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    if (!doc.arquivo || !doc.arquivo.path) return res.status(404).json({ error: 'Esse documento ainda não tem arquivo.' });
+    storage.streamArquivo(doc.arquivo.path, doc.arquivo.tipo, res);
+  } catch (err) { res.status(404).json({ error: err.message }); }
+});
+
+app.delete('/api/qualidade/documentos/:id', auth.requireAuth, async (req, res) => {
+  try {
+    const doc = await qualidadeDocumentos.obter(req.params.id);
+    if (!podeNaUnidadeQA(req, doc.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    res.json(await qualidadeDocumentos.remover(req.params.id));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 
 app.get('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
@@ -17015,6 +17085,33 @@ function aquecerBoot(promessa, ms) {
     rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
     setInterval(() => {
       rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
+    }, 60 * 60 * 1000);
+
+    // Q.A: documento da unidade vencendo ou vencido (ver
+    // qualidadeDocumentos.varrerVencimentos).
+    //
+    // Mesmo desenho do alerta do RH logo acima, e pelos mesmos dois motivos:
+    // só dentro do horário comercial (documento vencido não é urgência de
+    // madrugada - e acordar gerente com isso faz o alerta ser silenciado), e
+    // com marca de "já avisei NESTA situação" no próprio documento, pra
+    // rodar de hora em hora sem repetir.
+    //
+    // Avisa DUAS vezes na vida de um documento: quando entra em "a vencer" e
+    // de novo quando vence de fato - a segunda é a que vira risco de
+    // fiscalização.
+    const rodarAlertaDocumentosQA = async () => {
+      const h = horaBrasilia();
+      if (h < 8 || h >= 20) return;
+      const pendentes = await qualidadeDocumentos.varrerVencimentos();
+      for (const doc of pendentes) {
+        await push.notifyDocumentoQA(doc);
+        await qualidadeDocumentos.marcarAvisado(doc.id, doc.situacao);
+        broadcast('qa-documento', { id: doc.id, unidade: doc.unidade, situacao: doc.situacao }, 'qa');
+      }
+    };
+    rodarAlertaDocumentosQA().catch((err) => console.error('Erro no alerta de documentos do Q.A:', err.message));
+    setInterval(() => {
+      rodarAlertaDocumentosQA().catch((err) => console.error('Erro no alerta de documentos do Q.A:', err.message));
     }, 60 * 60 * 1000);
 
     // RH: ponto aberto além da jornada (ver LIMITE_CHECKOUT_HORAS em

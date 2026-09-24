@@ -27752,6 +27752,121 @@ $r | ConvertTo-Json -Depth 4 -Compress
   if (!okNotasRecolhidas) ruins += 1;
   console.log(`${okNotasRecolhidas ? '✓' : '✗'} Notas do Beniboy: recolhidas por padrão, com o aviso de pendência no título`);
 
+  // ------------------------------------------------------------------
+  // Q.A · PASTA DE DOCUMENTOS DA UNIDADE.
+  //
+  // Master (24/09/2026): "as unidades poderão armazenar documentação da
+  // unidade... sempre que tiver próximo da validade avisar para ser
+  // renovado... caso esteja vencido constará como vencido e isso gerará
+  // alertas para o Master, quem tem a Tag de Q.A, Gerente da unidade, admin".
+  //
+  // O que este bloco protege: a CONTA da validade (é ela que decide se a
+  // loja é avisada ou pega uma multa), o rearme depois de renovar, e quem
+  // enxerga o quê - a pasta é da unidade, e unidade nenhuma pode ver a
+  // pasta da outra.
+  let okDocsQA = false;
+  try {
+    const fsD = require('fs');
+    const qd = require(__dirname + '/qualidadeDocumentos.js');
+    const idxD = fsD.readFileSync(__dirname + '/index.js', 'utf8');
+    const navD = fsD.readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
+    const pushD = fsD.readFileSync(__dirname + '/push.js', 'utf8');
+    const modD = fsD.readFileSync(__dirname + '/qualidadeDocumentos.js', 'utf8');
+
+    const hoje = '2026-09-24';
+    const sit = (validade, aviso) => qd.situacaoDe({ validade, avisarDiasAntes: aviso }, hoje).situacao;
+
+    const conf = {
+      // a conta da validade, nos quatro estados e nas bordas
+      'documento sem data não vira vencido': sit(null) === 'sem_validade',
+      'vence amanhã = a vencer': sit('2026-09-25') === 'a_vencer',
+      'venceu ontem = vencido': sit('2026-09-23') === 'vencido',
+      'vence hoje ainda NÃO está vencido': sit('2026-09-24') === 'a_vencer',
+      'longe da validade = válido': sit('2027-09-24') === 'valido',
+      // o prazo é POR DOCUMENTO: bombeiro leva semanas, refil se compra no dia
+      'o aviso respeita o prazo de cada documento':
+        sit('2026-11-01', 30) === 'valido' && sit('2026-11-01', 90) === 'a_vencer'
+        && qd.DIAS_AVISO_PADRAO === 30,
+      // a situação é CALCULADA: gravada, um documento que venceu ontem
+      // apareceria válido até a próxima varredura rodar
+      // o que importa é o DOCUMENTO GRAVADO não ter o campo: olhar o
+      // código casaria com o `return { situacao }` do próprio cálculo, que
+      // é o oposto do que está sendo protegido
+      'a situação é calculada, nunca gravada': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const r = await postarJson('/api/qualidade/documentos', {
+          unidade: '19706', unidadeNome: 'Mooca', nome: 'Analise de agua', validade: '2020-05-05',
+        }, cabD);
+        if (r.status !== 200) return false;
+        const id = JSON.parse(r.corpo).id;
+        const gravado = [...DOCS.entries()].find(([k]) => k === `qualidadeDocumentos/${id}`);
+        return !!gravado && !('situacao' in gravado[1]) && !('dias' in gravado[1]);
+      })(),
+      // RENOVAR tem que voltar a avisar - senão o documento cala pra sempre
+      'renovar a validade rearma o aviso':
+        /const mudouValidade = !anterior \|\| anterior\.validade !== registro\.validade;/.test(modD)
+        && /registro\.avisadoSituacao = mudouValidade \? null/.test(modD),
+      // avisa quando falta pouco E de novo quando vence: a segunda é a que
+      // vira risco de fiscalização
+      'avisa por situação, não uma vez só':
+        /if \(doc\.avisadoSituacao === doc\.situacao\) continue;/.test(modD),
+      // a lista de nomes sai do PRÓPRIO checklist - repetir aqui faria as
+      // duas divergirem na primeira correção
+      'as sugestões saem do checklist, não de uma cópia': (() => {
+        const sug = qd.sugestoes();
+        const q2 = require(__dirname + '/qualidade.js');
+        const setor = q2.MODELO_PADRAO.setores.find((x) => x.id === 'documentacao');
+        return sug.length >= setor.itens.length
+          && setor.itens.every((i) => sug.some((x) => x.itemChecklistId === i.id))
+          && /\.find\(\(s\) => s\.id === 'documentacao'\)/.test(modD);
+      })(),
+      // o arquivo escaneado tem MBs: Storage, nunca Firestore (§3)
+      'o arquivo vai pro Storage, só o caminho fica no documento':
+        /storage\.salvarArquivo\(req\.params\.id, req\.file, 'qualidade-documentos'\)/.test(idxD)
+        && /path: String\(arquivo\.path \|\| ''\)/.test(modD),
+      // a pasta é DA unidade: ninguém vê a do vizinho
+      'unidade não enxerga nem escreve na pasta de outra':
+        /function podeNaUnidadeQA\(req, unidade\)/.test(idxD)
+        && /minhas\.includes\(String\(unidade\)\)/.test(idxD)
+        && (idxD.match(/podeNaUnidadeQA\(req,/g) || []).length >= 4
+        && /function unidadesVisiveisQA\(req\)/.test(idxD),
+      // público do alerta, exatamente o que o Master listou
+      'o alerta vai por ID de usuário, não pelo cargo principal da inscrição':
+        /async function publicoDocumentoQA\(unidade\)/.test(pushD)
+        && /users\.temTag\(u, 'qa'\)/.test(pushD)
+        && /users\.tagsDe\(u\)\.some\(\(c\) => ehCargoGerente\(c\)\)/.test(pushD)
+        && /u\.role === 'master' \|\| u\.isAdmin/.test(pushD),
+      // documento vencido não é urgência de madrugada
+      'a varredura só roda em horário comercial, e marca o que avisou':
+        /const rodarAlertaDocumentosQA = async \(\) => \{[\s\S]{0,200}if \(h < 8 \|\| h >= 20\) return;/.test(idxD)
+        && /qualidadeDocumentos\.marcarAvisado\(doc\.id, doc\.situacao\)/.test(idxD),
+      // quem alimenta a pasta é a LOJA: só a tag esconderia a tela dela
+      'a loja vê a tela, não só quem tem a tag':
+        /if \(it\.tagsOuUnidade\)/.test(navD)
+        && /me\.unidades === null \|\| \(me\.unidades \|\| \[\]\)\.length > 0/.test(navD)
+        && /id: 'nav-qa-documentos'[^}]*tagsOuUnidade: \['qa'\]/.test(navD)
+        && fsD.existsSync(__dirname + '/public/qa-documentos.html'),
+      'o alerta tem ícone na Central':
+        /'qa-documento': \{ icone: '📄'/.test(fsD.readFileSync(__dirname + '/public/central-alertas.html', 'utf8')),
+      // PONTA A PONTA na rota
+      'a rota guarda e devolve com a situação calculada': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const r = await postarJson('/api/qualidade/documentos', {
+          unidade: '19706', unidadeNome: 'Mooca', nome: 'Limpeza de caixa d\'água',
+          validade: '2020-01-01', avisarDiasAntes: 30,
+        }, cabD);
+        if (r.status !== 200) return false;
+        const salvo = JSON.parse(r.corpo);
+        return salvo.situacao === 'vencido' && salvo.id && salvo.avisadoSituacao === null;
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDocsQA = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDocsQA = false; console.log('  erro: ' + e.message); }
+  if (!okDocsQA) ruins += 1;
+  console.log(`${okDocsQA ? '✓' : '✗'} Q.A · Documentos: validade calculada, aviso que rearma ao renovar, e pasta que é da unidade`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

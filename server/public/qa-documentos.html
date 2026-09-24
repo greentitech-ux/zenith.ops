@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Documentos da unidade · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e; --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 80px;max-width:720px;margin-inline:auto;overflow-x:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-16px -12px 16px;padding:12px;border-bottom:1px solid var(--line);}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .sub{color:var(--muted);font-size:12px;line-height:1.5;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;}
+  .btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;}
+  .btn:hover{border-color:var(--accent);}
+  .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:9px;padding:10px 15px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .btn-x{background:none;border:none;color:var(--bad);font-size:15px;cursor:pointer;padding:0 6px;}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px;font-size:13.5px;font-family:inherit;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:8px 0 3px;}
+  .linha{display:flex;gap:8px;flex-wrap:wrap;}
+  .linha>*{flex:1;min-width:140px;}
+  .doc{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);}
+  .doc:last-child{border-bottom:none;}
+  .sit{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap;}
+  .sit.valido{background:var(--ok-dim);color:var(--ok);}
+  .sit.a_vencer{background:var(--warn-dim);color:var(--warn);}
+  .sit.vencido{background:var(--bad-dim);color:var(--bad);}
+  .sit.sem_validade{background:var(--panel2);color:var(--muted);}
+  .grupo-uni{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;margin:14px 0 2px;}
+  .btn-arq{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:11.5px;cursor:pointer;color:var(--text);}
+  .btn-arq input{display:none;}
+  .hidden{display:none!important;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">Q.A · Documentos da unidade</div>
+        <h1>Documentos</h1>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="abrirNovo()">+ Documento</button>
+  </div>
+</header>
+
+<div class="card" id="cx-form" style="display:none;">
+  <h2 style="margin:0 0 4px;font-size:14px;" id="form-titulo">Novo documento</h2>
+  <p class="sub" style="margin:0 0 8px;">Guarde aqui e a visita já chega sabendo o que está em dia.</p>
+  <div class="linha">
+    <div>
+      <label for="f-unidade">Unidade</label>
+      <select id="f-unidade"></select>
+    </div>
+    <div>
+      <label for="f-nome">Nome do documento</label>
+      <input id="f-nome" list="sugestoes" placeholder="Limpeza de caixa d'água">
+      <datalist id="sugestoes"></datalist>
+    </div>
+  </div>
+  <div class="linha">
+    <div>
+      <label for="f-validade">Validade</label>
+      <input id="f-validade" type="date">
+    </div>
+    <div>
+      <label for="f-aviso">Avisar quantos dias antes</label>
+      <input id="f-aviso" type="number" min="1" max="365" value="30">
+    </div>
+  </div>
+  <label for="f-obs">Observação</label>
+  <input id="f-obs" placeholder="opcional">
+  <div style="display:flex;gap:8px;margin-top:14px;">
+    <button class="btn" onclick="fecharForm()">Cancelar</button>
+    <button class="btn-primary" style="flex:1;" onclick="salvar()">Salvar</button>
+  </div>
+</div>
+
+<div class="card"><div id="lista"><div class="sub">Carregando…</div></div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const AUTH_TOKEN = localStorage.getItem('authToken') || '';
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const SIT_LABEL = { valido:'Válido', a_vencer:'A vencer', vencido:'Vencido', sem_validade:'Sem validade' };
+let DOCS = [], UNIDADES = [], EDIT_ID = null;
+
+async function api(caminho, opcoes){
+  const r = await fetch(caminho, Object.assign({
+    headers: { 'Content-Type':'application/json', Authorization: 'Bearer ' + AUTH_TOKEN },
+  }, opcoes||{}));
+  const t = await r.text();
+  let d = null; try { d = t ? JSON.parse(t) : null; } catch(e){}
+  if(!r.ok) throw new Error((d && d.error) || 'Falha na comunicação.');
+  return d;
+}
+
+function fmtData(iso){ return iso ? String(iso).split('-').reverse().join('/') : '—'; }
+
+function abrirNovo(){ EDIT_ID=null; $('form-titulo').textContent='Novo documento'; $('f-nome').value=''; $('f-validade').value=''; $('f-aviso').value=30; $('f-obs').value=''; $('cx-form').style.display='block'; }
+function fecharForm(){ $('cx-form').style.display='none'; EDIT_ID=null; }
+function editar(id){
+  const d = DOCS.find(x=>x.id===id); if(!d) return;
+  EDIT_ID = id;
+  $('form-titulo').textContent = 'Editar documento';
+  $('f-unidade').value = d.unidade;
+  $('f-nome').value = d.nome;
+  $('f-validade').value = d.validade || '';
+  $('f-aviso').value = d.avisarDiasAntes || 30;
+  $('f-obs').value = d.observacao || '';
+  $('cx-form').style.display='block';
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+async function carregar(){
+  try{
+    const [docs, unis, sug] = await Promise.all([
+      api('/api/qualidade/documentos'),
+      api('/api/meta/unidades').catch(()=>[]),
+      api('/api/qualidade/documentos/sugestoes').catch(()=>[]),
+    ]);
+    DOCS = docs; UNIDADES = unis;
+    $('f-unidade').innerHTML = (unis||[]).map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome||u.codigo)}</option>`).join('');
+    $('sugestoes').innerHTML = (sug||[]).map(s=>`<option value="${escapeHtml(s.nome)}">`).join('');
+    pintar();
+  }catch(e){ $('lista').innerHTML = `<div class="sub">${escapeHtml(e.message)}</div>`; }
+}
+
+function pintar(){
+  if(!DOCS.length){ $('lista').innerHTML = '<div class="sub" style="text-align:center;padding:20px 0;">Nenhum documento guardado ainda. Toque em <b>+ Documento</b>.</div>'; return; }
+  // vencido primeiro, depois a vencer: a tela abre no que precisa de ação
+  const ordem = { vencido:0, a_vencer:1, valido:2, sem_validade:3 };
+  const porUnidade = {};
+  DOCS.slice().sort((a,b)=>(ordem[a.situacao]-ordem[b.situacao]) || String(a.validade||'').localeCompare(String(b.validade||'')))
+    .forEach(d=>{ (porUnidade[d.unidadeNome||d.unidade] = porUnidade[d.unidadeNome||d.unidade]||[]).push(d); });
+  $('lista').innerHTML = Object.entries(porUnidade).map(([uni,lista])=>`
+    <div class="grupo-uni">${escapeHtml(uni)}</div>
+    ${lista.map(d=>`
+      <div class="doc">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;">${escapeHtml(d.nome)}</div>
+          <div class="sub">
+            ${d.validade ? 'vence ' + escapeHtml(fmtData(d.validade)) : 'sem data de validade'}
+            ${d.situacao==='a_vencer' ? ` · faltam ${d.dias} dia(s)` : ''}
+            ${d.situacao==='vencido' ? ` · há ${Math.abs(d.dias)} dia(s)` : ''}
+          </div>
+          ${d.observacao ? `<div class="sub">${escapeHtml(d.observacao)}</div>` : ''}
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            ${d.arquivo && d.arquivo.path
+              ? `<a class="btn-arq" href="/api/qualidade/documentos/${encodeURIComponent(d.id)}/arquivo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📎 ${escapeHtml(d.arquivo.nome||'arquivo')}</a>`
+              : '<span class="sub">sem arquivo</span>'}
+            <label class="btn-arq">📷 ${d.arquivo&&d.arquivo.path?'Trocar':'Anexar/escanear'}
+              <input type="file" accept="image/*,application/pdf" capture="environment" onchange="enviarArquivo('${escapeHtml(d.id)}', this)">
+            </label>
+            <button class="btn-arq" onclick="editar('${escapeHtml(d.id)}')">Editar</button>
+            <button class="btn-x" title="Remover" onclick="remover('${escapeHtml(d.id)}')">✕</button>
+          </div>
+        </div>
+        <span class="sit ${escapeHtml(d.situacao)}">${escapeHtml(SIT_LABEL[d.situacao]||d.situacao)}</span>
+      </div>`).join('')}`).join('');
+}
+
+async function salvar(){
+  const corpo = {
+    id: EDIT_ID || undefined,
+    unidade: $('f-unidade').value,
+    unidadeNome: ($('f-unidade').selectedOptions[0]||{}).textContent || null,
+    nome: $('f-nome').value.trim(),
+    validade: $('f-validade').value || null,
+    avisarDiasAntes: Number($('f-aviso').value) || 30,
+    observacao: $('f-obs').value.trim(),
+  };
+  if(!corpo.nome) return alert('Dê um nome ao documento.');
+  try{ await api('/api/qualidade/documentos', { method:'POST', body: JSON.stringify(corpo) }); fecharForm(); await carregar(); }
+  catch(e){ alert(e.message); }
+}
+
+async function enviarArquivo(id, input){
+  const arquivo = input.files && input.files[0];
+  if(!arquivo) return;
+  const fd = new FormData(); fd.append('arquivo', arquivo);
+  try{
+    // sem Content-Type: o navegador põe o boundary do multipart sozinho
+    const r = await fetch(`/api/qualidade/documentos/${encodeURIComponent(id)}/arquivo`,
+      { method:'POST', body: fd, headers: { Authorization: 'Bearer ' + AUTH_TOKEN } });
+    if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Falha ao enviar o arquivo.'); }
+    window.zenithRascunhos?.limparAnexoEnviado(input);
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+
+async function remover(id){
+  if(!confirm('Remover este documento?')) return;
+  try{ await api('/api/qualidade/documentos/'+encodeURIComponent(id), { method:'DELETE' }); await carregar(); }
+  catch(e){ alert(e.message); }
+}
+
+carregar();
+</script>
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>
