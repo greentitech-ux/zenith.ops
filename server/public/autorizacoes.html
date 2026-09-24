@@ -24,6 +24,25 @@ header{position:sticky;top:0;z-index:40;background:var(--bg,#0b0d10);border-bott
 .page-title{margin:0;font-size:20px;line-height:1.1}
 .hamburger-btn{width:34px;height:34px;border-radius:8px;padding:0;flex:none;background:var(--panel2,#181d24);color:var(--text,#e7ecf1);border:1px solid var(--line,#232a33)}
 main{max-width:640px;margin:0 auto}
+/* TRES COLUNAS (Master, 24/09/2026): pendente, autorizado, recusado.
+   No CELULAR elas empilham, na ordem Pendente -> Autorizado -> Recusado.
+   Tres colunas lado a lado em 390px seria pior que a lista de hoje - e o
+   celular e justamente de onde o Master autoriza, chegando pelo push. */
+@media(min-width:900px){ main{max-width:1180px} }
+.colunas{display:grid;gap:14px}
+@media(min-width:900px){ .colunas{grid-template-columns:repeat(3,minmax(0,1fr));align-items:start} }
+.coluna{min-width:0}
+.col-topo{display:flex;align-items:baseline;gap:8px;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line,#232a33)}
+.col-nome{font:12px var(--mono,monospace);letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#7d8896);font-weight:600}
+.coluna.pendente .col-nome{color:var(--accent)}
+.col-conta{font:12px var(--mono,monospace);color:var(--muted,#7d8896);margin-left:auto;flex:none}
+.col-nota{font-size:11.5px;color:var(--muted,#7d8896);line-height:1.4;margin:-4px 0 10px}
+.col-vazia{color:var(--muted,#7d8896);font-size:13px;padding:8px 0 16px}
+/* O RESULTADO DE UMA ACAO QUE ACABOU DE RODAR fica ACIMA das colunas, nao
+   dentro da coluna Autorizado. Ele aparece UMA vez e nao fica gravado (pode
+   ser uma senha temporaria): mandar ele pra uma coluna que no celular esta
+   abaixo da dobra seria perder o unico momento em que da pra ler. */
+#agora:not(:empty){margin-bottom:18px}
 .muted{color:var(--muted,#7d8896);font-size:13px;line-height:1.45}
 h2{font-size:12px;font-family:var(--mono,monospace);letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#7d8896);margin:22px 0 10px;font-weight:600}
 .pedido{background:var(--panel,#12161b);border:1px solid var(--line,#232a33);border-radius:13px;padding:15px;margin-bottom:12px}
@@ -61,9 +80,12 @@ window.fetch=(url,opcoes={})=>fetchOriginal(url,{...opcoes,headers:{...(opcoes.h
 <header><div class="header-top"><button type="button" class="hamburger-btn" aria-label="Abrir menu" title="Menu">☰</button><div class="header-copy"><div class="eyebrow">NOPULSO · SOLUTIONS TI TECH</div><h1 class="page-title">🔐 Autorizações</h1></div></div></header>
 <main>
   <p class="muted" id="intro">O que o Claude, o Beniboy ou um QA Master prepararam e só roda com a sua autorização.</p>
-  <div id="pendentes"><p class="muted">Carregando…</p></div>
-  <h2 id="tit-decididos" class="hidden">Decididas recentemente</h2>
-  <div id="decididos"></div>
+  <div id="agora"></div>
+  <div class="colunas">
+    <section class="coluna pendente"><div class="col-topo"><span class="col-nome">Pendente</span><span class="col-conta" id="c-pendente"></span></div><div id="col-pendente"><p class="muted">Carregando…</p></div></section>
+    <section class="coluna"><div class="col-topo"><span class="col-nome">Autorizado</span><span class="col-conta" id="c-aprovado"></span></div><div id="col-aprovado"></div></section>
+    <section class="coluna"><div class="col-topo"><span class="col-nome">Recusado</span><span class="col-conta" id="c-rejeitado"></span></div><div class="col-nota" id="nota-rejeitado"></div><div id="col-rejeitado"></div></section>
+  </div>
 </main>
 <script>
 const $=s=>document.querySelector(s);
@@ -77,7 +99,13 @@ const FEITOS=new Map(); // id -> resultado mostrado uma vez (senha temporária i
 function quando(iso){if(!iso)return '';const m=Math.round((Date.now()-Date.parse(iso))/60000);if(m<1)return 'agora';if(m<60)return 'há '+m+' min';const h=Math.round(m/60);if(h<48)return 'há '+h+'h';return new Date(iso).toLocaleDateString('pt-BR')}
 function vence(iso){if(!iso)return '';const m=Math.round((Date.parse(iso)-Date.now())/60000);if(m<=0)return ' · venceu';if(m<60)return ' · vence em '+m+' min';return ' · vence em '+Math.round(m/60)+'h'}
 function vencido(a){return a.status==='pendente'&&a.expiraEm&&Date.parse(a.expiraEm)<=Date.now()}
-function aberto(a){return (a.status==='pendente'||a.status==='erro')&&!vencido(a)}
+// ERRO DEFINITIVO NÃO ESTÁ ABERTO. `erro` normal volta pra mão do Master
+// ("pode autorizar de novo"); o definitivo falhou por uma regra que repetir
+// não muda - cancelar uma tarefa já concluída, por exemplo. Caso real de
+// 24/09: o Master autorizou, falhou, e o cartão ficou preso na tela sem
+// nenhuma saída, porque o botão que ele oferecia dava o mesmo erro sempre.
+function definitivo(a){return a.status==='erro'&&a.erroDefinitivo===true}
+function aberto(a){return (a.status==='pendente'||(a.status==='erro'&&!definitivo(a)))&&!vencido(a)}
 
 function cartao(a){
   const feito=FEITOS.get(a.id);
@@ -87,14 +115,16 @@ function cartao(a){
     return `<article class="pedido" id="p-${esc(a.id)}">${cabeca}<div class="feito ok">✅ Autorizado e executado.</div>${feito.saida?`<pre class="saida">${esc(feito.saida)}</pre><button type="button" style="margin-top:8px" onclick="copiar('${esc(a.id)}')">Copiar resultado</button><div class="muted" style="margin-top:6px">Este resultado aparece só agora - não fica gravado.</div>`:''}</article>`;
   }
   if(!aberto(a)){
-    const rot={aprovado:'✅ Autorizado',rejeitado:'❌ Recusado',expirado:'⌛ Venceu',pendente:'⌛ Venceu'}[a.status]||a.status;
-    return `<article class="pedido decidido">${cabeca}<div class="feito">${rot}${a.decididoPorEmail?' · '+esc(a.decididoPorEmail):''}${a.decididoEm?' · '+quando(a.decididoEm):''}${a.motivoRejeicao?'<br>Motivo: '+esc(a.motivoRejeicao):''}</div></article>`;
+    const rot={aprovado:'✅ Autorizado',rejeitado:'❌ Recusado',expirado:'⌛ Venceu',pendente:'⌛ Venceu',erro:'⚠️ Não rodou'}[a.status]||a.status;
+    // diz POR QUE não adianta tentar de novo, em vez de só sumir com o botão
+    const porque=definitivo(a)?`<br>${esc(a.erroExecucao||'')}<br><span class="muted">Autorizar de novo daria o mesmo resultado. Se ainda fizer sentido, peça de novo ao Claude.</span>`:'';
+    return `<article class="pedido decidido">${cabeca}<div class="feito">${rot}${a.decididoPorEmail?' · '+esc(a.decididoPorEmail):''}${a.decididoEm?' · '+quando(a.decididoEm):''}${a.motivoRejeicao?'<br>Motivo: '+esc(a.motivoRejeicao):''}${porque}</div></article>`;
   }
   // digital PRIMEIRO; senha é a alternativa. Sem digital neste aparelho, a
   // senha aparece direto (não dá pra esconder a única saída)
   const senhaAberta=!DIGITAL;
   return `<article class="pedido${a.id===FOCO?' foco':''}" id="p-${esc(a.id)}">${cabeca}
-    ${a.status==='erro'?`<div class="erro">⚠️ Autorizado antes, mas falhou ao executar: ${esc(a.erroExecucao||'')}. Pode autorizar de novo.</div>`:''}
+    ${a.status==='erro'?`<div class="erro">⚠️ Autorizado antes, mas falhou ao executar: ${esc(String(a.erroExecucao||'').replace(/\.*$/,''))}. Pode autorizar de novo.</div>`:''}
     <div class="acoes">
       ${DIGITAL?`<button type="button" class="primario" id="dig-${esc(a.id)}" onclick="autorizarDigital('${esc(a.id)}')">👆 Autorizar com a digital</button>`:''}
       <div class="senha${senhaAberta?'':' hidden'}" id="sen-${esc(a.id)}">
@@ -111,19 +141,62 @@ function cartao(a){
   </article>`;
 }
 
+// EM QUE COLUNA CADA PEDIDO CAI.
+//
+// Os estados que o servidor produz sao CINCO, nao tres (qaAprovacoes.js):
+// pendente, aprovado, rejeitado, expirado e erro. As tres colunas tem que
+// dar conta dos cinco - senao um pedido some da tela.
+//
+//   Pendente  <- pendente e ERRO. `erro` e "o Master aprovou mas o executor
+//                falhou", e o proprio cartao ja diz "Pode autorizar de novo":
+//                esta de volta na mao dele, entao espera decisao. Guardar
+//                isso em Autorizado enterraria justamente o que precisa de
+//                acao (e o `aberto()` da tela ja tratava os dois juntos).
+//   Autorizado <- aprovado.
+//   Recusado   <- rejeitado, EXPIRADO e o ERRO DEFINITIVO (inclusive o pendente que passou do
+//                `expiraEm`). Os dois nunca executaram. O cartao continua
+//                dizendo "⌛ Venceu" em vez de "❌ Recusado", entao o item
+//                fala a verdade mesmo dentro da coluna - e a nota embaixo do
+//                titulo avisa que a coluna junta os dois.
+//
+// "Recusado" e nao "Rejeitado" de proposito: o botao ja diz "Recusar" e o
+// selo ja diz "❌ Recusado" (CLAUDE.md §5 - nao ter duas palavras pra mesma
+// coisa na mesma tela). O status gravado continua `rejeitado`.
+function coluna(a){
+  if(FEITOS.has(a.id))return 'agora';
+  if(aberto(a))return 'pendente';
+  if(a.status==='aprovado')return 'aprovado';
+  return 'rejeitado'; // rejeitado, expirado, erro definitivo, e o pendente que venceu
+}
+
 function pintar(){
-  const abertos=LISTA.filter(aberto).sort((a,b)=>(b.id===FOCO)-(a.id===FOCO)||Date.parse(b.criadoEm)-Date.parse(a.criadoEm));
-  const feitos=LISTA.filter(a=>FEITOS.has(a.id));
-  const decididos=LISTA.filter(a=>!aberto(a)&&!FEITOS.has(a.id)).sort((a,b)=>Date.parse(b.decididoEm||b.criadoEm)-Date.parse(a.decididoEm||a.criadoEm)).slice(0,15);
-  $('#pendentes').innerHTML=[...feitos,...abertos].map(cartao).join('')||'<p class="muted">Nada esperando autorização agora.</p>';
-  $('#tit-decididos').classList.toggle('hidden',!decididos.length);
-  $('#decididos').innerHTML=decididos.map(cartao).join('');
+  const agora=LISTA.filter(a=>FEITOS.has(a.id));
+  const nas=k=>LISTA.filter(a=>!FEITOS.has(a.id)&&coluna(a)===k);
+  // o pedido que o push abriu vem primeiro; depois, o mais novo
+  const pendentes=nas('pendente').sort((a,b)=>(b.id===FOCO)-(a.id===FOCO)||Date.parse(b.criadoEm)-Date.parse(a.criadoEm));
+  const porDecisao=(x,y)=>Date.parse(y.decididoEm||y.criadoEm)-Date.parse(x.decididoEm||x.criadoEm);
+  // teto por coluna: a lista do servidor ja vem com 300, e a tela nao precisa
+  // virar historico - pra isso existe a busca
+  const aprovados=nas('aprovado').sort(porDecisao).slice(0,15);
+  const rejeitados=nas('rejeitado').sort(porDecisao).slice(0,15);
+  const venceram=rejeitados.filter(a=>a.status==='expirado'||vencido(a)).length;
+
+  $('#agora').innerHTML=agora.map(cartao).join('');
+  $('#col-pendente').innerHTML=pendentes.map(cartao).join('')||'<p class="col-vazia">Nada esperando autorização agora.</p>';
+  $('#col-aprovado').innerHTML=aprovados.map(cartao).join('')||'<p class="col-vazia">Nenhuma autorizada ainda.</p>';
+  $('#col-rejeitado').innerHTML=rejeitados.map(cartao).join('')||'<p class="col-vazia">Nenhuma recusada.</p>';
+  const conta=(el,n)=>{$(el).textContent=n?String(n):''};
+  conta('#c-pendente',pendentes.length);conta('#c-aprovado',aprovados.length);conta('#c-rejeitado',rejeitados.length);
+  $('#nota-rejeitado').textContent=venceram?`Inclui ${venceram} que venceu${venceram>1?'ram':''} sem decisão.`:'';
 }
 
 async function carregar(){
   const r=await fetch('/api/qa-aprovacoes');
-  if(r.status===403){$('#pendentes').innerHTML='<p class="muted">Só o Master autoriza estes pedidos.</p>';return}
-  if(!r.ok){$('#pendentes').innerHTML='<p class="muted">Não consegui carregar os pedidos.</p>';return}
+  // o recado vai pra PRIMEIRA coluna, que e a que a pessoa le primeiro no
+  // celular - e as outras duas ficam vazias em vez de mentir "nenhuma"
+  const recado=t=>{$('#col-pendente').innerHTML=`<p class="muted">${t}</p>`;$('#col-aprovado').innerHTML='';$('#col-rejeitado').innerHTML='';};
+  if(r.status===403){recado('Só o Master autoriza estes pedidos.');return}
+  if(!r.ok){recado('Não consegui carregar os pedidos.');return}
   LISTA=await r.json();
   pintar();
   if(FOCO){const el=document.getElementById('p-'+FOCO);if(el)el.scrollIntoView({block:'center'})}

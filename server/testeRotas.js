@@ -26900,6 +26900,70 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /<script src="\/digital\.js"/.test(htmlAut) && htmlAut.indexOf('👆 Autorizar com a digital') > -1
         && htmlAut.indexOf('👆 Autorizar com a digital') < htmlAut.indexOf('Autorizar com a senha')
         && /class="primario" id="dig-/.test(htmlAut),
+      // TRES COLUNAS (Master, 24/09/2026): pendente, autorizado, recusado.
+      //
+      // O que este teste protege e o que NAO se ve olhando a tela: os estados
+      // que o servidor produz sao CINCO (pendente, aprovado, rejeitado,
+      // expirado, erro). Se `coluna()` deixar algum de fora, o pedido some da
+      // tela sem erro nenhum - e `expirado` e `erro` sao justamente os que
+      // ninguem lembra de testar na mao.
+      'a tela tem as três colunas, e os cinco estados caem em alguma delas': (() => {
+        const temTodas = /id="col-pendente"/.test(htmlAut) && /id="col-aprovado"/.test(htmlAut) && /id="col-rejeitado"/.test(htmlAut);
+        // roda a MESMA função da tela, com um estado de cada
+        const fn = (htmlAut.match(/function coluna\(a\)\{[\s\S]*?\n\}/) || [])[0];
+        if (!fn || !temTodas) return false;
+        const coluna = new Function('FEITOS', 'aberto', 'vencido', `${fn}; return coluna;`)(
+          new Map(), (a) => (a.status === 'pendente' || a.status === 'erro') && !(a.status === 'pendente' && a.expiraEm), () => false);
+        return coluna({ status: 'pendente' }) === 'pendente'
+          && coluna({ status: 'erro' }) === 'pendente'          // voltou pra mão do Master: "pode autorizar de novo"
+          && coluna({ status: 'aprovado' }) === 'aprovado'
+          && coluna({ status: 'rejeitado' }) === 'rejeitado'
+          && coluna({ status: 'expirado' }) === 'rejeitado';    // nunca executou, como o recusado
+      })(),
+      // o resultado de uma ação que acabou de rodar aparece UMA vez e não
+      // fica gravado (pode ser senha temporária). Ele fica ACIMA das colunas:
+      // numa coluna, no celular, estaria abaixo da dobra - e seria o único
+      // momento em que dava pra ler
+      'o resultado que aparece uma vez só não vai pra dentro de uma coluna':
+        /<div id="agora"><\/div>/.test(htmlAut)
+        && htmlAut.indexOf('<div id="agora">') < htmlAut.indexOf('class="colunas"')
+        && /\$\('#agora'\)\.innerHTML=agora\.map\(cartao\)/.test(htmlAut),
+      // três colunas lado a lado em 390px seria pior que a lista de antes - e
+      // o celular é de onde o Master autoriza, chegando pelo push
+      'no celular as colunas empilham, e só viram colunas no desktop':
+        /@media\(min-width:900px\)\{ \.colunas\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/.test(htmlAut),
+      // ---- O CASO REAL DE 24/09 ----
+      // O Claude pediu pra cancelar uma tarefa duplicada, o Master autorizou,
+      // e falhou com "Só dá pra cancelar tarefa em aberto" - ela já estava
+      // cancelada. Quem pediu queria um ESTADO, e o estado já era verdade.
+      'cancelar tarefa já cancelada é sucesso, não erro': await (async () => {
+        const idT = 'tar-cancel-idem';
+        const base = { id: idT, numeroTicket: 90001, titulo: 'Duplicada', status: 'CANCELADA', unidade: null, criadoPorId: 'cb-mst', responsavelId: 'cb-mst' };
+        DOCS.set(`tarefas/${idT}`, base);
+        const acesso = { usuario: { id: 'cb-mst', email: 'cb-mst@teste.local', username: 'cbmst' }, isMaster: true };
+        const t = require(__dirname + '/tarefas.js');
+        const r = await t.cancelar(idT, acesso, 'duplicada').catch((e) => ({ erro: e.message }));
+        return !r.erro && r.status === 'CANCELADA';
+      })(),
+      // CONCLUÍDA é outra história: cancelar mudaria um desfecho que já
+      // aconteceu. Continua recusando - mas dizendo em QUE estado ela está, e
+      // marcando que repetir não muda nada.
+      'cancelar tarefa concluída recusa, diz o estado e marca que repetir não adianta': await (async () => {
+        const idT = 'tar-cancel-feita';
+        DOCS.set(`tarefas/${idT}`, { id: idT, numeroTicket: 90002, titulo: 'Já feita', status: 'CONCLUIDA', unidade: null, criadoPorId: 'cb-mst', responsavelId: 'cb-mst' });
+        const acesso = { usuario: { id: 'cb-mst', email: 'cb-mst@teste.local', username: 'cbmst' }, isMaster: true };
+        const t = require(__dirname + '/tarefas.js');
+        let err = null;
+        try { await t.cancelar(idT, acesso, 'x'); } catch (e) { err = e; }
+        return !!err && err.definitivo === true && /#90002/.test(err.message) && /concluída/.test(err.message);
+      })(),
+      // sem isto o pedido ficava PRESO na fila oferecendo "autorizar de novo"
+      // pra sempre - o botão dava exatamente o mesmo erro, toda vez
+      'falha que repetir não resolve sai da fila e para de oferecer o botão':
+        /erroDefinitivo: execErr\.definitivo === true/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8'))
+        && /function definitivo\(a\)\{return a\.status==='erro'&&a\.erroDefinitivo===true\}/.test(htmlAut)
+        && /function aberto\(a\)\{return \(a\.status==='pendente'\|\|\(a\.status==='erro'&&!definitivo\(a\)\)\)/.test(htmlAut)
+        && /Autorizar de novo daria o mesmo resultado/.test(htmlAut),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAutoriza = !falhas.length;

@@ -6111,8 +6111,17 @@ app.post('/api/qa-aprovacoes/:id/aprovar', requireMasterDeVerdade, async (req, r
     try {
       saida = await executor(pendente.payload || {});
     } catch (execErr) {
-      await qaAprovacoes.marcarDecidido(id, { status: 'erro', decididoPorEmail: req.user.email, erroExecucao: execErr.message });
-      return res.status(400).json({ error: `Aprovado, mas a ação falhou ao executar: ${execErr.message}` });
+      // `definitivo` = a regra que barrou não muda por repetir (cancelar uma
+      // tarefa já concluída, por exemplo). O cartão deixa de oferecer
+      // "autorizar de novo", que ia dar o mesmo erro pra sempre.
+      await qaAprovacoes.marcarDecidido(id, {
+        status: 'erro', decididoPorEmail: req.user.email,
+        erroExecucao: execErr.message, erroDefinitivo: execErr.definitivo === true,
+      });
+      return res.status(400).json({
+        error: `Aprovado, mas a ação falhou ao executar: ${execErr.message}`,
+        definitivo: execErr.definitivo === true,
+      });
     }
     // o que fica gravado (e o Claude lê) nunca leva senha temporária; a tela
     // do Master recebe o resultado inteiro, uma vez, nesta resposta

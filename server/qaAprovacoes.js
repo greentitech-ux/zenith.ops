@@ -64,6 +64,7 @@ async function criar({
     decididoEm: null,
     motivoRejeicao: null,
     erroExecucao: null,
+    erroDefinitivo: false,
   };
   await ref.set(registro);
   cache.invalidar();
@@ -75,8 +76,12 @@ async function criar({
 // visível pro Master decidir se tenta aprovar de novo ou rejeita)
 // `resultado`: o que a ação devolveu, SEM segredo - é o que o Claude lê de
 // volta (consultar_autorizacao) pra seguir o atendimento
+// `erroDefinitivo`: a ação falhou por uma regra que repetir não muda (cancelar
+// uma tarefa já concluída, por exemplo). Sem isso, o pedido ficava preso na
+// fila oferecendo "autorizar de novo" pra sempre - caso real de 24/09, em que
+// o Master autorizou, falhou, e o cartão nunca tinha como sair da tela.
 async function marcarDecidido(id, {
-  status, decididoPorEmail, motivoRejeicao, erroExecucao, resultado,
+  status, decididoPorEmail, motivoRejeicao, erroExecucao, erroDefinitivo, resultado,
 }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
@@ -88,6 +93,7 @@ async function marcarDecidido(id, {
     decididoEm: new Date().toISOString(),
     motivoRejeicao: motivoRejeicao || null,
     erroExecucao: erroExecucao || null,
+    erroDefinitivo: !!erroDefinitivo,
   };
   await ref.update(patch);
   cache.invalidar();

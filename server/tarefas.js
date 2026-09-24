@@ -66,6 +66,8 @@ async function salaDoWorkspace(reuniao, { titulo, descricao, dia, pessoas }) {
 const COLLECTION = db.collection('tarefas');
 const CONTROLE = db.collection('tarefasControle');
 const STATUS_ABERTO = new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']);
+// pra dizer em que estado a tarefa está, em vez de só "não dá" (ver cancelar)
+const ROTULO_STATUS = { CONCLUIDA: 'concluída', CANCELADA: 'cancelada', ARQUIVADA: 'arquivada' };
 const STATUS_EDITAVEIS = new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']);
 const STATUS_TAREFA = [...STATUS_EDITAVEIS, 'CONCLUIDA', 'CANCELADA', 'ARQUIVADA'];
 
@@ -1071,7 +1073,25 @@ async function cancelar(id, acesso, motivo) {
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
   if (!podeMoverStatus(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: não pode cancelá-la.');
-  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Só dá pra cancelar tarefa em aberto.');
+  // JÁ CANCELADA = PRONTO, NÃO ERRO (24/09/2026).
+  //
+  // Caso real: o Claude pediu pra cancelar uma tarefa duplicada, o Master
+  // autorizou, e a execução falhou com "Só dá pra cancelar tarefa em aberto"
+  // - porque ela já estava cancelada. Quem pediu queria um ESTADO ("essa
+  // tarefa não deve mais estar de pé"), e o estado já era verdade. Recusar
+  // aí é o sistema brigando com quem já conseguiu o que queria - e deixava o
+  // pedido preso na fila de autorização sem saída, porque "autorizar de
+  // novo" ia dar exatamente o mesmo erro, pra sempre.
+  if (tarefa.status === 'CANCELADA') return getOne(id);
+  if (!STATUS_ABERTO.has(tarefa.status)) {
+    // CONCLUÍDA ou ARQUIVADA é outra história: cancelar mudaria um desfecho
+    // que já aconteceu. Continua recusando - mas dizendo em QUE estado ela
+    // está, senão quem lê não sabe o que fazer com a informação. E marcado
+    // como definitivo: repetir não muda nada (ver DEFINITIVO abaixo).
+    const err = new Error(`A tarefa #${tarefa.numeroTicket || id} está ${ROTULO_STATUS[tarefa.status] || tarefa.status} - só dá pra cancelar tarefa em aberto.`);
+    err.definitivo = true;
+    throw err;
+  }
   const agora = new Date().toISOString();
   await ref.update({ status: 'CANCELADA', canceladaEm: agora, canceladaPorId: acesso.usuario.id, canceladaPorNome: nomeUsuario(acesso.usuario), motivoCancelamento: String(motivo || '').trim().slice(0, 300) || null, ...(tarefa.ehReuniao ? { 'linkExterno.ativo': false, 'linkExterno.encerradoEm': agora, 'linkExterno.encerradoPorNome': nomeUsuario(acesso.usuario) } : {}), atualizadoEm: agora });
   // reunião cancelada aqui tem que sumir da agenda de quem foi convidado -
