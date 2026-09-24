@@ -189,6 +189,9 @@ function normalize(item) {
     aliasCartao: contatoTexto(additional.alias),
     shopperReference: additional.shopperReference || item.merchantAccountCode + ':' + (additional.shopperEmail || ''),
     unidade: normalizarCodigoUnidade(item.merchantAccountCode),
+    // o código cru da conta na Adyen: a API de disputas pede ele, e o
+    // `unidade` acima já vem normalizado (adyenDisputas.js, 24/09/2026)
+    merchantAccountCode: item.merchantAccountCode || null,
     dataHora: new Date().toISOString(), // Adyen nao manda timestamp do evento; usamos hora de recebimento
     disputeStatus: additional.disputeStatus || null,
     // prazo final pra enviar defesa/recorrer do chargeback - a Adyen manda
