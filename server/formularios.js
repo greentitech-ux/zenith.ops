@@ -418,7 +418,7 @@ function rotuloDoSlot(tipo, chave, rotuloGravado) {
 
 function resumo(r) {
   const assinaturas = Object.entries(r.assinaturas || {}).map(([chave, a]) => ({
-    chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), assinado: !!a.imagem, nome: a.nome || null, assinadoEm: a.assinadoEm || null, dispositivo: (a.dispositivo && a.dispositivo.rotulo) || null,
+    chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), assinado: slotAssinado(a), eletronica: a.eletronica ? { metodo: a.eletronica.metodo, hash: a.eletronica.hash } : null, nome: a.nome || null, assinadoEm: a.assinadoEm || null, dispositivo: (a.dispositivo && a.dispositivo.rotulo) || null,
   }));
   const { assinaturas: _, ...resto } = r;
   return { ...resto, assinaturas };
@@ -514,6 +514,18 @@ function comprovanteObrigatorio(r) {
   return temDepositanteProprio(TIPOS[r.tipo], r.campos);
 }
 
+// ASSINADO = traço desenhado na tela (imagem) OU assinatura eletrônica do
+// Master pela digital/senha (pedir_assinatura do Claude, 24/09/2026). As
+// duas valem igual; o PDF mostra cada uma do seu jeito.
+function slotAssinado(a) { return !!(a && (a.imagem || a.eletronica)); }
+
+// RASCUNHO (pedido do Cowork, 24/09/2026): o Claude PREPARA o formulário -
+// cria, preenche, anexa, valida - e ele fica parado aqui, sem link de
+// assinatura funcionando, até pedir a assinatura do Master (o que o leva a
+// PENDENTE, o "aguardando assinatura" que já existia). Rascunho não é
+// documento: não assina, não vira pagamento.
+const STATUS_RASCUNHO = 'RASCUNHO';
+
 function montarAssinaturas(modelo, linhasOk, campos) {
   const assinaturas = {};
   const slot = (chave, rotulo) => {
@@ -529,7 +541,7 @@ function montarAssinaturas(modelo, linhasOk, campos) {
 // numeroTicket: aceita um número pronto de fora pelo MESMO motivo que
 // solicitacoes.js/refunds.js aceitam - quando um registro vira outro, ele
 // carrega o número em vez de tirar outro da fila (ver ticketCounter.js).
-async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail, numeroTicket }) {
+async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail, numeroTicket, rascunho, origem, preparadoPor }) {
   const modelo = TIPOS[tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
   const unidadeOk = limpar(unidade, 80);
@@ -555,7 +567,10 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
     id: doc.id, tipo, unidade: unidadeOk, unidadeCodigo: cadastro.codigo || null,
     razaoSocial: cadastro.razaoSocial,
     campos: camposOk, linhas: linhasOk, valorTotal, anexos: anexosOk,
-    assinaturas, status: 'PENDENTE',
+    assinaturas, status: rascunho ? STATUS_RASCUNHO : 'PENDENTE',
+    // de onde veio (ex.: o estorno #12029) e quem preparou - é o que o
+    // selo "preparado pelo Claude" e o comentário no ticket usam
+    origem: origem || null, preparadoPor: preparadoPor || null,
     // MESMA sequência dos tickets da Central (#10000+), não um contador
     // próprio: o formulário vira uma solicitação de Pagamento depois de
     // assinado, e tem que chegar lá com o número que já nasceu com ele -
@@ -726,6 +741,8 @@ async function salvarPreenchimento(token, { campos, linhas, anexos } = {}) {
 // fluxo público: só quem recebeu o link daquele papel sabe o token dele
 function chaveDoToken(r, token) {
   if (!r || !token) return null;
+  // rascunho ainda não é documento: link de assinatura não abre
+  if (r.status === STATUS_RASCUNHO) return null;
   const achado = Object.entries(r.assinaturas || {}).find(([, a]) => a.token === token);
   return achado ? achado[0] : null;
 }
@@ -744,12 +761,12 @@ async function vistaPublica(id, token) {
     colunas: TIPOS[r.tipo].colunas, cabecalho: TIPOS[r.tipo].cabecalho,
     status: r.status, criadoEm: r.criadoEm,
     anexos: (r.anexos || []).map((an, i) => ({ nome: an.nome, indice: i })),
-    meuPapel: chave, meuRotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), jaAssinei: !!a.imagem,
+    meuPapel: chave, meuRotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), jaAssinei: slotAssinado(a),
     // liga o campo de arquivo na pagina publica: quem depositou anexa o
     // comprovante no mesmo passo da assinatura (ver assinar). Se o
     // comprovante ja veio de outro jeito, nao pede de novo
     exigeComprovante: chave === 'depositante' && !(r.anexos || []).length,
-    assinaturas: Object.entries(r.assinaturas).map(([k, s]) => ({ rotulo: rotuloDoSlot(r.tipo, k, s.rotulo), assinado: !!s.imagem })),
+    assinaturas: Object.entries(r.assinaturas).map(([k, s]) => ({ rotulo: rotuloDoSlot(r.tipo, k, s.rotulo), assinado: slotAssinado(s) })),
   };
 }
 
@@ -784,7 +801,7 @@ async function assinar(id, token, { nome, imagem, anexos, userAgent } = {}) {
   const chave = chaveDoToken(r, token);
   if (!chave) throw new Error('Link de assinatura inválido ou revogado.');
   const a = r.assinaturas[chave];
-  if (a.imagem) throw new Error('Essa assinatura já foi registrada.');
+  if (slotAssinado(a)) throw new Error('Essa assinatura já foi registrada.');
   const img = String(imagem || '');
   if (!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(img)) throw new Error('Assinatura inválida - desenhe no quadro e tente de novo.');
   if (img.length > MAX_IMAGEM_CHARS) throw new Error('Assinatura grande demais - limpe o quadro e assine de novo.');
@@ -803,7 +820,7 @@ async function assinar(id, token, { nome, imagem, anexos, userAgent } = {}) {
   // faltando comprovante num deposito com depositante proprio, o formulario
   // NAO fecha mesmo com todas as assinaturas: e' o que impede seguir pro
   // pagamento sem a prova de que o dinheiro entrou no banco
-  const todasAssinadas = Object.values(assinaturas).every((s) => !!s.imagem);
+  const todasAssinadas = Object.values(assinaturas).every(slotAssinado);
   const completo = todasAssinadas
     && (!comprovanteObrigatorio(r) || anexosFinais.length > 0);
   await COLLECTION.doc(id).update({
@@ -845,11 +862,12 @@ async function editar(id, { campos, linhas, porEmail } = {}) {
   const mudou = JSON.stringify([camposOk, linhasOk]) !== JSON.stringify([r.campos, r.linhas]);
   if (!mudou) return { ...(await detalhar(id)), assinaturasDescartadas: 0, semMudanca: true };
 
-  const descartadas = Object.values(r.assinaturas || {}).filter((a) => a.imagem).length;
+  const descartadas = Object.values(r.assinaturas || {}).filter(slotAssinado).length;
   await COLLECTION.doc(id).update({
     campos: camposOk, linhas: linhasOk, valorTotal,
     assinaturas: montarAssinaturas(modelo, linhasOk, camposOk),
-    status: 'PENDENTE',
+    // editar um rascunho não o libera pra assinatura: continua rascunho
+    status: r.status === STATUS_RASCUNHO ? STATUS_RASCUNHO : 'PENDENTE',
     editadoEm: new Date().toISOString(), editadoPorEmail: porEmail || null,
   });
   cache.invalidar();
@@ -884,7 +902,7 @@ async function removerAssinatura(id, chave, porEmail) {
   if (r.status === 'CANCELADO') throw new Error('Formulário cancelado - não há o que remover.');
   const atual = (r.assinaturas || {})[chave];
   if (!atual) throw new Error('Esse formulário não tem essa assinatura.');
-  if (!atual.imagem) throw new Error('Essa assinatura ainda não foi coletada - não há o que remover.');
+  if (!slotAssinado(atual)) throw new Error('Essa assinatura ainda não foi coletada - não há o que remover.');
 
   const rotulo = rotuloDoSlot(r.tipo, chave, atual.rotulo);
   const assinaturas = {
@@ -937,7 +955,7 @@ async function pedirComprovanteDeposito(id, { nome, porEmail } = {}) {
   if (nomeIgual(quem, r.campos.nomeGerente)) {
     throw new Error('Esse é o próprio gerente - a assinatura dele já está no formulário.');
   }
-  const jaAssinou = r.assinaturas && r.assinaturas.depositante && r.assinaturas.depositante.imagem;
+  const jaAssinou = r.assinaturas && slotAssinado(r.assinaturas.depositante);
   if (jaAssinou) throw new Error('O depósito já foi assinado por quem depositou - para trocar, use Corrigir ou Cancelar.');
 
   const campos = { ...r.campos, depositante: quem };
@@ -1025,7 +1043,7 @@ async function adicionarAnexos(id, anexos, { porEmail } = {}) {
   // FECHA aqui, se as assinaturas já estiverem todas colhidas - o
   // comprovante era a única coisa que faltava
   const todasAssinadas = Object.values(r.assinaturas || {}).length > 0
-    && Object.values(r.assinaturas || {}).every((a) => !!a.imagem);
+    && Object.values(r.assinaturas || {}).every(slotAssinado);
   if (todasAssinadas && r.status === 'PENDENTE' && comprovanteObrigatorio(r)) patch.status = 'ASSINADO';
   await COLLECTION.doc(id).update(patch);
   cache.invalidar();
@@ -1118,8 +1136,8 @@ function dataHoraAssinatura(v) {
 
 function assinaturasAssinadas(r) {
   return Object.entries(r.assinaturas || {})
-    .filter(([, a]) => a.imagem)
-    .map(([chave, a]) => ({ chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), nome: a.nome, assinadoEm: a.assinadoEm, imagem: a.imagem, dispositivo: a.dispositivo || null }));
+    .filter(([, a]) => slotAssinado(a))
+    .map(([chave, a]) => ({ chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), nome: a.nome, assinadoEm: a.assinadoEm, imagem: a.imagem, eletronica: a.eletronica || null, dispositivo: a.dispositivo || null }));
 }
 
 async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssinatura) {
@@ -1143,7 +1161,12 @@ async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssin
   const larguraBloco = Math.min(150, Math.max(105, (width - 28) / Math.max(assinadas.length, 1) - 10));
   for (const a of assinadas) {
     let img = null;
-    try {
+    if (a.eletronica) {
+      // assinatura eletrônica: não há traço - vai o carimbo em texto
+      pagina.drawText('ASSINADO ELETRONICAMENTE', { x, y: 42, size: 7, font: negrito, color: rgb(0.1, 0.3, 0.1), maxWidth: larguraBloco });
+      pagina.drawText(`${a.eletronica.metodo === 'digital' ? 'Confirmado com a digital' : 'Confirmado com a senha'} · ${String(a.eletronica.hash || '').slice(0, 16)}`, { x, y: 32, size: 6, font: fonte, color: rgb(0.25, 0.25, 0.25), maxWidth: larguraBloco });
+    }
+    if (a.imagem) try {
       const bruto = Buffer.from(String(a.imagem).split(',')[1] || '', 'base64');
       img = /^data:image\/png/.test(a.imagem) ? await out.embedPng(bruto) : await out.embedJpg(bruto);
     } catch (e) { img = null; }
@@ -1636,6 +1659,14 @@ async function gerarPdf(r, res, opcoes) {
     const ass = (r.assinaturas || {})[p.papel];
     const buf = ass && ass.imagem ? imagemBuffer(ass.imagem) : null;
     if (buf) { try { doc.image(buf, bx + 15, yAssin - 52, { fit: [larguraBloco - 30, 50] }); } catch (e) { /* segue sem a imagem */ } }
+    // assinatura eletrônica (digital/senha do Master): carimbo em texto no
+    // lugar do traço, com o método e o hash do conteúdo que foi assinado
+    if (ass && ass.eletronica) {
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#1a5c2a').text('ASSINADO ELETRONICAMENTE', bx, yAssin - 40, { width: larguraBloco, align: 'center' });
+      doc.font('Helvetica').fontSize(6.5).fillColor('#444')
+        .text(`${ass.eletronica.metodo === 'digital' ? 'Confirmado com a digital' : 'Confirmado com a senha'} no NoPulso`, bx, yAssin - 28, { width: larguraBloco, align: 'center' })
+        .text(`Hash do conteúdo: ${String(ass.eletronica.hash || '').slice(0, 32)}`, bx, yAssin - 18, { width: larguraBloco, align: 'center' });
+    }
     doc.moveTo(bx, yAssin).lineTo(bx + larguraBloco, yAssin).lineWidth(0.8).stroke('#000');
     doc.font('Helvetica').fontSize(9).fillColor('#000').text(p.rotulo, bx, yAssin + 5, { width: larguraBloco, align: 'center' });
     if (ass && ass.nome) doc.fontSize(7.5).fillColor('#555').text(`${ass.nome}${ass.assinadoEm ? ' · ' + new Date(ass.assinadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : ''}`, bx, yAssin + 17, { width: larguraBloco, align: 'center' });
@@ -1679,6 +1710,133 @@ async function gerarPdf(r, res, opcoes) {
   }
 }
 
+// ---------------------------------------------------------------------
+// PREPARO PELO CLAUDE E ASSINATURA DO MASTER NO CELULAR (pedido do Cowork,
+// 24/09/2026: "o Claude prepara tudo, o Master só assina no celular").
+// RASCUNHO -> (validar) -> PENDENTE ("aguardando assinatura", o estado que
+// já existia) -> ASSINADO -> enviado ao Conecta (registro com protocolo).
+//
+// O QUE CADA MODELO EXIGE pra sair do rascunho. Só o que o próprio
+// documento precisa pra ser pago - nada inventado: o estorno é devolução
+// por Pix ao favorecido, então sem favorecido, CPF/CNPJ, chave Pix e o
+// comprovante da venda o financeiro não tem como pagar.
+const EXIGIDOS = {
+  estorno: { campos: ['favorecido', 'cpf', 'chavePix', 'cliente', 'contato'], anexo: 'o comprovante da venda (maquininha)' },
+};
+function digitosDe(v) { return String(v || '').replace(/\D/g, ''); }
+function cpfValido(v) {
+  const d = digitosDe(v);
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const dv = (n) => { let t = 0; for (let i = 0; i < n; i += 1) t += Number(d[i]) * (n + 1 - i); const r = (t * 10) % 11; return r === 10 ? 0 : r; };
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+}
+function cpfOuCnpjValido(v) {
+  const d = digitosDe(v);
+  if (d.length === 11) return cpfValido(d);
+  if (d.length === 14) return require('./formulariosUnidades').cnpjValido(d);
+  return false;
+}
+function dataBRValida(v) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(v || '').trim());
+  if (!m) return false;
+  const dt = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1])));
+  return dt.getUTCDate() === Number(m[1]) && dt.getUTCMonth() === Number(m[2]) - 1 && dt.getTime() <= Date.now() + 86400000;
+}
+
+// o que falta e o que não bate. `referencia.valor`: o valor do ticket de
+// origem (ex.: o estorno), que o formulário tem que repetir
+function validarConteudo(r, { referencia } = {}) {
+  const modelo = TIPOS[r.tipo];
+  const faltando = []; const inconsistencias = [];
+  if (!modelo) return { ok: false, faltando: ['tipo'], inconsistencias: [] };
+  const rotulo = (k) => ((modelo.cabecalho.find((c) => c.key === k) || {}).label || k);
+  const regra = EXIGIDOS[r.tipo] || {};
+  (regra.campos || []).forEach((k) => { if (!String((r.campos || {})[k] || '').trim()) faltando.push(rotulo(k)); });
+  if (!modelo.soAnexo) {
+    if (!(r.linhas || []).length) faltando.push('ao menos uma linha da tabela');
+    (r.linhas || []).forEach((l, i) => {
+      modelo.colunas.forEach((c) => {
+        if (c.valor && !(Number(l[c.key]) > 0)) inconsistencias.push(`linha ${i + 1}: ${c.label} tem que ser maior que zero`);
+        if (c.data && l[c.key] && !dataBRValida(l[c.key])) inconsistencias.push(`linha ${i + 1}: ${c.label} "${l[c.key]}" não é uma data válida (DD/MM/AAAA, não futura)`);
+        if (!c.valor && !String(l[c.key] || '').trim() && r.tipo === 'estorno') faltando.push(`linha ${i + 1}: ${c.label}`);
+      });
+    });
+  }
+  if ((regra.anexo || modelo.anexoObrigatorio) && !(r.anexos || []).length) faltando.push(`anexo: ${regra.anexo || 'o documento'}`);
+  const doc = (r.campos || {}).cpf;
+  if (doc && !cpfOuCnpjValido(doc)) inconsistencias.push(`${rotulo('cpf')} "${doc}" não é um CPF/CNPJ válido`);
+  if (referencia && referencia.valor != null && Math.abs(Number(r.valorTotal || 0) - Number(referencia.valor || 0)) > 0.009) {
+    inconsistencias.push(`valor total R$ ${fmtMoney(r.valorTotal)} diferente do ticket de origem (R$ ${fmtMoney(referencia.valor)})`);
+  }
+  return { ok: !faltando.length && !inconsistencias.length, faltando, inconsistencias };
+}
+
+// RASCUNHO -> PENDENTE: só com o conteúdo válido. É o que o pedido de
+// assinatura faz antes de mandar pro celular do Master.
+async function liberarParaAssinatura(id, opcoes = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.status === 'PENDENTE') return { jaLiberado: true, validacao: validarConteudo(r, opcoes) };
+  if (r.status !== STATUS_RASCUNHO) throw new Error(`Só rascunho vai pra assinatura - este está ${r.status}.`);
+  const validacao = validarConteudo(r, opcoes);
+  if (!validacao.ok) {
+    const e = new Error(`O formulário ainda não pode ir pra assinatura. ${[...validacao.faltando.map((f) => `Falta: ${f}`), ...validacao.inconsistencias].join('; ')}.`);
+    e.validacao = validacao;
+    throw e;
+  }
+  await COLLECTION.doc(id).update({ status: 'PENDENTE', liberadoEm: new Date().toISOString() });
+  cache.invalidar();
+  return { jaLiberado: false, validacao };
+}
+
+// hash do que foi assinado: tipo, unidade, cabeçalho, linhas, total e os
+// anexos. Mudou uma vírgula depois, o hash do PDF deixa de bater.
+function hashDoConteudo(r) {
+  const base = JSON.stringify([r.tipo, r.unidade, r.campos, r.linhas, r.valorTotal, (r.anexos || []).map((a) => a.path), r.numeroTicket]);
+  return crypto.createHash('sha256').update(base).digest('hex');
+}
+
+// ASSINATURA ELETRÔNICA do Master: roda só depois da digital (ou senha) dele
+// na tela de Autorizações - quem chama é o executor da autorização, nunca o
+// Claude direto. Assina SÓ o papel pedido (o de dentro: Responsável/
+// Gerente); favorecido e diarista continuam assinando pelo link deles.
+async function assinarEletronicamente(id, { papel, nome, metodo, dispositivo, autorizacaoId } = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.status === STATUS_RASCUNHO) throw new Error('Rascunho não se assina: peça a assinatura primeiro.');
+  if (r.status === STATUS_CANCELADO) throw new Error('Formulário cancelado não pode ser assinado.');
+  const a = (r.assinaturas || {})[papel];
+  if (!a) throw new Error(`Esse formulário não tem o papel "${papel}" pra assinar.`);
+  if (slotAssinado(a)) throw new Error(`O papel "${rotuloDoSlot(r.tipo, papel, a.rotulo)}" já está assinado.`);
+  const agora = new Date().toISOString();
+  const assinaturas = { ...r.assinaturas, [papel]: {
+    ...a, imagem: null, nome: limpar(nome, 80) || null, assinadoEm: agora,
+    dispositivo: dispositivo || null,
+    eletronica: { metodo: metodo === 'digital' ? 'digital' : 'senha', hash: hashDoConteudo(r), autorizacaoId: autorizacaoId || null },
+  } };
+  const todasAssinadas = Object.values(assinaturas).every(slotAssinado);
+  const completo = todasAssinadas && (!comprovanteObrigatorio(r) || (r.anexos || []).length > 0);
+  await COLLECTION.doc(id).update({ assinaturas, status: completo ? 'ASSINADO' : 'PENDENTE' });
+  cache.invalidar();
+  const faltam = Object.entries(assinaturas).filter(([, s]) => !slotAssinado(s)).map(([k, s]) => rotuloDoSlot(r.tipo, k, s.rotulo));
+  return { completo, faltam, hash: assinaturas[papel].eletronica.hash };
+}
+
+// ENVIO AO CONECTA: o Conecta é um portal - quem sobe o PDF lá é o Claude, no
+// navegador. O NoPulso só registra, com o protocolo que o portal deu, e só
+// de documento ASSINADO (mandar rascunho pro financeiro é o erro que isto
+// existe pra impedir).
+async function registrarEnvioConecta(id, { protocolo, porNome, observacao } = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.status !== 'ASSINADO') throw new Error(`Só formulário ASSINADO vai pro Conecta - este está ${r.status}.`);
+  if (r.enviadoConecta) throw new Error(`Esse formulário já foi registrado como enviado ao Conecta em ${new Date(r.enviadoConecta.em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`);
+  const envio = { em: new Date().toISOString(), protocolo: limpar(protocolo, 80) || null, porNome: limpar(porNome, 80) || null, observacao: limpar(observacao, 300) || null };
+  await COLLECTION.doc(id).update({ enviadoConecta: envio });
+  cache.invalidar();
+  return envio;
+}
+
 module.exports = {
   dispositivoDaAssinatura,
   MAX_ANEXOS,
@@ -1691,6 +1849,7 @@ module.exports = {
   adicionarAnexos,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
   reabrirAnexo, removerAssinatura,
+  STATUS_RASCUNHO, EXIGIDOS, slotAssinado, validarConteudo, liberarParaAssinatura, assinarEletronicamente, registrarEnvioConecta, hashDoConteudo, cpfOuCnpjValido, resumo,
   // mesma saida que parque.js expoe: quem escreve o documento por fora do
   // modulo (teste, restauracao de backup) precisa poder derrubar o cache de
   // 60s, senao a leitura seguinte devolve o estado velho

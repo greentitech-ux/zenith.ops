@@ -19,6 +19,8 @@ const storage = require('./storage');
 const push = require('./push');
 const store = require('./store');
 const adyenDisputas = require('./adyenDisputas');
+const refunds = require('./refunds');
+const catalogo = require('./coworkCatalogo');
 
 // O index.js liga aqui o broadcast da tela: sem isso, o comentário ou o
 // pré-preenchimento do Claude só apareceria na tarefa aberta depois de F5.
@@ -51,6 +53,14 @@ const FERRAMENTAS = Object.freeze({
   registrar_defesa_enviada: { descricao: 'Registra no NoPulso que a defesa FOI anexada e enviada na Adyen (status ENVIADA). Use só depois de enviar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
   registrar_disputa_aceita: { descricao: 'Registra no NoPulso que o chargeback foi ACEITO na Adyen, sem defesa (status PERDIDA). Use só depois de aceitar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
   consultar_autorizacao: { descricao: 'Consulta se o Master já autorizou (ou recusou) uma ação pedida antes, e o resultado dela.', risco: 'leitura', obrigatorios: ['autorizacaoId'] },
+  // ---- preparo pelo Claude, assinatura do Master no celular (24/09/2026) ----
+  listar_unidades: { descricao: 'Unidades com código, nome, apelidos aceitos, marca, empresa e o cadastro de formulário (rótulo, razão social, CNPJ). Toda ferramenta que pede unidade aceita código, nome ou apelido, sem diferenciar acento e maiúscula.', risco: 'leitura', obrigatorios: [] },
+  listar_modelos_formulario: { descricao: 'Tipos de formulário (estorno, reembolso, avulso...), com os campos do cabeçalho, as colunas da tabela, quem assina, o que é obrigatório pra sair do rascunho e se o tipo só nasce de um ticket.', risco: 'leitura', obrigatorios: [] },
+  obter_estorno: { descricao: 'Um estorno pelo número do ticket (ex.: 12029): venda, valor, motivo, cliente e Pix (documento, telefone e chave mascarados - o servidor copia os dados reais pro formulário), status, o formulário já gerado e LINKS TEMPORÁRIOS (2h) dos anexos (comprovante da maquininha).', risco: 'leitura', obrigatorios: [] },
+  obter_formulario: { descricao: 'Um formulário: status (RASCUNHO, PENDENTE = aguardando assinatura, ASSINADO, CANCELADO), assinaturas, origem, envio ao Conecta e LINK TEMPORÁRIO (2h) do PDF. Informe formularioId ou numero.', risco: 'leitura', obrigatorios: [] },
+  validar_formulario: { descricao: 'Diz o que falta e o que não bate num formulário (campo obrigatório vazio, CPF/CNPJ inválido, data, valor diferente do ticket de origem). Use antes de pedir_assinatura.', risco: 'leitura', obrigatorios: [] },
+  pedir_assinatura: { descricao: 'Manda o formulário pra assinatura do Master: valida (se faltar algo, recusa na hora e diz o quê), tira do rascunho e pede a digital dele no celular com a prévia. Aprovado, o Master assina eletronicamente o papel Responsável/Gerente, o PDF assinado fica pronto e o ticket de origem recebe o registro. Informe formularioId ou numero.', risco: 'medio', obrigatorios: [], autorizar: true },
+  registrar_envio_conecta: { descricao: 'Registra no NoPulso que o PDF ASSINADO foi enviado no portal do Conecta, com o número de protocolo que o portal deu. Use só depois de enviar de fato. Comenta no ticket de origem.', risco: 'baixo', obrigatorios: ['protocolo'] },
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
   consultar_noc: { descricao: 'Consulta o estado atual e compacto dos computadores monitorados.', risco: 'leitura', obrigatorios: [] },
   pesquisar_emails: { descricao: 'Pesquisa a caixa corporativa autorizada usando a sintaxe de busca do Gmail.', risco: 'leitura', obrigatorios: [] },
@@ -61,7 +71,7 @@ const FERRAMENTAS = Object.freeze({
   concluir_tarefa: { descricao: 'Marca uma tarefa como concluída.', risco: 'medio', obrigatorios: ['tarefaId'], autorizar: true },
   cancelar_tarefa: { descricao: 'Cancela uma tarefa.', risco: 'alto', obrigatorios: ['tarefaId', 'motivo'], autorizar: true },
   criar_solicitacao_ti: { descricao: 'Abre solicitação de Suporte de TI na Central.', risco: 'baixo', obrigatorios: ['unidade', 'titulo'] },
-  criar_formulario: { descricao: 'Cria formulário preenchido ou link para preenchimento.', risco: 'medio', obrigatorios: ['tipo', 'unidade'] },
+  criar_formulario: { descricao: 'Cria um formulário em RASCUNHO (nada é assinado nem enviado). numero = ticket de origem (ex.: o estorno 12029): o servidor copia campos e anexos do ticket e acha a unidade sozinho. Sem numero: tipo + unidade (código, nome ou apelido) + campos/linhas. modo=link gera o link pro solicitante preencher. Tipos e campos: listar_modelos_formulario.', risco: 'baixo', obrigatorios: ['tipo'] },
   criar_usuario: { descricao: 'Cria acesso copiando permissões de um usuário-modelo.', risco: 'alto', obrigatorios: ['modelo', 'email', 'username'], autorizar: true, devolveSegredo: true },
   desbloquear_usuario: { descricao: 'Desbloqueia um acesso existente sem trocar a senha.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true },
   criar_nova_senha: { descricao: 'Gera e aplica senha temporária aleatória; Master precisa repassá-la com segurança.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true, devolveSegredo: true },
@@ -83,7 +93,7 @@ const PROPRIEDADES_COMUNS = {
   horaInicio: { type: 'string', description: 'HH:MM' }, duracaoMin: { type: 'number' }, linkReuniao: { type: 'string' },
   tarefaId: { type: 'string' }, motivo: { type: 'string' }, usuario: { type: 'string', description: 'E-mail ou username.' },
   pedirTrocaSenha: { type: 'boolean' }, modelo: { type: 'string' }, email: { type: 'string' }, username: { type: 'string' },
-  tipo: { type: 'string' }, modo: { type: 'string', enum: ['link', 'preenchido'] }, campos: { type: 'object' }, linhas: { type: 'array', items: { type: 'object' } },
+  tipo: { type: 'string', description: 'Formulário: estorno, reembolso, avulso, deposito, diarias, diariasRh, adiantamento, assBoleto (listar_modelos_formulario). Solicitação: estorno, compra, manutencao, suporte-ti, pagamento, nota...' }, modo: { type: 'string', enum: ['link', 'preenchido'] }, campos: { type: 'object' }, linhas: { type: 'array', items: { type: 'object' } },
   tarefa: { type: 'string', enum: ['reiniciar', 'abortar', 'anydesk', 'zebra', 'gsurf-rsa', 'rede', 'corrigir-memoria-limitada'] },
   alvos: { type: 'array', items: { type: 'object', required: ['codigo', 'posto'], properties: { codigo: { type: 'string' }, posto: { type: 'string' } } } },
   limite: { type: 'number' },
@@ -104,15 +114,74 @@ const PROPRIEDADES_COMUNS = {
   motivoDefesa: { type: 'string', description: 'enviar_defesa_adyen: defenseReasonCode devolvido por preparar_defesa_adyen.' },
   documentos: { type: 'array', items: { type: 'object', properties: { arquivo: { type: 'string' }, tipo: { type: 'string' } } }, description: 'enviar_defesa_adyen: [{arquivo:"defesa"|id da evidência, tipo:defenseDocumentTypeCode}].' },
   avisar: { type: 'boolean', description: 'comentar_tarefa: false = só registra, sem push pros participantes.' },
+  responsavelEmail: { type: 'string', description: 'E-mail ou username do responsável. Sem ele, a tarefa fica com o Master.' },
+  formularioId: { type: 'string', description: 'Id interno do formulário (vem de criar_formulario/obter_formulario).' },
+  estornoId: { type: 'string', description: 'Id interno do estorno (vem de obter_estorno).' },
+  protocolo: { type: 'string', description: 'Número de protocolo que o portal do Conecta devolveu.' },
+  destino: { type: 'string', enum: ['conecta'], description: 'Pra onde o documento vai depois de assinado. Hoje: conecta (portal - o envio lá é feito por você, no navegador).' },
+  dataInicio: { type: 'string', description: 'AAAA-MM-DD' },
   idempotencyKey: { type: 'string', description: 'UUID novo por intenção de escrita; reutilize apenas ao repetir a mesma chamada.' },
 };
+
+// UM SCHEMA POR FERRAMENTA (pedido do Cowork, 24/09/2026). Antes toda
+// ferramenta expunha as ~50 propriedades de PROPRIEDADES_COMUNS: o Claude
+// não sabia o que cada uma usa e errava a chamada. E o schema também
+// ESCONDIA o que existia: criar_tarefa entende responsavelEmail, mas a
+// propriedade não estava na lista e o additionalProperties:false barrava -
+// toda tarefa criada pelo Claude caía no Master.
+// Cada nome aqui é o que o executor da ferramenta LÊ de verdade.
+const PARAMETROS = Object.freeze({
+  consultar_ticket: ['numero'],
+  listar_tarefas: ['unidade', 'status', 'responsavel', 'termo', 'limite'],
+  listar_solicitacoes: ['unidade', 'tipo', 'status', 'termo', 'limite'],
+  ler_chat_ticket: ['numero', 'solicitacaoId'],
+  listar_usuarios: ['cargo', 'unidade', 'termo', 'incluirInativos', 'limite'],
+  ler_reuniao: ['tarefaId', 'numero'],
+  listar_disputas: ['status', 'unidade', 'somenteProntas', 'limite'],
+  obter_disputa: ['disputaId', 'numero', 'psp'],
+  obter_pagamento_adyen: ['disputaId', 'numero', 'psp'],
+  preencher_defesa: ['tarefaId', 'numero', 'disputaId', 'psp', 'campos', 'fontes', 'usarDadosAdyen'],
+  comentar_tarefa: ['tarefaId', 'numero', 'disputaId', 'psp', 'texto', 'avisar'],
+  preparar_defesa_adyen: ['disputaId', 'numero', 'psp'],
+  enviar_defesa_adyen: ['disputaId', 'motivoDefesa', 'documentos', 'observacao'],
+  aceitar_disputa_adyen: ['disputaId', 'observacao'],
+  registrar_defesa_enviada: ['disputaId', 'observacao'],
+  registrar_disputa_aceita: ['disputaId', 'observacao'],
+  consultar_autorizacao: ['autorizacaoId'],
+  preparar_reuniao: ['termo', 'unidade', 'limite'],
+  consultar_noc: ['unidade'],
+  pesquisar_emails: ['consulta', 'limite'],
+  ler_email: ['emailId'],
+  enviar_email: ['para', 'assunto', 'texto'],
+  criar_tarefa: ['titulo', 'descricao', 'unidade', 'unidadeNome', 'prioridade', 'dataInicio', 'dataEntrega', 'responsavelEmail'],
+  criar_reuniao: ['titulo', 'descricao', 'dataEntrega', 'horaInicio', 'duracaoMin', 'linkReuniao', 'unidade', 'unidadeNome'],
+  concluir_tarefa: ['tarefaId', 'observacao'],
+  cancelar_tarefa: ['tarefaId', 'motivo'],
+  criar_solicitacao_ti: ['unidade', 'unidadeNome', 'titulo', 'observacao', 'prioridade'],
+  criar_formulario: ['tipo', 'unidade', 'modo', 'campos', 'linhas', 'numero'],
+  listar_unidades: ['termo'],
+  listar_modelos_formulario: ['tipo'],
+  obter_estorno: ['numero', 'estornoId'],
+  obter_formulario: ['formularioId', 'numero'],
+  validar_formulario: ['formularioId', 'numero'],
+  pedir_assinatura: ['formularioId', 'numero', 'destino', 'observacao'],
+  registrar_envio_conecta: ['formularioId', 'numero', 'protocolo', 'observacao'],
+  criar_usuario: ['modelo', 'email', 'username'],
+  desbloquear_usuario: ['usuario', 'pedirTrocaSenha'],
+  criar_nova_senha: ['usuario'],
+  executar_noc: ['tarefa', 'alvos'],
+});
+function propriedadesDe(nome, f) {
+  const lista = [...(PARAMETROS[nome] || []), ...(f.risco === 'leitura' ? [] : ['idempotencyKey'])];
+  return Object.fromEntries(lista.map((k) => [k, PROPRIEDADES_COMUNS[k]]));
+}
 
 function ferramentasMcp() {
   return Object.entries(FERRAMENTAS).map(([name, f]) => ({
     name, description: `${f.descricao} Risco: ${f.risco}.${f.autorizar ? ' NÃO executa na hora: vira um pedido de autorização que chega no celular do Master (digital ou senha). A resposta traz pendente=true e autorizacaoId; acompanhe com consultar_autorizacao e só diga que foi feito depois de status aprovado.' : ''}`,
     inputSchema: {
       type: 'object', additionalProperties: false,
-      properties: PROPRIEDADES_COMUNS,
+      properties: propriedadesDe(name, f),
       required: [...f.obrigatorios, ...(f.risco === 'leitura' ? [] : ['idempotencyKey'])],
     },
     annotations: { readOnlyHint: f.risco === 'leitura', destructiveHint: f.risco === 'alto', idempotentHint: f.risco === 'leitura' },
@@ -148,6 +217,11 @@ function validar(nome, entrada) {
   if (!ferramenta) throw new Error('Ferramenta não permitida. Consulte GET /api/agent/tools.');
   const faltando = ferramenta.obrigatorios.filter((campo) => entrada?.[campo] == null || entrada[campo] === '');
   if (faltando.length) throw new Error(`Campos obrigatórios: ${faltando.join(', ')}.`);
+  // parâmetro que a ferramenta não lê era ignorado calado - o Claude achava
+  // que tinha filtrado/preenchido e não tinha. Agora a resposta diz o quê.
+  const aceitos = new Set([...(PARAMETROS[nome] || Object.keys(PROPRIEDADES_COMUNS)), 'idempotencyKey', 'confirmar']);
+  const estranhos = Object.keys(entrada || {}).filter((k) => !aceitos.has(k));
+  if (estranhos.length) throw new Error(`${nome} não usa: ${estranhos.join(', ')}. Aceita: ${[...(PARAMETROS[nome] || [])].join(', ') || 'nenhum parâmetro'}.`);
   return ferramenta;
 }
 
@@ -162,6 +236,7 @@ const ROTULOS = {
   disputaId: 'Disputa', motivoDefesa: 'Motivo de defesa', documentos: 'Documentos',
 };
 const TITULO_ACAO = {
+  pedir_assinatura: 'Assinar formulário',
   enviar_email: 'Enviar e-mail', concluir_tarefa: 'Concluir tarefa', cancelar_tarefa: 'Cancelar tarefa',
   criar_usuario: 'Criar acesso', desbloquear_usuario: 'Desbloquear acesso', criar_nova_senha: 'Gerar senha temporária',
   executar_noc: 'Comando no NOC',
@@ -191,12 +266,14 @@ const VALIDADE_PADRAO_MS = 24 * 60 * 60 * 1000;
 // o Master já conferido por digital/senha. Roda exatamente o que ficou
 // gravado no pedido. `segredo` avisa que o resultado tem senha temporária:
 // ela vai só pra tela do Master, nunca pro Firestore nem pro Claude.
-async function executarAutorizado(payload) {
+async function executarAutorizado(payload, aprovacao = null) {
   const nome = String(payload && payload.nome || '');
   const ferramenta = FERRAMENTAS[nome];
   if (!ferramenta || !ferramenta.autorizar) throw new Error('Ação do Claude inválida.');
   const ator = await resolverAtor();
-  const resultado = await despachar(nome, payload.entrada || {}, ator);
+  // quem aprovou, como (digital/senha) e de que aparelho: vem do SERVIDOR
+  // (rota de aprovação), por cima de qualquer coisa que estivesse no pedido
+  const resultado = await despachar(nome, { ...(payload.entrada || {}), _aprovacao: aprovacao || undefined }, ator);
   const texto = typeof resultado === 'string' ? resultado : JSON.stringify(resultado);
   return {
     resultado: texto,
@@ -240,13 +317,22 @@ function solicitacaoCompacta(x) {
 async function consultarTicket(numero) {
   const n = Number(String(numero == null ? '' : numero).replace(/\D/g, ''));
   if (!n) throw new Error('Informe o número, ex.: 12052.');
-  const [listaTarefas, todasSolicitacoes] = await Promise.all([tarefas.porNumero(n), solicitacoes.listAll()]);
+  const [listaTarefas, todasSolicitacoes, todosEstornos, todosFormularios] = await Promise.all([
+    tarefas.porNumero(n), solicitacoes.listAll(), refunds.listAll(), formularios.listar(),
+  ]);
   const achadas = todasSolicitacoes.filter((x) => Number(x.numeroTicket) === n);
+  // estorno e formulário moram em coleções próprias, mas o número é da MESMA
+  // sequência dos tickets: o #12029 do estorno é achado aqui também
+  const estornos = todosEstornos.filter((x) => Number(x.numeroTicket) === n);
+  const forms = todosFormularios.filter((f) => Number(f.numeroTicket) === n);
+  const nada = !listaTarefas.length && !achadas.length && !estornos.length && !forms.length;
   return {
     numero: n,
     tarefas: listaTarefas.map(tarefaCompacta),
     solicitacoes: achadas.map(solicitacaoCompacta),
-    aviso: !listaTarefas.length && !achadas.length ? 'Nenhuma tarefa nem solicitação com esse número (estorno e ajuste de fechamento não entram nesta consulta).' : null,
+    estornos: estornos.map(estornoCompacto),
+    formularios: forms.map((f) => ({ formularioId: f.id, tipo: f.tipo, status: f.status, unidade: f.unidade, valorTotal: f.valorTotal ?? null })),
+    aviso: nada ? 'Nenhuma tarefa, solicitação, estorno ou formulário com esse número (ajuste de fechamento ainda não entra nesta consulta).' : null,
   };
 }
 
@@ -282,15 +368,18 @@ async function listarSolicitacoes(p) {
 
 async function lerChatTicket(p) {
   let alvo = null;
+  let estorno = null;
   if (p.solicitacaoId) alvo = await solicitacoes.getOne(String(p.solicitacaoId));
   else if (p.numero) {
     const n = Number(String(p.numero).replace(/\D/g, ''));
     alvo = (await solicitacoes.listAll()).find((x) => Number(x.numeroTicket) === n) || null;
+    // o chat do estorno é o mesmo da Central, com tipo 'estorno'
+    if (!alvo) estorno = await estornoPorNumero(n);
   } else throw new Error('Informe o numero ou o solicitacaoId.');
-  if (!alvo) throw new Error('Solicitação não encontrada.');
-  const mensagens = await centralChat.listByCard(alvo.tipo, alvo.id);
+  if (!alvo && !estorno) throw new Error('Solicitação não encontrada.');
+  const mensagens = await centralChat.listByCard(alvo ? alvo.tipo : 'estorno', alvo ? alvo.id : estorno.id);
   return {
-    solicitacao: solicitacaoCompacta(alvo),
+    ...(alvo ? { solicitacao: solicitacaoCompacta(alvo) } : { estorno: estornoCompacto(estorno) }),
     mensagens: mensagens.map((m) => ({ por: m.autorUsername || m.autorEmail || 'Usuário', em: m.criadoEm, texto: m.texto || '', temFoto: !!m.imagem })),
   };
 }
@@ -565,6 +654,215 @@ async function agirNaAdyen(nome, p, ator) {
   return `Defesa enviada na Adyen (${p.motivoDefesa}, ${docs.length} documento(s)). Disputa ${c.id} registrada como ENVIADA.`;
 }
 
+// ---------- PREPARO PELO CLAUDE, ASSINATURA NO CELULAR (24/09/2026) ----------
+// Pedido do Cowork: "o Claude prepara tudo; o Master só assina no celular".
+// Níveis: leitura livre; preparo (rascunho, validar) livre e com selo; a
+// assinatura passa pela digital do Master (autorizar); o envio ao Conecta
+// é feito pelo Claude no portal e só REGISTRADO aqui.
+const PAPEIS_DO_MASTER = ['responsavel', 'gerente'];
+function baseUrl() { return String(process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/$/, ''); }
+function linkTemporario(caminho, nome) {
+  return `${baseUrl()}/api/defesa-arquivo?t=${encodeURIComponent(defesaChargeback.assinarLink(caminho, nome, process.env.JWT_SECRET || ''))}`;
+}
+// documento, telefone e chave Pix não vão pro modelo (mesma regra do
+// obter_disputa): o formulário recebe os dados reais pelo servidor
+function mascararDoc(v) { const d = String(v || '').replace(/\D/g, ''); return d ? `•••${d.slice(-2)}` : null; }
+function mascararChavePix(v) {
+  const t = String(v || '').trim(); if (!t) return null;
+  if (t.includes('@')) return defesaChargeback.mascararEmail(t);
+  const d = t.replace(/\D/g, '');
+  return d.length >= 8 && d.length === t.replace(/[\s().+-]/g, '').length ? `•••${d.slice(-4)}` : `${t.slice(0, 3)}•••`;
+}
+const numeroDe = (v) => Number(String(v == null ? '' : v).replace(/\D/g, '')) || 0;
+
+async function estornoPorNumero(n) {
+  return (await refunds.listAll()).find((x) => Number(x.numeroTicket) === n) || null;
+}
+function estornoCompacto(x) {
+  return {
+    estornoId: x.id, ticket: x.numeroTicket || null, status: x.status, execucaoStatus: x.execucaoStatus || null,
+    unidade: x.unidadeNome || x.unidade || null, codigoUnidade: x.unidade || null,
+    valorEstornar: x.valorEstornar ?? null, dataVenda: x.dataVenda || null,
+    motivo: x.motivoEstorno === 'Outro' ? (x.motivoOutro || 'Outro') : (x.motivoEstorno || null),
+    formulario: x.formularioId ? { formularioId: x.formularioId, ticket: x.formularioNumero ?? null } : null,
+    criadoEm: x.criadoEm || null,
+  };
+}
+async function obterEstorno(p) {
+  let x = null;
+  if (p.estornoId) x = await refunds.getOne(String(p.estornoId));
+  else if (p.numero) x = await estornoPorNumero(numeroDe(p.numero));
+  else throw new Error('Informe o numero do ticket ou o estornoId.');
+  if (!x) throw new Error('Estorno não encontrado com esse número.');
+  return {
+    ...estornoCompacto(x),
+    origem: x.origem || null, observacao: x.observacao || null, horaVenda: x.horaVenda || null,
+    valorVenda: x.valorVenda ?? null, formaPagamento: x.formaPagamento || null, bandeira: x.bandeira || null, ultimos4: x.ultimos4 || null,
+    cliente: { nome: x.nomeCliente || null, documento: mascararDoc(x.cpfCnpjCliente), telefone: x.telefoneCliente ? defesaChargeback.mascararTelefone(x.telefoneCliente) : null },
+    pix: { titular: x.pixNomeTitular || null, banco: x.pixBanco || null, chave: mascararChavePix(x.pixChave) },
+    anexos: (x.anexos || []).map((a) => ({ nome: a.nome || 'anexo', tipo: a.tipo || null, link: a.path ? linkTemporario(a.path, a.nome || 'anexo') : null })),
+    proximoPasso: x.status !== 'APROVADO'
+      ? `O estorno está ${x.status}: só estorno APROVADO vira formulário.`
+      : (x.formularioId ? 'Já tem formulário: veja com obter_formulario.' : 'Pronto pra criar_formulario tipo=estorno numero=' + x.numeroTicket + ' (nasce em rascunho).'),
+  };
+}
+
+async function acharFormulario(p) {
+  if (p.formularioId) return formularios.getOne(String(p.formularioId));
+  const n = numeroDe(p.numero);
+  if (!n) throw new Error('Informe formularioId ou numero.');
+  const lista = (await formularios.listar()).filter((f) => Number(f.numeroTicket) === n);
+  const vivo = lista.find((f) => f.status !== 'CANCELADO') || lista[0];
+  return vivo ? formularios.getOne(vivo.id) : null;
+}
+// documento, contato e dados bancários do favorecido: o Claude vê que estão
+// preenchidos, não o valor (validar_formulario confere o formato no servidor)
+const CAMPOS_SENSIVEIS = { cpf: mascararDoc, contato: (v) => (v ? defesaChargeback.mascararTelefone(v) : null), chavePix: mascararChavePix, agencia: mascararDoc, conta: mascararDoc };
+function camposMascarados(campos) {
+  const out = { ...(campos || {}) };
+  for (const [k, f] of Object.entries(CAMPOS_SENSIVEIS)) if (out[k]) out[k] = f(out[k]);
+  return out;
+}
+// o que o Claude vê do formulário: NUNCA o token de assinatura (o token é o
+// link que assina - na mão do modelo, ele assinaria no lugar de alguém)
+function formularioCompacto(f) {
+  const r = formularios.resumo(f);
+  const modelo = formularios.TIPOS[f.tipo] || {};
+  return {
+    formularioId: r.id, ticket: r.numeroTicket ?? null, tipo: r.tipo, rotulo: modelo.rotulo || r.tipo,
+    unidade: r.unidade, status: r.status, valorTotal: r.valorTotal ?? null,
+    campos: camposMascarados(r.campos), linhas: r.linhas, anexos: (r.anexos || []).map((a) => a.nome),
+    assinaturas: r.assinaturas.map((a) => ({ papel: a.chave, rotulo: a.rotulo, assinado: a.assinado, eletronica: a.eletronica ? a.eletronica.metodo : null, nome: a.nome, em: a.assinadoEm })),
+    origem: r.origem || null, preparadoPor: r.preparadoPor || null,
+    enviadoConecta: r.enviadoConecta || null,
+    pdf: linkTemporario(`formulario-pdf:${r.id}`, `formulario-${r.numeroTicket || r.id}.pdf`),
+  };
+}
+async function referenciaDe(f) {
+  if (f && f.origem && f.origem.tipo === 'estorno' && f.origem.id) {
+    const x = await refunds.getOne(f.origem.id);
+    if (x) return { valor: x.valorEstornar };
+  }
+  return null;
+}
+async function obterFormulario(p) {
+  const f = await acharFormulario(p);
+  if (!f) throw new Error('Formulário não encontrado.');
+  return formularioCompacto(f);
+}
+async function validarFormulario(p) {
+  const f = await acharFormulario(p);
+  if (!f) throw new Error('Formulário não encontrado.');
+  const v = formularios.validarConteudo(f, { referencia: await referenciaDe(f) });
+  return { formularioId: f.id, ticket: f.numeroTicket ?? null, status: f.status, ...v,
+    proximoPasso: v.ok ? (f.status === formularios.STATUS_RASCUNHO ? 'Pronto: pedir_assinatura.' : `Já saiu do rascunho (${f.status}).`) : 'Corrija o que falta antes de pedir a assinatura.' };
+}
+
+function listarModelosFormulario(p) {
+  const tipos = Object.entries(formularios.TIPOS).filter(([k]) => !p.tipo || k === p.tipo);
+  if (p.tipo && !tipos.length) throw catalogo.erroComLista('Tipo de formulário', p.tipo, Object.keys(formularios.TIPOS));
+  return tipos.map(([tipo, m]) => ({
+    tipo, rotulo: m.rotulo,
+    somenteDeTicket: !!m.somenteDeTicket, soAnexo: !!m.soAnexo,
+    anexo: m.anexoObrigatorio || (formularios.EXIGIDOS[tipo] && formularios.EXIGIDOS[tipo].anexo) ? 'obrigatório' : 'opcional',
+    // CNPJ e razão social saem do cadastro da unidade: não se preenchem
+    campos: m.cabecalho.filter((c) => c.key !== 'cnpj').map((c) => ({ id: c.key, rotulo: c.label, data: !!c.data, valor: !!c.valor, obrigatorio: !!(formularios.EXIGIDOS[tipo] && formularios.EXIGIDOS[tipo].campos.includes(c.key)) })),
+    colunas: (m.colunas || []).map((c) => ({ id: c.key, rotulo: c.label, data: !!c.data, valor: !!c.valor, intervalo: !!c.intervalo })),
+    assinam: (m.assinantes || []).map((a) => ({ papel: a.papel, rotulo: a.rotulo, peloMaster: PAPEIS_DO_MASTER.includes(a.papel) })),
+    assinaturaPorLinha: !!m.assinaturaPorLinha,
+  }));
+}
+
+async function criarFormulario(p, ator) {
+  const tipos = Object.keys(formularios.TIPOS);
+  if (!tipos.includes(String(p.tipo || ''))) throw catalogo.erroComLista('Tipo de formulário', p.tipo, tipos);
+  const preparadoPor = { nome: 'Claude (Cowork)', via: ator.email, em: new Date().toISOString() };
+  if (p.numero) {
+    // a partir do ticket: hoje só o estorno tem o caminho ticket -> formulário
+    if (p.tipo !== 'estorno') throw new Error(`Formulário a partir de ticket só existe pro tipo estorno. Pra ${p.tipo}, mande unidade + campos/linhas.`);
+    const x = await estornoPorNumero(numeroDe(p.numero));
+    if (!x) throw new Error(`Não há estorno com o ticket ${p.numero}. Confira com obter_estorno.`);
+    const dados = {};
+    if (p.unidade) dados.unidade = (await catalogo.resolverUnidadeDoFormulario(p.unidade)).unidade;
+    const f = await refunds.gerarFormulario(x.id, dados, `${ator.email} via Claude/Cowork`, { rascunho: true, preparadoPor });
+    const cheio = await formularios.getOne(f.id);
+    return { mensagem: `Formulário #${f.numeroTicket} (${formularios.TIPOS.estorno.rotulo}) criado em RASCUNHO a partir do estorno #${x.numeroTicket}, com ${(cheio.anexos || []).length} anexo(s) copiado(s).`,
+      ...formularioCompacto(cheio), validacao: formularios.validarConteudo(cheio, { referencia: { valor: x.valorEstornar } }) };
+  }
+  if (formularios.TIPOS[p.tipo].somenteDeTicket) throw new Error(`${formularios.TIPOS[p.tipo].rotulo} só nasce de um ticket: mande numero (o ticket de origem).`);
+  if (!p.unidade) throw new Error('Informe a unidade (código, nome ou apelido) - ou numero, pra criar a partir de um ticket.');
+  const cadastro = await catalogo.resolverUnidadeDoFormulario(p.unidade);
+  const base = { tipo: p.tipo, unidade: cadastro.unidade, criadoPorId: ator.id, criadoPorEmail: `${ator.email} via Claude/Cowork` };
+  if (p.modo === 'link') {
+    const r = await formularios.criarParaPreenchimento(base);
+    return { mensagem: `Formulário #${r.numeroTicket} criado pra preenchimento por link.`, id: r.id, linkPreenchimento: r.tokenPreenchimento ? `${baseUrl()}/formulario-preencher?token=${encodeURIComponent(r.tokenPreenchimento)}` : null };
+  }
+  const r = await formularios.criar({ ...base, campos: p.campos || {}, linhas: p.linhas || [], anexos: [], rascunho: true, preparadoPor });
+  const cheio = await formularios.getOne(r.id);
+  return { mensagem: `Formulário #${r.numeroTicket} criado em RASCUNHO.`, ...formularioCompacto(cheio), validacao: formularios.validarConteudo(cheio) };
+}
+
+// ANTES do pedido chegar no celular: valida e tira do rascunho. Faltando
+// algo, recusa na hora - sem isso o Master receberia pra assinar um
+// documento que nem poderia ser pago.
+async function antesDePedirAssinatura(p) {
+  const f = await acharFormulario(p);
+  if (!f) throw new Error('Formulário não encontrado.');
+  const papel = PAPEIS_DO_MASTER.find((k) => f.assinaturas && f.assinaturas[k]);
+  if (!papel) throw new Error('Esse formulário não tem papel Responsável/Gerente pro Master assinar - quem assina são os links de cada pessoa.');
+  if (formularios.slotAssinado(f.assinaturas[papel])) throw new Error('O Master já assinou esse formulário.');
+  await formularios.liberarParaAssinatura(f.id, { referencia: await referenciaDe(f) });
+  const modelo = formularios.TIPOS[f.tipo] || {};
+  const reais = (v) => `R$ ${(Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return {
+    // o pedido guarda o id: numero pode achar outro formulário amanhã
+    entrada: { formularioId: f.id, destino: p.destino || null, observacao: p.observacao || null },
+    resumo: `Assinar ${modelo.rotulo || f.tipo} #${f.numeroTicket} · ${f.unidade} · ${reais(f.valorTotal)}`,
+    detalhes: [
+      { rotulo: 'Documento', valor: `${modelo.rotulo || f.tipo} #${f.numeroTicket}` },
+      { rotulo: 'Unidade', valor: f.unidade },
+      { rotulo: 'Valor', valor: reais(f.valorTotal) },
+      ...(f.campos && f.campos.favorecido ? [{ rotulo: 'Favorecido', valor: f.campos.favorecido }] : []),
+      ...(f.campos && f.campos.cliente ? [{ rotulo: 'Cliente', valor: f.campos.cliente }] : []),
+      { rotulo: 'Você assina como', valor: (f.assinaturas[papel].rotulo || papel) },
+      ...(p.destino ? [{ rotulo: 'Depois vai para', valor: p.destino === 'conecta' ? 'Conecta (o Claude envia no portal)' : p.destino }] : []),
+      { rotulo: 'Prévia do PDF', valor: `${baseUrl()}/api/formularios/${f.id}/pdf?inline=1` },
+    ],
+  };
+}
+async function comentarNoTicketDeOrigem(f, texto) {
+  if (!f || !f.origem || f.origem.tipo !== 'estorno' || !f.origem.id) return false;
+  await centralChat.addMessage({ tipo: 'estorno', cardId: f.origem.id, autorId: null, autorEmail: 'Claude (Cowork)', autorUsername: 'Claude (Cowork)', texto });
+  return true;
+}
+async function pedirAssinatura(p) {
+  // só chega aqui pelo executor da autorização, com o Master conferido
+  const ap = p._aprovacao;
+  if (!ap) throw new Error('Assinatura só com a autorização do Master.');
+  const f = await formularios.getOne(String(p.formularioId || ''));
+  if (!f) throw new Error('Formulário não encontrado.');
+  const papel = PAPEIS_DO_MASTER.find((k) => f.assinaturas && f.assinaturas[k]);
+  const r = await formularios.assinarEletronicamente(f.id, {
+    papel, nome: ap.nome, metodo: ap.metodo, dispositivo: ap.dispositivo, autorizacaoId: ap.autorizacaoId,
+  });
+  const depois = await formularios.getOne(f.id);
+  const quem = ap.nome || 'Master';
+  await comentarNoTicketDeOrigem(depois, `✍️ ${quem} assinou eletronicamente o formulário #${depois.numeroTicket} (${ap.metodo === 'digital' ? 'digital' : 'senha'}).${r.completo ? ' Documento ASSINADO.' : ` Falta: ${r.faltam.join(', ')}.`}${p.destino === 'conecta' && r.completo ? ' Próximo passo: envio ao Conecta.' : ''}`).catch(() => false);
+  return {
+    mensagem: r.completo ? `Formulário #${depois.numeroTicket} ASSINADO.` : `Assinatura do Master registrada. Ainda falta: ${r.faltam.join(', ')}.`,
+    ...formularioCompacto(depois),
+    proximoPasso: r.completo && p.destino === 'conecta' ? 'Baixe o PDF (link em pdf), envie no portal do Conecta e registre com registrar_envio_conecta + protocolo.' : null,
+  };
+}
+async function registrarEnvioConectaDoCowork(p) {
+  const f = await acharFormulario(p);
+  if (!f) throw new Error('Formulário não encontrado.');
+  const envio = await formularios.registrarEnvioConecta(f.id, { protocolo: p.protocolo, porNome: 'Claude (Cowork)', observacao: p.observacao });
+  await comentarNoTicketDeOrigem(f, `📤 Formulário #${f.numeroTicket} enviado ao Conecta pelo Claude (Cowork). Protocolo: ${envio.protocolo || '—'}.`).catch(() => false);
+  return { mensagem: `Envio ao Conecta registrado (protocolo ${envio.protocolo || '—'}).`, formularioId: f.id, ticket: f.numeroTicket ?? null, enviadoConecta: envio };
+}
+const ANTES_DE_AUTORIZAR = { pedir_assinatura: antesDePedirAssinatura };
+
 async function registrarNaDisputa(nome, p, ator) {
   const c = await disputes.getOne(String(p.disputaId));
   if (!c) throw new Error('Disputa não encontrada.');
@@ -593,6 +891,16 @@ async function despachar(nome, entrada, ator) {
   if (nome === 'enviar_defesa_adyen' || nome === 'aceitar_disputa_adyen') return agirNaAdyen(nome, p, ator);
   if (nome === 'registrar_defesa_enviada' || nome === 'registrar_disputa_aceita') return registrarNaDisputa(nome, p, ator);
   if (nome === 'consultar_ticket') return consultarTicket(p.numero);
+  if (nome === 'listar_unidades') {
+    const termo = catalogo.normalizar(p.termo);
+    return (await catalogo.listarUnidades()).filter((u) => !termo || catalogo.normalizar(JSON.stringify([u.codigo, u.nome, u.apelidos, u.marca, u.empresa])).includes(termo));
+  }
+  if (nome === 'listar_modelos_formulario') return listarModelosFormulario(p);
+  if (nome === 'obter_estorno') return obterEstorno(p);
+  if (nome === 'obter_formulario') return obterFormulario(p);
+  if (nome === 'validar_formulario') return validarFormulario(p);
+  if (nome === 'pedir_assinatura') return pedirAssinatura(p);
+  if (nome === 'registrar_envio_conecta') return registrarEnvioConectaDoCowork(p);
   if (nome === 'listar_tarefas') return listarTarefas(p);
   if (nome === 'listar_solicitacoes') return listarSolicitacoes(p);
   if (nome === 'ler_chat_ticket') return lerChatTicket(p);
@@ -717,14 +1025,7 @@ async function despachar(nome, entrada, ator) {
     });
     return `Solicitação de TI #${r.numeroTicket} criada: ${r.titulo}.`;
   }
-  if (nome === 'criar_formulario') {
-    const base = { tipo: p.tipo, unidade: p.unidade, criadoPorId: ator.id, criadoPorEmail: `${ator.email} via Claude/Cowork` };
-    const r = p.modo === 'preenchido'
-      ? await formularios.criar({ ...base, campos: p.campos || {}, linhas: p.linhas || [], anexos: [] })
-      : await formularios.criarParaPreenchimento(base);
-    const baseUrl = String(process.env.PUBLIC_BASE_URL || 'https://www.nopulso.com.br').replace(/\/$/, '');
-    return { mensagem: `Formulário #${r.numeroTicket} criado.`, id: r.id, linkPreenchimento: r.tokenPreenchimento ? `${baseUrl}/formulario-preencher.html?token=${encodeURIComponent(r.tokenPreenchimento)}` : null };
-  }
+  if (nome === 'criar_formulario') return criarFormulario(p, ator);
   throw new Error('Executor não implementado.');
 }
 
@@ -759,11 +1060,15 @@ async function executar({ nome, entrada, idempotencyKey }) {
   try {
     if (ferramenta.autorizar) {
       // não executa: vira pedido, e o celular do Master toca
-      const entradaLimpa = { ...(entrada || {}) }; delete entradaLimpa.confirmar; delete entradaLimpa.idempotencyKey;
-      const resumo = resumoDoPedido(nome, entradaLimpa);
+      let entradaLimpa = { ...(entrada || {}) }; delete entradaLimpa.confirmar; delete entradaLimpa.idempotencyKey; delete entradaLimpa._aprovacao;
+      // preparo antes do celular tocar (ex.: pedir_assinatura valida e tira
+      // do rascunho - faltando algo, recusa aqui mesmo)
+      const preparo = ANTES_DE_AUTORIZAR[nome] ? await ANTES_DE_AUTORIZAR[nome](entradaLimpa, ator) : null;
+      if (preparo && preparo.entrada) entradaLimpa = preparo.entrada;
+      const resumo = (preparo && preparo.resumo) || resumoDoPedido(nome, entradaLimpa);
       const pedido = await qaAprovacoes.criar({
         tipo: 'cowork.executar', resumo, origem: 'cowork',
-        detalhes: detalhesDoPedido(nome, entradaLimpa),
+        detalhes: (preparo && preparo.detalhes) || detalhesDoPedido(nome, entradaLimpa),
         expiraEm: new Date(Date.now() + (VALIDADE_AUTORIZACAO_MS[nome] || VALIDADE_PADRAO_MS)).toISOString(),
         payload: { nome, entrada: entradaLimpa },
         criadoPorId: ator.id, criadoPorEmail: 'Claude (Cowork)',
@@ -793,4 +1098,4 @@ async function executar({ nome, entrada, idempotencyKey }) {
   }
 }
 
-module.exports = { listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado, configurar };
+module.exports = { PARAMETROS, listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado, configurar };

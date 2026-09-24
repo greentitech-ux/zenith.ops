@@ -833,7 +833,9 @@ function lerLink(token, segredo, agora = Date.now()) {
   let v; try { v = JSON.parse(Buffer.from(dados, 'base64url').toString('utf8')); } catch (e) { return null; }
   if (!v || !v.p || !(v.e > agora)) return null;
   // só arquivo de defesa ou evidência de tarefa - nunca um caminho qualquer
-  if (!/^(defesas-chargeback|tarefas)\//.test(String(v.p))) return null;
+  // + os anexos de estorno/solicitação/formulário e o PDF de formulário gerado
+  // na hora (obter_estorno, obter_formulario do Cowork, 24/09/2026)
+  if (!/^(defesas-chargeback|tarefas|estornos-cliente|solicitacoes|formularios)\//.test(String(v.p)) && !/^formulario-pdf:[\w-]+$/.test(String(v.p))) return null;
   return { caminho: v.p, nome: v.n || 'arquivo' };
 }
 

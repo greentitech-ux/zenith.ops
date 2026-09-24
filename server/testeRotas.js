@@ -27568,6 +27568,141 @@ $r | ConvertTo-Json -Depth 4 -Compress
   console.log(`${okAdyenApi ? '✓' : '✗'} Defesa pela API da Adyen: motivos da bandeira, envio só com a digital do Master, ENVIADA só com sucesso da Adyen, chave nunca volta pro Claude`);
 
   // ------------------------------------------------------------------
+  // O CLAUDE PREPARA, O MASTER SÓ ASSINA NO CELULAR (pedido do Cowork,
+  // 24/09/2026). Caso real: estorno #12029, Dom Praça Aero Recife, R$ 27,80.
+  // Prova-se: schema por ferramenta (e o responsavelEmail que o schema
+  // barrava); unidade por nome/apelido sem acento e erro com a lista; estorno
+  // achado pelo número, com anexo por link e dado pessoal mascarado;
+  // formulário nascendo em RASCUNHO a partir do ticket, com o anexo copiado e
+  // link de assinatura que NÃO abre; pedir_assinatura recusando na hora o que
+  // está incompleto; assinatura só pela digital do Master, carimbada no PDF;
+  // e o envio ao Conecta registrado só de documento assinado.
+  let okPreparo = false;
+  try {
+    const cw = require(__dirname + '/coworkApi.js');
+    const cat = require(__dirname + '/coworkCatalogo.js');
+    const fm = require(__dirname + '/formularios.js');
+    const fu = require(__dirname + '/formulariosUnidades.js');
+    const rf = require(__dirname + '/refunds.js');
+    const qa = require(__dirname + '/qaAprovacoes.js');
+    const authP = require(__dirname + '/auth.js');
+    const pkP = require(__dirname + '/passkeys.js');
+    const hashP = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-prep-master', { passwordHash: hashP, role: 'master', active: true, email: 'prep-master@teste.local', username: 'prepmaster', nome: 'Sidney Teste', createdAt: new Date().toISOString() });
+    const tkP = (await authP.login('prep-master@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabP = { Authorization: 'Bearer ' + tkP };
+    const masterAntesP = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'prep-master@teste.local';
+    const tenta = async (fn) => { try { return { ok: true, v: await fn() } } catch (e) { return { ok: false, erro: e.message } } };
+    const localDe = (url) => { const u = new URL(url); return u.pathname + u.search; };
+    // o cadastro de formulário da loja do aeroporto (razão social/CNPJ)
+    await fu.criar({ unidade: 'Grande Fratello (teste)', razaoSocial: 'Grande Fratello', cnpj: '11.222.333/0001-81', codigo: 'Dominos Praça Aeroporto Recife' }, 'teste');
+    const PNG1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+    ARQUIVOS.set('estornos-cliente/prep/comprovante.png', PNG1);
+    const novoEstorno = (extra) => rf.create({ origem: 'cliente', unidade: 'Dominos Praça Aeroporto Recife', unidadeNome: 'Dom Praça Aero Recife',
+      motivoEstorno: 'Cobrança duplicada', valorVenda: 27.8, formaPagamento: 'Crédito', bandeira: 'Visa', dataVenda: '2026-09-20', valorEstornar: 27.8,
+      nomeCliente: 'Maria Teste', cpfCnpjCliente: '529.982.247-25', telefoneCliente: '(81) 99876-1234', pixChave: 'maria.teste@exemplo.com',
+      pixNomeTitular: 'Maria Teste', pixBanco: 'Nubank', anexos: [{ nome: 'comprovante.png', path: 'estornos-cliente/prep/comprovante.png', tipo: 'image/png' }], ...extra });
+    const e1 = await novoEstorno({});
+    await rf.updateStatus(e1.id, 'APROVADO', { motivoDecisao: 'ok', decidedByEmail: 'prep-master@teste.local' });
+    const eRuim = await novoEstorno({ cpfCnpjCliente: '111.111.111-11' });
+    await rf.updateStatus(eRuim.id, 'APROVADO', { motivoDecisao: 'ok', decidedByEmail: 'prep-master@teste.local' });
+    rf.invalidar();
+    const N = e1.numeroTicket; const NR = eRuim.numeroTicket;
+
+    // schema
+    const ferr = cw.ferramentasMcp();
+    const props = (n) => Object.keys((ferr.find((f) => f.name === n) || { inputSchema: { properties: {} } }).inputSchema.properties);
+    const estranho = await tenta(() => cw.executar({ nome: 'consultar_ticket', entrada: { numero: String(N), unidade: 'x' } }));
+    // unidade
+    const porApelido = await cat.resolverUnidade('dom praca aero recife');
+    const unidadeRuim = await tenta(() => cat.resolverUnidade('Loja Que Nao Existe'));
+    const unidades = (await cw.executar({ nome: 'listar_unidades', entrada: { termo: 'aero' } })).resultado;
+    const modelos = (await cw.executar({ nome: 'listar_modelos_formulario', entrada: { tipo: 'estorno' } })).resultado;
+    const tipoRuim = await tenta(() => cw.executar({ nome: 'criar_formulario', entrada: { tipo: 'estornoo', numero: String(N) }, idempotencyKey: 'prep-k0' }));
+    // estorno
+    const ticket = (await cw.executar({ nome: 'consultar_ticket', entrada: { numero: String(N) } })).resultado;
+    const est = (await cw.executar({ nome: 'obter_estorno', entrada: { numero: String(N) } })).resultado;
+    const anexoBaixado = est.anexos[0] ? await pedirBinario(localDe(est.anexos[0].link)) : { status: 0, buffer: Buffer.alloc(0) };
+    // rascunho a partir do ticket
+    const criado = (await cw.executar({ nome: 'criar_formulario', entrada: { tipo: 'estorno', numero: String(N) }, idempotencyKey: 'prep-k1' })).resultado;
+    fm.invalidar();
+    const bruto = await fm.getOne(criado.formularioId);
+    const tokenResp = bruto && bruto.assinaturas && bruto.assinaturas.responsavel && bruto.assinaturas.responsavel.token;
+    const vistaNoRascunho = await fm.vistaPublica(criado.formularioId, tokenResp);
+    const assinarNoRascunho = await tenta(() => fm.assinar(criado.formularioId, tokenResp, { nome: 'Intruso', imagem: 'data:image/png;base64,' + PNG1.toString('base64') }));
+    const valida = (await cw.executar({ nome: 'validar_formulario', entrada: { formularioId: criado.formularioId } })).resultado;
+    // formulário com CPF inválido: recusa ANTES de chegar no celular
+    const criadoRuim = (await cw.executar({ nome: 'criar_formulario', entrada: { tipo: 'estorno', numero: String(NR) }, idempotencyKey: 'prep-k2' })).resultado;
+    const contarQa = () => [...DOCS.keys()].filter((k) => k.startsWith('qaAprovacoes/')).length;
+    const qaAntes = contarQa();
+    const pedidoRuim = await tenta(() => cw.executar({ nome: 'pedir_assinatura', entrada: { formularioId: criadoRuim.formularioId }, idempotencyKey: 'prep-k3' }));
+    const qaDepois = contarQa();
+    fm.invalidar();
+    const ruimDepois = await fm.getOne(criadoRuim.formularioId);
+    // Conecta antes de assinar: recusa
+    const conectaCedo = await tenta(() => cw.executar({ nome: 'registrar_envio_conecta', entrada: { formularioId: criado.formularioId, protocolo: 'CX-1' }, idempotencyKey: 'prep-k4' }));
+    // pedido de assinatura: vira autorização, com a prévia
+    const pedido = await cw.executar({ nome: 'pedir_assinatura', entrada: { numero: String(N), destino: 'conecta' }, idempotencyKey: 'prep-k5' });
+    fm.invalidar();
+    const aguardando = await fm.getOne(criado.formularioId);
+    const autorizacao = await qa.obter(pedido.autorizacaoId);
+    // Claude tentando rodar a assinatura sem a aprovação
+    const semAprovacao = await tenta(() => cw.executarAutorizado({ nome: 'pedir_assinatura', entrada: { formularioId: criado.formularioId } }));
+    // o Master aprova com a DIGITAL, pela rota de verdade
+    const aprovado = await postarJson(`/api/qa-aprovacoes/${pedido.autorizacaoId}/aprovar`, { password: pkP.emitirConfirmacao('u-prep-master') }, { ...cabP, 'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile' });
+    fm.invalidar();
+    const assinado = await fm.getOne(criado.formularioId);
+    const cons = (await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: pedido.autorizacaoId } })).resultado;
+    const obtido = (await cw.executar({ nome: 'obter_formulario', entrada: { formularioId: criado.formularioId } })).resultado;
+    const pdf = await pedirBinario(localDe(obtido.pdf));
+    const txtPdf = pdf.status === 200 ? textoDoPdf(pdf.buffer) : '';
+    const conecta = (await cw.executar({ nome: 'registrar_envio_conecta', entrada: { formularioId: criado.formularioId, protocolo: 'CNT-2026-0099' }, idempotencyKey: 'prep-k6' })).resultado;
+    const conectaDeNovo = await tenta(() => cw.executar({ nome: 'registrar_envio_conecta', entrada: { formularioId: criado.formularioId, protocolo: 'CNT-2' }, idempotencyKey: 'prep-k7' }));
+    const chat = (await cw.executar({ nome: 'ler_chat_ticket', entrada: { numero: String(N) } })).resultado;
+    const tudoProClaude = JSON.stringify([est, criado, valida, obtido, cons, ticket]);
+
+    const conf = {
+      'schema: cada ferramenta expõe só o que usa': JSON.stringify(props('consultar_ticket')) === '["numero"]' && props('ler_email').join() === 'emailId',
+      'schema: criar_tarefa aceita responsavelEmail (antes o schema barrava e tudo caía no Master)': props('criar_tarefa').includes('responsavelEmail') && props('criar_tarefa').includes('idempotencyKey'),
+      'schema: toda ferramenta tem a lista, e toda propriedade existe': Object.keys(cw.PARAMETROS).length === ferr.length && ferr.every((f) => Object.values(f.inputSchema.properties).every(Boolean)),
+      'parâmetro que a ferramenta não usa: erro que diz o que corrigir': !estranho.ok && /não usa: unidade/.test(estranho.erro) && /Aceita: numero/.test(estranho.erro),
+      'unidade por nome sem acento nem maiúscula': porApelido.codigo === 'Dominos Praça Aeroporto Recife',
+      'unidade inválida devolve a lista do que existe': !unidadeRuim.ok && /Valores aceitos/.test(unidadeRuim.erro) && /Dom Praça Aero Recife/.test(unidadeRuim.erro),
+      'listar_unidades traz nome, código e o cadastro de formulário': unidades.some((u) => u.codigo === 'Dominos Praça Aeroporto Recife' && u.nome === 'Dom Praça Aero Recife' && u.formulario && u.formulario.razaoSocial === 'Grande Fratello'),
+      'listar_modelos_formulario: estorno só nasce de ticket e diz o obrigatório': modelos.length === 1 && modelos[0].somenteDeTicket && modelos[0].campos.some((c) => c.id === 'favorecido' && c.obrigatorio) && modelos[0].anexo === 'obrigatório',
+      'tipo inválido devolve a lista': !tipoRuim.ok && /Valores aceitos/.test(tipoRuim.erro) && /estorno/.test(tipoRuim.erro),
+      'consultar_ticket acha o estorno pelo número': ticket.estornos.length === 1 && ticket.estornos[0].estornoId === e1.id,
+      'obter_estorno: anexo por link temporário que baixa': est.anexos.length === 1 && anexoBaixado.status === 200 && anexoBaixado.buffer.equals(PNG1),
+      'obter_estorno: CPF, telefone e chave Pix não vão pro Claude': !/529\.?982|99876|maria\.teste@/.test(tudoProClaude),
+      'criar_formulario pelo número: RASCUNHO, anexo copiado, unidade achada sozinha': criado.status === 'RASCUNHO' && criado.anexos.length === 1 && criado.unidade === 'Grande Fratello (teste)' && !!criado.preparadoPor,
+      'o Claude nunca recebe o token de assinatura': !!tokenResp && !tudoProClaude.includes(tokenResp),
+      'rascunho: o link de assinatura não abre nem assina': vistaNoRascunho === null && !assinarNoRascunho.ok,
+      'validar_formulario: completo e com o valor do ticket': valida.ok === true && !valida.faltando.length,
+      'CPF inválido: recusado na hora, sem autorização criada, continua rascunho': !pedidoRuim.ok && /CPF\/CNPJ/.test(pedidoRuim.erro) && qaAntes === qaDepois && ruimDepois.status === 'RASCUNHO',
+      'Conecta antes de assinar: recusado': !conectaCedo.ok && /ASSINADO/.test(conectaCedo.erro),
+      'pedir_assinatura vira autorização com a prévia, e o formulário sai do rascunho': pedido.pendente === true && aguardando.status === 'PENDENTE'
+        && autorizacao && /Assinar Estorno ao cliente/.test(autorizacao.resumo) && (autorizacao.detalhes || []).some((d) => d.rotulo === 'Valor' && /27,80/.test(d.valor)),
+      'sem a aprovação do Master a assinatura não roda': !semAprovacao.ok,
+      'aprovado com a digital: ASSINADO, eletrônico, pelo nome de quem aprovou': aprovado.status === 200 && assinado.status === 'ASSINADO'
+        && assinado.assinaturas.responsavel.eletronica && assinado.assinaturas.responsavel.eletronica.metodo === 'digital'
+        && assinado.assinaturas.responsavel.nome === 'Sidney Teste' && /Celular/.test((assinado.assinaturas.responsavel.dispositivo || {}).rotulo || '')
+        && assinado.assinaturas.responsavel.eletronica.hash === fm.hashDoConteudo(assinado),
+      'consultar_autorizacao devolve o resultado com o PDF': cons.status === 'aprovado' && /ASSINADO/.test(cons.resultado || ''),
+      'o PDF sai com o carimbo da assinatura eletrônica': pdf.status === 200 && /ASSINADO ELETRONICAMENTE/.test(txtPdf) && /digital/.test(txtPdf),
+      'envio ao Conecta registrado com protocolo, uma vez só': conecta.enviadoConecta.protocolo === 'CNT-2026-0099' && !conectaDeNovo.ok,
+      'o ticket do estorno recebe o registro da assinatura e do envio': (chat.mensagens || []).some((m) => /assinou eletronicamente/.test(m.texto)) && (chat.mensagens || []).some((m) => /CNT-2026-0099/.test(m.texto)),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPreparo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [criado=${JSON.stringify(criado).slice(0, 300)} pedidoRuim=${JSON.stringify(pedidoRuim).slice(0, 200)} aprovado=${JSON.stringify(aprovado).slice(0, 300)} valida=${JSON.stringify(valida)} txt=${txtPdf.slice(0, 120)}]`);
+    process.env.NOPULSO_AGENT_MASTER = masterAntesP;
+    if (masterAntesP === undefined) delete process.env.NOPULSO_AGENT_MASTER;
+  } catch (e) { okPreparo = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
+  if (!okPreparo) ruins += 1;
+  console.log(`${okPreparo ? '✓' : '✗'} Preparo pelo Claude: schema por ferramenta, unidade por nome, estorno pelo número, formulário em rascunho, assinatura só pela digital do Master e envio ao Conecta registrado`);
+
+  // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
   //
   // Master (23/09/2026): "quero poder monitorar tanto celular como tablet -

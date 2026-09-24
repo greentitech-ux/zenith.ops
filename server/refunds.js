@@ -418,7 +418,7 @@ function dataBR(v) {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : t;
 }
 
-async function gerarFormulario(id, dados, porEmail) {
+async function gerarFormulario(id, dados, porEmail, { rascunho = false, preparadoPor = null } = {}) {
   const formularios = require('./formularios');
   const ref = refundsRef.doc(id);
   const snap = await ref.get();
@@ -436,7 +436,13 @@ async function gerarFormulario(id, dados, porEmail) {
   // (ver o comentario do tipo em formularios.js). O Reembolso continua
   // disponivel pra quem quiser o formulario com favorecido + responsavel.
   const tipo = d.tipo || 'estorno';
-  const unidade = String(d.unidade || '').trim();
+  let unidade = String(d.unidade || '').trim();
+  // sem unidade escolhida (o Claude): sai do CÓDIGO da loja do estorno pelo
+  // cadastro de formulário - a mesma ponte código -> rótulo que a tela usa
+  if (!unidade && rascunho) {
+    const cad = await require('./formulariosUnidades').obterPorCodigo(atual.unidade);
+    if (cad && cad.ativo !== false) unidade = cad.unidade;
+  }
   if (!unidade) throw new Error('Escolha a unidade do formulário (a razão social e o CNPJ saem do cadastro dela).');
 
   // O favorecido e' quem RECEBE o Pix, nao necessariamente quem comprou:
@@ -498,6 +504,10 @@ async function gerarFormulario(id, dados, porEmail) {
     // MESMO numero do estorno, como converterParaSolicitacao ja faz: o
     // formulario nao e' um pedido novo, e o documento DESTE ticket
     numeroTicket: atual.numeroTicket,
+    // o Claude prepara em RASCUNHO; a tela do Master continua criando pronto
+    rascunho,
+    origem: { tipo: 'estorno', id, numero: atual.numeroTicket },
+    preparadoPor,
   });
 
   await ref.update({
