@@ -139,6 +139,9 @@ const EVIDENCIAS = [
 // quem decide aceitar só precisa registrar o essencial (o caso ainda
 // ensina o NoPulso), sem montar evidência que não vai ser usada
 const OBRIGATORIAS_AO_ACEITAR = new Set(['numeroPedido', 'nomeCliente', 'decisao', 'declaracao']);
+// o que só a unidade responde: contestar ou aceitar, e declarar que é verdade.
+// O Claude pode recomendar num comentário, nunca marcar (tarefas.preencherDefesaPeloAgente)
+const SO_A_UNIDADE = new Set(['decisao', 'declaracao']);
 
 function vazio(v) { return v == null || (Array.isArray(v) ? !v.length : !String(v).trim()) || v === false; }
 function exigida(q, respostas) {
@@ -388,6 +391,120 @@ async function sincronizar({ store, users, tarefas, push, nomeUnidade = (c) => c
 }
 
 // ---------------------------------------------------------------------
+// DADOS DA ADYEN PRO CLAUDE (coworkApi `obter_pagamento_adyen` e
+// `preencher_defesa`, 24/09/2026). Tudo sai do que o store.js já tem em
+// memória: zero leitura de Firestore e nenhuma chamada à Adyen. O pedido com
+// disputa fica guardado inteiro (EVENTOS_PROTEGIDOS no store.js), então o
+// pagamento original está aqui mesmo semanas depois.
+//
+// Telefone e e-mail do cliente NÃO vão pro Claude (mesma regra do
+// obter_disputa): quando precisam entrar na defesa, o próprio servidor copia
+// da Adyen pro campo (sugestoesDaAdyen), sem passar pelo modelo.
+function mascararEmail(v) {
+  const s = String(v || ''); const i = s.indexOf('@');
+  return i > 0 ? `${s[0]}•••${s.slice(i)}` : (s ? '•••' : null);
+}
+function primeiroCom(txs, campo) { const t = (txs || []).find((x) => x && x[campo] != null && x[campo] !== ''); return t ? t[campo] : null; }
+
+// o retrato do pagamento, a partir de TODOS os eventos do pedido (a Adyen nem
+// sempre repete o dado do cliente nos eventos de disputa)
+function dadosDoPagamento(txs) {
+  const ordenados = [...(txs || [])].sort((a, b) => String(a.dataHora || '').localeCompare(String(b.dataHora || '')));
+  const pagamento = ordenados.find((t) => t.status === 'APROVADO') || ordenados[0] || {};
+  const doPedido = [pagamento, ...ordenados];
+  const c = (campo) => primeiroCom(doPedido, campo);
+  return {
+    pspPagamento: pagamento.pspReference || null, merchantReference: c('merchantReference'),
+    unidade: c('unidade'), valor: pagamento.valor ?? c('valor'), dataCompra: pagamento.dataHora || null,
+    metodo: c('metodo'), last4: c('last4'), bin: c('bin'), aliasCartao: c('aliasCartao'),
+    nomeCliente: c('nomeCliente'), nomeNoCartao: c('cardHolder'),
+    emailCliente: c('emailCliente'), telefoneCliente: c('telefoneCliente'),
+    enderecoCliente: c('enderecoCliente'), enderecoTipo: c('enderecoTipo'),
+    shopperIp: c('shopperIp'), paisCliente: c('paisCliente'), paisEmissor: c('paisEmissor'),
+    bancoEmissor: c('bancoEmissor'), fonteCartao: c('fonteCartao'),
+    threeDOferecido: c('threeDOferecido'), threeDAutenticado: c('threeDAutenticado'),
+    resultadoAvs: c('resultadoAvs'), resultadoCvc: c('resultadoCvc'),
+    scoreRiscoAdyen: c('scoreRiscoAdyen'), resultadoRiscoAdyen: c('resultadoRiscoAdyen'),
+    dispositivo: c('dispositivo'), navegador: c('navegador'),
+    shopperReference: c('shopperReference'),
+    eventos: ordenados.map((t) => ({ evento: t.eventCode || t.status, status: t.status, em: t.dataHora || null, valor: t.valor ?? null, motivo: t.motivo || null })),
+  };
+}
+
+// o que o banco olha numa fraude sem cartão presente, em fato - não em veredito
+function sinaisDaDefesa(d) {
+  const sim = (v) => /^(true|sim|yes|y|1)$/i.test(String(v || ''));
+  const s = [];
+  if (sim(d.threeDAutenticado)) s.push({ sinal: '3DS autenticado', peso: 'forte', leitura: 'O titular passou pela autenticação do banco: em fraude, costuma transferir a responsabilidade para o emissor.' });
+  else if (d.threeDAutenticado != null) s.push({ sinal: 'Sem autenticação 3DS', peso: 'contra', leitura: 'Sem 3DS, a defesa depende de provar a entrega a quem pediu.' });
+  if (d.enderecoTipo === 'entrega') s.push({ sinal: 'Endereço de entrega informado', peso: 'apoio', leitura: 'Comprovante de entrega nesse endereço é a prova principal.' });
+  if (d.paisEmissor && d.paisCliente && String(d.paisEmissor).toUpperCase() !== String(d.paisCliente).toUpperCase()) s.push({ sinal: `País do cartão (${d.paisEmissor}) diferente do país do cliente (${d.paisCliente})`, peso: 'contra', leitura: 'Padrão comum em cartão clonado.' });
+  if (/^[CN]/i.test(String(d.resultadoCvc || '')) || /no match|não confere/i.test(String(d.resultadoCvc || ''))) s.push({ sinal: `CVC: ${d.resultadoCvc}`, peso: 'contra', leitura: 'O código de segurança não conferiu.' });
+  if (Number.isFinite(Number(d.scoreRiscoAdyen)) && d.scoreRiscoAdyen != null && Number(d.scoreRiscoAdyen) >= 50) s.push({ sinal: `Score de risco da Adyen ${d.scoreRiscoAdyen}`, peso: 'contra', leitura: 'A própria Adyen viu risco alto na hora da compra.' });
+  return s;
+}
+
+// outros pedidos do MESMO cliente no que o Monitor guarda. Só liga por chave
+// forte (e-mail, telefone ou cartão tokenizado) - nome não identifica ninguém
+// (ver fraudIdentity.js). O Monitor guarda poucos dias de venda comum, então
+// "nada achado" NÃO quer dizer cliente novo: a resposta diz a janela.
+function digitos(v) { return String(v || '').replace(/\D/g, ''); }
+function mesmoCliente(todas, dados, pedidoId, chave = (t) => t.merchantReference || t.originalReference || t.pspReference) {
+  const email = String(dados.emailCliente || '').toLowerCase();
+  const tel = digitos(dados.telefoneCliente);
+  const alias = dados.aliasCartao || null;
+  const bate = (t) => (email && String(t.emailCliente || '').toLowerCase() === email)
+    || (tel.length >= 8 && digitos(t.telefoneCliente) === tel)
+    || (alias && t.aliasCartao === alias);
+  const porPedido = new Map();
+  for (const t of todas || []) {
+    const k = chave(t);
+    if (!k || k === pedidoId || !bate(t)) continue;
+    if (!porPedido.has(k)) porPedido.set(k, []);
+    porPedido.get(k).push(t);
+  }
+  const pedidos = [...porPedido.entries()].map(([k, lista]) => {
+    const aprovado = lista.find((t) => t.status === 'APROVADO');
+    return {
+      unidade: primeiroCom(lista, 'unidade'), valor: (aprovado || lista[0]).valor ?? null,
+      em: (aprovado || lista[0]).dataHora || null, aprovado: !!aprovado,
+      teveDisputa: lista.some(ehEventoDeDisputa),
+      ligadoPor: [email && lista.some((t) => String(t.emailCliente || '').toLowerCase() === email) ? 'e-mail' : null,
+        tel.length >= 8 && lista.some((t) => digitos(t.telefoneCliente) === tel) ? 'telefone' : null,
+        alias && lista.some((t) => t.aliasCartao === alias) ? 'cartão' : null].filter(Boolean),
+    };
+  }).sort((a, b) => String(a.em || '').localeCompare(String(b.em || '')));
+  return {
+    pedidos, aprovadosSemDisputa: pedidos.filter((p) => p.aprovado && !p.teveDisputa).length,
+    comDisputa: pedidos.filter((p) => p.teveDisputa).length,
+    janela: 'O Monitor guarda os últimos dias de venda e todo pedido com disputa. Não achar nada aqui NÃO prova que o cliente é novo: quem sabe é o sistema da loja.',
+  };
+}
+
+// o que o SERVIDOR preenche sozinho a partir da Adyen. Só fato que a Adyen
+// traz com certeza; o resto (número do pedido na loja, itens, contato,
+// entrega) é da unidade. `merchantReference` é o id do pedido na Adyen, não o
+// número do sistema da loja - por isso não vira `numeroPedido`.
+function sugestoesDaAdyen(dados, historico) {
+  const campos = {}; const fontes = {};
+  const por = (id, valor, fonte) => { if (!vazio(valor)) { campos[id] = valor; fontes[id] = fonte; } };
+  por('nomeCliente', dados.nomeCliente || dados.nomeNoCartao, dados.nomeCliente ? 'Adyen (nome do comprador)' : 'Adyen (nome no cartão)');
+  por('telefoneCliente', dados.telefoneCliente, 'Adyen');
+  if (dados.enderecoTipo === 'entrega') {
+    por('endereco', dados.enderecoCliente, 'Adyen (endereço de entrega)');
+    por('tipoPedido', 'Delivery', 'Adyen (pedido com endereço de entrega)');
+  }
+  if (historico && historico.aprovadosSemDisputa > 0) {
+    const antes = historico.pedidos.filter((p) => p.aprovado && !p.teveDisputa && (!dados.dataCompra || String(p.em || '') < String(dados.dataCompra)));
+    if (antes.length) {
+      por('clienteRecorrente', 'Sim', 'Adyen (pedidos anteriores do mesmo cliente)');
+      por('historicoCliente', `${antes.length} pedido(s) aprovado(s) sem disputa desde ${dataBR(antes[0].em)}, pelo mesmo ${[...new Set(antes.flatMap((p) => p.ligadoPor))].join('/')}`, 'Adyen');
+    }
+  }
+  return { campos, fontes };
+}
+
+// ---------------------------------------------------------------------
 // PDF DA DEFESA (português, decisão do Master). A4. A Adyen recusa PDF acima
 // de 2 MB e, na Mastercard, acima de 19 páginas: o PDF sai do mesmo jeito,
 // e o aviso vai no caso pro Claude anexar as evidências em arquivos
@@ -528,7 +645,9 @@ module.exports = {
   // textos e prazos
   traduzirMotivo, dicaDoMotivo, prazoInterno, dataSP, dataBR, dataHoraBR, reais,
   // questionário
-  QUESTOES, EVIDENCIAS, OPCAO_ACEITAR, OBRIGATORIAS_AO_ACEITAR, faltando, limparRespostas, exigida,
-  mascararSensiveis, mascararTelefone,
+  QUESTOES, EVIDENCIAS, OPCAO_ACEITAR, OBRIGATORIAS_AO_ACEITAR, SO_A_UNIDADE, vazio, faltando, limparRespostas, exigida,
+  mascararSensiveis, mascararTelefone, mascararEmail,
+  // dados da Adyen pro Claude
+  dadosDoPagamento, sinaisDaDefesa, mesmoCliente, sugestoesDaAdyen,
   _crypto: crypto, _disputes: disputes,
 };

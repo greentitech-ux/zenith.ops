@@ -1108,6 +1108,8 @@ async function atenderMcpNoPulso(req, res) {
     return responder({ content: [{ type: 'text', text: JSON.stringify({ error: err.message, code: err.code || 'ACAO_INVALIDA' }) }], isError: true });
   }
 }
+// o que o Claude escreve numa tarefa aparece na hora pra quem está com ela aberta
+coworkApi.configurar({ aoAlterarTarefa: (t) => { if (t && t.id) broadcast('tarefas-atualizada', { id: t.id, unidade: t.unidade }, 'tarefas'); } });
 app.post('/mcp/nopulso', atenderMcpNoPulso);
 app.post('/mcp/nopulso/:token', atenderMcpNoPulso);
 app.post('/api/bot/solicitacoes', async (req, res) => {

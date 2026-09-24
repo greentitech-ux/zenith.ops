@@ -27184,6 +27184,113 @@ $r | ConvertTo-Json -Depth 4 -Compress
   console.log(`${okDefesa ? '✓' : '✗'} Defesa de chargeback: evento vira tarefa do gerente com prazo, questionário trava a conclusão, PDF sem dado sensível e link pro Claude`);
 
   // ------------------------------------------------------------------
+  // A DEFESA CONDUZIDA PELO CLAUDE DENTRO DA TAREFA (24/09/2026).
+  //
+  // Master: "não quero por e-mail, quero que seja tudo dentro da tarefa no
+  // Meu Dia" e "sem precisar acessar o Chrome". O Claude lê o pagamento que o
+  // Monitor já tem (obter_pagamento_adyen), pré-preenche o que é fato da
+  // Adyen (preencher_defesa) e cobra a unidade (comentar_tarefa).
+  //
+  // O que este teste protege: o Claude nunca troca resposta da unidade, nunca
+  // decide contestar/aceitar nem declara que é verdade, o telefone do cliente
+  // não passa por ele, e o selo "preenchido pelo Claude" cai quando a unidade
+  // muda o valor.
+  let okDefesaClaude = false;
+  try {
+    const dc = require(__dirname + '/defesaChargeback.js');
+    const dispM = require(__dirname + '/disputes.js');
+    const tarM = require(__dirname + '/tarefas.js');
+    const authD = require(__dirname + '/auth.js');
+    const cw = require(__dirname + '/coworkApi.js');
+    const bcryptC = require('bcryptjs');
+    const HORA = 3600000, DIA = 24 * HORA;
+    const T0 = Date.now();
+    const iso = (ms) => new Date(ms).toISOString();
+    const UNI = 'Dominos Garanhuns';
+    const hashC = bcryptC.hashSync('SenhaDeTeste!2026', 4);
+    const gerente = { id: 'cw-gerente', email: 'cw-gerente@teste.local', username: 'cw-gerente', cargo: 'gerente', cargos: ['gerente'], active: true, role: 'user', passwordHash: hashC, permissions: { sections: ['tarefas'], unidades: [UNI], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: iso(T0) };
+    const masterC = { id: 'cw-master', email: 'cw-master@teste.local', username: 'cwmaster', role: 'master', active: true, passwordHash: hashC };
+    DOCS.set('users/cw-gerente', gerente); DOCS.set('users/cw-master', masterC);
+    const pushNada = { notifyCritico: async () => {}, notifyUsuario: async () => {} };
+    const base = { unidade: UNI, metodo: 'visa', last4: '5511', valor: 86.9, emailCliente: 'cliente.fiel@exemplo.com', telefoneCliente: '(87) 99876-4321' };
+    const TXS = [
+      { ...base, merchantReference: 'PED-CW', pspReference: 'CWPAG', eventCode: 'AUTHORISATION', status: 'APROVADO', dataHora: iso(T0 - 18 * DIA),
+        nomeCliente: 'Carla Menezes', cardHolder: 'CARLA M MENEZES', enderecoCliente: 'Rua das Flores, 45 · Garanhuns - PE · 55290-000', enderecoTipo: 'entrega',
+        threeDAutenticado: 'true', paisEmissor: 'BR', paisCliente: 'BR', shopperIp: '189.1.2.3' },
+      { ...base, merchantReference: 'PED-CW', pspReference: 'CWDISP', originalReference: 'CWPAG', eventCode: 'NOTIFICATION_OF_CHARGEBACK', status: 'NOTIFICATION_OF_CHARGEBACK', dataHora: iso(T0 - HORA), prazoDefesa: iso(T0 + 10 * DIA), motivo: 'Other Fraud-Card Absent Environment' },
+      // o mesmo cliente (mesmo e-mail) comprou antes, sem disputa
+      { ...base, merchantReference: 'PED-CW-ANTES', pspReference: 'CWANT', eventCode: 'AUTHORISATION', status: 'APROVADO', dataHora: iso(T0 - 40 * DIA), telefoneCliente: null },
+      // outra pessoa com o MESMO nome não conta como o mesmo cliente
+      { ...base, merchantReference: 'PED-CW-HOMONIMO', pspReference: 'CWHOM', eventCode: 'AUTHORISATION', status: 'APROVADO', dataHora: iso(T0 - 30 * DIA), nomeCliente: 'Carla Menezes', emailCliente: 'outra@exemplo.com', telefoneCliente: '(11) 91111-2222' },
+    ];
+    for (const t of TXS) store.addOrUpdate(t);
+    dispM.invalidar();
+    await dc.sincronizar({ store: { allTransactions: () => TXS }, users: { list: async () => [gerente, masterC] }, tarefas: tarM, push: pushNada, agora: T0, masterPreferido: 'cw-master@teste.local' });
+    const caso = await dispM.getOne(dc.idDoCaso('PED-CW'));
+    const tkG = (await authD.login('cw-gerente@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabG = { Authorization: 'Bearer ' + tkG };
+    // a unidade já respondeu dois campos ANTES do Claude chegar
+    await enviarJson('PATCH', `/api/tarefas/${caso.tarefaId}/defesa`, { respostas: { numeroPedido: '7781', nomeCliente: 'Carla (como está no pedido)' } }, cabG);
+
+    const masterAntes = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'cw-master@teste.local';
+    let pag, pre, pre2, com, noMcp, depoisConcluir;
+    try {
+      noMcp = cw.ferramentasMcp().map((f) => f.name);
+      pag = (await cw.executar({ nome: 'obter_pagamento_adyen', entrada: { numero: String(caso.tarefaNumero) } })).resultado;
+      pre = (await cw.executar({ nome: 'preencher_defesa', entrada: {
+        numero: String(caso.tarefaNumero), usarDadosAdyen: true,
+        campos: { canal: "App Domino's", nomeCliente: 'Nome que o Claude achou', decisao: 'Contestar', declaracao: true, inventado: 'x' },
+        fontes: { canal: 'pagamento online na Adyen' },
+      }, idempotencyKey: 'cw-pre-1' })).resultado;
+      pre2 = (await cw.executar({ nome: 'preencher_defesa', entrada: { tarefaId: caso.tarefaId, campos: { canal: 'Telefone' } }, idempotencyKey: 'cw-pre-2' })).resultado;
+      com = (await cw.executar({ nome: 'comentar_tarefa', entrada: { tarefaId: caso.tarefaId, texto: 'Falta o cupom e o print do pedido. Com 3DS autenticado, recomendo contestar.', avisar: false }, idempotencyKey: 'cw-com-1' })).resultado;
+    } finally {
+      if (masterAntes === undefined) delete process.env.NOPULSO_AGENT_MASTER; else process.env.NOPULSO_AGENT_MASTER = masterAntes;
+    }
+    const tarefa1 = DOCS.get(`tarefas/${caso.tarefaId}`);
+    const resp1 = (tarefa1.defesaChargeback && tarefa1.defesaChargeback.respostas) || {};
+    const selos1 = (tarefa1.defesaChargeback && tarefa1.defesaChargeback.preenchidoPeloClaude) || {};
+    // a unidade troca o canal que o Claude pôs e salva o formulário inteiro
+    await enviarJson('PATCH', `/api/tarefas/${caso.tarefaId}/defesa`, { respostas: { ...resp1, canal: "Site Domino's" } }, cabG);
+    const tarefa2 = DOCS.get(`tarefas/${caso.tarefaId}`);
+    const selos2 = tarefa2.defesaChargeback.preenchidoPeloClaude || {};
+    // concluída, o Claude não mexe mais
+    DOCS.set(`tarefas/${caso.tarefaId}`, { ...tarefa2, status: 'CONCLUIDA' });
+    process.env.NOPULSO_AGENT_MASTER = 'cw-master@teste.local';
+    try { await cw.executar({ nome: 'preencher_defesa', entrada: { tarefaId: caso.tarefaId, campos: { itens: 'x' } }, idempotencyKey: 'cw-pre-3' }); depoisConcluir = 'passou'; } catch (e) { depoisConcluir = e.message; }
+    finally { if (masterAntes === undefined) delete process.env.NOPULSO_AGENT_MASTER; else process.env.NOPULSO_AGENT_MASTER = masterAntes; }
+    const tudoQueOClaudeViu = JSON.stringify([pag, pre, pre2, com]);
+    const comentClaude = (tarefa1.comentarios || []).find((c) => c.viaAgente);
+    const comentSistema = (tarefa1.comentarios || []).find((c) => c.sistema && /pré-preencheu/.test(c.texto || ''));
+
+    const conf = {
+      'as três ferramentas novas estão no conector': ['obter_pagamento_adyen', 'preencher_defesa', 'comentar_tarefa'].every((n) => noMcp.includes(n)),
+      'o Claude vê o pagamento da Adyen sem abrir a Adyen (nome, entrega, 3DS)': !!pag && pag.pagamento.nomeCliente === 'Carla Menezes' && pag.pagamento.enderecoTipo === 'entrega'
+        && pag.sinais.some((s) => s.sinal === '3DS autenticado'),
+      'telefone e e-mail do cliente não passam pelo Claude': !tudoQueOClaudeViu.includes('99876') && !tudoQueOClaudeViu.includes('cliente.fiel@') && /4321/.test(pag.pagamento.telefoneCliente || ''),
+      'pedido anterior do mesmo e-mail conta; homônimo não': pag.mesmoCliente.aprovadosSemDisputa === 1 && pag.mesmoCliente.pedidos.length === 1,
+      'o servidor copia o telefone da Adyen pra defesa (sem passar pelo modelo)': resp1.telefoneCliente === '(87) 99876-4321' && selos1.telefoneCliente && /Adyen/.test(selos1.telefoneCliente.fonte),
+      'endereço de entrega vira Delivery + endereço, e o histórico vira cliente recorrente':
+        resp1.tipoPedido === 'Delivery' && /Rua das Flores/.test(resp1.endereco || '') && resp1.clienteRecorrente === 'Sim' && /1 pedido/.test(resp1.historicoCliente || ''),
+      'resposta da unidade nunca é trocada pelo Claude': resp1.numeroPedido === '7781' && resp1.nomeCliente === 'Carla (como está no pedido)' && pre.jaRespondidosPelaUnidade.length === 1,
+      'contestar/aceitar e a declaração são só da unidade': resp1.decisao === undefined && !resp1.declaracao && pre.recusados.length === 2,
+      'campo fora do questionário é devolvido como inválido': pre.invalidos.some((x) => /inventado/.test(x)),
+      'o que o Claude apurou entra com a fonte dele': resp1.canal === "App Domino's" && selos1.canal && selos1.canal.fonte === 'pagamento online na Adyen',
+      'segunda passada não sobrescreve o que o próprio Claude já pôs': pre2.preenchidos.length === 0 && pre2.jaRespondidosPelaUnidade.length === 1,
+      'a tarefa registra o pré-preenchimento e o comentário do Claude, com o nome dele': !!comentSistema && !!comentClaude && comentClaude.porNome === 'Claude (Cowork)' && /cupom/.test(comentClaude.texto),
+      'a unidade mudou o valor: o selo daquele campo cai, os outros ficam': !selos2.canal && !!selos2.telefoneCliente && !!selos2.endereco,
+      'defesa concluída não é mais pré-preenchida': /já foi concluída/.test(depoisConcluir || ''),
+      'o que falta na defesa volta pro Claude cobrar': Array.isArray(pre.faltaNaDefesa) && pre.faltaNaDefesa.some((f) => /nota fiscal/i.test(f)),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDefesaClaude = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [pre=${JSON.stringify(pre)} resp1=${JSON.stringify(resp1)}]`);
+  } catch (e) { okDefesaClaude = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
+  if (!okDefesaClaude) ruins += 1;
+  console.log(`${okDefesaClaude ? '✓' : '✗'} Defesa conduzida pelo Claude dentro da tarefa: lê a Adyen pelo Monitor, pré-preenche só campo vazio, nunca decide nem declara, telefone não passa por ele`);
+
+  // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
   //
   // Master (23/09/2026): "quero poder monitorar tanto celular como tablet -

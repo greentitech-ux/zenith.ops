@@ -707,11 +707,81 @@ async function salvarDefesa(id, acesso, respostas) {
   if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Esta defesa já foi concluída. Reabra a tarefa para mudar.');
   const limpas = require('./defesaChargeback').limparRespostas(respostas);
   const agora = new Date().toISOString();
+  // o selo "preenchido pelo Claude" só fica no campo que continua com o valor
+  // que o Claude pôs: a unidade mudou, a resposta passou a ser dela
+  const selos = {};
+  for (const [campo, s] of Object.entries(tarefa.defesaChargeback.preenchidoPeloClaude || {})) {
+    if (s && JSON.stringify(limpas[campo]) === JSON.stringify(s.valor)) selos[campo] = s;
+  }
   await ref.update({
-    defesaChargeback: { ...tarefa.defesaChargeback, respostas: limpas, respondidoEm: agora, respondidoPorNome: nomeUsuario(acesso.usuario) },
+    defesaChargeback: { ...tarefa.defesaChargeback, respostas: limpas, preenchidoPeloClaude: selos, respondidoEm: agora, respondidoPorNome: nomeUsuario(acesso.usuario) },
     atualizadoEm: agora,
   });
   return getOne(id, acesso);
+}
+
+// PRÉ-PREENCHIMENTO PELO CLAUDE (coworkApi `preencher_defesa`, 24/09/2026).
+// Regras que não se negociam:
+//   - só escreve em campo VAZIO: o que a unidade respondeu nunca é trocado;
+//   - nunca responde `decisao` nem `declaracao` - contestar ou aceitar, e
+//     jurar que é verdade, é da unidade (defesaChargeback.SO_A_UNIDADE);
+//   - cada campo escrito ganha um selo com a fonte, que a tela mostra, e o
+//     selo cai sozinho quando a unidade muda o valor (salvarDefesa acima).
+// Não conclui a tarefa e não gera PDF: quem entrega é a unidade.
+async function preencherDefesaPeloAgente(id, campos, { fontes = {}, porNome = 'Claude (Cowork)' } = {}) {
+  const dc = require('./defesaChargeback');
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!tarefa.defesaChargeback) throw new Error('Esta tarefa não é de defesa de chargeback.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Esta defesa já foi concluída: o pré-preenchimento só vale com a tarefa aberta.');
+  const pedidos = { ...(campos || {}) };
+  const recusados = Object.keys(pedidos).filter((k) => dc.SO_A_UNIDADE.has(k));
+  for (const k of recusados) delete pedidos[k];
+  const limpas = dc.limparRespostas(pedidos);
+  const atuais = tarefa.defesaChargeback.respostas || {};
+  const selos = { ...(tarefa.defesaChargeback.preenchidoPeloClaude || {}) };
+  const agora = new Date().toISOString();
+  const escritos = []; const mantidos = [];
+  const novas = { ...atuais };
+  for (const [campo, valor] of Object.entries(limpas)) {
+    if (!dc.vazio(atuais[campo])) { mantidos.push(campo); continue; }
+    if (dc.vazio(valor)) continue;
+    novas[campo] = valor;
+    selos[campo] = { fonte: String(fontes[campo] || 'Claude').slice(0, 40), valor, em: agora };
+    escritos.push(campo);
+  }
+  const invalidos = Object.keys(pedidos).filter((k) => !(k in limpas));
+  if (escritos.length) {
+    const rotulo = (k) => (dc.QUESTOES.find((q) => q.id === k) || {}).rotulo || k;
+    const comentario = {
+      id: crypto.randomBytes(8).toString('hex'), sistema: true, porId: null, porNome, em: agora,
+      texto: `🤖 ${porNome} pré-preencheu ${escritos.length} campo(s) da defesa: ${escritos.map((k) => `${rotulo(k)} (${selos[k].fonte})`).join('; ')}. Confira antes de concluir - se algo estiver errado, corrija e salve.`,
+    };
+    await ref.update({
+      defesaChargeback: { ...tarefa.defesaChargeback, respostas: novas, preenchidoPeloClaude: selos },
+      comentarios: [...(tarefa.comentarios || []), comentario].slice(-100),
+      atualizadoEm: agora,
+    });
+  }
+  return {
+    tarefa: await getOne(id), escritos, mantidos, recusados, invalidos,
+    faltando: dc.faltando(novas, tarefa.anexos),
+  };
+}
+
+// comentário escrito pelo Claude: aparece com o nome dele, não com o do Master
+// cujo acesso ele usa - quem lê a tarefa precisa saber que foi o assistente
+async function comentarComoAgente(id, texto, { porNome = 'Claude (Cowork)' } = {}) {
+  const corpo = String(texto || '').trim().slice(0, 2000);
+  if (!corpo) throw new Error('Escreva um comentário.');
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  const agora = new Date().toISOString();
+  const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: corpo, porId: null, porNome, viaAgente: true, em: agora };
+  await ref.update({ comentarios: [...(tarefa.comentarios || []), comentario].slice(-100), atualizadoEm: agora });
+  return { tarefa: await getOne(id), comentario };
 }
 
 async function atualizarDescricao(id, acesso, descricao) {
@@ -1210,4 +1280,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, listarAbertas, porNumero, LIMITE_ABERTAS_AGENTE, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, salvarDefesa, atualizarResumo, RESUMO_MAX, ehArquivoDeTranscricao, tipoDaTranscricao, textoDaTranscricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, listarAbertas, porNumero, LIMITE_ABERTAS_AGENTE, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, salvarDefesa, preencherDefesaPeloAgente, comentarComoAgente, atualizarResumo, RESUMO_MAX, ehArquivoDeTranscricao, tipoDaTranscricao, textoDaTranscricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
