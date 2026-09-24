@@ -22,9 +22,9 @@ const users = require('./users');
 // assunto -> { tag, rotulo, url }
 // `url` é pra onde o push leva quem recebeu: a tela onde o trabalho é feito.
 const ASSUNTOS = {
-  'suporte-ti': { tag: 'tecnico', rotulo: 'Suporte de TI', url: '/tecnico.html' },
-  manutencao: { tag: 'manutencao', rotulo: 'Manutenção', url: '/manutencao.html' },
-  agregador: { tag: 'coordenador-agregador', rotulo: 'Agregador (iFood/99food)', url: '/beniboy.html' },
+  'suporte-ti': { tag: 'tecnico', rotulo: 'Suporte de TI', url: '/tecnico' },
+  manutencao: { tag: 'manutencao', rotulo: 'Manutenção', url: '/manutencao' },
+  agregador: { tag: 'coordenador-agregador', rotulo: 'Agregador (iFood/99food)', url: '/beniboy' },
 };
 
 function tagDoAssunto(assunto) {

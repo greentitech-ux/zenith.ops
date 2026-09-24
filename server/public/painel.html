@@ -531,14 +531,14 @@ function montarContextoPainel(){
   const tags = global
     ? '<span class="pc-tag global">VISÃO GLOBAL</span><span class="pc-tag">gestão e configuração</span>'
     : `<span class="pc-tag">${unidades.length === 1 ? '1 unidade liberada' : `${unidades.length} unidades liberadas`}</span><span class="pc-tag">acesso restrito ao seu escopo</span>`;
-  const acoes = [{ href:'/tarefas.html', icone:'✅', nome:'Meu Dia', principal:true }];
+  const acoes = [{ href:'/tarefas', icone:'✅', nome:'Meu Dia', principal:true }];
   if(global){
-    acoes.push({ href:'/central-alertas.html', icone:'🚨', nome:'Alertas' }, { href:'/loja-status.html', icone:'📡', nome:'NOC' }, { href:'/usuarios.html', icone:'👤', nome:'Acessos' });
+    acoes.push({ href:'/central-alertas', icone:'🚨', nome:'Alertas' }, { href:'/loja-status', icone:'📡', nome:'NOC' }, { href:'/usuarios', icone:'👤', nome:'Acessos' });
   }else{
-    if(temSecaoPainel('solicitacoes') || temSecaoPainel('tecnico') || temSecaoPainel('manutencao')) acoes.push({ href:'/central-inicio.html', icone:'📋', nome:'Solicitações' });
-    if(temSecaoPainel('lancamento') || temSecaoPainel('sangria')) acoes.push({ href:'/lancamento.html', icone:'🧾', nome:'Fechamento' });
-    else if(temSecaoPainel('monitor')) acoes.push({ href:'/monitor.html', icone:'📈', nome:'Monitor' });
-    else if(temSecaoPainel('parque')) acoes.push({ href:'/parque.html', icone:'🎡', nome:'Parque' });
+    if(temSecaoPainel('solicitacoes') || temSecaoPainel('tecnico') || temSecaoPainel('manutencao')) acoes.push({ href:'/central-inicio', icone:'📋', nome:'Solicitações' });
+    if(temSecaoPainel('lancamento') || temSecaoPainel('sangria')) acoes.push({ href:'/lancamento', icone:'🧾', nome:'Fechamento' });
+    else if(temSecaoPainel('monitor')) acoes.push({ href:'/monitor', icone:'📈', nome:'Monitor' });
+    else if(temSecaoPainel('parque')) acoes.push({ href:'/parque', icone:'🎡', nome:'Parque' });
   }
   el.innerHTML = `<div><div class="pc-rotulo">Seu espaço operacional</div><h2>${escapeHtml(cargo)}</h2><p class="pc-descricao">${escopo}</p><div class="pc-tags">${tags}</div></div><div class="pc-acoes">${acoes.slice(0,4).map(a=>`<a class="pc-acao${a.principal?' principal':''}" href="${escaparAttr(a.href)}">${a.icone} ${escapeHtml(a.nome)}</a>`).join('')}</div>`;
   el.classList.remove('hidden');
@@ -609,7 +609,7 @@ function mostrarResumoNotificacoes(wrap){
   if(notificacoesPausadas()) return;
   notificacoesAgrupadas += 1;
   let resumo=document.getElementById('notif-solicitacao-resumo');
-  if(!resumo){ resumo=document.createElement('button'); resumo.type='button'; resumo.id='notif-solicitacao-resumo'; resumo.className='notif-solicitacao-resumo'; resumo.addEventListener('click',()=>{location.href='/central-historico.html';}); wrap.appendChild(resumo); }
+  if(!resumo){ resumo=document.createElement('button'); resumo.type='button'; resumo.id='notif-solicitacao-resumo'; resumo.className='notif-solicitacao-resumo'; resumo.addEventListener('click',()=>{location.href='/central-historico';}); wrap.appendChild(resumo); }
   resumo.innerHTML=`<span>🔔 <strong>+${notificacoesAgrupadas}</strong> ${notificacoesAgrupadas===1?'solicitação aguardando':'solicitações aguardando'}</span><span>Ver fila →</span>`;
 }
 function limparNotificacoesDaTela(wrap){ notificacoesAgrupadas=0; pararRepeticaoSomNotificacao(); wrap.replaceChildren(); }
@@ -636,7 +636,7 @@ function mostrarNotificacaoSolicitacao(card){
   el.querySelector('.ns-ok').addEventListener('click', ()=>{
     marcarVistoNotificacao(card.tipo, card.id);
     if(soEncerra(card)) return;
-    location.href = `/central-historico.html?tipo=${encodeURIComponent(card.tipo)}&id=${encodeURIComponent(card.id)}`;
+    location.href = `/central-historico?tipo=${encodeURIComponent(card.tipo)}&id=${encodeURIComponent(card.id)}`;
   });
   el.querySelector('.ns-fechar').addEventListener('click', (event)=>{
     event.stopPropagation();
@@ -695,7 +695,7 @@ async function iniciarNotificacoesCentral(){
 async function cardPedidoSemanal(){
   const d = await fetch('/api/pedido-semanal').then(r=>r.json());
   if(!d.ativo){
-    return pcardWrap('📦','Pedido semanal','/lancamento.html',
+    return pcardWrap('📦','Pedido semanal','/lancamento',
       '<div class="pcard-vazio">Nenhuma regra de pedido semanal ativa. O Master cadastra em Grupos.</div>');
   }
   const unidades = d.unidades || [];
@@ -719,7 +719,7 @@ async function cardPedidoSemanal(){
     + (pendentes.length
         ? `<div class="pcard-nota">${pendentes.slice(0,6).map(u=>escapeHtml(u.nome)).join(' · ')}${pendentes.length>6?` +${pendentes.length-6}`:''}</div>`
         : '');
-  return pcardWrap('📦','Pedido semanal','/lancamento.html', corpo);
+  return pcardWrap('📦','Pedido semanal','/lancamento', corpo);
 }
 const fmtDataBr = (d) => { if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}`; };
 
@@ -797,7 +797,7 @@ async function cardMonitor(){
   const fraude = semChargeback.filter(t=>t.fraudeSuspeita);
   const volume = +aprovadas.reduce((s,t)=>s+(t.valor||0),0).toFixed(2);
   const taxa = semChargeback.length ? Math.round(aprovadas.length/semChargeback.length*100) : 0;
-  return pcardWrap('📈','Monitor (hoje)','/monitor.html', `
+  return pcardWrap('📈','Monitor (hoje)','/monitor', `
     <div class="pstats-row">
       ${statRow('Transações', semChargeback.length)}
       ${statRow('Aprovadas', aprovadas.length,'ok')}
@@ -830,7 +830,7 @@ async function cardAlertas(){
   const lista = await fetch('/api/alertas-central').then(r=>r.ok?r.json():[]).catch(()=>[]);
   const abertos = lista.filter(a=>!a.atendidoEm);
   if(!abertos.length){
-    return pcardWrap('🔔','Alertas','/central-alertas.html',
+    return pcardWrap('🔔','Alertas','/central-alertas',
       '<div class="pcard-vazio">Nenhum alerta em aberto.</div>');
   }
   const linhas = abertos.slice(0, 5).map(a=>{
@@ -841,7 +841,7 @@ async function cardAlertas(){
     </div></div>`;
   }).join('');
   const sobra = abertos.length - 5;
-  return pcardWrap('🔔','Alertas','/central-alertas.html', `<div class="palertas">${linhas}</div>
+  return pcardWrap('🔔','Alertas','/central-alertas', `<div class="palertas">${linhas}</div>
     ${sobra>0?`<div class="pcard-nota">+${sobra} ${sobra===1?'alerta':'alertas'} em aberto na Central.</div>`:''}`);
 }
 
@@ -873,7 +873,7 @@ async function cardFechamentos(){
     ? `<div class="delta bad">${unidadesComQuebra} ${unidadesComQuebra===1?'unidade':'unidades'} · exige tratativa</div>`
     : '<div class="delta ok">caixa bateu</div>';
 
-  return pcardWrap('💰','Fechamentos (ontem)','/fechamentos.html', `<div class="pstats-row">
+  return pcardWrap('💰','Fechamentos (ontem)','/fechamentos', `<div class="pstats-row">
       ${statRow('Lojas lançadas', doDia.length)}
       ${statRow('Faturamento', fmtMoney(faturamento))}
       <div class="pstat"><div class="lbl">Diferença de caixa</div>
@@ -932,7 +932,7 @@ async function cardEntregas(){
       <option value="">Todas as unidades</option>
       ${ENTREGAS_ROSTER_CACHE.map(c=>`<option value="${c}">${escapeHtml(ENTREGAS_UNIDADES_NOMES[c]||c)}</option>`).join('')}
     </select>` : '';
-  return pcardWrap('🛵','Entregas (ontem)','/entregas.html', `
+  return pcardWrap('🛵','Entregas (ontem)','/entregas', `
     ${selectHtml}
     <div id="entregas-corpo">${corpoEntregas(ENTREGAS_DODIA_CACHE, ENTREGAS_ROSTER_CACHE, '')}</div>
   `);
@@ -942,13 +942,13 @@ async function cardCentral(){
   const rows = await fetch('/api/central').then(r=>r.json());
   const pendentes = rows.filter(c=>c.status==='PENDENTE');
   if(!pendentes.length){
-    return pcardWrap('📋','Central de Solicitações','/central-historico.html', `<div class="pcard-vazio">Nenhuma solicitação pendente. 🎉</div>`);
+    return pcardWrap('📋','Central de Solicitações','/central-historico', `<div class="pcard-vazio">Nenhuma solicitação pendente. 🎉</div>`);
   }
   const porTipo = {};
   pendentes.forEach(c=>{ porTipo[c.tipo] = (porTipo[c.tipo]||0) + 1; });
   const linhas = Object.entries(porTipo).sort((a,b)=>b[1]-a[1])
     .map(([tipo,qtd])=>`<div class="linha"><span>${escapeHtml(TIPOS_CENTRAL_LABEL[tipo]||tipo)}</span><b>${qtd}</b></div>`).join('');
-  return pcardWrap('📋','Central de Solicitações','/central-historico.html', `
+  return pcardWrap('📋','Central de Solicitações','/central-historico', `
     <div class="pstats">${statRow('Pendentes', pendentes.length, 'warn')}</div>
     <div class="ptipos">${linhas}</div>
   `);
@@ -958,7 +958,7 @@ async function cardChamados(){
   const rows = await fetch('/api/chamados').then(r=>r.json());
   const abertos = rows.filter(c=>c.status==='ABERTO');
   const emAndamento = rows.filter(c=>c.status==='INICIADO');
-  return pcardWrap('🔧','Chamados de TI','/tecnico.html', `<div class="pstats">
+  return pcardWrap('🔧','Chamados de TI','/tecnico', `<div class="pstats">
     ${statRow('Abertos', abertos.length, abertos.length ? 'warn' : '')}
     ${statRow('Em andamento', emAndamento.length)}
   </div>`);
@@ -969,7 +969,7 @@ async function cardManutencao(){
   const abertos = rows.filter(c=>c.status==='ABERTO');
   const agendados = rows.filter(c=>c.status==='ACEITO');
   const emExecucao = rows.filter(c=>c.status==='INICIADO' || c.status==='EM_ESPERA');
-  return pcardWrap('🔧','Manutenção','/manutencao.html', `<div class="pstats">
+  return pcardWrap('🔧','Manutenção','/manutencao', `<div class="pstats">
     ${statRow('Aguardando aceite', abertos.length, abertos.length ? 'warn' : '')}
     ${statRow('Agendados', agendados.length)}
     ${statRow('Em execução', emExecucao.length)}
@@ -1098,10 +1098,10 @@ async function cardNoc(){
   const acessosRecentes = NOC_COMPUTADORES_CACHE.filter(c=>c.ultimoAcessoRemotoEm && (agora - c.ultimoAcessoRemotoEm) < 24*60*60*1000).length;
 
   if(!NOC_COMPUTADORES_CACHE.length){
-    return pcardWrap('🖥️','NOC-NoPulso','/loja-status.html', `<div class="pcard-vazio">Nenhum computador cadastrado ainda.</div>`);
+    return pcardWrap('🖥️','NOC-NoPulso','/loja-status', `<div class="pcard-vazio">Nenhum computador cadastrado ainda.</div>`);
   }
 
-  return pcardWrap('🖥️','NOC-NoPulso','/loja-status.html', `
+  return pcardWrap('🖥️','NOC-NoPulso','/loja-status', `
     <div class="pstats-row">
       ${statRow('Computadores', NOC_COMPUTADORES_CACHE.length)}
       ${statRow('Online', online, 'ok')}
@@ -1123,7 +1123,7 @@ async function cardIfood(){
   const doDia = rows.filter(d=>(d.dataHora||'').slice(0,10)===hoje);
   const bruto = +doDia.reduce((s,d)=>s+(d.valorBruto||0),0).toFixed(2);
   const liquido = +doDia.reduce((s,d)=>s+(d.valorLiquido||0),0).toFixed(2);
-  return pcardWrap('🍔','iFood (hoje)','/ifood.html', `<div class="pstats">
+  return pcardWrap('🍔','iFood (hoje)','/ifood', `<div class="pstats">
     ${statRow('Vendas', doDia.length)}
     ${statRow('Valor bruto', fmtMoney(bruto))}
     ${statRow('Valor líquido', fmtMoney(liquido))}
@@ -1201,7 +1201,7 @@ async function cardEstoque(){
   ESTOQUE_CATALOGO_CACHE = {};
   ESTOQUE_ABERTA = null;
   const contaram = ESTOQUE_ROSTER_CACHE.filter(u=>ESTOQUE_CONTAGENS_CACHE[u.codigo]);
-  return pcardWrap('📦','Estoque (ontem)','/estoque.html', `
+  return pcardWrap('📦','Estoque (ontem)','/estoque', `
     <div class="pstats">${statRow('Unidades com contagem', `${contaram.length} de ${ESTOQUE_ROSTER_CACHE.length}`)}</div>
     <div class="pestoque-chips" id="estoque-chips">${renderEstoqueChips()}</div>
     <div id="estoque-detalhe"></div>
@@ -1254,7 +1254,7 @@ async function cardParque(){
     </div>`;
   }).join('');
 
-  return pcardWrap('🤸','Saltiverso (hoje)','/parque.html', `
+  return pcardWrap('🤸','Saltiverso (hoje)','/parque', `
     <div class="pstats">
       ${statRow('Check-ins hoje', doDia.length)}
       ${statRow('Crianças', criancas)}
@@ -1279,7 +1279,7 @@ async function cardSaltiversoLoja(){
   const validas = (vendas||[]).filter(v=>!v.cancelada);
   const totalVendido = validas.reduce((s,v)=>s+(Number(v.total)||0),0);
   const fechado = !!(fechamento && fechamento.fechado);
-  return pcardWrap('🥤','Bebidas & Meias (hoje)','/saltiverso-vendas.html', `
+  return pcardWrap('🥤','Bebidas & Meias (hoje)','/saltiverso-vendas', `
     <div class="pstats">
       ${statRow('Vendas hoje', validas.length)}
       ${statRow('Total vendido', 'R$ '+totalVendido.toFixed(2).replace('.',','))}
@@ -1336,7 +1336,7 @@ async function cardRH(){
   const proxVenc30 = proximoVenc(exp30);
   const proxVenc60 = proximoVenc(exp60);
   const fmtProx = (dias)=> dias==null ? '—' : (dias===0 ? 'hoje' : `${dias}d`);
-  return pcardWrap('🧑‍💼','RH','/rh.html', `
+  return pcardWrap('🧑‍💼','RH','/rh', `
     <div class="pstats">
       ${statRow('Ativos', ativos.length)}
       ${statRow('Na loja agora', abertos.length, abertos.length?'ok':'')}
@@ -1370,7 +1370,7 @@ async function cardFestasCalendario(){
   FESTAS_CAL_ANO = Number(hoje.slice(0,4));
   FESTAS_CAL_MES = Number(hoje.slice(5,7)) - 1;
   FESTAS_CAL_DIA_SEL = null;
-  return pcardWrap('🎉','Festas (calendário)','/festas.html', `<div id="pcal-wrap">${renderCalFestas()}</div>`);
+  return pcardWrap('🎉','Festas (calendário)','/festas', `<div id="pcal-wrap">${renderCalFestas()}</div>`);
 }
 
 function festasDoDiaCal(iso){
@@ -1443,7 +1443,7 @@ async function cardAbastecimento(){
   const comExtra = recebidos.filter(r=>r.recebimento && (r.recebimento.extras||[]).length);
   const divergencias = recebidos.filter(r=>r.recebimento && r.recebimento.divergencia);
   const aguardando = regs.filter(r=>r.tipo==='ENVIO' && !r.recebidoEm).length;
-  return pcardWrap('🛒','Abastecimento Carrinho (indicadores)','/abastecimento.html', `<div class="pstats">
+  return pcardWrap('🛒','Abastecimento Carrinho (indicadores)','/abastecimento', `<div class="pstats">
     ${statRow('⏱️ Pedido → envio (hoje)', fmtMin(tPedido(doDia(enviosVinc))))}
     ${statRow('⏱️ Pedido → envio (geral)', fmtMin(tPedido(enviosVinc)))}
     ${statRow('📦 Envio → confirmação (geral)', fmtMin(tEnvio(recebidos)))}

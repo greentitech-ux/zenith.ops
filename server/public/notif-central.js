@@ -241,7 +241,7 @@
     if (!resumo) {
       resumo = document.createElement('button');
       resumo.type = 'button'; resumo.id = 'zn-notif-resumo'; resumo.className = 'zn-notif-resumo';
-      resumo.addEventListener('click', () => { location.href = '/central-historico.html'; });
+      resumo.addEventListener('click', () => { location.href = '/central-historico'; });
       wrap.appendChild(resumo);
     }
     resumo.innerHTML = `<span>🔔 <strong>+${notificacoesAgrupadas}</strong> ${notificacoesAgrupadas === 1 ? 'solicitação aguardando' : 'solicitações aguardando'}</span><span>Ver fila →</span>`;
@@ -307,7 +307,7 @@
   // Perder essa marcação é barato - a notificação volta na próxima visita.
   function abrirSolicitacao(tipo, id) {
     marcarVistoNotificacao(tipo, id);
-    location.href = `/central-historico.html?tipo=${encodeURIComponent(tipo)}&id=${encodeURIComponent(id)}`;
+    location.href = `/central-historico?tipo=${encodeURIComponent(tipo)}&id=${encodeURIComponent(id)}`;
   }
 
   async function marcarVistoNotificacao(tipo, id) {

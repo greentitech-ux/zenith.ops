@@ -810,7 +810,7 @@
       const c = ATEND.chats.find((x) => x.id === b.dataset.atendChat);
       if (c) atendRenderConversa(c);
     }));
-    corpo.querySelector('#szc-ir-beniboy').addEventListener('click', () => { location.href = '/beniboy.html'; });
+    corpo.querySelector('#szc-ir-beniboy').addEventListener('click', () => { location.href = '/beniboy'; });
   }
 
   function montarThreadHtml(chat) {
@@ -870,7 +870,7 @@
     // dar pra ir direto pra Central do Beniboy - antes só existia esse link
     // na LISTA de conversas (atendRenderLista), não dentro de uma já aberta
     corpo.querySelector('#szc-atend-beniboy').addEventListener('click', () => {
-      location.href = '/beniboy.html?chat=' + encodeURIComponent(chat.id);
+      location.href = '/beniboy?chat=' + encodeURIComponent(chat.id);
     });
     // botao de PDF so existe no DOM quando ATEND.ehMaster (rota tambem e
     // Master-only no backend - pedido explicito do usuario: "so o master
@@ -964,7 +964,7 @@
   let alarmeAudioCtx = null;
   let alarmeSirenTimer = null;
   let alarmeVibraTimer = null;
-  let alarmeUrlAtual = '/beniboy.html'; // pra onde "Atender agora" leva - cada tipo de alerta manda a sua (ver dispararAlarmeBeniboy)
+  let alarmeUrlAtual = '/beniboy'; // pra onde "Atender agora" leva - cada tipo de alerta manda a sua (ver dispararAlarmeBeniboy)
   const alarmeEl = el(`<div class="szc-alarme" role="alertdialog" aria-label="Alerta do Beniboy">
     <div class="szc-al-icone">${window.beniboySVG ? window.beniboySVG(112, 'alarme no-vermelho') : '🚨'}</div>
     <div class="szc-al-titulo" id="szc-al-titulo">Beniboy precisa de você</div>
@@ -1005,7 +1005,7 @@
     if (!ATEND.podeAlarme) return; // alarme e pro Master + tag Suporte (ver push.notifyBeniboyEscalonamento)
     const titulo = (info && info.titulo) || 'Beniboy precisa de você';
     const corpo = (info && info.corpo) || 'O assistente não conseguiu resolver sozinho.';
-    alarmeUrlAtual = (info && info.url) || '/beniboy.html';
+    alarmeUrlAtual = (info && info.url) || '/beniboy';
     alarmeEl.querySelector('#szc-al-titulo').textContent = titulo;
     alarmeEl.querySelector('#szc-al-corpo').textContent = corpo;
     if (alarmeAtivo) return; // ja tocando - so atualiza o texto
@@ -1277,7 +1277,7 @@
         es.addEventListener('beniboy-escalonamento', (e) => {
           const d = JSON.parse(e.data);
           const corpo = `${esc(d.nome || 'Visitante')}${d.motivo ? ' · ' + esc(d.motivo) : ''}`;
-          dispararAlarmeBeniboy({ corpo, url: '/beniboy.html?chat=' + encodeURIComponent(d.chatId || '') });
+          dispararAlarmeBeniboy({ corpo, url: '/beniboy?chat=' + encodeURIComponent(d.chatId || '') });
         });
         // alerta de seguranca (texto tipo comando/script ou upload bloqueado
         // no chat publico - ver segurancaChat.js/index.js) - SO Master, mais
@@ -1287,7 +1287,7 @@
           if (!ATEND.ehMaster) return;
           const d = JSON.parse(e.data);
           const corpo = `${esc(d.nome || 'Visitante')} · ${esc(d.motivo || 'Atividade suspeita detectada no chat')}`;
-          dispararAlarmeBeniboy({ titulo: '🛡️ Alerta de segurança do chat', corpo, url: '/beniboy.html?chat=' + encodeURIComponent(d.id || '') });
+          dispararAlarmeBeniboy({ titulo: '🛡️ Alerta de segurança do chat', corpo, url: '/beniboy?chat=' + encodeURIComponent(d.id || '') });
         });
       }
       // a MESMA pessoa silenciou/atendeu em outro aparelho (celular x

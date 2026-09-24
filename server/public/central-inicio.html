@@ -83,7 +83,7 @@
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:6px;">
-    <a class="back" href="/central-historico.html">📜 Histórico completo</a>
+    <a class="back" href="/central-historico">📜 Histórico completo</a>
     <button class="back" onclick="location.reload()" title="Atualizar">🔄</button>
     <button class="back" onclick="logout()">🚪 Sair</button>
   </div>
@@ -202,7 +202,7 @@ function rcCardHtml(c){
   const pct = slaUtilizadoPct(c);
   const atribuidosTxt = (c.atribuidosEmails && c.atribuidosEmails.length) ? c.atribuidosEmails.join(', ') : (c.direcionadoParaEmail || '—');
   const temDecisao = c.status!=='PENDENTE' && c.status!=='CONVERTIDO';
-  return `<div class="rel-card" onclick="location.href='/central-historico.html?tipo=${encodeURIComponent(c.tipo)}&id=${encodeURIComponent(c.id)}'">
+  return `<div class="rel-card" onclick="location.href='/central-historico?tipo=${encodeURIComponent(c.tipo)}&id=${encodeURIComponent(c.id)}'">
     <div class="rel-card-topo">
       <span class="tipo-badge">${iconeTipo(c.tipo)} #${c.numeroTicket ?? '—'}</span>
       <span class="badge ${c.status}">${c.status}</span>

@@ -663,7 +663,7 @@ const TOPICOS = [
     <ul>
       <li><b>👷 Extras:</b> avulso, trabalho pontual - sem período de teste, sem atestado, sem advertência.</li>
       <li><b>⏳ Em Teste:</b> candidato no período de experiência de 5 dias - fora da ficha de colaboradores até a decisão.</li>
-      <li><b>🧑‍💼 Colaboradores:</b> quem foi efetivado de verdade (direto ou aprovado no teste) - só esse grupo tem acesso a Atestados e Advertências. Não aparece no quiosque físico de check-in (<code>/rh-checkin.html</code>) - em vez disso, bate o ponto pelo próprio <b>link de auto-atendimento</b> (ver abaixo).</li>
+      <li><b>🧑‍💼 Colaboradores:</b> quem foi efetivado de verdade (direto ou aprovado no teste) - só esse grupo tem acesso a Atestados e Advertências. Não aparece no quiosque físico de check-in (<code>/rh-checkin</code>) - em vez disso, bate o ponto pelo próprio <b>link de auto-atendimento</b> (ver abaixo).</li>
     </ul>
     <h3>Cadastrar (1º dia de trabalho)</h3>
     <p>Na aba <b>➕ Cadastrar</b>, primeiro escolha o <b>tipo de cadastro</b>:</p>
@@ -707,7 +707,7 @@ const TOPICOS = [
     <p><b>Como montar o dispositivo na loja:</b></p>
     <ol>
       <li>No dispositivo que vai ficar fixo na entrada, faça login normalmente no NoPulso com uma conta que tenha acesso ao RH (o gerente da loja já serve).</li>
-      <li>Abra <b>RH → aba 📸 Check-ins → "📸 Abrir tela de check-in (quiosque)"</b>, ou acesse direto <code>/rh-checkin.html</code>. Deixe essa aba aberta o dia inteiro no dispositivo.</li>
+      <li>Abra <b>RH → aba 📸 Check-ins → "📸 Abrir tela de check-in (quiosque)"</b>, ou acesse direto <code>/rh-checkin</code>. Deixe essa aba aberta o dia inteiro no dispositivo.</li>
       <li>Se a conta tiver acesso a mais de uma unidade, escolha em qual unidade esse dispositivo específico está instalado (fica salvo no aparelho, não precisa escolher de novo).</li>
     </ol>
     <p><b>Como o extra usa (fluxo do dia a dia):</b></p>
@@ -719,7 +719,7 @@ const TOPICOS = [
     <p><b>Colaborador efetivado não aparece nessa lista</b> - seja efetivado direto ou candidato que foi aprovado no teste, ele já bate o ponto no sistema de ponto de verdade, fora do NoPulso. Esse quiosque é só pra quem ainda não tem vínculo formal.</p>
     <p><b>Sem reconhecimento facial:</b> o sistema não identifica ninguém automaticamente pela foto - a identificação é a própria pessoa escolhendo o nome dela na lista; a foto (com horário) é só o registro/prova visual de quem esteve na loja e quando, útil em caso de dúvida ou divergência. Cada pessoa só pode ter <b>1 check-in aberto por vez</b> - precisa fazer o check-out antes de abrir outro.</p>
     <p><b>Localização (só Master):</b> junto com a foto, o navegador captura a localização do dispositivo no momento do check-in/check-out (usando o próprio recurso de localização do navegador - se a pessoa recusar a permissão, o registro segue normalmente, só sem localização). Esse dado <b>não aparece pra ninguém além do Master</b> - nem Admin, nem RH, nem quem tem a tag "RH todas as unidades" vê o link de localização; pro resto do time o check-in aparece normal, só sem esse dado extra.</p>
-    <p><b>Visão pra quem administra:</b> a aba <b>📸 Check-ins</b> em <code>/rh.html</code> mostra "🟢 Na loja agora" (quem já fez check-in mas ainda não fez check-out) e o histórico do dia (ou de qualquer data escolhida), com link pra ver as fotos de entrada e saída de cada check-in. O <b>Painel</b> também mostra a contagem de "Na loja agora" no card de RH.</p>
+    <p><b>Visão pra quem administra:</b> a aba <b>📸 Check-ins</b> em <code>/rh</code> mostra "🟢 Na loja agora" (quem já fez check-in mas ainda não fez check-out) e o histórico do dia (ou de qualquer data escolhida), com link pra ver as fotos de entrada e saída de cada check-in. O <b>Painel</b> também mostra a contagem de "Na loja agora" no card de RH.</p>
     <h3>⏳ Aprovações (limite de check-in)</h3>
     <p>Dois freios no check-in, resolvidos com uma pendência de aprovação em vez de travar liso - visível só pra quem tem a tag <b>🧑‍💼 RH (todas as unidades)</b>, Admin ou Master (nunca pro gerente comum da loja, que é justamente quem gerou a pendência):</p>
     <ul>

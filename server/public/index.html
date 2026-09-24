@@ -259,8 +259,8 @@ let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 function paginaInicial(me){
   const secoes = (me && me.permissions && me.permissions.sections) || [];
   const abaixoDeAdmin = me && me.role !== 'master' && !me.isAdmin;
-  if(abaixoDeAdmin && (secoes.includes('abastecimento-carrinho') || secoes.includes('abastecimento-loja'))) return '/abastecimento.html';
-  return '/tarefas.html';
+  if(abaixoDeAdmin && (secoes.includes('abastecimento-carrinho') || secoes.includes('abastecimento-loja'))) return '/abastecimento';
+  return '/tarefas';
 }
 
 async function boot(){
@@ -499,7 +499,7 @@ document.getElementById('trocar-senha-form').addEventListener('submit', async (e
       const me = await fetch('/api/me', { headers: { Authorization: 'Bearer '+form.dataset.token } }).then(r=>r.json());
       if(!me.temPalavraRecuperacao){ mostrarPalavraRecuperacao(form.dataset.token, nova, me); return; }
       location.href = paginaInicial(me);
-    }catch(e){ location.href = '/tarefas.html'; }
+    }catch(e){ location.href = '/tarefas'; }
   }catch(err){
     erroEl.textContent = err.message;
     erroEl.classList.remove('hidden');

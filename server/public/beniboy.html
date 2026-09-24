@@ -640,7 +640,7 @@ function painelHtml(chat){
   const tickets = chat.ticketsVinculados || [];
   // Todo trabalho que nasce da conversa começa no Meu Dia. Só depois a
   // triagem decide se será mesmo uma solicitação/chamado de TI.
-  const destinoPrincipal = chat.tarefaId ? `/tarefas.html?tarefa=${encodeURIComponent(chat.tarefaId)}` : null;
+  const destinoPrincipal = chat.tarefaId ? `/tarefas?tarefa=${encodeURIComponent(chat.tarefaId)}` : null;
   const protocoloHtml = chat.numeroTicket
     ? (destinoPrincipal
       ? `<a href="${destinoPrincipal}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700;">Ticket #${escapeHtml(chat.numeroTicket)}</a>`
@@ -669,7 +669,7 @@ function painelHtml(chat){
     acoes.push(`<button type="button" class="btn-icone" data-dica="Reabrir" aria-label="Reabrir" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️</button>`);
   }
   if(!chat.tarefaId) acoes.push(`<button type="button" class="btn-icone" data-dica="Gerar tarefa" aria-label="Gerar tarefa" onclick="gerarTarefa('${chat.id}')">📝</button>`);
-  else acoes.push(`<a class="btn-icone" data-dica="Tarefa gerada - abrir o Meu Dia" aria-label="Tarefa gerada - abrir o Meu Dia" href="/tarefas.html">📝</a>`);
+  else acoes.push(`<a class="btn-icone" data-dica="Tarefa gerada - abrir o Meu Dia" aria-label="Tarefa gerada - abrir o Meu Dia" href="/tarefas">📝</a>`);
   if(IS_MASTER) acoes.push(`<button type="button" class="btn-icone" data-dica="Baixar PDF da conversa" aria-label="Baixar PDF da conversa" onclick="baixarPdfConversa('${chat.id}')">📄</button>`);
   // problema de Computador/Sistema numa loja já identificada e que já tem
   // computador com acesso remoto cadastrado no NOC - atalho direto em vez de
@@ -681,7 +681,7 @@ function painelHtml(chat){
   if(ASSUNTOS_NOC.includes(chat.assunto)){
     const codigoNoc = unidadeComAcessoRemoto(chat.lojaContexto);
     if(codigoNoc){
-      acoes.push(`<a class="btn-icone" data-dica="Ir para o NOC" aria-label="Ir para o NOC" href="/loja-status.html?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️</a>`);
+      acoes.push(`<a class="btn-icone" data-dica="Ir para o NOC" aria-label="Ir para o NOC" href="/loja-status?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️</a>`);
     } else {
       acoes.push(`<button type="button" class="btn-icone" data-dica="Ir para o NOC" aria-label="Ir para o NOC" data-loja="${escapeHtml(chat.lojaContexto||'')}" onclick="abrirNocDaConversa(this.dataset.loja)">🖥️</button>`);
     }
@@ -718,10 +718,10 @@ function painelHtml(chat){
     ${tickets.length ? `<div class="d-tickets">🎫 Tickets dessa conversa: ${tickets.map(t=>{
       // chamado-ti abre no técnico, o resto (solicitacao) na Central -
       // clicavel leva direto pro ticket (pedido explicito do usuario)
-      const destino = t.tipo === 'chamado-ti' ? '/tecnico.html' : '/central-historico.html';
+      const destino = t.tipo === 'chamado-ti' ? '/tecnico' : '/central-historico';
       return `<a href="${destino}?ticket=${encodeURIComponent(t.numero)}" target="_blank" rel="noopener" style="color:var(--accent);">#${escapeHtml(t.numero)}</a>`;
     }).join(', ')}</div>` : ''}
-    ${(chat.tarefaId || chat.chamadoId) ? `<div class="d-tickets">↗ Abrir: ${chat.tarefaId ? `<a href="/tarefas.html?tarefa=${encodeURIComponent(chat.tarefaId)}" target="_blank" rel="noopener" style="color:var(--accent);">tarefa do Ticket #${escapeHtml(chat.numeroTicket)}</a>` : ''}${chat.tarefaId && chat.chamadoId ? ' · ' : ''}${chat.chamadoId ? `<a href="/tecnico.html?ticket=${encodeURIComponent(chat.numeroTicket)}" target="_blank" rel="noopener" style="color:var(--accent);">chamado remoto</a>` : ''}</div>` : ''}
+    ${(chat.tarefaId || chat.chamadoId) ? `<div class="d-tickets">↗ Abrir: ${chat.tarefaId ? `<a href="/tarefas?tarefa=${encodeURIComponent(chat.tarefaId)}" target="_blank" rel="noopener" style="color:var(--accent);">tarefa do Ticket #${escapeHtml(chat.numeroTicket)}</a>` : ''}${chat.tarefaId && chat.chamadoId ? ' · ' : ''}${chat.chamadoId ? `<a href="/tecnico?ticket=${encodeURIComponent(chat.numeroTicket)}" target="_blank" rel="noopener" style="color:var(--accent);">chamado remoto</a>` : ''}</div>` : ''}
     ${alertasSeg.length ? `<div class="d-alerta-seguranca"><details><summary>🛡️ ${alertasSeg.length} alerta(s) de segurança nessa conversa</summary>${alertasSeg.map(a=>`
       <div class="d-alerta-item">
         <b>${escapeHtml(a.motivo||'')}</b> · ${fmtDataHora(a.em)}<br>
@@ -969,11 +969,11 @@ function abrirNocDaConversa(lojaContexto){
     const digitado = prompt('Qual unidade? (nome da loja no NOC)', lojaContexto||'');
     if(digitado===null) return;
     const termo = digitado.trim();
-    if(!termo){ window.open('/loja-status.html','_blank','noopener'); return; }
+    if(!termo){ window.open('/loja-status','_blank','noopener'); return; }
     const porNome = NOC_UNIDADES.find(x=>String(x.nome||'').toLowerCase()===termo.toLowerCase());
     codigo = porNome ? porNome.codigo : termo;
   }
-  window.open('/loja-status.html?unidade='+encodeURIComponent(codigo),'_blank','noopener');
+  window.open('/loja-status?unidade='+encodeURIComponent(codigo),'_blank','noopener');
 }
 
 function unidadeComAcessoRemoto(nomeLoja){

@@ -93,7 +93,11 @@ function servidor() {
       // o resto: lista vazia ou objeto vazio - a tela tem que abrir mesmo sem dado
       return json(/\/(config|contexto|status|resumo|sincronizacao|kpis?)$/.test(u.pathname) ? {} : []);
     }
-    const alvo = path.join(RAIZ, u.pathname === '/' ? 'index.html' : u.pathname);
+    // igual à produção (express.static com extensions: ['html']): /tarefas
+    // serve tarefas.html. Sem isto, tela que navega pra URL sem .html (todas,
+    // desde 24/09) caía em "nao" aqui e parecia quebrada
+    let alvo = path.join(RAIZ, u.pathname === '/' ? 'index.html' : u.pathname);
+    if (!path.extname(alvo) && fs.existsSync(alvo + '.html')) alvo += '.html';
     if (!alvo.startsWith(RAIZ) || !fs.existsSync(alvo) || fs.statSync(alvo).isDirectory()) { res.writeHead(404); return res.end('nao'); }
     res.writeHead(200, { 'content-type': TIPOS[path.extname(alvo)] || 'application/octet-stream' });
     fs.createReadStream(alvo).pipe(res);

@@ -447,7 +447,7 @@ document.getElementById('curriculo').addEventListener('change', ()=>{
 });
 
 document.getElementById('btn-abrir-ponto').addEventListener('click', ()=>{
-  if(LINK_TOKEN) location.href = '/rh-colaborador.html?token=' + encodeURIComponent(LINK_TOKEN);
+  if(LINK_TOKEN) location.href = '/rh-colaborador?token=' + encodeURIComponent(LINK_TOKEN);
 });
 
 boot();

@@ -108,7 +108,7 @@ async function notifyQaAprovacaoPendente(resumo, criadoPorEmail, { id = null, or
     // um aviso por pedido: dois pedidos seguidos nao podem se engolir
     tag: id ? `autorizacao-${id}` : 'qa-aprovacao',
     critical: true,
-    url: id ? `/autorizacoes.html?id=${encodeURIComponent(id)}` : '/autorizacoes.html',
+    url: id ? `/autorizacoes?id=${encodeURIComponent(id)}` : '/autorizacoes',
   };
   await alertasCentral.registrar({ tipo: 'qa-aprovacao', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -211,22 +211,22 @@ async function notify(tx) {
   // outros "critico") - estorno/chargeback comum fica so no push normal,
   // senao toda operação de rotina (varias por dia) viraria sirene
   const critico = !!tx.fraudeSuspeita;
-  await alertasCentral.registrar({ tipo: critico ? 'fraude' : 'monitor', titulo: title, resumo: body, url: '/monitor.html', critico });
-  await sendToAll({ title, body, tag: tx.pspReference, critical: critico, url: '/monitor.html' }, { unidade: tx.unidade, section: 'monitor' });
+  await alertasCentral.registrar({ tipo: critico ? 'fraude' : 'monitor', titulo: title, resumo: body, url: '/monitor', critico });
+  await sendToAll({ title, body, tag: tx.pspReference, critical: critico, url: '/monitor' }, { unidade: tx.unidade, section: 'monitor' });
 }
 
 // alerta generico (ex: teste de cartao clonado) - nao depende de uma
 // transacao especifica normalizada
 async function notifyRaw(title, body, tag, unidade) {
-  await alertasCentral.registrar({ tipo: 'monitor', titulo: title, resumo: body, url: '/monitor.html' });
-  await sendToAll({ title, body, tag, url: '/monitor.html' }, { unidade, section: 'monitor' });
+  await alertasCentral.registrar({ tipo: 'monitor', titulo: title, resumo: body, url: '/monitor' });
+  await sendToAll({ title, body, tag, url: '/monitor' }, { unidade, section: 'monitor' });
 }
 
 // solicitacao nova na Central (estorno, ajuste de fechamento, pagamento,
 // suporte de TI etc.) - vai so pra Master/Admin, que sao quem decide essas
 // filas (mesmo publico do toast+som ja existente no Painel)
 async function notifySolicitacao(title, body, tag, url) {
-  const destino = url || '/central-historico.html';
+  const destino = url || '/central-historico';
   await alertasCentral.registrar({ tipo: 'solicitacao', titulo: title, resumo: body, url: destino });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify({ title, body, tag, url: destino });
@@ -250,7 +250,7 @@ async function notifySolicitacao(title, body, tag, url) {
 // alarme e assunto do balcao, nao da gestao
 async function notifyAbastecimento(title, body, tag, secao) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({ title, body, tag, url: '/abastecimento.html' });
+  const payload = JSON.stringify({ title, body, tag, url: '/abastecimento' });
   const subs = await loadSubs();
   for (const sub of subs) {
     const meta = sub.meta;
@@ -293,14 +293,14 @@ async function notifyBeniboyEscalonamento(chat, motivo, opts) {
     title: '🔴 Loja sem conexão · conversa travada',
     body: `${(chat && chat.lojaContexto) || 'A loja'} está sem internet/computador desligado - a conversa com ${(chat && chat.nome) || 'o visitante'} parou por causa disso, não porque o Beniboy não resolveu.`.slice(0, 150),
     tag: 'beniboy-' + chatId,
-    url: '/loja-status.html',
+    url: '/loja-status',
   } : {
     title: '🚨 Beniboy precisa de você',
     icone: '/beniboy-192.png',
     body: `${(chat && chat.nome) || 'Visitante'}${motivo ? ' · ' + motivo : ''}`.slice(0, 150),
     tag: 'beniboy-' + chatId,
     critical: true,
-    url: '/alerta-beniboy.html?' + params.toString(),
+    url: '/alerta-beniboy?' + params.toString(),
   };
   await alertasCentral.registrar({ tipo: lojaOffline ? 'noc-loja-offline-conversa' : 'beniboy', titulo: dados.title, resumo: dados.body, url: dados.url, critico: !lojaOffline });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -347,9 +347,9 @@ async function notifyPorTag(destino, { titulo, corpo, tagPush, url, critico } = 
 // a seção que cada tela pede - o suficiente pra não mandar alguém pra uma
 // porta fechada. Tela fora desta lista não restringe (o push leva o link).
 const SECAO_DA_TELA = {
-  '/tecnico.html': 'tecnico',
-  '/manutencao.html': 'manutencao',
-  '/beniboy.html': 'suporte',
+  '/tecnico': 'tecnico',
+  '/manutencao': 'manutencao',
+  '/beniboy': 'suporte',
 };
 function podeAbrirUrl(pessoa, url) {
   const secao = SECAO_DA_TELA[String(url || '').split('?')[0]];
@@ -375,7 +375,7 @@ async function notifyAgregador(chat, { acao, detalhe, unidade, canal } = {}) {
   const onde = [canal, unidade].filter(Boolean).join(' · ');
   const titulo = `🛵 ${oQue} no agregador`;
   const corpo = `${(chat && chat.nome) || 'Visitante'}${onde ? ' · ' + onde : ''}${detalhe ? ' — ' + detalhe : ''}`.slice(0, 150);
-  const url = '/beniboy.html?chat=' + encodeURIComponent(chatId);
+  const url = '/beniboy?chat=' + encodeURIComponent(chatId);
 
   await alertasCentral.registrar({ tipo: 'agregador', titulo, resumo: corpo, url, critico: true });
   if (!coordenadores.length) {
@@ -406,7 +406,7 @@ async function notifySegurancaChat(chat, detalhe) {
     body: `${(chat && chat.nome) || 'Visitante'}${detalhe ? ' · ' + detalhe : ''}`.slice(0, 150),
     tag: 'seguranca-' + chatId + '-' + Date.now(),
     critical: true,
-    url: '/alerta-beniboy.html?' + params.toString(),
+    url: '/alerta-beniboy?' + params.toString(),
   };
   await alertasCentral.registrar({ tipo: 'seguranca', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -464,7 +464,7 @@ async function notifyAbastecimentoDivergencia(rotuloTurno, resumo, turnoAte) {
     // com o "ate" do ciclo, o clique abre direto na explicacao daquele
     // turno (ver /api/abastecimento/turno/:ate em index.js) em vez de cair
     // na tela geral - sem ele (chamada antiga/defensiva), cai na tela geral
-    url: turnoAte ? `/abastecimento-relatorios.html?turno=${encodeURIComponent(turnoAte)}` : '/abastecimento-relatorios.html',
+    url: turnoAte ? `/abastecimento-relatorios?turno=${encodeURIComponent(turnoAte)}` : '/abastecimento-relatorios',
   };
   await alertasCentral.registrar({ tipo: 'abastecimento-divergencia', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -499,7 +499,7 @@ async function testarPush(userId) {
     title: '🔔 Teste de notificação',
     body: 'Se você está vendo isso, os alertas estão chegando neste aparelho.',
     tag: 'teste-push',
-    url: '/painel.html',
+    url: '/painel',
   });
   let enviados = 0;
   let expiradasRemovidas = 0;
@@ -543,7 +543,7 @@ async function notifyParqueTermoPendente({ unidade, unidadeNome, responsavelNome
     // tag com o id da emissao: cada atendimento avisa uma vez so, e um
     // aviso novo nao substitui o anterior na bandeja
     tag: `parque-termo-pendente-${id}`,
-    url: '/parque.html',
+    url: '/parque',
   };
   await alertasCentral.registrar({ tipo: 'parque-termo', titulo: dados.title, resumo: dados.body, url: dados.url });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -565,7 +565,7 @@ async function notifyParquePcdCortesiaLimite({ unidade, unidadeNome, horaBucket,
     title: 'PCD cortesia · limite do horário atingido',
     body: `${unidadeNome || unidade} · ${horaBucket}:00–${horaBucket}:59 · já foram usadas as 2 vagas de cortesia PCD.`,
     tag: `parque-pcd-cortesia-${unidade}-${dataUtilizacao}-${horaBucket}`,
-    url: '/parque-checkin.html',
+    url: '/parque-checkin',
   };
   await alertasCentral.registrar({ tipo: 'parque-pcd', titulo: dados.title, resumo: dados.body, url: dados.url });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -605,7 +605,7 @@ async function notifyRhTesteVencido(funcionario) {
     body: `${funcionario.nome} (${funcionario.unidade}) completou o período de teste - defina se segue.`,
     tag: `rh-teste-${funcionario.id}`,
     critical: true,
-    url: '/rh.html',
+    url: '/rh',
   };
   await alertasCentral.registrar({ tipo: 'rh-teste-vencido', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -636,8 +636,8 @@ function podeReceberAprovacaoRh(sub) {
   return !!meta.isMaster || !!meta.isAdmin || !!meta.podeRhTodasUnidades;
 }
 async function notifyAprovacaoRh(title, body, tag, tipo, critico) {
-  const dados = { title, body, tag, url: '/rh.html', critical: !!critico };
-  await alertasCentral.registrar({ tipo: tipo || 'rh', titulo: title, resumo: body, url: '/rh.html', critico: !!critico });
+  const dados = { title, body, tag, url: '/rh', critical: !!critico };
+  await alertasCentral.registrar({ tipo: tipo || 'rh', titulo: title, resumo: body, url: '/rh', critico: !!critico });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
@@ -674,7 +674,7 @@ async function notifyRhCheckoutAtrasado(checkin, horas) {
     body: `${checkin.funcionarioNome} (${checkin.unidade}) está com o ponto aberto há ${h}h - precisa bater o check-out.`,
     tag: `rh-checkout-${checkin.id}`,
     critical: false,
-    url: '/rh.html',
+    url: '/rh',
   };
   await alertasCentral.registrar({ tipo: 'rh-checkout-atrasado', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -773,7 +773,7 @@ async function notifyExperienciaPrazoGerente(funcionario) {
     title: `🗓️ Experiência vence HOJE`,
     body: `${funcionario.nome} - prazo da etapa de ${etapaLabel} vence hoje. Registre a decisão.`,
     tag: `rh-experiencia-gerente-${funcionario.id}`,
-    url: '/rh.html',
+    url: '/rh',
   };
   await alertasCentral.registrar({ tipo: 'rh-experiencia-gerente', titulo: dados.title, resumo: dados.body, url: dados.url });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -813,7 +813,7 @@ async function notifyDiscoAlerta(unidadeNome, codigo, computadorNome, posto, niv
     title: nivel === 'critico' ? '💽 HD em estado crítico' : '💽 HD pedindo atenção',
     body: `${prefixo}${unidadeNome || codigo}: ${lista}`,
     tag: `noc-disco-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-disco', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -844,7 +844,7 @@ async function notifyRamAlerta(unidadeNome, codigo, computadorNome, posto, nivel
     title: nivel === 'critico' ? '🧠 RAM crítica no computador' : '🧠 RAM pedindo atenção',
     body: `${prefixo}${unidadeNome || codigo}: ${lista}`,
     tag: `noc-ram-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-ram', titulo: dados.title, resumo: dados.body, url: dados.url, critico: nivel === 'critico' });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -867,7 +867,7 @@ async function notifyComandoSemAdmin(unidadeNome, codigo, computadorNome, posto,
     title: '⚙️ Comando não rodou (sem Administrador)',
     body: `${prefixo}${unidadeNome || codigo}: ${motivo || 'reinstale o NOCZenith como Administrador'}`,
     tag: `noc-cmd-admin-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-comando-admin', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -895,7 +895,7 @@ async function notifyComandoTravado(unidadeNome, codigo, computadorNome, posto, 
     title: '⚙️ Comando sem retorno',
     body: `${prefixo}${unidadeNome || codigo}: ${motivo || 'a execução foi marcada como erro e a fila foi liberada.'}`,
     tag: `noc-cmd-travado-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-comando-travado', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -920,7 +920,7 @@ async function notifyVmCaiu(unidadeNome, codigo, computadorNome, posto, vms) {
     title: n > 1 ? `🖥️ ${n} VMs caíram` : '🖥️ VM caiu',
     body: `${prefixo}${unidadeNome || codigo}: ${quais}`,
     tag: `noc-vm-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-vm', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -956,7 +956,7 @@ async function notifyMaquinaReiniciou(unidadeNome, codigo, computadorNome, posto
       ? `${prefixo}${unidadeNome || codigo}: voltou depois de um desligamento anormal (queda de energia ou travamento).`
       : `${prefixo}${unidadeNome || codigo}: reiniciou e voltou ao ar.`,
     tag: `noc-reiniciou-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-reiniciou', titulo: dados.title, resumo: dados.body, url: dados.url, critico: !!inesperado });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -984,7 +984,7 @@ async function notifyLinkDegradado(unidadeNome, codigo, computadorNome, posto, l
       ? `${prefixo}${unidadeNome || codigo}: a placa de rede está sem link (cabo solto, switch ou porta). Segue no ar por ${linkTipo === 'wifi' ? 'Wi-Fi' : 'outro caminho'}.`
       : `${prefixo}${unidadeNome || codigo}: saiu do cabo e está no Wi-Fi.`,
     tag: `noc-link-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-link', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1034,7 +1034,7 @@ async function notifyInternetUnidade(unidadeNome, t) {
   const dados = {
     ...textoInternetRuim(t, unidadeNome),
     tag: `noc-internet-${t.codigo}`,
-    url: '/noc-rede.html',
+    url: '/noc-rede',
   };
   await alertasCentral.registrar({ tipo: 'noc-internet', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1059,7 +1059,7 @@ async function notifyInternetUnidadeNormalizou(unidadeNome, t) {
     title: '🌐 Internet normalizou',
     body: `${unidadeNome || t.codigo}: ${agora}${quanto}.`,
     tag: `noc-internet-${t.codigo}`,
-    url: '/noc-rede.html',
+    url: '/noc-rede',
   };
   await alertasCentral.registrar({ tipo: 'noc-internet', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1093,7 +1093,7 @@ async function notifyInternetUnidadeNormalizou(unidadeNome, t) {
 // errada. O público é o mesmo dos alarmes do NOC.
 async function notifyAlertaExterno(titulo, corpo, tag, critico) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({ title: titulo, body: corpo, tag, url: '/central-alertas.html' });
+  const payload = JSON.stringify({ title: titulo, body: corpo, tag, url: '/central-alertas' });
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberCritico(sub)) continue;
@@ -1113,7 +1113,7 @@ async function notifyDispositivoIpMudou(unidadeNome, codigo, apelido, tipoRotulo
     body: `${que} · ${unidadeNome || codigo}: o endereço passou de ${de} para ${para}. `
       + 'Atualize no servidor da loja — até lá, o trabalho continua saindo pro endereço antigo.',
     tag: `noc-ip-${codigo}-${apelido || tipoRotulo || 'dispositivo'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-ip', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1139,7 +1139,7 @@ async function notifyReinicioPendente(unidadeNome, codigo, computadorNome, posto
     // alguém logar de novo (a tarefa antiga só dispara no login)
     body: `${prefixo}${unidadeNome || codigo}: ligado há ${dias} dias sem reiniciar. Após reiniciar, faça um login na máquina (ou reinstale o NOCZenith como Administrador pra ele voltar sozinho).`,
     tag: `noc-reiniciar-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-reiniciar', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1174,13 +1174,13 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, rei
     body: `${prefixo}${unidadeNome || codigo} saiu do ar pra reiniciar - foi o NOC que mandou. Volta em ~2 min; se não voltar, você é avisado.`,
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
     critical: false,
-    url: '/loja-status.html',
+    url: '/loja-status',
   } : {
     title: '⚠️ Computador sem resposta',
     body: `${prefixo}${unidadeNome || codigo} está sem sinal há ${minutosSemSinal} min. Pode estar travado, desligado ou sem rede; confirme antes de agir.`,
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
     critical: true,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrarCiclo({
     ciclo: dados.tag, estado: 'caiu',
@@ -1219,7 +1219,7 @@ async function notifyDivergenciaCaixa(unidadeNome, sangria) {
       + (pendentes ? ` · ${pendentes} dia(s) sem fechamento lançado` : '')
       + (sangria.motivoDivergencia ? ` · motivo: ${sangria.motivoDivergencia}` : ''),
     tag: `caixa-divergencia-${sangria.id}`,
-    url: '/saidas.html',
+    url: '/saidas',
   };
   await alertasCentral.registrar({ tipo: 'caixa-divergencia', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1266,7 +1266,7 @@ async function notifyRedeUnidade(unidadeNome, codigo, resumo, caiu) {
     title: caiu ? `🔴 Rede caiu · ${unidadeNome || codigo}` : `🟢 Rede voltou · ${unidadeNome || codigo}`,
     body: resumo,
     tag: `noc-rede-unidade-${codigo}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: caiu ? 'caiu' : 'voltou', tipo: 'noc-rede-unidade', titulo: dados.title, resumo: dados.body, url: dados.url, critico: caiu });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1303,7 +1303,7 @@ async function notifyBateriaAparelho(codigo, posto, aviso) {
     title: aviso.critica ? `🪫 Bateria crítica · ${onde}` : `🔋 Bateria baixa · ${onde}`,
     body: `O aparelho está com ${aviso.porcento}% e não está carregando.`,
     tag: `bateria-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
     critical: !!aviso.critica,
   };
   await alertasCentral.registrar({ tipo: 'bateria-aparelho', titulo: dados.title, resumo: dados.body, url: dados.url, critico: !!aviso.critica });
@@ -1328,7 +1328,7 @@ async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispos
     title: `${icone} ${rotulo} sem rede`,
     body: `${nome} (${unidadeNome || codigo}) sumiu da rede - verifique cabo/energia do equipamento.`,
     tag: `noc-dispositivo-${codigo}-${mac}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   // `dados.tag` ja e' a identidade da maquina (codigo+mac) - e' o que faz o
   // celular colapsar a notificacao. Reaproveitada como chave do ciclo: um card
@@ -1364,7 +1364,7 @@ async function notifyImpressoraProblema(unidadeNome, codigo, apelido, ip, mac, n
     // 7 trabalho(s) parados" - nunca "algo deu errado"
     body: `${nome} (${unidadeNome || codigo}): ${motivos.join(' · ')}.`,
     tag: `noc-impressora-${codigo}-${mac}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'caiu', tipo: 'noc-impressora-problema', titulo: dados.title, resumo: dados.body, url: dados.url, critico });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1391,7 +1391,7 @@ async function notifyImpressoraNormalizou(unidadeNome, codigo, apelido, ip, mac,
     title: '🖨️ Impressora normalizou',
     body: `${nome} (${unidadeNome || codigo}) voltou a imprimir${(de || []).length ? ` - era: ${de.join(' · ')}` : ''}.`,
     tag: `noc-impressora-${codigo}-${mac}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'voltou', tipo: 'noc-impressora-normalizou', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1416,7 +1416,7 @@ async function notifyDispositivoOnline(unidadeNome, codigo, apelido, tipoDisposi
     title: `${icone} Voltou à rede`,
     body: `${nome} (${unidadeNome || codigo}) voltou a responder na rede.`,
     tag: `noc-dispositivo-${codigo}-${mac}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'voltou', tipo: 'noc-dispositivo-online', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1448,7 +1448,7 @@ async function notifyReinicioNaoVoltou(unidadeNome, codigo, computadorNome, post
     body: `${prefixo}${unidadeNome || codigo}: reiniciada pelo NOC há ${minutos} min e ainda não subiu. Pode ter travado no boot, desligado de vez ou perdido a rede ao subir.`,
     tag: `noc-reinicio-falhou-${codigo}-${posto || 'principal'}`,
     critical: true,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-reinicio-falhou', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1473,7 +1473,7 @@ async function notifyLojaVoltou(unidadeNome, codigo, computadorNome, posto, volt
       ? `${prefixo}${unidadeNome || codigo} reiniciou e já está no ar de novo.`
       : `${prefixo}${unidadeNome || codigo} voltou a responder.`,
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'voltou', tipo: 'noc-online', titulo: dados.title, resumo: dados.body, url: dados.url });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1521,7 +1521,7 @@ async function notifyProgramaNovo(unidadeNome, codigo, computadorNome, posto, no
     body: `${prefixo}${unidadeNome || codigo} · ${lista}${resto}`,
     tag: `programa-novo-${codigo}-${posto || 'principal'}-${Date.now()}`,
     critical: true,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-programa-novo', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1551,7 +1551,7 @@ async function notifyProgramaSumido(unidadeNome, codigo, computadorNome, posto, 
     body: `${prefixo}${unidadeNome || codigo} · ${lista}${resto}`,
     tag: `programa-sumido-${codigo}-${posto || 'principal'}-${Date.now()}`,
     critical: true,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-programa-sumido', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1574,7 +1574,7 @@ async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, 
     body: `${prefixo}${unidadeNome || codigo} · ${detalhe || 'conexão de acesso remoto'}`,
     tag: `acesso-remoto-${codigo}-${posto || 'principal'}-${Date.now()}`,
     critical: true,
-    url: '/loja-status.html',
+    url: '/loja-status',
   };
   await alertasCentral.registrar({ tipo: 'noc-acesso-remoto', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
@@ -1623,7 +1623,7 @@ async function notifyFechamentoLancado(registro, { exceptUserId } = {}) {
     : `diferença de ${fmtMoedaFech(diferenca)}`;
   const title = '🧾 Fechamento lançado';
   const body = `${registro.unidadeNome || registro.unidade} · ${dataBr} · faturamento ${fmtMoedaFech(registro.faturamento)} · ${resumoCaixa}${registro.gerente ? ` · por ${registro.gerente}` : ''}`;
-  const url = '/fechamentos.html';
+  const url = '/fechamentos';
   await alertasCentral.registrar({ tipo: 'fechamento', titulo: title, resumo: body, url });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify({ title, body, tag: `fechamento-${registro.id}`, url });
