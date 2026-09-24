@@ -1621,19 +1621,33 @@ async function detalhar(codigo, posto) {
 }
 
 // DIAGNOSTICO DO PAPEL DE PAREDE (pedido do Master: "por que não subiu em
-// todos?"). Pra cada computador diz se a arte VAI aplicar e, quando não, por
-// quê — sem o Master ter que abrir máquina por máquina. Motivos:
-//   desligado      - a trava 🖼️ do card está off (nada aplica sem ela)
-//   sem-marca      - a unidade não tem marca no perfil, então não casa arte de
-//                    grupo+marca nem de marca (cai só na padrão, se houver)
-//   sem-arte       - tem marca, mas não há arte pra ela (nem do grupo, nem da
-//                    marca, nem padrão) - ver papelDeParedeDe
-//   offline        - vai aplicar quando a máquina voltar
-//   ok             - ligado, com arte e no ar; aplica na próxima batida. Só a
-//                    instância logada aplica (SYSTEM não tem área de trabalho),
-//                    então máquina sem ninguém logado no Windows aplica quando
-//                    alguém logar.
+// todos?"). Pra cada computador diz o que a máquina VAI mostrar e, quando não
+// vai, por quê — sem o Master ter que abrir máquina por máquina. Motivos, na
+// ordem em que são checados (o primeiro que bate é o que impede):
+//   offline        - nada chega nela, nem arte nem modelo básico. Vem
+//                    primeiro: ligar a trava ou subir arte não adianta
+//                    enquanto a máquina estiver calada
+//   desligado      - a trava 🖼️ do card está off
+//   ok             - ligado e com arte (da máquina, grupo+marca, marca ou
+//                    padrão): aplica a arte
+//   modelo-basico  - ligado e SEM arte: aplica o modelo básico (logo do
+//                    grupo, logo da marca, nome da máquina). Desde 23/09 isso
+//                    APLICA - antes do modelo básico este caso era "sem-arte"
+//                    e o painel dizia "não vai aplicar", o que deixou de ser
+//                    verdade
+//   agente-antigo  - ligado, sem arte, e o agente é anterior ao modelo básico
+//                    (v115): ele não sabe desenhar o modelo e a tela fica como
+//                    está até a máquina atualizar
+// Só a instância logada aplica (SYSTEM não tem área de trabalho): máquina
+// sem ninguém logado no Windows aplica quando alguém logar.
 // Custa leitura só quando o Master abre o painel — fora do poll de 30s.
+const VERSAO_MODELO_BASICO = 115;
+function motivoDoPapel({ online, ativo, temArte, agenteVersao }) {
+  if (!online) return 'offline';
+  if (!ativo) return 'desligado';
+  if (temArte) return 'ok';
+  return Number(agenteVersao) >= VERSAO_MODELO_BASICO ? 'modelo-basico' : 'agente-antigo';
+}
 async function diagnosticoPapelDeParede() {
   const docs = await listar();
   const linhas = [];
@@ -1641,18 +1655,14 @@ async function diagnosticoPapelDeParede() {
     const ativo = !!(d.politica && d.politica.papelDeParedeAtivo);
     let arte = null;
     if (ativo) arte = await papelDeParedeDe(d.codigo, d.posto).catch(() => null);
-    let motivo;
-    if (!ativo) motivo = 'desligado';
-    else if (!arte) {
-      const perf = await unidades.perfil(d.codigo).catch(() => null);
-      motivo = (perf && perf.marca) ? 'sem-arte' : 'sem-marca';
-    } else if (!d.online) motivo = 'offline';
-    else motivo = 'ok';
+    const agenteVersao = d.agenteVersao || null;
+    const motivo = motivoDoPapel({ online: !!d.online, ativo, temArte: !!arte, agenteVersao });
     const tipoArte = arte ? (arte.daMaquina ? 'maquina' : (arte.rede ? 'grupo+marca' : (arte.marca ? 'marca' : 'padrao'))) : null;
     linhas.push({
       codigo: d.codigo, posto: d.posto, nome: d.nome || d.posto,
       online: !!d.online, ativo, temArte: !!arte, tipoArte,
-      agenteVersao: d.agenteVersao || null, motivo,
+      ultimoContato: d.ultimoHeartbeatEm || null,
+      agenteVersao, motivo,
     });
   }
   return linhas;
@@ -4820,7 +4830,7 @@ module.exports = {
   substituirSegredos, SEGREDOS_PERMITIDOS,
   impressorasPraSondar,
   flushHeartbeatsPendentes,
-  heartbeat, listar, listarResumo, detalhar, diagnosticoPapelDeParede, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
+  heartbeat, listar, listarResumo, detalhar, diagnosticoPapelDeParede, motivoDoPapel, VERSAO_MODELO_BASICO, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   // alerta de internet por unidade: o estado vive em memoria, e o teste
   // precisa comecar cada cenario do zero
