@@ -18,6 +18,7 @@ const defesaChargeback = require('./defesaChargeback');
 const storage = require('./storage');
 const push = require('./push');
 const store = require('./store');
+const adyenDisputas = require('./adyenDisputas');
 
 // O index.js liga aqui o broadcast da tela: sem isso, o comentário ou o
 // pré-preenchimento do Claude só apareceria na tarefa aberta depois de F5.
@@ -44,6 +45,9 @@ const FERRAMENTAS = Object.freeze({
   obter_pagamento_adyen: { descricao: 'O pagamento contestado como a Adyen mandou: comprador (nome), endereço, cartão (bandeira, BIN, final, país e banco emissor), IP, 3DS, AVS/CVC, score de risco, linha do tempo dos eventos, os SINAIS que pesam na defesa e os outros pedidos do mesmo cliente que o Monitor guarda. Telefone e e-mail vêm mascarados: quem copia pra defesa é o servidor (preencher_defesa com usarDadosAdyen). Informe psp, numero (ticket da tarefa) ou disputaId.', risco: 'leitura', obrigatorios: [] },
   preencher_defesa: { descricao: 'Pré-preenche a "Defesa de chargeback" DENTRO da tarefa do Meu Dia. usarDadosAdyen=true copia do pagamento o que a Adyen traz com certeza (nome, telefone, endereço de entrega, delivery, pedidos anteriores do mesmo cliente); campos={id: valor} escreve o que você apurou (ids e opções do questionário, ex.: canal, itens, foraDoNormalTexto) e fontes={id: "de onde veio"}. Só escreve em campo VAZIO, nunca troca resposta da unidade e nunca marca decisao nem declaracao. Cada campo ganha o selo "preenchido pelo Claude" na tela e a tarefa recebe um comentário. Não conclui a tarefa. Informe tarefaId, numero ou disputaId.', risco: 'baixo', obrigatorios: [] },
   comentar_tarefa: { descricao: 'Escreve um comentário na tarefa do Meu Dia, assinado como Claude (Cowork), e avisa no celular o responsável e os participantes (avisar=false pra só registrar). Use pra cobrar o que falta, explicar o que foi preenchido e recomendar contestar ou aceitar. Informe tarefaId ou numero, e texto.', risco: 'baixo', obrigatorios: ['texto'] },
+  preparar_defesa_adyen: { descricao: 'Consulta NA ADYEN (Disputes API) os motivos de defesa que a bandeira aceita para esta disputa e os documentos que cada um pede, e lista o que o NoPulso tem pra enviar (PDF da defesa e evidências). Use antes de enviar_defesa_adyen. Informe disputaId, numero ou psp.', risco: 'leitura', obrigatorios: [] },
+  enviar_defesa_adyen: { descricao: 'Envia a defesa PELA API da Adyen: sobe os documentos (por padrão o PDF da defesa, no tipo de documento que o motivo pede) e defende com motivoDefesa (código de preparar_defesa_adyen). documentos=[{arquivo:"defesa" ou id da evidência (nota-fiscal, print-pedido...), tipo:"código do documento"}] pra escolher. Só com a defesa da unidade concluída e decisão Contestar. Deu certo, o caso fica ENVIADA sozinho.', risco: 'alto', obrigatorios: ['disputaId', 'motivoDefesa'], autorizar: true },
+  aceitar_disputa_adyen: { descricao: 'Aceita o chargeback PELA API da Adyen (o valor fica com o banco) e marca o caso PERDIDA. Use quando a unidade decidiu aceitar ou não há como defender.', risco: 'alto', obrigatorios: ['disputaId'], autorizar: true },
   registrar_defesa_enviada: { descricao: 'Registra no NoPulso que a defesa FOI anexada e enviada na Adyen (status ENVIADA). Use só depois de enviar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
   registrar_disputa_aceita: { descricao: 'Registra no NoPulso que o chargeback foi ACEITO na Adyen, sem defesa (status PERDIDA). Use só depois de aceitar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
   consultar_autorizacao: { descricao: 'Consulta se o Master já autorizou (ou recusou) uma ação pedida antes, e o resultado dela.', risco: 'leitura', obrigatorios: ['autorizacaoId'] },
@@ -97,6 +101,8 @@ const PROPRIEDADES_COMUNS = {
   incluirInativos: { type: 'boolean' },
   usarDadosAdyen: { type: 'boolean', description: 'preencher_defesa: o servidor copia da Adyen o que ela traz com certeza (nome, telefone, endereço de entrega, delivery, histórico do cliente).' },
   fontes: { type: 'object', description: 'preencher_defesa: {campo: "de onde veio"} - aparece no selo do campo.' },
+  motivoDefesa: { type: 'string', description: 'enviar_defesa_adyen: defenseReasonCode devolvido por preparar_defesa_adyen.' },
+  documentos: { type: 'array', items: { type: 'object', properties: { arquivo: { type: 'string' }, tipo: { type: 'string' } } }, description: 'enviar_defesa_adyen: [{arquivo:"defesa"|id da evidência, tipo:defenseDocumentTypeCode}].' },
   avisar: { type: 'boolean', description: 'comentar_tarefa: false = só registra, sem push pros participantes.' },
   idempotencyKey: { type: 'string', description: 'UUID novo por intenção de escrita; reutilize apenas ao repetir a mesma chamada.' },
 };
@@ -153,11 +159,13 @@ const ROTULOS = {
   modelo: 'Copiar permissões de', email: 'E-mail', username: 'Usuário', usuario: 'Acesso',
   pedirTrocaSenha: 'Pedir troca de senha', tarefa: 'Comando', alvos: 'Computadores', unidade: 'Unidade',
   titulo: 'Título', descricao: 'Descrição', observacao: 'Observação',
+  disputaId: 'Disputa', motivoDefesa: 'Motivo de defesa', documentos: 'Documentos',
 };
 const TITULO_ACAO = {
   enviar_email: 'Enviar e-mail', concluir_tarefa: 'Concluir tarefa', cancelar_tarefa: 'Cancelar tarefa',
   criar_usuario: 'Criar acesso', desbloquear_usuario: 'Desbloquear acesso', criar_nova_senha: 'Gerar senha temporária',
   executar_noc: 'Comando no NOC',
+  enviar_defesa_adyen: 'Enviar defesa na Adyen', aceitar_disputa_adyen: 'Aceitar chargeback na Adyen',
 };
 function valorLegivel(v) {
   if (Array.isArray(v)) return v.map((x) => (x && typeof x === 'object' ? [x.codigo, x.posto].filter(Boolean).join(' / ') || JSON.stringify(x) : String(x))).join(', ');
@@ -485,6 +493,78 @@ async function comentarTarefa(p) {
   return { tarefaId: t.id, ticket: t.numeroTicket || null, comentarioId: r.comentario.id, avisados };
 }
 
+// ---------- A DEFESA PELA API DA ADYEN (adyenDisputas.js) ----------
+// Mesmas travas do registrar_*: sem defesa concluída não defende, caso
+// encerrado não mexe. E o envio só roda com a digital do Master (autorizar).
+function arquivosDoCaso(c) {
+  const lista = [];
+  if (c.defesaPdf) lista.push({ arquivo: 'defesa', nome: c.defesaPdf.nome, path: c.defesaPdf.path, contentType: 'application/pdf', tamanhoKB: Math.round((c.defesaPdf.tamanho || 0) / 1024), avisos: c.defesaPdf.avisos || [] });
+  for (const e of c.evidencias || []) {
+    const tipo = /pdf/i.test(e.tipo || '') ? 'application/pdf' : (/png/i.test(e.tipo || '') ? 'image/png' : 'image/jpeg');
+    lista.push({ arquivo: e.evidencia, nome: e.nome, path: e.path, contentType: tipo });
+  }
+  return lista;
+}
+async function contextoAdyen(c) {
+  if (!c) throw new Error('Disputa não encontrada.');
+  if (!c.pspDisputa) throw new Error('Esta disputa ainda não tem o PSP da disputa (a Adyen ainda não abriu o chargeback - aviso de fraude sozinho não se defende).');
+  const conta = adyenDisputas.contaDoCaso(c, txsDoPedido(c.pedidoId));
+  if (!conta) throw new Error(`Não sei o merchantAccountCode da Adyen de ${c.unidade}. Configure ADYEN_MERCHANT_ACCOUNTS no Render (ex.: {"${c.unidade}":"DOM_xxxxx"}).`);
+  return { pspDisputa: c.pspDisputa, conta };
+}
+async function prepararDefesaAdyen(p) {
+  const c = await acharCaso(p);
+  const cfg = adyenDisputas.configurada();
+  const base = { disputaId: c ? c.id : null, status: c ? c.status : null, apiConfigurada: cfg.ok, falta: cfg.falta,
+    defesaPronta: !!(c && c.defesaProntaEm), decisaoDaUnidade: c ? c.decisao || null : null,
+    arquivosDisponiveis: c ? arquivosDoCaso(c).map(({ path, ...x }) => x) : [] };
+  if (!cfg.ok) return { ...base, motivos: [], aviso: `A API de disputas não está configurada no Render. Falta: ${cfg.falta.join(', ')}.` };
+  const ctx = await contextoAdyen(c);
+  return { ...base, contaAdyen: ctx.conta, pspDisputa: ctx.pspDisputa, motivos: await adyenDisputas.motivosDeDefesa(ctx) };
+}
+async function agirNaAdyen(nome, p, ator) {
+  const c = await disputes.getOne(String(p.disputaId));
+  if (!c) throw new Error('Disputa não encontrada.');
+  if (['GANHA', 'PERDIDA'].includes(c.status)) throw new Error(`Essa disputa já está encerrada (${c.status}).`);
+  const ctx = await contextoAdyen(c);
+  const porNome = `Claude (Cowork) via API · ${ator.username || ator.email}`;
+  if (nome === 'aceitar_disputa_adyen') {
+    await adyenDisputas.aceitar(ctx);
+    await disputes.registrarAcao(c.id, { status: 'PERDIDA', porNome, observacao: p.observacao || 'Chargeback aceito pela API da Adyen.', campo: 'aceite' });
+    await disputes.salvarCaso(c.id, { resultado: 'chargeback aceito sem defesa' });
+    return `Chargeback aceito na Adyen. Disputa ${c.id} registrada como PERDIDA.`;
+  }
+  if (c.status === 'ENVIADA') throw new Error('A defesa desta disputa já foi enviada.');
+  if (!c.defesaProntaEm) throw new Error('A defesa ainda não foi gerada: a tarefa da unidade não foi concluída.');
+  if (c.decisao === defesaChargeback.OPCAO_ACEITAR) throw new Error('A unidade decidiu aceitar o chargeback: use aceitar_disputa_adyen.');
+  const disponiveis = arquivosDoCaso(c);
+  let escolhidos = Array.isArray(p.documentos) && p.documentos.length ? p.documentos : null;
+  if (!escolhidos) {
+    // padrão: o PDF da defesa no documento que o motivo mais exige
+    const motivo = (await adyenDisputas.motivosDeDefesa(ctx)).find((m) => m.codigo === p.motivoDefesa);
+    if (!motivo) throw new Error(`O motivo ${p.motivoDefesa} não é aceito pela bandeira nesta disputa. Veja preparar_defesa_adyen.`);
+    const tipo = (motivo.documentos.find((d) => /required/i.test(d.exigencia || '')) || motivo.documentos[0] || {}).codigo;
+    if (!tipo) throw new Error('A Adyen não informou tipo de documento para esse motivo: mande documentos=[{arquivo, tipo}].');
+    escolhidos = [{ arquivo: 'defesa', tipo }];
+  }
+  const docs = [];
+  for (const d of escolhidos) {
+    const a = disponiveis.find((x) => x.arquivo === d.arquivo);
+    if (!a) throw new Error(`Arquivo "${d.arquivo}" não existe nesta defesa. Disponíveis: ${disponiveis.map((x) => x.arquivo).join(', ')}.`);
+    if (!d.tipo) throw new Error(`Falta o tipo de documento da Adyen para "${d.arquivo}".`);
+    docs.push({ buffer: await storage.baixarArquivo(a.path), contentType: a.contentType, tipo: String(d.tipo) });
+  }
+  await adyenDisputas.defender({ ...ctx, motivo: String(p.motivoDefesa), documentos: docs });
+  const agora = new Date().toISOString();
+  await disputes.registrarAcao(c.id, { status: 'ENVIADA', porNome, observacao: p.observacao || `Defesa enviada pela API: ${p.motivoDefesa}.`, campo: 'envio' });
+  await disputes.salvarCaso(c.id, { envioAdyen: { em: agora, motivo: String(p.motivoDefesa), documentos: escolhidos.map((d) => ({ arquivo: d.arquivo, tipo: d.tipo })) } });
+  if (c.tarefaId) {
+    const r = await tarefas.comentarComoAgente(c.tarefaId, `✅ Defesa enviada na Adyen pela API (motivo ${p.motivoDefesa}, ${docs.length} documento(s)), com autorização do Master. Agora é aguardar o banco: o resultado chega sozinho.`).catch(() => null);
+    if (r) aoAlterarTarefa(r.tarefa);
+  }
+  return `Defesa enviada na Adyen (${p.motivoDefesa}, ${docs.length} documento(s)). Disputa ${c.id} registrada como ENVIADA.`;
+}
+
 async function registrarNaDisputa(nome, p, ator) {
   const c = await disputes.getOne(String(p.disputaId));
   if (!c) throw new Error('Disputa não encontrada.');
@@ -509,6 +589,8 @@ async function despachar(nome, entrada, ator) {
   if (nome === 'obter_pagamento_adyen') return obterPagamentoAdyen(p);
   if (nome === 'preencher_defesa') return preencherDefesa(p);
   if (nome === 'comentar_tarefa') return comentarTarefa(p);
+  if (nome === 'preparar_defesa_adyen') return prepararDefesaAdyen(p);
+  if (nome === 'enviar_defesa_adyen' || nome === 'aceitar_disputa_adyen') return agirNaAdyen(nome, p, ator);
   if (nome === 'registrar_defesa_enviada' || nome === 'registrar_disputa_aceita') return registrarNaDisputa(nome, p, ator);
   if (nome === 'consultar_ticket') return consultarTicket(p.numero);
   if (nome === 'listar_tarefas') return listarTarefas(p);

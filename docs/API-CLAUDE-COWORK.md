@@ -70,6 +70,14 @@ Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Ap
 - `listar_disputas` (`status`, `unidade`, `somenteProntas`): os casos, pelo prazo mais próximo.
 - `obter_disputa` (`disputaId`, `numero` do ticket da tarefa ou `psp`): dados, respostas da unidade e links assinados de 2h do PDF e de cada evidência, para baixar e anexar na Adyen.
 - `registrar_defesa_enviada` e `registrar_disputa_aceita`: registram no NoPulso o que foi feito **na** Adyen (ENVIADA / PERDIDA). Só depois de agir lá, com a confirmação do Master na conversa.
+- `obter_pagamento_adyen`: o pagamento contestado como o Monitor guardou (3DS, país, CVC, score, eventos, outros pedidos do mesmo cliente). Telefone e e-mail vêm mascarados.
+- `preencher_defesa` (`usarDadosAdyen`, `campos`, `fontes`): pré-preenche a defesa dentro da tarefa, **só em campo vazio**. Nunca marca `decisao` nem `declaracao`. Cada campo ganha o selo "preenchido pelo Claude", que cai quando a unidade muda o valor.
+- `comentar_tarefa`: comentário assinado como Claude (Cowork), com push pro responsável e participantes.
+- **Pela API da Adyen** (opcional, `adyenDisputas.js`):
+  - `preparar_defesa_adyen` (leitura): motivos que a bandeira aceita e documentos de cada um.
+  - `enviar_defesa_adyen` e `aceitar_disputa_adyen`: viram **pedido de autorização** (digital do Master). O caso só vira ENVIADA com sucesso da Adyen.
+  - Render: `ADYEN_DISPUTES_API_KEY` (credencial com **só** o papel "API dispute management"). A URL padrão é a de produção, `https://ca-live.adyen.com/ca/services/DisputeService/v30` (host da Customer Area, **sem** prefixo de conta). `ADYEN_DISPUTES_URL` sobrepõe, pra homologar em `ca-test`. `ADYEN_MERCHANT_ACCOUNTS` (JSON unidade → conta) só pra caso antigo, anterior ao Monitor guardar o `merchantAccountCode` cru.
+  - A chave fica só no Render: nunca no código, nunca no chat.
 
 `preparar_reuniao` lê dados atuais do NoPulso e devolve, em uma única chamada, tarefas e reuniões, solicitações abertas e máquinas offline/degradadas. Aceita `termo`, `unidade` e `limite`; o Beni pode chamar novamente durante a reunião para atualizar cobranças sem trabalhar com uma pauta antiga.
 

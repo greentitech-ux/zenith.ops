@@ -27321,6 +27321,108 @@ $r | ConvertTo-Json -Depth 4 -Compress
   console.log(`${okDefesaClaude ? '✓' : '✗'} Defesa conduzida pelo Claude dentro da tarefa: lê a Adyen pelo Monitor, pré-preenche só campo vazio, nunca decide nem declara, telefone não passa por ele`);
 
   // ------------------------------------------------------------------
+  // A DEFESA PELA API DA ADYEN (adyenDisputas.js, 24/09/2026).
+  //
+  // Master: "vamos para a API da Adyen". O Claude consulta os motivos de
+  // defesa, sobe o PDF e defende pelo servidor - sem abrir a Customer Area.
+  //
+  // O que este teste protege: sem credencial nada é chamado; enviar e aceitar
+  // só rodam com a digital do Master (viram pedido de autorização); sem defesa
+  // concluída, ou com a unidade decidindo aceitar, não defende; resposta
+  // success=false da Adyen não marca ENVIADA; e a chave nunca volta pro Claude.
+  let okAdyenApi = false;
+  const fetchAntesApi = globalThis.fetch;
+  const envAntesApi = { k: process.env.ADYEN_DISPUTES_API_KEY, u: process.env.ADYEN_DISPUTES_URL, m: process.env.NOPULSO_AGENT_MASTER };
+  try {
+    const dispM = require(__dirname + '/disputes.js');
+    const cw = require(__dirname + '/coworkApi.js');
+    const ad = require(__dirname + '/adyenDisputas.js');
+    const BASE = 'https://adyen-falsa.teste/DisputeService/v30';
+    const chamadas = [];
+    let recusarDefesa = false;
+    globalThis.fetch = async (url, init) => {
+      if (!String(url).startsWith(BASE)) return fetchAntesApi(url, init);
+      const metodo = String(url).slice(BASE.length + 1);
+      const corpo = JSON.parse(init.body || '{}');
+      chamadas.push({ metodo, corpo, chave: init.headers['X-API-Key'] });
+      const json = (o) => ({ ok: true, status: 200, text: async () => JSON.stringify(o) });
+      if (metodo === 'retrieveApplicableDefenseReasons') return json({ defenseReasons: [{ defenseReasonCode: 'ShippedToAVS', satisfied: false, defenseDocumentTypes: [{ defenseDocumentTypeCode: 'TIDorInvoice', requirementLevel: 'Required', available: false }, { defenseDocumentTypeCode: 'Proof', requirementLevel: 'Optional' }] }], disputeServiceResult: { success: true } });
+      if (metodo === 'defendDispute' && recusarDefesa) return json({ disputeServiceResult: { success: false, errorMessage: 'Defense period ended' } });
+      return json({ disputeServiceResult: { success: true } });
+    };
+    const PDFBUF = Buffer.from('%PDF-1.4 defesa de teste');
+    ARQUIVOS.set('defesas-chargeback/api-teste.pdf', PDFBUF);
+    const caso = (id, extra) => dispM.salvarCaso(id, { pedidoId: 'PED-' + id, origem: 'adyen', unidade: 'Dominos Tirol', status: 'ABERTA', pspDisputa: 'DSP-' + id, valor: 50, ...extra });
+    const pronto = { defesaProntaEm: new Date().toISOString(), decisao: 'Contestar', defesaPdf: { path: 'defesas-chargeback/api-teste.pdf', nome: 'defesa.pdf', tamanho: PDFBUF.length } };
+    await caso('api-ok', pronto);
+    await caso('api-recusa', pronto);
+    await caso('api-crua', {});
+    await caso('api-aceitou', { ...pronto, decisao: 'Aceitar o chargeback' });
+    await caso('api-aceitar', {});
+    store.addOrUpdate({ merchantReference: 'PED-api-ok', pspReference: 'API-OK-PAG', eventCode: 'AUTHORISATION', status: 'APROVADO', unidade: 'Dominos Tirol', merchantAccountCode: 'DOM_TESTE_TIROL', dataHora: new Date().toISOString(), valor: 50 });
+    DOCS.set('users/mst-api', { email: 'master-api@teste.local', role: 'master', active: true });
+    process.env.NOPULSO_AGENT_MASTER = 'master-api@teste.local';
+    delete process.env.ADYEN_DISPUTES_API_KEY; delete process.env.ADYEN_DISPUTES_URL;
+    const semConfig = (await cw.executar({ nome: 'preparar_defesa_adyen', entrada: { disputaId: 'api-ok' } })).resultado;
+    const chamadasSemConfig = chamadas.length;
+    process.env.ADYEN_DISPUTES_API_KEY = 'chave-secreta-de-teste-123';
+    process.env.ADYEN_DISPUTES_URL = BASE;
+    process.env.ADYEN_MERCHANT_ACCOUNTS = JSON.stringify({ 'Dominos Tirol': 'DOM_DO_MAPA' });
+    const prep = (await cw.executar({ nome: 'preparar_defesa_adyen', entrada: { disputaId: 'api-ok' } })).resultado;
+    const pedido = await cw.executar({ nome: 'enviar_defesa_adyen', entrada: { disputaId: 'api-ok', motivoDefesa: 'ShippedToAVS' }, idempotencyKey: 'api-k1' });
+    const chamadasAntesDaDigital = chamadas.filter((c) => c.metodo !== 'retrieveApplicableDefenseReasons').length;
+    const rodou = await cw.executarAutorizado({ nome: 'enviar_defesa_adyen', entrada: { disputaId: 'api-ok', motivoDefesa: 'ShippedToAVS' } });
+    const envio = chamadas.find((c) => c.metodo === 'supplyDefenseDocument');
+    const defesa = chamadas.find((c) => c.metodo === 'defendDispute');
+    dispM.invalidar();
+    const depois = await dispM.getOne('api-ok');
+    const tenta = async (nome, entrada) => { try { await cw.executarAutorizado({ nome, entrada }); return 'passou'; } catch (e) { return e.message; } };
+    const deNovo = await tenta('enviar_defesa_adyen', { disputaId: 'api-ok', motivoDefesa: 'ShippedToAVS' });
+    const cru = await tenta('enviar_defesa_adyen', { disputaId: 'api-crua', motivoDefesa: 'ShippedToAVS' });
+    const unidadeAceitou = await tenta('enviar_defesa_adyen', { disputaId: 'api-aceitou', motivoDefesa: 'ShippedToAVS' });
+    const motivoInvalido = await tenta('enviar_defesa_adyen', { disputaId: 'api-recusa', motivoDefesa: 'Inventado' });
+    recusarDefesa = true;
+    const recusada = await tenta('enviar_defesa_adyen', { disputaId: 'api-recusa', motivoDefesa: 'ShippedToAVS' });
+    recusarDefesa = false;
+    dispM.invalidar();
+    const casoRecusado = await dispM.getOne('api-recusa');
+    await cw.executarAutorizado({ nome: 'aceitar_disputa_adyen', entrada: { disputaId: 'api-aceitar' } });
+    dispM.invalidar();
+    const aceito = await dispM.getOne('api-aceitar');
+    const tudoProClaude = JSON.stringify([semConfig, prep, pedido, rodou]);
+
+    const conf = {
+      'sem credencial no Render, nada é chamado e a resposta diz o que falta': semConfig.apiConfigurada === false && chamadasSemConfig === 0 && /ADYEN_DISPUTES_API_KEY/.test(semConfig.aviso || ''),
+      'com credencial, o Claude vê os motivos que a bandeira aceita e os documentos de cada um': prep.apiConfigurada === true && prep.motivos[0].codigo === 'ShippedToAVS' && prep.motivos[0].documentos[0].codigo === 'TIDorInvoice',
+      'sem ADYEN_DISPUTES_URL vale a Disputes API de produção, no host da Customer Area e sem prefixo de conta': ad.urlBase({}) === 'https://ca-live.adyen.com/ca/services/DisputeService/v30'
+        && ad.urlBase({ ADYEN_DISPUTES_URL: 'https://ca-test.adyen.com/ca/services/DisputeService/v30/' }) === 'https://ca-test.adyen.com/ca/services/DisputeService/v30',
+      'o merchantAccountCode cru da transação ganha do mapa': prep.contaAdyen === 'DOM_TESTE_TIROL' && ad.contaDoCaso({ unidade: 'Dominos Tirol' }, []) === 'DOM_DO_MAPA',
+      'enviar vira pedido de autorização: nada vai pra Adyen antes da digital': pedido.pendente === true && !!pedido.autorizacaoId && chamadasAntesDaDigital === 0,
+      'aprovado, sobe o PDF no documento exigido e defende com o motivo': !!envio && envio.corpo.defenseDocuments[0].defenseDocumentTypeCode === 'TIDorInvoice'
+        && Buffer.from(envio.corpo.defenseDocuments[0].content, 'base64').equals(PDFBUF) && !!defesa && defesa.corpo.defenseReasonCode === 'ShippedToAVS' && defesa.corpo.merchantAccountCode === 'DOM_TESTE_TIROL',
+      'depois do envio o caso fica ENVIADA sozinho, com quem e quando': depois.status === 'ENVIADA' && /via API/.test(depois.envio.porNome) && depois.envioAdyen.motivo === 'ShippedToAVS',
+      'defesa já enviada não é enviada de novo': /já foi enviada/.test(deNovo),
+      'sem a defesa da unidade concluída não defende': /ainda não foi gerada/.test(cru),
+      'unidade decidiu aceitar: não defende, manda aceitar': /aceitar_disputa_adyen/.test(unidadeAceitou),
+      'motivo que a bandeira não aceita é recusado antes de subir arquivo': /não é aceito/.test(motivoInvalido),
+      'Adyen respondeu success=false: o caso NÃO vira ENVIADA': /Defense period ended/.test(recusada) && casoRecusado.status === 'ABERTA',
+      'aceitar pela API marca PERDIDA': aceito.status === 'PERDIDA' && chamadas.some((c) => c.metodo === 'acceptDispute' && c.corpo.disputePspReference === 'DSP-api-aceitar'),
+      'a chave vai só no cabeçalho pra Adyen, nunca volta pro Claude': chamadas.every((c) => c.chave === 'chave-secreta-de-teste-123') && !tudoProClaude.includes('chave-secreta'),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAdyenApi = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [prep=${JSON.stringify(prep).slice(0, 300)} deNovo=${deNovo} recusada=${recusada}]`);
+  } catch (e) { okAdyenApi = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
+  finally {
+    globalThis.fetch = fetchAntesApi;
+    const volta = (k, v) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; };
+    volta('ADYEN_DISPUTES_API_KEY', envAntesApi.k); volta('ADYEN_DISPUTES_URL', envAntesApi.u); volta('NOPULSO_AGENT_MASTER', envAntesApi.m);
+    delete process.env.ADYEN_MERCHANT_ACCOUNTS;
+  }
+  if (!okAdyenApi) ruins += 1;
+  console.log(`${okAdyenApi ? '✓' : '✗'} Defesa pela API da Adyen: motivos da bandeira, envio só com a digital do Master, ENVIADA só com sucesso da Adyen, chave nunca volta pro Claude`);
+
+  // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
   //
   // Master (23/09/2026): "quero poder monitorar tanto celular como tablet -
