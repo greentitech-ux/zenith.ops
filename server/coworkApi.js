@@ -17,6 +17,14 @@ const disputes = require('./disputes');
 const defesaChargeback = require('./defesaChargeback');
 const storage = require('./storage');
 const push = require('./push');
+const store = require('./store');
+
+// O index.js liga aqui o broadcast da tela: sem isso, o comentário ou o
+// pré-preenchimento do Claude só apareceria na tarefa aberta depois de F5.
+let aoAlterarTarefa = () => {};
+function configurar(opcoes = {}) {
+  if (typeof opcoes.aoAlterarTarefa === 'function') aoAlterarTarefa = opcoes.aoAlterarTarefa;
+}
 
 const AUDITORIA = db.collection('coworkApiAuditoria');
 const IDEMPOTENCIA = db.collection('coworkApiIdempotencia');
@@ -33,6 +41,9 @@ const FERRAMENTAS = Object.freeze({
   // NoPulso gera o PDF, o Claude anexa na Adyen e registra aqui o que fez ----
   listar_disputas: { descricao: 'Lista os casos de chargeback/aviso de fraude da Adyen com prazo, status (MONITORANDO, ABERTA, ENVIADA, GANHA, PERDIDA), tarefa de defesa e se a defesa já está pronta pra anexar. Filtros: status, unidade, somenteProntas.', risco: 'leitura', obrigatorios: [] },
   obter_disputa: { descricao: 'Um caso completo: dados do pagamento, motivo, prazos, respostas da unidade e LINKS TEMPORÁRIOS (2h) do PDF da defesa e de cada evidência, pra baixar e anexar na Adyen. Informe disputaId, ou numero (ticket da tarefa), ou o PSP do pagamento/disputa.', risco: 'leitura', obrigatorios: [] },
+  obter_pagamento_adyen: { descricao: 'O pagamento contestado como a Adyen mandou: comprador (nome), endereço, cartão (bandeira, BIN, final, país e banco emissor), IP, 3DS, AVS/CVC, score de risco, linha do tempo dos eventos, os SINAIS que pesam na defesa e os outros pedidos do mesmo cliente que o Monitor guarda. Telefone e e-mail vêm mascarados: quem copia pra defesa é o servidor (preencher_defesa com usarDadosAdyen). Informe psp, numero (ticket da tarefa) ou disputaId.', risco: 'leitura', obrigatorios: [] },
+  preencher_defesa: { descricao: 'Pré-preenche a "Defesa de chargeback" DENTRO da tarefa do Meu Dia. usarDadosAdyen=true copia do pagamento o que a Adyen traz com certeza (nome, telefone, endereço de entrega, delivery, pedidos anteriores do mesmo cliente); campos={id: valor} escreve o que você apurou (ids e opções do questionário, ex.: canal, itens, foraDoNormalTexto) e fontes={id: "de onde veio"}. Só escreve em campo VAZIO, nunca troca resposta da unidade e nunca marca decisao nem declaracao. Cada campo ganha o selo "preenchido pelo Claude" na tela e a tarefa recebe um comentário. Não conclui a tarefa. Informe tarefaId, numero ou disputaId.', risco: 'baixo', obrigatorios: [] },
+  comentar_tarefa: { descricao: 'Escreve um comentário na tarefa do Meu Dia, assinado como Claude (Cowork), e avisa no celular o responsável e os participantes (avisar=false pra só registrar). Use pra cobrar o que falta, explicar o que foi preenchido e recomendar contestar ou aceitar. Informe tarefaId ou numero, e texto.', risco: 'baixo', obrigatorios: ['texto'] },
   registrar_defesa_enviada: { descricao: 'Registra no NoPulso que a defesa FOI anexada e enviada na Adyen (status ENVIADA). Use só depois de enviar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
   registrar_disputa_aceita: { descricao: 'Registra no NoPulso que o chargeback foi ACEITO na Adyen, sem defesa (status PERDIDA). Use só depois de aceitar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
   consultar_autorizacao: { descricao: 'Consulta se o Master já autorizou (ou recusou) uma ação pedida antes, e o resultado dela.', risco: 'leitura', obrigatorios: ['autorizacaoId'] },
@@ -84,6 +95,9 @@ const PROPRIEDADES_COMUNS = {
   disputaId: { type: 'string' }, psp: { type: 'string', description: 'PSP do pagamento ou da disputa (Adyen).' },
   somenteProntas: { type: 'boolean', description: 'Só as defesas prontas pra anexar na Adyen.' },
   incluirInativos: { type: 'boolean' },
+  usarDadosAdyen: { type: 'boolean', description: 'preencher_defesa: o servidor copia da Adyen o que ela traz com certeza (nome, telefone, endereço de entrega, delivery, histórico do cliente).' },
+  fontes: { type: 'object', description: 'preencher_defesa: {campo: "de onde veio"} - aparece no selo do campo.' },
+  avisar: { type: 'boolean', description: 'comentar_tarefa: false = só registra, sem push pros participantes.' },
   idempotencyKey: { type: 'string', description: 'UUID novo por intenção de escrita; reutilize apenas ao repetir a mesma chamada.' },
 };
 
@@ -367,6 +381,9 @@ async function obterDisputa(p) {
     respostasDaUnidade: defesaChargeback.QUESTOES.filter((q) => respostas[q.id] != null && q.id !== 'telefoneCliente')
       .map((q) => ({ pergunta: q.rotulo, resposta: Array.isArray(respostas[q.id]) ? respostas[q.id].join('; ') : String(respostas[q.id]) })),
     faltaNaDefesa: tarefa && tarefa.defesaChargeback ? defesaChargeback.faltando(respostas, tarefa.anexos) : [],
+    preenchidoPeloClaude: tarefa && tarefa.defesaChargeback ? Object.entries(tarefa.defesaChargeback.preenchidoPeloClaude || {})
+      .map(([k, s]) => ({ campo: (defesaChargeback.QUESTOES.find((q) => q.id === k) || {}).rotulo || k, fonte: s.fonte, em: s.em })) : [],
+    comentariosDaTarefa: ((tarefa && tarefa.comentarios) || []).slice(-20).map((m) => ({ por: m.porNome, em: m.em, texto: m.texto, sistema: !!m.sistema })),
     pdfDaDefesa: c.defesaPdf ? { link: link(c.defesaPdf.path, c.defesaPdf.nome), paginas: c.defesaPdf.paginas, tamanhoKB: Math.round((c.defesaPdf.tamanho || 0) / 1024), avisos: c.defesaPdf.avisos || [] } : null,
     evidencias: evidencias.map((a) => {
       const e = defesaChargeback.EVIDENCIAS.find((x) => x.id === a.evidencia);
@@ -378,6 +395,96 @@ async function obterDisputa(p) {
       : 'A defesa ainda não está pronta: a unidade precisa concluir a tarefa de defesa no Meu Dia.',
   };
 }
+// ---------- A DEFESA DENTRO DA TAREFA (24/09/2026) ----------
+// Pedido do Master: "tudo dentro da tarefa no Meu Dia", sem e-mail e sem
+// abrir a Adyen no navegador. O Claude lê o pagamento que o Monitor já tem,
+// pré-preenche o que é fato da Adyen, comenta o que falta e cobra a unidade.
+function txsDoPedido(pedidoId) {
+  const chave = (t) => t.merchantReference || t.originalReference || t.pspReference;
+  return store.allTransactions().filter((t) => chave(t) === pedidoId);
+}
+async function obterPagamentoAdyen(p) {
+  const c = await acharCaso(p);
+  if (!c) throw new Error('Disputa não encontrada.');
+  const txs = txsDoPedido(c.pedidoId);
+  if (!txs.length) throw new Error('O Monitor não tem mais os eventos deste pedido (nem o pagamento original).');
+  const d = defesaChargeback.dadosDoPagamento(txs);
+  const hist = defesaChargeback.mesmoCliente(store.allTransactions(), d, c.pedidoId);
+  return {
+    disputaId: c.id, tarefaId: c.tarefaId || null, tarefaTicket: c.tarefaNumero || null,
+    pagamento: {
+      ...d,
+      emailCliente: defesaChargeback.mascararEmail(d.emailCliente),
+      telefoneCliente: d.telefoneCliente ? defesaChargeback.mascararTelefone(d.telefoneCliente) : null,
+      aliasCartao: d.aliasCartao ? 'presente' : null, shopperReference: undefined,
+    },
+    sinais: defesaChargeback.sinaisDaDefesa(d),
+    mesmoCliente: hist,
+    oServidorPreencheria: Object.keys(defesaChargeback.sugestoesDaAdyen(d, hist).campos),
+  };
+}
+async function acharTarefaDeDefesa(p) {
+  if (p.tarefaId) return tarefas.getOne(String(p.tarefaId));
+  if (p.numero) {
+    const lista = await tarefas.porNumero(p.numero);
+    return lista.find((t) => t.defesaChargeback) || lista[0] || null;
+  }
+  if (p.disputaId || p.psp) {
+    const c = await acharCaso(p);
+    return c && c.tarefaId ? tarefas.getOne(c.tarefaId) : null;
+  }
+  throw new Error('Informe tarefaId, numero ou disputaId.');
+}
+async function preencherDefesa(p) {
+  const t = await acharTarefaDeDefesa(p);
+  if (!t) throw new Error('Tarefa não encontrada.');
+  if (!t.defesaChargeback) throw new Error('Esta tarefa não é de defesa de chargeback.');
+  const campos = {}; const fontes = {};
+  if (p.usarDadosAdyen) {
+    const c = await disputes.getOne(t.defesaChargeback.disputaId);
+    const txs = c ? txsDoPedido(c.pedidoId) : [];
+    if (txs.length) {
+      const d = defesaChargeback.dadosDoPagamento(txs);
+      const s = defesaChargeback.sugestoesDaAdyen(d, defesaChargeback.mesmoCliente(store.allTransactions(), d, c.pedidoId));
+      Object.assign(campos, s.campos); Object.assign(fontes, s.fontes);
+    }
+  }
+  // o que o Claude mandou vem por cima do automático (ele pode ter apurado melhor)
+  const doClaude = p.campos && typeof p.campos === 'object' ? p.campos : {};
+  for (const [k, v] of Object.entries(doClaude)) {
+    campos[k] = v;
+    fontes[k] = String((p.fontes && p.fontes[k]) || 'Claude');
+  }
+  if (!Object.keys(campos).length) throw new Error('Nada para preencher: mande campos e/ou usarDadosAdyen=true.');
+  const r = await tarefas.preencherDefesaPeloAgente(t.id, campos, { fontes });
+  aoAlterarTarefa(r.tarefa);
+  const rotulo = (k) => (defesaChargeback.QUESTOES.find((q) => q.id === k) || {}).rotulo || k;
+  return {
+    tarefaId: t.id, ticket: t.numeroTicket || null,
+    preenchidos: r.escritos.map(rotulo),
+    jaRespondidosPelaUnidade: r.mantidos.map(rotulo),
+    recusados: r.recusados.length ? r.recusados.map((k) => `${rotulo(k)}: só a unidade responde`) : [],
+    invalidos: r.invalidos.length ? r.invalidos.map((k) => `${k}: campo ou opção fora do questionário`) : [],
+    faltaNaDefesa: r.faltando,
+  };
+}
+async function comentarTarefa(p) {
+  const t = await acharTarefaDeDefesa(p);
+  if (!t) throw new Error('Tarefa não encontrada.');
+  const r = await tarefas.comentarComoAgente(t.id, p.texto);
+  aoAlterarTarefa(r.tarefa);
+  let avisados = 0;
+  if (p.avisar !== false) {
+    const ids = [...new Set([t.responsavelId, ...(t.colaboradoresIds || [])].filter(Boolean))];
+    const titulo = `💬 Claude comentou: ${String(t.titulo || 'tarefa').slice(0, 60)}`;
+    for (const id of ids) {
+      await push.notifyUsuario(id, titulo, String(p.texto).slice(0, 140), `tarefa-coment-${t.id}`, `/tarefas?tarefa=${encodeURIComponent(t.id)}`)
+        .then(() => { avisados += 1; }).catch(() => {});
+    }
+  }
+  return { tarefaId: t.id, ticket: t.numeroTicket || null, comentarioId: r.comentario.id, avisados };
+}
+
 async function registrarNaDisputa(nome, p, ator) {
   const c = await disputes.getOne(String(p.disputaId));
   if (!c) throw new Error('Disputa não encontrada.');
@@ -399,6 +506,9 @@ async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
   if (nome === 'listar_disputas') return listarDisputas(p);
   if (nome === 'obter_disputa') return obterDisputa(p);
+  if (nome === 'obter_pagamento_adyen') return obterPagamentoAdyen(p);
+  if (nome === 'preencher_defesa') return preencherDefesa(p);
+  if (nome === 'comentar_tarefa') return comentarTarefa(p);
   if (nome === 'registrar_defesa_enviada' || nome === 'registrar_disputa_aceita') return registrarNaDisputa(nome, p, ator);
   if (nome === 'consultar_ticket') return consultarTicket(p.numero);
   if (nome === 'listar_tarefas') return listarTarefas(p);
@@ -601,4 +711,4 @@ async function executar({ nome, entrada, idempotencyKey }) {
   }
 }
 
-module.exports = { listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado };
+module.exports = { listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado, configurar };
