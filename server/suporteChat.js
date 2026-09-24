@@ -399,13 +399,53 @@ async function registrarNotaInterna(id, { resumo, situacao, pendencia } = {}) {
   if (!resumoLimpo) throw new Error('Escreva o resumo da nota interna.');
   const nota = {
     resumo: resumoLimpo,
-    situacao: ['RESOLVIDO', 'PENDENTE'].includes(situacao) ? situacao : null,
+    // EM_ANDAMENTO = "o bot resolveu, ninguém precisa agir, só acompanhar"
+    // (ver desbloquear_login em suporteBot.js). Ele JÁ era escrito em três
+    // lugares e caía aqui virando null - a nota chegava na tela sem marcador
+    // nenhum e o estado se perdia em silêncio. Não é o EM_ATENDIMENTO do
+    // chat: aquele é o status da conversa, este é o da nota.
+    situacao: ['RESOLVIDO', 'PENDENTE', 'EM_ANDAMENTO'].includes(situacao) ? situacao : null,
     pendencia: limpar(pendencia, 600) || null,
     por: 'Beniboy (bot)',
     em: new Date().toISOString(),
   };
   const notasInternas = [...(chat.notasInternas || []), nota].slice(-MAX_NOTAS_INTERNAS);
   await COLLECTION.doc(id).update({ notasInternas, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
+// MARCAR UMA NOTA COMO TRATADA.
+//
+// Sem isto, uma nota PENDENTE ficava pendente pra sempre: o ✅ da tela marca
+// a CONVERSA como resolvida, nunca a nota. Resultado - a caixa vermelha
+// dizia "há pendência" em toda conversa que um dia passou pelo handoff do
+// Beniboy, mesmo meses depois de atendida. Aviso que nunca apaga vira
+// enfeite, e aí ninguém olha mais nenhum.
+//
+// A nota é achada por POSIÇÃO + CARIMBO. Só a posição não serve: a lista tem
+// teto (MAX_NOTAS_INTERNAS) e desloca quando enche, e marcar a nota errada é
+// pior que não marcar - some a pendência de verdade e fica a que já estava
+// resolvida.
+async function marcarNotaTratada(id, indice, autor) {
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  const notas = [...(chat.notasInternas || [])];
+  const i = Number(indice);
+  if (!Number.isInteger(i) || i < 0 || i >= notas.length) throw new Error('Nota não encontrada.');
+  const esperado = autor && autor.em ? String(autor.em) : null;
+  if (esperado && String(notas[i].em) !== esperado) {
+    throw new Error('A lista de notas mudou. Recarregue a conversa e tente de novo.');
+  }
+  if (notas[i].situacao === 'RESOLVIDO') return chat;
+  notas[i] = {
+    ...notas[i],
+    situacao: 'RESOLVIDO',
+    tratadaEm: new Date().toISOString(),
+    tratadaPorEmail: (autor && autor.email) || null,
+    tratadaPorNome: (autor && autor.nome) || null,
+  };
+  await COLLECTION.doc(id).update({ notasInternas: notas, atualizadoEm: new Date().toISOString() });
   chatsCache.invalidar();
   return getOne(id);
 }
@@ -654,6 +694,6 @@ async function finalizarOciosos() {
 module.exports = {
   criar, getOne, getPublico, getComToken, atualizarLogado, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
-  listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, estatisticas,
+  listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, marcarNotaTratada, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,
 };

@@ -290,6 +290,11 @@ const COLUNAS = [
 // solucao ou nao sem reprocessar tudo), senao cai em Pendente como qualquer
 // conversa nova. Mesma logica pro nivel (sem responsavel = so o bot mexeu).
 function statusDe(chat){ return chat.statusAtendimento || (chat.status==='FINALIZADO' ? 'RESOLVIDO' : 'PENDENTE'); }
+// Os três estados que uma NOTA pode ter (ver registrarNotaInterna). Não é o
+// mesmo conjunto do status da CONVERSA logo acima: EM_ANDAMENTO aqui quer
+// dizer "o Beniboy resolveu sozinho, é só acompanhar" - não pede ação de
+// ninguém, e por isso não conta como pendência.
+const ROTULO_NOTA = { PENDENTE: '⏳ Pendente', EM_ANDAMENTO: '🔄 Acompanhando', RESOLVIDO: '✅ Resolvido' };
 function nivelDe(chat){ return chat.nivel || (chat.atendidoPorEmail ? 2 : 1); }
 
 function ultimaMsg(chat){
@@ -372,6 +377,20 @@ function onColDrop(ev, statusAlvo){
   DRAG_ID = null;
   if(!id) return;
   iniciarTransicao(id, statusAlvo);
+}
+
+// Marca UMA nota como tratada. O carimbo vai junto: se a lista tiver mudado
+// desde que a tela pintou, o servidor recusa em vez de marcar a nota errada.
+async function marcarNotaTratada(id, indice, em){
+  try{
+    const r = await fetch(`/api/suporte-chats/${encodeURIComponent(id)}/notas/${encodeURIComponent(indice)}/tratada`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization: 'Bearer ' + (localStorage.getItem('authToken')||'') },
+      body: JSON.stringify({ em }),
+    });
+    if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Não foi possível marcar a nota.'); }
+    await carregarLista();
+  }catch(e){ alert(e.message); }
 }
 
 // ---------- mover card (drag OU botao/select do detalhe) ----------
@@ -710,11 +729,13 @@ function painelHtml(chat){
         ${escapeHtml(a.userAgent||'')}
         ${a.detalheExtra ? `<code>${escapeHtml(a.detalheExtra)}</code>` : ''}
       </div>`).join('')}</details></div>` : ''}
-    ${notasInt.length ? `<div class="d-alerta-seguranca"><details ${temPendente?'open':''}><summary>📝 ${notasInt.length} nota(s) do Beniboy${temPendente?' · há pendência':''}</summary>${notasInt.map(n=>`
+    ${notasInt.length ? `<div class="d-alerta-seguranca"><details><summary>📝 ${notasInt.length} nota(s) do Beniboy${temPendente?' · há pendência':''}</summary>${notasInt.map((n,ix)=>`
       <div class="d-alerta-item">
-        ${n.situacao ? `<b>${n.situacao==='PENDENTE'?'⏳ Pendente':'✅ Resolvido'}</b> · ` : ''}${fmtDataHora(n.em)}<br>
+        ${n.situacao ? `<b>${ROTULO_NOTA[n.situacao] || n.situacao}</b> · ` : ''}${fmtDataHora(n.em)}<br>
         ${escapeHtml(n.resumo||'')}
         ${n.pendencia ? `<br><b>Falta:</b> ${escapeHtml(n.pendencia)}` : ''}
+        ${n.tratadaEm ? `<br><span class="sub">tratada por ${escapeHtml(n.tratadaPorNome||n.tratadaPorEmail||'—')} · ${fmtDataHora(n.tratadaEm)}</span>` : ''}
+        ${n.situacao==='PENDENTE' ? `<br><button type="button" class="btn-ghost" style="margin-top:6px;font-size:11.5px;padding:5px 9px;" onclick="marcarNotaTratada('${chat.id}',${ix},'${escapeHtml(n.em||'')}')">Marcar tratada</button>` : ''}
       </div>`).join('')}</details></div>` : ''}
     <div class="d-acoes">${acoes.join('')}</div>
     <div class="painel-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${msgsHtml}</div>

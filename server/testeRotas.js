@@ -27450,6 +27450,101 @@ $r | ConvertTo-Json -Depth 4 -Compress
   if (!okMenuLargura) ruins += 1;
   console.log(`${okMenuLargura ? '✓' : '✗'} Menu e largura no celular: tela com nav-menu.js abre o menu, e painel empilhado não estoura`);
 
+  // ------------------------------------------------------------------
+  // NOTAS DO BENIBOY: RECOLHIDAS POR PADRÃO.
+  //
+  // Master (24/09/2026): "quero que ele fique por padrão recolhido, expandir
+  // caso seja clicado".
+  //
+  // A caixa vermelha das notas internas abria SOZINHA (<details open>) toda
+  // vez que havia nota PENDENTE. Como não existe jeito de marcar uma nota
+  // como tratada, "pendente" nunca deixa de ser verdade - então a caixa
+  // ficava permanentemente aberta em cima da conversa, empurrando as
+  // mensagens pra baixo. Um aviso que está sempre aceso deixa de ser aviso.
+  //
+  // O rótulo "· há pendência" FICA no título: recolher é esconder o corpo,
+  // não apagar o sinal. Por isso o teste protege as duas coisas.
+  let okNotasRecolhidas = false;
+  try {
+    const beniboy = require('fs').readFileSync(__dirname + '/public/beniboy.html', 'utf8');
+    const i = beniboy.indexOf('nota(s) do Beniboy');
+    const linha = beniboy.slice(Math.max(0, i - 260), i + 120);
+
+    const conf = {
+      'o bloco de notas nasce recolhido':
+        /<div class="d-alerta-seguranca"><details><summary>📝 \$\{notasInt\.length\} nota\(s\) do Beniboy/.test(beniboy),
+      'nada mais abre o bloco sozinho': !/<details \$\{temPendente\?'open':''\}/.test(beniboy),
+      // recolher não pode custar o aviso: quem bate o olho na conversa
+      // precisa continuar vendo que há algo pendente ali dentro
+      'o título continua dizendo que há pendência':
+        /\$\{temPendente\?' · há pendência':''\}/.test(linha),
+      // a caixa de alertas de SEGURANÇA já era recolhida - as duas seguem
+      // iguais, senão uma tela tem dois comportamentos pro mesmo componente
+      'o bloco de segurança segue recolhido também':
+        /<div class="d-alerta-seguranca"><details><summary>🛡️/.test(beniboy),
+
+      // ---- e agora a nota PODE ser fechada (antes, "pendente" era pra sempre)
+      // EM_ANDAMENTO era escrito em 3 lugares do bot e virava null aqui: a
+      // nota chegava na tela sem marcador nenhum
+      'EM_ANDAMENTO deixa de ser descartado em silêncio': (() => {
+        const sc = require('fs').readFileSync(__dirname + '/suporteChat.js', 'utf8');
+        return /\['RESOLVIDO', 'PENDENTE', 'EM_ANDAMENTO'\]\.includes\(situacao\)/.test(sc)
+          && /situacao: 'EM_ANDAMENTO'/.test(require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8'));
+      })(),
+      'a tela tem rótulo para os três estados da nota':
+        /const ROTULO_NOTA = \{ PENDENTE: '⏳ Pendente', EM_ANDAMENTO: '🔄 Acompanhando', RESOLVIDO: '✅ Resolvido' \};/.test(beniboy),
+      // o botão só faz sentido no que ainda está pendente
+      'só nota pendente oferece "marcar tratada"':
+        /\$\{n\.situacao==='PENDENTE' \? `<br><button[^`]*marcarNotaTratada/.test(beniboy),
+      // PONTA A PONTA: semeia uma conversa com 2 notas e fecha a pendente
+      'marcar tratada fecha a nota e derruba o "há pendência"': await (async () => {
+        const cabS = token ? { Authorization: 'Bearer ' + token } : {};
+        const em0 = '2026-09-24T10:00:00.000Z';
+        const em1 = '2026-09-24T10:00:01.000Z';
+        DOCS.set('suporteChats/chat-nota-teste', {
+          id: 'chat-nota-teste', nome: 'Loja Teste', status: 'ABERTO', mensagens: [],
+          criadoEm: em0, numeroTicket: 99001,
+          notasInternas: [
+            { resumo: 'Acompanhamento', situacao: 'EM_ANDAMENTO', em: em0, por: 'Beniboy (bot)' },
+            { resumo: 'Handoff', situacao: 'PENDENTE', pendencia: 'atender', em: em1, por: 'Beniboy (bot)' },
+          ],
+        });
+        const r = await postarJson('/api/suporte-chats/chat-nota-teste/notas/1/tratada', { em: em1 }, cabS);
+        if (r.status !== 200) return false;
+        const depois = DOCS.get('suporteChats/chat-nota-teste').notasInternas;
+        return depois[1].situacao === 'RESOLVIDO'
+          && !!depois[1].tratadaEm
+          // a outra não pode ser tocada
+          && depois[0].situacao === 'EM_ANDAMENTO'
+          // e agora nenhuma está PENDENTE: é isso que apaga o "há pendência"
+          && !depois.some((n) => n.situacao === 'PENDENTE');
+      })(),
+      // marcar a nota ERRADA some com a pendência de verdade e deixa de pé a
+      // que já estava resolvida - por isso o carimbo é conferido
+      'carimbo que não bate é recusado, não marca a nota errada': await (async () => {
+        const cabS = token ? { Authorization: 'Bearer ' + token } : {};
+        DOCS.set('suporteChats/chat-nota-carimbo', {
+          id: 'chat-nota-carimbo', nome: 'Loja', status: 'ABERTO', mensagens: [], criadoEm: '2026-09-24T11:00:00.000Z',
+          notasInternas: [{ resumo: 'Handoff', situacao: 'PENDENTE', em: '2026-09-24T11:00:00.000Z', por: 'Beniboy (bot)' }],
+        });
+        const r = await postarJson('/api/suporte-chats/chat-nota-carimbo/notas/0/tratada', { em: '2026-01-01T00:00:00.000Z' }, cabS);
+        const nota = DOCS.get('suporteChats/chat-nota-carimbo').notasInternas[0];
+        return r.status === 400 && nota.situacao === 'PENDENTE';
+      })(),
+      // mesma porta do resto da Central do Beniboy
+      'a rota está atrás do time de suporte': (() => {
+        const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+        const i = idx.indexOf("'/api/suporte-chats/:id/notas/:indice/tratada'");
+        return i > 0 && /if \(!ehTimeSuporte\(req\)\) return res\.status\(403\)/.test(idx.slice(i, i + 420));
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okNotasRecolhidas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okNotasRecolhidas = false; console.log('  erro: ' + e.message); }
+  if (!okNotasRecolhidas) ruins += 1;
+  console.log(`${okNotasRecolhidas ? '✓' : '✗'} Notas do Beniboy: recolhidas por padrão, com o aviso de pendência no título`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

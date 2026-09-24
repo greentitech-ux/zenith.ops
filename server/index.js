@@ -15337,6 +15337,23 @@ app.get('/api/suporte/agentes', auth.requireAuth, async (req, res) => {
   }
 });
 
+// MARCAR UMA NOTA DO BENIBOY COMO TRATADA (ver marcarNotaTratada).
+// Mesma porta do resto da Central do Beniboy: time de suporte.
+app.post('/api/suporte-chats/:id/notas/:indice/tratada', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    const chat = await suporteChat.marcarNotaTratada(req.params.id, req.params.indice, {
+      email: req.user.email,
+      nome: req.user.username || req.user.email,
+      // carimbo da nota que a TELA estava vendo: se a lista mudou no meio,
+      // a marcação é recusada em vez de acertar a nota errada
+      em: (req.body || {}).em || null,
+    });
+    broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    res.json(chat);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => {
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
