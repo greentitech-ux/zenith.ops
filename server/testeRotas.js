@@ -27302,7 +27302,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
   // success=false da Adyen não marca ENVIADA; e a chave nunca volta pro Claude.
   let okAdyenApi = false;
   const fetchAntesApi = globalThis.fetch;
-  const envAntesApi = { k: process.env.ADYEN_DISPUTES_API_KEY, u: process.env.ADYEN_DISPUTES_URL, m: process.env.NOPULSO_AGENT_MASTER };
+  const envAntesApi = { k: process.env.ADYEN_DISPUTES_API_KEY, k2: process.env.ADYEN_DISPUTES_API_KEY_2, u: process.env.ADYEN_DISPUTES_URL, m: process.env.NOPULSO_AGENT_MASTER };
   try {
     const dispM = require(__dirname + '/disputes.js');
     const cw = require(__dirname + '/coworkApi.js');
@@ -27316,6 +27316,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
       const corpo = JSON.parse(init.body || '{}');
       chamadas.push({ metodo, corpo, chave: init.headers['X-API-Key'] });
       const json = (o) => ({ ok: true, status: 200, text: async () => JSON.stringify(o) });
+      // duas empresas: a chave de uma não enxerga a conta da outra
+      const daOutra = corpo.merchantAccountCode === 'DOM_OUTRA_EMPRESA';
+      if (daOutra !== (init.headers['X-API-Key'] === 'chave-da-outra-empresa-456')) return { ok: false, status: 403, text: async () => JSON.stringify({ message: 'Not allowed' }) };
       if (metodo === 'retrieveApplicableDefenseReasons') return json({ defenseReasons: [{ defenseReasonCode: 'ShippedToAVS', satisfied: false, defenseDocumentTypes: [{ defenseDocumentTypeCode: 'TIDorInvoice', requirementLevel: 'Required', available: false }, { defenseDocumentTypeCode: 'Proof', requirementLevel: 'Optional' }] }], disputeServiceResult: { success: true } });
       if (metodo === 'defendDispute' && recusarDefesa) return json({ disputeServiceResult: { success: false, errorMessage: 'Defense period ended' } });
       return json({ disputeServiceResult: { success: true } });
@@ -27359,7 +27362,17 @@ $r | ConvertTo-Json -Depth 4 -Compress
     await cw.executarAutorizado({ nome: 'aceitar_disputa_adyen', entrada: { disputaId: 'api-aceitar' } });
     dispM.invalidar();
     const aceito = await dispM.getOne('api-aceitar');
-    const tudoProClaude = JSON.stringify([semConfig, prep, pedido, rodou]);
+    // segunda empresa: chave 2 no Render, conta que só ela abre
+    process.env.ADYEN_DISPUTES_API_KEY_2 = 'chave-da-outra-empresa-456';
+    await caso('api-outra', pronto);
+    store.addOrUpdate({ merchantReference: 'PED-api-outra', pspReference: 'API-OUTRA-PAG', eventCode: 'AUTHORISATION', status: 'APROVADO', unidade: 'Dominos Tirol', merchantAccountCode: 'DOM_OUTRA_EMPRESA', dataHora: new Date().toISOString(), valor: 50 });
+    const prepOutra = (await cw.executar({ nome: 'preparar_defesa_adyen', entrada: { disputaId: 'api-outra' } })).resultado;
+    await cw.executarAutorizado({ nome: 'enviar_defesa_adyen', entrada: { disputaId: 'api-outra', motivoDefesa: 'ShippedToAVS' } });
+    const escritasOutra = chamadas.filter((c) => c.corpo.disputePspReference === 'DSP-api-outra' && c.metodo !== 'retrieveApplicableDefenseReasons');
+    const prepDeNovoPrimeira = (await cw.executar({ nome: 'preparar_defesa_adyen', entrada: { disputaId: 'api-recusa' } })).resultado;
+    dispM.invalidar();
+    const outraDepois = await dispM.getOne('api-outra');
+    const tudoProClaude = JSON.stringify([semConfig, prep, pedido, rodou, prepOutra, prepDeNovoPrimeira]);
 
     const conf = {
       'sem credencial no Render, nada é chamado e a resposta diz o que falta': semConfig.apiConfigurada === false && chamadasSemConfig === 0 && /ADYEN_DISPUTES_API_KEY/.test(semConfig.aviso || ''),
@@ -27377,7 +27390,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'motivo que a bandeira não aceita é recusado antes de subir arquivo': /não é aceito/.test(motivoInvalido),
       'Adyen respondeu success=false: o caso NÃO vira ENVIADA': /Defense period ended/.test(recusada) && casoRecusado.status === 'ABERTA',
       'aceitar pela API marca PERDIDA': aceito.status === 'PERDIDA' && chamadas.some((c) => c.metodo === 'acceptDispute' && c.corpo.disputePspReference === 'DSP-api-aceitar'),
-      'a chave vai só no cabeçalho pra Adyen, nunca volta pro Claude': chamadas.every((c) => c.chave === 'chave-secreta-de-teste-123') && !tudoProClaude.includes('chave-secreta'),
+      'duas empresas: a conta da outra abre com a chave 2, e defender/enviar vão só com ela': prepOutra.motivos.length === 1 && outraDepois.status === 'ENVIADA'
+        && escritasOutra.length === 2 && escritasOutra.every((c) => c.chave === 'chave-da-outra-empresa-456'),
+      'com duas chaves, a conta da primeira empresa continua abrindo com a chave 1': prepDeNovoPrimeira.motivos.length === 1,
+      'a chave vai só no cabeçalho pra Adyen, nunca volta pro Claude': chamadas.every((c) => ['chave-secreta-de-teste-123', 'chave-da-outra-empresa-456'].includes(c.chave)) && !/chave-secreta|chave-da-outra/.test(tudoProClaude),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAdyenApi = !falhas.length;
@@ -27386,7 +27402,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
   finally {
     globalThis.fetch = fetchAntesApi;
     const volta = (k, v) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; };
-    volta('ADYEN_DISPUTES_API_KEY', envAntesApi.k); volta('ADYEN_DISPUTES_URL', envAntesApi.u); volta('NOPULSO_AGENT_MASTER', envAntesApi.m);
+    volta('ADYEN_DISPUTES_API_KEY', envAntesApi.k); volta('ADYEN_DISPUTES_API_KEY_2', envAntesApi.k2); volta('ADYEN_DISPUTES_URL', envAntesApi.u); volta('NOPULSO_AGENT_MASTER', envAntesApi.m);
     delete process.env.ADYEN_MERCHANT_ACCOUNTS;
   }
   if (!okAdyenApi) ruins += 1;

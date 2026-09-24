@@ -7,8 +7,13 @@
 // servidor - mas SEMPRE depois da digital do Master (coworkApi, autorizar).
 //
 // Configuração no Render (nunca no código, nunca no chat):
-//   ADYEN_DISPUTES_API_KEY   chave de uma credencial com o papel
-//                            "API dispute management" (só esse papel)
+//   ADYEN_DISPUTES_API_KEY   chave de uma credencial com o papel de
+//                            gestão de disputas (só esse papel)
+//   ADYEN_DISPUTES_API_KEY_2 a da OUTRA empresa Adyen do grupo. Credencial
+//                            de empresa só enxerga as contas daquela
+//                            empresa: com duas empresas, são duas chaves.
+//                            Não precisa dizer qual conta é de qual: o
+//                            servidor descobre (chaveDaConta, abaixo)
 //   ADYEN_DISPUTES_URL       opcional: a URL base inteira. Sem ela vale a de
 //                            produção (URL_LIVE). Pra homologar, use a de
 //                            teste: https://ca-test.adyen.com/ca/services/DisputeService/v30
@@ -22,7 +27,7 @@
 //                            pra caso antigo, de antes de o Monitor guardar
 //                            o merchantAccountCode cru em cada transação
 //
-// Sem chave ou sem URL, nada é chamado: a ferramenta responde o que falta.
+// Sem chave, nada é chamado: a ferramenta responde o que falta.
 const VERSAO = 'v30';
 const URL_LIVE = `https://ca-live.adyen.com/ca/services/DisputeService/${VERSAO}`;
 
@@ -30,10 +35,16 @@ function urlBase(env = process.env) {
   if (env.ADYEN_DISPUTES_URL) return String(env.ADYEN_DISPUTES_URL).replace(/\/$/, '');
   return URL_LIVE;
 }
+// ADYEN_DISPUTES_API_KEY, ADYEN_DISPUTES_API_KEY_2, _3... nessa ordem
+function chaves(env = process.env) {
+  const ordem = (k) => Number((k.match(/_(\d+)$/) || [0, 1])[1]);
+  return Object.keys(env).filter((k) => /^ADYEN_DISPUTES_API_KEY(_\d+)?$/.test(k) && env[k])
+    .sort((a, b) => ordem(a) - ordem(b)).map((k) => String(env[k]));
+}
 function configurada(env = process.env) {
   const falta = [];
-  if (!env.ADYEN_DISPUTES_API_KEY) falta.push('ADYEN_DISPUTES_API_KEY');
-  return { ok: !falta.length, falta };
+  if (!chaves(env).length) falta.push('ADYEN_DISPUTES_API_KEY');
+  return { ok: !falta.length, falta, empresas: chaves(env).length };
 }
 
 // o merchantAccountCode cru: da transação (normalize.js grava desde
@@ -48,12 +59,12 @@ function contaDoCaso(caso, txs, env = process.env) {
   return null;
 }
 
-async function chamar(metodo, corpo, { env = process.env, fetchImpl = globalThis.fetch } = {}) {
+async function chamar(metodo, corpo, { env = process.env, fetchImpl = globalThis.fetch, chave = chaves(env)[0] } = {}) {
   const cfg = configurada(env);
   if (!cfg.ok) throw new Error(`API de disputas da Adyen não configurada no servidor. Falta: ${cfg.falta.join(', ')}.`);
   const resp = await fetchImpl(`${urlBase(env)}/${metodo}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': env.ADYEN_DISPUTES_API_KEY },
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': chave },
     body: JSON.stringify(corpo),
   });
   const texto = await resp.text();
@@ -68,10 +79,34 @@ async function chamar(metodo, corpo, { env = process.env, fetchImpl = globalThis
   return dados || {};
 }
 
+// QUAL CHAVE ABRE ESTA CONTA. Com uma chave só, é ela. Com duas empresas, o
+// servidor pergunta os motivos de defesa (chamada de LEITURA, não muda nada
+// na Adyen) com cada chave, na ordem, e guarda qual respondeu. Nunca tenta
+// chave em chamada que escreve (defender/aceitar): elas só rodam com a
+// chave que já abriu a conta.
+const CHAVE_DA_CONTA = new Map();
+async function chaveDaConta({ pspDisputa, conta }, opcoes = {}) {
+  const env = opcoes.env || process.env;
+  const lista = chaves(env);
+  if (lista.length <= 1) return lista[0];
+  const guardada = CHAVE_DA_CONTA.get(conta);
+  if (guardada && lista.includes(guardada)) return guardada;
+  const erros = [];
+  for (let i = 0; i < lista.length; i++) {
+    try {
+      await chamar('retrieveApplicableDefenseReasons', { disputePspReference: pspDisputa, merchantAccountCode: conta }, { ...opcoes, chave: lista[i] });
+      CHAVE_DA_CONTA.set(conta, lista[i]);
+      return lista[i];
+    } catch (e) { erros.push(`chave ${i + 1}: ${e.message}`); }
+  }
+  throw new Error(`Nenhuma das ${lista.length} chaves da Adyen abriu a conta ${conta} nesta disputa. ${erros.join(' | ')}`);
+}
+
 // motivos de defesa que a bandeira aceita PARA ESTA disputa, com os
 // documentos que cada um pede - é daqui que sai o que enviar
-async function motivosDeDefesa({ pspDisputa, conta }, opcoes) {
-  const d = await chamar('retrieveApplicableDefenseReasons', { disputePspReference: pspDisputa, merchantAccountCode: conta }, opcoes);
+async function motivosDeDefesa({ pspDisputa, conta }, opcoes = {}) {
+  const chave = await chaveDaConta({ pspDisputa, conta }, opcoes);
+  const d = await chamar('retrieveApplicableDefenseReasons', { disputePspReference: pspDisputa, merchantAccountCode: conta }, { ...opcoes, chave });
   return (d.defenseReasons || []).map((m) => ({
     codigo: m.defenseReasonCode, satisfeito: !!m.satisfied,
     documentos: (m.defenseDocumentTypes || []).map((t) => ({ codigo: t.defenseDocumentTypeCode, exigencia: t.requirementLevel || null, jaEnviado: !!t.available })),
@@ -79,8 +114,9 @@ async function motivosDeDefesa({ pspDisputa, conta }, opcoes) {
 }
 
 // envia os documentos e defende. `documentos` = [{ buffer, contentType, tipo }]
-async function defender({ pspDisputa, conta, motivo, documentos }, opcoes) {
+async function defender({ pspDisputa, conta, motivo, documentos }, opcoes = {}) {
   if (!documentos || !documentos.length) throw new Error('Nenhum documento para enviar.');
+  opcoes = { ...opcoes, chave: await chaveDaConta({ pspDisputa, conta }, opcoes) };
   await chamar('supplyDefenseDocument', {
     disputePspReference: pspDisputa, merchantAccountCode: conta,
     defenseDocuments: documentos.map((x) => ({ content: Buffer.from(x.buffer).toString('base64'), contentType: x.contentType, defenseDocumentTypeCode: x.tipo })),
@@ -89,9 +125,10 @@ async function defender({ pspDisputa, conta, motivo, documentos }, opcoes) {
   return { ok: true };
 }
 
-async function aceitar({ pspDisputa, conta }, opcoes) {
+async function aceitar({ pspDisputa, conta }, opcoes = {}) {
+  opcoes = { ...opcoes, chave: await chaveDaConta({ pspDisputa, conta }, opcoes) };
   await chamar('acceptDispute', { disputePspReference: pspDisputa, merchantAccountCode: conta }, opcoes);
   return { ok: true };
 }
 
-module.exports = { URL_LIVE, urlBase, configurada, contaDoCaso, chamar, motivosDeDefesa, defender, aceitar, VERSAO };
+module.exports = { URL_LIVE, urlBase, chaves, chaveDaConta, configurada, contaDoCaso, chamar, motivosDeDefesa, defender, aceitar, VERSAO };
