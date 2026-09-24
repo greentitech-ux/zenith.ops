@@ -6,6 +6,7 @@
 const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const db = require('./firestore');
 const { resolverBucket } = require('./storageBucket');
+const pagamentosArquivo = require('./pagamentosArquivo');
 const COLLECTION = db.collection('transactions');
 
 let cache = [];
@@ -129,6 +130,24 @@ async function pruneOld(cutoffMs) {
   }
 
   if (removed.length) {
+    // ANTES DE APAGAR, GUARDA A FICHA DO PAGAMENTO (Master, 24/09/2026).
+    //
+    // O pedido só vira protegido DEPOIS que um evento de disputa chega nele -
+    // e o chargeback chega dias ou semanas depois. Até 24/09, quando chegava,
+    // a autorização já tinha sido apagada aqui, e a tarefa de defesa nascia
+    // com a data e o PSP do PRÓPRIO chargeback (caso real: #12084, compra de
+    // 01/09 gravada como 06/09). O evento continua morrendo no Firestore, que
+    // é o que custa; o fato sobrevive num arquivo no Storage.
+    //
+    // Não pode derrubar a limpeza: se o Storage falhar, o log conta e as
+    // transações velhas saem do mesmo jeito - segurar a limpeza por causa
+    // disso seria trocar um dado faltando por uma cota estourada.
+    try {
+      const guardou = await pagamentosArquivo.arquivar(removed);
+      if (guardou.pagamentos) console.log(`[pagamentos-arquivo] ${guardou.pagamentos} pagamento(s) guardado(s) em ${guardou.arquivos} arquivo(s) antes da limpeza.`);
+    } catch (err) {
+      console.error('[pagamentos-arquivo] não consegui arquivar os pagamentos que estão saindo:', err.message);
+    }
     cache = kept;
     // Firestore aceita no maximo 500 operacoes por batch
     for (let i = 0; i < removed.length; i += 450) {

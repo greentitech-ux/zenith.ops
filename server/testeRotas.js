@@ -182,7 +182,12 @@ const bucketFake = {
       return Readable.from([ARQUIVOS.get(caminho) || Buffer.alloc(0)]);
     },
     delete: async () => { ARQUIVOS.delete(caminho); },
+    name: caminho,
   }),
+  // a limpeza do arquivo de pagamentos lista por prefixo (pagamentosArquivo.limpar)
+  getFiles: async ({ prefix } = {}) => [[...ARQUIVOS.keys()]
+    .filter((k) => !prefix || k.startsWith(prefix))
+    .map((k) => ({ name: k, delete: async () => { ARQUIVOS.delete(k); } }))],
 };
 
 // Leitor de documento de mentira, DESLIGADO por padrão (os testes que já
@@ -27057,12 +27062,23 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const casoCB = await dispM.getOne(dc.idDoCaso('PED-CB'));
     const casoFr = await dispM.getOne(dc.idDoCaso('PED-FRAUDE'));
     const casoVelho = await dispM.getOne(dc.idDoCaso('PED-VELHO'));
+    let envioAntes;
     const casoSem = await dispM.getOne(dc.idDoCaso('PED-SEMGERENTE'));
     const tarefaCB = casoCB && casoCB.tarefaId ? DOCS.get(`tarefas/${casoCB.tarefaId}`) : null;
     const tarefaSem = casoSem && casoSem.tarefaId ? DOCS.get(`tarefas/${casoSem.tarefaId}`) : null;
     const criticos1 = pushLog.filter((p) => p.tipo === 'critico').length;
     const r2 = await dc.sincronizar(deps(T0 + 60000));
     const criticos2 = pushLog.filter((p) => p.tipo === 'critico').length;
+    // AQUI, e nao la embaixo: a partir de r3 (T0+25h) o prazo da Adyen deste
+    // caso (T0+24h) ja venceu, e a varredura fecha ele como PERDIDA - o que
+    // esta certo. Medido depois, a recusa vinha por "ja encerrada" e este
+    // teste deixava de provar o que ele existe pra provar: que sem o PDF da
+    // defesa gerado nao da pra registrar ENVIADA.
+    DOCS.set('users/mst-defesa', { email: 'master-defesa@teste.local', role: 'master', active: true });
+    const masterAntesCedo = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'master-defesa@teste.local';
+    try { await cw.executar({ nome: 'registrar_defesa_enviada', entrada: { disputaId: casoSem.id }, idempotencyKey: 'df-k0' }); envioAntes = 'passou'; } catch (e) { envioAntes = e.message; }
+    finally { if (masterAntesCedo === undefined) delete process.env.NOPULSO_AGENT_MASTER; else process.env.NOPULSO_AGENT_MASTER = masterAntesCedo; }
     // lembrete depois de 24h sem resposta, e o Master chamado 12h antes do prazo interno
     const r3 = await dc.sincronizar(deps(T0 + 25 * HORA));
     const r4 = await dc.sincronizar(deps(Date.parse(casoCB.prazoInterno) - 11 * HORA));
@@ -27109,11 +27125,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
     DOCS.set('users/mst-defesa', { email: 'master-defesa@teste.local', role: 'master', active: true });
     const masterAntesD = process.env.NOPULSO_AGENT_MASTER;
     process.env.NOPULSO_AGENT_MASTER = 'master-defesa@teste.local';
-    let lista, detalhe, envioAntes, envio, linkOk, linkMexido, linkForjado, vencido;
+    let lista, detalhe, envio, linkOk, linkMexido, linkForjado, vencido;
     try {
       lista = (await cw.executar({ nome: 'listar_disputas', entrada: { somenteProntas: true } })).resultado;
       detalhe = (await cw.executar({ nome: 'obter_disputa', entrada: { psp: 'DISP1' } })).resultado;
-      try { await cw.executar({ nome: 'registrar_defesa_enviada', entrada: { disputaId: casoSem.id }, idempotencyKey: 'df-k0' }); envioAntes = 'passou'; } catch (e) { envioAntes = e.message; }
       envio = await cw.executar({ nome: 'registrar_defesa_enviada', entrada: { disputaId: casoCB.id, observacao: 'anexado na Adyen' }, idempotencyKey: 'df-k1' });
     } finally {
       if (masterAntesD === undefined) delete process.env.NOPULSO_AGENT_MASTER; else process.env.NOPULSO_AGENT_MASTER = masterAntesD;
@@ -27261,7 +27276,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
     try { await cw.executar({ nome: 'preencher_defesa', entrada: { tarefaId: caso.tarefaId, campos: { itens: 'x' } }, idempotencyKey: 'cw-pre-3' }); depoisConcluir = 'passou'; } catch (e) { depoisConcluir = e.message; }
     finally { if (masterAntes === undefined) delete process.env.NOPULSO_AGENT_MASTER; else process.env.NOPULSO_AGENT_MASTER = masterAntes; }
     const tudoQueOClaudeViu = JSON.stringify([pag, pre, pre2, com]);
-    const comentClaude = (tarefa1.comentarios || []).find((c) => c.viaAgente);
+    // POR NOME, nao por `viaAgente`: desde 24/09 a tarefa nasce com um
+    // comentario do "NoPulso (automatico)", que tambem e viaAgente. Procurar
+    // pela flag pegava o comentario errado - o do servidor, nao o do Claude.
+    const comentClaude = (tarefa1.comentarios || []).find((c) => c.viaAgente && c.porNome === 'Claude (Cowork)');
+    const comentNoPulso = (tarefa1.comentarios || []).find((c) => c.porNome === 'NoPulso (automático)');
     const comentSistema = (tarefa1.comentarios || []).find((c) => c.sistema && /pré-preencheu/.test(c.texto || ''));
 
     const conf = {
@@ -28715,6 +28734,199 @@ $r | ConvertTo-Json -Depth 4 -Compress
   } catch (e) { okSse = false; console.log('  erro: ' + e.message); }
   if (!okSse) ruins += 1;
   console.log(`${okSse ? '✓' : '✗'} Ao vivo: evento do servidor com tela escutando dos dois lados, de um arquivo só`);
+
+  // ------------------------------------------------------------------
+  // DEFESA DE CHARGEBACK 100% NO SERVIDOR (Master, 24/09/2026).
+  //
+  // O caso real que motivou: tarefa #12084, Dom Bessa, R$ 86,90. O pagamento
+  // foi 01/09 18:08:45 (PSP VH68ZV96SS76L7Q9) e o chargeback chegou 06/09. A
+  // tarefa nasceu dizendo que a COMPRA foi 06/09, com o PSP da disputa no
+  // lugar do pagamento.
+  //
+  // Não era erro de conta: o Monitor apaga transação com 2 dias, e o pedido
+  // só vira protegido DEPOIS que a disputa chega nele. Quando chegou, a
+  // autorização já não existia, e `find(APROVADO) || ordenados[0]` caiu no
+  // próprio chargeback. A loja então procurava no sistema dela um pedido de
+  // 06/09 que não existia - e a defesa morria aí.
+  let okCbAuto = false;
+  try {
+    const dcA = require(__dirname + '/defesaChargeback.js');
+    const arq = require(__dirname + '/pagamentosArquivo.js');
+    const dispA = require(__dirname + '/disputes.js');
+    const tarA = require(__dirname + '/tarefas.js');
+    const HORA_A = 3600000, DIA_A = 24 * HORA_A;
+    const T = Date.parse('2026-09-06T12:00:00.000Z');
+    const isoA = (ms) => new Date(ms).toISOString();
+    const UNI_A = 'Dominos Bessa';
+    const ger = { id: 'cb-ger', email: 'cb-ger@teste.local', username: 'cb-ger', cargo: 'gerente', cargos: ['gerente'], active: true, role: 'user', permissions: { sections: ['tarefas'], unidades: [UNI_A], vaultSubgroups: [], tiposSolicitacao: [] } };
+    const mst = { id: 'cb-mst', email: 'cb-mst@teste.local', username: 'cbmst', role: 'master', active: true };
+    DOCS.set('users/cb-ger', ger); DOCS.set('users/cb-mst', mst);
+    arq.invalidar();
+
+    // --- 1) o pagamento que o pruneOld vai apagar ---
+    const pagamento = {
+      merchantReference: 'PED-12084', pspReference: 'VH68ZV96SS76L7Q9', eventCode: 'AUTHORISATION',
+      status: 'APROVADO', dataHora: isoA(T - 5 * DIA_A), unidade: UNI_A, valor: 86.9,
+      metodo: 'visa', last4: '1234', bin: '451416', merchantAccountCode: 'DOM_BESSA',
+      nomeCliente: 'Ana Souza', cardHolder: 'ANA C SOUZA', emailCliente: 'ana@exemplo.com',
+      telefoneCliente: '(83) 99999-1234', enderecoCliente: 'Rua A, 10 - João Pessoa', enderecoTipo: 'entrega',
+      threeDAutenticado: 'false', threeDOferecido: 'true', paisCliente: 'BR', paisEmissor: 'BR',
+    };
+    // PELO pruneOld, não chamando arquivar() na mão: é o pruneOld que apaga, e
+    // era ele que precisava passar a guardar antes. Chamando o módulo direto,
+    // arrancar a chamada de dentro do pruneOld passava batido no teste.
+    store.addOrUpdate(pagamento);
+    store.addOrUpdate({ ...pagamento, merchantReference: 'OUTRO', pspReference: 'REC1', status: 'RECUSADO' });
+    const leiturasAntes = LEITURAS.docs;
+    await store.pruneOld(T - 2 * DIA_A);
+    const leiturasArquivar = LEITURAS.docs - leiturasAntes;
+    const saiuDoMonitor = !store.allTransactions().some((t) => t.pspReference === 'VH68ZV96SS76L7Q9');
+    const guardado = JSON.parse((ARQUIVOS.get(`pagamentos-arquivo/${arq.diaSP(pagamento.dataHora)}.json`) || Buffer.from('{}')).toString('utf8'));
+
+    // --- 2) o chargeback chega 5 dias depois, SEM o pagamento em memoria ---
+    const cbEvento = {
+      merchantReference: 'PED-12084', pspReference: 'GF3HFTT96GP699Z3', originalReference: 'VH68ZV96SS76L7Q9',
+      eventCode: 'NOTIFICATION_OF_CHARGEBACK', status: 'NOTIFICATION_OF_CHARGEBACK', dataHora: isoA(T),
+      unidade: UNI_A, valor: 86.9, prazoDefesa: isoA(T + 10 * DIA_A),
+      motivo: 'Other Fraud-Card Absent Environment',
+    };
+    // PELO normalize, não injetando o campo na mão: o texto do banco chega no
+    // webhook e é o normalize que decide guardá-lo. Escrevendo direto no
+    // objeto, apagar essa leitura passava batido.
+    const normalizado = require(__dirname + '/normalize.js').normalize({
+      pspReference: 'GF3HFTT96GP699Z3', originalReference: 'VH68ZV96SS76L7Q9',
+      merchantReference: 'PED-12084', eventCode: 'NOTIFICATION_OF_CHARGEBACK',
+      reason: "KARLA GARCIA ALVES - Card Holder don't recognize this purchase",
+      amount: { value: 8690, currency: 'BRL' }, success: 'true',
+    });
+    cbEvento.comentarioEmissor = normalizado.comentarioEmissor;
+    const pushMudo = { notifyCritico: async () => {}, notifyUsuario: async () => {} };
+    const depsA = (txs, extra = {}) => ({
+      store: { allTransactions: () => txs }, users: { list: async () => [ger, mst] },
+      tarefas: tarA, push: pushMudo, agora: T + HORA_A, masterPreferido: 'cb-mst@teste.local', ...extra,
+    });
+    await dcA.sincronizar(depsA([cbEvento]));
+    dispA.invalidar();
+    const caso = await dispA.getOne(dcA.idDoCaso('PED-12084'));
+    const tarefa = caso && caso.tarefaId ? DOCS.get(`tarefas/${caso.tarefaId}`) : null;
+    const respostas = (tarefa && tarefa.defesaChargeback && tarefa.defesaChargeback.respostas) || {};
+    const selos = (tarefa && tarefa.defesaChargeback && tarefa.defesaChargeback.preenchidoPeloClaude) || {};
+    // DOIS comentários nascem com o mesmo nome: o do pré-preenchimento
+    // (sistema: true, listando os campos) e o do resumo (viaAgente: true).
+    // Pegar pelo nome só trazia o primeiro.
+    const comentario = ((tarefa && tarefa.comentarios) || []).find((c) => c.viaAgente && c.porNome === 'NoPulso (automático)');
+    const comentPre = ((tarefa && tarefa.comentarios) || []).find((c) => c.sistema && c.porNome === 'NoPulso (automático)');
+
+    // --- 3) pedido sem pagamento em lugar nenhum ---
+    const semPag = { ...cbEvento, merchantReference: 'PED-SEM-FICHA', pspReference: 'DISPX', originalReference: 'NAOEXISTE', comentarioEmissor: null };
+    await dcA.sincronizar(depsA([semPag]));
+    dispA.invalidar();
+    const casoSemFicha = await dispA.getOne(dcA.idDoCaso('PED-SEM-FICHA'));
+    const tarefaSemFicha = casoSemFicha && casoSemFicha.tarefaId ? DOCS.get(`tarefas/${casoSemFicha.tarefaId}`) : null;
+
+    // --- 4) o pre-preenchimento quebra: a tarefa TEM que nascer assim mesmo ---
+    // com ficha arquivada: sem ela não há campo pra preencher, o
+    // pré-preenchimento nem é chamado, e a sabotagem que o derruba passava
+    await arq.arquivar([{ ...pagamento, merchantReference: 'PED-QUEBRA' }]);
+    const quebrar = { ...cbEvento, merchantReference: 'PED-QUEBRA', pspReference: 'DISPQ' };
+    const tarefasQuebradas = { ...tarA, preencherDefesaPeloAgente: async () => { throw new Error('quebrei de proposito'); } };
+    await dcA.sincronizar(depsA([quebrar], { tarefas: tarefasQuebradas }));
+    dispA.invalidar();
+    const casoQuebra = await dispA.getOne(dcA.idDoCaso('PED-QUEBRA'));
+
+    // --- 5) caso ABERTA com prazo vencido e sem defesa vira PERDIDA ---
+    await dispA.salvarCaso('cb-preso', { pedidoId: 'PED-PRESO', origem: 'adyen', unidade: UNI_A, status: 'ABERTA', prazoDefesa: isoA(T - 40 * DIA_A), valor: 50 });
+    await dispA.salvarCaso('cb-enviado', { pedidoId: 'PED-ENVIADO', origem: 'adyen', unidade: UNI_A, status: 'ABERTA', prazoDefesa: isoA(T - 40 * DIA_A), valor: 50, defesaProntaEm: isoA(T - 41 * DIA_A) });
+    dispA.invalidar();
+    await dcA.sincronizar(depsA([]));
+    dispA.invalidar();
+    const preso = await dispA.getOne('cb-preso');
+    const enviado = await dispA.getOne('cb-enviado');
+
+    // --- 6) a limpeza dos 180 dias ---
+    ARQUIVOS.set('pagamentos-arquivo/2025-01-01.json', Buffer.from('{}'));
+    arq.invalidar();
+    await arq.limpar(T);
+    const velhoSumiu = !ARQUIVOS.has('pagamentos-arquivo/2025-01-01.json');
+    const novoFicou = ARQUIVOS.has(`pagamentos-arquivo/${arq.diaSP(pagamento.dataHora)}.json`);
+
+    const conf = {
+      // --- o arquivo ---
+      'só o pagamento APROVADO é arquivado, e sem número de cartão':
+        !!guardado['PED-12084'] && !guardado.OUTRO
+        && guardado['PED-12084'].pspReference === 'VH68ZV96SS76L7Q9'
+        && guardado['PED-12084'].last4 === '1234'
+        && !JSON.stringify(guardado).includes('4514161234567890'),
+      // CLAUDE.md §3: o arquivo existe pra NÃO custar Firestore
+      'arquivar não custa nenhuma leitura de Firestore': leiturasArquivar === 0,
+      // a limpeza continua fazendo o trabalho dela: o evento SAI do Monitor
+      // (é isso que baixa a cota); o que sobrevive é a ficha no Storage
+      'o pagamento sai do Monitor e sobrevive só como ficha': saiuDoMonitor && !!guardado['PED-12084'],
+      'o arquivo é um por dia de pagamento, no fuso de SP':
+        arq.diaSP('2026-09-01T23:30:00.000Z') === '2026-09-01' && arq.diaSP('2026-09-02T02:30:00.000Z') === '2026-09-01',
+      // --- o bug da #12084 ---
+      'pagamento apagado: a data e o PSP do caso são os da COMPRA, não os da disputa':
+        !!caso && caso.dataCompra === isoA(T - 5 * DIA_A) && caso.pspPagamento === 'VH68ZV96SS76L7Q9'
+        && caso.pspDisputa === 'GF3HFTT96GP699Z3' && caso.pagamentoDoArquivo === true,
+      'sem pagamento em lugar nenhum: data nula e descrição honesta':
+        !!casoSemFicha && casoSemFicha.dataCompra === null && casoSemFicha.pspPagamento === null
+        && /data da compra não encontrada/.test((tarefaSemFicha && tarefaSemFicha.descricao) || ''),
+      // --- a tarefa nasce preenchida ---
+      'a tarefa nasce com os campos que são fato da Adyen, com selo do NoPulso':
+        !!tarefa && respostas.nomeCliente === 'Ana Souza' && respostas.telefoneCliente === '(83) 99999-1234'
+        && respostas.tipoPedido === 'Delivery' && /Rua A, 10/.test(respostas.endereco || '')
+        && !!selos.nomeCliente && /Adyen/.test(selos.nomeCliente.fonte),
+      // Não basta o campo estar vazio - vazio ele estaria de qualquer jeito se
+      // ninguém tentasse. O que prova a trava é a RECUSA sendo devolvida
+      // quando alguém oferece os dois campos.
+      'decisão e declaração continuam só da unidade': respostas.decisao === undefined && !respostas.declaracao
+        && (await (async () => {
+          const r = await tarA.preencherDefesaPeloAgente(caso.tarefaId, { decisao: 'Contestar', declaracao: true, itens: '1 pizza' }, { porNome: 'NoPulso (automático)' });
+          const depois = DOCS.get(`tarefas/${caso.tarefaId}`);
+          const resp2 = (depois.defesaChargeback && depois.defesaChargeback.respostas) || {};
+          return r.recusados.length === 2 && r.recusados.includes('decisao') && r.recusados.includes('declaracao')
+            && resp2.decisao === undefined && !resp2.declaracao
+            // e o que NÃO é proibido entrou, senão a recusa poderia ser "não escreveu nada"
+            && resp2.itens === '1 pizza';
+        })()),
+      'o comentário traz pedido, risco, motivo e o que a loja tem que buscar':
+        !!comentario && !!comentPre && /PEDIDO/.test(comentario.texto) && /RISCO/.test(comentario.texto)
+        && /PARA A LOJA BUSCAR/.test(comentario.texto) && /LEITURA/.test(comentario.texto)
+        && /VH68ZV96SS76L7Q9/.test(comentario.texto) && /GF3HFTT96GP699Z3/.test(comentario.texto)
+        && /01\/09\/2026/.test(comentario.texto),
+      // A LEITURA É REGRA FIXA, NÃO MODELO. Um parágrafo gerado sobre "chance
+      // de ganhar" seria número inventado (CLAUDE.md §6) - e a loja decide
+      // contestar ou aceitar em cima dele. São três condições, e só.
+      'a leitura da defesa sai de regra, e cobre os três casos': (() => {
+        const base = { caso: { motivoAdyen: 'Fraud', pedidoId: 'X' }, pedido: { valor: 10, dataCompra: null }, prazoInt: isoA(T), historico: null };
+        const texto = (d) => dcA.textoDoComentarioAutomatico({ ...base, dados: d });
+        return /Defesa forte/.test(texto({ threeDAutenticado: 'true', enderecoTipo: 'entrega' }))
+          && /Defesa fraca/.test(texto({ threeDAutenticado: 'false' }))
+          && /provar a entrega/.test(texto({ threeDAutenticado: 'false', enderecoTipo: 'entrega' }));
+      })(),
+      // telefone e e-mail vão pro CAMPO pelo servidor, mas não pro texto que o
+      // Claude lê depois (mesma regra do obter_pagamento_adyen)
+      'telefone e e-mail não entram no texto do comentário':
+        !!comentario && !comentario.texto.includes('99999-1234') && !comentario.texto.includes('ana@exemplo.com'),
+      'o que o banco escreveu entra na tarefa, com o nome que só ele tem':
+        !!caso && /KARLA GARCIA ALVES/.test(caso.comentarioEmissor || '')
+        && /KARLA GARCIA ALVES/.test((tarefa && tarefa.descricao) || ''),
+      // --- a tarefa nasce de qualquer jeito ---
+      'pré-preenchimento que quebra não impede a tarefa de nascer':
+        !!casoQuebra && !!casoQuebra.tarefaId && !!DOCS.get(`tarefas/${casoQuebra.tarefaId}`),
+      // --- status ---
+      'caso ABERTA com prazo vencido e sem defesa vira PERDIDA':
+        preso.status === 'PERDIDA' && /prazo de defesa vencido sem resposta/.test(preso.resultado || ''),
+      'quem já mandou a defesa NÃO é fechado pelo prazo': enviado.status === 'ABERTA',
+      // --- limpeza ---
+      'o arquivo com mais de 180 dias é apagado, o novo fica': velhoSumiu && novoFicou,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okCbAuto = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [caso=${JSON.stringify(caso && { d: caso.dataCompra, p: caso.pspPagamento, a: caso.pagamentoDoArquivo, e: caso.comentarioEmissor })} resp=${JSON.stringify(respostas)} com=${comentario ? comentario.texto.slice(0, 200) : null}]`);
+  } catch (e) { okCbAuto = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
+  if (!okCbAuto) ruins += 1;
+  console.log(`${okCbAuto ? '✓' : '✗'} Chargeback sem Chrome: pagamento guardado 180 dias, data certa da compra, tarefa nascendo preenchida e prazo vencido fechado`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

@@ -36,6 +36,54 @@ Chargeback Automatizado" (Cowork), separando o que o código já tem, o que
   - `registrar_disputa_aceita`.
 - **Atenção:** a especificação original diz que a Adyen exige documento em inglês. Se a tela de defesa recusar o PDF em português, o Claude anexa junto uma carta curta em inglês com o resumo.
 
+### Sem Chrome: o servidor faz sozinho o que é fato da Adyen (24/09/2026)
+
+Decisão do Master: **nada de abrir a Customer Area no navegador**. Motivador:
+a tarefa **#12084** (Dom Bessa, R$ 86,90) nasceu com a data errada — gravou a
+compra em **06/09** e o PSP da disputa como se fosse o do pagamento. A compra
+foi **01/09 18:08:45, PSP VH68ZV96SS76L7Q9**.
+
+Não era erro de conta, era de **retenção**: o Monitor apaga transação com 2
+dias (`RETENCAO_TRANSACOES_DIAS`, `store.js`), e um pedido só fica protegido
+*depois* que um evento de disputa chega nele. Quando o chargeback chegou, a
+autorização já tinha ido, e `find(APROVADO) || ordenados[0]` caiu no próprio
+chargeback.
+
+- **Arquivo de pagamentos, 180 dias** (`pagamentosArquivo.js`). Antes de o
+  `pruneOld` apagar, a ficha de cada pagamento **aprovado** vai para
+  `pagamentos-arquivo/AAAA-MM-DD.json` — um arquivo por dia de pagamento, no
+  fuso de SP, com merge do que já existir. **Só Storage: zero leitura e zero
+  escrita no Firestore** (mesmo motivo do snapshot do `store.js`). Nunca o
+  número do cartão. Limpeza 1× por dia.
+- **A compra volta quando o chargeback chega.** Sem evento aprovado em
+  memória, a varredura busca a ficha (anda para trás dia a dia a partir da
+  data da disputa). Achou: entra como se fosse o evento de pagamento, e
+  `dadosDoPagamento`, `sugestoesDaAdyen` e `mesmoCliente` funcionam igual.
+  **Não achou: `dataCompra` e `pspPagamento` ficam nulos** e a tarefa diz
+  "data da compra não encontrada". A data da disputa nunca mais entra no
+  lugar da compra — uma data errada é pior que uma faltando, porque a loja
+  procura no sistema dela um pedido que não existe naquele dia.
+- **A tarefa nasce preenchida.** Logo depois de criada, o próprio NoPulso
+  escreve os campos que são fato da Adyen (selo "NoPulso (automático)") e
+  deixa um comentário com PEDIDO, CLIENTE, RISCO, MOTIVO, PARA A LOJA BUSCAR
+  e LEITURA. **Decisão e declaração continuam só da unidade.** Telefone e
+  e-mail vão para o *campo* (quem copia é o servidor), nunca para o texto do
+  comentário. Falha em qualquer passo não impede a tarefa de nascer.
+- **A LEITURA é regra fixa, não modelo:** 3DS autenticado → defesa forte; sem
+  3DS e sem endereço de entrega → defesa fraca; sem 3DS com entrega → depende
+  do comprovante de entrega.
+- **O que o banco escreveu** entra na tarefa. Na #12084 veio *"KARLA GARCIA
+  ALVES - Card Holder don't recognize this purchase"* — um terceiro nome, que
+  sumia porque `traduzirMotivo()` casa o texto num padrão e devolve a frase
+  pronta.
+- **Prazo vencido fecha o caso.** 24 casos estavam `ABERTA` com o prazo da
+  Adyen vencido (alguns desde 29/07). Agora viram `PERDIDA` com o texto que já
+  existia. Quem já mandou a defesa não é tocado.
+
+**Fora do escopo, esperando a Adyen:** o envio pela API (`enviar_defesa_adyen`)
+só funciona quando a Adyen liberar **"Merchant Dispute Management"** para as
+credenciais de API. O código já está publicado.
+
 ## 1. O que os números dizem (e o que muda na prioridade)
 
 | Fato do CSV | Consequência |

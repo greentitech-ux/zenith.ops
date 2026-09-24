@@ -123,6 +123,7 @@ const agenteAcoes = require('./agenteAcoes');
 const coworkApi = require('./coworkApi');
 const enderecoAntigo = require('./enderecoAntigo');
 const defesaChargeback = require('./defesaChargeback');
+const pagamentosArquivo = require('./pagamentosArquivo');
 const vigiaScript = require('./vigiaScript');
 const agenteAndroid = require('./agenteAndroid');
 const qualidade = require('./qualidade');
@@ -17217,10 +17218,21 @@ function aquecerBoot(promessa, ms) {
     // quem não respondeu. Lê os pedidos do store em memória (sem Firestore).
     const rodarDefesaChargeback = () => defesaChargeback.sincronizar({
       store, users, tarefas, push, nomeUnidade: (c) => nomeCanonicoUnidade(c, c), masterPreferido: String(process.env.MASTER_EMAIL || '').trim().toLowerCase(),
-    }).then((r) => { if (r && (r.casosNovos || r.tarefasCriadas || r.avisosFraude)) console.log('[chargeback]', JSON.stringify(r)); })
+      // a tarefa nasce pre-preenchida e comentada: quem estiver com a tela
+      // aberta ve aparecer, sem F5 (ver zenithAoVivo no tema.js)
+      aoAlterarTarefa: (t) => { if (t && t.id) broadcast('tarefas-atualizada', { id: t.id, unidade: t.unidade }, 'tarefas'); },
+    }).then((r) => { if (r && (r.casosNovos || r.tarefasCriadas || r.avisosFraude || r.vencidos)) console.log('[chargeback]', JSON.stringify(r)); })
       .catch((err) => console.error('Erro na defesa de chargeback:', err.message));
     setTimeout(rodarDefesaChargeback, 20 * 1000);
     setInterval(rodarDefesaChargeback, 3 * 60 * 1000);
+
+    // ARQUIVO DE PAGAMENTOS: some com o que passou de 180 dias. Uma vez por
+    // dia, e so no Storage - nao encosta no Firestore.
+    const limparArquivoPagamentos = () => pagamentosArquivo.limpar()
+      .then((r) => { if (r && r.apagados) console.log(`[pagamentos-arquivo] ${r.apagados} arquivo(s) com mais de ${pagamentosArquivo.DIAS_GUARDADOS} dias apagado(s).`); })
+      .catch((err) => console.error('Erro na limpeza do arquivo de pagamentos:', err.message));
+    setTimeout(limparArquivoPagamentos, 5 * 60 * 1000);
+    setInterval(limparArquivoPagamentos, 24 * 60 * 60 * 1000);
 
     setInterval(() => {
       rodarVarreduraLojaStatus().catch((err) => console.error('Erro na varredura de conectividade das lojas:', err.message));

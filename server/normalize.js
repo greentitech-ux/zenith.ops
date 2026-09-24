@@ -137,6 +137,19 @@ function enderecoDoWebhook(additional, item) {
   return { enderecoCliente: null, enderecoTipo: null };
 }
 
+// ver `comentarioEmissor` no retorno do normalize
+const CAMPOS_EMISSOR = ['chargebackReasonCode', 'disputeReason', 'issuerComment', 'chargebackComment', 'notes'];
+function comentarioDoEmissor(additional, item) {
+  for (const c of CAMPOS_EMISSOR) {
+    const v = String((additional && additional[c]) || '').trim();
+    // só texto de gente: um código isolado ("10.4") já vira a tradução do
+    // motivo, e repetir ele aqui só encheria a tarefa
+    if (v && /[a-zA-Z]{4}/.test(v)) return v.slice(0, 400);
+  }
+  const cru = String((item && item.reason) || '').trim();
+  return cru && /[a-zA-Z]{4}/.test(cru) ? cru.slice(0, 400) : null;
+}
+
 function normalize(item) {
   const additional = item.additionalData || {};
   const status = statusFromEvent(item);
@@ -161,6 +174,20 @@ function normalize(item) {
     status,
     fraudeSuspeita: isFraudSuspect(item),
     motivo: item.reason || additional.refusalReasonRaw || '',
+    // O QUE O BANCO ESCREVEU (Master, 24/09/2026).
+    //
+    // Na #12084 a Adyen mandou "KARLA GARCIA ALVES - Card Holder don't
+    // recognize this purchase" - um TERCEIRO nome, diferente do titular e do
+    // nome no pedido. Isso é ouro na defesa, e sumia: `traduzirMotivo()` casa
+    // o texto num padrão conhecido e devolve a frase pronta em português,
+    // então o nome ia embora antes de chegar na tarefa.
+    //
+    // A Adyen não tem UM campo documentado de "comentário do emissor" nas
+    // notificações de disputa - o texto costuma vir no próprio `reason`. Por
+    // isso a leitura é: os campos de additionalData que já vi carregarem
+    // isso, e o `reason` cru como fonte final. Se a Adyen passar a mandar
+    // noutro campo, entra na lista.
+    comentarioEmissor: comentarioDoEmissor(additional, item),
     valor: centsToReais(item.amount),
     moeda: item.amount?.currency || 'BRL',
     metodo: item.paymentMethod || '?',

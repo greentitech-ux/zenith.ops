@@ -24,6 +24,7 @@
 // desta versão (as disputas abertas hoje ganham tarefa no primeiro deploy).
 const crypto = require('crypto');
 const disputes = require('./disputes');
+const pagamentosArquivo = require('./pagamentosArquivo');
 
 // ---------------------------------------------------------------------
 // eventos de disputa (eventCode cru da Adyen; o normalize.js guarda em
@@ -220,6 +221,11 @@ function evoluirCaso(atual, txs, agoraMs = Date.now()) {
   const todos = eventos;
   const comPrazo = [...todos].reverse().find((e) => e.prazoDefesa);
   const comMotivo = [...todos].reverse().find((e) => ABRE.has(codigoDoEvento(e)) && e.motivo) || [...todos].reverse().find((e) => e.motivo);
+  // o que o BANCO escreveu, palavra por palavra - o `motivoAdyen` vira frase
+  // pronta em `traduzirMotivo()` e perde o que é específico deste caso (na
+  // #12084, um terceiro nome: "KARLA GARCIA ALVES")
+  const comEmissor = [...todos].reverse().find((e) => ABRE.has(codigoDoEvento(e)) && e.comentarioEmissor)
+    || [...todos].reverse().find((e) => e.comentarioEmissor);
   const abertura = todos.find((e) => ABRE.has(codigoDoEvento(e)));
   const aviso = todos.find((e) => codigoDoEvento(e) === AVISO_FRAUDE);
   return {
@@ -227,6 +233,7 @@ function evoluirCaso(atual, txs, agoraMs = Date.now()) {
     eventosVistos: [...vistos].slice(-60),
     prazoDefesa: comPrazo ? comPrazo.prazoDefesa : ((atual && atual.prazoDefesa) || null),
     motivoAdyen: comMotivo ? comMotivo.motivo : ((atual && atual.motivoAdyen) || null),
+    comentarioEmissor: comEmissor ? comEmissor.comentarioEmissor : ((atual && atual.comentarioEmissor) || null),
     pspDisputa: abertura ? abertura.pspReference : ((atual && atual.pspDisputa) || null),
     abertoEm: abertura ? abertura.dataHora : ((atual && atual.abertoEm) || null),
     avisoFraudeEm: aviso ? aviso.dataHora : ((atual && atual.avisoFraudeEm) || null),
@@ -256,13 +263,96 @@ function equipeDaUnidade(lista, unidade, masterPreferido) {
 
 function textoDaTarefa(caso, pedido, prazoInt) {
   const m = traduzirMotivo(caso.motivoAdyen);
+  // SEM DATA, A TAREFA DIZ QUE NÃO ACHOU - e não inventa.
+  //
+  // Até 24/09 a data do chargeback entrava aqui como se fosse a da compra
+  // (#12084: compra de 01/09 descrita como 06/09). A loja procurava no
+  // sistema dela um pedido que não existia naquele dia, não achava, e a
+  // defesa morria. Dizer "não encontrada" manda a pessoa procurar pelo valor
+  // e pelo nome, que é o que funciona.
+  const linhaPagamento = pedido.dataCompra
+    ? `Pagamento: ${reais(pedido.valor)} em ${dataHoraBR(pedido.dataCompra)}${pedido.last4 ? `, cartão final ${pedido.last4}` : ''}${pedido.metodo ? ` (${String(pedido.metodo).toUpperCase()})` : ''}.`
+    : `Pagamento: ${reais(pedido.valor)}${pedido.last4 ? `, cartão final ${pedido.last4}` : ''}${pedido.metodo ? ` (${String(pedido.metodo).toUpperCase()})` : ''} - data da compra não encontrada. Procure no sistema da loja pelo valor e pelo nome do cliente.`;
   const linhas = [
     `A Adyen avisou de um chargeback: ${m.pt}.`,
-    `Pagamento: ${reais(pedido.valor)} em ${dataHoraBR(pedido.dataCompra)}${pedido.last4 ? `, cartão final ${pedido.last4}` : ''}${pedido.metodo ? ` (${String(pedido.metodo).toUpperCase()})` : ''}.`,
+    linhaPagamento,
+    ...(caso.comentarioEmissor && caso.comentarioEmissor.trim().toLowerCase() !== String(m.pt).trim().toLowerCase()
+      ? [`O banco escreveu: "${caso.comentarioEmissor}".`] : []),
     `Prazo da Adyen: ${dataBR(caso.prazoDefesa)}. Responda até ${dataHoraBR(prazoInt)} - sem resposta, o valor fica com o banco.`,
     'Preencha a "Defesa de chargeback" abaixo e anexe as evidências. Ao concluir, o NoPulso gera o PDF e o Claude anexa na Adyen.',
     dicaDoMotivo(m.fraude),
   ];
+  return linhas.join('\n');
+}
+
+// ---------------------------------------------------------------------
+// O COMENTÁRIO QUE O NOPULSO DEIXA NA TAREFA (Master, 24/09/2026).
+//
+// "nada de Chrome": a tarefa tem que chegar com tudo que é FATO da Adyen já
+// escrito, pra loja não precisar abrir a Customer Area nem esperar o Claude.
+//
+// É TEXTO DE REGRA, NÃO DE MODELO. Nenhuma frase aqui é gerada por IA - a
+// leitura ("defesa forte/fraca") sai de duas condições fixas sobre 3DS e
+// endereço de entrega. Um parágrafo bonito que o modelo escrevesse sobre a
+// chance de ganhar seria exatamente o número inventado que o CLAUDE.md §6
+// proíbe: a loja decide contestar ou aceitar em cima disso.
+//
+// TELEFONE E E-MAIL NÃO ENTRAM NO TEXTO. Eles vão pro CAMPO da defesa, pelo
+// servidor (sugestoesDaAdyen). O comentário é lido pelo Claude quando ele
+// abre a tarefa - mesma regra do `obter_pagamento_adyen`.
+function textoDoComentarioAutomatico({ dados, historico, caso, pedido, prazoInt }) {
+  const m = traduzirMotivo(caso.motivoAdyen);
+  const d = dados || {};
+  const sim = (v) => /^(true|sim|yes|y|1)$/i.test(String(v || ''));
+  const ou = (v, alt) => (v == null || v === '' ? (alt || '—') : v);
+  const linhas = [];
+
+  linhas.push('🤖 NoPulso preencheu o que é fato da Adyen. Confira antes de concluir.');
+  linhas.push('');
+  linhas.push('PEDIDO');
+  linhas.push(`· Referência: ${ou(d.merchantReference || caso.pedidoId)}`);
+  linhas.push(`· Conta Adyen: ${ou(d.merchantAccountCode)}`);
+  linhas.push(pedido.dataCompra
+    ? `· Pagamento: ${dataHoraBR(pedido.dataCompra)} · ${reais(pedido.valor)}`
+    : `· Pagamento: ${reais(pedido.valor)} · DATA NÃO ENCONTRADA (o Monitor já tinha apagado a venda quando o chargeback chegou)`);
+  linhas.push(`· PSP do pagamento: ${ou(d.pspPagamento || caso.pspPagamento)}`);
+  linhas.push(`· PSP da disputa: ${ou(caso.pspDisputa)}`);
+  linhas.push('');
+  linhas.push('CLIENTE');
+  linhas.push(`· Nome no pedido: ${ou(d.nomeCliente)}`);
+  linhas.push(`· Titular do cartão: ${ou(d.nomeNoCartao || pedido.cardHolder)}`);
+  linhas.push(`· Cartão: ${ou(pedido.metodo && String(pedido.metodo).toUpperCase())}${pedido.last4 ? ` final ${pedido.last4}` : ''}${d.bin ? ` · BIN ${d.bin}` : ''}`);
+  linhas.push(`· Banco emissor: ${ou(d.bancoEmissor)}${d.paisEmissor ? ` (${d.paisEmissor})` : ''}`);
+  linhas.push(`· Cartão salvo na conta: ${d.aliasCartao ? 'sim' : 'não'}`);
+  linhas.push('');
+  linhas.push('RISCO');
+  const sinais = sinaisDaDefesa(d);
+  if (sinais.length) for (const s of sinais) linhas.push(`· ${s.sinal} — ${s.leitura}`);
+  else linhas.push('· A Adyen não mandou sinal de risco neste pagamento.');
+  if (historico && historico.pedidos && historico.pedidos.length) {
+    linhas.push(`· Mesmo cliente: pelo menos ${historico.aprovadosSemDisputa} pedido(s) aprovado(s) sem disputa${historico.comDisputa ? ` e ${historico.comDisputa} com disputa` : ''} no que o Monitor guarda.`);
+  }
+  linhas.push('');
+  linhas.push('MOTIVO DA CONTESTAÇÃO');
+  linhas.push(`· ${ou(caso.motivoAdyen)} — ${m.pt}`);
+  if (caso.comentarioEmissor) linhas.push(`· O banco escreveu: "${caso.comentarioEmissor}"`);
+  linhas.push('');
+  linhas.push('PARA A LOJA BUSCAR');
+  const quando = pedido.dataCompra ? dataHoraBR(pedido.dataCompra) : 'na data que bater com o valor';
+  linhas.push(`· Localize no sistema o pedido de ${quando}, em nome de ${ou(d.nomeCliente, 'cliente não informado')}, ${reais(pedido.valor)}.`);
+  linhas.push('· Dele saem: número do pedido, endereço, telefone, itens e entregador.');
+  linhas.push('· Anexe o print do pedido no sistema e o cupom ou nota fiscal.');
+  linhas.push('');
+  // LEITURA: duas condições fixas, e só. Sem 3DS e sem endereço de entrega, a
+  // defesa depende de prova que a loja pode não ter - dizer isso antes evita
+  // a unidade gastar o prazo montando uma defesa que já nasce perdida.
+  const tem3DS = sim(d.threeDAutenticado);
+  const temEntrega = d.enderecoTipo === 'entrega';
+  linhas.push('LEITURA');
+  if (tem3DS) linhas.push('· Defesa forte: o 3DS foi autenticado, e isso costuma transferir a responsabilidade ao banco emissor.');
+  else if (!temEntrega) linhas.push('· Defesa fraca: sem 3DS e sem endereço de entrega. Só conteste com prova de entrega ao titular ou com pedidos anteriores do mesmo cliente sem contestação.');
+  else linhas.push('· Sem 3DS: a defesa depende de provar a entrega no endereço do pedido. O comprovante de entrega é a peça principal.');
+  linhas.push(`· Responda até ${dataHoraBR(prazoInt)} - sem resposta, o valor fica com o banco.`);
   return linhas.join('\n');
 }
 
@@ -272,10 +362,10 @@ const JANELA_HISTORICO_MS = 60 * DIA; // disputa mais velha que isso sem caso: n
 let rodando = false;
 function chaveDoPedido(tx) { return tx.merchantReference || tx.originalReference || tx.pspReference; }
 
-async function sincronizar({ store, users, tarefas, push, nomeUnidade = (c) => c, agora = Date.now(), masterPreferido = '' }) {
+async function sincronizar({ store, users, tarefas, push, nomeUnidade = (c) => c, agora = Date.now(), masterPreferido = '', aoAlterarTarefa = null }) {
   if (rodando) return { pulou: true };
   rodando = true;
-  const r = { casosNovos: 0, casosAtualizados: 0, tarefasCriadas: 0, avisosFraude: 0, lembretes: 0, escalonados: 0 };
+  const r = { casosNovos: 0, casosAtualizados: 0, tarefasCriadas: 0, avisosFraude: 0, lembretes: 0, escalonados: 0, vencidos: 0 };
   try {
     const txs = store.allTransactions();
     const comDisputa = new Set();
@@ -307,22 +397,49 @@ async function sincronizar({ store, users, tarefas, push, nomeUnidade = (c) => c
       if (caso && !evo.novos.length && !precisaTarefa) continue;
 
       const ordenados = [...lista].sort((a, b) => String(a.dataHora || '').localeCompare(String(b.dataHora || '')));
-      const pagamento = ordenados.find((t) => t.status === 'APROVADO') || ordenados[0];
+      // O PAGAMENTO, DE VERDADE (Master, 24/09/2026).
+      //
+      // Aqui morava o erro da #12084. Era `find(APROVADO) || ordenados[0]`, e
+      // quando a autorização já tinha sido apagada pela retenção de 2 dias do
+      // Monitor, `ordenados[0]` era o PRÓPRIO evento de disputa: a tarefa
+      // saiu dizendo que a compra foi 06/09 (a data do chargeback) e gravou o
+      // PSP da disputa como se fosse o do pagamento.
+      //
+      // Agora: memória primeiro; não achando, o arquivo de 180 dias
+      // (pagamentosArquivo). A ficha entra COMO SE fosse o evento aprovado,
+      // pra `dadosDoPagamento`, `sugestoesDaAdyen` e `mesmoCliente` seguirem
+      // funcionando igual.
+      //
+      // E não achando em lugar nenhum, fica NULO. Uma data errada é pior que
+      // uma data faltando: a loja procura no sistema dela um pedido que não
+      // existe naquele dia, não acha, e a defesa morre aí.
+      let pagamento = ordenados.find((t) => t.status === 'APROVADO') || null;
+      let doArquivo = null;
+      if (!pagamento) {
+        try {
+          doArquivo = await pagamentosArquivo.buscar(pedidoId, (ultimo && ultimo.dataHora) || null);
+        } catch (err) {
+          console.error('[defesa] não consegui ler o arquivo de pagamentos:', err.message);
+        }
+        if (doArquivo) pagamento = { ...doArquivo, status: 'APROVADO' };
+      }
       const pedido = {
         valor: (pagamento && pagamento.valor) || (ultimo && ultimo.valor) || 0,
         dataCompra: pagamento ? pagamento.dataHora : null,
-        last4: (ordenados.find((t) => t.last4) || {}).last4 || null,
-        metodo: (ordenados.find((t) => t.metodo) || {}).metodo || null,
-        cardHolder: (ordenados.find((t) => t.cardHolder) || {}).cardHolder || null,
-        unidade: (ordenados.find((t) => t.unidade) || {}).unidade || null,
+        last4: (pagamento && pagamento.last4) || (ordenados.find((t) => t.last4) || {}).last4 || null,
+        metodo: (pagamento && pagamento.metodo) || (ordenados.find((t) => t.metodo) || {}).metodo || null,
+        cardHolder: (pagamento && pagamento.cardHolder) || (ordenados.find((t) => t.cardHolder) || {}).cardHolder || null,
+        unidade: (pagamento && pagamento.unidade) || (ordenados.find((t) => t.unidade) || {}).unidade || null,
       };
       const id = caso ? caso.id : idDoCaso(pedidoId);
       const patch = {
         pedidoId, origem: caso && caso.origem !== 'adyen' && !caso.pspPagamento ? (caso.origem || 'manual') : 'adyen',
         unidade: (caso && caso.unidade) || pedido.unidade,
         status: evo.status, resultado: evo.resultado, eventosVistos: evo.eventosVistos,
-        prazoDefesa: evo.prazoDefesa, motivoAdyen: evo.motivoAdyen, pspDisputa: evo.pspDisputa,
+        prazoDefesa: evo.prazoDefesa, motivoAdyen: evo.motivoAdyen, comentarioEmissor: evo.comentarioEmissor, pspDisputa: evo.pspDisputa,
+        // nulo quando não achei o pagamento: o PSP da disputa NÃO entra aqui
         pspPagamento: pagamento ? (pagamento.pspReference || null) : null,
+        pagamentoDoArquivo: !!doArquivo,
         abertoEm: evo.abertoEm, avisoFraudeEm: evo.avisoFraudeEm, ultimoEvento: evo.ultimoEvento,
         valor: pedido.valor, dataCompra: pedido.dataCompra, last4: pedido.last4, metodo: pedido.metodo,
       };
@@ -354,12 +471,63 @@ async function sincronizar({ store, users, tarefas, push, nomeUnidade = (c) => c
           });
           Object.assign(patch, { tarefaId: tarefa.id, tarefaNumero: tarefa.numeroTicket || null, tarefaCriadaEm: new Date(agora).toISOString(), prazoInterno: prazoInt, responsavelId: eq.responsavel.id, responsavelNome: eq.responsavel.username || eq.responsavel.email });
           r.tarefasCriadas++;
+
+          // A TAREFA JÁ NASCE PREENCHIDA (Master, 24/09/2026: "nada de
+          // Chrome"). O que é fato da Adyen o servidor escreve sozinho; o que
+          // depende de olhar o sistema da loja fica pra unidade. Decisão e
+          // declaração NUNCA - contestar ou aceitar, e jurar que é verdade, é
+          // dela (preencherDefesaPeloAgente recusa por SO_A_UNIDADE).
+          //
+          // TUDO AQUI É BEST-EFFORT: se o arquivo do Storage estiver fora, ou
+          // o pré-preenchimento falhar, a tarefa nasce do mesmo jeito. Uma
+          // defesa sem os campos preenchidos ainda dá pra responder na mão;
+          // uma defesa que não nasceu perde o prazo.
+          try {
+            const doPedido = pagamento ? [...ordenados.filter((t) => t !== pagamento), pagamento] : ordenados;
+            const d = dadosDoPagamento(doPedido);
+            const hist = mesmoCliente(store.allTransactions(), d, pedidoId);
+            const s = sugestoesDaAdyen(d, hist);
+            if (Object.keys(s.campos).length) {
+              await tarefas.preencherDefesaPeloAgente(tarefa.id, s.campos, { fontes: s.fontes, porNome: 'NoPulso (automático)' });
+            }
+            const texto = textoDoComentarioAutomatico({
+              dados: { ...d, pspPagamento: patch.pspPagamento }, historico: hist,
+              caso: { ...patch, motivoAdyen: evo.motivoAdyen }, pedido, prazoInt,
+            });
+            const res = await tarefas.comentarComoAgente(tarefa.id, texto, { porNome: 'NoPulso (automático)' });
+            // a tela aberta atualiza sem F5 (ver zenithAoVivo no tema.js)
+            if (res && res.tarefa && typeof aoAlterarTarefa === 'function') aoAlterarTarefa(res.tarefa);
+          } catch (err) {
+            console.error(`[defesa] tarefa ${tarefa.id} nasceu, mas o pré-preenchimento falhou:`, err.message);
+          }
+
           push.notifyUsuario(eq.responsavel.id, `⚖️ Chargeback de ${reais(pedido.valor)} para defender`,
             `${nomeUnidade(pedido.unidade)} · responda até ${dataHoraBR(prazoInt)} no Meu Dia`, `defesa-${id}`, `/tarefas?tarefa=${encodeURIComponent(tarefa.id)}`).catch(() => {});
         }
       }
       await disputes.salvarCaso(id, patch);
       if (caso) r.casosAtualizados++; else r.casosNovos++;
+    }
+
+    // PRAZO VENCIDO SEM DEFESA = PERDIDA (Master, 24/09/2026).
+    //
+    // 24 casos estavam ABERTA com o prazo da Adyen vencido - alguns desde
+    // 29/07. Eles ficavam na lista como se ainda desse pra fazer algo, e
+    // empurravam pra baixo os que de fato ainda dá. A Adyen nem sempre manda
+    // o DISPUTE_DEFENSE_PERIOD_ENDED, então esperar o evento deixa o caso
+    // preso pra sempre.
+    //
+    // SÓ MUDA O STATUS. Mesmo texto que o evento da Adyen já gravava
+    // ("prazo de defesa vencido sem resposta"), nada de histórico reescrito -
+    // CLAUDE.md §1: não escrever migração nova sobre dado antigo. E não toca
+    // em quem já mandou a defesa (ENVIADA, ou defesaProntaEm): esse espera o
+    // veredito da bandeira, não venceu nada.
+    for (const c of await disputes.listAll()) {
+      if (c.status !== 'ABERTA' || c.defesaProntaEm || c.envioAdyen) continue;
+      const prazo = Date.parse(c.prazoDefesa || '');
+      if (!Number.isFinite(prazo) || prazo > agora) continue;
+      await disputes.salvarCaso(c.id, { status: 'PERDIDA', resultado: 'prazo de defesa vencido sem resposta', fechadoPorPrazoEm: new Date(agora).toISOString() });
+      r.vencidos = (r.vencidos || 0) + 1;
     }
 
     // LEMBRETE e ESCALONAMENTO - sobre o que já está gravado, sem ler tarefa:
@@ -646,7 +814,7 @@ function lerLink(token, segredo, agora = Date.now()) {
 
 module.exports = {
   gerarPdf, aoConcluirTarefa, assinarLink, lerLink, VALIDADE_LINK_MS, LIMITE_ADYEN_BYTES,
-  sincronizar, equipeDaUnidade, textoDaTarefa, JANELA_HISTORICO_MS,
+  sincronizar, equipeDaUnidade, textoDaTarefa, textoDoComentarioAutomatico, JANELA_HISTORICO_MS,
   // eventos
   ABRE, AVISO_FRAUDE, GANHOU, PERDEU, FIM_DE_PRAZO, codigoDoEvento, ehEventoDeDisputa, aplicarEvento, evoluirCaso, idDoCaso, eventosDoPedido,
   // textos e prazos
