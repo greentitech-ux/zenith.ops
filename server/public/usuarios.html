@@ -263,11 +263,11 @@
 
 <div id="root" class="hidden">
   <nav class="admin-nav" aria-label="Administração">
-    <a class="active" href="/usuarios.html" aria-current="page">👥 Usuários</a>
-    <a href="/grupos.html#empresas">🏢 Empresas e unidades</a>
-    <a href="/grupos.html">🏷️ Grupos operacionais</a>
-    <a href="/cofre.html">🔐 Cofre de acessos</a>
-    <a href="/central-alertas.html">🚨 Regras e alertas</a>
+    <a class="active" href="/usuarios" aria-current="page">👥 Usuários</a>
+    <a href="/grupos#empresas">🏢 Empresas e unidades</a>
+    <a href="/grupos">🏷️ Grupos operacionais</a>
+    <a href="/cofre">🔐 Cofre de acessos</a>
+    <a href="/central-alertas">🚨 Regras e alertas</a>
   </nav>
 
   <section class="admin-hero" aria-label="Resumo da administração">
@@ -1435,7 +1435,7 @@ function fecharAprovacoesQa(){ document.getElementById('qa-aprovacoes-overlay').
 document.getElementById('qa-aprovacoes-overlay').addEventListener('click', (e)=>{ if(e.target.id==='qa-aprovacoes-overlay') fecharAprovacoesQa(); });
 // autorizar pede a digital (ou a senha) desde 23/09/2026 - é tudo na tela
 // de Autorizações, a mesma que o push do celular abre
-function aprovarQa(id){ location.href = '/autorizacoes.html?id=' + encodeURIComponent(id); }
+function aprovarQa(id){ location.href = '/autorizacoes?id=' + encodeURIComponent(id); }
 async function rejeitarQa(id){
   const motivo = prompt('Motivo da rejeição (opcional):') || '';
   const res = await fetch('/api/qa-aprovacoes/'+id+'/rejeitar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo})});

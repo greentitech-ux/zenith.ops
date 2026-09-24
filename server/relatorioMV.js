@@ -212,7 +212,7 @@ async function prepararCardParaEmail(card) {
   if (modulo) {
     try {
       const { linkAcao } = await modulo.gerarLinkAcao(card.id);
-      copia.linkAcaoUrl = `${APP_BASE_URL}/ticket-publico.html?tipo=${encodeURIComponent(card.tipo)}&ticket=${encodeURIComponent(card.id)}&link=${encodeURIComponent(linkAcao)}`;
+      copia.linkAcaoUrl = `${APP_BASE_URL}/ticket-publico?tipo=${encodeURIComponent(card.tipo)}&ticket=${encodeURIComponent(card.id)}&link=${encodeURIComponent(linkAcao)}`;
     } catch (e) { /* ticket em estado terminal - sem link possivel, card fica sem o "ver completo" mesmo */ }
   }
   return copia;
@@ -236,7 +236,7 @@ async function montarDados() {
 
 function linkDecisao(card, acao) {
   const params = new URLSearchParams({ ticket: card.id, tipo: card.tipo, acao, token: card.tokenAcao || '' });
-  return `${APP_BASE_URL}/decidir.html?${params.toString()}`;
+  return `${APP_BASE_URL}/decidir?${params.toString()}`;
 }
 
 function htmlBotoesAcao(card) {

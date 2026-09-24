@@ -356,7 +356,7 @@
   <div class="panel">
     <h2>📸 Check-in por foto</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">identifica quem apareceu num dia qualquer - o próprio extra escolhe o nome e tira uma foto num dispositivo fixo na entrada da loja (tablet/PC com webcam)</div>
-    <a class="btn-secundario" href="/rh-checkin.html" target="_blank" rel="noopener">📸 Abrir tela de check-in (quiosque)</a>
+    <a class="btn-secundario" href="/rh-checkin" target="_blank" rel="noopener">📸 Abrir tela de check-in (quiosque)</a>
     <div class="msg hidden" id="nota-localizacao-master" style="margin-top:10px;background:var(--panel2);color:var(--muted);">📍 Só você (Master) vê o link de localização em cada check-in abaixo - aparece do lado da foto quando o dispositivo conseguiu captar.</div>
   </div>
   <div class="panel">
@@ -1032,7 +1032,7 @@ async function copiarLinkCadastroRh(){
   const msg = document.getElementById('link-cadastro-rh-msg');
   if(!unidade){ msg.textContent = 'Escolha a loja antes de gerar o link.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
   const params = new URLSearchParams({ unidade, tipo: TIPO_CADASTRO });
-  const url = location.origin + '/rh-cadastro.html?' + params.toString();
+  const url = location.origin + '/rh-cadastro?' + params.toString();
   try{
     await navigator.clipboard.writeText(url);
     msg.textContent = '✅ Link copiado (loja e tipo já vêm travados): ' + url;
@@ -2106,7 +2106,7 @@ async function carregar(){
 async function copiarLinkColaborador(id){
   const f = TODOS.find(x=>x.id===id);
   if(!f || !f.linkToken) return;
-  const url = `${location.origin}/rh-colaborador.html?token=${f.linkToken}`;
+  const url = `${location.origin}/rh-colaborador?token=${f.linkToken}`;
   try{
     await navigator.clipboard.writeText(url);
     alert(`Link copiado! Manda pro ${f.nome} preencher os dados e bater ponto:\n\n${url}`);
@@ -2193,7 +2193,7 @@ async function gerarFormularioDiarias(){
           <button type="button" class="btn-secundario" style="padding:6px 12px;" onclick="copiarLinkDiarias(${i})">copiar</button>
         </div>
       </div>`).join('')}
-      <a class="link-btn" href="/formularios.html">📄 abrir página Formulários</a>`;
+      <a class="link-btn" href="/formularios">📄 abrir página Formulários</a>`;
     document.getElementById('di-corpo').classList.add('hidden');
     res.classList.remove('hidden');
     carregar().catch(()=>{});

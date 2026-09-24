@@ -1992,7 +1992,7 @@ setTimeout(async () => {
       && (gerJ.linhas || []).length === 2 && gerJ.valorTotal === 300
       && gerJ.linhas[0].data === '18/08/2026' && gerJ.linhas[0].nome === 'Diarista Da Silva'
       && chavesAss === 'favorecido,responsavel'
-      && (gerJ.assinaturas || []).every((a) => a.link && a.link.includes('/assinar.html?'))
+      && (gerJ.assinaturas || []).every((a) => a.link && a.link.includes('/assinar?'))
       && gerJ.campos && gerJ.campos.chavePix === '83 98888-0000' && gerJ.campos.cpf === '111.444.777-35'
       && gerJ.numeroTicket != null;
     if (!okGerDia) ruins += 1;
@@ -2342,7 +2342,7 @@ setTimeout(async () => {
     && /Fechamento lançado/.test(alertaFech.titulo || '')
     && /Dom Carrão/.test(alertaFech.resumo || '')
     && /19\/08/.test(alertaFech.resumo || '')
-    && alertaFech.url === '/fechamentos.html'
+    && alertaFech.url === '/fechamentos'
     // rotina NUNCA toca sirene - só alerta de urgência é critico
     && alertaFech.critico === false;
   if (!okAvisoFech) ruins += 1;
@@ -4387,7 +4387,7 @@ setTimeout(async () => {
         && (dExplicacao.negativos || []).some((i) => i.chave === 'pizza:calabresa' && i.saida === -5),
       'turno que não existe dá 404': turnoInexistente.status === 404,
       'o PDF de UM turno sai válido': pdfTurno.status === 200 && pdfTurno.corpo.startsWith('%PDF'),
-      'o push da divergência manda o link já apontando pro turno': /url: turnoAte \? `\/abastecimento-relatorios\.html\?turno=/.test(srcPush),
+      'o push da divergência manda o link já apontando pro turno': /url: turnoAte \? `\/abastecimento-relatorios\?turno=/.test(srcPush),
       'o service worker navega respeitando a query string (não só o path)': /u\.pathname \+ u\.search === url/.test(srcSw),
       'a tela lê ?turno= no boot e mostra o card de explicação': /carregarExplicacaoTurno/.test(html) && /painel-explicacao-turno/.test(html),
       'a tela tem o botão de PDF desta divergência': /baixarPdfTurno/.test(html) && /turno\/\$\{encodeURIComponent\(TURNO_ATE\)\}\/relatorio\.pdf/.test(html),
@@ -9171,43 +9171,57 @@ setTimeout(async () => {
   if (!okBeniboy) ruins += 1;
   console.log(`${okBeniboy ? '\u2713' : '\u2717'} Beniboy: um desenho so pros 6 lugares, a linha sempre inteira e a marca batendo junto`);
 
-  // ---------- Aviso de mudanca de endereco ----------
-  // Quem entra pelo endereco antigo precisa saber que o app mudou de casa.
-  // O perigo esta em ONDE esse aviso aparece: index.html na raiz e
-  // abastecimento.html sao as telas que fazem heartbeat pelo navegador na
-  // maquina de loja. localStorage e por origem - um clique ali apaga o
-  // zenithMonitorFixo, a maquina esquece a unidade e a loja acusa offline.
-  // Este teste existe pra ninguem tirar essa trava sem perceber.
+  // ---------- Chegada de quem vinha pelo endereco antigo ----------
+  // Até 24/09 era um aviso com botão - e o perigo era a máquina de loja
+  // clicar e esquecer a unidade (localStorage é por origem). Agora o servidor
+  // leva a tela (ver "Migração de endereço") com o localStorage na URL, e o
+  // tema.js do lado novo recebe. Aqui o CÓDIGO do tema.js roda de verdade num
+  // navegador de mentira: a unidade da máquina chega, nada é sobrescrito, a
+  // sessão some da barra e um link forjado (que não veio do endereço antigo)
+  // não planta nada.
   let okAvisoEndereco = false;
   try {
-    const fsE = require('fs'), pathE = require('path');
+    const fsE = require('fs'), pathE = require('path'), vmE = require('vm');
     const tema = fsE.readFileSync(pathE.join(__dirname, 'public', 'tema.js'), 'utf8');
     const idx = fsE.readFileSync(pathE.join(__dirname, 'index.js'), 'utf8');
-
     const rota = await pedir('/api/meta/endereco');
-    let corpoRota = {};
-    try { corpoRota = JSON.parse(rota.corpo); } catch (e) { /* fica vazio */ }
-
+    const fonte = (tema.match(/var HOST_ANTIGO = '[^']+';\n  function receberDoEnderecoAntigo\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
+    const rodar = ({ hash, referrer, existentes = {} }) => {
+      const armazenado = { ...existentes }; let trocou = null;
+      const ctx = {
+        location: { hash, pathname: '/abastecimento', search: '?unidade=DOM_19706' },
+        document: { referrer },
+        history: { replaceState: (a, b, url) => { trocou = url; } },
+        localStorage: { getItem: (k) => (k in armazenado ? armazenado[k] : null), setItem: (k, v) => { armazenado[k] = String(v); } },
+        URL, JSON, decodeURIComponent, Object, String,
+      };
+      vmE.runInNewContext(fonte + '\nreceberDoEnderecoAntigo();', ctx);
+      return { armazenado, trocou };
+    };
+    const pacote = '#nopulso-migrar=' + encodeURIComponent(JSON.stringify({ zenithMonitorFixo: 'DOM_19706|2', authToken: 'tok-antigo', zenithTema: 'claro' }));
+    const legitimo = rodar({ hash: pacote, referrer: 'https://adyen-monitor.onrender.com/' });
+    const naoSobrescreve = rodar({ hash: pacote, referrer: 'https://adyen-monitor.onrender.com/', existentes: { zenithTema: 'escuro' } });
+    const forjado = rodar({ hash: pacote, referrer: 'https://site-qualquer.com/' });
+    const semOrigem = rodar({ hash: pacote, referrer: '' });
+    const lixo = rodar({ hash: '#nopulso-migrar=%7Bquebrado', referrer: 'https://adyen-monitor.onrender.com/' });
     const conf = {
-      'a rota devolve o endereco oficial (e e publica, sem Firestore)':
-        rota.status === 200 && typeof corpoRota.oficial === 'string' && /^https?:\/\//.test(corpoRota.oficial),
-      'o destino vem do APP_BASE_URL, nao de dominio cravado no JS':
-        /res\.json\(\{ oficial: APP_BASE_URL \}\)/.test(idx)
-        && !/nopulso\.com\.br/.test(tema),
-      'as telas de heartbeat da loja ficam de fora':
-        /TELAS_DE_HEARTBEAT\s*=\s*\['\/', '\/index\.html', '\/abastecimento\.html'\]/.test(tema)
-        && /TELAS_DE_HEARTBEAT\.indexOf\(location\.pathname\) !== -1\) return;/.test(tema),
-      'so aparece pra quem esta logado (cliente em pagina publica nao ve)':
-        /if \(!localStorage\.getItem\('authToken'\)\) return;/.test(tema),
-      'e some sozinho quando ja se esta no endereco certo':
-        /destino\.origin === location\.origin\) return;/.test(tema),
+      'a rota pública do endereço oficial continua (sem Firestore)': rota.status === 200 && /res\.json\(\{ oficial: APP_BASE_URL \}\)/.test(idx),
+      'o receptor roda antes das telas lerem o localStorage': !!fonte && /\n  receberDoEnderecoAntigo\(\);\n/.test(tema),
+      'a unidade da máquina de loja chega no endereço novo (heartbeat não cai)': legitimo.armazenado.zenithMonitorFixo === 'DOM_19706|2',
+      'a sessão e o tema chegam, e o aviso do 🔔 fica marcado': legitimo.armazenado.authToken === 'tok-antigo' && legitimo.armazenado.nopulsoAvisoSinoNovo === '1',
+      'o que já existe no endereço novo não é sobrescrito': naoSobrescreve.armazenado.zenithTema === 'escuro',
+      'a sessão sai da barra de endereço (fica a tela e a query)': legitimo.trocou === '/abastecimento?unidade=DOM_19706',
+      'link forjado (ou sem origem) não planta sessão nenhuma': Object.keys(forjado.armazenado).length === 0 && Object.keys(semOrigem.armazenado).length === 0
+        && forjado.trocou === '/abastecimento?unidade=DOM_19706',
+      'pacote quebrado não derruba a tela': Object.keys(lixo.armazenado).length === 0,
+      'o endereço novo não fica cravado no JS (vem do APP_BASE_URL)': !/nopulso\.com\.br/.test(tema),
     };
     const ruinsE = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okAvisoEndereco = !ruinsE.length;
-    if (ruinsE.length) console.log(`  falhou em: ${ruinsE.join(' · ')}`);
+    if (ruinsE.length) console.log(`  falhou em: ${ruinsE.join(' · ')} [legitimo=${JSON.stringify(legitimo)}]`);
   } catch (e) { okAvisoEndereco = false; console.log('  erro: ' + e.message); }
   if (!okAvisoEndereco) ruins += 1;
-  console.log(`${okAvisoEndereco ? '\u2713' : '\u2717'} Mudanca de endereco: avisa quem entra pelo antigo, menos na maquina de loja`);
+  console.log(`${okAvisoEndereco ? '\u2713' : '\u2717'} Mudanca de endereco: quem vem do antigo chega com a unidade, a sessão e o tema - e link forjado não planta nada`);
 
   // ---------- Endereco antigo aposentado (23/09/2026) ----------
   // Decisao do Master: o adyen-monitor.onrender.com saiu de uso e o endereco
@@ -9235,15 +9249,19 @@ setTimeout(async () => {
     const idx = fsE.readFileSync(pathE.join(__dirname, 'index.js'), 'utf8');
     const rota = await pedir('/api/meta/endereco');
     const conf = {
-      'o endereço antigo só sobra no aviso de mudança e no reparo':
-        comAntigo.length === 2
-        && comAntigo.map((a) => pathE.relative(__dirname, a)).sort().join(',') === 'public/tema.js,reparoNocZenithScript.js'
+      // desde 24/09: + enderecoAntigo.js, que mede quem ainda usa o antigo e
+      // leva as telas embora (é o que diz quando dá pra desligar)
+      'o endereço antigo só sobra na migração (servidor e tela) e no reparo':
+        comAntigo.length === 3
+        && comAntigo.map((a) => pathE.relative(__dirname, a)).sort().join(',') === 'enderecoAntigo.js,public/tema.js,reparoNocZenithScript.js'
         && linhasReparo.every((l) => /\$HostsLegadosPermitidos = @\(|^const ENDERECO_RESERVA = |^\/\/ /.test(l.trim())),
       'o endereço padrão é o oficial nos 3 lugares':
         ['index.js', 'relatorioMV.js', 'vigiaScript.js'].every((f) => fsE.readFileSync(pathE.join(__dirname, f), 'utf8')
           .includes("const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br')")),
-      'o aviso de mudança continua de pé (o host antigo ainda responde)':
-        /avisarEnderecoNovo\(\)/.test(tema) && rota.status === 200,
+      // o aviso virou mudança de verdade: o servidor leva a tela e o tema.js
+      // do lado novo recebe o localStorage (ver o teste "Migração de endereço")
+      'a tela nova recebe quem vem do endereço antigo (o host antigo ainda responde)':
+        /function receberDoEnderecoAntigo\(\)/.test(tema) && rota.status === 200,
     };
     const ruinsE = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okEnderecoAntigo = !ruinsE.length;
@@ -9251,6 +9269,79 @@ setTimeout(async () => {
   } catch (e) { okEnderecoAntigo = false; console.log('  erro: ' + e.message); }
   if (!okEnderecoAntigo) ruins += 1;
   console.log(`${okEnderecoAntigo ? '\u2713' : '\u2717'} Endereço antigo aposentado: o padrão é o oficial, e o antigo só fica no aviso de mudança e no plano B do reparo`);
+
+  // ------------------------------------------------------------------
+  // MIGRAÇÃO DE ENDEREÇO: TELA VAI EMBORA, MÁQUINA CONTINUA SENDO ATENDIDA.
+  //
+  // Master (24/09/2026): "tudo direcionado pra www.nopulso.com.br sem .html,
+  // desligando de vez a antiga URL". Desligar sem medir perderia o webhook da
+  // Adyen, agente antigo e tela de loja em heartbeat. Aqui se prova, por HTTP
+  // de verdade com o Host do endereço antigo: tela recebe a passagem (sem
+  // .html, com a query); webhook, heartbeat, API e arquivo NÃO (cliente de
+  // máquina não segue redirect de POST); tudo é contado; e o endereço novo
+  // não é tocado.
+  let okMigraEndereco = false;
+  try {
+    const ea = require(__dirname + '/enderecoAntigo.js');
+    for (const k of Object.keys(ea._estado.dias)) delete ea._estado.dias[k];
+    for (const k of Object.keys(ea._estado.ultimos)) delete ea._estado.ultimos[k];
+    const ANT = { Host: ea.HOST_ANTIGO, Accept: 'text/html,application/xhtml+xml' };
+    const NOVO = { Host: 'www.nopulso.com.br', Accept: 'text/html' };
+    const tela = await pedir('/tarefas.html', ANT);
+    const telaQuery = await pedir('/abastecimento.html?unidade=DOM_19706&posto=2', ANT);
+    const raiz = await pedir('/', ANT);
+    const indexHtml = await pedir('/index.html', ANT);
+    const curta = await pedir('/loja-status', ANT);
+    // cru, sem %3C: um cliente que não codifica a URL é o caso perigoso
+    const injecao = await pedir('/tarefas.html?x=</script><script>alert(1)</script>', ANT);
+    const js = await pedir('/tema.js', { Host: ea.HOST_ANTIGO });
+    const api = await pedir('/api/tarefas/contexto', { Host: ea.HOST_ANTIGO, Accept: 'application/json' });
+    const hb = await postarJson('/api/loja-status/heartbeat', { codigo: 'X', posto: '1' }, { Host: ea.HOST_ANTIGO });
+    const wh = await postarJson('/webhooks/adyen', { notificationItems: [] }, { Host: ea.HOST_ANTIGO });
+    const ps = await pedir('/api/loja-status/vigia-versao', { Host: ea.HOST_ANTIGO, 'User-Agent': 'Mozilla/5.0 (Windows NT; Windows NT 10.0; pt-BR) WindowsPowerShell/5.1' });
+    const novoTela = await pedir('/tarefas', NOVO);
+    const res = ea.resumo();
+    const hoje = Object.values(res.dias).reduce((acc, cats) => { for (const [c, n] of Object.entries(cats)) acc[c] = (acc[c] || 0) + n; return acc; }, {});
+    const cabM = token ? { Authorization: 'Bearer ' + token } : {};
+    const rotaMaster = await pedir('/api/meta/endereco-antigo', cabM);
+    const rotaSem = await pedir('/api/meta/endereco-antigo');
+    // a página de passagem (o tema.js também cita "nopulso-migrar" - é o receptor)
+    const ehPassagem = (corpo) => /^<!doctype html>/i.test(String(corpo)) && /var destino = /.test(String(corpo));
+    const passagem = (r) => r.status === 200 && ehPassagem(r.corpo);
+    const destinoDe = (r) => { const m = String(r.corpo).match(/var destino = ("[^"]*")/); return m ? JSON.parse(m[1]) : null; };
+    // o menu acende o item da tela atual com o endereço SEM .html (o servidor
+    // redireciona pra ele desde 15/09; comparar cru deixava tudo apagado)
+    const navSrc = require('fs').readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
+    const fnsMenu = ['semHtml', 'grauDeMatch'].map((n) => (navSrc.match(new RegExp(`  function ${n}\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}\n`)) || [''])[0]).join('\n');
+    const grau = (pathname, href) => require('vm').runInNewContext(`${fnsMenu}\ngrauDeMatch({ getAttribute: () => ${JSON.stringify(href)} })`,
+      { location: { pathname, search: '', origin: 'https://www.nopulso.com.br' }, URL, URLSearchParams, String });
+    const conf = {
+      'o menu acende a tela atual com e sem .html': !!fnsMenu.trim() && grau('/tarefas', '/tarefas') === 0 && grau('/tarefas', '/tarefas.html') === 0
+        && grau('/tarefas.html', '/tarefas') === 0 && grau('/painel', '/tarefas') === -1 && grau('/', '/index.html') === 0,
+      'tela no endereço antigo abre a MESMA tela no novo, sem .html':
+        passagem(tela) && destinoDe(tela) === 'https://www.nopulso.com.br/tarefas'
+        && destinoDe(curta) === 'https://www.nopulso.com.br/loja-status',
+      'a query vai junto (é o ?unidade=&posto= da máquina de loja)':
+        destinoDe(telaQuery) === 'https://www.nopulso.com.br/abastecimento?unidade=DOM_19706&posto=2',
+      'a raiz e o /index.html vão pra raiz': destinoDe(raiz) === 'https://www.nopulso.com.br/' && destinoDe(indexHtml) === 'https://www.nopulso.com.br/',
+      'a oferta de biometria não viaja (a digital do antigo não vale no novo)': /passkeyOferecidoAte/.test(tela.corpo),
+      'URL maliciosa não fecha o <script> da passagem': !/<\/script><script>alert/i.test(injecao.corpo),
+      'arquivo, API, heartbeat, webhook e agente NÃO são redirecionados':
+        [js, api, hb, wh, ps].every((r) => !ehPassagem(r.corpo)) && /javascript/.test(String(js.headers && js.headers['content-type']))
+        && api.status === 401 && wh.corpo === '[accepted]' && /"versao"/.test(ps.corpo),
+      'cada tipo de acesso é contado': hoje.tela >= 5 && hoje['webhook-adyen'] === 1 && hoje['heartbeat-navegador'] === 1
+        && hoje['agente-pc'] === 1 && hoje.arquivo >= 1 && hoje.api >= 1,
+      'o endereço novo não é redirecionado nem contado': novoTela.status === 200 && !ehPassagem(novoTela.corpo) && hoje.tela === 6,
+      'com webhook e agente ainda no antigo, NÃO está pronto pra desligar':
+        res.prontoParaDesligar === false && res.pendentes.includes('webhook-adyen') && res.pendentes.includes('agente-pc'),
+      'a medição é do Master': rotaMaster.status === 200 && /webhook-adyen/.test(rotaMaster.corpo) && rotaSem.status === 401,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMigraEndereco = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [hoje=${JSON.stringify(hoje)} tela=${tela.status} destino=${destinoDe(tela)} js=${js.status}:${js.headers && js.headers['content-type']} api=${api.status}:${String(api.corpo).slice(0,60)} hb=${hb.status}:${String(hb.corpo).slice(0,60)} wh=${wh.status}:${String(wh.corpo).slice(0,40)} ps=${ps.status}:${String(ps.corpo).slice(0,40)}]`);
+  } catch (e) { okMigraEndereco = false; console.log('  erro: ' + e.message); }
+  if (!okMigraEndereco) ruins += 1;
+  console.log(`${okMigraEndereco ? '✓' : '✗'} Migração de endereço: tela vai pro novo sem .html, máquina segue atendida e tudo é medido`);
 
   // ---------- Painel: o desenho novo sem inventar dado ----------
   // O mockup 1b trazia "Meta do mes 71,2%" e "Faturamento hoje +8,4%" - dois
@@ -16284,13 +16375,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // a tela: o aviso vive no tema.js porque e o unico arquivo das 53 telas
       'o aviso mora no tema.js (o único carregado por todas as telas)': !!fnAviso && /fetch\('\/api\/fechamentos\/pendencias'/.test(tema),
       'não aparece na própria tela de lançamento nem sem login':
-        !!fnAviso && /location\.pathname === TELA_LANCAMENTO/.test(fnAviso[0]) && /localStorage\.getItem\('authToken'\)/.test(fnAviso[0]),
+        !!fnAviso && /caminhoAtual\(\) === TELA_LANCAMENTO/.test(fnAviso[0]) && /localStorage\.getItem\('authToken'\)/.test(fnAviso[0]),
       'clicar leva pra tela de lançar já na loja e no dia certos':
         !!fnAviso && /TELA_LANCAMENTO \+ '\?unidade=' \+ item\.getAttribute\('data-unidade'\) \+ '&data=' \+ item\.getAttribute\('data-data'\)/.test(fnAviso[0])
         && /const uq = q\.get\('unidade'\);/.test(htmlLanc) && /if\(uq && unidades\.includes\(uq\)\) selUnidade\.value = uq;/.test(htmlLanc),
       'o "Agora não" vale só pra tela atual - na próxima o aviso volta':
-        !!fnAviso && /sessionStorage\.setItem\('nopulsoPendFechAdiado', location\.pathname\)/.test(fnAviso[0])
-        && /sessionStorage\.getItem\('nopulsoPendFechAdiado'\) === location\.pathname/.test(fnAviso[0]),
+        !!fnAviso && /sessionStorage\.setItem\('nopulsoPendFechAdiado', caminhoAtual\(\)\)/.test(fnAviso[0])
+        && /sessionStorage\.getItem\('nopulsoPendFechAdiado'\) === caminhoAtual\(\)/.test(fnAviso[0]),
       'a tela não repete a regra: quem decide o que está pendente é o servidor':
         !/HORA_COBRANCA/.test(tema) && !/2h|>= 2\b/.test(String((fnAviso || [''])[0])),
     };
@@ -17848,7 +17939,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && /btn-add-saida'\)\.classList\.remove\('hidden'\)/.test(html)
         && /btn-add-sangria'\)\.classList\.remove\('hidden'\)/.test(html),
       'Adicionar sangria leva pro formulário que tem a conferência de caixa':
-        /href="\/lancamento\.html#painel-sangria"/.test(html),
+        /href="\/lancamento#painel-sangria"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okEditarSaida = !falhas.length;
@@ -18337,8 +18428,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'a conversa aberta tem um botão pra Central do Beniboy': /id="szc-atend-beniboy"/.test(trecho),
       'não fica escondido atrás do "só Master" do botão de PDF (Suporte não-Master também tem que ver)':
         !ramoSoMaster.includes('szc-atend-beniboy'),
-      'manda pro beniboy.html JÁ na conversa certa (?chat=)':
-        /location\.href = '\/beniboy\.html\?chat=' \+ encodeURIComponent\(chat\.id\)/.test(trecho),
+      'manda pro beniboy JÁ na conversa certa (?chat=)':
+        /location\.href = '\/beniboy\?chat=' \+ encodeURIComponent\(chat\.id\)/.test(trecho),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okChatLinkBeniboy = !falhas.length;
@@ -19958,7 +20049,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
        'tarefa concluída não aceita mudança de prazo': fim.status === 200 && depoisDeConcluir.status === 400 && /encerrada/i.test(JSON.parse(depoisDeConcluir.corpo).error || ''),
        'tarefa concluída é reaberta sem arquivar e registra a auditoria': reabrir.status === 200 && tarefaReaberta.status === 'EM_ANDAMENTO' && !!tarefaReaberta.reabertaEm && !!tarefaReaberta.reabertaPorNome,
        'Meu Dia oferece Reabrir e não a remoção da tarefa concluída': /id="BTNREABRIR"[\s\S]*?onclick="reabrir\(\)"/.test(html) && /<h2>Reabertas/.test(html) && !/Remover concluída/.test(html),
-      'o número do ticket é link para a solicitação na Central': /linkTicket\(/.test(html) && /central-historico\.html\?ticket=\$\{encodeURIComponent\(numero\)\}/.test(html) && /onclick="event\.stopPropagation\(\)"/.test(html),
+      'o número do ticket é link para a solicitação na Central': /linkTicket\(/.test(html) && /central-historico\?ticket=\$\{encodeURIComponent\(numero\)\}/.test(html) && /onclick="event\.stopPropagation\(\)"/.test(html),
       'o card e o detalhe usam o mesmo link (ninguém ficou com texto puro)': !/'Ticket #'\+/.test(html),
       'a previsão de conclusão é campo de data ao lado do início': /id="DINI" type="date"/.test(html) && /id="DFIM" type="date" onchange="salvarDatas\(\)"/.test(html),
       'nova tarefa tem campo de anexo e sobe o arquivo depois de criar': /id="FILENEW"/.test(html) && /for\(const f of PEND\)\{try\{await subirAnexo\(nova\.id,f\)\}/.test(html),
@@ -20899,7 +20990,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'tipo fora da lista e documento sem id são recusados': lixo.status === 400 && semId.status === 400,
       'quem não participa da tarefa não escreve nela': deFora.status === 400,
       'os dois botões só aparecem pra quem tem a seção': /\$\('BTNSOL'\)\.hidden=!CTX\.podeSolicitacao/.test(html) && /\$\('BTNFOR'\)\.hidden=!CTX\.podeFormulario/.test(html),
-      'e levam pras telas que já existem, com o contexto da tarefa': /function virarSolicitacao\(\)\{location\.href=contexto2\('\/central\.html\?nova=1'\)\}/.test(html) && /function virarFormulario\(\)\{location\.href=contexto2\('\/formularios\.html'\)\}/.test(html) && /new URLSearchParams\(\{tarefa:O\.id,titulo:tituloVisivel\(O\)\}\)/.test(html),
+      'e levam pras telas que já existem, com o contexto da tarefa': /function virarSolicitacao\(\)\{location\.href=contexto2\('\/central\?nova=1'\)\}/.test(html) && /function virarFormulario\(\)\{location\.href=contexto2\('\/formularios'\)\}/.test(html) && /new URLSearchParams\(\{tarefa:O\.id,titulo:tituloVisivel\(O\)\}\)/.test(html),
       'a Central lê a tarefa da URL e avisa de volta quando o ticket nasce': /TAREFA_ORIGEM = p\.get\('tarefa'\)/.test(ch) && /await avisarTarefa\(data\);/.test(ch) && /tipo:'solicitacao', id: dados\.id, numeroTicket: dados\.numeroTicket/.test(ch),
       'Formulários faz o mesmo, e lê o tipo ANTES de zerar TIPO_ATUAL': /await avisarTarefa\(d, TIPO_ATUAL\);\s*TIPO_ATUAL = null;/.test(fh),
     };
@@ -21126,7 +21217,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'dia NOVO sem fechamento volta a avisar mesmo depois do X': diaNovo.visiveis.length === 1 && diaNovo.total === 1,
       'o X só é desenhado pro Master': /d && d\.souMaster\s*\n\s*\? '<button type="button" class="fechar"/.test(tema),
       'e o clique nele é testado ANTES do item (senão o item engole)': tema.indexOf("closest('.fechar')") < tema.indexOf("closest('.item')"),
-      '"Agora não" continua fechando só nesta tela': /sessionStorage\.setItem\('nopulsoPendFechAdiado', location\.pathname\)/.test(tema),
+      '"Agora não" continua fechando só nesta tela': /sessionStorage\.setItem\('nopulsoPendFechAdiado', caminhoAtual\(\)\)/.test(tema),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okXAviso = !falhas.length;
@@ -21616,7 +21707,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'a injeção roda no boot da página': /iniciar\(\) \{[^}]*montarBeniboy\(\);/.test(tema),
       'onde a tag já existe não baixa de novo': /document\.querySelector\('script\[src\*="suporte-chat\.js"\]'\)/.test(tema),
       'a tela de alarme fica de fora (ela JÁ é o Beniboy em tela cheia)':
-        /SEM_BENIBOY = \['\/alerta-beniboy\.html'\]/.test(tema) && /SEM_BENIBOY\.indexOf\(location\.pathname\) >= 0/.test(tema),
+        /SEM_BENIBOY = \['\/alerta-beniboy'\]/.test(tema) && /SEM_BENIBOY\.indexOf\(caminhoAtual\(\)\) >= 0/.test(tema),
       'as telas que estavam sem o Beniboy passam a receber pela injeção':
         soPelaInjecao.includes('tarefas.html') && soPelaInjecao.includes('noc-maquinas.html')
         && soPelaInjecao.includes('central-solucoes.html') && soPelaInjecao.includes('fornecedores.html'),
@@ -23244,29 +23335,29 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const fn = new Function(`${(html.match(/function paginaInicial\(me\)\{[\s\S]*?\n\}/) || [''])[0]}; return paginaInicial;`)();
 
     const conf = {
-      'Master cai no Meu Dia': fn({ role: 'master', permissions: { sections: [] } }) === '/tarefas.html',
+      'Master cai no Meu Dia': fn({ role: 'master', permissions: { sections: [] } }) === '/tarefas',
       'quem tem cargo também (loja, técnico, suporte, manutenção)':
         ['loja', 'tecnico', 'suporte', 'manutencao']
-          .every((cargo) => fn({ role: 'user', cargo, permissions: { sections: [] } }) === '/tarefas.html'),
-      'e quem não tem cargo nenhum': fn({ role: 'user', permissions: { sections: [] } }) === '/tarefas.html'
-        && fn({}) === '/tarefas.html' && fn(null) === '/tarefas.html',
+          .every((cargo) => fn({ role: 'user', cargo, permissions: { sections: [] } }) === '/tarefas'),
+      'e quem não tem cargo nenhum': fn({ role: 'user', permissions: { sections: [] } }) === '/tarefas'
+        && fn({}) === '/tarefas' && fn(null) === '/tarefas',
       // o tablet é aparelho DEDICADO, fica o dia todo numa tela só e é ele que
       // bate o heartbeat da loja pelo navegador - mandar pro Meu Dia tira a
       // loja do ar
       'o tablet de abastecimento continua indo pra tela dele':
-        fn({ role: 'user', permissions: { sections: ['abastecimento-carrinho'] } }) === '/abastecimento.html'
-        && fn({ role: 'user', permissions: { sections: ['abastecimento-loja'] } }) === '/abastecimento.html',
+        fn({ role: 'user', permissions: { sections: ['abastecimento-carrinho'] } }) === '/abastecimento'
+        && fn({ role: 'user', permissions: { sections: ['abastecimento-loja'] } }) === '/abastecimento',
       'mas Master/Admin com essa seção NÃO ficam presos no tablet':
-        fn({ role: 'master', permissions: { sections: ['abastecimento-carrinho'] } }) === '/tarefas.html'
-        && fn({ role: 'user', isAdmin: true, permissions: { sections: ['abastecimento-loja'] } }) === '/tarefas.html',
+        fn({ role: 'master', permissions: { sections: ['abastecimento-carrinho'] } }) === '/tarefas'
+        && fn({ role: 'user', isAdmin: true, permissions: { sections: ['abastecimento-loja'] } }) === '/tarefas',
       'se nem der pra ler quem é a pessoa, o destino é o mesmo':
-        /\}catch\(e\)\{ location\.href = '\/tarefas\.html'; \}/.test(html),
+        /\}catch\(e\)\{ location\.href = '\/tarefas'; \}/.test(html),
       // ESTA é a invariante que sustenta tudo: se um dia o Meu Dia passar a
       // exigir seção, a porta de entrada quebra pra quem não tiver
       'o Meu Dia continua sem exigir seção (senão a porta de entrada quebra)':
         /app\.get\('\/api\/tarefas\/minhas', auth\.requireAuth/.test(idx)
         && /app\.get\('\/api\/tarefas\/contexto', auth\.requireAuth/.test(idx)
-        && /\{ id: 'nav-tarefas', href: '\/tarefas\.html', icone: '✅', rotulo: 'Meu Dia' \}/.test(nav),
+        && /\{ id: 'nav-tarefas', href: '\/tarefas', icone: '✅', rotulo: 'Meu Dia' \}/.test(nav),
       // o PC interno da loja abre a raiz SEM login: boot() sai cedo e a página
       // fica, que é o que mantém o heartbeat de pé
       'sem login ninguém é redirecionado (é assim que a loja segue batendo)':
@@ -23491,7 +23582,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'o alerta entra na Central com a unidade no título e o tipo externo':
         ok1.status === 200 && j1.ok === true && !!cardDoAlerta
         && cardDoAlerta.tipo === 'externo' && /Loja fechada fora do horário · /.test(cardDoAlerta.titulo)
-        && cardDoAlerta.critico === true && cardDoAlerta.url === '/central-alertas.html',
+        && cardDoAlerta.critico === true && cardDoAlerta.url === '/central-alertas',
       'o MESMO aviso de novo é "repetido" e NÃO cria card novo':
         ok2.status === 200 && j2.repetido === true && !!j2.silencioAteEm && !j2.alerta,
       'outro assunto na mesma loja passa (o silêncio é por assunto)': ok3.status === 200 && j3.repetido !== true,
@@ -25388,7 +25479,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         })(),
       'as três telas existem e são as que o menu aponta':
         ['estacao-salao', 'estacao-caixa', 'estacao-fechamento'].every((t) => fsx.existsSync(`${__dirname}/public/${t}.html`))
-        && /href: '\/estacao-salao\.html'/.test(nav) && /href: '\/estacao-caixa\.html'/.test(nav) && /href: '\/estacao-fechamento\.html'/.test(nav),
+        && /href: '\/estacao-salao'/.test(nav) && /href: '\/estacao-caixa'/.test(nav) && /href: '\/estacao-fechamento'/.test(nav),
       'o visual mora num css só, e as três o carregam':
         todas.every((t) => /<link rel="stylesheet" href="\/estacao\.css">/.test(t))
         && !todas.some((t) => /<style>/.test(t))

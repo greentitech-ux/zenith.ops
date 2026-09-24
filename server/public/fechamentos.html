@@ -271,7 +271,7 @@
     </div>
     <div class="header-nav">
       <div class="nav-actions">
-        <a class="back" href="/lancamento.html">➕ Adicionar Fechamento</a>
+        <a class="back" href="/lancamento">➕ Adicionar Fechamento</a>
         <button class="back hidden" id="btn-sincronizar-planilhas" onclick="sincronizarPlanilhas(false)" style="cursor:pointer;">🔄 Sincronizar agora</button>
         <button class="back hidden" id="btn-sincronizar-completa" onclick="sincronizarPlanilhas(true)" title="Relê a planilha inteira do zero (mais lento) - use depois de reorganizar/limpar abas na planilha, pra descartar linhas antigas que a leitura incremental não percebe que sumiram" style="cursor:pointer;">🔁 Recarregar tudo</button>
         <button class="back hidden" id="btn-pausa-sync" onclick="togglePausaSync()" title="Congela a leitura das planilhas até você retomar - use quando for mexer na planilha sem o NoPulso relendo por cima. Não apaga nada do que já foi lido." style="cursor:pointer;">⏸️ Pausar sincronização</button>
@@ -479,7 +479,7 @@
     </div>
   </div>
   <!-- um bloco de tabela POR GRUPO (franquia) - cada franquia lança um
-       fechamento diferente (canais/formas próprios em /grupos.html), então
+       fechamento diferente (canais/formas próprios em /grupos), então
        misturar tudo numa tabela só criava colunas cheias de R$ 0,00 pra quem
        não usa aquele campo. Ver renderTabela(). -->
   <div id="fechamentos-tabelas"></div>

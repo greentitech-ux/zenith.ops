@@ -121,6 +121,7 @@ const briefingEmail = require('./briefingEmail');
 const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
 const coworkApi = require('./coworkApi');
+const enderecoAntigo = require('./enderecoAntigo');
 const vigiaScript = require('./vigiaScript');
 const agenteAndroid = require('./agenteAndroid');
 const qualidade = require('./qualidade');
@@ -235,6 +236,11 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
+
+// ENDEREÇO ANTIGO (ver enderecoAntigo.js): conta quem ainda fala com ele e
+// leva toda TELA pro endereço novo, com o localStorage junto. API, webhook e
+// agentes continuam sendo atendidos aqui até o subdomínio ser desligado.
+app.use(enderecoAntigo.middleware(() => APP_BASE_URL));
 
 // gzip em TODA resposta compressivel (JSON, HTML, CSV, JS). Motivo direto:
 // o plano free do Render inclui so 5 GB/mes de banda e o servico foi
@@ -903,7 +909,7 @@ async function resolverUnidadePublica(termo) {
   return { encontrada: null, candidatas };
 }
 function linkEstornoCliente(codigo) {
-  return `${APP_BASE_URL}/estorno-cliente.html?unidade=${encodeURIComponent(codigo)}`;
+  return `${APP_BASE_URL}/estorno-cliente?unidade=${encodeURIComponent(codigo)}`;
 }
 
 // Pedido externo não entra mais diretamente numa fila de solicitação. Ele
@@ -1225,7 +1231,7 @@ app.post('/api/bot/alerta', async (req, res) => {
     const corpo = resumo || `Avisado por ${origem}.`;
     const registro = await alertasCentral.registrar({
       tipo: 'externo', titulo: tituloFinal, resumo: corpo,
-      url: texto(c.url, 200) || '/central-alertas.html', critico: c.critico === true,
+      url: texto(c.url, 200) || '/central-alertas', critico: c.critico === true,
     });
     console.log(`[alerta-bot] ${origem}: ${tituloFinal} - ${corpo.slice(0, 140)}`);
     // push próprio: notifyRaw registraria o alerta na Central DE NOVO (com
@@ -1874,7 +1880,7 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
     }
     const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto, logado, lojaContexto: req.body.lojaContexto, anexo });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
-    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Novo chat de suporte`, `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
+    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Novo chat de suporte`, `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico');
     res.json({ id: chat.id, token: chat.token, numeroTicket: chat.numeroTicket });
     acionarBeniboy(chat.id);
   } catch (err) {
@@ -1922,7 +1928,7 @@ app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), asyn
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     // notificacao no celular do time tambem em MENSAGEM nova (nao so na
     // abertura da conversa) - o atendente ve e responde de onde estiver
-    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Nova mensagem no chat de suporte`, `${chat.nome} · ${texto.slice(0, 80) || (anexo ? '📎 ' + anexo.nome : '')}`, chat.id, '/tecnico.html');
+    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Nova mensagem no chat de suporte`, `${chat.nome} · ${texto.slice(0, 80) || (anexo ? '📎 ' + anexo.nome : '')}`, chat.id, '/tecnico');
     // fecha a brecha de seguranca pedida pelo usuario: texto tipo comando/
     // script no chat publico (sem login) NUNCA e executado pelo Beniboy (ele
     // so gera texto - ver suporteBot.js), mas mandar isso e sinal forte de
@@ -2792,6 +2798,12 @@ app.post('/api/reunioes/publica/:token/comentarios', async (req, res) => {
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
 app.use('/api', auth.requireAuth);
+
+// quem ainda usa o endereço antigo, por tipo e por dia - o que diz se já dá
+// pra desligar o subdomínio do Render (NOC, só Master)
+app.get('/api/meta/endereco-antigo', auth.requireMaster, (req, res) => {
+  res.json({ ...enderecoAntigo.resumo(), oficial: APP_BASE_URL });
+});
 
 // PROCEDIMENTOS DE SOCORRO: o que se copia no NOC e cola NA MAQUINA quando
 // ela nao responde a comando nenhum (ver procedimentosSocorro.js). Autenticada
@@ -4486,7 +4498,7 @@ app.post('/api/monitor/alertar-loja', requireSection('monitor'), async (req, res
 // tablet/quiosque na entrada da loja) aponta pro chat publico do Beniboy -
 // ver comentario de TIPOS_COMPUTADOR em lojaStatus.js
 function urlComputador(codigo, posto, tipo) {
-  const base = tipo === 'interno' ? '/' : '/atendimento.html';
+  const base = tipo === 'interno' ? '/' : '/atendimento';
   return `${APP_BASE_URL}${base}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
 }
 
@@ -4678,7 +4690,7 @@ function formularioComLinks(f) {
     ...f,
     assinaturas: f.assinaturas.map((a) => ({
       ...a,
-      link: a.token ? `${APP_BASE_URL}/assinar.html?f=${encodeURIComponent(f.id)}&t=${encodeURIComponent(a.token)}` : null,
+      link: a.token ? `${APP_BASE_URL}/assinar?f=${encodeURIComponent(f.id)}&t=${encodeURIComponent(a.token)}` : null,
       token: undefined,
     })),
   };
@@ -7884,7 +7896,7 @@ app.post('/api/bonificacao/pedir-revisao', requireSection('bonificacao'), async 
     const { unidade, mes, motivo } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.sendStatus(404);
     const apuracao = await bonificacao.pedirRevisao(unidade, mes, { motivo, porEmail: req.user.email, porNome: req.user.username || req.user.email });
-    push.notifySolicitacao('Bonificação: pedido de revisão', `${unidade} · ${mes} · por ${req.user.username || req.user.email}${motivo ? ' · ' + motivo : ''}`, `bonif-revisao-${unidade}-${mes}`, '/bonificacao.html');
+    push.notifySolicitacao('Bonificação: pedido de revisão', `${unidade} · ${mes} · por ${req.user.username || req.user.email}${motivo ? ' · ' + motivo : ''}`, `bonif-revisao-${unidade}-${mes}`, '/bonificacao');
     res.json(bonificacao.montarRespostaPorPermissao(apuracao, {
       podeVerTotal: req.isMaster || req.isAdmin || req.podeBonifVerValorTotal,
       podeVerColaboradores: req.isMaster || req.isAdmin || req.podeBonifVerColaboradores,
@@ -10070,7 +10082,7 @@ app.post('/api/rh/advertencias/:id/documento', requireSection('rh'), upload.sing
       push.notifyUsuario(
         registro.solicitadoPorId, '📋 RH · documento de advertência pronto',
         `${registro.funcionarioNome} - baixe o documento e colha a assinatura do colaborador.`,
-        `rh-advertencia-documento-${registro.id}`, '/rh.html',
+        `rh-advertencia-documento-${registro.id}`, '/rh',
       );
     }
     res.json(registro);
@@ -11438,7 +11450,7 @@ app.post('/api/fornecedores/link', auth.requireAuth, async (req, res) => {
     if (!unidade || (permitidas && !permitidas.includes(unidade))) return res.status(403).json({ error: 'Escolha uma unidade do seu acesso.' });
     const mapa = await construirUnidadesMapa();
     const convite = await fornecedores.criarConvite({ unidade, unidadeNome: mapa[unidade] || unidade, por: req.user });
-    res.status(201).json({ ...convite, link: `${APP_BASE_URL}/fornecedor-cadastro.html?convite=${encodeURIComponent(convite.token)}` });
+    res.status(201).json({ ...convite, link: `${APP_BASE_URL}/fornecedor-cadastro?convite=${encodeURIComponent(convite.token)}` });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -12006,7 +12018,7 @@ app.patch('/api/tarefas/:id/descricao', auth.requireMaster, async (req, res) => 
 app.post('/api/tarefas/:id/link-externo', auth.requireAuth, async (req, res) => {
   try {
     const criado = await tarefas.criarLinkExterno(req.params.id, acessoDasTarefas(req));
-    res.status(201).json({ link: `${APP_BASE_URL}/reuniao-publica.html?convite=${encodeURIComponent(criado.token)}` });
+    res.status(201).json({ link: `${APP_BASE_URL}/reuniao-publica?convite=${encodeURIComponent(criado.token)}` });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -12577,7 +12589,7 @@ app.post('/api/central/:tipo/:id/gerar-link', auth.requireMasterOrAdmin, async (
   try {
     if (tipoBloqueado(req, req.params.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
     const { linkAcao } = await moduloTicket(req.params.tipo).gerarLinkAcao(req.params.id);
-    const url = `${APP_BASE_URL}/ticket-publico.html?tipo=${encodeURIComponent(req.params.tipo)}&ticket=${encodeURIComponent(req.params.id)}&link=${encodeURIComponent(linkAcao)}`;
+    const url = `${APP_BASE_URL}/ticket-publico?tipo=${encodeURIComponent(req.params.tipo)}&ticket=${encodeURIComponent(req.params.id)}&link=${encodeURIComponent(linkAcao)}`;
     res.json({ url });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -14891,7 +14903,7 @@ async function acionarBeniboy(chatId) {
         // o ticket ainda espera a decisão do Master: quem tem a tag vê ele no
         // Histórico da Central, não na tela de execução (que só recebe depois
         // de aprovado). Mandar pra tela errada é mandar pra tela vazia.
-        url: '/central-historico.html',
+        url: '/central-historico',
       }).catch((e) => console.error('[roteamento] falha ao avisar quem tem a tag:', e.message));
       console.log(`[roteamento] ticket #${d.numeroTicket} (${d.tipo}) -> ${roteamentoTags.descreverDestino(destino)}`);
     }
@@ -14938,11 +14950,11 @@ async function acionarBeniboy(chatId) {
         a.tipo === 'desbloqueio' ? '🔓 Beniboy desbloqueou um acesso' : '🔐 Beniboy identificou acesso',
         `${a.usuario || r.chat?.nome || 'Usuário'} · ${a.motivo || ''}`.slice(0, 150),
         `beniboy-acesso-${chatId}`,
-        `/beniboy.html?chat=${encodeURIComponent(chatId)}`,
+        `/beniboy?chat=${encodeURIComponent(chatId)}`,
       ).catch((e) => console.error('[suporteBot] falha ao avisar Master sobre acesso:', e.message));
     }
     if (r.chamouAtendente) {
-      push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico.html');
+      push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico');
       // se a loja de onde veio essa conversa esta sem conexao, a causa real
       // da conversa travada nao e o Beniboy "nao ter resolvido" - troca o
       // alarme critico por um push explicando isso (ver lojaContextoEstaOffline)
@@ -15038,7 +15050,7 @@ async function verificarAlertaPedido(order) {
       `Pedido ${order.pedidoId} mudou de status`,
       `${order.cliente || 'Cliente'} · R$ ${(order.valor || 0).toFixed(2)} · ${vigia.statusVisto || '—'} → ${order.statusAtual}`,
       'pedido-' + order.pedidoId,
-      '/monitor.html'
+      '/monitor'
     ).catch((err) => console.error('[pedidoWatch] falha no push:', err.message));
     await pedidoWatch.remover(order.pedidoId, vigia.userId);
   }
@@ -15090,7 +15102,7 @@ app.post('/api/mensagens/enviar', auth.requireAuth, async (req, res) => {
 function avisarMensagemDireta(userId, conversaId, deNome, texto) {
   const previa = String(texto || '').trim().slice(0, 140);
   broadcastParaUsuario(userId, 'mensagem-direta', { conversaId, previa, deEmail: deNome, em: Date.now() });
-  push.notifyUsuario(userId, `Mensagem de ${deNome}`, previa, 'mensagem-direta-' + conversaId, '/painel.html')
+  push.notifyUsuario(userId, `Mensagem de ${deNome}`, previa, 'mensagem-direta-' + conversaId, '/painel')
     .catch((err) => console.error('Erro no push de mensagem direta:', err.message));
 }
 
@@ -15375,7 +15387,7 @@ app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => 
         '💬 Conversa transferida pra você',
         `${chat.nome || 'Visitante'}${autor.nome ? ' · de ' + autor.nome : ''}`.slice(0, 150),
         'suporte-transf-' + chat.id,
-        '/beniboy.html?chat=' + encodeURIComponent(chat.id),
+        '/beniboy?chat=' + encodeURIComponent(chat.id),
       ).catch((e) => console.error('[suporte] falha ao avisar quem recebeu a conversa:', e.message));
     }
     const { token, ...resto } = chat;

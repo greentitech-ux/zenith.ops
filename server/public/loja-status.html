@@ -600,7 +600,7 @@
       <button type="button" class="btn-icone hidden" id="btn-limpar-travados" onclick="limparTravados()" data-dica="Destravar lojas: fechar processos travados do agente NOC-NoPulso" aria-label="Destravar lojas">🧹</button>
       <!-- atalho pra central de HD/temperatura/reboot: o card daqui mostra o
            computador que voce ja escolheu; la e a frota inteira de uma vez -->
-      <a class="btn-icone" href="/noc-maquinas.html" data-dica="Saúde das máquinas: HD, temperatura e tempo ligado de toda a frota" aria-label="Saúde das máquinas">💽</a>
+      <a class="btn-icone" href="/noc-maquinas" data-dica="Saúde das máquinas: HD, temperatura e tempo ligado de toda a frota" aria-label="Saúde das máquinas">💽</a>
       <button class="btn-notif" onclick="carregar()" title="Atualizar">🔄</button>
       <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
     </div>
@@ -1513,8 +1513,8 @@ const TIPO_COMPUTADOR_LABEL = { atendimento: '🤖 atendimento', interno: '🔒 
 // (copiarLinkComputador) e no script de vigia (baixarVigia)
 function paginaDoTipo(tipo){
   if(tipo === 'interno') return '';
-  if(tipo === 'abastecimento') return 'abastecimento.html';
-  return 'atendimento.html';
+  if(tipo === 'abastecimento') return '/abastecimento';
+  return '/atendimento';
 }
 
 // parse leve do user-agent - so pra dar um resumo legivel (SO + navegador),
@@ -4343,11 +4343,27 @@ async function carregarMigracaoEndereco(){
     const d = await r.json();
     const cor = d.podeAposentar ? 'var(--ok)' : 'var(--warn)';
     const lista = (d.pendentes||[]).map(p=>`<div style="font-size:11.5px;color:var(--muted);">• ${escapeHtml(p.nome||'')} — ${p.endereco?escapeHtml(p.endereco):`sem reportar (agente v${p.versao||'?'}, anterior à 51)`}</div>`).join('');
-    el.innerHTML = `<div style="border:1px solid ${cor};border-radius:10px;padding:12px;">
-      <div style="font-size:13px;"><b style="color:${cor};">${d.migradas} de ${d.total}</b> já falam pelo endereço oficial <b>${escapeHtml(d.oficial||'(não configurado)')}</b>.</div>
-      ${d.podeAposentar
-        ? '<div style="font-size:12.5px;color:var(--ok);margin-top:6px;">✅ Nenhuma máquina pendente — dá pra aposentar o endereço antigo com segurança.</div>'
-        : `<div style="font-size:12.5px;color:var(--warn);margin-top:6px;">⚠️ ${(d.pendentes||[]).length} máquina(s) ainda não confirmaram. <b>Não desligue o endereço antigo agora.</b></div>${lista}`}
+    // QUEM AINDA CHAMA o endereço antigo (ver enderecoAntigo.js): as máquinas
+    // acima são só uma parte - o webhook da Adyen, tablet e tela de loja
+    // também. Só dá pra desligar com as DUAS partes limpas.
+    let t = null;
+    try { const rt = await fetch('/api/meta/endereco-antigo'); if(rt.ok) t = await rt.json(); }catch(e){}
+    const ROT = { 'webhook-adyen':'Webhook da Adyen', 'agente-pc':'NOCZenith (PC)', 'agente-android':'Agente Android', 'heartbeat-navegador':'Tela de loja (heartbeat)', 'api':'Outras chamadas de API', 'tela':'Telas abertas (já levadas pro novo)', 'arquivo':'Arquivos' };
+    const trafego = t ? Object.entries(t.ultimos7dias||{}).sort((a,b)=>b[1]-a[1]).map(([c,n])=>{
+      const critico = (t.pendentes||[]).includes(c);
+      const u = (t.ultimos||{})[c];
+      return `<div style="font-size:11.5px;color:${critico?'var(--warn)':'var(--muted)'};">${critico?'⚠️':'•'} ${escapeHtml(ROT[c]||c)}: <b>${n}</b>${u&&u.em?' · último '+escapeHtml(tempoRelativo(u.em))+(u.caminho?' em '+escapeHtml(u.caminho):''):''}</div>`;
+    }).join('') : '';
+    const pronto = d.podeAposentar && t && t.prontoParaDesligar;
+    const corGeral = pronto ? 'var(--ok)' : 'var(--warn)';
+    el.innerHTML = `<div style="border:1px solid ${corGeral};border-radius:10px;padding:12px;">
+      <div style="font-size:13px;"><b style="color:${cor};">${d.migradas} de ${d.total}</b> máquinas já falam pelo endereço oficial <b>${escapeHtml(d.oficial||'(não configurado)')}</b>.</div>
+      ${d.podeAposentar ? '' : `<div style="font-size:12.5px;color:var(--warn);margin-top:6px;">⚠️ ${(d.pendentes||[]).length} máquina(s) ainda não confirmaram.</div>${lista}`}
+      ${t ? `<div style="font-size:12.5px;margin-top:10px;"><b>Quem ainda chama ${escapeHtml(t.host)}</b> <span style="color:var(--muted);">(últimos 7 dias · medindo há ${t.diasMedidos} dia(s))</span></div>
+        ${trafego || '<div style="font-size:11.5px;color:var(--ok);">Ninguém.</div>'}` : ''}
+      <div style="font-size:12.5px;margin-top:8px;color:${corGeral};">${pronto
+        ? '✅ Nada depende mais do endereço antigo há 7 dias — dá pra desligar o subdomínio no Render.'
+        : '<b>Ainda não desligue o endereço antigo.</b> Pode desligar quando webhook, agentes, tela de loja e API ficarem em zero por 7 dias.'}</div>
     </div>`;
   }catch(e){ /* o painel some em vez de quebrar a tela */ }
 }
@@ -5415,7 +5431,7 @@ function renderAgenteHistorico(){
 }
 // autorizar pede a digital (ou a senha) desde 23/09/2026 - é tudo na tela
 // de Autorizações, a mesma que o push do celular abre
-function aprovarAgenteQa(id){ location.href = '/autorizacoes.html?id=' + encodeURIComponent(id); }
+function aprovarAgenteQa(id){ location.href = '/autorizacoes?id=' + encodeURIComponent(id); }
 async function rejeitarAgenteQa(id){
   const motivo = prompt('Motivo da rejeição (opcional):') || '';
   const res = await fetch('/api/qa-aprovacoes/'+id+'/rejeitar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo})});

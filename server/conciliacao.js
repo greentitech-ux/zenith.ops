@@ -275,7 +275,7 @@ async function cobrar({ conciliacao, hoje }) {
       `Tolerância: ${brl(conciliacao.regra.toleranciaReais)} ou ${conciliacao.regra.toleranciaPct}%.`,
       gerente ? 'Explique a diferença nesta tarefa e corrija o fechamento pela Central → Histórico → Fechamentos → Pedir correção.' : `Sem gerente com a tag e a unidade no acesso - perguntar a ${item.gerente || 'quem lançou'}.`,
     ].join('\n');
-    const alerta = await alertasCentral.registrar({ tipo: 'conciliacao-divergente', titulo, resumo: descricao.split('\n')[1], url: '/tarefas.html', critico: true });
+    const alerta = await alertasCentral.registrar({ tipo: 'conciliacao-divergente', titulo, resumo: descricao.split('\n')[1], url: '/tarefas', critico: true });
     const tarefa = await tarefas.criar({
       titulo, descricao, dataInicio: hoje, dataEntrega: hoje,
       unidade: item.unidade, unidadeNome: item.unidadeNome,

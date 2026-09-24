@@ -33,8 +33,8 @@
   // ---------------------------------------------------------------
   const MENU = [
     { itens: [
-      { id: 'nav-painel', href: '/painel.html', icone: '🏠', rotulo: 'Painel' },
-      { id: 'nav-tarefas', href: '/tarefas.html', icone: '✅', rotulo: 'Meu Dia' },
+      { id: 'nav-painel', href: '/painel', icone: '🏠', rotulo: 'Painel' },
+      { id: 'nav-tarefas', href: '/tarefas', icone: '✅', rotulo: 'Meu Dia' },
     ] },
     { grupo: 'Operação diária', itens: [
       // /lancamento.html serve DUAS coisas: quem tem 'lancamento' cai no
@@ -42,90 +42,90 @@
       // deposito. Antes a propria pagina reescrevia o texto do link
       // (getElementById('nav-self')) - o que so funcionava DENTRO dela.
       // Aqui o rotulo certo aparece no menu de qualquer tela.
-      { id: 'nav-lancamento', href: '/lancamento.html', icone: '🧾', rotulo: 'Fechamento', secoes: ['lancamento', 'sangria'],
+      { id: 'nav-lancamento', href: '/lancamento', icone: '🧾', rotulo: 'Fechamento', secoes: ['lancamento', 'sangria'],
         alt: { quando: (me) => !temSecao(me, 'lancamento') && temSecao(me, 'sangria'), icone: '💰', rotulo: 'Sangria/Depósito' } },
-      { id: 'nav-saidas-painel', href: '/saidas.html', icone: '📤', rotulo: 'Painel de Saídas', secoes: ['lancamento', 'sangria'] },
-      { id: 'nav-entrega-lancamento', href: '/entrega-lancamento.html', icone: '📦', rotulo: 'Lançar entrega', secoes: ['entregas-lancamento'] },
+      { id: 'nav-saidas-painel', href: '/saidas', icone: '📤', rotulo: 'Painel de Saídas', secoes: ['lancamento', 'sangria'] },
+      { id: 'nav-entrega-lancamento', href: '/entrega-lancamento', icone: '📦', rotulo: 'Lançar entrega', secoes: ['entregas-lancamento'] },
       // pagina de Fechamentos e uma so (fechamentos.html), mas cada franquia
       // so quer ver o proprio numero sem lembrar de trocar um filtro toda
       // vez - por isso 2 itens de menu, cada um mandando pra ca com
       // ?grupo=ARCFOOD/BRAVO ja fixado (a pagina trava o seletor sozinha
       // quando ve o parametro, ver GRUPO_FIXO em fechamentos.html)
-      { id: 'nav-fechamentos-arcfood', href: '/fechamentos.html?grupo=ARCFOOD', icone: '💰', rotulo: 'Fechamentos Arcfood', secoes: ['fechamentos'], redes: ['ARCFOOD'] },
-      { id: 'nav-fechamentos-gbe', href: '/fechamentos.html?grupo=BRAVO', icone: '💰', rotulo: 'Fechamentos GBE', secoes: ['fechamentos'], redes: ['GBE'] },
-      { id: 'nav-kpis-operacionais', href: '/kpis-operacionais.html', icone: "⏱️", rotulo: "KPI's operacionais", secoes: ['kpis'] },
-      { id: 'nav-formularios', href: '/formularios.html', icone: '🖊️', rotulo: 'Formulários', secoes: ['formularios'] },
-      { id: 'nav-vendas-recordes', href: '/vendas-recordes.html', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
-      { id: 'nav-entregas', href: '/entregas.html', icone: '🛵', rotulo: 'Entregas', secoes: ['entregas'] },
-      { id: 'nav-inventario', href: '/estoque.html', icone: '📦', rotulo: 'Estoque', secoes: ['inventario'] },
-      { id: 'nav-abastecimento', href: '/abastecimento.html', icone: '🛒', rotulo: 'Abastec. Carrinho', secoes: ['abastecimento-carrinho', 'abastecimento-loja'] },
-      { id: 'nav-abastecimento-relatorios', href: '/abastecimento-relatorios.html', icone: '📊', rotulo: 'Relatórios do Carrinho', master: true },
+      { id: 'nav-fechamentos-arcfood', href: '/fechamentos?grupo=ARCFOOD', icone: '💰', rotulo: 'Fechamentos Arcfood', secoes: ['fechamentos'], redes: ['ARCFOOD'] },
+      { id: 'nav-fechamentos-gbe', href: '/fechamentos?grupo=BRAVO', icone: '💰', rotulo: 'Fechamentos GBE', secoes: ['fechamentos'], redes: ['GBE'] },
+      { id: 'nav-kpis-operacionais', href: '/kpis-operacionais', icone: "⏱️", rotulo: "KPI's operacionais", secoes: ['kpis'] },
+      { id: 'nav-formularios', href: '/formularios', icone: '🖊️', rotulo: 'Formulários', secoes: ['formularios'] },
+      { id: 'nav-vendas-recordes', href: '/vendas-recordes', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
+      { id: 'nav-entregas', href: '/entregas', icone: '🛵', rotulo: 'Entregas', secoes: ['entregas'] },
+      { id: 'nav-inventario', href: '/estoque', icone: '📦', rotulo: 'Estoque', secoes: ['inventario'] },
+      { id: 'nav-abastecimento', href: '/abastecimento', icone: '🛒', rotulo: 'Abastec. Carrinho', secoes: ['abastecimento-carrinho', 'abastecimento-loja'] },
+      { id: 'nav-abastecimento-relatorios', href: '/abastecimento-relatorios', icone: '📊', rotulo: 'Relatórios do Carrinho', master: true },
     ] },
     { grupo: 'Monitoramento', itens: [
-      { id: 'nav-monitor', href: '/monitor.html', icone: '📈', rotulo: 'Monitor', secoes: ['monitor'] },
-      { id: 'nav-relatorios', href: '/relatorios.html', icone: '📊', rotulo: 'Relatórios', secoes: ['disputas'] },
-      { id: 'nav-ifood', href: '/ifood.html', icone: '🍔', rotulo: 'iFood', secoes: ['ifood'] },
+      { id: 'nav-monitor', href: '/monitor', icone: '📈', rotulo: 'Monitor', secoes: ['monitor'] },
+      { id: 'nav-relatorios', href: '/relatorios', icone: '📊', rotulo: 'Relatórios', secoes: ['disputas'] },
+      { id: 'nav-ifood', href: '/ifood', icone: '🍔', rotulo: 'iFood', secoes: ['ifood'] },
       // conectividade das lojas: e infra, encaixa melhor aqui do que em
       // Solicitacoes (onde estava) - mesmo publico do Beniboy
-      { id: 'nav-loja-status', href: '/loja-status.html', icone: '📡', rotulo: 'NOC-NoPulso', secoes: ['suporte'] },
-      { id: 'nav-noc-incidentes', href: '/noc-incidentes.html', icone: '🚨', rotulo: 'Incidentes NOC', secoes: ['suporte'] },
-      { id: 'nav-noc-rede', href: '/noc-rede.html', icone: '📈', rotulo: 'Análise de Rede', secoes: ['suporte'] },
-      { id: 'nav-noc-maquinas', href: '/noc-maquinas.html', icone: '💽', rotulo: 'Saúde das Máquinas', secoes: ['suporte'] },
+      { id: 'nav-loja-status', href: '/loja-status', icone: '📡', rotulo: 'NOC-NoPulso', secoes: ['suporte'] },
+      { id: 'nav-noc-incidentes', href: '/noc-incidentes', icone: '🚨', rotulo: 'Incidentes NOC', secoes: ['suporte'] },
+      { id: 'nav-noc-rede', href: '/noc-rede', icone: '📈', rotulo: 'Análise de Rede', secoes: ['suporte'] },
+      { id: 'nav-noc-maquinas', href: '/noc-maquinas', icone: '💽', rotulo: 'Saúde das Máquinas', secoes: ['suporte'] },
     ] },
     { grupo: 'Atendimento', itens: [
-      { id: 'nav-beniboy', href: '/beniboy.html', icone: (window.beniboySVG ? window.beniboySVG(20) : '🐝'), rotulo: 'Central do Beniboy', secoes: ['suporte'] },
-      { id: 'nav-dashboard-atendimentos', href: '/dashboard-atendimentos.html', icone: '📊', rotulo: 'Dashboard de Atendimentos', secoes: ['suporte'] },
-      { id: 'nav-central-solucoes', href: '/central-solucoes.html', icone: '💬', rotulo: 'Central de Soluções', secoes: ['central-solucoes'] },
+      { id: 'nav-beniboy', href: '/beniboy', icone: (window.beniboySVG ? window.beniboySVG(20) : '🐝'), rotulo: 'Central do Beniboy', secoes: ['suporte'] },
+      { id: 'nav-dashboard-atendimentos', href: '/dashboard-atendimentos', icone: '📊', rotulo: 'Dashboard de Atendimentos', secoes: ['suporte'] },
+      { id: 'nav-central-solucoes', href: '/central-solucoes', icone: '💬', rotulo: 'Central de Soluções', secoes: ['central-solucoes'] },
     ] },
     { grupo: 'Solicitações', itens: [
-      { id: 'nav-fornecedores', href: '/fornecedores.html', icone: '🏢', rotulo: 'Fornecedores', gerenteOuSecoes: ['fornecedores', 'solicitacoes'] },
-      { id: 'nav-compras', href: '/compras.html', icone: '🛍️', rotulo: 'Acompanhar Compras', secoes: ['solicitacoes'] },
+      { id: 'nav-fornecedores', href: '/fornecedores', icone: '🏢', rotulo: 'Fornecedores', gerenteOuSecoes: ['fornecedores', 'solicitacoes'] },
+      { id: 'nav-compras', href: '/compras', icone: '🛍️', rotulo: 'Acompanhar Compras', secoes: ['solicitacoes'] },
       // resumo pessoal (por status/unidade + meus abertos/concluidos) que
       // antes vivia dentro do Historico - separado em pagina propria porque
       // misturado com o quadro do Historico ficava bagunçado
-      { id: 'nav-inicio-solicitacoes', href: '/central-inicio.html', icone: '📊', rotulo: 'Início', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
+      { id: 'nav-inicio-solicitacoes', href: '/central-inicio', icone: '📊', rotulo: 'Início', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
       // o Historico tambem serve pra quem RECEBE card atribuido
-      { id: 'nav-historico', href: '/central-historico.html', icone: '📋', rotulo: 'Central de Solicitações', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
-      { id: 'nav-tecnico', href: '/tecnico.html', icone: '🔧', rotulo: 'Chamados TI', secoes: ['tecnico', 'suporte'] },
-      { id: 'nav-manutencao', href: '/manutencao.html', icone: '🛠️', rotulo: 'Manutenção', secoes: ['manutencao'] },
-      { id: 'nav-ativos-ti', href: '/ativos-ti.html', icone: '🖥️', rotulo: 'Ativos de TI', secoes: ['ativos-ti'] },
+      { id: 'nav-historico', href: '/central-historico', icone: '📋', rotulo: 'Central de Solicitações', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
+      { id: 'nav-tecnico', href: '/tecnico', icone: '🔧', rotulo: 'Chamados TI', secoes: ['tecnico', 'suporte'] },
+      { id: 'nav-manutencao', href: '/manutencao', icone: '🛠️', rotulo: 'Manutenção', secoes: ['manutencao'] },
+      { id: 'nav-ativos-ti', href: '/ativos-ti', icone: '🖥️', rotulo: 'Ativos de TI', secoes: ['ativos-ti'] },
     ] },
     // Q.A - a seção inteira é liberada pela TAG de cargo 'qa' (Master,
     // 23/09/2026: "só quem tem acesso a tag terá acesso a ela, pois é um
     // setor que fará a visita nas unidades"). Master e Admin veem sempre,
     // como em todo o resto do app. `tags` aqui é lido por aplicarRegras().
     { grupo: 'Q.A', itens: [
-      { id: 'nav-qa-visita', href: '/qa-visita.html', icone: '🥼', rotulo: 'Visita Q.A', tags: ['qa'] },
-      { id: 'nav-qa-treinamento', href: '/qa-treinamento.html', icone: '🎓', rotulo: 'Treinamento Q.A', tags: ['qa'] },
+      { id: 'nav-qa-visita', href: '/qa-visita', icone: '🥼', rotulo: 'Visita Q.A', tags: ['qa'] },
+      { id: 'nav-qa-treinamento', href: '/qa-treinamento', icone: '🎓', rotulo: 'Treinamento Q.A', tags: ['qa'] },
     ] },
     { grupo: 'Saltiverso', itens: [
-      { id: 'nav-parque-checkin', href: '/parque-checkin.html', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },
-      { id: 'nav-parque', href: '/parque.html', icone: '🎡', rotulo: 'Parque (painel)', secoes: ['parque'] },
-      { id: 'nav-festas', href: '/festas.html', icone: '🎉', rotulo: 'Festas', secoes: ['festas'] },
-      { id: 'nav-mensalistas', href: '/mensalistas.html', icone: '📅', rotulo: 'Mensalistas', secoes: ['parque'] },
-      { id: 'nav-saltiverso-vendas', href: '/saltiverso-vendas.html', icone: '🥤', rotulo: 'Bebidas & Meias', secoes: ['parque-loja'] },
-      { id: 'nav-saltiverso-fechamento', href: '/saltiverso-fechamento.html', icone: '🧾', rotulo: 'Fechamento do balcão', secoes: ['parque-loja'] },
+      { id: 'nav-parque-checkin', href: '/parque-checkin', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },
+      { id: 'nav-parque', href: '/parque', icone: '🎡', rotulo: 'Parque (painel)', secoes: ['parque'] },
+      { id: 'nav-festas', href: '/festas', icone: '🎉', rotulo: 'Festas', secoes: ['festas'] },
+      { id: 'nav-mensalistas', href: '/mensalistas', icone: '📅', rotulo: 'Mensalistas', secoes: ['parque'] },
+      { id: 'nav-saltiverso-vendas', href: '/saltiverso-vendas', icone: '🥤', rotulo: 'Bebidas & Meias', secoes: ['parque-loja'] },
+      { id: 'nav-saltiverso-fechamento', href: '/saltiverso-fechamento', icone: '🧾', rotulo: 'Fechamento do balcão', secoes: ['parque-loja'] },
     ] },
     { grupo: 'Estação da Comida', itens: [
-      { id: 'nav-estacao-salao', href: '/estacao-salao.html', icone: '🍽️', rotulo: 'Salão', secoes: ['estacao-salao'] },
-      { id: 'nav-estacao-caixa', href: '/estacao-caixa.html', icone: '💳', rotulo: 'Caixa', secoes: ['estacao-caixa'] },
-      { id: 'nav-estacao-fechamento', href: '/estacao-fechamento.html', icone: '🧾', rotulo: 'Fechamento do dia', secoes: ['estacao-fechamento'] },
+      { id: 'nav-estacao-salao', href: '/estacao-salao', icone: '🍽️', rotulo: 'Salão', secoes: ['estacao-salao'] },
+      { id: 'nav-estacao-caixa', href: '/estacao-caixa', icone: '💳', rotulo: 'Caixa', secoes: ['estacao-caixa'] },
+      { id: 'nav-estacao-fechamento', href: '/estacao-fechamento', icone: '🧾', rotulo: 'Fechamento do dia', secoes: ['estacao-fechamento'] },
     ] },
     { grupo: 'BigBrother', itens: [
-      { id: 'nav-rh', href: '/rh.html', icone: '🧑‍💼', rotulo: 'RH', secoes: ['rh'] },
+      { id: 'nav-rh', href: '/rh', icone: '🧑‍💼', rotulo: 'RH', secoes: ['rh'] },
     ] },
     { grupo: 'Bonificação', itens: [
-      { id: 'nav-bonificacao', href: '/bonificacao.html', icone: '🏆', rotulo: 'Bonificação', secoes: ['bonificacao'] },
+      { id: 'nav-bonificacao', href: '/bonificacao', icone: '🏆', rotulo: 'Bonificação', secoes: ['bonificacao'] },
     ] },
     { grupo: 'Administração', itens: [
-      { id: 'nav-usuarios', href: '/usuarios.html', icone: '👤', rotulo: 'Usuários', master: true },
-      { id: 'nav-grupos', href: '/grupos.html', icone: '🏷️', rotulo: 'Grupos', master: true },
-      { id: 'nav-cofre', href: '/cofre.html', icone: '🔐', rotulo: 'Cofre', secoes: ['cofre'] },
-      { id: 'nav-central-alertas', href: '/central-alertas.html', icone: '🚨', rotulo: 'Central de Alertas', master: true },
-      { id: 'nav-entregas-regras', href: '/entregas-regras.html', icone: '⚙️', rotulo: 'Regras de Entregas', master: true },
-      { id: 'nav-email', href: '/email.html', icone: '✉️', rotulo: 'Email', master: true },
-      { id: 'nav-login-custom', href: '/login-custom.html', icone: '🎨', rotulo: 'Tela de Login', master: true },
-      { id: 'nav-reset-senha', href: '/painel.html?resetSenha=1', icone: '🔑', rotulo: 'Reset senha', admin: true },
+      { id: 'nav-usuarios', href: '/usuarios', icone: '👤', rotulo: 'Usuários', master: true },
+      { id: 'nav-grupos', href: '/grupos', icone: '🏷️', rotulo: 'Grupos', master: true },
+      { id: 'nav-cofre', href: '/cofre', icone: '🔐', rotulo: 'Cofre', secoes: ['cofre'] },
+      { id: 'nav-central-alertas', href: '/central-alertas', icone: '🚨', rotulo: 'Central de Alertas', master: true },
+      { id: 'nav-entregas-regras', href: '/entregas-regras', icone: '⚙️', rotulo: 'Regras de Entregas', master: true },
+      { id: 'nav-email', href: '/email', icone: '✉️', rotulo: 'Email', master: true },
+      { id: 'nav-login-custom', href: '/login-custom', icone: '🎨', rotulo: 'Tela de Login', master: true },
+      { id: 'nav-reset-senha', href: '/painel?resetSenha=1', icone: '🔑', rotulo: 'Reset senha', admin: true },
     ] },
   ];
 
@@ -426,7 +426,7 @@
   // estrutural; sem pai, aproveita apenas uma origem interna confirmada.
   let VOLTAR_EL = null;
   function montarVoltar() {
-    const pai = itemPorId(VOLTAR[location.pathname]);
+    const pai = itemPorId(VOLTAR[semHtml(location.pathname)]);
     const origem = pai ? null : origemContextual();
     if (!pai && !origem) return;
     const btn = acharHamburguer();
@@ -558,10 +558,17 @@
   // Isso existe porque "Reset senha" aponta pra /painel.html?resetSenha=1:
   // comparando so o pathname, ele acendia junto com "Painel" em toda visita
   // ao painel, e ainda abria o acordeao de Administracao sem motivo.
+  function semHtml(p) {
+    const c = String(p || '/');
+    if (/^\/index\.html$/i.test(c)) return '/';
+    return c.replace(/\.html$/i, '') || '/';
+  }
   function grauDeMatch(a) {
     let u;
     try { u = new URL(a.getAttribute('href'), location.origin); } catch (e) { return -1; }
-    if (u.pathname !== location.pathname) return -1;
+    // o servidor manda /tela.html pra /tela desde 15/09: comparar cru fazia o
+    // item da tela atual nunca acender (href com .html x endereço sem)
+    if (semHtml(u.pathname) !== semHtml(location.pathname)) return -1;
     const atual = new URLSearchParams(location.search);
     let grau = 0;
     for (const [k, v] of u.searchParams) {

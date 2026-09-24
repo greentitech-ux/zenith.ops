@@ -150,18 +150,40 @@ não tem URL cravada em lugar nenhum.
 O `adyen-monitor.onrender.com` foi **aposentado em 23/09/2026** (decisão do
 Master, com o parque sendo reinstalado). Ele não é mais fallback nem link.
 Mas continua **respondendo** enquanto o subdomínio do Render estiver ligado,
-e por isso fica em exatamente dois lugares, onde ainda tem função (o
+e por isso fica em exatamente três lugares, onde ainda tem função (o
 `testeRotas.js` reprova qualquer outro):
 
-- `tema.js` — o aviso "o NoPulso mudou de endereço" pra quem ainda abre
-  pelo antigo (fora das telas de heartbeat da loja);
+- `enderecoAntigo.js` (desde 24/09) — toda **tela** aberta no antigo vai pra
+  mesma tela no novo, sem `.html`, levando o localStorage junto (unidade da
+  máquina, sessão, tema). API, webhook e agentes **não** são redirecionados
+  (cliente de máquina não segue redirect de POST): continuam atendidos e são
+  **contados** por tipo e por dia. O NOC mostra quem ainda chama o antigo;
+- `tema.js` — recebe esse localStorage do lado novo, **só** se a pessoa veio
+  do antigo (Referer) e sem sobrescrever o que já existe;
 - `reparoNocZenithScript.js` — plano B do comando de reparo, pra loja
   atrás de rede que não resolve o domínio novo (caso real de 22/09), e o
   reconhecimento de cópia do agente instalada antes da troca.
 
-Desligou o subdomínio no Render? Aí os dois perdem a função: tire o aviso
-(e a rota `/api/meta/endereco`) e o `ENDERECO_RESERVA` do reparo. Máquina
-que ficou com o agente antigo volta pelo reparo ou por reinstalação.
+**Desligar o subdomínio** (Render → serviço → Settings → Render Subdomain) só
+quando o painel de migração do NOC disser ✅: máquinas todas no oficial **e**
+webhook da Adyen, agentes, tela de loja e API em zero por 7 dias. O webhook
+da Adyen é o que mais pesa: se ele ainda apontar pro antigo, o Monitor para
+de receber transações no minuto em que desligar. Desligou? Tire o
+`enderecoAntigo.js`, o receptor do `tema.js`, a rota `/api/meta/endereco` e o
+`ENDERECO_RESERVA` do reparo. Máquina que ficou com o agente antigo volta
+pelo reparo ou por reinstalação.
+
+### URLs sem `.html`
+
+Desde 15/09 o servidor manda `/tela.html` pra `/tela` (308), e desde 24/09
+todo link do código já nasce sem `.html` (push, e-mail, menu, telas). Quem
+compara o caminho da tela (`location.pathname`) compara **sem** `.html`
+(`caminhoAtual()` no `tema.js`, `semHtml()` no `nav-menu.js`) - comparar cru
+deixou o menu sem item aceso por 9 dias. A lista de rotas públicas do
+`index.js` mantém as duas formas: link antigo de cliente continua abrindo.
+O agente (`vigiaScript.js`) ainda abre `.html` e o redirect resolve; troque
+junto com a próxima versão dele, não sozinho (subir `VERSAO_VIGIA` vai em
+ondas).
 
 ### Versão nova do agente vai em ondas (desde a v118)
 

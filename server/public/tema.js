@@ -832,77 +832,71 @@
     }, ANYDESK_ESPERA_MS);
   };
 
-  // ---- aviso de mudanca de endereco ----
-  // Quem entra pelo endereco antigo (adyen-monitor.onrender.com) precisa
-  // saber que o NoPulso mudou de casa - senao continua usando o velho pra
-  // sempre, com o atalho antigo na tela inicial. O endereco de destino vem
-  // do servidor (/api/meta/endereco), que devolve o APP_BASE_URL: cravar o
-  // dominio novo aqui quebraria a regra de que ele e a UNICA fonte.
+  // ---- chegada de quem vinha pelo endereco antigo ----
+  // Desde 24/09/2026 o SERVIDOR leva toda tela aberta no endereco antigo
+  // (adyen-monitor.onrender.com) pra mesma tela aqui, com o localStorage de
+  // la no fim da URL (#nopulso-migrar=, ver enderecoAntigo.js). Antes era um
+  // aviso com botao - e a pessoa que clicava perdia a sessao, o tema e, na
+  // maquina de loja, a unidade monitorada (localStorage e por origem).
   //
-  // DUAS TELAS FICAM DE FORA, DE PROPOSITO: index.html na raiz e
-  // abastecimento.html sao as que fazem heartbeat pelo navegador na maquina
-  // de loja. localStorage e por origem - se alguem clicar no aviso ali, o
-  // zenithMonitorFixo some, a maquina esquece que unidade monitora e a loja
-  // passa a acusar offline no NOC. Nessas o vigia migra sozinho.
+  // So aceita se a pessoa veio MESMO do endereco antigo (Referer): sem isso,
+  // um link forjado pra ca plantaria no navegador de alguem a sessao de outra
+  // pessoa. E nunca sobrescreve o que ja existe aqui - o endereco novo manda.
   //
-  // Tambem so aparece pra quem tem authToken: cliente em pagina publica
-  // (atendimento, estorno) nao ve. Se visse e clicasse, perderia a conversa
-  // em andamento, que tambem mora no localStorage da origem antiga.
+  // Roda antes de tudo (o tema.js e o primeiro script das telas): a tela de
+  // heartbeat le zenithMonitorFixo logo depois.
   var HOST_ANTIGO = 'adyen-monitor.onrender.com';
-  var TELAS_DE_HEARTBEAT = ['/', '/index.html', '/abastecimento.html'];
-
-  function avisarEnderecoNovo() {
-    if (location.hostname !== HOST_ANTIGO) return;
-    if (TELAS_DE_HEARTBEAT.indexOf(location.pathname) !== -1) return;
+  function receberDoEnderecoAntigo() {
+    var marca = '#nopulso-migrar=';
+    if (String(location.hash || '').indexOf(marca) !== 0) return;
+    var bruto = location.hash.slice(marca.length);
+    // tira da barra na hora: a sessao nao fica visivel nem no historico
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    var veioDe = '';
+    try { veioDe = new URL(document.referrer).hostname; } catch (e) { veioDe = ''; }
+    if (veioDe !== HOST_ANTIGO) return;
+    var dados;
+    try { dados = JSON.parse(decodeURIComponent(bruto)); } catch (e) { return; }
+    if (!dados || typeof dados !== 'object') return;
+    var trouxe = 0;
     try {
-      if (!localStorage.getItem('authToken')) return;
-      if (sessionStorage.getItem('nopulsoAvisoEndereco') === 'fechado') return;
-    } catch (e) { return; }
-
-    fetch('/api/meta/endereco').then(function (r) { return r.json(); }).then(function (d) {
-      var oficial = (d && d.oficial) || '';
-      if (!oficial) return;
-      var destino;
-      try { destino = new URL(oficial); } catch (e) { return; }
-      if (destino.origin === location.origin) return;   // ja esta no endereco certo
-
-      var st = document.createElement('style');
-      st.textContent = [
-        '#nopulso-mudou{position:fixed;left:0;right:0;bottom:0;z-index:99998;',
-        '  background:var(--panel2,#181d24);border-top:2px solid var(--accent,#b8ff3c);',
-        '  color:var(--text,#e7ecf1);padding:14px 16px;display:flex;gap:14px;',
-        '  align-items:center;justify-content:center;flex-wrap:wrap;',
-        "  font-family:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;",
-        '  box-shadow:0 -6px 20px rgba(0,0,0,.35);}',
-        '#nopulso-mudou .txt{font-size:13.5px;line-height:1.45;max-width:56ch;}',
-        '#nopulso-mudou b{color:var(--accent,#b8ff3c);}',
-        '#nopulso-mudou .acoes{display:flex;gap:8px;flex-wrap:wrap;}',
-        '#nopulso-mudou a.ir{background:var(--accent,#b8ff3c);color:#0b0d10;text-decoration:none;',
-        '  border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;white-space:nowrap;}',
-        '#nopulso-mudou button.depois{background:none;border:1px solid var(--line,#232a33);',
-        '  color:var(--muted,#7d8896);border-radius:8px;padding:9px 14px;font-size:13px;cursor:pointer;}',
-        '@media(max-width:520px){#nopulso-mudou{flex-direction:column;align-items:stretch;text-align:center;}',
-        '  #nopulso-mudou .acoes{justify-content:center;}}'
-      ].join('\n');
-      document.head.appendChild(st);
-
-      var barra = document.createElement('div');
-      barra.id = 'nopulso-mudou';
-      barra.setAttribute('role', 'status');
-      barra.innerHTML =
-        '<div class="txt">O NoPulso mudou de endereço para <b>' + destino.host + '</b>. '
-        + 'Entre por lá e reinstale o atalho na tela inicial — o ícone e o nome antigos só trocam '
-        + 'depois de reinstalar. O 🔔 precisa ser ativado uma vez no endereço novo.</div>'
-        + '<div class="acoes">'
-        + '<a class="ir" href="' + destino.origin + '">Abrir no endereço novo</a>'
-        + '<button type="button" class="depois">Agora não</button>'
-        + '</div>';
-      document.body.appendChild(barra);
-      barra.querySelector('.depois').addEventListener('click', function () {
-        try { sessionStorage.setItem('nopulsoAvisoEndereco', 'fechado'); } catch (e) {}
-        barra.remove();
+      Object.keys(dados).forEach(function (k) {
+        if (typeof dados[k] !== 'string') return;
+        if (localStorage.getItem(k) !== null) return;
+        localStorage.setItem(k, dados[k]);
+        trouxe++;
       });
-    }).catch(function () { /* sem aviso e melhor que erro na tela */ });
+      // o sino e por endereco: quem estava logado precisa ativar de novo aqui
+      if (trouxe && dados.authToken) localStorage.setItem('nopulsoAvisoSinoNovo', '1');
+    } catch (e) {}
+  }
+  receberDoEnderecoAntigo();
+
+  // aviso UMA vez, pra quem veio logado: sem isto o Master para de receber
+  // as autorizacoes no celular sem saber por que
+  function avisarSinoNoEnderecoNovo() {
+    try {
+      if (localStorage.getItem('nopulsoAvisoSinoNovo') !== '1') return;
+      localStorage.removeItem('nopulsoAvisoSinoNovo');
+    } catch (e) { return; }
+    var barra = document.createElement('div');
+    barra.setAttribute('role', 'status');
+    barra.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99998;max-width:560px;margin:0 auto;'
+      + 'background:var(--panel2,#181d24);border:1px solid var(--accent);color:var(--text,#e7ecf1);border-radius:12px;'
+      + 'padding:12px 14px;font-size:13.5px;line-height:1.45;box-shadow:0 6px 20px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center';
+    barra.innerHTML = '<span style="flex:1">O NoPulso agora abre em <b style="color:var(--accent)">' + location.host + '</b>. '
+      + 'Os avisos no celular são por endereço: ative o 🔔 de novo neste aparelho.</span>'
+      + '<button type="button" style="background:none;border:1px solid var(--line,#27313b);color:var(--muted,#8c99a7);border-radius:8px;padding:7px 10px;cursor:pointer">OK</button>';
+    document.body.appendChild(barra);
+    barra.querySelector('button').addEventListener('click', function () { barra.remove(); });
+  }
+
+  // O servidor redireciona /tela.html -> /tela desde 15/09. Toda comparacao
+  // com o caminho da tela passa por aqui, pras duas formas baterem.
+  function caminhoAtual() {
+    var p = location.pathname || '/';
+    if (/^\/index\.html$/i.test(p)) return '/';
+    return p.replace(/\.html$/i, '') || '/';
   }
 
   var LS_TEMA = 'zenithTema';   // 'escuro' (padrao) | 'claro'
@@ -1362,7 +1356,7 @@
   // ele dispensa o que está pendente AGORA, não o aviso pra sempre: dia novo
   // sem fechamento volta a avisar. Um botão que silenciasse o alarme de vez
   // seria a última vez que alguém veria um caixa em aberto.
-  var TELA_LANCAMENTO = '/lancamento.html';
+  var TELA_LANCAMENTO = '/lancamento';
   var CACHE_PENDENCIA_MS = 60 * 1000;
   var CHAVE_DISPENSA = 'nopulsoPendFechDispensadas';
 
@@ -1409,11 +1403,11 @@
   }
 
   function avisarFechamentoPendente() {
-    if (location.pathname === TELA_LANCAMENTO) return;   // já está na tela de lançar
+    if (caminhoAtual() === TELA_LANCAMENTO) return;   // já está na tela de lançar
     if (document.getElementById('nopulso-pend-fech')) return;
     try {
       if (!localStorage.getItem('authToken')) return;    // tela pública/login
-      if (sessionStorage.getItem('nopulsoPendFechAdiado') === location.pathname) return;
+      if (sessionStorage.getItem('nopulsoPendFechAdiado') === caminhoAtual()) return;
     } catch (e) { return; }
 
     pendenciasDeFechamento().then(function (d) {
@@ -1483,7 +1477,7 @@
         // "Agora não" e o clique fora fecham só nesta tela: na próxima o aviso
         // volta, que é o pedido ("sempre que acessar qualquer tela")
         if ((e.target.closest && e.target.closest('.depois')) || e.target === cx) {
-          try { sessionStorage.setItem('nopulsoPendFechAdiado', location.pathname); } catch (err) {}
+          try { sessionStorage.setItem('nopulsoPendFechAdiado', caminhoAtual()); } catch (err) {}
           cx.remove();
         }
       });
@@ -1504,10 +1498,10 @@
   // A tela de alarme fica de fora: ela JÁ é o Beniboy em 112px ocupando o
   // ecrã inteiro (ver alerta-beniboy.html) - um lançador de chat por cima
   // seria o mesmo boneco duas vezes, e a tela existe para uma ação só.
-  var SEM_BENIBOY = ['/alerta-beniboy.html'];
+  var SEM_BENIBOY = ['/alerta-beniboy'];
 
   function montarBeniboy() {
-    if (SEM_BENIBOY.indexOf(location.pathname) >= 0) return;
+    if (SEM_BENIBOY.indexOf(caminhoAtual()) >= 0) return;
     // 44 páginas ainda trazem a tag no HTML: sem esta checagem o arquivo seria
     // baixado duas vezes (o próprio suporte-chat.js já se protege de iniciar
     // duas vezes, mas o download repetido é desperdício em rede de loja)
@@ -1518,7 +1512,7 @@
     document.head.appendChild(tag);
   }
 
-  function iniciar() { montarControles(); vigiarDrawer(); avisarEnderecoNovo(); avisarFechamentoPendente(); montarBeniboy(); }
+  function iniciar() { montarControles(); vigiarDrawer(); avisarSinoNoEnderecoNovo(); avisarFechamentoPendente(); montarBeniboy(); }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
   else iniciar();
