@@ -224,6 +224,12 @@ function evoluirCaso(atual, txs, agoraMs = Date.now()) {
   // o que o BANCO escreveu, palavra por palavra - o `motivoAdyen` vira frase
   // pronta em `traduzirMotivo()` e perde o que é específico deste caso (na
   // #12084, um terceiro nome: "KARLA GARCIA ALVES")
+  // `todos` já são SÓ eventos de disputa (eventosDoPedido filtra por
+  // ehEventoDeDisputa), e é isso que impede o `reason` de uma AUTORIZAÇÃO
+  // RECUSADA - que o normalize também guarda em `comentarioEmissor` - entrar
+  // na tarefa como "o banco escreveu: Do not honor". Cheguei a repetir esse
+  // filtro aqui e tirei: era código que nunca mudava nada, e um guarda que
+  // não guarda é pior que nenhum, porque a próxima pessoa confia nele.
   const comEmissor = [...todos].reverse().find((e) => ABRE.has(codigoDoEvento(e)) && e.comentarioEmissor)
     || [...todos].reverse().find((e) => e.comentarioEmissor);
   const abertura = todos.find((e) => ABRE.has(codigoDoEvento(e)));
@@ -522,17 +528,36 @@ async function sincronizar({ store, users, tarefas, push, nomeUnidade = (c) => c
     // CLAUDE.md §1: não escrever migração nova sobre dado antigo. E não toca
     // em quem já mandou a defesa (ENVIADA, ou defesaProntaEm): esse espera o
     // veredito da bandeira, não venceu nada.
+    // ...e o LEMBRETE e o ESCALONAMENTO, na MESMA passada - sobre o que já
+    // está gravado, sem ler tarefa: a conclusão marca `defesaProntaEm` no
+    // caso (aoConcluirTarefa).
+    //
+    // UMA passada, não duas. A primeira versão disto tinha um `listAll()` só
+    // pro prazo vencido e outro pros lembretes. Parecia de graça porque
+    // `listAll` é cacheado - mas `salvarCaso` invalida o cache, e o laço de
+    // cima grava. O segundo `listAll` relia a coleção INTEIRA, a cada 3
+    // minutos, todo dia (CLAUDE.md §3). Junto, custa zero a mais.
     for (const c of await disputes.listAll()) {
-      if (c.status !== 'ABERTA' || c.defesaProntaEm || c.envioAdyen) continue;
-      const prazo = Date.parse(c.prazoDefesa || '');
-      if (!Number.isFinite(prazo) || prazo > agora) continue;
-      await disputes.salvarCaso(c.id, { status: 'PERDIDA', resultado: 'prazo de defesa vencido sem resposta', fechadoPorPrazoEm: new Date(agora).toISOString() });
-      r.vencidos = (r.vencidos || 0) + 1;
-    }
-
-    // LEMBRETE e ESCALONAMENTO - sobre o que já está gravado, sem ler tarefa:
-    // a conclusão da tarefa marca `defesaProntaEm` no caso (aoConcluirTarefa)
-    for (const c of await disputes.listAll()) {
+      // PRAZO VENCIDO SEM DEFESA = PERDIDA (Master, 24/09/2026).
+      //
+      // 24 casos estavam ABERTA com o prazo da Adyen vencido - alguns desde
+      // 29/07. Ficavam na lista como se ainda desse pra fazer algo e
+      // empurravam pra baixo os que de fato dá. A Adyen nem sempre manda o
+      // DISPUTE_DEFENSE_PERIOD_ENDED, então esperar o evento deixa o caso
+      // preso pra sempre. Vem ANTES do filtro de lembrete de propósito: os
+      // presos não têm tarefa, e o filtro de baixo exige `tarefaId`.
+      //
+      // SÓ MUDA O STATUS, com o mesmo texto que o evento da Adyen já gravava
+      // - nada de migração nova sobre dado antigo (CLAUDE.md §1). E não toca
+      // em quem já mandou a defesa: esse espera o veredito da bandeira.
+      if (c.status === 'ABERTA' && !c.defesaProntaEm && !c.envioAdyen) {
+        const prazo = Date.parse(c.prazoDefesa || '');
+        if (Number.isFinite(prazo) && prazo <= agora) {
+          await disputes.salvarCaso(c.id, { status: 'PERDIDA', resultado: 'prazo de defesa vencido sem resposta', fechadoPorPrazoEm: new Date(agora).toISOString() });
+          r.vencidos = (r.vencidos || 0) + 1;
+          continue; // acabou: não cobra lembrete de quem já foi fechado
+        }
+      }
       if (c.status !== 'ABERTA' || !c.tarefaId || c.defesaProntaEm) continue;
       const criada = Date.parse(c.tarefaCriadaEm || 0);
       const limite = Date.parse(c.prazoInterno || 0);

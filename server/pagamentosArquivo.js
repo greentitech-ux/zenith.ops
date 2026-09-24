@@ -62,12 +62,50 @@ function ficha(tx) {
   return f;
 }
 
-// CACHE POR ARQUIVO. Uma varredura de chargebacks pode procurar vários
-// pedidos seguidos; sem cache, cada um baixaria os mesmos arquivos de novo.
-// Guarda o conteúdo (ou `null`, pro arquivo que não existe - senão o dia
-// vazio é rebaixado toda vez).
+// CACHE POR ARQUIVO, COM TETO. Uma varredura de chargebacks pode procurar
+// vários pedidos seguidos; sem cache, cada um baixaria os mesmos arquivos de
+// novo.
+//
+// O TETO existe porque um dia de pico tem milhares de pagamentos: guardar os
+// 180 dias abertos na memória do processo seria centenas de MB no Render, por
+// um cache que quase nunca é reusado inteiro. 12 dias cobre o caso real (o
+// pagamento costuma estar na semana anterior à disputa) e o resto sai pelo
+// mais antigo a entrar.
 const cache = new Map();
-function invalidar() { cache.clear(); }
+const MAX_DIAS_EM_MEMORIA = 12;
+function guardarNoCache(dia, conteudo) {
+  if (cache.has(dia)) cache.delete(dia); // reinsere no fim = fica mais tempo
+  cache.set(dia, conteudo);
+  while (cache.size > MAX_DIAS_EM_MEMORIA) cache.delete(cache.keys().next().value);
+}
+function invalidar() { cache.clear(); diasNoBucket = null; }
+
+// QUAIS DIAS EXISTEM DE VERDADE.
+//
+// `buscar` andava pra trás dia a dia baixando 181 arquivos às cegas quando o
+// pedido não tinha ficha - e é exatamente o que acontece com TODA disputa
+// aberta antes desta versão: o arquivo nem existe. Eram 181 idas ao Storage
+// por caso, a cada varredura. Uma listagem só resolve: baixa apenas os dias
+// que existem.
+let diasNoBucket = null; // { em, dias: Set }
+const VALIDADE_LISTA_MS = 10 * 60 * 1000;
+async function diasExistentes() {
+  if (diasNoBucket && Date.now() - diasNoBucket.em < VALIDADE_LISTA_MS) return diasNoBucket.dias;
+  const dias = new Set();
+  try {
+    const [arquivos] = await comBucket((b) => b.getFiles({ prefix: `${PASTA}/` }));
+    for (const f of arquivos || []) {
+      const m = /(\d{4}-\d{2}-\d{2})\.json$/.exec(f.name || '');
+      if (m) dias.add(m[1]);
+    }
+  } catch (err) {
+    // sem listagem (Storage fora, ou sem permissão pra listar): devolve null
+    // e quem chama volta a andar dia a dia - lento, mas não cego
+    return null;
+  }
+  diasNoBucket = { em: Date.now(), dias };
+  return dias;
+}
 
 async function lerDia(dia) {
   if (cache.has(dia)) return cache.get(dia);
@@ -79,13 +117,16 @@ async function lerDia(dia) {
   } catch (err) {
     conteudo = null; // não existe, ou Storage fora do ar
   }
-  cache.set(dia, conteudo);
+  guardarNoCache(dia, conteudo);
   return conteudo;
 }
 
 async function gravarDia(dia, mapa) {
   await comBucket((b) => b.file(`${PASTA}/${dia}.json`).save(JSON.stringify(mapa), { contentType: 'application/json' }));
-  cache.set(dia, mapa);
+  guardarNoCache(dia, mapa);
+  // o dia passou a existir: a listagem em memória tem que saber, senão uma
+  // busca logo em seguida pularia justamente o arquivo recém-gravado
+  if (diasNoBucket) diasNoBucket.dias.add(dia);
 }
 
 // ARQUIVAR: chamado pelo `pruneOld` ANTES de apagar. Recebe as transações que
@@ -122,6 +163,20 @@ async function buscar(pedidoId, dicaDeData) {
   const chave = String(pedidoId || '');
   if (!chave) return null;
   const base = Date.parse(dicaDeData || '') || Date.now();
+  const ateDia = diaSP(new Date(base).toISOString());
+  const existentes = await diasExistentes();
+  if (existentes) {
+    // só os dias que EXISTEM e que são anteriores (ou iguais) à disputa - o
+    // pagamento nunca é depois dela. Do mais novo pro mais velho: o caso
+    // comum é o pagamento da semana anterior.
+    const candidatos = [...existentes].filter((d) => !ateDia || d <= ateDia).sort().reverse();
+    for (const dia of candidatos) {
+      const mapa = await lerDia(dia);
+      if (mapa && mapa[chave]) return mapa[chave];
+    }
+    return null;
+  }
+  // sem listagem, volta ao dia a dia (só acontece com o Storage com problema)
   for (let i = 0; i <= DIAS_GUARDADOS; i++) {
     const dia = diaSP(new Date(base - i * DIA_MS).toISOString());
     if (!dia) continue;
@@ -143,6 +198,7 @@ async function limpar(agora = Date.now()) {
       if (Date.parse(`${m[1]}T00:00:00Z`) >= corte) continue;
       await f.delete();
       cache.delete(m[1]);
+      if (diasNoBucket) diasNoBucket.dias.delete(m[1]);
       apagados++;
     }
   } catch (err) {
@@ -151,4 +207,4 @@ async function limpar(agora = Date.now()) {
   return { apagados };
 }
 
-module.exports = { PASTA, DIAS_GUARDADOS, CAMPOS, diaSP, chaveDoPedido, ficha, arquivar, buscar, limpar, invalidar, _cache: cache };
+module.exports = { PASTA, DIAS_GUARDADOS, MAX_DIAS_EM_MEMORIA, CAMPOS, diaSP, chaveDoPedido, ficha, arquivar, buscar, limpar, invalidar, diasExistentes, _cache: cache };

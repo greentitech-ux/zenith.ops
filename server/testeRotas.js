@@ -28781,6 +28781,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
   let okCbAuto = false;
   try {
     const dcA = require(__dirname + '/defesaChargeback.js');
+    const fsCb = require('fs');
     const arq = require(__dirname + '/pagamentosArquivo.js');
     const dispA = require(__dirname + '/disputes.js');
     const tarA = require(__dirname + '/tarefas.js');
@@ -28950,6 +28951,53 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'quem já mandou a defesa NÃO é fechado pelo prazo': enviado.status === 'ABERTA',
       // --- limpeza ---
       'o arquivo com mais de 180 dias é apagado, o novo fica': velhoSumiu && novoFicou,
+      // ---- o que a REVISÃO desta entrega encontrou ----
+      // UMA passada sobre os casos, não duas. `listAll` é cacheado, mas
+      // `salvarCaso` invalida - um segundo laço relia a coleção INTEIRA a
+      // cada 3 minutos, todo dia (CLAUDE.md §3).
+      'a varredura lê a lista de casos uma vez só por passada': (() => {
+        const src = fsCb.readFileSync(__dirname + '/defesaChargeback.js', 'utf8');
+        const dentro = src.slice(src.indexOf('async function sincronizar('));
+        return (dentro.match(/await disputes\.listAll\(\)/g) || []).length === 2;
+      })(),
+      // buscar() andava 181 dias pra trás baixando arquivo às cegas - e é o
+      // que acontece com TODA disputa aberta antes desta versão, que não tem
+      // ficha nenhuma. Uma listagem resolve.
+      'procurar ficha que não existe não varre 181 arquivos': await (async () => {
+        arq.invalidar();
+        const antes = [...ARQUIVOS.keys()].length;
+        let baixados = 0;
+        const origDownload = bucketFake.file;
+        bucketFake.file = (caminho) => { const f = origDownload(caminho); return { ...f, download: async () => { baixados += 1; return f.download(); } }; };
+        try { await arq.buscar('NAO-EXISTE-NENHUM', isoA(T)); } finally { bucketFake.file = origDownload; }
+        // só pode ter baixado o que de fato existe na pasta, nunca 181
+        return baixados <= antes && baixados < 20;
+      })(),
+      // um dia de pico tem milhares de pagamentos: 180 dias abertos na
+      // memória do processo seriam centenas de MB no Render
+      'o cache de dias em memória tem teto': await (async () => {
+        arq.invalidar();
+        for (let i = 0; i < arq.MAX_DIAS_EM_MEMORIA + 6; i++) {
+          const dia = arq.diaSP(isoA(T - i * DIA_A));
+          ARQUIVOS.set(`pagamentos-arquivo/${dia}.json`, Buffer.from('{}'));
+        }
+        arq.invalidar();
+        for (let i = 0; i < arq.MAX_DIAS_EM_MEMORIA + 6; i++) await arq.buscar('X', isoA(T - i * DIA_A));
+        return arq._cache.size <= arq.MAX_DIAS_EM_MEMORIA;
+      })(),
+      // O `comentarioEmissor` do normalize cai no `reason` cru quando não acha
+      // campo melhor - e o reason de uma AUTORIZAÇÃO RECUSADA é o motivo da
+      // recusa ("Do not honor"). O que impede isso de virar "o banco
+      // escreveu" na tarefa é `eventosDoPedido` só deixar passar evento de
+      // DISPUTA. É essa garantia que o teste prende: repetir o filtro lá na
+      // frente seria código que nunca muda nada.
+      'só evento de disputa chega no caso - recusa de pagamento não entra': (() => {
+        const recusa = { ...pagamento, merchantReference: 'PED-RECUSA', pspReference: 'REC9', status: 'RECUSADO', eventCode: 'AUTHORISATION', comentarioEmissor: 'Do not honor' };
+        const disputa = { merchantReference: 'PED-RECUSA', pspReference: 'DISPR', eventCode: 'NOTIFICATION_OF_CHARGEBACK', status: 'NOTIFICATION_OF_CHARGEBACK', dataHora: isoA(T), prazoDefesa: isoA(T + 5 * DIA_A), motivo: 'Fraud' };
+        const soDisputa = dcA.eventosDoPedido([recusa, disputa]);
+        return soDisputa.length === 1 && soDisputa[0].pspReference === 'DISPR'
+          && dcA.evoluirCaso(null, [recusa, disputa], T).comentarioEmissor === null;
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okCbAuto = !falhas.length;
