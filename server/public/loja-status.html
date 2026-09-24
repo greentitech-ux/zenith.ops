@@ -2244,7 +2244,7 @@ async function carregarCatalogoProgramas(){
   }catch(e){ alert(e.message); }
 }
 async function salvarCatalogoProgramas(){
-  const password = prompt('Digite sua senha Master para alterar o catálogo de instalações:');
+  const password = await pedirSenhaMaster('alterar o catálogo de instalações');
   if(password === null) return false;
   const r = await fetch('/api/loja-status/programas/catalogo', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({catalogo:PROG_CATALOGO, password}) });
   const d = await r.json().catch(()=>({}));
@@ -2278,7 +2278,7 @@ async function instalarProgramaCatalogo(){
   const item = PROG_CATALOGO.find(x=>x.id===id);
   if(!item) return alert('Escolha um programa válido do catálogo.');
   if(!confirm(`Instalar ${item.nome} em ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nO agente elevado fará a instalação em segundo plano.`)) return;
-  const password = prompt('Digite sua senha Master para autorizar a instalação:');
+  const password = await pedirSenhaMaster(`instalar ${item.nome}`);
   if(password === null) return;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/instalar`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password})});
@@ -2294,7 +2294,7 @@ async function instalarSiigmaBox(){
   const codigoSiigma = (campo.value||'').trim().toUpperCase();
   if(!/^[A-Za-z0-9]{6,12}$/.test(codigoSiigma)) return alert('Código do Siigma Box inválido - são 6 a 12 letras/números, sem espaço nem símbolo.');
   if(!confirm(`Instalar o Siigma Box (código ${codigoSiigma}) em ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nBaixa do site oficial da Siigma e roda na sessão de quem está usando a máquina.`)) return;
-  const password = prompt('Digite sua senha Master para autorizar a instalação:');
+  const password = await pedirSenhaMaster(`instalar o Siigma Box (${codigoSiigma})`);
   if(password === null) return;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/instalar-siigma`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigoSiigma,password})});
@@ -2307,7 +2307,7 @@ async function instalarSiigmaBox(){
 }
 async function removerProgramaAtual(nome){
   if(!PROG_ATUAL || !confirm(`Remover “${nome}” de ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nO desinstalador registrado no Windows será executado pelo agente elevado.`)) return;
-  const password = prompt('Digite sua senha Master para autorizar a remoção:');
+  const password = await pedirSenhaMaster(`remover ${nome}`);
   if(password === null) return;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/remover`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,password})});
