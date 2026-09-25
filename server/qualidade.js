@@ -80,11 +80,13 @@ function pesoDoItem(item, comPesos) {
 }
 
 // ---------------------------------------------------------------------
-// VOCABULÁRIO (CLAUDE.md §5) - as duas respostas são as da planilha, e não
-// há uma terceira. "Não se aplica" ficou de fora de propósito: ela mudaria
-// o denominador da nota, e nenhuma das visitas enviadas usa isso.
-const RESPOSTAS = ['conforme', 'nao-conforme', 'nao-aplica'];
-const RESPOSTA_LABEL = { conforme: 'CONFORME', 'nao-conforme': 'NÃO CONFORME', 'nao-aplica': 'NÃO SE APLICA' };
+// VOCABULÁRIO (CLAUDE.md §5) - cada item novo só pode ser Conforme ou Não
+// conforme. "Não se aplica" não entra mais na avaliação: apagaria parte do
+// denominador da nota e abriria uma terceira interpretação para a vistoria.
+// A conta ainda sabe LER o valor legado abaixo para não reescrever laudos
+// antigos já concluídos, mas a API não permite criá-lo nem alterá-lo.
+const RESPOSTAS = ['conforme', 'nao-conforme'];
+const RESPOSTA_LABEL = { conforme: 'CONFORME', 'nao-conforme': 'NÃO CONFORME', 'nao-aplica': 'NÃO SE APLICA (legado)' };
 // a visita nasce aberta e só fecha quando ela termina de andar pela loja
 const STATUS = ['EM_ANDAMENTO', 'CONCLUIDA', 'CANCELADA'];
 

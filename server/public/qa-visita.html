@@ -331,7 +331,6 @@ function pintarItem(item, concluida){
     <div class="resp">
       <button ${trava} class="${r.resposta==='conforme'?'on-ok':''}" onclick="responder('${escapeHtml(item.id)}','conforme')">CONFORME</button>
       <button ${trava} class="${naoConforme?'on-bad':''}" onclick="responder('${escapeHtml(item.id)}','nao-conforme')">NÃO CONFORME</button>
-      ${VISITA.modeloSnap.tipo==='oficial'?`<button ${trava} class="${r.resposta==='nao-aplica'?'on-ok':''}" onclick="responder('${escapeHtml(item.id)}','nao-aplica')">N/A</button>`:''}
     </div>
     ${naoConforme ? `<div class="detalhe">
       <label>O que foi visto</label>
