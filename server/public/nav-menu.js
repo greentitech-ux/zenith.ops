@@ -568,6 +568,41 @@
     // reaplica a busca sem tocar no estado de autorização.
     const busca = document.getElementById('nmz-busca');
     if (busca) filtrarMenu(busca.value);
+    montarFluxoQA();
+  }
+
+  // Fluxo curto para quem está trabalhando em Q.A. O menu lateral continua
+  // sendo a navegação completa; aqui ficam somente as três telas que formam
+  // a sequência natural da visita: roteiro, modelo e documentação. A barra
+  // nasce só depois das permissões, portanto não oferece uma tela proibida
+  // para quem recebeu apenas acesso à pasta da unidade.
+  function montarFluxoQA() {
+    const rotas = ['/qa-visita', '/qa-modelos', '/qa-documentos'];
+    if (!rotas.includes(semHtml(location.pathname)) || !ME) return;
+    const antigo = document.getElementById('nmz-fluxo-qa');
+    if (antigo) antigo.remove();
+    const itens = [
+      ['nav-qa-visita', '🥼', 'Visitas'],
+      ['nav-qa-modelos', '📋', 'Modelos'],
+      ['nav-qa-documentos', '📄', 'Documentação'],
+    ].map(([id, icone, rotulo]) => {
+      const item = itemPorId(id);
+      return item && podeVer(item, ME) ? { ...item, icone, rotulo } : null;
+    }).filter(Boolean);
+    if (itens.length < 2) return;
+    const fluxo = document.createElement('nav');
+    fluxo.id = 'nmz-fluxo-qa';
+    fluxo.setAttribute('aria-label', 'Navegação Q.A');
+    fluxo.style.cssText = 'display:flex;gap:7px;overflow:auto;scrollbar-width:none;padding:0 12px 10px;background:var(--bg,#0b0d10);border-bottom:1px solid var(--line,#232a33);white-space:nowrap;';
+    fluxo.innerHTML = itens.map((item) => {
+      const ativo = semHtml(item.href.split('?')[0]) === semHtml(location.pathname);
+      const estilo = ativo
+        ? 'background:var(--accent,#b8ff3c);border-color:var(--accent,#b8ff3c);color:#0b0d10;font-weight:700;'
+        : 'background:var(--panel2,#181d24);border-color:var(--line,#232a33);color:var(--muted,#8c99a7);';
+      return `<a href="${item.href}" style="${estilo}display:inline-flex;align-items:center;gap:5px;border:1px solid;border-radius:999px;padding:7px 10px;text-decoration:none;font:12px var(--sans,Arial);">${item.icone} ${esc(item.rotulo)}</a>`;
+    }).join('');
+    const header = document.querySelector('header');
+    if (header && header.parentNode) header.insertAdjacentElement('afterend', fluxo);
   }
 
   // Quao bem o href de um item descreve a tela aberta agora:
