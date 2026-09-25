@@ -185,6 +185,16 @@ let MODELOS = [];
 let UNIDADES = [];
 let VISITA = null;
 
+function atualizarUnidadesDoModelo(){
+  const modelo = MODELOS.find((m) => m.id === $('n-modelo').value) || {};
+  const marca = modelo.marca || null;
+  const anteriores = $('n-unidade').value;
+  const visiveis = marca ? UNIDADES.filter((u) => u.marca === marca) : UNIDADES;
+  $('n-unidade').innerHTML = visiveis.map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('') || '<option value="">Nenhuma unidade desta marca foi cadastrada</option>';
+  if(visiveis.some((u)=>u.codigo===anteriores)) $('n-unidade').value=anteriores;
+  $('n-unidade').disabled = !visiveis.length;
+}
+
 async function api(caminho, opcoes){
   const r = await fetch(caminho, Object.assign({
     headers: { 'Content-Type':'application/json', Authorization: 'Bearer ' + AUTH_TOKEN },
@@ -479,7 +489,8 @@ async function concluir(){
   try{
     [MODELOS, UNIDADES] = await Promise.all([api('/api/qualidade/modelos'), api('/api/qualidade/unidades')]);
     $('n-modelo').innerHTML = MODELOS.map(m=>`<option value="${escapeHtml(m.id)}">${escapeHtml(m.nome)}</option>`).join('');
-    $('n-unidade').innerHTML = UNIDADES.map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('') || '<option value="">Nenhuma unidade atribuída</option>';
+    atualizarUnidadesDoModelo();
+    $('n-modelo').addEventListener('change', atualizarUnidadesDoModelo);
   }catch(e){ /* a lista mostra o erro */ }
   verLista();
 })();

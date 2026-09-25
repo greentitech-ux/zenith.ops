@@ -5090,7 +5090,11 @@ app.get('/api/qualidade/unidades', auth.requireAuth, async (req, res) => {
   try {
     const mapa = await construirUnidadesMapa();
     const codigos = (req.isMaster || req.isAdmin) ? Object.keys(mapa) : ((req.permissions && req.permissions.unidades) || []);
-    res.json(codigos.filter((codigo) => mapa[codigo]).map((codigo) => ({ codigo, nome: mapa[codigo] })));
+    const lista = await Promise.all(codigos.filter((codigo) => mapa[codigo]).map(async (codigo) => {
+      const perfil = await unidadesExtras.perfil(codigo).catch(() => null);
+      return { codigo, nome: mapa[codigo], marca: (perfil && perfil.marca) || null };
+    }));
+    res.json(lista);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -5117,6 +5121,11 @@ app.post('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
     const gps = (req.body || {}).gps || {};
     if (!Number.isFinite(Number(gps.latitude)) || !Number.isFinite(Number(gps.longitude))) {
       return res.status(400).json({ error: 'Localização válida é obrigatória para iniciar a vistoria.' });
+    }
+    const modelo = await qualidade.modeloPorId((req.body || {}).modeloId);
+    const perfilUnidade = await unidadesExtras.perfil(unidade).catch(() => null);
+    if (modelo.marca && (!perfilUnidade || perfilUnidade.marca !== modelo.marca)) {
+      return res.status(400).json({ error: `Este checklist é da marca ${unidadesExtras.MARCAS_LABEL[modelo.marca] || modelo.marca}. Escolha uma unidade da mesma marca.` });
     }
     const mapa = await construirUnidadesMapa();
     req.body.unidadeNome = mapa[unidade] || null;
