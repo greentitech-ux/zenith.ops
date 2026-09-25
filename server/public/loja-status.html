@@ -2659,6 +2659,27 @@ function renderEventosDetalhe(){
 
 let DETALHE_ATUAL = null; // { codigo, posto }
 let DETALHE_ABA = 'resumo';
+// O painel recebe atualizações ao vivo (SSE/poll) enquanto o Master está
+// configurando a máquina. Sem este rascunho, cada batimento refazia o HTML da
+// aba Política e apagava as últimas caixas marcadas antes de haver salvamento.
+// A máquina nunca recebe esse estado local: ele só é enviado pelos dois botões
+// "Salvar" após a confirmação de senha do Master.
+let DETALHE_POLITICA_RASCUNHO = null; // "codigo|posto" da ficha em edição
+function chavePoliticaDetalhe(codigo, posto){
+  return `${codigo}|${posto}`;
+}
+function politicaDetalheEmRascunho(codigo, posto){
+  return DETALHE_POLITICA_RASCUNHO === chavePoliticaDetalhe(codigo, posto);
+}
+function marcarRascunhoPolitica(){
+  if(!DETALHE_ATUAL) return;
+  DETALHE_POLITICA_RASCUNHO = chavePoliticaDetalhe(DETALHE_ATUAL.codigo, DETALHE_ATUAL.posto);
+  const aviso = document.getElementById('aviso-politica-rascunho');
+  if(aviso) aviso.classList.remove('hidden');
+}
+function limparRascunhoPolitica(codigo, posto){
+  if(!codigo || !posto || politicaDetalheEmRascunho(codigo, posto)) DETALHE_POLITICA_RASCUNHO = null;
+}
 function trocarAbaDetalhe(aba){
   const permitidas = ['resumo','rede','atividades','politica'];
   DETALHE_ABA = permitidas.includes(aba) ? aba : 'resumo';
@@ -2681,7 +2702,10 @@ function abrirDetalheComputador(codigo, posto){
   const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
   if(!c) return;
   // abriu OUTRO computador: o filtro de data do anterior nao vale mais
-  if(!DETALHE_ATUAL || DETALHE_ATUAL.codigo!==codigo || DETALHE_ATUAL.posto!==posto) EV_FILTRO_DATA = '';
+  if(!DETALHE_ATUAL || DETALHE_ATUAL.codigo!==codigo || DETALHE_ATUAL.posto!==posto){
+    EV_FILTRO_DATA = '';
+    limparRascunhoPolitica();
+  }
   DETALHE_ATUAL = { codigo, posto };
   DETALHE_ABA = 'resumo';
   // abre na hora com o resumo (e o que ja tiver de detalhe de uma abertura
@@ -2709,6 +2733,7 @@ function irParaPapelDeParede(){
 }
 function fecharDetalheComputador(){
   fecharOverlay('detalhe-comp-overlay');
+  limparRascunhoPolitica();
   DETALHE_ATUAL = null;
 }
 // chamado no fim de render() - se o modal de detalhe estiver aberto quando
@@ -4648,12 +4673,28 @@ function raizEstacao(){
   return document.getElementById('detalhe-comp-politica');
 }
 
+// Delegação porque os campos são criados novamente ao abrir outra máquina.
+// `change` cobre toque e teclado e não marca rascunho quando a tela apenas
+// recebe uma atualização do servidor.
+document.addEventListener('change', (ev)=>{
+  const campo = ev.target;
+  if(!campo || typeof campo.matches !== 'function' || !campo.matches('#detalhe-comp-politica [data-pol], #detalhe-comp-politica [data-estacao], #detalhe-comp-politica [data-estacao-atalho], #detalhe-comp-politica [data-estacao-atalho-custom], #detalhe-comp-politica [data-estacao-barra], #detalhe-comp-politica [data-estacao-barra-custom]')) return;
+  marcarRascunhoPolitica();
+});
+
 function renderPoliticaComputador(codigo, c){
   const el = document.getElementById('detalhe-comp-politica');
   // painel opcional: se um dia ele sair do HTML, a ficha continua abrindo
   if(!el) return;
   el.classList.toggle('hidden', !IS_MASTER);
   if(!IS_MASTER) return;
+  // Não redesenha controles que o Master ainda não salvou. O resto da ficha
+  // segue vivo; só esta aba conserva o rascunho até Salvar ou Fechar.
+  if(politicaDetalheEmRascunho(codigo, c.posto)){
+    const avisoRascunho = el.querySelector('#aviso-politica-rascunho');
+    if(avisoRascunho) avisoRascunho.classList.remove('hidden');
+    return;
+  }
   const pol = c.politica || {};
   const estacao = pol.estacao || {};
   const atalhosAprovados = Array.isArray(estacao.atalhosAprovados) ? estacao.atalhosAprovados : [];
@@ -4682,6 +4723,7 @@ function renderPoliticaComputador(codigo, c){
   const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
   const sumiu = c.ultimoProgramaSumidoEm ? `<div style="font-size:11.5px;color:var(--bad);margin-top:8px;">🗑️ Programa desinstalado: <b>${escapeHtml(c.ultimoProgramaSumidoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaSumidoEm))}</div>` : '';
   el.innerHTML = `<div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Política desta máquina</div>
+    <div id="aviso-politica-rascunho" class="msg hidden" style="margin:0 0 8px;">Rascunho local preservado. Salve para aplicar ou feche para descartar; atualizações ao vivo não apagam suas marcações.</div>
     ${POLITICA_ITENS.map(i=>`<label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;cursor:pointer;">
       <input type="checkbox" data-pol="${i.campo}" ${pol[i.campo]?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);">
       <span style="font-size:12.5px;">${i.rotulo}<small style="display:block;color:var(--muted);">${i.ajuda}</small>${i.ir?`<button type="button" class="btn-mini" style="margin-top:5px;" onclick="event.preventDefault();${i.ir}()">🖼️ Enviar / trocar a imagem</button>`:''}</span>
@@ -4764,6 +4806,7 @@ async function salvarPoliticaComputador(codigo, posto){
       method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui salvar.');
+    limparRascunhoPolitica(codigo, posto);
     msg.textContent = 'Política salva. A máquina aplica na próxima consulta (interno ~25s, demais até ~2 min).';
     msg.className = 'msg'; msg.classList.remove('hidden');
     await carregar();
@@ -4794,6 +4837,7 @@ async function salvarPerfilEstacao(codigo, posto){
       method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ativa, aplicar, ocultarLixeira, arquivarDados, compactarBackup:true, backupAntesDeLimpar:true, atalhosAprovados, atalhosPersonalizados, barraTarefasAprovada, gerenciarBarraTarefas, password:senha }) });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui salvar.');
+    limparRascunhoPolitica(codigo, posto);
     msg.textContent = aplicar ? 'Lista salva. O NOC solicitou agora a leitura dos atalhos, faz backup do que sair e aplica a mudança automaticamente na próxima consulta.' : 'Lista salva como rascunho e a leitura dos atalhos foi solicitada; nenhuma alteração será feita até marcar “Aplicar lista aprovada”.';
     msg.className='msg'; msg.classList.remove('hidden');
     await carregar();
