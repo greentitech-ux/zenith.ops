@@ -5333,7 +5333,8 @@ app.get('/api/qualidade/visitas/:id/pdf', auth.requireAuth, async (req, res) => 
     const nome = `${unidadeNoArquivo}-QA-${dataNoArquivo ? `${dataNoArquivo[3]}-${dataNoArquivo[2]}-${dataNoArquivo[1]}` : 'sem-data'}.pdf`;
     const nomeAscii = nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '');
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${nomeAscii}"; filename*=UTF-8''${encodeURIComponent(nome)}`);
+    const disposicao = String(req.query.download || '') === '1' ? 'attachment' : 'inline';
+    res.setHeader('Content-Disposition', `${disposicao}; filename="${nomeAscii}"; filename*=UTF-8''${encodeURIComponent(nome)}`);
     // PDF é sempre gerado sob demanda. Alguns visualizadores de celular
     // reaproveitam a URL anterior mesmo depois de uma vistoria ser corrigida;
     // impedir cache evita que a pessoa veja a capa ou os apontamentos velhos.

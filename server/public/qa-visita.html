@@ -157,7 +157,10 @@
     <div id="assin-estado"></div>
   </div>
   <div class="card hidden" id="v-laudo">
-    <a id="v-laudo-link" target="_blank" rel="noopener" class="btn-primary" style="display:block;text-align:center;text-decoration:none;">📄 Abrir o laudo em PDF</a>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+      <a id="v-laudo-link" target="_blank" rel="noopener" class="btn-primary" style="flex:1 1 190px;text-align:center;text-decoration:none;">📄 Abrir o laudo em PDF</a>
+      <a id="v-laudo-baixar" class="btn" style="flex:1 1 150px;text-align:center;text-decoration:none;">⬇ Baixar PDF</a>
+    </div>
     <p class="sub" style="margin:8px 0 0;text-align:center;">Gerado na hora — uma ação corretiva respondida hoje já sai na próxima vez que você abrir.</p>
   </div>
   <div class="card hidden" id="v-administrar">
@@ -325,7 +328,9 @@ function pintarVisita(){
   // vai na URL, igual à foto do chat da Central (requireAuth aceita os dois)
   // Cada abertura recebe uma URL nova: visualizadores de PDF do celular podem
   // guardar a prévia anterior mesmo quando o laudo é gerado no servidor.
-  $('v-laudo-link').href = `/api/qualidade/visitas/${encodeURIComponent(v.id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}&v=QA-2026.09.25.13&abertoEm=${Date.now()}`;
+  const urlLaudo = `/api/qualidade/visitas/${encodeURIComponent(v.id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}&v=QA-2026.09.25.13&abertoEm=${Date.now()}`;
+  $('v-laudo-link').href = urlLaudo;
+  $('v-laudo-baixar').href = `${urlLaudo}&download=1`;
 
   $('v-setores').innerHTML = (v.modeloSnap.setores||[]).map((s)=>{
     const extras = (v.extras||{})[s.id] || [];
