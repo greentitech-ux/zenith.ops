@@ -116,7 +116,7 @@
     <label for="n-modelo">Modelo</label>
     <select id="n-modelo"></select>
     <div class="linha">
-      <div><label for="n-loja">Loja</label><input id="n-loja" placeholder="DOMINOS NATAL"></div>
+      <div><label for="n-unidade">Unidade</label><select id="n-unidade"><option>Carregando…</option></select></div>
       <div><label for="n-data">Data</label><input id="n-data" type="date"></div>
     </div>
     <div class="linha">
@@ -182,6 +182,7 @@ const $ = (id) => document.getElementById(id);
 const AUTH_TOKEN = localStorage.getItem('authToken') || '';
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 let MODELOS = [];
+let UNIDADES = [];
 let VISITA = null;
 
 async function api(caminho, opcoes){
@@ -235,10 +236,16 @@ async function criarVisita(){
   const prova = await window.pedirConfirmacao('iniciar a vistoria desta loja');
   if(prova === null) return;
   try{
+    if(!navigator.geolocation) throw new Error('Este aparelho não disponibiliza localização. Use um celular ou tablet com GPS.');
+    const gps = await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(
+      (p)=>resolve({latitude:p.coords.latitude,longitude:p.coords.longitude,accuracy:p.coords.accuracy}),
+      ()=>reject(new Error('Permita a localização para iniciar a vistoria.')),
+      {enableHighAccuracy:true,timeout:15000,maximumAge:30000}
+    ));
     const v = await api('/api/qualidade/visitas', { method:'POST', body: JSON.stringify({
       password: prova,
       modeloId: $('n-modelo').value,
-      loja: $('n-loja').value, data: $('n-data').value, horario: $('n-horario').value,
+      unidade: $('n-unidade').value, gps, data: $('n-data').value, horario: $('n-horario').value,
       representanteLoja: $('n-repr').value, nutricionista: $('n-nutri').value,
     })});
     abrirVisita(v.id);
@@ -285,7 +292,7 @@ function pintarVisita(){
       </div>
       <div class="setor-corpo">
         ${todos.map(i=>pintarItem(i, concluida)).join('')}
-        ${concluida ? '' : `<div class="item" style="background:var(--panel2);">
+        ${concluida || v.modeloSnap.tipo==='oficial' ? '' : `<div class="item" style="background:var(--panel2);">
           <div class="espec">
             <input id="novo-ponto-${escapeHtml(s.id)}" placeholder="Outro ponto que você viu neste setor…">
             <button class="btn" style="color:var(--accent);" onclick="addPonto('${escapeHtml(s.id)}')">+</button>
@@ -305,6 +312,7 @@ function pintarItem(item, concluida){
     <div class="resp">
       <button ${trava} class="${r.resposta==='conforme'?'on-ok':''}" onclick="responder('${escapeHtml(item.id)}','conforme')">CONFORME</button>
       <button ${trava} class="${naoConforme?'on-bad':''}" onclick="responder('${escapeHtml(item.id)}','nao-conforme')">NÃO CONFORME</button>
+      ${VISITA.modeloSnap.tipo==='oficial'?`<button ${trava} class="${r.resposta==='nao-aplica'?'on-ok':''}" onclick="responder('${escapeHtml(item.id)}','nao-aplica')">N/A</button>`:''}
     </div>
     ${naoConforme ? `<div class="detalhe">
       <label>O que foi visto</label>
@@ -454,14 +462,24 @@ async function enviarFoto(itemId, input){
 
 async function concluir(){
   if(!confirm('Concluir a visita? Depois disso o checklist não muda mais.')) return;
-  try{ await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/concluir`, { method:'POST', body:'{}' }); await recarregar(); }
+  try{
+    if(!navigator.geolocation) throw new Error('Este aparelho não disponibiliza localização.');
+    const gps = await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(
+      (p)=>resolve({latitude:p.coords.latitude,longitude:p.coords.longitude,accuracy:p.coords.accuracy}),
+      ()=>reject(new Error('Permita a localização para concluir a vistoria.')),
+      {enableHighAccuracy:true,timeout:15000,maximumAge:30000}
+    ));
+    await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/concluir`, { method:'POST', body:JSON.stringify({ gps }) });
+    await recarregar();
+  }
   catch(e){ alert(e.message); }
 }
 
 (async function boot(){
   try{
-    MODELOS = await api('/api/qualidade/modelos');
+    [MODELOS, UNIDADES] = await Promise.all([api('/api/qualidade/modelos'), api('/api/qualidade/unidades')]);
     $('n-modelo').innerHTML = MODELOS.map(m=>`<option value="${escapeHtml(m.id)}">${escapeHtml(m.nome)}</option>`).join('');
+    $('n-unidade').innerHTML = UNIDADES.map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('') || '<option value="">Nenhuma unidade atribuída</option>';
   }catch(e){ /* a lista mostra o erro */ }
   verLista();
 })();

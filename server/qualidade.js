@@ -83,8 +83,8 @@ function pesoDoItem(item, comPesos) {
 // VOCABULÁRIO (CLAUDE.md §5) - as duas respostas são as da planilha, e não
 // há uma terceira. "Não se aplica" ficou de fora de propósito: ela mudaria
 // o denominador da nota, e nenhuma das visitas enviadas usa isso.
-const RESPOSTAS = ['conforme', 'nao-conforme'];
-const RESPOSTA_LABEL = { conforme: 'CONFORME', 'nao-conforme': 'NÃO CONFORME' };
+const RESPOSTAS = ['conforme', 'nao-conforme', 'nao-aplica'];
+const RESPOSTA_LABEL = { conforme: 'CONFORME', 'nao-conforme': 'NÃO CONFORME', 'nao-aplica': 'NÃO SE APLICA' };
 // a visita nasce aberta e só fecha quando ela termina de andar pela loja
 const STATUS = ['EM_ANDAMENTO', 'CONCLUIDA'];
 
@@ -110,7 +110,10 @@ const FAIXA_LABEL = { positiva: 'Pontuação positiva', atencao: 'Pontuação de
 // digitação que vieram da planilha - que o histórico continua legível.
 const MODELO_PADRAO = {
   id: 'padrao',
-  nome: 'Padrão',
+  nome: 'Modelo aberto padrão',
+  tipo: 'aberto',
+  marca: null,
+  bloqueado: false,
   setores: [
     {
       id: 'higiene-manipuladores',
@@ -191,6 +194,55 @@ const MODELO_PADRAO = {
   ],
 };
 
+// Modelos oficiais são deliberadamente separados dos modelos abertos.  O
+// conteúdo de uma auditoria contratual não pode ganhar um "outro ponto" no
+// meio da visita, pois isto altera o formulário contra o qual a loja será
+// cobrada.  A lista completa é publicada como versão bloqueada pelo Master;
+// estas definições dão ao sistema um identificador estável e uma régua de
+// pontuação que nunca cai no modelo aberto por engano.
+const MODELOS_OFICIAIS = [
+  {
+    id: 'dominos-brasil-qa-2026', nome: 'Domino’s Brasil · Avaliação de Qualidade 2026',
+    tipo: 'oficial', marca: 'dominos', bloqueado: true, versaoFonte: 'Março/2026',
+    pontuacaoOficial: 150,
+    setores: [
+      { id: 'risco-alimentos', nome: 'Fatores de risco à segurança dos alimentos', itens: [
+        ['1.01', 'Produtos identificados e dentro da validade.', 4], ['1.02', 'Temperaturas de produtos refrigerados e congelados dentro do padrão.', 4], ['1.03', 'Produtos cozidos a 74 °C ou mais.', 4], ['1.06', 'Proteção contra contaminação cruzada.', 4], ['1.09', 'Ausência de pragas ou indícios.', 3], ['1.11', 'Pia exclusiva e abastecida para lavagem de mãos.', 4], ['1.14', 'Sanitizante corretamente diluído e identificado.', 3],
+      ].map(([id,texto,pontos]) => ({ id, texto, pontos })) },
+      { id: 'limpeza', nome: 'Limpeza', itens: [
+        ['2.01', 'Makeline limpa.', 2], ['2.02', 'Walk-in limpo.', 2], ['2.05', 'Forno e exaustor limpos.', 1], ['2.07', 'Área de lavagem de louça limpa.', 1], ['2.09', 'Pisos e ralos limpos.', 1], ['2.18', 'Banheiros limpos e higienizados.', 2],
+      ].map(([id,texto,pontos]) => ({ id, texto, pontos })) },
+      { id: 'manutencao', nome: 'Manutenção e instalações', itens: [
+        ['3.01', 'Makeline em bom estado de conservação.', 2], ['3.02', 'Walk-in em bom estado de conservação.', 2], ['3.09', 'Pisos e ralos em bom estado.', 1], ['3.21', 'Caixa de gordura e esgoto vedados.', 2],
+      ].map(([id,texto,pontos]) => ({ id, texto, pontos })) },
+      { id: 'armazenamento', nome: 'Armazenamento', itens: [
+        ['4.01', 'PVPS sendo realizado.', 2], ['4.03', 'Alimentos e embalagens protegidos e fora do chão.', 2], ['4.07', 'Alergênicos armazenados separadamente.', 2],
+      ].map(([id,texto,pontos]) => ({ id, texto, pontos })) },
+      { id: 'conhecimento', nome: 'Conhecimento e adequação', itens: [
+        ['5.02', 'Certificados de calibração disponíveis.', 2], ['5.06', 'Licenças de alimentos e comerciais vigentes.', 2], ['5.07', 'Registros da qualidade da água vigentes.', 3], ['5.08', 'Registros de temperatura e recebimento preenchidos.', 2], ['5.12', 'Manual de boas práticas atualizado.', 2],
+      ].map(([id,texto,pontos]) => ({ id, texto, pontos })) },
+      { id: 'violacoes-extremas', nome: 'Violações extremas', itens: [
+        ['6.01', 'Prevenção de pragas.', 5], ['6.02', 'Infraestrutura em padrão operacional.', 5], ['6.03', 'Proteção dos clientes.', 5], ['6.04', 'Integridade e segurança dos alimentos.', 5],
+      ].map(([id,texto,pontos]) => ({ id, texto, pontos, criticidade: 'imprescindivel' })) },
+    ],
+  },
+  {
+    id: 'dominos-dpi-fse-2026', nome: 'Domino’s DPI/FSE · Padrão Global 2026',
+    tipo: 'oficial', marca: 'dominos', bloqueado: true, versaoFonte: 'DPI 2026',
+    pontuacaoOficial: 150,
+    setores: [
+      { id: 'risco-alimentos', nome: 'Fatores de risco à segurança dos alimentos', itens: [
+        ['5.1', 'Produtos datados e dentro da validade.', 4], ['5.2', 'Termômetros calibrados em uso.', 3], ['5.3', 'Produtos cozidos a 74 °C ou mais.', 4], ['5.4', 'Produtos refrigerados a 5 °C ou menos.', 4], ['5.6', 'Proteção contra contaminação cruzada.', 3], ['5.8', 'Sem evidência de pragas.', 3], ['5.11', 'Lavagem e higienização das mãos.', 4], ['5.15', 'Sanitizante na concentração adequada.', 3],
+      ].map(([id,texto,pontos]) => ({ id, texto, pontos })) },
+      { id: 'limpeza', nome: 'Limpeza', itens: [['6.1','Makeline limpa.',2],['6.2','Walk-in limpo.',1],['6.6','Forno e coifa limpos.',1],['6.11','Pisos e ralos limpos.',1],['6.18','Banheiros limpos e sanitizados.',3]].map(([id,texto,pontos]) => ({ id,texto,pontos })) },
+      { id: 'manutencao', nome: 'Manutenção e instalações', itens: [['7.1','Makeline em bom estado.',2],['7.2','Walk-in em bom estado.',1],['7.11','Pisos e ralos em bom estado.',1],['7.20','Ralos e canos com sistema anti-refluxo.',2]].map(([id,texto,pontos]) => ({ id,texto,pontos })) },
+      { id: 'armazenamento', nome: 'Armazenamento', itens: [['8.1','Alimentos preparados em recipientes separados.',1],['8.3','Itens protegidos e não armazenados no chão.',2],['8.5','Produtos químicos rotulados e usados corretamente.',2]].map(([id,texto,pontos]) => ({ id,texto,pontos })) },
+      { id: 'conhecimento', nome: 'Conhecimento e conformidade', itens: [['9.3','Conhecimento da política de saúde dos funcionários.',2],['9.4','Registros de temperatura completos.',1],['9.7','Plano de higienização implementado.',1],['9.10','Política de alergênicos disponível.',2]].map(([id,texto,pontos]) => ({ id,texto,pontos })) },
+      { id: 'violacoes-criticas', nome: 'Violações críticas', itens: [['10.1','Prevenção e erradicação de pragas.',5],['10.2','Instalações e utensílios no padrão exigido.',5],['10.3','Público adequadamente protegido.',5],['10.4','Integridade e segurança do produto.',5]].map(([id,texto,pontos]) => ({ id,texto,pontos,criticidade:'imprescindivel' })) },
+    ],
+  },
+];
+
 function itensDoModelo(modelo) {
   return (modelo.setores || []).flatMap((s) => (s.itens || []).map((i) => ({ ...i, setorId: s.id })));
 }
@@ -203,20 +255,26 @@ function totalDeItens(modelo) {
 function calcularNota(modelo, respostas) {
   const itens = itensDoModelo(modelo);
   if (!itens.length) return { nota: null, conformes: 0, naoConformes: 0, respondidos: 0, total: 0, faixa: null, criticasAbertas: 0 };
+  const oficial = modelo && modelo.tipo === 'oficial';
   const comPesos = !!(modelo && modelo.pesos);
   const porId = new Map(itens.map((i) => [i.id, i]));
   let pontosPossiveis = 0;
   let pontosObtidos = 0;
   let conformes = 0;
   let naoConformes = 0;
+  let naoAplicaveis = 0;
   let criticasAbertas = 0;
-  for (const item of itens) pontosPossiveis += pesoDoItem(item, comPesos);
+  for (const item of itens) pontosPossiveis += oficial ? Number(item.pontos || 0) : pesoDoItem(item, comPesos);
   for (const [id, r] of Object.entries(respostas || {})) {
     const item = porId.get(id);
     if (!item || !r) continue;
-    if (r.resposta === 'conforme') {
+    if (r.resposta === 'nao-aplica') {
+      naoAplicaveis += 1;
+      pontosPossiveis -= oficial ? Number(item.pontos || 0) : pesoDoItem(item, comPesos);
+      continue;
+    } else if (r.resposta === 'conforme') {
       conformes += 1;
-      pontosObtidos += pesoDoItem(item, comPesos);
+      pontosObtidos += oficial ? Number(item.pontos || 0) : pesoDoItem(item, comPesos);
     } else if (r.resposta === 'nao-conforme') {
       naoConformes += 1;
       // não conformidade em item imprescindível é o que o relatório precisa
@@ -224,16 +282,16 @@ function calcularNota(modelo, respostas) {
       if (item.criticidade === 'imprescindivel') criticasAbertas += 1;
     }
   }
-  const respondidos = conformes + naoConformes;
+  const respondidos = conformes + naoConformes + naoAplicaveis;
   // A nota é sobre o modelo INTEIRO, não sobre o que já foi respondido: meia
   // visita não pode parecer nota 10 porque só os conformes foram marcados.
   //
   // TRUNCA, não arredonda: 28/38 x 10 = 7,3684, e a planilha do Dominos
   // mostra 7,36. Arredondar viraria 7,37 e a mesma visita passaria a ter
   // duas notas diferentes conforme onde fosse lida.
-  const bruta = (pontosObtidos / pontosPossiveis) * 10;
+  const bruta = pontosPossiveis > 0 ? (pontosObtidos / pontosPossiveis) * (oficial ? 100 : 10) : 0;
   const nota = Math.floor(bruta * 100) / 100;
-  return { nota, conformes, naoConformes, respondidos, total: itens.length, faixa: faixaDaNota(nota), criticasAbertas };
+  return { nota, conformes, naoConformes, naoAplicaveis, respondidos, total: itens.length, faixa: faixaDaNota(nota), criticasAbertas };
 }
 
 // ---------------------------------------------------------------------
@@ -244,14 +302,20 @@ function calcularNota(modelo, respostas) {
 async function listarModelos() {
   const snap = await MODELOS.get();
   const salvos = snap.docs.map((d) => d.data());
-  return [MODELO_PADRAO, ...salvos];
+  const porId = new Map(salvos.map((m) => [m.id, m]));
+  // Um documento com o mesmo id é a versão oficial mais nova aprovada. Assim
+  // a atualização substitui o modelo vigente, sem criar cópias concorrentes.
+  return [MODELO_PADRAO, ...MODELOS_OFICIAIS.map((m) => porId.get(m.id) || m), ...salvos.filter((m) => !MODELOS_OFICIAIS.some((o) => o.id === m.id))];
 }
 const cacheModelos = createCache(listarModelos, 60 * 1000);
 
 async function modeloPorId(id) {
   if (!id || id === MODELO_PADRAO.id) return MODELO_PADRAO;
   const snap = await MODELOS.doc(String(id)).get();
-  return snap.exists ? snap.data() : MODELO_PADRAO;
+  if (snap.exists) return snap.data();
+  const oficial = MODELOS_OFICIAIS.find((m) => m.id === String(id));
+  if (oficial) return oficial;
+  throw new Error('Modelo de checklist não encontrado. Atualize a tela e escolha um modelo válido.');
 }
 
 // Limites de um modelo. Não é paranoia: o modelo inteiro viaja DENTRO de
@@ -294,7 +358,8 @@ function normalizarSetores(bruto) {
       return {
         id: idItem,
         texto,
-        criticidade: CRITICIDADES.includes(i && i.criticidade) ? i.criticidade : null,
+      criticidade: CRITICIDADES.includes(i && i.criticidade) ? i.criticidade : null,
+      pontos: Math.max(0, Math.min(20, Number(i && i.pontos) || 0)),
       };
     });
     if (!itens.length) throw new Error(`O setor "${nome}" precisa de pelo menos um item.`);
@@ -303,12 +368,12 @@ function normalizarSetores(bruto) {
   return setores;
 }
 
-async function salvarModelo({ id, nome, setores, pesos }, email) {
+async function salvarModelo({ id, nome, setores, pesos, marca }, email) {
   const limpo = String(nome || '').trim();
   if (!limpo) throw new Error('O modelo precisa de um nome.');
   const setoresLimpos = normalizarSetores(setores);
   const idFinal = String(id || '').trim() || limpo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
-  if (!idFinal || idFinal === MODELO_PADRAO.id) throw new Error('Esse identificador de modelo não pode ser usado.');
+  if (!idFinal || idFinal === MODELO_PADRAO.id || MODELOS_OFICIAIS.some((m) => m.id === idFinal)) throw new Error('Esse identificador de modelo não pode ser usado.');
   const anterior = (await MODELOS.doc(idFinal).get()).data();
   const registro = {
     id: idFinal,
@@ -317,12 +382,40 @@ async function salvarModelo({ id, nome, setores, pesos }, email) {
     // então mexer no modelo hoje nunca reescreve o que foi respondido antes.
     versao: Number(anterior && anterior.versao ? anterior.versao : 0) + 1,
     pesos: pesos === true,
+    tipo: 'aberto', bloqueado: false,
+    marca: String(marca || '').trim().slice(0, 80) || null,
     setores: setoresLimpos,
     criadoEm: (anterior && anterior.criadoEm) || new Date().toISOString(),
     atualizadoEm: new Date().toISOString(),
     atualizadoPorEmail: email || null,
   };
   await MODELOS.doc(idFinal).set(registro);
+  cacheModelos.invalidar();
+  return registro;
+}
+
+// Atualização controlada de uma fonte oficial. Não aceita alterar o id nem
+// transformar o formulário em aberto; a visita antiga continua usando seu
+// modeloSnap e a próxima já recebe a versão nova.
+async function atualizarModeloOficial({ id, nome, setores, versaoFonte, fonte }, email) {
+  const base = MODELOS_OFICIAIS.find((m) => m.id === String(id));
+  if (!base) throw new Error('Este não é um modelo oficial reconhecido.');
+  const fonteLimpa = String(fonte || '').trim().slice(0, 240);
+  const versaoLimpa = String(versaoFonte || '').trim().slice(0, 80);
+  if (!fonteLimpa || !versaoLimpa) throw new Error('Informe o arquivo-fonte e a versão/data divulgada pela Domino’s.');
+  const anterior = (await MODELOS.doc(base.id).get()).data() || base;
+  const registro = {
+    id: base.id,
+    nome: String(nome || base.nome).trim() || base.nome,
+    tipo: 'oficial', marca: 'dominos', bloqueado: true,
+    pontuacaoOficial: Number(base.pontuacaoOficial || 150), pesos: false,
+    setores: normalizarSetores(setores),
+    versao: Number(anterior.versao || 1) + 1,
+    versaoFonte: versaoLimpa, fonte: fonteLimpa,
+    atualizadoEm: new Date().toISOString(), atualizadoPorEmail: email || null,
+    criadoEm: anterior.criadoEm || new Date().toISOString(),
+  };
+  await MODELOS.doc(base.id).set(registro);
   cacheModelos.invalidar();
   return registro;
 }
@@ -341,15 +434,17 @@ function retratoDoModelo(modelo) {
     nome: modelo.nome,
     versao: Number(modelo.versao || 1),
     pesos: !!modelo.pesos,
+    tipo: modelo.tipo || 'aberto', marca: modelo.marca || null, bloqueado: !!modelo.bloqueado,
+    pontuacaoOficial: Number(modelo.pontuacaoOficial || 0) || null,
     setores: (modelo.setores || []).map((s) => ({
       id: s.id,
       nome: s.nome,
-      itens: (s.itens || []).map((i) => ({ id: i.id, texto: i.texto, criticidade: i.criticidade || null })),
+      itens: (s.itens || []).map((i) => ({ id: i.id, texto: i.texto, criticidade: i.criticidade || null, pontos: Number(i.pontos || 0) })),
     })),
   };
 }
 
-async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, horario, representanteLoja, nutricionista, visitaAnteriorId }, email) {
+async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, horario, representanteLoja, nutricionista, visitaAnteriorId, gps }, email) {
   const modelo = await modeloPorId(modeloId);
   const registro = {
     id: novoId(),
@@ -363,6 +458,10 @@ async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, horario
     representanteLoja: String(representanteLoja || '').trim() || null,
     nutricionista: String(nutricionista || '').trim() || null,
     visitaAnteriorId: String(visitaAnteriorId || '').trim() || null,
+    gps: gps && Number.isFinite(Number(gps.latitude)) && Number.isFinite(Number(gps.longitude)) ? {
+      latitude: Number(gps.latitude), longitude: Number(gps.longitude), accuracy: Number(gps.accuracy) || null,
+      registradoEm: String(gps.registradoEm || new Date().toISOString()),
+    } : null,
     respostas: {},
     extras: {},
     criadoEm: new Date().toISOString(),
@@ -447,6 +546,9 @@ async function adicionarPontoDeCheck(id, setorId, texto, email) {
   if (!snap.exists) throw new Error('Visita não encontrada.');
   const visita = snap.data();
   travarSeConcluida(visita);
+  if ((visita.modeloSnap || {}).bloqueado || (visita.modeloSnap || {}).tipo === 'oficial') {
+    throw new Error('O checklist oficial é bloqueado. Duplique-o como modelo aberto antes de acrescentar pontos.');
+  }
   const limpo = String(texto || '').trim().slice(0, 500);
   if (!limpo) throw new Error('Escreva o ponto de check.');
   const setores = new Set((visita.modeloSnap.setores || []).map((s) => s.id));
@@ -605,7 +707,7 @@ async function pendenciasDaAnterior(visita) {
   };
 }
 
-async function concluirVisita(id, email) {
+async function concluirVisita(id, email, gpsFim) {
   const snap = await COLLECTION.doc(String(id)).get();
   if (!snap.exists) throw new Error('Visita não encontrada.');
   const visita = snap.data();
@@ -634,6 +736,10 @@ async function concluirVisita(id, email) {
     status: 'CONCLUIDA',
     concluidaEm: new Date().toISOString(),
     concluidaPorEmail: email || null,
+    gpsFim: gpsFim && Number.isFinite(Number(gpsFim.latitude)) && Number.isFinite(Number(gpsFim.longitude)) ? {
+      latitude: Number(gpsFim.latitude), longitude: Number(gpsFim.longitude), accuracy: Number(gpsFim.accuracy) || null,
+      registradoEm: String(gpsFim.registradoEm || new Date().toISOString()),
+    } : null,
     // a nota vai CONGELADA no documento: é o que o laudo mostrou no dia.
     // Recalcular na leitura faria uma correção futura no modelo mudar a nota
     // de uma visita já entregue ao cliente.
@@ -707,7 +813,7 @@ module.exports = {
   CRITICIDADES, CRITICIDADE_LABEL, PESO_POR_CRITICIDADE, pesoDoItem,
   FAIXA_POSITIVA_MIN, FAIXA_ATENCAO_MIN, FAIXA_LABEL,
   faixaDaNota, calcularNota, itensDoModelo, totalDeItens,
-  listarModelos, modeloPorId, salvarModelo, retratoDoModelo, normalizarSetores,
+  MODELOS_OFICIAIS, listarModelos, modeloPorId, salvarModelo, atualizarModeloOficial, retratoDoModelo, normalizarSetores,
   MAX_SETORES, MAX_ITENS_POR_SETOR,
   criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
   salvarAcaoCorretiva, concluirVisita, listarVisitas, apontamentosDe,

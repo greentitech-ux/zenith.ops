@@ -4857,6 +4857,18 @@ function exigirQA(req, res) {
   return false;
 }
 
+// A tag dá acesso ao setor; a unidade continua sendo o limite de dados.
+function podeVisitarUnidadeQA(req, unidade) {
+  if (req.isMaster || req.isAdmin) return true;
+  return !!unidade && ((req.permissions && req.permissions.unidades) || []).includes(String(unidade));
+}
+function podeLerVisitaQA(req, visita) { return !!visita && podeVisitarUnidadeQA(req, visita.unidade); }
+async function exigirVisitaQA(req, res) {
+  const visita = await qualidade.obterVisita(req.params.id);
+  if (!podeLerVisitaQA(req, visita)) { res.status(403).json({ error: 'Sem acesso a esta visita.' }); return null; }
+  return visita;
+}
+
 // ---------------------------------------------------------------------
 // Q.A · PASTA DE DOCUMENTOS DA UNIDADE (ver qualidadeDocumentos.js)
 //
@@ -4865,12 +4877,10 @@ function exigirQA(req, res) {
 // documentação da unidade"). Então entra Master/Admin, quem tem a tag Q.A
 // (que visita), e quem tem ESSA unidade na permissão - e só essa.
 function podeNaUnidadeQA(req, unidade) {
-  if (req.isMaster || req.isAdmin || users.temTag(req.user, 'qa')) return true;
-  const minhas = (req.permissions && req.permissions.unidades) || [];
-  return !!unidade && minhas.includes(String(unidade));
+  return podeVisitarUnidadeQA(req, unidade);
 }
 function unidadesVisiveisQA(req) {
-  if (req.isMaster || req.isAdmin || users.temTag(req.user, 'qa')) return null; // todas
+  if (req.isMaster || req.isAdmin) return null; // todas
   return new Set((req.permissions && req.permissions.unidades) || []);
 }
 
@@ -5056,13 +5066,32 @@ app.get('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
 // editar modelo mexe no checklist de TODAS as visitas futuras - fica com
 // Master/Admin, mesmo dentro do Q.A
 app.post('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
-  if (!(req.isMaster || req.isAdmin)) return res.status(403).json({ error: 'Só Master ou Admin edita modelo de checklist.' });
+  if (!exigirQA(req, res)) return;
   try { res.json(await qualidade.salvarModelo(req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// O arquivo novo da Domino's atualiza o MESMO modelo oficial. A aprovação
+// fica restrita ao Master/Admin para que uma planilha comum não altere uma
+// auditoria contratual por engano.
+app.put('/api/qualidade/modelos/:id/oficial', auth.requireAuth, async (req, res) => {
+  if (!(req.isMaster || req.isAdmin)) return res.status(403).json({ error: 'Só Master ou Admin atualiza modelo oficial.' });
+  try {
+    res.json(await qualidade.atualizarModeloOficial({ ...(req.body || {}), id: req.params.id }, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
-  try { res.json(await qualidade.listarVisitas()); } catch (err) { res.status(400).json({ error: err.message }); }
+  try { res.json((await qualidade.listarVisitas()).filter((v) => podeLerVisitaQA(req, v))); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/qualidade/unidades', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try {
+    const mapa = await construirUnidadesMapa();
+    const codigos = (req.isMaster || req.isAdmin) ? Object.keys(mapa) : ((req.permissions && req.permissions.unidades) || []);
+    res.json(codigos.filter((codigo) => mapa[codigo]).map((codigo) => ({ codigo, nome: mapa[codigo] })));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // TRAVA PRA ABRIR A VISITA (Master, 24/09/2026: "para iniciar a vistoria
@@ -5080,6 +5109,18 @@ app.post('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
   try {
     const confere = await auth.verifyPassword(req.user.id, (req.body || {}).password);
     if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a visita não foi aberta.' });
+    const unidade = String((req.body || {}).unidade || '');
+    if (!podeVisitarUnidadeQA(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    // Igual ao RH: a localização é evidência obrigatória da abertura, não
+    // uma cerca geográfica. Vistorias podem começar no estacionamento,
+    // shopping, aeroporto ou área técnica antes da entrada da loja.
+    const gps = (req.body || {}).gps || {};
+    if (!Number.isFinite(Number(gps.latitude)) || !Number.isFinite(Number(gps.longitude))) {
+      return res.status(400).json({ error: 'Localização válida é obrigatória para iniciar a vistoria.' });
+    }
+    const mapa = await construirUnidadesMapa();
+    req.body.unidadeNome = mapa[unidade] || null;
+    req.body.loja = req.body.unidadeNome;
     res.json(await qualidade.criarVisita(req.body || {}, req.user && req.user.email));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
@@ -5088,6 +5129,7 @@ app.get('/api/qualidade/visitas/:id', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
   try {
     const visita = await qualidade.obterVisita(req.params.id);
+    if (!podeLerVisitaQA(req, visita)) return res.status(403).json({ error: 'Sem acesso a esta visita.' });
     res.json({
       ...visita,
       apontamentos: qualidade.apontamentosDe(visita),
@@ -5100,17 +5142,17 @@ app.get('/api/qualidade/visitas/:id', auth.requireAuth, async (req, res) => {
 
 app.post('/api/qualidade/visitas/:id/item/:itemId', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
-  try { res.json(await qualidade.responderItem(req.params.id, req.params.itemId, req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+  try { if (!await exigirVisitaQA(req, res)) return; res.json(await qualidade.responderItem(req.params.id, req.params.itemId, req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/qualidade/visitas/:id/setor/:setorId/ponto', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
-  try { res.json(await qualidade.adicionarPontoDeCheck(req.params.id, req.params.setorId, (req.body || {}).texto, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+  try { if (!await exigirVisitaQA(req, res)) return; res.json(await qualidade.adicionarPontoDeCheck(req.params.id, req.params.setorId, (req.body || {}).texto, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/qualidade/visitas/:id/item/:itemId/acao', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
-  try { res.json(await qualidade.salvarAcaoCorretiva(req.params.id, req.params.itemId, req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+  try { if (!await exigirVisitaQA(req, res)) return; res.json(await qualidade.salvarAcaoCorretiva(req.params.id, req.params.itemId, req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // FOTO DO APONTAMENTO. Reaproveita o mesmo `upload` (memória) dos outros
@@ -5120,6 +5162,7 @@ app.post('/api/qualidade/visitas/:id/item/:itemId/acao', auth.requireAuth, async
 app.post('/api/qualidade/visitas/:id/item/:itemId/foto', auth.requireAuth, upload.single('foto'), async (req, res) => {
   if (!exigirQA(req, res)) return;
   try {
+    if (!await exigirVisitaQA(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'Nenhuma foto enviada.' });
     const caminho = await storage.salvarArquivo(req.params.id, req.file, 'qualidade');
     res.json(await qualidade.anexarFoto(req.params.id, req.params.itemId, {
@@ -5131,6 +5174,7 @@ app.post('/api/qualidade/visitas/:id/item/:itemId/foto', auth.requireAuth, uploa
 app.get('/api/qualidade/visitas/:id/item/:itemId/foto/:indice', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
   try {
+    if (!await exigirVisitaQA(req, res)) return;
     const foto = await qualidade.fotoDe(req.params.id, req.params.itemId, req.params.indice);
     storage.streamArquivo(foto.path, foto.tipo, res);
   } catch (err) { res.status(404).json({ error: err.message }); }
@@ -5144,6 +5188,7 @@ app.get('/api/qualidade/visitas/:id/pdf', auth.requireAuth, async (req, res) => 
   if (!exigirQA(req, res)) return;
   try {
     const visita = await qualidade.obterVisita(req.params.id);
+    if (!podeLerVisitaQA(req, visita)) return res.status(403).json({ error: 'Sem acesso a esta visita.' });
     const nome = `visita-qa-${String(visita.loja || visita.unidade || 'unidade').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${visita.data || ''}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${nome}"`);
@@ -5157,13 +5202,18 @@ app.get('/api/qualidade/visitas/:id/pdf', auth.requireAuth, async (req, res) => 
 // assina no próprio aparelho (ver assinarVisita). Vale depois de concluída.
 app.post('/api/qualidade/visitas/:id/assinar', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
-  try { res.json(await qualidade.assinarVisita(req.params.id, req.body || {})); } catch (err) { res.status(400).json({ error: err.message }); }
+  try { if (!await exigirVisitaQA(req, res)) return; res.json(await qualidade.assinarVisita(req.params.id, req.body || {})); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/qualidade/visitas/:id/concluir', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
   try {
-    const fim = await qualidade.concluirVisita(req.params.id, req.user && req.user.email);
+    if (!await exigirVisitaQA(req, res)) return;
+    const gpsFim = (req.body || {}).gps || {};
+    if (!Number.isFinite(Number(gpsFim.latitude)) || !Number.isFinite(Number(gpsFim.longitude))) {
+      return res.status(400).json({ error: 'Localização válida é obrigatória para concluir a vistoria.' });
+    }
+    const fim = await qualidade.concluirVisita(req.params.id, req.user && req.user.email, gpsFim);
     // O LAUDO VAI PRA PASTA DA UNIDADE assim que fecha (Master, 24/09/2026:
     // "o relatório assim que finalizado fica disponível na área de
     // armazenamento"). Fica junto do alvará, do AVCB e do resto - que é
