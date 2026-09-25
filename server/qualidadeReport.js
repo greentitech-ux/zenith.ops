@@ -20,7 +20,7 @@ const LOGO_DOMINOS = path.join(__dirname, 'public', 'branding', 'dominos-pizza.p
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.8';
+const VERSAO_LAUDO = 'QA-2026.09.25.9';
 
 const COR = {
   texto: '#1a1a1a',
@@ -151,6 +151,57 @@ function rodapeDaCapa(doc, visita, marca) {
     .text(`${visita.loja || visita.unidadeNome || 'Unidade'}  •  ${dataBR(visita.data)}  •  ${marca.nome}`, doc.page.margins.left, y + 16, { width: largura });
 }
 
+function rodapeNoPulso(doc) {
+  const pagina = doc.page;
+  const margemEsquerda = pagina.margins.left;
+  const margemDireita = pagina.margins.right;
+  const y = pagina.height - 17;
+  const yTexto = y - 4;
+  const textoNoPulso = 'NoPulso';
+  const dominio = 'nopulso.com.br';
+  const xNome = margemEsquerda + 61;
+  const xDominio = pagina.width - margemDireita - 69;
+  const yOriginal = doc.y;
+  const xOriginal = doc.x;
+  const margemInferiorOriginal = pagina.margins.bottom;
+
+  // Reserva uma faixa branca para que o rodapé continue preto e legível até
+  // na capa, que possui a faixa institucional azul na parte inferior.
+  doc.save();
+  doc.rect(0, pagina.height - 30, pagina.width, 30).fill('#ffffff');
+  doc.strokeColor('#111111').lineWidth(1.15)
+    .moveTo(margemEsquerda, y)
+    .lineTo(margemEsquerda + 10, y)
+    .lineTo(margemEsquerda + 15, y - 5)
+    .lineTo(margemEsquerda + 20, y + 6)
+    .lineTo(margemEsquerda + 25, y - 11)
+    .lineTo(margemEsquerda + 30, y)
+    .lineTo(margemEsquerda + 54, y)
+    .stroke();
+  doc.restore();
+
+  // O PDFKit considera a margem inferior como fim do fluxo de texto. O
+  // rodapé é desenhado propositalmente abaixo dela, então liberamos a margem
+  // só durante estes dois textos e a restauramos antes de voltar ao conteúdo.
+  pagina.margins.bottom = 0;
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#111111').text(textoNoPulso, xNome, yTexto, { lineBreak: false });
+  const fimNome = xNome + doc.widthOfString(textoNoPulso);
+  doc.save();
+  doc.strokeColor('#111111').lineWidth(0.7).moveTo(fimNome + 9, y).lineTo(xDominio - 10, y).stroke();
+  doc.restore();
+  doc.font('Helvetica').fontSize(7.5).fillColor('#111111').text(dominio, xDominio, yTexto + 1, { width: 69, align: 'right', lineBreak: false });
+  pagina.margins.bottom = margemInferiorOriginal;
+  doc.x = xOriginal;
+  doc.y = yOriginal;
+}
+
+function adicionarPaginaComRodape(doc) {
+  doc.addPage();
+  rodapeNoPulso(doc);
+  doc.x = doc.page.margins.left;
+  doc.y = doc.page.margins.top;
+}
+
 function campoDeCapa(doc, x, y, largura, rotulo, valor) {
   doc.roundedRect(x, y, largura, 43, 5).fillAndStroke('#f7f8fa', COR.linha);
   doc.font('Helvetica-Bold').fontSize(6.5).fillColor(COR.fraco).text(String(rotulo).toUpperCase(), x + 9, y + 7, { width: largura - 18 });
@@ -206,7 +257,7 @@ function resumoDaCapa(doc, visita, largura) {
 
 function paginaDeConformes(doc, visita, largura) {
   const porSetor = conformesPorSetor(visita);
-  doc.addPage();
+  adicionarPaginaComRodape(doc);
   doc.font('Helvetica-Bold').fontSize(18).fillColor(COR.positiva).text('ITENS CONFORMES', { width: largura });
   doc.font('Helvetica').fontSize(10).fillColor(COR.fraco)
     .text(`${visita.conformes || 0} item(ns) em conformidade, agrupado(s) por setor.`);
@@ -268,6 +319,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   // ---------- CAPA ----------
   const marca = marcaDaVisita(visita);
   desenharFundoDaCapa(doc, marca);
+  rodapeNoPulso(doc);
   desenharMarca(doc, marca, doc.page.margins.left, 34, 260);
   try {
     // As duas marcas ocupam a mesma faixa visual (50 pt de altura). `fit`
@@ -335,14 +387,14 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
 
   // ---------- APONTAMENTOS ----------
   if (!apontamentos.length) {
-    doc.addPage();
+    adicionarPaginaComRodape(doc);
     doc.fontSize(14).fillColor(COR.positiva).font('Helvetica-Bold').text('Nenhuma não conformidade registrada nesta visita.');
   }
 
   for (const [i, a] of apontamentos.entries()) {
     // Não abre página por padrão: só vira quando o próximo bloco inteiro não
     // cabe. Assim duas ou mais não conformidades curtas ocupam a mesma folha.
-    if (i === 0 || precisaNovaPagina(doc, alturaApontamento(a))) doc.addPage();
+    if (i === 0 || precisaNovaPagina(doc, alturaApontamento(a))) adicionarPaginaComRodape(doc);
     doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text(`APONTAMENTO ${i + 1} DE ${apontamentos.length}${a.setor ? ' · ' + String(a.setor).toUpperCase() : ''}`);
     doc.moveDown(0.18);
     cabecalhoDeBloco(doc, a.texto, COR.negativa);
@@ -399,7 +451,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   const assin = visita.assinaturas || {};
   const assinados = ['loja', 'responsavel'].filter((k) => assin[k] && assin[k].imagem);
   if (assinados.length) {
-    doc.addPage();
+    adicionarPaginaComRodape(doc);
     doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text('ASSINATURAS');
     doc.moveDown(0.6);
     for (const chave of assinados) {
