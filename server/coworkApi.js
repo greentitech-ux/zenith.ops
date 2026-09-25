@@ -125,6 +125,7 @@ const PROPRIEDADES_COMUNS = {
   estornoId: { type: 'string', description: 'Id interno do estorno (vem de obter_estorno).' },
   protocolo: { type: 'string', description: 'Número do protocolo de suporte/Beniboy ou do portal Conecta, conforme a ferramenta.' },
   resumo: { type: 'string', description: 'Resumo interno objetivo do que foi resolvido no atendimento.' },
+  restringirAposConclusao: { type: 'boolean', description: 'finalizar_chat_suporte: true para criação, senha ou outro caso de acesso. Após concluir, o solicitante não relê nem baixa o chat; só Master e Suporte veem.' },
   permissions: { type: 'object', description: 'ajustar_permissoes_usuario: informe apenas os campos a alterar: sections, unidades, vaultSubgroups e/ou tiposSolicitacao.' },
   cargos: { type: 'array', items: { type: 'string' }, description: 'ajustar_permissoes_usuario: cargos finais. Omitido = não altera cargos.' },
   destino: { type: 'string', enum: ['conecta'], description: 'Pra onde o documento vai depois de assinado. Hoje: conecta (portal - o envio lá é feito por você, no navegador).' },
@@ -181,7 +182,7 @@ const PARAMETROS = Object.freeze({
   criar_nova_senha: ['usuario'],
   ajustar_permissoes_usuario: ['usuario', 'permissions', 'cargos'],
   responder_chat_suporte: ['protocolo', 'texto'],
-  finalizar_chat_suporte: ['protocolo', 'resumo'],
+  finalizar_chat_suporte: ['protocolo', 'resumo', 'restringirAposConclusao'],
   executar_noc: ['tarefa', 'alvos'],
 });
 function propriedadesDe(nome, f) {
@@ -393,6 +394,7 @@ async function finalizarChatSuporte(p) {
   const chat = await acharChatSuporte(p.protocolo);
   const resumo = String(p.resumo || '').trim();
   if (!resumo) throw new Error('Escreva o resumo do encerramento.');
+  if (p.restringirAposConclusao) await suporteChat.restringirAposConclusao(chat.id);
   await suporteChat.registrarNotaInterna(chat.id, { resumo, situacao: 'RESOLVIDO' });
   await suporteChat.finalizar(chat.id, { autorEmail: 'Cowork via Beniboy' });
   return `Protocolo #${chat.numeroTicket} finalizado com resumo interno.`;

@@ -108,6 +108,12 @@ async function criar({ acao, canal, unidade, unidadeNome, item, motivo, origem, 
     erro: null,
     avisadoCoordenadorEm: null,
     tentativas: 0,
+    // confirmação para quem abriu o chat. É outra entrega, independente do
+    // Cowork ter executado o painel; se falhar, fica rastreável e reenviável.
+    avisoChatPendente: false,
+    avisoChatTentativas: 0,
+    avisoChatEntregueEm: null,
+    avisoChatErro: null,
   };
   await ref.set(pedido);
   listaCache.invalidar();
@@ -159,13 +165,19 @@ async function concluir(id, { ok, resultado, erro } = {}) {
   const agora = new Date().toISOString();
   let patch;
   if (ok) {
-    patch = { status: 'executado', aberto: null, concluidoEm: agora, resultado: texto(resultado, 300) || null, erro: null };
+    patch = {
+      status: 'executado', aberto: null, concluidoEm: agora, resultado: texto(resultado, 300) || null, erro: null,
+      ...(p.chatId ? { avisoChatPendente: true, avisoChatTentativas: 0, avisoChatEntregueEm: null, avisoChatErro: null } : {}),
+    };
   } else if ((p.tentativas || 0) < MAX_TENTATIVAS) {
     // erro que ainda pode dar certo (painel fora do ar, sessão caída): volta
     // pra fila em vez de morrer - o Cowork pega de novo no próximo ciclo
     patch = { status: 'pendente', entregueEm: null, erro: texto(erro, 300) || 'falha sem detalhe' };
   } else {
-    patch = { status: 'erro', aberto: null, concluidoEm: agora, erro: texto(erro, 300) || 'falha sem detalhe' };
+    patch = {
+      status: 'erro', aberto: null, concluidoEm: agora, erro: texto(erro, 300) || 'falha sem detalhe',
+      ...(p.chatId ? { avisoChatPendente: true, avisoChatTentativas: 0, avisoChatEntregueEm: null, avisoChatErro: null } : {}),
+    };
   }
   await ref.update(patch);
   listaCache.invalidar();
@@ -211,6 +223,39 @@ async function marcarCoordenadorAvisado(id) {
   listaCache.invalidar();
 }
 
+async function listarAvisosChatPendentes(limite = 20) {
+  const snap = await PEDIDOS.where('avisoChatPendente', '==', true).limit(Math.min(Number(limite) || 20, 50)).get();
+  return snap.docs.map((d) => d.data());
+}
+
+async function marcarAvisoChatEntregue(id) {
+  await PEDIDOS.doc(String(id || '')).update({
+    avisoChatPendente: false,
+    avisoChatEntregueEm: new Date().toISOString(),
+    avisoChatErro: null,
+  });
+  listaCache.invalidar();
+}
+
+// Depois de três tentativas o pedido não some: ele deixa de ser reenviado e
+// fica marcado para o coordenador agir sem gerar ruído a cada ciclo.
+async function registrarFalhaAvisoChat(id, erro) {
+  const ref = PEDIDOS.doc(String(id || ''));
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const atual = snap.data();
+  const tentativas = Number(atual.avisoChatTentativas || 0) + 1;
+  const esgotado = tentativas >= 3;
+  const patch = {
+    avisoChatTentativas: tentativas,
+    avisoChatErro: texto(erro, 300) || 'falha sem detalhe',
+    ...(esgotado ? { avisoChatPendente: false, avisoChatFalhouDefinitivoEm: new Date().toISOString() } : {}),
+  };
+  await ref.update(patch);
+  listaCache.invalidar();
+  return { ...atual, ...patch, avisoChatEsgotado: esgotado };
+}
+
 async function getOne(id) {
   const snap = await PEDIDOS.doc(String(id || '')).get();
   return snap.exists ? snap.data() : null;
@@ -237,5 +282,6 @@ function descrever(p) {
 module.exports = {
   ACOES, CANAIS, STATUS, MINUTOS_ATE_ATRASO, LIMITE_FILA, MAX_TENTATIVAS,
   criar, puxar, concluir, cancelar, varrerAtrasados, marcarCoordenadorAvisado,
+  listarAvisosChatPendentes, marcarAvisoChatEntregue, registrarFalhaAvisoChat,
   getOne, listar, descrever, chaveDo,
 };

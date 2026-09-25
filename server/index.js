@@ -1294,6 +1294,41 @@ app.get('/api/bot/agregador/fila', async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
+function textoAvisoAgregador(pedido) {
+  const oQue = agregadorFila.descrever(pedido);
+  return pedido.status === 'executado'
+    ? `✅ ${oQue} — feito agora no painel.`
+    : `⚠️ ${oQue} — não consegui fazer pelo painel${pedido.erro ? ` (${pedido.erro})` : ''}. O coordenador do agregador foi chamado.`;
+}
+
+// A ação no agregador e a resposta no Beniboy são duas entregas diferentes.
+// Não engolimos uma falha de chat: ela fica no pedido, é tentada novamente e,
+// se esgotar, vira um alerta claro para o time humano.
+async function entregarAvisoAgregadorNoChat(pedido) {
+  if (!pedido || !pedido.chatId || !pedido.avisoChatPendente) return { entregue: false, ignorado: true };
+  try {
+    await suporteChat.adicionarMensagem(pedido.chatId, {
+      de: 'suporte', texto: textoAvisoAgregador(pedido), bot: true,
+    });
+    await agregadorFila.marcarAvisoChatEntregue(pedido.id);
+    broadcast('suporte-chat', { id: pedido.chatId }, 'suporte');
+    return { entregue: true };
+  } catch (err) {
+    const falha = await agregadorFila.registrarFalhaAvisoChat(pedido.id, err.message);
+    console.error(`[agregador] não entregou retorno do pedido ${pedido.id} no chat:`, err.message);
+    if (falha?.avisoChatEsgotado) {
+      await push.notifySolicitacao(
+        '⚠️ Retorno do Cowork não chegou ao solicitante',
+        `${agregadorFila.descrever(falha)} · confira o protocolo vinculado.`,
+        falha.chatId || falha.id,
+        '/tecnico',
+      ).catch((e) => console.error('[agregador] falha ao alertar entrega de chat:', e.message));
+    }
+    return { entregue: false, esgotado: !!falha?.avisoChatEsgotado };
+  }
+}
+
 // 2) O Cowork confirma. ok=false com tentativa sobrando devolve o pedido pra
 //    fila sozinho (ver concluir); esgotadas as tentativas ele fecha como erro
 //    e a varredura de atraso chama o coordenador humano.
@@ -1310,16 +1345,9 @@ app.post('/api/bot/agregador/retorno', async (req, res) => {
     console.log(`[agregador] retorno do Cowork: ${oQue} -> ${pedido.status}${pedido.erro ? ` (${pedido.erro})` : ''}`);
     broadcast('agregador-pedido', { id: pedido.id, status: pedido.status }, 'suporte');
 
-    // quem pediu fica sabendo NA CONVERSA - o Beniboy prometeu o retorno
-    // quando acionou a ferramenta, e sem isto a pessoa ficaria olhando pro
-    // chat sem saber se a coca saiu do ar ou não
-    if (pedido.chatId && (pedido.status === 'executado' || pedido.status === 'erro')) {
-      const aviso = pedido.status === 'executado'
-        ? `✅ ${oQue} — feito agora no painel.`
-        : `⚠️ ${oQue} — não consegui fazer pelo painel${pedido.erro ? ` (${pedido.erro})` : ''}. O coordenador do agregador foi chamado.`;
-      await suporteChat.adicionarMensagem(pedido.chatId, { de: 'suporte', texto: aviso, bot: true }).catch(() => {});
-      broadcast('suporte-chat', { id: pedido.chatId }, 'suporte');
-    }
+    // quem pediu fica sabendo na conversa. Se a entrega falhar, a fila guarda
+    // e reenvia; a ação já executada nunca fica escondida num catch vazio.
+    await entregarAvisoAgregadorNoChat(pedido);
     // erro do robô não pode morrer no log: vira alerta e chama o humano
     if (pedido.status === 'erro') {
       await push.notifyAgregador({ id: pedido.chatId, nome: pedido.pedidoPorNome || 'Cowork Agregador' }, {
@@ -6125,6 +6153,33 @@ function requireMasterDeVerdade(req, res, next) {
 
 app.get('/api/qa-aprovacoes', requireMasterDeVerdade, async (req, res) => {
   res.json(await qaAprovacoes.listar());
+});
+
+// Leitura curta para a operação 24h: não expõe token, comando ou conteúdo de
+// chat; só mostra se alguma engrenagem exige intervenção humana.
+app.get('/api/operacao/saude', auth.requireMaster, async (req, res) => {
+  try {
+    const [maquinas, comandos, chats, aprovacoes, agregador] = await Promise.all([
+      lojaStatus.listarResumo(), lojaStatus.listarComandosPendentes({}), suporteChat.listAll(),
+      qaAprovacoes.listarPendentes(), agregadorFila.varrerAtrasados(),
+    ]);
+    const valor = (m) => String(m.estado || m.status || m.situacao || '').toLowerCase();
+    const indisponiveis = maquinas.filter((m) => valor(m).includes('indispon')).length;
+    const degradadas = maquinas.filter((m) => valor(m).includes('degrad')).length;
+    const semRetorno = comandos.filter((c) => c.timeoutDetectadoEm || c.status === 'sem-retorno').length;
+    const chatsEsperando = chats.filter((c) => c.status === 'ABERTO' && c.aguardandoHumano).length;
+    const critico = indisponiveis || semRetorno || agregador.atrasados.length;
+    res.json({
+      geradoEm: new Date().toISOString(),
+      estado: critico ? 'ATENCAO' : 'OK',
+      noc: { maquinas: maquinas.length, indisponiveis, degradadas, comandosPendentes: comandos.length, comandosSemRetorno: semRetorno },
+      atendimento: { chatsAbertos: chats.filter((c) => c.status === 'ABERTO').length, aguardandoHumano: chatsEsperando },
+      autorizacoes: { pendentes: aprovacoes.length },
+      agregador: { abertos: agregador.abertos, atrasados: agregador.atrasados.length },
+    });
+  } catch (err) {
+    res.status(503).json({ error: `Não foi possível montar a saúde operacional: ${err.message}` });
+  }
 });
 
 // APROVAR = AUTORIZAR. Desde 23/09/2026 (Master: "só faço a autorização,
@@ -17130,6 +17185,29 @@ function aquecerBoot(promessa, ms) {
     setInterval(() => {
       rodarFinalizacaoOciososSuporte().catch((err) => console.error('Erro na varredura de chats ociosos do suporte:', err.message));
     }, 5 * 60 * 1000);
+
+    // Aprovação vencida não pode continuar pendente esperando que alguém abra
+    // a tela. A transição fica auditada e remove o pedido do ciclo de alertas.
+    const expirarAutorizacoesPendentes = async () => {
+      const total = await qaAprovacoes.expirarPendentes();
+      if (total) console.log(`[autorizacao] ${total} pedido(s) vencido(s) encerrado(s) automaticamente.`);
+    };
+    expirarAutorizacoesPendentes().catch((err) => console.error('Erro ao expirar autorizações pendentes:', err.message));
+    setInterval(() => {
+      expirarAutorizacoesPendentes().catch((err) => console.error('Erro ao expirar autorizações pendentes:', err.message));
+    }, 60 * 1000);
+
+    // O Cowork pode concluir no painel enquanto o chat está temporariamente
+    // indisponível. Reentrega só os avisos gravados como pendentes, sem repetir
+    // uma resposta já recebida pelo solicitante.
+    const reenviarAvisosAgregador = async () => {
+      const pendentes = await agregadorFila.listarAvisosChatPendentes();
+      for (const pedido of pendentes) await entregarAvisoAgregadorNoChat(pedido);
+    };
+    reenviarAvisosAgregador().catch((err) => console.error('Erro ao reenviar retorno do Cowork Agregador:', err.message));
+    setInterval(() => {
+      reenviarAvisosAgregador().catch((err) => console.error('Erro ao reenviar retorno do Cowork Agregador:', err.message));
+    }, 60 * 1000);
 
     // varredura de conectividade das lojas (ver lojaStatus.varrerAlertas) -
     // quiosque (atendimento.html) parou de mandar heartbeat -> avisa Master/

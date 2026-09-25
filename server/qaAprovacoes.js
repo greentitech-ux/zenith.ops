@@ -21,11 +21,40 @@ async function listUncached() {
   return snap.docs.map((d) => d.data());
 }
 const cache = createCache(listUncached, 5 * 1000);
-const listar = cache.cached;
+const listarRecentes = cache.cached;
+
+// Pendentes não podem desaparecer simplesmente porque surgiram mais de 300
+// decisões recentes. A lista histórica continua curta e barata, mas a fila
+// operacional é consultada diretamente e mesclada pelo id.
+async function buscarPendentesNoBanco() {
+  // A fila de aprovação é pequena por natureza e precisa ser completa. Não
+  // usamos cursor sem ordenação explícita: em alguns SDKs isso pode pular ou
+  // repetir documentos quando a coleção muda entre páginas.
+  const snap = await COLLECTION.where('status', '==', 'pendente').get();
+  return snap.docs.map((d) => d.data());
+}
+
+async function listar() {
+  const [recentes, pendentes] = await Promise.all([listarRecentes(), buscarPendentesNoBanco()]);
+  const porId = new Map(recentes.map((a) => [a.id, a]));
+  pendentes.forEach((a) => porId.set(a.id, a));
+  return [...porId.values()].sort((a, b) => String(b.criadoEm || '').localeCompare(String(a.criadoEm || '')));
+}
 
 async function listarPendentes() {
-  const todas = await listar();
-  return todas.filter((a) => a.status === 'pendente');
+  return buscarPendentesNoBanco();
+}
+
+// Expiração é uma decisão de servidor, não um efeito visual da tela. Assim
+// nenhuma aprovação vencida continua alertando ou volta a aparecer depois.
+async function expirarPendentes() {
+  const agora = Date.now();
+  const pendentes = await buscarPendentesNoBanco();
+  const vencidas = pendentes.filter((a) => a.expiraEm && Date.parse(a.expiraEm) <= agora);
+  for (const a of vencidas) {
+    await marcarDecidido(a.id, { status: 'expirado', decididoPorEmail: null });
+  }
+  return vencidas.length;
 }
 
 async function obter(id) {
@@ -110,5 +139,5 @@ async function marcarDecidido(id, {
 }
 
 module.exports = {
-  listar, listarPendentes, obter, criar, marcarDecidido,
+  listar, listarPendentes, expirarPendentes, obter, criar, marcarDecidido,
 };

@@ -108,6 +108,11 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto, anex
     nivel: 1,
     responsavel: null,
     desbloqueio: false,
+    // Conversas de acesso podem conter contexto que não deve permanecer no
+    // aparelho de quem abriu o chat depois da conclusão. Desbloqueio usa esta
+    // proteção automaticamente; criação de usuário pode marcá-la pelo fluxo
+    // interno antes de finalizar.
+    restritoAposConclusao: false,
     ticketsVinculados: [],
     motivoSemSolucao: null,
     historicoStatus: [{ statusAtendimento: 'PENDENTE', nivel: 1, por: null, em: agora }],
@@ -130,6 +135,10 @@ async function getOne(id) {
 async function getPublico(id, token) {
   const chat = await getOne(id);
   if (!chat || !token || chat.token !== token) return null;
+  // Encerrado não significa "público para sempre". O token fica salvo no
+  // navegador e, em casos de acesso/senha, permitir a releitura ou o PDF
+  // contrariaria a separação pedida entre solicitante e Master/Suporte.
+  if (chat.status !== 'ABERTO' && (chat.desbloqueio || chat.restritoAposConclusao)) return null;
   return {
     id: chat.id,
     numeroTicket: chat.numeroTicket,
@@ -148,6 +157,7 @@ async function getPublico(id, token) {
 async function getComToken(id, token) {
   const chat = await getOne(id);
   if (!chat || !token || chat.token !== token) return null;
+  if (chat.status !== 'ABERTO' && (chat.desbloqueio || chat.restritoAposConclusao)) return null;
   return chat;
 }
 
@@ -455,7 +465,18 @@ async function marcarNotaTratada(id, indice, autor) {
 async function marcarDesbloqueio(id) {
   const chat = await getOne(id);
   if (!chat || chat.desbloqueio) return chat;
-  await COLLECTION.doc(id).update({ desbloqueio: true, atualizadoEm: new Date().toISOString() });
+  await COLLECTION.doc(id).update({ desbloqueio: true, restritoAposConclusao: true, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
+// Criação, troca ou recuperação de acesso também pode usar esta marca, sem
+// depender do texto livre do solicitante. Só os fluxos internos chamam isto.
+async function restringirAposConclusao(id) {
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  if (chat.restritoAposConclusao) return chat;
+  await COLLECTION.doc(id).update({ restritoAposConclusao: true, atualizadoEm: new Date().toISOString() });
   chatsCache.invalidar();
   return getOne(id);
 }
@@ -693,7 +714,7 @@ async function finalizarOciosos() {
 
 module.exports = {
   criar, getOne, getPublico, getComToken, atualizarLogado, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
-  atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
+  atualizarStatusAtendimento, marcarDesbloqueio, restringirAposConclusao, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, marcarNotaTratada, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,
 };
