@@ -136,6 +136,22 @@
   </div>
 </div>
 
+<div class="card" id="cx-padrao" style="display:none;">
+  <div class="eyebrow">Padrão da franquia</div>
+  <h2 id="padrao-titulo" style="margin:0 0 5px;font-size:15px;">Nova versão do padrão</h2>
+  <p class="sub" style="margin:0 0 8px;">Anexe a fonte oficial. Ela fica versionada por franquia e serve de referência para futuras revisões da lista — não altera os documentos das lojas sozinha.</p>
+  <label for="padrao-versao">Versão</label>
+  <input id="padrao-versao" maxlength="40" placeholder="Ex.: 2026.1, 2026.2 ou 2027">
+  <label class="btn-arq" style="margin-top:10px;">📎 Anexar padrão (PDF, imagem ou planilha)
+    <input id="padrao-arquivo" type="file" accept="application/pdf,image/*,.xlsx,.xls,.doc,.docx" onchange="mostrarArquivoPadrao()">
+  </label>
+  <span id="padrao-arquivo-nome" class="sub" style="display:block;margin-top:6px;">Nenhum arquivo escolhido</span>
+  <div class="linha" style="margin-top:12px;">
+    <button class="btn" onclick="fecharPadrao()">Cancelar</button>
+    <button class="btn-primary" id="padrao-enviar" style="flex:1;" onclick="enviarPadrao()">Salvar versão</button>
+  </div>
+</div>
+
 <div class="card" id="cx-form" style="display:none;">
   <h2 style="margin:0 0 4px;font-size:14px;" id="form-titulo">Novo documento</h2>
   <p class="sub" style="margin:0 0 8px;">Guarde aqui e a visita já chega sabendo o que está em dia.</p>
@@ -231,7 +247,7 @@ const SIT_LABEL = {
   avaliacao:{ valido:'Em dia', a_vencer:'Chegando a hora', vencido:'Atrasada', sem_validade:'Sem registro' },
 };
 const rotulo = (d) => d.situacaoLabel || (SIT_LABEL[d.tipo==='avaliacao'?'avaliacao':'validade']||{})[d.situacao] || d.situacao;
-let DOCS = [], UNIDADES = [], EDIT_ID = null, VERSAO_DOC = null, MARCA = null;
+let DOCS = [], UNIDADES = [], EDIT_ID = null, VERSAO_DOC = null, MARCA = null, PADRAO = null;
 let FILTRO_UNIDADE = '', FILTRO_SITUACAO = 'pendentes', FILTRO_BUSCA = '', PREPARAR = null;
 
 async function api(caminho, opcoes){
@@ -308,11 +324,12 @@ async function carregar(){
 // semearia a lista da franqueadora errada.
 async function carregarMarca(){
   const uni = $('f-unidade').value;
-  MARCA = null;
+  MARCA = null; PADRAO = null;
   if(!uni){ pintarAcaoMarca(); return; }
   const nomeUni = (UNIDADES.find(u=>u.codigo===uni)||{}).nome || uni;
   try{
     MARCA = await api('/api/qualidade/documentos/marca/'+encodeURIComponent(uni));
+    if(MARCA && MARCA.marca) PADRAO = await api('/api/qualidade/documentos/padrao/'+encodeURIComponent(MARCA.marca)).catch(()=>null);
   }catch(e){ MARCA = null; }
   pintarAcaoMarca(nomeUni);
 }
@@ -323,10 +340,16 @@ function pintarAcaoMarca(nomeUni){
   const nome = nomeUni || (UNIDADES.find(u=>u.codigo===FILTRO_UNIDADE)||{}).nome || FILTRO_UNIDADE;
   if(!MARCA || !MARCA.marca){
     cx.innerHTML = `<div class="sub"><b>${escapeHtml(nome)}</b> ainda não tem marca definida. O Master define a marca no cadastro da unidade.</div>`;
-  } else if(!MARCA.temPacote){
-    cx.innerHTML = `<div class="sub">A lista de exigências da <b>${escapeHtml(MARCA.marcaLabel)}</b> ainda não foi cadastrada.</div>`;
   } else {
-    cx.innerHTML = `<div class="sub"><b>${escapeHtml(MARCA.marcaLabel)}</b> · ${MARCA.itens} requisito(s) oficiais disponíveis.</div><button class="btn" onclick="semearMarca()">Preparar lista</button>`;
+    const versoes = (PADRAO && PADRAO.versoes) || [];
+    const atual = versoes[0];
+    const referencia = atual
+      ? (atual.arquivo
+        ? `<a class="btn-arq" href="/api/qualidade/documentos/padrao/${encodeURIComponent(MARCA.marca)}/versao/${encodeURIComponent(atual.id)}/arquivo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📎 Padrão ${escapeHtml(atual.versao)}</a>`
+        : `<span class="sub">Padrão base ${escapeHtml(atual.versao)} · ${escapeHtml(atual.fonte || 'referência cadastrada')}</span>`)
+      : '<span class="sub">Nenhum arquivo-padrão anexado ainda.</span>';
+    const lista = MARCA.temPacote ? ` · ${MARCA.itens} requisito(s) mapeados` : ' · a lista de requisitos será revisada a partir do arquivo';
+    cx.innerHTML = `<div class="sub"><b>${escapeHtml(MARCA.marcaLabel)}</b>${lista}<br>${referencia}</div>${MARCA.podeAtualizarPadrao ? '<button class="btn" onclick="abrirPadrao()">Anexar atualização</button>' : ''}`;
   }
 }
 
@@ -339,6 +362,29 @@ function trocarUnidadeFiltro(){
 }
 function trocarBusca(){ FILTRO_BUSCA = $('filtro-busca').value.trim().toLocaleLowerCase('pt-BR'); pintar(); }
 function trocarSituacao(situacao){ FILTRO_SITUACAO = situacao; pintar(); }
+
+function abrirPadrao(){
+  if(!MARCA || !MARCA.marca) return;
+  $('padrao-titulo').textContent = `Atualizar padrão · ${MARCA.marcaLabel}`;
+  $('padrao-versao').value=''; $('padrao-arquivo').value=''; mostrarArquivoPadrao();
+  $('cx-padrao').style.display='block'; window.scrollTo({ top:0, behavior:'smooth' });
+}
+function fecharPadrao(){ $('cx-padrao').style.display='none'; }
+function mostrarArquivoPadrao(){ const f=$('padrao-arquivo').files[0]; $('padrao-arquivo-nome').textContent=f?f.name:'Nenhum arquivo escolhido'; }
+async function enviarPadrao(){
+  if(!MARCA || !MARCA.marca) return;
+  const arquivo=$('padrao-arquivo').files[0];
+  if(!arquivo) return alert('Anexe o arquivo de referência.');
+  if(!$('padrao-versao').value.trim()) return alert('Informe a versão, por exemplo 2026.1 ou 2027.');
+  const fd=new FormData(); fd.append('arquivo',arquivo); fd.append('versao',$('padrao-versao').value.trim());
+  const btn=$('padrao-enviar'); btn.disabled=true; btn.textContent='Salvando…';
+  try{
+    const r=await fetch(`/api/qualidade/documentos/padrao/${encodeURIComponent(MARCA.marca)}/arquivo`,{method:'POST',body:fd,headers:{Authorization:'Bearer '+AUTH_TOKEN}});
+    const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.error||'Não foi possível salvar o padrão.');
+    fecharPadrao(); await carregarMarca(); pintar();
+  }catch(e){ alert(e.message); }
+  finally{btn.disabled=false;btn.textContent='Salvar versão';}
+}
 
 function linhaVersao(d, v, ehTopo){
   const quem = v.enviadoPorEmail ? ` · ${escapeHtml(String(v.enviadoPorEmail).split('@')[0])}` : '';

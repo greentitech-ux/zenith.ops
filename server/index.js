@@ -4978,6 +4978,39 @@ app.get('/api/qualidade/documentos/exigencias/:marca', auth.requireAuth, (req, r
   res.json(pacote);
 });
 
+// PADRÃO DA FRANQUIA: a referência é versionada uma vez por marca, nunca
+// duplicada em cada loja. A leitura é liberada a quem vê Documentação; subir
+// ou atualizar o padrão é ato do Master/Admin, pois pode orientar toda a rede.
+app.get('/api/qualidade/documentos/padrao/:marca', auth.requireAuth, async (req, res) => {
+  try {
+    const padrao = await qualidadeDocumentos.obterPadrao(req.params.marca);
+    if (!padrao) return res.status(404).json({ error: 'Não tenho padrão cadastrado para esta marca.' });
+    res.json({ ...padrao, podeAtualizar: !!(req.isMaster || req.isAdmin) });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/qualidade/documentos/padrao/:marca/arquivo', auth.requireAuth, upload.single('arquivo'), async (req, res) => {
+  if (!(req.isMaster || req.isAdmin)) return res.status(403).json({ error: 'Só Master ou Admin atualiza o padrão da franquia.' });
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Anexe o arquivo de referência.' });
+    const marca = String(req.params.marca || '').toLowerCase();
+    const caminho = await storage.salvarArquivo(`padrao-${marca}`, req.file, 'qualidade-padroes');
+    res.json(await qualidadeDocumentos.anexarPadrao(marca, {
+      versao: (req.body || {}).versao,
+      arquivo: { nome: req.file.originalname, path: caminho, tipo: req.file.mimetype },
+    }, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: storage.erroDeUpload ? storage.erroDeUpload(err) : err.message }); }
+});
+
+app.get('/api/qualidade/documentos/padrao/:marca/versao/:versaoId/arquivo', auth.requireAuth, async (req, res) => {
+  try {
+    const padrao = await qualidadeDocumentos.obterPadrao(req.params.marca);
+    const versao = padrao && (padrao.versoes || []).find((v) => v.id === req.params.versaoId);
+    if (!versao || !versao.arquivo || !versao.arquivo.path) return res.status(404).json({ error: 'Esta versão não possui arquivo anexado.' });
+    storage.streamArquivo(versao.arquivo.path, versao.arquivo.tipo, res);
+  } catch (err) { res.status(404).json({ error: err.message }); }
+});
+
 // A MARCA DA UNIDADE, resolvida NO SERVIDOR.
 //
 // A marca já existe no perfil da unidade (unidades.js) e é o Master quem
@@ -4998,6 +5031,7 @@ app.get('/api/qualidade/documentos/marca/:unidade', auth.requireAuth, async (req
       temPacote: !!pacote,
       itens: pacote ? pacote.itens.length : 0,
       fonte: pacote ? pacote.fonte : null,
+      podeAtualizarPadrao: !!(req.isMaster || req.isAdmin),
     });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });

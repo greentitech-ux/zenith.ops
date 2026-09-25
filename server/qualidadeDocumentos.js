@@ -29,6 +29,11 @@ const { createCache } = require('./liveCache');
 const qualidade = require('./qualidade');
 
 const COLLECTION = db.collection('qualidadeDocumentos');
+// O arquivo que DEFINE o padrão da franquia não pertence a uma loja. Guardá-lo
+// junto com o alvará da unidade faria a atualização 2026.1 parecer uma nova
+// versão do alvará de cada loja. Este acervo é por marca e mantém a trilha de
+// versões do material que originou a lista de exigências.
+const PADROES_COLLECTION = db.collection('qualidadeDocumentosPadroes');
 
 // Quantos dias antes do vencimento o aviso começa. É POR DOCUMENTO, e não
 // uma regra fixa, porque o prazo de renovação muda muito: alvará de bombeiro
@@ -220,6 +225,45 @@ function exigenciasDe(marca) {
 // pra nao prometer uma lista que nao existe.
 function marcasComExigencias() {
   return Object.keys(EXIGENCIAS).map((k) => ({ marca: k, nome: EXIGENCIAS[k].nome, itens: EXIGENCIAS[k].itens.length }));
+}
+
+function padraoBase(marca) {
+  const pacote = exigenciasDe(marca);
+  // Marcas sem lista estruturada também podem guardar o PDF/planilha que
+  // será a fonte oficial. Anexar a fonte não inventa itens: só materializa a
+  // referência até a lista ser revisada pelo Master.
+  const chave = String(marca || '').trim().toLowerCase();
+  if (!chave) return null;
+  return {
+    marca: chave, marcaLabel: pacote ? pacote.nome : chave,
+    versoes: pacote ? [{ id: 'base', versao: pacote.nome === "Domino's" ? '2025' : 'Base inicial', fonte: pacote.fonte, arquivo: null, sistema: true }] : [],
+  };
+}
+
+async function obterPadrao(marca) {
+  const base = padraoBase(marca);
+  if (!base) return null;
+  const snap = await PADROES_COLLECTION.doc(String(marca)).get();
+  const salvas = snap.exists && Array.isArray(snap.data().versoes) ? snap.data().versoes : [];
+  return { ...base, versoes: [...base.versoes, ...salvas].sort((a, b) => String(b.enviadoEm || '').localeCompare(String(a.enviadoEm || ''))) };
+}
+
+async function anexarPadrao(marca, { versao, arquivo }, email) {
+  const base = padraoBase(marca);
+  if (!base) throw new Error('Informe uma marca para guardar o padrão.');
+  const nomeVersao = String(versao || '').trim().slice(0, 40);
+  if (!nomeVersao) throw new Error('Informe a versão, por exemplo 2026.1 ou 2027.');
+  if (!arquivo || !arquivo.path) throw new Error('Anexe o arquivo que será a referência desta versão.');
+  const ref = PADROES_COLLECTION.doc(String(marca));
+  const snap = await ref.get();
+  const anteriores = snap.exists && Array.isArray(snap.data().versoes) ? snap.data().versoes : [];
+  const registro = {
+    id: crypto.randomBytes(8).toString('hex'), versao: nomeVersao,
+    arquivo: { nome: String(arquivo.nome || 'padrão').slice(0, 160), path: String(arquivo.path), tipo: String(arquivo.tipo || '') },
+    enviadoEm: new Date().toISOString(), enviadoPorEmail: email || null,
+  };
+  await ref.set({ marca: String(marca), versoes: [...anteriores, registro], atualizadoEm: registro.enviadoEm, atualizadoPorEmail: email || null }, { merge: true });
+  return obterPadrao(marca);
 }
 
 function hojeISO() {
@@ -548,6 +592,6 @@ module.exports = {
   sugestoes, situacaoDe, comSituacao, hojeISO, diasEntre, somarDias,
   ordenarVersoes, dataDaVersao, topoDe,
   EXIGENCIAS, PERIODICIDADE_LABEL, DIAS_POR_PERIODICIDADE, DIAS_CADENCIA,
-  exigenciasDe, marcasComExigencias,
+  exigenciasDe, marcasComExigencias, obterPadrao, anexarPadrao,
   listar, obter, salvar, garantirSlot, empilhar, removerVersao, remover, varrerVencimentos, marcarAvisado,
 };
