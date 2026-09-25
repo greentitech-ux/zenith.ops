@@ -6614,8 +6614,17 @@ app.post('/api/loja-status/:codigo/computadores/:posto/inventariar-atalhos', aut
 app.delete('/api/loja-status/comandos/:id', auth.requireMaster, async (req, res) => {
   try {
     if (!(await exigirSenhaDoMaster(req, res))) return;
-    const comando = await lojaStatus.cancelarComandoPendente(req.params.id, req.user && req.user.email);
-    res.json({ ok: true, comando, mensagem: comando.canceladoAposErro ? 'Comando com erro marcado como cancelado.' : 'Comando removido da fila antes de chegar à máquina.' });
+    // `desistirSemRetorno`: a tela pede explicitamente pra desistir de um
+    // comando que a máquina não confirmou em 10 min, liberando a fila dela.
+    // O módulo só aceita quando o limite já foi detectado (ver
+    // cancelarComandoPendente) - a tela não consegue forçar isso sozinha.
+    const comando = await lojaStatus.cancelarComandoPendente(req.params.id, req.user && req.user.email, {
+      desistirSemRetorno: (req.body || {}).desistirSemRetorno === true,
+    });
+    const mensagem = comando.desistidoSemRetorno
+      ? 'Fila liberada. O comando pode ter rodado na máquina: desistimos de esperar o retorno, não interrompemos nada.'
+      : (comando.canceladoAposErro ? 'Comando com erro marcado como cancelado.' : 'Comando removido da fila antes de chegar à máquina.');
+    res.json({ ok: true, comando, mensagem });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
