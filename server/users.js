@@ -186,7 +186,12 @@ async function create({ email, password, permissions, username }) {
       // senha definida pelo Master na hora de criar o acesso - pede pra
       // trocar no primeiro login, ja que ele avisa a senha por fora do app
       precisaTrocarSenha: true,
-      permissions: sanitizePermissions(permissions),
+      // Acesso novo começa no Meu Dia. É o mínimo operacional e evita criar
+      // uma conta "muda" que depois precisa de intervenção só para enxergar
+      // as tarefas. Cofre continua fechado até uma concessão explícita.
+      permissions: permissions == null
+        ? { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] }
+        : sanitizePermissions(permissions),
       createdAt: new Date().toISOString(),
     });
     return ref.id;

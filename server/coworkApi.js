@@ -21,6 +21,7 @@ const store = require('./store');
 const adyenDisputas = require('./adyenDisputas');
 const refunds = require('./refunds');
 const catalogo = require('./coworkCatalogo');
+const suporteChat = require('./suporteChat');
 
 // O index.js liga aqui o broadcast da tela: sem isso, o comentário ou o
 // pré-preenchimento do Claude só apareceria na tarefa aberta depois de F5.
@@ -38,7 +39,8 @@ const FERRAMENTAS = Object.freeze({
   listar_tarefas: { descricao: 'Lista tarefas e reuniões ABERTAS do Meu Dia (Pendente, A fazer, Hoje, Em andamento), filtrando por unidade, status, responsável e texto. Concluída/cancelada: use consultar_ticket com o número.', risco: 'leitura', obrigatorios: [] },
   listar_solicitacoes: { descricao: 'Lista solicitações da Central (compra, suporte de TI, manutenção, pagamento, nota...) por unidade, tipo, status (PENDENTE, APROVADO, REJEITADO, CONVERTIDO) e texto, da mais nova pra mais antiga.', risco: 'leitura', obrigatorios: [] },
   ler_chat_ticket: { descricao: 'Lê a conversa de uma solicitação da Central (a caixa "Escrever uma mensagem..." do ticket). Informe o numero, ou solicitacaoId.', risco: 'leitura', obrigatorios: [] },
-  listar_usuarios: { descricao: 'Lista acessos por cargo, unidade ou texto (nome, e-mail, username) - pra escolher o usuário-modelo de criar_usuario ou o responsável de uma tarefa. Não traz senha nem nada secreto.', risco: 'leitura', obrigatorios: [] },
+  ler_chat_suporte: { descricao: 'Lê um protocolo do Beniboy/Suporte. Devolve conversa, notas internas, pendência, status e responsável. Informe o protocolo que a pessoa vê, ex.: 12113.', risco: 'leitura', obrigatorios: ['protocolo'] },
+  listar_usuarios: { descricao: 'Lista acessos por cargo, unidade ou texto (nome, e-mail, username), incluindo seções, unidades, subgrupos do Cofre, tipos de solicitação e flags. Não traz senha nem segredo.', risco: 'leitura', obrigatorios: [] },
   ler_reuniao: { descricao: 'Lê uma reunião do Meu Dia: pauta, participantes, resumo, anotações (comentários), decisões e o TEXTO das transcrições anexadas (.txt, .vtt, .md, .docx). Informe tarefaId ou numero.', risco: 'leitura', obrigatorios: [] },
   // ---- defesa de chargeback (24/09/2026): a unidade responde no Meu Dia, o
   // NoPulso gera o PDF, o Claude anexa na Adyen e registra aqui o que fez ----
@@ -75,6 +77,9 @@ const FERRAMENTAS = Object.freeze({
   criar_usuario: { descricao: 'Cria acesso copiando permissões de um usuário-modelo.', risco: 'alto', obrigatorios: ['modelo', 'email', 'username'], autorizar: true, devolveSegredo: true },
   desbloquear_usuario: { descricao: 'Desbloqueia um acesso existente sem trocar a senha.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true },
   criar_nova_senha: { descricao: 'Gera e aplica senha temporária aleatória; Master precisa repassá-la com segurança.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true, devolveSegredo: true },
+  ajustar_permissoes_usuario: { descricao: 'Altera somente os campos de permissão informados de um acesso existente (seções, unidades, subgrupos do Cofre, tipos da Central e cargos). Sempre gera aprovação do Master no celular e devolve o antes/depois.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true },
+  responder_chat_suporte: { descricao: 'Envia uma resposta do Cowork pelo Beniboy ao solicitante de um protocolo de suporte aberto.', risco: 'baixo', obrigatorios: ['protocolo', 'texto'] },
+  finalizar_chat_suporte: { descricao: 'Registra o resumo interno e finaliza um protocolo de suporte depois que a situação estiver resolvida.', risco: 'baixo', obrigatorios: ['protocolo', 'resumo'] },
   executar_noc: { descricao: 'Enfileira uma ação fechada do NOC em computadores. Resetar Zebra só é permitido em unidade com marca Domino\'s configurada e Zebra monitorada. Para "TEF parou", use gsurf-rsa: reinicia o GSurfRSA Listener somente nas cinco unidades autorizadas e pode interromper uma transação por alguns segundos.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], autorizar: true },
 });
 
@@ -118,7 +123,10 @@ const PROPRIEDADES_COMUNS = {
   formularioId: { type: 'string', description: 'Id interno do formulário (vem de criar_formulario/obter_formulario).' },
   gcom: { type: 'boolean', description: 'consultar_noc: true = só as máquinas marcadas "Possui GCOM" no cadastro; false = só as sem.' },
   estornoId: { type: 'string', description: 'Id interno do estorno (vem de obter_estorno).' },
-  protocolo: { type: 'string', description: 'Número de protocolo que o portal do Conecta devolveu.' },
+  protocolo: { type: 'string', description: 'Número do protocolo de suporte/Beniboy ou do portal Conecta, conforme a ferramenta.' },
+  resumo: { type: 'string', description: 'Resumo interno objetivo do que foi resolvido no atendimento.' },
+  permissions: { type: 'object', description: 'ajustar_permissoes_usuario: informe apenas os campos a alterar: sections, unidades, vaultSubgroups e/ou tiposSolicitacao.' },
+  cargos: { type: 'array', items: { type: 'string' }, description: 'ajustar_permissoes_usuario: cargos finais. Omitido = não altera cargos.' },
   destino: { type: 'string', enum: ['conecta'], description: 'Pra onde o documento vai depois de assinado. Hoje: conecta (portal - o envio lá é feito por você, no navegador).' },
   dataInicio: { type: 'string', description: 'AAAA-MM-DD' },
   idempotencyKey: { type: 'string', description: 'UUID novo por intenção de escrita; reutilize apenas ao repetir a mesma chamada.' },
@@ -136,6 +144,7 @@ const PARAMETROS = Object.freeze({
   listar_tarefas: ['unidade', 'status', 'responsavel', 'termo', 'limite'],
   listar_solicitacoes: ['unidade', 'tipo', 'status', 'termo', 'limite'],
   ler_chat_ticket: ['numero', 'solicitacaoId'],
+  ler_chat_suporte: ['protocolo'],
   listar_usuarios: ['cargo', 'unidade', 'termo', 'incluirInativos', 'limite'],
   ler_reuniao: ['tarefaId', 'numero'],
   listar_disputas: ['status', 'unidade', 'somenteProntas', 'limite'],
@@ -170,6 +179,9 @@ const PARAMETROS = Object.freeze({
   criar_usuario: ['modelo', 'email', 'username'],
   desbloquear_usuario: ['usuario', 'pedirTrocaSenha'],
   criar_nova_senha: ['usuario'],
+  ajustar_permissoes_usuario: ['usuario', 'permissions', 'cargos'],
+  responder_chat_suporte: ['protocolo', 'texto'],
+  finalizar_chat_suporte: ['protocolo', 'resumo'],
   executar_noc: ['tarefa', 'alvos'],
 });
 function propriedadesDe(nome, f) {
@@ -232,6 +244,7 @@ function validar(nome, entrada) {
 const ROTULOS = {
   para: 'Para', assunto: 'Assunto', texto: 'Texto', tarefaId: 'Tarefa', motivo: 'Motivo',
   modelo: 'Copiar permissões de', email: 'E-mail', username: 'Usuário', usuario: 'Acesso',
+  permissions: 'Permissões a alterar', cargos: 'Cargos finais', protocolo: 'Protocolo', resumo: 'Resumo interno',
   pedirTrocaSenha: 'Pedir troca de senha', tarefa: 'Comando', alvos: 'Computadores', unidade: 'Unidade',
   titulo: 'Título', descricao: 'Descrição', observacao: 'Observação',
   disputaId: 'Disputa', motivoDefesa: 'Motivo de defesa', documentos: 'Documentos',
@@ -239,7 +252,7 @@ const ROTULOS = {
 const TITULO_ACAO = {
   pedir_assinatura: 'Assinar formulário',
   enviar_email: 'Enviar e-mail', concluir_tarefa: 'Concluir tarefa', cancelar_tarefa: 'Cancelar tarefa',
-  criar_usuario: 'Criar acesso', desbloquear_usuario: 'Desbloquear acesso', criar_nova_senha: 'Gerar senha temporária',
+  criar_usuario: 'Criar acesso', desbloquear_usuario: 'Desbloquear acesso', criar_nova_senha: 'Gerar senha temporária', ajustar_permissoes_usuario: 'Ajustar permissões',
   executar_noc: 'Comando no NOC',
   enviar_defesa_adyen: 'Enviar defesa na Adyen', aceitar_disputa_adyen: 'Aceitar chargeback na Adyen',
 };
@@ -318,23 +331,71 @@ function solicitacaoCompacta(x) {
 async function consultarTicket(numero) {
   const n = Number(String(numero == null ? '' : numero).replace(/\D/g, ''));
   if (!n) throw new Error('Informe o número, ex.: 12052.');
-  const [listaTarefas, todasSolicitacoes, todosEstornos, todosFormularios] = await Promise.all([
-    tarefas.porNumero(n), solicitacoes.listAll(), refunds.listAll(), formularios.listar(),
+  const [listaTarefas, todasSolicitacoes, todosEstornos, todosFormularios, chatsSuporte] = await Promise.all([
+    tarefas.porNumero(n), solicitacoes.listAll(), refunds.listAll(), formularios.listar(), suporteChat.listAll(),
   ]);
   const achadas = todasSolicitacoes.filter((x) => Number(x.numeroTicket) === n);
   // estorno e formulário moram em coleções próprias, mas o número é da MESMA
   // sequência dos tickets: o #12029 do estorno é achado aqui também
   const estornos = todosEstornos.filter((x) => Number(x.numeroTicket) === n);
   const forms = todosFormularios.filter((f) => Number(f.numeroTicket) === n);
-  const nada = !listaTarefas.length && !achadas.length && !estornos.length && !forms.length;
+  const chats = chatsSuporte.filter((c) => Number(c.numeroTicket) === n).map(chatSuporteCompacto);
+  const nada = !listaTarefas.length && !achadas.length && !estornos.length && !forms.length && !chats.length;
   return {
     numero: n,
     tarefas: listaTarefas.map(tarefaCompacta),
     solicitacoes: achadas.map(solicitacaoCompacta),
     estornos: estornos.map(estornoCompacto),
     formularios: forms.map((f) => ({ formularioId: f.id, tipo: f.tipo, status: f.status, unidade: f.unidade, valorTotal: f.valorTotal ?? null })),
-    aviso: nada ? 'Nenhuma tarefa, solicitação, estorno ou formulário com esse número (ajuste de fechamento ainda não entra nesta consulta).' : null,
+    chatsSuporte: chats,
+    aviso: nada ? 'Nenhuma tarefa, solicitação, estorno, formulário ou chat de suporte com esse número.' : null,
   };
+}
+
+function numeroDoProtocolo(valor) {
+  const numero = Number(String(valor == null ? '' : valor).replace(/\D/g, ''));
+  if (!numero) throw new Error('Informe o protocolo, ex.: 12113.');
+  return numero;
+}
+function chatSuporteCompacto(chat) {
+  return {
+    protocolo: chat.numeroTicket || null, chatId: chat.id, assunto: chat.assunto || null,
+    nome: chat.nome || null, contato: chat.contato || null, status: chat.status || null,
+    statusAtendimento: chat.statusAtendimento || null, nivel: chat.nivel || null,
+    responsavel: chat.responsavel || chat.atendidoPorEmail || null,
+    pendente: (chat.notasInternas || []).some((n) => n.situacao === 'PENDENTE'),
+    criadoEm: chat.criadoEm || null, atualizadoEm: chat.atualizadoEm || null,
+  };
+}
+async function acharChatSuporte(protocolo) {
+  const numero = numeroDoProtocolo(protocolo);
+  const chat = (await suporteChat.listAll()).find((c) => Number(c.numeroTicket) === numero);
+  if (!chat) throw new Error(`Protocolo #${numero} não encontrado no Beniboy.`);
+  return chat;
+}
+async function lerChatSuporte(protocolo) {
+  const chat = await acharChatSuporte(protocolo);
+  return {
+    ...chatSuporteCompacto(chat),
+    notasInternas: (chat.notasInternas || []).map((n) => ({ resumo: n.resumo || '', situacao: n.situacao || null, pendencia: n.pendencia || null, por: n.por || null, em: n.em || null })),
+    mensagens: (chat.mensagens || []).map((m) => ({ de: m.de, por: m.autorEmail || (m.bot ? 'Beniboy/Cowork' : null), texto: m.texto || '', em: m.em, anexo: m.anexo ? { nome: m.anexo.nome || null, tipo: m.anexo.tipo || null } : null })),
+  };
+}
+async function responderChatSuporte(p) {
+  const chat = await acharChatSuporte(p.protocolo);
+  if (chat.status !== 'ABERTO') throw new Error('Esse chat já está finalizado; não é possível responder nele.');
+  const texto = String(p.texto || '').trim();
+  if (!texto) throw new Error('Escreva a resposta para o solicitante.');
+  await suporteChat.adicionarMensagem(chat.id, { de: 'suporte', texto, autorEmail: 'Cowork via Beniboy', bot: true });
+  return `Resposta enviada no protocolo #${chat.numeroTicket}.`;
+}
+async function finalizarChatSuporte(p) {
+  const chat = await acharChatSuporte(p.protocolo);
+  const resumo = String(p.resumo || '').trim();
+  if (!resumo) throw new Error('Escreva o resumo do encerramento.');
+  await suporteChat.registrarNotaInterna(chat.id, { resumo, situacao: 'RESOLVIDO' });
+  await suporteChat.finalizar(chat.id, { autorEmail: 'Cowork via Beniboy' });
+  return `Protocolo #${chat.numeroTicket} finalizado com resumo interno.`;
 }
 
 async function listarTarefas(p) {
@@ -401,8 +462,63 @@ async function listarUsuarios(p) {
       cargo: u.cargo || null, cargos: u.cargos || [], ativo: u.active !== false, bloqueado: !!u.locked,
       unidades: u.permissions ? (u.permissions.unidades || []) : 'todas (master)',
       secoes: u.permissions ? (u.permissions.sections || []) : 'todas (master)',
+      vaultSubgroups: u.permissions ? (u.permissions.vaultSubgroups || []) : 'todos (master)',
+      tiposSolicitacao: u.permissions ? (u.permissions.tiposSolicitacao || []) : 'todos (master)',
+      flags: u.role === 'master' ? {} : {
+        admin: !!u.isAdmin, catalogoEstoque: !!u.podeCatalogoEstoque, catalogoInsumos: !!u.podeCatalogoInsumos,
+        cadastrarOperadores: !!u.podeCadastrarOperadores, nopulsoPrint: !!u.podeNoPulsoPrint,
+        rhTodasUnidades: !!u.podeRhTodasUnidades, rhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado,
+        sessaoLonga: !!u.sessaoLonga, qaUser: !!u.qaUser,
+      },
     })),
   };
+}
+
+// Alteração de acesso é deliberadamente "patch", não substituição: o Cowork
+// só toca no que foi informado e a aprovação mostra o antes/depois. Assim um
+// lote para Meu Dia não apaga Cofre, unidade ou cargo por acidente.
+async function planejarAjustePermissoes(p) {
+  const usuario = await users.findByIdentifier(String(p.usuario || '').trim());
+  if (!usuario) throw new Error('Usuário não encontrado. Informe e-mail ou username.');
+  if (usuario.role === 'master') throw new Error('O acesso Master não usa permissões editáveis.');
+  const alteracoes = p.permissions && typeof p.permissions === 'object' ? p.permissions : {};
+  const campos = ['sections', 'unidades', 'vaultSubgroups', 'tiposSolicitacao'];
+  const informados = campos.filter((campo) => Object.prototype.hasOwnProperty.call(alteracoes, campo));
+  const mudaCargos = Array.isArray(p.cargos);
+  if (!informados.length && !mudaCargos) throw new Error('Informe ao menos permissions (campos a alterar) ou cargos.');
+  for (const campo of informados) {
+    if (!Array.isArray(alteracoes[campo])) throw new Error(`${campo} deve ser uma lista.`);
+  }
+  if (informados.includes('sections')) {
+    const invalida = alteracoes.sections.find((s) => !users.VALID_SECTIONS.includes(String(s)));
+    if (invalida) throw new Error(`Seção inválida: ${invalida}.`);
+  }
+  if (informados.includes('tiposSolicitacao')) {
+    const invalido = alteracoes.tiposSolicitacao.find((t) => !users.TIPOS_SOLICITACAO.includes(String(t)));
+    if (invalido) throw new Error(`Tipo de solicitação inválido: ${invalido}.`);
+  }
+  if (mudaCargos) {
+    const invalido = p.cargos.find((c) => !users.CARGOS_VALIDOS.includes(String(c).toLowerCase()));
+    if (invalido) throw new Error(`Cargo inválido: ${invalido}.`);
+  }
+  const antes = {
+    permissions: usuario.permissions || { sections: [], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+    cargos: usuario.cargos || (usuario.cargo ? [usuario.cargo] : []),
+  };
+  const depois = {
+    permissions: { ...antes.permissions, ...Object.fromEntries(informados.map((campo) => [campo, alteracoes[campo]])) },
+    cargos: mudaCargos ? p.cargos : antes.cargos,
+  };
+  return {
+    usuario: { id: usuario.id, email: usuario.email, username: usuario.username || null },
+    alterados: [...informados, ...(mudaCargos ? ['cargos'] : [])], antes, depois,
+  };
+}
+async function ajustarPermissoesUsuario(p) {
+  const plano = await planejarAjustePermissoes(p);
+  if (plano.alterados.some((campo) => campo !== 'cargos')) await users.updatePermissions(plano.usuario.id, plano.depois.permissions);
+  if (plano.alterados.includes('cargos')) await users.updateCargos(plano.usuario.id, plano.depois.cargos);
+  return plano;
 }
 
 const TRANSCRICAO_MAX_CARACTERES = 200000;
@@ -862,7 +978,19 @@ async function registrarEnvioConectaDoCowork(p) {
   await comentarNoTicketDeOrigem(f, `📤 Formulário #${f.numeroTicket} enviado ao Conecta pelo Claude (Cowork). Protocolo: ${envio.protocolo || '—'}.`).catch(() => false);
   return { mensagem: `Envio ao Conecta registrado (protocolo ${envio.protocolo || '—'}).`, formularioId: f.id, ticket: f.numeroTicket ?? null, enviadoConecta: envio };
 }
-const ANTES_DE_AUTORIZAR = { pedir_assinatura: antesDePedirAssinatura };
+async function antesDeAjustarPermissoes(entrada) {
+  const plano = await planejarAjustePermissoes(entrada);
+  return {
+    resumo: `Ajustar permissões · ${plano.usuario.username || plano.usuario.email}`,
+    detalhes: [
+      { rotulo: 'Acesso', valor: plano.usuario.email },
+      { rotulo: 'Campos alterados', valor: plano.alterados.join(', ') },
+      { rotulo: 'Antes', valor: valorLegivel(plano.antes) },
+      { rotulo: 'Depois', valor: valorLegivel(plano.depois) },
+    ],
+  };
+}
+const ANTES_DE_AUTORIZAR = { pedir_assinatura: antesDePedirAssinatura, ajustar_permissoes_usuario: antesDeAjustarPermissoes };
 
 async function registrarNaDisputa(nome, p, ator) {
   const c = await disputes.getOne(String(p.disputaId));
@@ -892,6 +1020,9 @@ async function despachar(nome, entrada, ator) {
   if (nome === 'enviar_defesa_adyen' || nome === 'aceitar_disputa_adyen') return agirNaAdyen(nome, p, ator);
   if (nome === 'registrar_defesa_enviada' || nome === 'registrar_disputa_aceita') return registrarNaDisputa(nome, p, ator);
   if (nome === 'consultar_ticket') return consultarTicket(p.numero);
+  if (nome === 'ler_chat_suporte') return lerChatSuporte(p.protocolo);
+  if (nome === 'responder_chat_suporte') return responderChatSuporte(p);
+  if (nome === 'finalizar_chat_suporte') return finalizarChatSuporte(p);
   if (nome === 'listar_unidades') {
     const termo = catalogo.normalizar(p.termo);
     return (await catalogo.listarUnidades()).filter((u) => !termo || catalogo.normalizar(JSON.stringify([u.codigo, u.nome, u.apelidos, u.marca, u.empresa])).includes(termo));
@@ -906,6 +1037,7 @@ async function despachar(nome, entrada, ator) {
   if (nome === 'listar_solicitacoes') return listarSolicitacoes(p);
   if (nome === 'ler_chat_ticket') return lerChatTicket(p);
   if (nome === 'listar_usuarios') return listarUsuarios(p);
+  if (nome === 'ajustar_permissoes_usuario') return ajustarPermissoesUsuario(p);
   if (nome === 'ler_reuniao') return lerReuniao(p);
   if (nome === 'consultar_autorizacao') {
     const a = await qaAprovacoes.obter(String(p.autorizacaoId || ''));

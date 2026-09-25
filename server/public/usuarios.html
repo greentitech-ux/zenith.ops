@@ -811,7 +811,8 @@ async function boot(){
   EMPRESAS = Array.isArray(empresas) ? empresas : [];
   UNIDADES.forEach(u=>{ UNIDADES_NOMES[u.codigo] = u.nome; });
 
-  renderCategoriasPermissao('c', null, null);
+  // Regra padrão de acesso: novo usuário já vê Meu Dia; Cofre continua vazio.
+  renderCategoriasPermissao('c', {sections:['tarefas'], unidades:[], vaultSubgroups:[], tiposSolicitacao:[]}, null);
 
   await carregarUsuarios();
   await carregarBackups();
@@ -1513,7 +1514,7 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
     let pendente = !!data.pendenteAprovacao;
     if(!pendente) pendente = await salvarTagsUsuario(data.id, tags);
     document.getElementById('create-form').reset();
-    renderCategoriasPermissao('c', null, null);
+    renderCategoriasPermissao('c', {sections:['tarefas'], unidades:[], vaultSubgroups:[], tiposSolicitacao:[]}, null);
     if(pendente){ alert('Esse acesso é QA Master: a criação/tags foram enviadas pra aprovação de outro Master (ver 🧪 no topo).'); await carregarAprovacoesQa(); }
     await carregarUsuarios();
   }catch(err){ errEl.textContent = err.message; errEl.classList.remove('hidden'); }
@@ -1527,7 +1528,9 @@ function editarPermissoes(id){
   EDITING_USER = id;
   document.getElementById('perm-title').textContent = 'Permissões de ' + u.email;
   const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
-  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, cargos: u.cargos||(u.cargo?[u.cargo]:[]), empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, sessaoLonga: !!u.sessaoLonga });
+  // Passe TODOS os campos que o formulário pode salvar. Antes dois flags não
+  // eram carregados e, ao salvar sem mexer neles, o modal os desligava.
+  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, cargos: u.cargos||(u.cargo?[u.cargo]:[]), empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeNoPulsoPrint: !!u.podeNoPulsoPrint, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, sessaoLonga: !!u.sessaoLonga, qaUser: !!u.qaUser });
   document.getElementById('perm-err').classList.add('hidden');
   permOverlay.classList.add('show');
 }
