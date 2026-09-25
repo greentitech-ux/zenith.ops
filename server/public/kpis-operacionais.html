@@ -169,7 +169,7 @@
         <button type="button" class="preset" onclick="exportar('pdf')" title="Baixa a matriz do período em PDF, com os ofensores no topo">📄 PDF</button>
       </span>
     </h2>
-    <div class="sub" style="margin-bottom:10px;">Cada número é calculado direto dos fechamentos filtrados. <b>Soma</b> junta os lançamentos preenchidos; <b>média</b> divide pela quantidade de lançamentos preenchidos. Tempo, percentuais e indicadores <b>por 1.000</b> usam média automática. A linha auxiliar mostra quantos lançamentos entraram em cada célula.</div>
+    <div class="sub" style="margin-bottom:10px;">Cada número é calculado direto dos fechamentos filtrados. <b>Soma</b> junta os lançamentos preenchidos; <b>média</b> divide pela quantidade de lançamentos preenchidos. Tempo, percentuais e indicadores <b>por 1.000</b> usam média automática. Quando existirem <b>Extreme Lates Per 1000*</b> e <b>Delivery</b>, a tela também apura <b>Extreme Lates (&gt; 40 min)</b> por <b>taxa × Delivery ÷ 1.000</b>, inclusive para o histórico. A linha auxiliar mostra quantos lançamentos entraram em cada célula.</div>
     <div class="rolagem"><table id="matriz"></table></div>
   </div>
 
@@ -258,7 +258,9 @@ function fmtValor(v, def, modo){
   if(tipo === 'kg') return `${fmtNumero(v, modo === 'media' ? 2 : 3)} kg`;
   if(tipo === 'tempo') return `⏱ ${fmtTempo(v)}`;
   if(tipo === 'percentual') return `${fmtNumero(v, 1)}%`;
-  return `${fmtNumero(v, modo === 'media' ? 1 : 0)} un.`;
+  // Média de quantidade pode ser fracionária (ex.: 1,5 entregas/dia), mas
+  // 1,0 é o mesmo valor inteiro 1 e só polui a leitura operacional.
+  return `${fmtNumero(v, Number.isInteger(Number(v)) ? 0 : (modo === 'media' ? 1 : 0))} un.`;
 }
 // No eixo do gráfico cabe pouco texto; abrevia só ali, sem tirar a unidade.
 // Tabela, tooltip e exportação continuam exibindo o número completo.
@@ -290,6 +292,42 @@ function unidadesDoGrupo(){
 }
 function kpisDoGrupo(){ return (GRUPO_ATUAL && GRUPO_ATUAL.kpisExtras) || []; }
 
+// O relatório de Service Times manda ao NoPulso apenas "Extreme Lates Per
+// 1000*", não os baldes 40–45, 45–50 etc. A quantidade de extremos é
+// derivada pela mesma fórmula do relatório: taxa × pedidos Delivery ÷ 1.000.
+// Ex.: 366,67 × 60 Delivery ÷ 1.000 = 22 extremos. O TC Total (133 no
+// exemplo) NÃO é o divisor: 366,67 × 133 ÷ 1.000 daria 48,77, em desacordo
+// com os baldes do próprio relatório. Só criamos a linha se o grupo também
+// captura Delivery, evitando supor um denominador que não foi informado.
+function campoDeliveryKpi(){
+  return kpisDoGrupo().find(k => /^(delivery|entregas delivery|pedidos delivery)$/i.test(String(k?.label || '').trim())) || null;
+}
+function kpiExtremeLatesPorMil(){
+  return kpisDoGrupo().find(k => /extreme\s+lates?.*per\s*1000/i.test(String(k?.label || ''))) || null;
+}
+function kpisExibidos(){
+  const base = kpisDoGrupo();
+  const taxa = kpiExtremeLatesPorMil();
+  const delivery = campoDeliveryKpi();
+  if(!taxa || !delivery) return base;
+  return [...base, {
+    campo: '__extreme_lates_quantidade',
+    label: 'Extreme Lates (> 40 min)',
+    tipo: 'quantidade', direcao: 'menor-melhor',
+    origem: 'extremeLatesQuantidade', taxaCampo: taxa.campo, deliveryCampo: delivery.campo,
+  }];
+}
+function valorKpiFechamento(f, def){
+  const mapa = f.kpisExtras || {};
+  if(def?.origem === 'extremeLatesQuantidade'){
+    const taxa = Number(mapa[def.taxaCampo]);
+    const deliveries = Number(mapa[def.deliveryCampo]);
+    if(!Number.isFinite(taxa) || !Number.isFinite(deliveries) || deliveries <= 0) return null;
+    return Math.round((taxa * deliveries) / 1000);
+  }
+  return mapa[def?.campo];
+}
+
 // linhas do período, só das lojas do grupo escolhido
 function linhasFiltradas(){
   const ini = document.getElementById('f-inicio').value;
@@ -300,11 +338,11 @@ function linhasFiltradas(){
 
 // valores de UM kpi por loja: {unidade: [valores...]} - só entra dia em que
 // a loja realmente preencheu, senão a média cairia por causa de dia vazio
-function valoresPorLoja(campo, linhas){
+function valoresPorLoja(def, linhas){
   const out = {};
   unidadesDoGrupo().forEach(u => { out[u] = []; });
   linhas.forEach(f => {
-    const bruto = (f.kpisExtras||{})[campo];
+    const bruto = valorKpiFechamento(f, def);
     if(bruto === undefined || bruto === null || bruto === '') return;
     if(out[f.unidade]) out[f.unidade].push({ data: f.data, valor: num(bruto) });
   });
@@ -388,7 +426,7 @@ function exportarPendenciasCsv(){
 function renderMatriz(){
   const linhas = linhasFiltradas();
   const lojas = unidadesDoGrupo();
-  const kpis = kpisDoGrupo();
+  const kpis = kpisExibidos();
   const tabela = document.getElementById('matriz');
   document.getElementById('matriz-info').textContent =
     `${linhas.length} lançamento(s) · ${kpis.length} KPI's · ${lojas.length} loja(s)`;
@@ -405,7 +443,7 @@ function renderMatriz(){
 
   const corpo = kpis.map(def => {
     const modo = modoAgregacao(def);
-    const porLoja = valoresPorLoja(def.campo, linhas);
+    const porLoja = valoresPorLoja(def, linhas);
     const celulas = lojas.map(u => {
       const v = agregar(porLoja[u], modo);
       const txt = fmtValor(v, def, modo);
@@ -417,7 +455,7 @@ function renderMatriz(){
     const celTotal = `<td class="valor total-col" title="Recalculado com os ${nTotal} lançamento(s), sem somar células arredondadas">${txtTotal === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txtTotal)}${nTotal ? `<small class="celula-apoio">${nTotal} lançamento(s)</small>` : ''}</td>`;
     const sel = KPI_SEL === def.campo ? ' sel' : '';
     return `<tr class="kpi-linha${sel}" onclick="escolherKpi('${escapeHtml(def.campo)}')">` +
-      `<td>${escapeHtml(def.label)}<span class="unidade-kpi">${escapeHtml(unidadeKpi(def))}</span></td>` +
+      `<td>${escapeHtml(def.label)}<span class="unidade-kpi">${escapeHtml(unidadeKpi(def))}</span>${def.origem === 'extremeLatesQuantidade' ? '<small class="celula-apoio">calculado: Per 1000 × Delivery ÷ 1.000</small>' : ''}</td>` +
       `<td class="valor vazio-cel" style="font-size:10.5px;">${modo === 'media' ? 'média' : 'soma'}</td>` +
       celulas + celTotal + '</tr>';
   });
@@ -452,9 +490,9 @@ function calcularOfensores(){
   const linhas = linhasFiltradas();
   const lojas = unidadesDoGrupo();
   const out = [];
-  kpisDoGrupo().forEach(def => {
+  kpisExibidos().forEach(def => {
     const modo = modoAgregacao(def);
-    const porLoja = valoresPorLoja(def.campo, linhas);
+    const porLoja = valoresPorLoja(def, linhas);
     // A tabela acima exibe o total real do período quando a regra é soma. Para
     // comparar lojas, porém, total bruto pune quem teve mais dias/fechamentos.
     // Aqui a base é sempre média por lançamento preenchido; isso torna a
@@ -496,9 +534,10 @@ function renderOfensores(){
   const lista = calcularOfensores();
   OFENSORES = lista;
 
-  const comDirecao = kpisDoGrupo().filter(k => k.direcao && k.direcao !== 'neutro').length;
+  const kpisVisiveis = kpisExibidos();
+  const comDirecao = kpisVisiveis.filter(k => k.direcao && k.direcao !== 'neutro').length;
   legenda.innerHTML = comDirecao
-    ? `Ordenado pelo <b>pior desempenho</b> de cada indicador. A comparação usa a <b>média por lançamento</b> de cada loja (não o total bruto), contra a mediana das lojas filtradas. ${comDirecao} de ${kpisDoGrupo().length} KPI's têm direção cadastrada — os demais entram por <b>divergência</b>.`
+    ? `Ordenado pelo <b>pior desempenho</b> de cada indicador. A comparação usa a <b>média por lançamento</b> de cada loja (não o total bruto), contra a mediana das lojas filtradas. ${comDirecao} de ${kpisVisiveis.length} KPI's têm direção cadastrada — os demais entram por <b>divergência</b>.`
     : `Nenhum KPI tem a direção cadastrada, então isto mostra <b>quem mais diverge da mediana</b> da média por lançamento — não necessariamente quem está pior. Pra virar "pior de verdade", marque em <b>Grupos</b> se cada indicador é ruim quando sobe ou quando cai.`;
 
   if(!lista.length){
@@ -541,9 +580,9 @@ async function exportar(formato){
     fim: document.getElementById('f-fim').value,
     lancamentos: linhas.length,
     lojas,
-    linhas: kpisDoGrupo().map(def => {
+    linhas: kpisExibidos().map(def => {
       const modo = modoAgregacao(def);
-      const porLoja = valoresPorLoja(def.campo, linhas);
+      const porLoja = valoresPorLoja(def, linhas);
       return {
       kpi: rotuloKpi(def),
         agregacao: modo === 'media' ? 'média' : 'soma',
@@ -580,11 +619,11 @@ function renderTendencia(){
   const alvo = document.getElementById('grafico');
   const legenda = document.getElementById('legenda');
   const info = document.getElementById('tend-info');
-  const def = kpisDoGrupo().find(k => k.campo === KPI_SEL);
+  const def = kpisExibidos().find(k => k.campo === KPI_SEL);
   if(!def){ alvo.innerHTML = '<div class="empty">Escolha um KPI na tabela acima.</div>'; legenda.innerHTML=''; info.textContent=''; return; }
 
   const linhas = linhasFiltradas();
-  const porLoja = valoresPorLoja(def.campo, linhas);
+  const porLoja = valoresPorLoja(def, linhas);
   const lojas = unidadesDoGrupo().filter(u => porLoja[u] && porLoja[u].length);
   const dias = [...new Set(linhas.map(f => f.data))].sort();
   info.textContent = rotuloKpi(def);
