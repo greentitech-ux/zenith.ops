@@ -61,6 +61,25 @@
   .versao.topo{border-left-color:var(--accent);}
   .versao .quando{font-family:var(--mono);color:var(--text);}
   .tag-atual{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--panel2);color:var(--accent);border-radius:99px;padding:1px 7px;}
+  .top-actions{display:flex;gap:8px;align-items:center;flex:none;}
+  .btn-plus{width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:21px;}
+  .operacao-titulo{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;}
+  .resumo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0;}
+  .kpi-doc{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer;text-align:left;color:var(--text);font-family:inherit;}
+  .kpi-doc.ativo{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);}
+  .kpi-doc strong{display:block;font-family:var(--mono);font-size:20px;line-height:1.1;}
+  .kpi-doc span{display:block;font-size:10px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.05em;}
+  .kpi-doc.urgente strong{color:var(--bad)} .kpi-doc.atencao strong{color:var(--warn)} .kpi-doc.ok strong{color:var(--ok)}
+  .chips{display:flex;gap:6px;overflow:auto;padding:2px 0;scrollbar-width:none;}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:99px;color:var(--muted);font:11.5px var(--sans);padding:7px 10px;white-space:nowrap;cursor:pointer;}
+  .chip.ativo{background:var(--accent);border-color:var(--accent);color:#0b0d10;font-weight:700;}
+  .acao-marca{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;justify-content:space-between;}
+  .acao-marca .sub{flex:1;}
+  .doc{padding:12px 0;}
+  .doc-acoes{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+  .doc-acoes .btn-arq{padding:7px 9px;}
+  .grupo-uni:first-child{margin-top:0;}
+  @media (min-width:540px){.resumo{grid-template-columns:repeat(4,minmax(0,1fr));}}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -71,17 +90,29 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Q.A · Documentação</div>
+        <div class="eyebrow">Documentação da unidade</div>
         <h1>Documentação</h1>
       </div>
     </div>
-    <div style="display:flex;gap:8px;">
-      <button class="btn" id="btn-criar-pasta" onclick="abrirCriarPasta()" title="Criar a documentação de uma unidade que ainda não tem registros">📁 Criar documentação</button>
-      <button class="btn" id="btn-marca" onclick="semearMarca()" title="Cria os documentos que a franqueadora exige, sem data - a loja preenche">Exigências da marca</button>
-      <button class="btn-primary" onclick="abrirNovo()">+ Documento</button>
+    <div class="top-actions">
+      <button class="btn-primary btn-plus" onclick="abrirNovo()" aria-label="Novo documento" title="Novo documento">+</button>
     </div>
   </div>
 </header>
+
+<section class="card" id="cx-operacao">
+  <div class="operacao-titulo">
+    <div><h2 style="margin:0;font-size:14px;">O que precisa de atenção</h2><p class="sub" id="op-resumo" style="margin:3px 0 0;">Escolha uma unidade para acompanhar.</p></div>
+    <button class="btn" onclick="abrirCriarPasta()" title="Preparar uma unidade que ainda não tem documentação">Preparar</button>
+  </div>
+  <label for="filtro-unidade">Unidade</label>
+  <select id="filtro-unidade" onchange="trocarUnidadeFiltro()"></select>
+  <div class="resumo" id="resumo-documentos"></div>
+  <div class="chips" id="filtros-situacao"></div>
+  <label for="filtro-busca">Buscar documento</label>
+  <input id="filtro-busca" type="search" placeholder="Ex.: alvará, limpeza, licença" oninput="trocarBusca()">
+  <div class="acao-marca" id="acao-marca"></div>
+</section>
 
 <div class="card" id="cx-criar-pasta" style="display:none;">
   <h2 style="margin:0 0 4px;font-size:14px;">Criar documentação da unidade</h2>
@@ -92,6 +123,16 @@
   <div class="linha" style="margin-top:12px;">
     <button class="btn" onclick="fecharCriarPasta()">Cancelar</button>
     <button class="btn-primary" id="cp-criar" style="flex:1;" onclick="criarPasta()">Criar documentação</button>
+  </div>
+</div>
+
+<div class="card" id="cx-preparar" style="display:none;">
+  <div class="eyebrow">Preparar documentação</div>
+  <h2 id="preparar-titulo" style="margin:0 0 5px;font-size:15px;">Requisitos da marca</h2>
+  <p class="sub" id="preparar-texto" style="margin:0;"></p>
+  <div class="linha" style="margin-top:12px;">
+    <button class="btn" onclick="fecharPreparar()">Voltar</button>
+    <button class="btn-primary" id="preparar-confirmar" style="flex:1;" onclick="confirmarPreparar()">Preparar requisitos</button>
   </div>
 </div>
 
@@ -191,6 +232,7 @@ const SIT_LABEL = {
 };
 const rotulo = (d) => d.situacaoLabel || (SIT_LABEL[d.tipo==='avaliacao'?'avaliacao':'validade']||{})[d.situacao] || d.situacao;
 let DOCS = [], UNIDADES = [], EDIT_ID = null, VERSAO_DOC = null, MARCA = null;
+let FILTRO_UNIDADE = '', FILTRO_SITUACAO = 'pendentes', FILTRO_BUSCA = '', PREPARAR = null;
 
 async function api(caminho, opcoes){
   const r = await fetch(caminho, Object.assign({
@@ -220,6 +262,7 @@ function abrirNovo(){
   EDIT_ID=null; $('form-titulo').textContent='Novo documento';
   $('f-nome').value=''; $('f-validade').value=''; $('f-aviso').value=30;
   $('f-tipo').value='validade'; $('f-cadencia').value=365; $('f-obs').value='';
+  if(FILTRO_UNIDADE) $('f-unidade').value = FILTRO_UNIDADE;
   trocarTipo(); $('cx-form').style.display='block';
 }
 function fecharForm(){ $('cx-form').style.display='none'; EDIT_ID=null; }
@@ -247,9 +290,14 @@ async function carregar(){
       api('/api/qualidade/documentos/sugestoes').catch(()=>[]),
     ]);
     DOCS = docs; UNIDADES = unis;
-    $('f-unidade').innerHTML = (unis||[]).map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome||u.codigo)}</option>`).join('');
+    const opcoes = (unis||[]).map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome||u.codigo)}</option>`).join('');
+    $('f-unidade').innerHTML = opcoes;
+    if(!FILTRO_UNIDADE || !(unis||[]).some(u=>u.codigo===FILTRO_UNIDADE)) FILTRO_UNIDADE = (unis||[])[0]?.codigo || '';
+    $('filtro-unidade').innerHTML = opcoes;
+    $('filtro-unidade').value = FILTRO_UNIDADE;
+    $('f-unidade').value = FILTRO_UNIDADE;
     $('sugestoes').innerHTML = (sug||[]).map(s=>`<option value="${escapeHtml(s.nome)}">`).join('');
-    $('f-unidade').onchange = carregarMarca;
+    $('f-unidade').onchange = ()=>{ FILTRO_UNIDADE = $('f-unidade').value; $('filtro-unidade').value = FILTRO_UNIDADE; carregarMarca(); pintar(); };
     await carregarMarca();
     pintar();
   }catch(e){ $('lista').innerHTML = `<div class="sub">${escapeHtml(e.message)}</div>`; }
@@ -259,27 +307,38 @@ async function carregar(){
 // "Spoleto Domino's Aeroporto Recife" tem as duas marcas no nome, e chutar
 // semearia a lista da franqueadora errada.
 async function carregarMarca(){
-  const b = $('btn-marca'); const uni = $('f-unidade').value;
+  const uni = $('f-unidade').value;
   MARCA = null;
-  if(!uni){ b.disabled = true; b.textContent = 'Exigências da marca'; return; }
+  if(!uni){ pintarAcaoMarca(); return; }
   const nomeUni = (UNIDADES.find(u=>u.codigo===uni)||{}).nome || uni;
   try{
     MARCA = await api('/api/qualidade/documentos/marca/'+encodeURIComponent(uni));
   }catch(e){ MARCA = null; }
-  b.disabled = false;
-  // o botão diz de QUAL unidade está falando: ele semeia a pasta de uma loja
-  // só, e o seletor que manda nisso está dentro do formulário
+  pintarAcaoMarca(nomeUni);
+}
+
+function pintarAcaoMarca(nomeUni){
+  const cx = $('acao-marca');
+  if(!FILTRO_UNIDADE){ cx.innerHTML=''; return; }
+  const nome = nomeUni || (UNIDADES.find(u=>u.codigo===FILTRO_UNIDADE)||{}).nome || FILTRO_UNIDADE;
   if(!MARCA || !MARCA.marca){
-    b.textContent = 'Exigências da marca';
-    b.title = `${nomeUni} ainda não tem marca definida no perfil da unidade.`;
+    cx.innerHTML = `<div class="sub"><b>${escapeHtml(nome)}</b> ainda não tem marca definida. O Master define a marca no cadastro da unidade.</div>`;
   } else if(!MARCA.temPacote){
-    b.textContent = `Exigências ${MARCA.marcaLabel}`;
-    b.title = `${nomeUni} · ainda não recebi a lista de documentos da ${MARCA.marcaLabel}.`;
+    cx.innerHTML = `<div class="sub">A lista de exigências da <b>${escapeHtml(MARCA.marcaLabel)}</b> ainda não foi cadastrada.</div>`;
   } else {
-    b.textContent = `Exigências ${MARCA.marcaLabel}`;
-    b.title = `${nomeUni} · ${MARCA.itens} item(ns) · ${MARCA.fonte}`;
+    cx.innerHTML = `<div class="sub"><b>${escapeHtml(MARCA.marcaLabel)}</b> · ${MARCA.itens} requisito(s) oficiais disponíveis.</div><button class="btn" onclick="semearMarca()">Preparar lista</button>`;
   }
 }
+
+function trocarUnidadeFiltro(){
+  FILTRO_UNIDADE = $('filtro-unidade').value;
+  $('f-unidade').value = FILTRO_UNIDADE;
+  FILTRO_SITUACAO = 'pendentes';
+  carregarMarca();
+  pintar();
+}
+function trocarBusca(){ FILTRO_BUSCA = $('filtro-busca').value.trim().toLocaleLowerCase('pt-BR'); pintar(); }
+function trocarSituacao(situacao){ FILTRO_SITUACAO = situacao; pintar(); }
 
 function linhaVersao(d, v, ehTopo){
   const quem = v.enviadoPorEmail ? ` · ${escapeHtml(String(v.enviadoPorEmail).split('@')[0])}` : '';
@@ -305,11 +364,38 @@ function linhaVersao(d, v, ehTopo){
 }
 
 function pintar(){
-  if(!DOCS.length){ $('lista').innerHTML = '<div class="sub" style="text-align:center;padding:20px 0;">Nenhum documento guardado ainda. Toque em <b>+ Documento</b>.</div>'; return; }
+  const daUnidade = DOCS.filter(d=>!FILTRO_UNIDADE || d.unidade===FILTRO_UNIDADE);
+  const contagem = { vencido:0, a_vencer:0, sem_validade:0, valido:0 };
+  daUnidade.forEach(d=>{ if(contagem[d.situacao] != null) contagem[d.situacao]++; });
+  const pendentes = contagem.vencido + contagem.a_vencer + contagem.sem_validade;
+  $('op-resumo').textContent = FILTRO_UNIDADE
+    ? `${pendentes ? pendentes+' ponto(s) precisam de atenção' : 'Documentação acompanhada e sem pendências'} nesta unidade.`
+    : 'Escolha uma unidade para acompanhar.';
+  const kpis = [
+    ['pendentes', pendentes, 'Para regularizar', 'urgente'],
+    ['vencido', contagem.vencido, 'Vencidos / atrasados', 'urgente'],
+    ['a_vencer', contagem.a_vencer, 'Perto do prazo', 'atencao'],
+    ['valido', contagem.valido, 'Em dia', 'ok'],
+  ];
+  $('resumo-documentos').innerHTML = kpis.map(([id,nome,rotulo,classe])=>`<button class="kpi-doc ${classe} ${FILTRO_SITUACAO===id?'ativo':''}" onclick="trocarSituacao('${id}')"><strong>${nome}</strong><span>${rotulo}</span></button>`).join('');
+  const chips = [['pendentes','Pendentes'],['todos','Todos'],['sem_validade','Sem arquivo/data'],['valido','Em dia']];
+  $('filtros-situacao').innerHTML = chips.map(([id,rotulo])=>`<button class="chip ${FILTRO_SITUACAO===id?'ativo':''}" onclick="trocarSituacao('${id}')">${rotulo}</button>`).join('');
+  if(!daUnidade.length){
+    $('lista').innerHTML = `<div class="sub" style="text-align:center;padding:20px 0;">Esta unidade ainda não tem documentação. Use <b>Preparar</b> para montar a lista da marca ou <b>+</b> para incluir o primeiro documento.</div>`;
+    return;
+  }
+  const filtrados = daUnidade.filter(d=>{
+    const busca = !FILTRO_BUSCA || [d.nome,d.observacao,d.unidadeNome].filter(Boolean).join(' ').toLocaleLowerCase('pt-BR').includes(FILTRO_BUSCA);
+    const situacao = FILTRO_SITUACAO==='todos' ||
+      (FILTRO_SITUACAO==='pendentes' && ['vencido','a_vencer','sem_validade'].includes(d.situacao)) ||
+      d.situacao===FILTRO_SITUACAO;
+    return busca && situacao;
+  });
+  if(!filtrados.length){ $('lista').innerHTML = '<div class="sub" style="text-align:center;padding:20px 0;">Nenhum documento corresponde a este filtro.</div>'; return; }
   // vencido primeiro, depois a vencer: a tela abre no que precisa de ação
   const ordem = { vencido:0, a_vencer:1, valido:2, sem_validade:3 };
   const porUnidade = {};
-  DOCS.slice().sort((a,b)=>(ordem[a.situacao]-ordem[b.situacao]) || String(a.prazo||'').localeCompare(String(b.prazo||'')))
+  filtrados.slice().sort((a,b)=>(ordem[a.situacao]-ordem[b.situacao]) || String(a.prazo||'').localeCompare(String(b.prazo||'')))
     .forEach(d=>{ (porUnidade[d.unidadeNome||d.unidade] = porUnidade[d.unidadeNome||d.unidade]||[]).push(d); });
   $('lista').innerHTML = Object.entries(porUnidade).map(([uni,lista])=>`
     <div class="grupo-uni">${escapeHtml(uni)}</div>
@@ -333,16 +419,16 @@ function pintar(){
             ${d.situacao==='vencido' ? ` · há ${Math.abs(d.dias)} dia(s)` : ''}
           </div>
           ${d.observacao ? `<div class="sub">${escapeHtml(d.observacao)}</div>` : ''}
-          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <div class="doc-acoes">
             ${ehLaudo
               // laudo de visita: o PDF é gerado na hora, então o link vai pra
               // VISITA e não pro Storage - assim a pasta serve sempre a
               // versão atual, com as ações corretivas já respondidas
               ? `<a class="btn-arq" href="/api/qualidade/visitas/${encodeURIComponent(d.origem.visitaId)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 Abrir o laudo${d.origem.nota!=null?' · nota '+escapeHtml(String(d.origem.nota).replace('.',',')):''}</a>`
               : (d.arquivo && d.arquivo.path
-                ? `<a class="btn-arq" href="/api/qualidade/documentos/${encodeURIComponent(d.id)}/arquivo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📎 ${escapeHtml(d.arquivo.nome||'arquivo')}</a>`
+                ? `<a class="btn-arq" href="/api/qualidade/documentos/${encodeURIComponent(d.id)}/arquivo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📎 Abrir arquivo</a>`
                 : '<span class="sub">sem arquivo</span>')}
-            ${ehLaudo ? '' : `<button class="btn-arq" onclick="abrirVersao('${escapeHtml(d.id)}')">＋ Nova versão</button>`}
+            ${ehLaudo ? '' : `<button class="btn-arq" onclick="abrirVersao('${escapeHtml(d.id)}')">${d.arquivo&&d.arquivo.path?'Nova versão':'Anexar arquivo'}</button>`}
             <button class="btn-arq" onclick="editar('${escapeHtml(d.id)}')">Editar</button>
             <button class="btn-x" title="Remover" onclick="remover('${escapeHtml(d.id)}')">✕</button>
           </div>
@@ -476,15 +562,8 @@ async function criarPasta(){
   const u = unidadeSemPasta($('cp-unidade').value);
   if(!u) return;
   if(u.temPacote){
-    if(!confirm(`Criar a documentação de ${u.nome} com os ${u.itensExigencia} itens que a ${u.marcaLabel} exige?\n\nEles entram SEM data — a loja preenche cada uma olhando o documento.`)) return;
-    const btn = $('cp-criar'); btn.disabled=true; btn.textContent='Criando…';
-    try{
-      const r = await api(`/api/qualidade/documentos/exigencias/${encodeURIComponent(u.marca)}`, { method:'POST', body: JSON.stringify({ unidade: u.codigo, unidadeNome: u.nome }) });
-      fecharCriarPasta();
-      await carregar();
-      alert(`Documentação de ${u.nome} criada: ${r.criados} documento(s).`);
-    }catch(e){ alert(e.message); }
-    finally{ btn.disabled=false; btn.textContent='Criar documentação'; }
+    fecharCriarPasta();
+    mostrarPreparar({ unidade:u.codigo, unidadeNome:u.nome, marca:u.marca, marcaLabel:u.marcaLabel, itens:u.itensExigencia });
     return;
   }
   // sem lista da marca: a pasta nasce com o primeiro documento manual
@@ -500,12 +579,28 @@ async function semearMarca(){
   if(!MARCA || !MARCA.marca) return alert('Essa unidade ainda não tem marca definida no perfil.\n\nA marca é o Master quem define, em Unidades — ela não é deduzida do nome da loja.');
   if(!MARCA.temPacote) return alert(`Ainda não recebi a lista de documentos da ${MARCA.marcaLabel}.`);
   const nome = (UNIDADES.find(u=>u.codigo===uni)||{}).nome || uni;
-  if(!confirm(`Criar na documentação de ${nome} os ${MARCA.itens} itens que a ${MARCA.marcaLabel} exige?\n\nEles entram SEM data — você preenche cada uma olhando o documento.`)) return;
+  mostrarPreparar({ unidade:uni, unidadeNome:nome, marca:MARCA.marca, marcaLabel:MARCA.marcaLabel, itens:MARCA.itens });
+}
+function mostrarPreparar(dados){
+  PREPARAR = dados;
+  $('preparar-titulo').textContent = `${dados.unidadeNome} · requisitos ${dados.marcaLabel}`;
+  $('preparar-texto').innerHTML = `Vamos preparar <b>${dados.itens}</b> requisito(s) para acompanhamento. Eles serão criados <b>sem arquivo e sem validade</b>: nada será marcado como regular automaticamente. Depois, a unidade anexa o comprovante e informa a validade de cada item.`;
+  $('preparar-confirmar').textContent = `Preparar ${dados.itens} requisito(s)`;
+  $('cx-preparar').style.display='block';
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+function fecharPreparar(){ $('cx-preparar').style.display='none'; PREPARAR=null; }
+async function confirmarPreparar(){
+  if(!PREPARAR) return;
+  const btn = $('preparar-confirmar'); btn.disabled=true; btn.textContent='Preparando…';
   try{
-    const r = await api(`/api/qualidade/documentos/exigencias/${encodeURIComponent(MARCA.marca)}`, { method:'POST', body: JSON.stringify({ unidade: uni, unidadeNome: nome }) });
-    alert(`${r.criados} criado(s)${r.jaExistiam?` · ${r.jaExistiam} já existia(m)`:''}.`);
+    const r = await api(`/api/qualidade/documentos/exigencias/${encodeURIComponent(PREPARAR.marca)}`, { method:'POST', body: JSON.stringify({ unidade: PREPARAR.unidade, unidadeNome: PREPARAR.unidadeNome }) });
+    const mensagem = `${r.criados} requisito(s) preparado(s)${r.jaExistiam?` · ${r.jaExistiam} já existia(m)`:''}.`;
+    fecharPreparar();
     await carregar();
+    alert(mensagem);
   }catch(e){ alert(e.message); }
+  finally{ btn.disabled=false; btn.textContent='Preparar requisitos'; }
 }
 
 async function remover(id){
