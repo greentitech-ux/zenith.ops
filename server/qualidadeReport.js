@@ -35,6 +35,10 @@ function dataBR(iso) {
   const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
 }
+function horaBR(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+}
 function notaBR(nota) {
   return nota === null || nota === undefined ? '—' : Number(nota).toFixed(2).replace('.', ',');
 }
@@ -124,7 +128,8 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   doc.fontSize(10).fillColor(COR.texto).font('Helvetica');
   [
     ['Data', dataBR(visita.data)],
-    ['Horário', visita.horario],
+    ['Hora inicial', horaBR(visita.iniciadaEm || visita.criadoEm) || visita.horario],
+    ['Hora final', horaBR(visita.concluidaEm)],
     ['Representante da loja', visita.representanteLoja],
     ['Responsável técnico', visita.nutricionista],
     ['Checklist', `${(visita.modeloSnap || {}).nome || 'Padrão'} (versão ${(visita.modeloSnap || {}).versao || 1})`],

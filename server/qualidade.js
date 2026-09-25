@@ -444,7 +444,7 @@ function retratoDoModelo(modelo) {
   };
 }
 
-async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, horario, representanteLoja, nutricionista, visitaAnteriorId, gps }, email) {
+async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, representanteLoja, nutricionista, visitaAnteriorId, gps }, email) {
   const modelo = await modeloPorId(modeloId);
   const registro = {
     id: novoId(),
@@ -454,7 +454,10 @@ async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, horario
     unidadeNome: String(unidadeNome || '').trim() || null,
     loja: String(loja || '').trim() || null,
     data: String(data || '').trim() || new Date().toISOString().slice(0, 10),
-    horario: String(horario || '').trim() || null,
+    // Horas são geradas pelo servidor: campo digitável permitiria dizer que a
+    // visita começou/terminou em outro momento que não o registrado.
+    iniciadaEm: new Date().toISOString(),
+    horario: null,
     representanteLoja: String(representanteLoja || '').trim() || null,
     nutricionista: String(nutricionista || '').trim() || null,
     visitaAnteriorId: String(visitaAnteriorId || '').trim() || null,
@@ -764,7 +767,7 @@ async function listarUncached() {
       ? { nota: v.nota, faixa: v.faixa, conformes: v.conformes, naoConformes: v.naoConformes, total: v.totalItens }
       : calcularNota(v.modeloSnap, v.respostas);
     return {
-      id: v.id, status: v.status, data: v.data, horario: v.horario,
+      id: v.id, status: v.status, data: v.data, horario: v.horario, iniciadaEm: v.iniciadaEm,
       unidade: v.unidade, unidadeNome: v.unidadeNome, loja: v.loja,
       modeloNome: (v.modeloSnap || {}).nome || null,
       representanteLoja: v.representanteLoja, nutricionista: v.nutricionista,

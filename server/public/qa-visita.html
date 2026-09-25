@@ -120,7 +120,7 @@
       <div><label for="n-data">Data</label><input id="n-data" type="date"></div>
     </div>
     <div class="linha">
-      <div><label for="n-horario">Horário</label><input id="n-horario" placeholder="16:00 às 19:00h"></div>
+      <div><label>Hora inicial</label><input value="Registrada ao começar" readonly aria-label="Hora inicial registrada automaticamente"></div>
       <div><label for="n-repr">Representante da loja</label><input id="n-repr" placeholder="Marcela"></div>
     </div>
     <label for="n-nutri">Responsável técnico</label>
@@ -231,7 +231,7 @@ async function carregarLista(){
       <div class="visita-row" onclick="abrirVisita('${escapeHtml(v.id)}')">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;font-weight:700;">${escapeHtml(v.loja || v.unidadeNome || 'Sem loja')}</div>
-          <div class="sub">${escapeHtml(v.data||'')} ${v.horario?'· '+escapeHtml(v.horario):''}</div>
+          <div class="sub">${escapeHtml(v.data||'')} · início ${escapeHtml(v.iniciadaEm?new Date(v.iniciadaEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):(v.horario||'—'))}${v.concluidaEm?' · fim '+escapeHtml(new Date(v.concluidaEm).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):''}</div>
         </div>
         ${v.status==='CONCLUIDA'
           ? `<span class="faixa ${escapeHtml(v.faixa||'')}">${v.nota==null?'—':escapeHtml(String(v.nota).replace('.',','))}</span>`
@@ -255,7 +255,7 @@ async function criarVisita(){
     const v = await api('/api/qualidade/visitas', { method:'POST', body: JSON.stringify({
       password: prova,
       modeloId: $('n-modelo').value,
-      unidade: $('n-unidade').value, gps, data: $('n-data').value, horario: $('n-horario').value,
+      unidade: $('n-unidade').value, gps, data: $('n-data').value,
       representanteLoja: $('n-repr').value, nutricionista: $('n-nutri').value,
     })});
     abrirVisita(v.id);
@@ -279,7 +279,8 @@ function pintarVisita(){
   $('v-nota').textContent = v.nota==null ? '—' : String(v.nota.toFixed(2)).replace('.',',');
   $('v-faixa').innerHTML = v.faixa ? `<span class="faixa ${escapeHtml(v.faixa)}">${escapeHtml({positiva:'Positiva',atencao:'Atenção',negativa:'Negativa'}[v.faixa]||'')}</span>` : '';
   $('v-progresso').textContent = `${v.respondidos} de ${v.total} respondidos · ${v.naoConformes} não conforme(s)`;
-  $('v-cabecalho').textContent = [v.data, v.horario, v.representanteLoja, v.nutricionista].filter(Boolean).join(' · ');
+  const hora = (iso)=>{ if(!iso) return null; try{return new Date(iso).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch(e){return null;} };
+  $('v-cabecalho').textContent = [v.data, `Início ${hora(v.iniciadaEm||v.criadoEm)||'—'}`, v.concluidaEm?`Fim ${hora(v.concluidaEm)||'—'}`:null, v.representanteLoja, v.nutricionista].filter(Boolean).join(' · ');
   const concluida = v.status === 'CONCLUIDA';
   $('v-fechar').classList.toggle('hidden', concluida);
   $('v-laudo').classList.toggle('hidden', !concluida);
