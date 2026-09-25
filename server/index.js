@@ -5324,6 +5324,12 @@ app.get('/api/qualidade/visitas/:id/pdf', auth.requireAuth, async (req, res) => 
     const nome = `visita-qa-${String(visita.loja || visita.unidade || 'unidade').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${visita.data || ''}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${nome}"`);
+    // PDF é sempre gerado sob demanda. Alguns visualizadores de celular
+    // reaproveitam a URL anterior mesmo depois de uma vistoria ser corrigida;
+    // impedir cache evita que a pessoa veja a capa ou os apontamentos velhos.
+    res.setHeader('Cache-Control', 'no-store, no-cache, max-age=0, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-NoPulso-Laudo-Template', qualidadeReport.VERSAO_LAUDO);
     await qualidadeReport.gerarPdf(visita, qualidade.apontamentosDe(visita), res, await qualidade.pendenciasDaAnterior(visita));
   } catch (err) {
     if (!res.headersSent) res.status(400).json({ error: err.message });
@@ -17207,7 +17213,7 @@ app.use(express.static(DIRETORIO_PUBLICO, {
   // compositor. Nao deixar um aparelho continuar usando um bundle antigo:
   // o navegador sempre revalida esse unico arquivo pequeno ao abrir a tela.
   setHeaders(res, arquivo) {
-    if (path.basename(arquivo) === 'suporte-chat.js') {
+    if (['suporte-chat.js', 'qa-visita.html'].includes(path.basename(arquivo))) {
       res.setHeader('Cache-Control', 'no-store, max-age=0');
     }
   },

@@ -16,6 +16,10 @@ const PDFDocument = require('pdfkit');
 const storage = require('./storage');
 
 const LOGO_GRUPO_BRAVO = path.join(__dirname, 'public', 'grupo-bravo.png');
+// Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
+// atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
+// servidor antigo.
+const VERSAO_LAUDO = 'QA-2026.09.25.2';
 
 const COR = {
   texto: '#1a1a1a',
@@ -348,4 +352,4 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   doc.end();
 }
 
-module.exports = { gerarPdf, COR, FAIXA_TITULO };
+module.exports = { gerarPdf, COR, FAIXA_TITULO, VERSAO_LAUDO };
