@@ -655,6 +655,14 @@ const NOME_GRUPO_FIXO = { ARCFOOD:'ARCFOOD', BRAVO:'Grupo Bravo (GBE)' };
 
 let DATA = [];
 let IS_MASTER = false;
+let ME_FECHAMENTOS = null;
+
+function podePedirCorrecaoDaLinha(d){
+  if(!ME_FECHAMENTOS || !d) return false;
+  if(IS_MASTER || ME_FECHAMENTOS.isAdmin || ME_FECHAMENTOS.podePedirCorrecaoFechamento) return true;
+  if(['gerente','assistente-gerente'].includes(ME_FECHAMENTOS.cargo)) return true;
+  return !!(d.criadoPorId && String(d.criadoPorId) === String(ME_FECHAMENTOS.id));
+}
 // ESPELHO de server/redes.js (que divide os relatorios) - a tela e o
 // relatorio tem que classificar igual, senao o filtro mostra uma coisa e o
 // PDF exportado mostra outra. ARCFOOD e lista FECHADA (4 lojas); o Grupo
@@ -2872,7 +2880,7 @@ function abrirFichaFechamento(id){
   btnEd.classList.toggle('hidden', !(IS_MASTER && d.criadoPorId));
   const btnPedir = document.getElementById('ficha-pedir-correcao');
   btnPedir.dataset.id = String(d.id||'');
-  btnPedir.classList.toggle('hidden', !d.id);
+  btnPedir.classList.toggle('hidden', !d.id || !podePedirCorrecaoDaLinha(d));
   document.getElementById('ficha-corpo').innerHTML = corpo + (obs?`<div class="ficha-secao"><div class="ficha-secao-titulo">📝 Observação</div><div class="ficha-obs">${escapeHtml(obs)}</div></div>`:'');
   document.getElementById('ficha-overlay').classList.remove('hidden');
 }
@@ -2887,7 +2895,7 @@ function editarDaFicha(){
 }
 function pedirCorrecaoDaFicha(){
   const id = document.getElementById('ficha-pedir-correcao').dataset.id;
-  if(!id) return;
+  if(!id || !podePedirCorrecaoDaLinha(DATA.find(x=>String(x.id)===String(id)))) return;
   fecharFichaFechamento();
   abrirEdicaoFechamento(id, 'correcao');
 }
@@ -3770,6 +3778,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   const me = await res.json();
+  ME_FECHAMENTOS = me;
   await mesclarUnidadesExtras();
   const isMaster = me.role==='master';
   IS_MASTER = isMaster;

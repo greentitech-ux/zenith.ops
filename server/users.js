@@ -488,6 +488,20 @@ async function updatePodeNoPulsoPrint(id, valor) {
   return toPublic(await ref.get());
 }
 
+// Exceção controlada para correção de fechamento. Cargo de gerente já tem o
+// direito por regra; esta tag serve para Financeiro/Suporte ou outro acesso
+// que o Master queira autorizar, sempre limitado às unidades do próprio acesso.
+async function updatePodePedirCorrecaoFechamento(id, valor) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (snap.data().role === 'master') throw new Error('O acesso Master já pode tudo, não precisa dessa permissão.');
+  await ref.update({ podePedirCorrecaoFechamento: !!valor });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
 async function updatePodeCadastrarOperadores(id, valor) {
   const ref = usersRef.doc(id);
   const snap = await ref.get();
@@ -825,6 +839,7 @@ function toPublic(doc) {
     // do computador); celular não tem cadastro de máquina, então aqui é por
     // PESSOA. As duas marcas convivem e não se substituem.
     podeNoPulsoPrint: data.role === 'master' ? null : !!data.podeNoPulsoPrint,
+    podePedirCorrecaoFechamento: data.role === 'master' ? null : !!data.podePedirCorrecaoFechamento,
     podeRhTodasUnidades: data.role === 'master' ? null : !!data.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: data.role === 'master' ? null : !!data.podeRhCadastrarEfetivado,
     podeBonifVerValorTotal: data.role === 'master' ? null : !!data.podeBonifVerValorTotal,
@@ -975,6 +990,7 @@ module.exports = {
   listarPorEmpresa,
   desvincularEmpresa,
   updatePodeCatalogoEstoque,
+  updatePodePedirCorrecaoFechamento,
   updatePodeCatalogoInsumos,
   updatePodeCadastrarOperadores,
   updatePodeNoPulsoPrint,

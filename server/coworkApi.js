@@ -469,6 +469,7 @@ async function listarUsuarios(p) {
       flags: u.role === 'master' ? {} : {
         admin: !!u.isAdmin, catalogoEstoque: !!u.podeCatalogoEstoque, catalogoInsumos: !!u.podeCatalogoInsumos,
         cadastrarOperadores: !!u.podeCadastrarOperadores, nopulsoPrint: !!u.podeNoPulsoPrint,
+        pedirCorrecaoFechamento: !!u.podePedirCorrecaoFechamento,
         rhTodasUnidades: !!u.podeRhTodasUnidades, rhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado,
         sessaoLonga: !!u.sessaoLonga, qaUser: !!u.qaUser,
       },

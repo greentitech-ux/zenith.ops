@@ -706,7 +706,7 @@ function caminhoSubgrupo(id){
 // Acoes marcar cada tag uma por uma ----------
 const CARGOS = [ ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'], ['coordenador-agregador','🛵 Coord. Agregador'], ['qa','🥼 Q.A'] ];
 function tagsFieldsetHtml(prefixo, tags){
-  tags = tags || { cargo:null, cargos:[], empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeNoPulsoPrint:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, podeBonifVerValorTotal:false, podeBonifVerColaboradores:false, sessaoLonga:false, qaUser:false };
+  tags = tags || { cargo:null, cargos:[], empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeNoPulsoPrint:false, podePedirCorrecaoFechamento:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, podeBonifVerValorTotal:false, podeBonifVerColaboradores:false, sessaoLonga:false, qaUser:false };
   // MAIS DE UMA TAG por pessoa (Master, 14/09): "assim eu designo alguém de
   // suporte para cuidar de Agregador". Era rádio (exclusivo) e por isso a
   // pessoa do Suporte não podia também cuidar do Agregador. A PRIMEIRA
@@ -734,6 +734,7 @@ function tagsFieldsetHtml(prefixo, tags){
       <label><input type="checkbox" id="${prefixo}-tag-catalogo-insumos" ${tags.podeCatalogoInsumos?'checked':''}> 🥤 Insumos (Abastec. Carrinho)</label>
       <label><input type="checkbox" id="${prefixo}-tag-operadores" ${tags.podeCadastrarOperadores?'checked':''}> 👥 Operadores (Abastec. Carrinho)</label>
       <label><input type="checkbox" id="${prefixo}-tag-print" ${tags.podeNoPulsoPrint?'checked':''}> 📸 NoPulsoPrint (botão de print no celular)</label>
+      <label title="Permite pedir correção de fechamentos das unidades já atribuídas. Não permite aprovar nem editar diretamente."><input type="checkbox" id="${prefixo}-tag-pedir-correcao-fechamento" ${tags.podePedirCorrecaoFechamento?'checked':''}> 🧾 Pedir correção de fechamento</label>
       <label><input type="checkbox" id="${prefixo}-tag-rh-todas-unidades" ${tags.podeRhTodasUnidades?'checked':''}> 🧑‍💼 RH (todas as unidades)</label>
       <label><input type="checkbox" id="${prefixo}-tag-rh-cadastrar-efetivado" ${tags.podeRhCadastrarEfetivado?'checked':''}> 🧑‍💼 RH: pode cadastrar efetivado direto</label>
       <label title="Sem esta tag, quem tem a seção Bonificação vê só o próprio card - com ela, vê faturamento/pool/taxas por trás da conta"><input type="checkbox" id="${prefixo}-tag-bonif-valor-total" ${tags.podeBonifVerValorTotal?'checked':''}> 🏆 Bonificação: ver valor total</label>
@@ -751,6 +752,7 @@ function lerTagsForm(prefixo){
     podeCatalogoInsumos: document.getElementById(prefixo+'-tag-catalogo-insumos').checked,
     podeCadastrarOperadores: document.getElementById(prefixo+'-tag-operadores').checked,
     podeNoPulsoPrint: document.getElementById(prefixo+'-tag-print').checked,
+    podePedirCorrecaoFechamento: document.getElementById(prefixo+'-tag-pedir-correcao-fechamento').checked,
     podeRhTodasUnidades: document.getElementById(prefixo+'-tag-rh-todas-unidades').checked,
     podeRhCadastrarEfetivado: document.getElementById(prefixo+'-tag-rh-cadastrar-efetivado').checked,
     podeBonifVerValorTotal: document.getElementById(prefixo+'-tag-bonif-valor-total').checked,
@@ -772,6 +774,7 @@ async function salvarTagsUsuario(id, tags){
     fetch('/api/users/'+id+'/catalogo-insumos', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCatalogoInsumos: tags.podeCatalogoInsumos})}),
     fetch('/api/users/'+id+'/cadastrar-operadores', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCadastrarOperadores: tags.podeCadastrarOperadores})}),
     fetch('/api/users/'+id+'/nopulso-print', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeNoPulsoPrint: tags.podeNoPulsoPrint})}),
+    fetch('/api/users/'+id+'/pedir-correcao-fechamento', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podePedirCorrecaoFechamento: tags.podePedirCorrecaoFechamento})}),
     fetch('/api/users/'+id+'/rh-todas-unidades', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhTodasUnidades: tags.podeRhTodasUnidades})}),
     fetch('/api/users/'+id+'/rh-cadastrar-efetivado', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhCadastrarEfetivado: tags.podeRhCadastrarEfetivado})}),
     fetch('/api/users/'+id+'/bonif-ver-valor-total', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeBonifVerValorTotal: tags.podeBonifVerValorTotal})}),
@@ -1530,7 +1533,7 @@ function editarPermissoes(id){
   const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
   // Passe TODOS os campos que o formulário pode salvar. Antes dois flags não
   // eram carregados e, ao salvar sem mexer neles, o modal os desligava.
-  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, cargos: u.cargos||(u.cargo?[u.cargo]:[]), empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeNoPulsoPrint: !!u.podeNoPulsoPrint, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, sessaoLonga: !!u.sessaoLonga, qaUser: !!u.qaUser });
+  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, cargos: u.cargos||(u.cargo?[u.cargo]:[]), empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeNoPulsoPrint: !!u.podeNoPulsoPrint, podePedirCorrecaoFechamento: !!u.podePedirCorrecaoFechamento, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, sessaoLonga: !!u.sessaoLonga, qaUser: !!u.qaUser });
   document.getElementById('perm-err').classList.add('hidden');
   permOverlay.classList.add('show');
 }

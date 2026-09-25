@@ -395,6 +395,7 @@ async function aplicarUsuarioNoReq(req, user, sid) {
       req.podeCatalogoInsumos = !!user.podeCatalogoInsumos;
       req.podeCadastrarOperadores = !!user.podeCadastrarOperadores;
       req.podeNoPulsoPrint = !!user.podeNoPulsoPrint;
+      req.podePedirCorrecaoFechamento = !!user.podePedirCorrecaoFechamento;
       req.podeRhTodasUnidades = !!user.podeRhTodasUnidades;
       req.podeRhCadastrarEfetivado = !!user.podeRhCadastrarEfetivado;
       req.podeBonifVerValorTotal = !!user.podeBonifVerValorTotal;

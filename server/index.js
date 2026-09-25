@@ -2955,6 +2955,7 @@ app.get('/api/me', async (req, res) => {
     podeCatalogoInsumos: req.podeCatalogoInsumos,
     podeCadastrarOperadores: req.podeCadastrarOperadores,
     podeNoPulsoPrint: req.isMaster || !!req.podeNoPulsoPrint,
+    podePedirCorrecaoFechamento: req.isMaster || req.isAdmin || !!req.podePedirCorrecaoFechamento,
     podeRhTodasUnidades: req.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: req.podeRhCadastrarEfetivado,
     podeBonifVerValorTotal: req.podeBonifVerValorTotal,
@@ -6079,6 +6080,7 @@ const EXECUTORES_QA = {
   'usuarios.catalogoInsumos': (p) => users.updatePodeCatalogoInsumos(p.id, p.valor),
   'usuarios.sessaoLonga': (p) => users.updateSessaoLonga(p.id, p.valor),
   'usuarios.cadastrarOperadores': (p) => users.updatePodeCadastrarOperadores(p.id, p.valor),
+  'usuarios.pedirCorrecaoFechamento': (p) => users.updatePodePedirCorrecaoFechamento(p.id, p.valor),
   'usuarios.rhTodasUnidades': (p) => users.updatePodeRhTodasUnidades(p.id, p.valor),
   'usuarios.rhCadastrarEfetivado': (p) => users.updatePodeRhCadastrarEfetivado(p.id, p.valor),
   'usuarios.bonifVerValorTotal': (p) => users.updatePodeBonifVerValorTotal(p.id, p.valor),
@@ -7447,18 +7449,48 @@ app.get('/api/fechamentos/caixa-anterior', requireSection('lancamento'), async (
   res.json(await fechamentosLive.caixaFinalAnterior(unidade, data) || { valor: null, de: null });
 });
 
+// Quem pode propor correção é decidido no servidor (e não só pelo botão da
+// tela): Master/Admin; gerente/assistente da própria unidade; quem lançou o
+// fechamento; ou a exceção explícita dada pelo Master. A exceção jamais fura
+// o escopo de unidades já atribuído ao acesso.
+function podePedirCorrecaoFechamento(req, registro) {
+  if (req.isMaster || req.isAdmin) return true;
+  if (!registro || !(req.permissions?.unidades || []).includes(registro.unidade)) return false;
+  if (req.podePedirCorrecaoFechamento) return true;
+  if (users.ehCargoGerente(req.user?.cargo)) return true;
+  return !!(registro.criadoPorId && req.user?.id && String(registro.criadoPorId) === String(req.user.id));
+}
+
+function correcaoFinanceira(payload = {}) {
+  const camposFinanceiros = new Set([
+    'caixaInicial', 'caixaFinal', 'entradaDinheiro', 'deposito', 'totalSaida',
+    'quebra', 'faturamento', 'totalDeclarado', 'adyen', 'adyenPos', 'ajustePosAnterior',
+  ]);
+  if (['item', 'saida-item', 'excluir'].includes(payload.tipoCorrecao)) return true;
+  if (Object.keys(payload.mudancasCanais || {}).length || Object.keys(payload.mudancasFormas || {}).length) return true;
+  return Object.keys(payload.mudancas || {}).some((campo) => camposFinanceiros.has(campo));
+}
+
 // Registro cru (sem mesclar com sangria/planilha). Também alimenta o
-// formulário "Pedir correção": quem tem a seção Lançamento pode ler SOMENTE
-// o fechamento da própria unidade e propor mudanças; editar/aprovar continua
-// nas rotas restritas abaixo. Antes esta leitura exigia Master, mas o botão
-// aparecia para a loja e falhava exatamente ao abrir o formulário.
+// formulário "Pedir correção". A mesma regra é repetida na criação do pedido,
+// para que chamar a API diretamente nunca contorne a autorização.
 app.get('/api/fechamentos/:id/bruto', requireSection('lancamento'), async (req, res) => {
   const registro = await fechamentosLive.getOne(req.params.id);
   if (!registro) return res.status(404).json({ error: 'Fechamento não encontrado.' });
-  if (!req.isMaster && !(req.permissions.unidades || []).includes(registro.unidade)) {
-    return res.status(403).json({ error: 'Você não tem acesso a esse fechamento.' });
+  if (!podePedirCorrecaoFechamento(req, registro)) {
+    return res.status(403).json({ error: 'Você só pode pedir correção de fechamento lançado por você, da sua unidade como Gerente/Assistente, ou com permissão dada pelo Master.' });
   }
   res.json(registro);
+});
+
+app.put('/api/users/:id/pedir-correcao-fechamento', auth.requireMaster, async (req, res) => {
+  try {
+    const valor = !!req.body.podePedirCorrecaoFechamento;
+    if (await desviarSeQaMaster(req, res, 'usuarios.pedirCorrecaoFechamento', `${valor ? 'Dar' : 'Tirar'} permissão de pedir correção de fechamento`, { id: req.params.id, valor })) return;
+    res.json(await users.updatePodePedirCorrecaoFechamento(req.params.id, valor));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // data de hoje em Brasilia, formato YYYY-MM-DD
@@ -11490,14 +11522,16 @@ app.post('/api/fechamentos/:id/solicitar-edicao', requireSection('lancamento'), 
   try {
     const atual = await fechamentosLive.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Fechamento não encontrado.' });
-    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
-      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-    }
+    if (!podePedirCorrecaoFechamento(req, atual)) return res.status(403).json({ error: 'Você não pode pedir correção deste fechamento.' });
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     const anexos = [];
     for (const file of req.files || []) {
       const path = await storage.salvarArquivo(req.params.id, file, 'fechamento-edicoes');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype || 'application/octet-stream' });
+    }
+    const motivoDetalhado = String(payload.motivo || '').trim().length >= 30;
+    if (correcaoFinanceira(payload) && !anexos.length && !motivoDetalhado) {
+      return res.status(400).json({ error: 'Correção financeira exige um anexo/print ou justificativa detalhada (ao menos 30 caracteres).' });
     }
     const pedido = await fechamentosLive.solicitarEdicao({
       fechamentoId: req.params.id,
@@ -11628,6 +11662,11 @@ app.get('/api/fechamentos/edicoes', requireSection('lancamento'), async (req, re
 app.patch('/api/fechamentos/edicoes/:id', auth.requireMasterOrAdmin, async (req, res) => {
   try {
     if (tipoBloqueado(req, 'ajuste-fechamento')) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
+    const pendente = await fechamentosLive.getEdicao(req.params.id);
+    if (!pendente) return res.status(404).json({ error: 'Pedido de correção não encontrado.' });
+    if (pendente.solicitadoPorId && String(pendente.solicitadoPorId) === String(req.user.id)) {
+      return res.status(403).json({ error: 'Quem solicitou a correção não pode aprová-la nem rejeitá-la.' });
+    }
     const pedido = await fechamentosLive.decidirEdicao(req.params.id, req.body.status, {
       decididoPorEmail: req.user.email,
       motivoDecisao: req.body.motivoDecisao,
@@ -13542,6 +13581,13 @@ app.post('/api/central/decidir-lote', auth.requireMasterOrAdmin, async (req, res
     const pendentes = [];
     for (const { tipo, id } of tickets) {
       if (!mapa.has(`${tipo}::${id}`)) { pulados.push({ tipo, id, motivo: 'não encontrado ou sem permissão' }); continue; }
+      if (tipo === 'ajuste-fechamento') {
+        const pedido = await fechamentosLive.getEdicao(id);
+        if (pedido?.solicitadoPorId && String(pedido.solicitadoPorId) === String(req.user.id)) {
+          pulados.push({ tipo, id, motivo: 'quem solicitou não pode decidir a própria correção' });
+          continue;
+        }
+      }
       if (status === 'APROVADO' && (tipo === 'suporte-ti' || tipo === 'manutencao')) {
         pulados.push({ tipo, id, motivo: tipo === 'suporte-ti' ? 'precisa escolher o técnico - decida pelo card' : 'precisa escolher quem vai fazer - decida pelo card' });
         continue;

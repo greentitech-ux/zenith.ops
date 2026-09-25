@@ -2759,6 +2759,9 @@ function edicoesFechamentoPendentes(fechamentoId){
 // deixa decidir). Mostra o que o pedido muda (resumoMudancas, "de → para")
 // pra decisão ser tomada olhando o número, não só o motivo.
 function renderDecisaoCorrecaoNoCard(e){
+  if(e.solicitadoPorId && String(e.solicitadoPorId)===String(ME?.id)){
+    return '<div class="sub" style="margin-top:8px;">Aguardando decisão de outro aprovador.</div>';
+  }
   const resumo = (e.resumoMudancas||[]).map(l=>`<div style="font-family:var(--mono);font-size:11.5px;">${escapeHtml(l)}</div>`).join('');
   const motivo = String(e.motivo||'').trim();
   const id = escapeHtml(String(e.id));
@@ -2843,7 +2846,7 @@ function renderListaFechamentos(){
       ${(IS_MASTER||IS_ADMIN) && pendentes.length ? pendentes.map(renderDecisaoCorrecaoNoCard).join('') : ''}
       ${IS_MASTER
         ? '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEditarMasterFechamento(\''+f.id+'\')">✎ Editar (Master)</button>'
-        : '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEdicaoFechamento(\''+f.id+'\')">'+(pendente?'Pedir outra correção':'Pedir correção')+'</button>'}
+        : podePedirCorrecaoFechamentoDaLinha(f) ? '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEdicaoFechamento(\''+f.id+'\')">'+(pendente?'Pedir outra correção':'Pedir correção')+'</button>' : ''}
     </div>`;
   }).join('');
   // 8 fechamentos a mostra; o resto fica abaixo, acessivel pelo scroll da
@@ -2863,6 +2866,12 @@ function renderListaFechamentos(){
 // adiciona um por um na lista e envia um pedido só (antes cada campo exigia
 // um pedido separado - foi isso que gerou pedidos duplicados na fila)
 let EF_CAMPOS = [];
+function podePedirCorrecaoFechamentoDaLinha(f){
+  if(!ME || !f) return false;
+  if(IS_MASTER || IS_ADMIN || ME.podePedirCorrecaoFechamento) return true;
+  if(['gerente','assistente-gerente'].includes(ME.cargo)) return true;
+  return !!(f.criadoPorId && String(f.criadoPorId)===String(ME.id));
+}
 function adicionarCampoCorrecao(){
   const selEl = document.getElementById('ef-campo');
   const valor = document.getElementById('ef-valor').value;
@@ -2885,10 +2894,11 @@ function renderCamposCorrecao(){
 }
 
 function abrirEdicaoFechamento(id){
+  const f = MEUS_FECHAMENTOS.find(x=>x.id===id);
+  if(!podePedirCorrecaoFechamentoDaLinha(f)) return;
   EDITANDO_FECHAMENTO_ID = id;
   EF_CAMPOS = [];
   renderCamposCorrecao();
-  const f = MEUS_FECHAMENTOS.find(x=>x.id===id);
   document.getElementById('edicao-fechamento-info').textContent = `${f.unidadeNome||f.unidade} · ${fmtData(f.data)} — depois de lançado o fechamento não pode ser mudado direto; o pedido vai para aprovação do Master.`;
   document.getElementById('ef-campo').innerHTML = opcoesCorrecaoFechamento(f);
   document.getElementById('ef-valor').value = '';
