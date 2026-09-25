@@ -29452,6 +29452,61 @@ $r | ConvertTo-Json -Depth 4 -Compress
   if (!okNiverPlano) ruins += 1;
   console.log(`${okNiverPlano ? '✓' : '✗'} Parque: o desconto de aniversariante também pega quando o plano é escolhido criança a criança`);
 
+  // ------------------------------------------------------------------
+  // A FESTA DE ONTEM CAINDO NO CAIXA DE HOJE (Saltiverso, 25/09/2026).
+  //
+  // O caso: festa vendida às 21:12 de 24/09 apareceu no caixa de 25/09 - num
+  // dia que ainda nem tinha sido aberto. O 24/09 mostrava "Festas R$ 0,00" e
+  // o 25/09, "Festas R$ 559,20".
+  //
+  // Causa: `new Date().toISOString()` é UTC e Brasília é UTC-3, então TODA
+  // venda depois das 21:00 ganhava a data de amanhã. Uma janela de 3 horas
+  // por dia - justamente a noite, que é quando o parque vende festa.
+  //
+  // O `parque.js` e o `saltiversoVendas.js` já usavam America/Sao_Paulo; o
+  // `festas.js` era o único da soma do dia que não usava. Por isso só a linha
+  // "Festas" pulava de dia e as outras duas ficavam certas.
+  let okFestaFuso = false;
+  try {
+    const fs2 = require('fs');
+    const fst = require(__dirname + '/festas.js');
+    const srcFestas = fs2.readFileSync(__dirname + '/festas.js', 'utf8');
+    // 24/09 21:12 em Brasília é 25/09 00:12 em UTC - o carimbo do caso real
+    const CARIMBO = '2026-09-25T00:12:00.000Z';
+    const festaSemData = { id: 'f1', status: 'ativo', sinal: { valor: 559.2, forma: 'pix' }, criadoEm: CARIMBO };
+    const em24 = fst.movimentosDoDia(festaSemData, '2026-09-24');
+    const em25 = fst.movimentosDoDia(festaSemData, '2026-09-25');
+    // recebimento carimbado igual, pelo mesmo caminho
+    const comRecebimento = { id: 'f2', status: 'ativo', recebimentos: [{ valor: 100, forma: 'pix', data: CARIMBO }] };
+    const rec24 = fst.movimentosDoDia(comRecebimento, '2026-09-24');
+    // data pura (o caso normal, digitada na tela) não pode ter mudado
+    const pura = fst.movimentosDoDia({ id: 'f3', status: 'ativo', sinal: { valor: 10, forma: 'pix', data: '2026-09-24' } }, '2026-09-24');
+    // e a madrugada continua no dia dela: 25/09 01:00 BRT = 25/09 04:00 UTC
+    const madrugada = fst.movimentosDoDia({ id: 'f4', status: 'ativo', sinal: { valor: 20, forma: 'pix' }, criadoEm: '2026-09-25T04:00:00.000Z' }, '2026-09-25');
+
+    const conf = {
+      'a festa das 21:12 de 24/09 fica em 24/09': em24.length === 1 && em24[0].valor === 559.2,
+      'e NÃO aparece em 25/09': em25.length === 0,
+      'o recebimento carimbado segue a mesma regra': rec24.length === 1,
+      'data pura digitada na tela continua valendo como está': pura.length === 1,
+      'a madrugada continua no dia dela (não volta pro anterior)': madrugada.length === 1,
+      // sem isto, o conserto seria só na leitura e a PRÓXIMA venda continuaria
+      // nascendo com a data errada gravada
+      'a venda nasce com a data de Brasília, não a de UTC':
+        !/toISOString\(\)\.slice\(0, 10\)/.test(srcFestas)
+        && /dataVenda: dataVenda \|\| hojeBrasilia\(\)/.test(srcFestas)
+        && /data: data \|\| hojeBrasilia\(\)/.test(srcFestas),
+      // os três módulos que somam o dinheiro do dia têm que falar do MESMO dia
+      'os três módulos do faturado usam o mesmo fuso': ['festas.js', 'parque.js', 'saltiversoVendas.js']
+        .every((m) => /America\/Sao_Paulo/.test(fs2.readFileSync(__dirname + '/' + m, 'utf8'))),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFestaFuso = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [em24=${em24.length} em25=${em25.length}]`);
+  } catch (e) { okFestaFuso = false; console.log('  erro: ' + e.message); }
+  if (!okFestaFuso) ruins += 1;
+  console.log(`${okFestaFuso ? '✓' : '✗'} Saltiverso: festa vendida à noite fica no dia dela (o fuso jogava tudo depois das 21h pro dia seguinte)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
