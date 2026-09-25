@@ -5184,7 +5184,7 @@ app.post('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
 
 app.get('/api/qualidade/contexto', auth.requireAuth, (req, res) => {
   const podeAvaliar = req.isMaster || req.isAdmin || users.temTag(req.user, 'qa');
-  res.json({ podeAvaliar, podeCancelar: !!req.isMaster });
+  res.json({ podeAvaliar, podeCancelar: !!req.isMaster, isMaster: !!req.isMaster });
 });
 
 // O arquivo novo da Domino's atualiza o MESMO modelo oficial. A aprovação
@@ -6409,6 +6409,35 @@ app.post('/api/qualidade/visitas/:id/cancelar', auth.requireMaster, async (req, 
     const confere = await auth.verifyPassword(req.user.id, (req.body || {}).password);
     if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a visita não foi cancelada.' });
     res.json(await qualidade.cancelarVisita(req.params.id, req.body || {}, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Exclusão não apaga o documento no Firestore: tira a visita da lista e dos
+// relatórios, mantendo o motivo e o responsável para auditoria. Por isso a
+// confirmação forte é obrigatória exatamente como no cancelamento.
+app.post('/api/qualidade/visitas/:id/excluir', auth.requireMaster, async (req, res) => {
+  try {
+    const confere = await auth.verifyPassword(req.user.id, (req.body || {}).password);
+    if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a visita não foi excluída.' });
+    res.json(await qualidade.excluirVisita(req.params.id, req.body || {}, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Usuários da unidade e avaliadores podem apontar uma necessidade de cancelar
+// ou excluir, mas somente o Master executa a medida após confirmação forte.
+app.post('/api/qualidade/visitas/:id/solicitacoes-administrativas', auth.requireAuth, async (req, res) => {
+  try {
+    const visita = await exigirVisitaQA(req, res);
+    if (!visita) return;
+    res.status(201).json(await qualidade.solicitarAcaoAdministrativa(req.params.id, req.body || {}, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/qualidade/visitas/:id/solicitacoes-administrativas/:solicitacaoId/decidir', auth.requireMaster, async (req, res) => {
+  try {
+    const confere = await auth.verifyPassword(req.user.id, (req.body || {}).password);
+    if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a decisão não foi aplicada.' });
+    res.json(await qualidade.decidirSolicitacaoAdministrativa(req.params.id, req.params.solicitacaoId, req.body || {}, req.user && req.user.email));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 

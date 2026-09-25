@@ -160,9 +160,8 @@
     <a id="v-laudo-link" target="_blank" rel="noopener" class="btn-primary" style="display:block;text-align:center;text-decoration:none;">📄 Abrir o laudo em PDF</a>
     <p class="sub" style="margin:8px 0 0;text-align:center;">Gerado na hora — uma ação corretiva respondida hoje já sai na próxima vez que você abrir.</p>
   </div>
-  <div class="card hidden" id="v-cancelar">
-    <button class="btn" style="width:100%;color:var(--bad);border-color:var(--bad);" onclick="cancelarVisita()">Cancelar visita (somente Master)</button>
-    <p class="sub" style="margin:8px 0 0;text-align:center;">Exige confirmação; o laudo e o motivo permanecem no histórico.</p>
+  <div class="card hidden" id="v-administrar">
+    <div id="v-administrar-conteudo"></div>
   </div>
 
   <div id="assin-modal" class="assin-modal hidden">
@@ -195,7 +194,7 @@ function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, (c)=>({'
 let MODELOS = [];
 let UNIDADES = [];
 let VISITA = null;
-let CONTEXTO = { podeAvaliar:false, podeCancelar:false };
+let CONTEXTO = { podeAvaliar:false, podeCancelar:false, isMaster:false };
 let INICIAR_DEPOIS_DA_SELFIE = false;
 
 function atualizarUnidadesDoModelo(){
@@ -318,7 +317,8 @@ function pintarVisita(){
   $('v-fechar').classList.toggle('hidden', encerrada);
   $('v-laudo').classList.toggle('hidden', !concluida);
   $('v-assinaturas').classList.toggle('hidden', !concluida);
-  $('v-cancelar').classList.toggle('hidden', !CONTEXTO.podeCancelar || v.status==='CANCELADA');
+  $('v-administrar').classList.toggle('hidden', v.status === 'EXCLUIDA');
+  pintarAdministracao(v);
   pintarAnterior(v.anterior);
   pintarAssinaturas(v.assinaturas||{});
   // o navegador abre o PDF numa aba nova e não manda header nenhum: o token
@@ -379,6 +379,29 @@ function pintarItem(item, concluida){
       ${VISITA.status==='CONCLUIDA' ? pintarRevisao(item.id, r) : ''}
     </div>` : ''}
   </div>`;
+}
+
+function pintarAdministracao(v){
+  const pedidos = v.solicitacoesAdministrativas || [];
+  const pendentes = pedidos.filter((p)=>p.status==='PENDENTE');
+  const historico = pedidos.filter((p)=>p.status!=='PENDENTE').slice(-3).reverse();
+  const el = $('v-administrar-conteudo');
+  if(CONTEXTO.isMaster){
+    el.innerHTML = `<h2 style="margin:0 0 4px;font-size:14px;">Controle da avaliação</h2>
+      <p class="sub" style="margin:0 0 10px;">Cancelar ou excluir exige sua senha ou digital. A exclusão some da operação, mas preserva a trilha de auditoria.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${v.status==='CANCELADA'?'':`<button class="btn" style="flex:1;color:var(--warn);border-color:var(--warn);" onclick="cancelarVisita()">Cancelar avaliação</button>`}
+        <button class="btn" style="flex:1;color:var(--bad);border-color:var(--bad);" onclick="excluirVisita()">Excluir avaliação</button>
+      </div>
+      ${pendentes.length?`<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px;"><b style="font-size:12.5px;">Solicitações aguardando sua decisão</b>${pendentes.map((p)=>`<div style="margin-top:8px;padding:9px;background:var(--panel2);border-radius:8px;"><div style="font-size:12px;font-weight:700;">${p.acao==='EXCLUIR'?'EXCLUSÃO':'CANCELAMENTO'} solicitado</div><div class="sub" style="margin-top:4px;">${escapeHtml(p.motivo)}</div><div style="display:flex;gap:7px;margin-top:8px;"><button class="btn-primary" style="flex:1;padding:8px;" onclick="decidirSolicitacaoAdministrativa('${escapeHtml(p.id)}',true)">Aprovar</button><button class="btn" style="flex:1;padding:8px;" onclick="decidirSolicitacaoAdministrativa('${escapeHtml(p.id)}',false)">Recusar</button></div></div>`).join('')}</div>`:''}
+      ${historico.length?`<div class="sub" style="margin-top:10px;">${historico.map((p)=>`${p.acao==='EXCLUIR'?'Exclusão':'Cancelamento'} ${p.status==='APROVADA'?'aprovado':'recusado'}`).join(' · ')}</div>`:''}`;
+    return;
+  }
+  const existePendente = pendentes.length > 0;
+  el.innerHTML = `<h2 style="margin:0 0 4px;font-size:14px;">Solicitar cancelamento ou exclusão</h2>
+    <p class="sub" style="margin:0 0 8px;">O pedido é enviado ao Master; a avaliação não muda até a decisão dele.</p>
+    ${existePendente?`<div class="sub" style="color:var(--warn);">Já existe uma solicitação aguardando decisão do Master.</div>`:`<label>Ação solicitada<select id="adm-acao"><option value="CANCELAR">Cancelar avaliação</option><option value="EXCLUIR">Excluir avaliação</option></select></label><label>Justificativa<textarea id="adm-motivo" rows="3" placeholder="Explique por que esta medida é necessária"></textarea></label><button class="btn-primary" style="width:100%;margin-top:9px;" onclick="solicitarAcaoAdministrativa()">Enviar solicitação ao Master</button>`}
+    ${historico.length?`<div class="sub" style="margin-top:10px;">Última decisão: ${historico[0].acao==='EXCLUIR'?'exclusão':'cancelamento'} ${historico[0].status==='APROVADA'?'aprovado':'recusado'}.</div>`:''}`;
 }
 
 function pintarRevisao(itemId, r){
@@ -571,6 +594,38 @@ async function cancelarVisita(){
   try{
     await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/cancelar`,{method:'POST',body:JSON.stringify({motivo,password:prova})});
     await recarregar();
+  }catch(e){alert(e.message);}
+}
+async function excluirVisita(){
+  const motivo=prompt('Motivo da exclusão (obrigatório):');
+  if(!motivo || !motivo.trim()) return;
+  if(!confirm('Excluir esta avaliação da operação? O registro de auditoria será preservado.')) return;
+  const prova=await window.pedirConfirmacao('excluir esta avaliação');
+  if(prova===null) return;
+  try{
+    await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/excluir`,{method:'POST',body:JSON.stringify({motivo,password:prova})});
+    verLista();
+  }catch(e){alert(e.message);}
+}
+async function solicitarAcaoAdministrativa(){
+  const acao=$('adm-acao').value;
+  const motivo=($('adm-motivo').value||'').trim();
+  if(!motivo) return alert('Explique o motivo da solicitação.');
+  try{
+    await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/solicitacoes-administrativas`,{method:'POST',body:JSON.stringify({acao,motivo})});
+    await recarregar();
+    alert('Solicitação enviada ao Master. A avaliação permanece inalterada até a decisão.');
+  }catch(e){alert(e.message);}
+}
+async function decidirSolicitacaoAdministrativa(solicitacaoId, aprovar){
+  const parecer=prompt(aprovar?'Parecer para aprovar esta solicitação:':'Parecer para recusar esta solicitação:');
+  if(!parecer || !parecer.trim()) return;
+  const acao=aprovar?'aprovar e executar esta solicitação':'recusar esta solicitação';
+  const prova=await window.pedirConfirmacao(acao);
+  if(prova===null) return;
+  try{
+    const retorno=await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/solicitacoes-administrativas/${encodeURIComponent(solicitacaoId)}/decidir`,{method:'POST',body:JSON.stringify({aprovar,parecer,password:prova})});
+    if(retorno.status==='EXCLUIDA') verLista(); else await recarregar();
   }catch(e){alert(e.message);}
 }
 

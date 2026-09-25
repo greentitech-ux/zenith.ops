@@ -88,7 +88,7 @@ function pesoDoItem(item, comPesos) {
 const RESPOSTAS = ['conforme', 'nao-conforme'];
 const RESPOSTA_LABEL = { conforme: 'CONFORME', 'nao-conforme': 'NÃO CONFORME', 'nao-aplica': 'NÃO SE APLICA (legado)' };
 // a visita nasce aberta e só fecha quando ela termina de andar pela loja
-const STATUS = ['EM_ANDAMENTO', 'CONCLUIDA', 'CANCELADA'];
+const STATUS = ['EM_ANDAMENTO', 'CONCLUIDA', 'CANCELADA', 'EXCLUIDA'];
 
 // FAIXAS (decisão do Master, 23/09/2026). As cores são as da planilha
 // (verde 92D050, amarelo FFFF00, vermelho FF0000); os números não estavam
@@ -507,9 +507,9 @@ async function obterVisita(id) {
 // que continua aberto depois de fechar é só o ciclo da ação corretiva
 function travarSeConcluida(visita) {
   if (visita.status !== 'EM_ANDAMENTO') {
-    throw new Error(visita.status === 'CANCELADA'
-      ? 'Visita cancelada não pode ser alterada.'
-      : 'Visita concluída não pode ser alterada. Abra uma visita nova.');
+    if (visita.status === 'CANCELADA') throw new Error('Visita cancelada não pode ser alterada.');
+    if (visita.status === 'EXCLUIDA') throw new Error('Visita excluída não pode ser alterada.');
+    throw new Error('Visita concluída não pode ser alterada. Abra uma visita nova.');
   }
 }
 
@@ -671,6 +671,81 @@ async function cancelarVisita(id, { motivo }, email) {
   const texto = String(motivo || '').trim().slice(0, 2000);
   if (!texto) throw new Error('Informe o motivo do cancelamento.');
   const patch = { status: 'CANCELADA', canceladaEm: new Date().toISOString(), canceladaPorEmail: email || null, motivoCancelamento: texto };
+  await COLLECTION.doc(String(id)).set(patch, { merge: true });
+  cacheLista.invalidar();
+  return { ...visita, ...patch };
+}
+
+// Exclusão é lógica, nunca física. Assim a avaliação some da operação e dos
+// relatórios, mas a trilha de quem autorizou, quando e por quê continua
+// preservada para auditoria. Remover o documento do Firestore apagaria justo
+// a prova que protege a empresa numa contestação.
+async function excluirVisita(id, { motivo }, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  if (visita.status === 'EXCLUIDA') throw new Error('Esta visita já foi excluída.');
+  const texto = String(motivo || '').trim().slice(0, 2000);
+  if (!texto) throw new Error('Informe o motivo da exclusão.');
+  const patch = { status: 'EXCLUIDA', excluidaEm: new Date().toISOString(), excluidaPorEmail: email || null, motivoExclusao: texto };
+  await COLLECTION.doc(String(id)).set(patch, { merge: true });
+  cacheLista.invalidar();
+  return { ...visita, ...patch };
+}
+
+const ACOES_ADMINISTRATIVAS = ['CANCELAR', 'EXCLUIR'];
+
+function idSolicitacaoAdministrativa() {
+  return `qa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// Qualquer pessoa que enxerga a visita pode pedir a medida, mas não executá-la.
+// O pedido fica no próprio laudo para a decisão não se perder em uma conversa
+// de WhatsApp ou em uma planilha paralela.
+async function solicitarAcaoAdministrativa(id, { acao, motivo }, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  if (visita.status === 'EXCLUIDA') throw new Error('Esta visita já foi excluída.');
+  const tipo = String(acao || '').toUpperCase();
+  if (!ACOES_ADMINISTRATIVAS.includes(tipo)) throw new Error('Ação administrativa inválida.');
+  const texto = String(motivo || '').trim().slice(0, 2000);
+  if (!texto) throw new Error('Explique o motivo da solicitação.');
+  const pendente = (visita.solicitacoesAdministrativas || []).find((s) => s.status === 'PENDENTE');
+  if (pendente) throw new Error('Já existe uma solicitação aguardando decisão do Master.');
+  const pedido = { id: idSolicitacaoAdministrativa(), acao: tipo, motivo: texto, status: 'PENDENTE', solicitadoEm: new Date().toISOString(), solicitadoPorEmail: email || null };
+  const solicitacoesAdministrativas = [...(visita.solicitacoesAdministrativas || []), pedido];
+  await COLLECTION.doc(String(id)).set({ solicitacoesAdministrativas }, { merge: true });
+  return pedido;
+}
+
+// A decisão e a ação aprovada são gravadas juntas: não existe janela em que
+// um pedido apareça como aprovado sem a avaliação ter sido cancelada/excluída.
+async function decidirSolicitacaoAdministrativa(id, solicitacaoId, { aprovar, parecer }, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  const texto = String(parecer || '').trim().slice(0, 2000);
+  if (!texto) throw new Error('Informe o parecer do Master.');
+  if (typeof aprovar !== 'boolean') throw new Error('Informe a decisão do Master.');
+  let solicitacao = null;
+  const solicitacoesAdministrativas = (visita.solicitacoesAdministrativas || []).map((s) => {
+    if (s.id !== String(solicitacaoId)) return s;
+    if (s.status !== 'PENDENTE') throw new Error('Esta solicitação já foi decidida.');
+    solicitacao = { ...s, status: aprovar ? 'APROVADA' : 'RECUSADA', parecer: texto, decididaEm: new Date().toISOString(), decididaPorEmail: email || null };
+    return solicitacao;
+  });
+  if (!solicitacao) throw new Error('Solicitação não encontrada.');
+  const patch = { solicitacoesAdministrativas };
+  if (aprovar) {
+    if (solicitacao.acao === 'CANCELAR') {
+      patch.status = 'CANCELADA'; patch.canceladaEm = new Date().toISOString(); patch.canceladaPorEmail = email || null;
+      patch.motivoCancelamento = `${solicitacao.motivo}\n\nAprovação Master: ${texto}`;
+    } else {
+      patch.status = 'EXCLUIDA'; patch.excluidaEm = new Date().toISOString(); patch.excluidaPorEmail = email || null;
+      patch.motivoExclusao = `${solicitacao.motivo}\n\nAprovação Master: ${texto}`;
+    }
+  }
   await COLLECTION.doc(String(id)).set(patch, { merge: true });
   cacheLista.invalidar();
   return { ...visita, ...patch };
@@ -846,7 +921,7 @@ async function concluirVisita(id, email, gpsFim) {
 // LISTA. Resumo, nunca o documento inteiro (CLAUDE.md §3).
 async function listarUncached() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').limit(300).get();
-  return snap.docs.map((d) => {
+  return snap.docs.filter((d) => d.data().status !== 'EXCLUIDA').map((d) => {
     const v = d.data();
     const conta = v.status === 'CONCLUIDA'
       ? { nota: v.nota, faixa: v.faixa, conformes: v.conformes, naoConformes: v.naoConformes, total: v.totalItens }
@@ -905,7 +980,7 @@ module.exports = {
   MODELOS_OFICIAIS, listarModelos, modeloPorId, salvarModelo, atualizarModeloOficial, retratoDoModelo, normalizarSetores,
   MAX_SETORES, MAX_ITENS_POR_SETOR,
   dataDaVisitaAgora, criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
-  salvarAcaoCorretiva, solicitarRevisao, decidirRevisao, cancelarVisita, concluirVisita, listarVisitas, apontamentosDe,
+  salvarAcaoCorretiva, solicitarRevisao, decidirRevisao, cancelarVisita, excluirVisita, solicitarAcaoAdministrativa, decidirSolicitacaoAdministrativa, concluirVisita, listarVisitas, apontamentosDe,
   MAX_FOTOS_POR_ITEM, anexarFoto, fotoDe,
   QUEM_ASSINA, QUEM_ASSINA_LABEL, MAX_IMAGEM_CHARS, assinarVisita,
   visitaAnteriorDe, pendenciasDaAnterior,
