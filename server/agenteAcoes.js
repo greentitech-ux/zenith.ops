@@ -562,23 +562,36 @@ async function responderChat(params) {
 const TAREFAS_NOC = {
   reiniciar: { verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
   abortar: { verbo: 'Abortar o reinício de', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
-  anydesk: { verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
+  anydesk: { verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk', requerAdmin: true },
   'gsurf-rsa': { verbo: 'TEF parou — reiniciar o GSurfRSA Listener de', comando: lojaStatus.COMANDO_REINICIAR_GSURF_RSA, origem: 'manutencao-gsurf-rsa', requerAdmin: true },
   'diagnostico-tef': { verbo: 'Diagnosticar TEF/pinpad de', comando: lojaStatus.COMANDO_DIAGNOSTICO_TEF, origem: 'manutencao-diagnostico-tef' },
+  'diagnostico-desempenho': { verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
+  'inventario-estacao': { verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
+  'limpeza-segura': { verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },
   'corrigir-memoria-limitada': { verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
-  rede: { verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede' },
+  'remover-office': { verbo: 'Remover Microsoft Office de', comando: lojaStatus.COMANDO_REMOVER_OFFICE, origem: 'manutencao-remover-office', requerAdmin: true },
+  rede: { verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede', requerAdmin: true },
+  'gcom-wcf': { verbo: 'Encerrar o GcomClient.WCF de', comando: lojaStatus.comandoEncerrarGcomWcf, origem: 'manutencao-gcom-wcf' },
   zebra: { verbo: 'Resetar as Zebras de', comando: async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)), origem: 'manutencao-zebra' },
+  'reset-senha': {
+    verbo: 'Remover a senha local em', origem: 'manutencao-reset-senha', requerAdmin: true,
+    comando: (_doc, parametros) => lojaStatus.comandoResetSenha(String(parametros.nomeConta || '').trim()),
+  },
 };
 
 async function nocComando(params) {
   const p = params || {};
   await resolverAtor(p);
   const t = TAREFAS_NOC[String(p.tarefa || '')];
-  if (!t) throw new Error('Tarefa do NOC inválida - use reiniciar, abortar, anydesk, zebra, gsurf-rsa, diagnostico-tef, rede ou corrigir-memoria-limitada.');
+  if (!t) throw new Error('Tarefa de manutenção inválida. Consulte as opções do conector antes de solicitar.');
   const alvos = Array.isArray(p.alvos) ? p.alvos.filter((a) => a && a.codigo && a.posto) : [];
   if (!alvos.length) throw new Error('Diga quais computadores (lista de {codigo, posto}).');
   if (alvos.length > 200) throw new Error('Muitos alvos de uma vez - divida em lotes.');
-  const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, { origem: t.origem, requerAdmin: !!t.requerAdmin });
+  if (p.tarefa === 'reset-senha' && !String(p.nomeConta || '').trim()) throw new Error('Informe nomeConta para remover a senha local.');
+  const comando = typeof t.comando === 'function'
+    ? ((doc) => t.comando(doc, p))
+    : t.comando;
+  const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, comando, { origem: t.origem, requerAdmin: !!t.requerAdmin });
   const ok = resultados.filter((r) => r.ok).length;
   // quem NÃO entrou diz por quê (sem agentToken, já tem comando pendente...)
   // - senão "0 de 1" vira adivinhação
@@ -651,7 +664,7 @@ async function executarAcaoSistema(executorSistema, parametros) {
 }
 
 module.exports = {
-  TIPOS_ACAO, EXECUTORES_SISTEMA_VALIDOS, PARAMETROS_EXECUTOR, MODELOS_COMANDO, validarDados,
+  TIPOS_ACAO, EXECUTORES_SISTEMA_VALIDOS, PARAMETROS_EXECUTOR, MODELOS_COMANDO, TAREFAS_NOC, validarDados,
   listar, listarAtivas, obter, criar, atualizar, remover,
   obterContexto, salvarContexto, executarAcaoDoAgente, executarAcaoSistema,
 };

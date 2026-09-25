@@ -80,7 +80,7 @@ const FERRAMENTAS = Object.freeze({
   ajustar_permissoes_usuario: { descricao: 'Altera somente os campos de permissão informados de um acesso existente (seções, unidades, subgrupos do Cofre, tipos da Central e cargos). Sempre gera aprovação do Master no celular e devolve o antes/depois.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true },
   responder_chat_suporte: { descricao: 'Envia uma resposta do Cowork pelo Beniboy ao solicitante de um protocolo de suporte aberto.', risco: 'baixo', obrigatorios: ['protocolo', 'texto'] },
   finalizar_chat_suporte: { descricao: 'Registra o resumo interno e finaliza um protocolo de suporte depois que a situação estiver resolvida.', risco: 'baixo', obrigatorios: ['protocolo', 'resumo'] },
-  executar_noc: { descricao: 'Enfileira uma ação fechada do NOC em computadores. Resetar Zebra só é permitido em unidade com marca Domino\'s configurada e Zebra monitorada. Para "TEF parou", use gsurf-rsa: reinicia o GSurfRSA Listener somente nas cinco unidades autorizadas e pode interromper uma transação por alguns segundos.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], autorizar: true },
+  executar_noc: { descricao: 'Solicita qualquer função remota disponível em Manutenção para computadores internos: reinício, serviços, TEF, diagnósticos, inventário, limpeza, rede, Zebra, memória, Office e senha local. A ação nunca executa na chamada: gera alerta ao Master e só entra na fila após aprovação com senha ou digital. PowerShell livre continua fora do conector por segurança.', risco: 'alto', obrigatorios: ['tarefa', 'alvos'], autorizar: true },
 });
 
 function listarFerramentas() {
@@ -99,8 +99,9 @@ const PROPRIEDADES_COMUNS = {
   tarefaId: { type: 'string' }, motivo: { type: 'string' }, usuario: { type: 'string', description: 'E-mail ou username.' },
   pedirTrocaSenha: { type: 'boolean' }, modelo: { type: 'string' }, email: { type: 'string' }, username: { type: 'string' },
   tipo: { type: 'string', description: 'Formulário: estorno, reembolso, avulso, deposito, diarias, diariasRh, adiantamento, assBoleto (listar_modelos_formulario). Solicitação: estorno, compra, manutencao, suporte-ti, pagamento, nota...' }, modo: { type: 'string', enum: ['link', 'preenchido'] }, campos: { type: 'object' }, linhas: { type: 'array', items: { type: 'object' } },
-  tarefa: { type: 'string', enum: ['reiniciar', 'abortar', 'anydesk', 'zebra', 'gsurf-rsa', 'rede', 'corrigir-memoria-limitada'] },
+  tarefa: { type: 'string', enum: ['reiniciar', 'abortar', 'anydesk', 'gsurf-rsa', 'diagnostico-tef', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office', 'rede', 'gcom-wcf', 'zebra', 'reset-senha'], description: 'Função fechada de Manutenção. Todas geram aprovação do Master antes de chegar na máquina.' },
   alvos: { type: 'array', items: { type: 'object', required: ['codigo', 'posto'], properties: { codigo: { type: 'string' }, posto: { type: 'string' } } } },
+  nomeConta: { type: 'string', description: 'Obrigatório apenas em reset-senha: conta local do Windows que ficará sem senha.' },
   limite: { type: 'number' },
   // compatibilidade: versões antigas do Cowork mandavam confirmar=true. Não
   // autoriza mais nada - quem autoriza é o Master, no celular.
@@ -183,7 +184,7 @@ const PARAMETROS = Object.freeze({
   ajustar_permissoes_usuario: ['usuario', 'permissions', 'cargos'],
   responder_chat_suporte: ['protocolo', 'texto'],
   finalizar_chat_suporte: ['protocolo', 'resumo', 'restringirAposConclusao'],
-  executar_noc: ['tarefa', 'alvos'],
+  executar_noc: ['tarefa', 'alvos', 'nomeConta'],
 });
 function propriedadesDe(nome, f) {
   const lista = [...(PARAMETROS[nome] || []), ...(f.risco === 'leitura' ? [] : ['idempotencyKey'])];
@@ -236,6 +237,17 @@ function validar(nome, entrada) {
   const aceitos = new Set([...(PARAMETROS[nome] || Object.keys(PROPRIEDADES_COMUNS)), 'idempotencyKey', 'confirmar']);
   const estranhos = Object.keys(entrada || {}).filter((k) => !aceitos.has(k));
   if (estranhos.length) throw new Error(`${nome} não usa: ${estranhos.join(', ')}. Aceita: ${[...(PARAMETROS[nome] || [])].join(', ') || 'nenhum parâmetro'}.`);
+  // A validação acontece antes de avisar o Master. Assim o celular nunca
+  // recebe uma autorização impossível (por exemplo, resetar senha sem dizer
+  // qual conta local) e a lista permanece exatamente igual à manutenção.
+  if (nome === 'executar_noc') {
+    if (!agenteAcoes.TAREFAS_NOC[String(entrada?.tarefa || '')]) {
+      throw new Error('Função de manutenção inválida. Consulte as opções do conector.');
+    }
+    if (entrada?.tarefa === 'reset-senha' && !String(entrada?.nomeConta || '').trim()) {
+      throw new Error('reset-senha exige nomeConta (a conta local do Windows).');
+    }
+  }
   return ferramenta;
 }
 
@@ -246,7 +258,7 @@ const ROTULOS = {
   para: 'Para', assunto: 'Assunto', texto: 'Texto', tarefaId: 'Tarefa', motivo: 'Motivo',
   modelo: 'Copiar permissões de', email: 'E-mail', username: 'Usuário', usuario: 'Acesso',
   permissions: 'Permissões a alterar', cargos: 'Cargos finais', protocolo: 'Protocolo', resumo: 'Resumo interno',
-  pedirTrocaSenha: 'Pedir troca de senha', tarefa: 'Comando', alvos: 'Computadores', unidade: 'Unidade',
+  pedirTrocaSenha: 'Pedir troca de senha', tarefa: 'Função de manutenção', alvos: 'Computadores', nomeConta: 'Conta local do Windows', unidade: 'Unidade',
   titulo: 'Título', descricao: 'Descrição', observacao: 'Observação',
   disputaId: 'Disputa', motivoDefesa: 'Motivo de defesa', documentos: 'Documentos',
 };
