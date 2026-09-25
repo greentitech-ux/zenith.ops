@@ -1049,6 +1049,7 @@
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
         <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
        <button type="button" class="btn-ghost" id="manut-gsurf-rsa" onclick="manutEnviar('gsurfRsa')" title="Reinicia só o serviço GSurfRSA Listener (TEF), sem reiniciar o computador. Use apenas nas máquinas selecionadas que apresentam o erro de automação/TEF.">💳 Reiniciar GSurfRSA</button>
+       <button type="button" class="btn-ghost" id="manut-diagnostico-tef" onclick="manutEnviar('diagnostico-tef')" title="Somente leitura: identifica o estado do Listener, GCOM, portas seriais, dispositivos/driver do pinpad e logs recentes. Não interrompe venda.">💳 Diagnosticar TEF/pinpad</button>
        <button type="button" class="btn-ghost" id="manut-gcom-wcf" onclick="manutEnviar('gcomWcf')" title="Encerra somente GcomClient.WCF.exe nas VMs marcadas como GCOM; a própria VM o inicia novamente">🟥 Encerrar GCOM</button>
        <button type="button" class="btn-ghost" id="manut-diagnostico" onclick="manutEnviar('diagnostico-desempenho')" title="Lê eventos de tela azul, falha de disco/hardware, minidumps e consumo atual; não altera a máquina">🩺 Diagnosticar falha</button>
        <button type="button" class="btn-ghost" id="manut-limpeza-segura" onclick="manutEnviar('limpeza-segura')" title="Remove apenas temporários do Windows e do usuário, além da Lixeira; mede o espaço livre antes e depois; não reinicia a máquina">🧹 Liberar espaço seguro</button>
@@ -2348,6 +2349,7 @@ function abrirManutencaoDestaMaquina(codigo, posto, nome){
 const PROG_MANUTENCOES = [
   ['anydesk','🖥️ Reiniciar AnyDesk','Reinicia somente o serviço de acesso remoto; o computador e o caixa continuam ligados.'],
   ['gsurfRsa','💳 Reiniciar GSurfRSA','Reinicia o Listener TEF desta máquina. Pode interromper uma transação em curso por alguns segundos.'],
+  ['diagnostico-tef','💳 Diagnosticar TEF/pinpad','Somente leitura: verifica Listener, GCOM, porta serial, dispositivo/driver do pinpad e logs recentes. Não interrompe venda.'],
   ['gcomWcf','🟥 Encerrar GCOM','Finaliza somente o processo GcomClient.WCF; a VM o inicia novamente pelo mecanismo padrão.'],
   ['diagnostico-desempenho','🩺 Diagnosticar falha','Lê tela azul, disco, hardware, minidumps e consumo atual. Não altera a máquina.'],
   ['limpeza-segura','🧹 Liberar espaço seguro','Remove temporários e Lixeira, medindo antes e depois. Não toca em documentos, Downloads ou programas.'],
@@ -3778,6 +3780,7 @@ const MANUT_TAREFAS = {
   abortar: { botao: 'manut-abortar', rotulo: 'Abort' },
   anydesk: { botao: 'manut-anydesk', rotulo: 'Reinício do AnyDesk' },
   gsurfRsa: { botao: 'manut-gsurf-rsa', rotulo: 'Reinício do GSurfRSA Listener' },
+  'diagnostico-tef': { botao: 'manut-diagnostico-tef', rotulo: 'Diagnóstico TEF/pinpad' },
   gcomWcf: { botao: 'manut-gcom-wcf', rotulo: 'Encerramento do GcomClient.WCF' },
   'diagnostico-desempenho': { botao: 'manut-diagnostico', rotulo: 'Diagnóstico de falha' },
   'limpeza-segura': { botao: 'manut-limpeza-segura', rotulo: 'Liberação de espaço seguro' },
@@ -3821,6 +3824,9 @@ async function manutEnviar(tarefa){
   }
   if(tarefa === 'gsurfRsa'){
     if(!confirm(`Reiniciar o serviço GSurfRSA Listener (TEF) em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO computador NÃO reinicia. A operação só é enviada às máquinas selecionadas e pode interromper uma transação TEF em andamento por alguns segundos.`)) return;
+  }
+  if(tarefa === 'diagnostico-tef'){
+    if(!confirm(`Diagnosticar TEF/pinpad em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nA coleta é somente leitura: consulta Listener, GCOM, portas/dispositivos e registros recentes. Não reinicia serviço, computador ou pinpad e não lê dados de vendas.`)) return;
   }
   if(tarefa === 'gcomWcf'){
     if(!confirm(`Encerrar GcomClient.WCF.exe em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO NOC não reinicia a VM nem tenta abrir o programa: apenas finaliza esse processo específico. A própria VM o inicia novamente pelo mecanismo padrão.`)) return;

@@ -3065,6 +3065,33 @@ const COMANDO_REINICIAR_GSURF_RSA = [
   '}',
 ].join('\n');
 
+// Diagnóstico do TEF/pinpad. Diferente do reinício acima, esta coleta é
+// estritamente de leitura: não reinicia serviço, não toca na porta serial e
+// não lê conteúdo de transações. Ela permite separar "pinpad sumiu/driver" de
+// "listener parado" antes de tomar qualquer ação que possa interromper venda.
+// Mantemos o comando fechado no servidor pelo mesmo motivo das demais ações do
+// NOC: a tela nunca envia PowerShell livre para uma máquina de loja.
+const COMANDO_DIAGNOSTICO_TEF = [
+  '$padroes = "(?i)pin.?pad|gertec|ingenico|verifone|pax|idtech|sitef|tef|gsurf|gcom"',
+  '$servico = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "GSurfRSA Listener" -or $_.DisplayName -eq "GSurfRSA Listener" }) | Select-Object -First 1',
+  'if ($servico) { "TEF serviço: $($servico.DisplayName) | estado=$($servico.Status) | início=$($servico.StartType)" } else { "TEF serviço: GSurfRSA Listener NÃO encontrado" }',
+  '$svcInfo = @(Get-WmiObject Win32_Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "GSurfRSA Listener" -or $_.DisplayName -eq "GSurfRSA Listener" }) | Select-Object -First 1',
+  'if ($svcInfo) { "TEF serviço configurado: estado=$($svcInfo.State) | início=$($svcInfo.StartMode)" }',
+  '$gertec = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "Gertec-WebAPI" -or $_.DisplayName -eq "Gertec WebAPI 2" -or $_.DisplayName -match "(?i)gertec.*webapi" }) | Select-Object -First 1',
+  'if ($gertec) { "Pinpad serviço Gertec: $($gertec.DisplayName) | estado=$($gertec.Status) | início=$($gertec.StartType)" } else { "Pinpad serviço Gertec WebAPI: NÃO encontrado" }',
+  '$gcom = @(Get-Process -Name "GcomClient.WCF" -ErrorAction SilentlyContinue)',
+  '"GCOM: " + $(if ($gcom.Count) { "em execução ($($gcom.Count) processo(s))" } else { "processo não encontrado" })',
+  '$portas = @(Get-WmiObject Win32_SerialPort -ErrorAction SilentlyContinue)',
+  'if ($portas.Count) { $portas | ForEach-Object { "Porta serial: $($_.DeviceID) | $($_.Name) | status=$($_.Status) | PNP=$($_.PNPDeviceID)" } } else { "Porta serial: nenhuma porta COM detectada" }',
+  '$pnp = @(Get-WmiObject Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object { (($_.Name + " " + $_.Caption + " " + $_.PNPDeviceID) -match $padroes) })',
+  'if ($pnp.Count) { $pnp | Select-Object -First 20 | ForEach-Object { "Dispositivo TEF: $($_.Name) | status=$($_.Status) | código=$($_.ConfigManagerErrorCode) | PNP=$($_.PNPDeviceID)" } } else { "Dispositivo TEF: nenhum pinpad/driver identificado pelo Windows" }',
+  '$logDirs = @()',
+  'if ($svcInfo -and $svcInfo.PathName) { $bin = [regex]::Match([string]$svcInfo.PathName, "^\\s*\\\"?([^\\\"]+?\\.exe)").Groups[1].Value; if ($bin -and (Test-Path $bin)) { $base = Split-Path $bin -Parent; $logDirs += $base; $logDirs += (Join-Path $base "logs") } }',
+  '$logs = @($logDirs | Where-Object { Test-Path $_ } | Select-Object -Unique | ForEach-Object { Get-ChildItem -Path $_ -File -Include *.log,*.txt -ErrorAction SilentlyContinue } | Sort-Object LastWriteTime -Descending | Select-Object -First 3)',
+  'if ($logs.Count) { $logs | ForEach-Object { "Log TEF: $($_.Name) | atualizado=$($_.LastWriteTime.ToString(\"yyyy-MM-dd HH:mm:ss\")) | tamanho=$($_.Length) bytes" } } else { "Log TEF: nenhum arquivo de log conhecido ao lado do Listener" }',
+  '"Diagnóstico concluído: somente leitura; nenhum serviço, driver, porta ou venda foi alterado."',
+].join('\n');
+
 // GcomClient.WCF e o cliente da GCOM que roda nas VMs marcadas como GCOM no
 // NOC. Em algumas delas ele fica travado, mas o proprio ambiente da VM ja tem
 // o mecanismo que o sobe de novo. Portanto esta manutencao NAO tenta iniciar
@@ -4948,7 +4975,7 @@ module.exports = {
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   dispositivosComTipoDe, resumoDe,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_ENCERRAR_GCOM_WCF,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf,
   ESTADOS, estadoDe, motivosDeDegradacao,

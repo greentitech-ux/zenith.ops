@@ -6603,7 +6603,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'diagnostico-tef', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const nomeConta = tarefa === 'reset-senha' ? req.body.nomeConta : undefined;
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
@@ -6618,6 +6618,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       // servico so
       anydesk: { acao: 'manutencao.reiniciarAnydesk', verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk', requerAdmin: true },
       gsurfRsa: { acao: 'manutencao.reiniciarGsurfRsa', verbo: 'Reiniciar o GSurfRSA Listener de', comando: lojaStatus.COMANDO_REINICIAR_GSURF_RSA, origem: 'manutencao-gsurf-rsa', requerAdmin: true },
+      'diagnostico-tef': { acao: 'manutencao.diagnosticoTef', verbo: 'Diagnosticar TEF de', comando: lojaStatus.COMANDO_DIAGNOSTICO_TEF, origem: 'manutencao-diagnostico-tef' },
       gcomWcf: { acao: 'manutencao.encerrarGcomWcf', verbo: 'Encerrar o GcomClient.WCF de', comando: lojaStatus.comandoEncerrarGcomWcf, origem: 'manutencao-gcom-wcf' },
       // O comando aqui e uma FUNCAO porque muda de unidade pra unidade: leva
       // os IPs das Zebras DAQUELA loja. Os IPs saem de impressorasPraSondar,
