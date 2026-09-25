@@ -47,6 +47,7 @@ const entregasRegras = require('./entregasRegras');
 const backup = require('./backup');
 const relatorios = require('./relatorios');
 const sheetsSync = require('./sheetsSync');
+const fechamentosLeitura = require('./fechamentosLeitura');
 const bravoImport = require('./bravoImport');
 const bravoMapa = require('./bravoMapa');
 const entregasSync = require('./entregasSync');
@@ -1421,7 +1422,7 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
     conciliacao.listarRegistros().catch(() => []),
     conciliacao.getConfig().catch(() => conciliacao.CONFIG_PADRAO),
   ]);
-  const mesclados = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
+  const mesclados = combinarFechamentosParaLeitura({ planilha: fechamentosData, lancados, sangriasLancadas, saltiversoLancado });
   // TC: o bot le `f.tc`, mas o TC das lojas vive nos KPI's do grupo com um
   // nome por franquia (ver grupos.campoTcDoGrupo). Resolve aqui, antes de
   // entregar ao botIndicadores (que e puro e nao conhece grupo) - senao
@@ -7572,6 +7573,13 @@ app.get('/api/relatorios/:nome', auth.requireMaster, async (req, res) => {
 let fechamentosData = require('./fechamentos-snapshot.json');
 let statusSincronizacaoPlanilhas = { ultimaEm: null, ultimoErro: null, sincronizando: false, pausada: false, pausadaPor: null, pausadaEm: null };
 
+function combinarFechamentosParaLeitura({ planilha = [], lancados = [], sangriasLancadas = [], saltiversoLancado = [] } = {}) {
+  return fechamentosLeitura.combinar(
+    { planilha, lancados, sangriasLancadas, saltiversoLancado },
+    sheetsSync.mesclarLancamentosDoMesmoDia,
+  );
+}
+
 // PAUSA DA SINCRONIZACAO (pedido do Master): uma trava pra ele congelar a
 // leitura das planilhas quando quiser mexer nelas sem o NoPulso relendo por
 // cima. So o Master liga/desliga (via botao). Fica num doc do Firestore pra
@@ -7639,7 +7647,7 @@ app.get('/api/fechamentos', requireSection('fechamentos'), async (req, res) => {
   // de linha (ver saltiversoFechamento.comoFechamento), pra aparecer junto
   // com as lojas no painel geral em vez de só na tela dedicada dele
   const saltiversoLancado = (await saltiversoFechamento.listAll()).map(saltiversoFechamento.comoFechamento);
-  const combinado = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
+  const combinado = combinarFechamentosParaLeitura({ planilha: fechamentosData, lancados, sangriasLancadas, saltiversoLancado });
   res.json(auth.filterByUnidade(req, combinado));
 });
 
@@ -7825,7 +7833,7 @@ async function fechamentosFiltrados(req) {
   const { inicio, fim, grupo, unidades, diaSemana } = req.query;
   const lancados = await fechamentosLive.listAll();
   const sangriasLancadas = (await sangrias.listAll()).map(sangrias.comoFechamento);
-  const combinado = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas]);
+  const combinado = combinarFechamentosParaLeitura({ planilha: fechamentosData, lancados, sangriasLancadas });
   const permitido = auth.filterByUnidade(req, combinado);
   const unidadesSet = unidades ? new Set(String(unidades).split(',').filter(Boolean)) : null;
   // peneira do dia da semana (ver o seletor em fechamentos.html) - o relatório
