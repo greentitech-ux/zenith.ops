@@ -36,7 +36,7 @@ function limpar(texto, max) {
 
 // lista curta e fixa (sem IA) so pra agrupar as conversas na Central de
 // Soluções - o visitante escolhe ao abrir o chat, sem custo de token
-const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'Outro'];
+const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'Pesquisar Pedido', 'Outro'];
 
 // logado: snapshot de quem estava com sessao valida no momento em que ABRIU
 // a conversa (ver /api/suporte-chat/iniciar em index.js) - null pra visitante
@@ -56,12 +56,16 @@ const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'O
 // rota - aqui so entra na primeira mensagem, no mesmo formato que o anexo de
 // qualquer outra mensagem, pra atendimento/PDF/download nao precisarem saber
 // que essa veio da abertura.
-async function criar({ nome, contato, texto, assunto, logado, lojaContexto, anexo }) {
+async function criar({ nome, contato, texto, assunto, logado, lojaContexto, unidadeContexto, postoContexto, anexo }) {
   const nomeLimpo = limpar(nome, 120);
   const contatoLimpo = limpar(contato, 120);
   const textoLimpo = limpar(texto, MAX_TEXTO);
   const assuntoLimpo = ASSUNTOS.includes(assunto) ? assunto : null;
   const lojaContextoLimpa = limpar(lojaContexto, 80);
+  // Codigo/posto nao sao exibidos ao visitante. Eles so fixam a consulta de
+  // pedido ao computador da loja quando o chat abre no atendimento.html.
+  const unidadeContextoLimpa = limpar(unidadeContexto, 100);
+  const postoContextoLimpo = limpar(postoContexto, 100);
   if (!nomeLimpo) throw new Error('Informe seu nome.');
   if (!contatoLimpo) throw new Error('Informe um contato (e-mail ou telefone).');
   if (!textoLimpo) throw new Error('Escreva sua mensagem.');
@@ -84,6 +88,8 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto, anex
     contato: contatoLimpo,
     assunto: assuntoLimpo,
     lojaContexto: lojaContextoLimpa || null,
+    unidadeContexto: unidadeContextoLimpa || null,
+    postoContexto: postoContextoLimpo || null,
     status: 'ABERTO',
     mensagens: [{ de: 'visitante', texto: textoLimpo, em: agora, ...(anexo ? { anexo } : {}) }],
     // toda conversa nasce com alguem esperando resposta (a 1a mensagem e do
@@ -289,6 +295,7 @@ function mensagemNumeroTicket(numeroTicket, assunto) {
     'Computador/Sistema': 'Vamos analisar o ocorrido e seguir com o atendimento técnico.',
     'Acesso/Senha': 'Vamos verificar seu acesso e orientar os próximos passos.',
     'Financeiro/Estorno': 'Vamos conferir a situação informada e orientar a solução.',
+    'Pesquisar Pedido': 'Vamos localizar o pedido e informar o status atual.',
     Outro: 'Vamos analisar sua solicitação e retornar com uma atualização.',
   };
   const orientacao = orientacaoPorAssunto[assunto] || orientacaoPorAssunto.Outro;

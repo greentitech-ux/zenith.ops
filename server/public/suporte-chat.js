@@ -439,7 +439,7 @@
   // mesma lista fixa do backend (suporteChat.js ASSUNTOS) - so pra agrupar
   // as conversas na Central de Soluções, escolhida pelo visitante (sem
   // custo de IA pra classificar)
-  const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'Outro'];
+  const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'Pesquisar Pedido', 'Outro'];
 
   function renderFormInicial(prefill) {
     rodape.classList.add('szc-hidden');
@@ -449,7 +449,7 @@
     const lojaTag = window.__zenithLojaContexto
       ? `<div class="szc-aviso" style="color:var(--accent,#b8ff3c);">🏬 Loja: ${esc(window.__zenithLojaContexto)}</div>` : '';
     corpo.innerHTML = `
-      <div class="szc-aviso">Conte pra gente o que está acontecendo — problema no computador, no sistema ou de acesso. Não precisa estar logado.</div>
+      <div class="szc-aviso">Conte pra gente o que está acontecendo — problema no computador, sistema, acesso ou pesquise um pedido. Não precisa estar logado.</div>
       ${lojaTag}
       <div class="szc-label">Seu nome</div>
       <input type="text" class="szc-input" id="szc-nome" maxlength="120" value="${esc(prefill?.nome || '')}">
@@ -522,6 +522,11 @@
       // ?unidade=) ANTES de carregar esse script - o Beniboy ja sabe a
       // loja sem precisar perguntar (ver window.__zenithLojaContexto)
       if (window.__zenithLojaContexto) fd.append('lojaContexto', window.__zenithLojaContexto);
+      // atendimento.html e' o computador fixo da unidade. O codigo vai
+      // separado do nome so para o servidor travar a consulta de pedido nessa
+      // loja; nunca vira texto visivel no chat.
+      if (window.__zenithLojaCodigoContexto) fd.append('unidadeContexto', window.__zenithLojaCodigoContexto);
+      if (window.__zenithPostoContexto) fd.append('postoContexto', window.__zenithPostoContexto);
       const arquivoInicial = corpo.querySelector('#szc-inicial-anexo');
       if (arquivoInicial && arquivoInicial.files[0]) fd.append('anexo', arquivoInicial.files[0]);
       const r = await rawFetch('/api/suporte-chat/iniciar', { method: 'POST', headers, body: fd });

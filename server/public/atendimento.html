@@ -143,12 +143,19 @@ async function boot(){
       if(salvo && salvo.unidade){ unidadeFixa = salvo.unidade; postoFixo = salvo.posto; }
     }catch(e){}
   }
-  if(unidadeFixa){
-    try{
-      const unidades = await fetch('/api/meta/unidades-publico').then(r=>r.json());
-      const achada = unidades.find(u=>u.codigo===unidadeFixa);
-      if(achada) window.__zenithLojaContexto = achada.nome;
-    }catch(e){ /* segue sem contexto de loja - o Beniboy pergunta normal */ }
+   if(unidadeFixa){
+     try{
+       const unidades = await fetch('/api/meta/unidades-publico').then(r=>r.json());
+       const achada = unidades.find(u=>u.codigo===unidadeFixa);
+       if(achada){
+         window.__zenithLojaContexto = achada.nome;
+         // O widget envia este codigo interno junto da conversa. Assim uma
+         // consulta de pedido aberta neste computador fica travada nesta loja,
+         // mesmo se a pessoa tiver acesso a outras unidades.
+         window.__zenithLojaCodigoContexto = unidadeFixa;
+         window.__zenithPostoContexto = postoFixo || '';
+       }
+     }catch(e){ /* segue sem contexto de loja - o Beniboy pergunta normal */ }
     heartbeat(unidadeFixa, postoFixo);
     setInterval(() => heartbeat(unidadeFixa, postoFixo), 25 * 1000);
     // tablet de quiosque que dorme para de bater presença e some do NOC - a

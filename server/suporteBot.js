@@ -182,7 +182,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
 - desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você vai usar a última senha criada?" antes de chamar de novo com lembraSenha=true/false. Com true, só destrave; com false, registre que precisa criar senha nova e acione o Master. NUNCA peça, invente, revele, envie ou repasse senha em chat, telefone ou WhatsApp. O Master recebe o alerta e libera o fluxo seguro de criação de nova senha.${temFerramentaPedido ? `
-- consultar_pedido: quando uma unidade perguntar pelo pedido de um cliente, consulte o status de UM pedido (aprovado, recusado, estornado ou em análise). Peça nome do cliente e valor; se a conta tiver mais de uma unidade, peça também o NOME da loja — nunca código IDPULSE. A busca é limitada às lojas que essa pessoa tem acesso. Devolva somente status, valor, loja e identificação do pedido; nunca dados de cartão. Se não achar, diga isso sem supor fraude/erro e ofereça chamar_atendente. Se o status mudar depois, a pessoa é avisada automaticamente.` : `
+- consultar_pedido: quando uma unidade perguntar pelo pedido de um cliente, consulte o status de UM pedido (aprovado, recusado, estornado ou em análise). Peça nome do cliente e valor. Se a conta tiver mais de uma unidade e o computador não tiver uma loja fixada, mostre as opções permitidas e peça que a pessoa escolha uma delas — nunca peça código IDPULSE nem aceite loja fora da lista. A busca é limitada às lojas que essa pessoa tem acesso. Devolva somente status, valor, loja e identificação do pedido; nunca dados de cartão. Se não achar, diga isso sem supor fraude/erro e ofereça chamar_atendente. Se o status mudar depois, a pessoa é avisada automaticamente.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora porque não há uma unidade vinculada à sessão. Use chamar_atendente.`}${(logado && logado.isMaster) ? `
 - executar_acao_agente: executa uma ação do catálogo NOC-NoPulso (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
 
@@ -325,7 +325,7 @@ const TOOLS_BASE = [
 // limita os codigos no servidor; visitante anonimo nunca a recebe.
 const TOOL_CONSULTAR_PEDIDO = {
   name: 'consultar_pedido',
-  description: 'Consulta o status de um pedido/transação específico da própria unidade. O resultado é limitado às lojas do usuário. Peça nome do cliente e valor; peça o nome da loja somente se ele tiver acesso a mais de uma unidade. Nunca peça código IDPULSE.',
+  description: 'Consulta o status de um pedido/transação específico da própria unidade. O resultado é limitado às lojas do usuário. Peça nome do cliente e valor; se houver mais de uma unidade, apresente apenas as opções permitidas para a pessoa escolher. Nunca peça código IDPULSE.',
   input_schema: {
     type: 'object',
     properties: {
@@ -807,8 +807,38 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const termoUnidade = normalizarUnidade(input.unidade);
     const permitidas = chat.logado.isMaster ? Object.keys(unidadesPorCodigo || {}) : (chat.logado.unidades || []);
+    const expandirCodigos = (codigos) => {
+      const todos = new Set();
+      for (const codigo of codigos) {
+        todos.add(codigo);
+        for (const equivalente of (resolverUnidadesPorIdPulse ? resolverUnidadesPorIdPulse(codigo) : [codigo])) todos.add(equivalente);
+      }
+      return todos;
+    };
+    const unidadeDoComputador = String(chat.unidadeContexto || '').trim();
     let bases = permitidas;
-    if (termoUnidade) {
+    if (!chat.logado.isMaster && unidadeDoComputador) {
+      // O atendimento.html manda o codigo da unidade configurada no computador
+      // (ou tablet). Mesmo acesso com varias lojas fica preso a essa unidade.
+      const minhasUnidades = expandirCodigos(permitidas);
+      const unidadeFixa = expandirCodigos([unidadeDoComputador]);
+      if (![...unidadeFixa].some((codigo) => minhasUnidades.has(codigo))) {
+        return 'O computador desta conversa não está vinculado a uma unidade liberada para esta conta.';
+      }
+      if (termoUnidade) {
+        const escolhidas = permitidas.filter((codigo) => {
+          const nomeDaLoja = normalizarUnidade((unidadesPorCodigo || {})[codigo]);
+          const codigoNormalizado = normalizarUnidade(codigo);
+          return codigoNormalizado === termoUnidade || (nomeDaLoja && (nomeDaLoja === termoUnidade
+            || nomeDaLoja.includes(termoUnidade) || termoUnidade.includes(nomeDaLoja)));
+        });
+        const unidadePedida = expandirCodigos(escolhidas);
+        if (!escolhidas.length || ![...unidadePedida].some((codigo) => unidadeFixa.has(codigo))) {
+          return 'Por segurança, esta conversa está vinculada ao computador desta unidade e não consulta pedidos de outra loja.';
+        }
+      }
+      bases = [unidadeDoComputador];
+    } else if (termoUnidade) {
       bases = permitidas.filter((codigo) => {
         const nomeDaLoja = normalizarUnidade((unidadesPorCodigo || {})[codigo]);
         const codigoNormalizado = normalizarUnidade(codigo);
@@ -817,17 +847,15 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       });
       if (!bases.length) return 'Não reconheci essa loja dentro do acesso desta conversa. Confirme o nome da unidade.';
     } else if (bases.length !== 1) {
-      const opcoes = bases.slice(0, 12).map((codigo) => (unidadesPorCodigo || {})[codigo] || codigo).join(', ');
-      return `Peça o nome da loja antes de consultar, pois esta conta tem mais de uma unidade: ${opcoes}.`;
+      // Sem computador fixado, a pessoa escolhe SOMENTE entre as lojas do
+      // próprio acesso; a lista evita digitação livre e não vaza outra unidade.
+      const opcoes = bases.slice(0, 12).map((codigo, indice) => `${indice + 1}. ${(unidadesPorCodigo || {})[codigo] || codigo}`).join(' | ');
+      return `Mostre estas opções de unidade e peça que a pessoa escolha uma: ${opcoes}.`;
     }
 
     // Um mesmo ponto pode ter codigo do Fechamento e outro no Monitor. Expande
     // somente os codigos da unidade ja autorizada, nunca uma busca global.
-    const candidatos = new Set();
-    for (const codigo of bases) {
-      candidatos.add(codigo);
-      for (const equivalente of (resolverUnidadesPorIdPulse ? resolverUnidadesPorIdPulse(codigo) : [codigo])) candidatos.add(equivalente);
-    }
+    const candidatos = expandirCodigos(bases);
     let pedidos = store.allOrders().filter((o) => o.unidade && candidatos.has(o.unidade));
     pedidos = pedidos.filter((o) => String(o.cliente || '').toLowerCase().includes(nomeCliente));
     pedidos = pedidos.filter((o) => Math.abs((o.valor || 0) - valorNum) < 0.01);

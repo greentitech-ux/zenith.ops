@@ -1940,7 +1940,11 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
       const path = await storage.salvarArquivo(`abertura-${Date.now()}`, req.file, 'suporte-chat');
       anexo = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream', tamanho: req.file.size };
     }
-    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto, logado, lojaContexto: req.body.lojaContexto, anexo });
+    const chat = await suporteChat.criar({
+      nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto,
+      logado, lojaContexto: req.body.lojaContexto, unidadeContexto: req.body.unidadeContexto,
+      postoContexto: req.body.postoContexto, anexo,
+    });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Novo chat de suporte`, `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico');
     res.json({ id: chat.id, token: chat.token, numeroTicket: chat.numeroTicket });
