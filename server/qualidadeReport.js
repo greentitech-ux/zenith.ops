@@ -20,7 +20,7 @@ const LOGO_DOMINOS = path.join(__dirname, 'public', 'branding', 'dominos-pizza.p
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.9';
+const VERSAO_LAUDO = 'QA-2026.09.25.10';
 
 const COR = {
   texto: '#1a1a1a',
@@ -160,7 +160,10 @@ function rodapeNoPulso(doc) {
   const textoNoPulso = 'NoPulso';
   const dominio = 'nopulso.com.br';
   const xNome = margemEsquerda + 61;
-  const xDominio = pagina.width - margemDireita - 69;
+  const larguraDominio = 69;
+  // O domínio não encosta no canto: fica levemente à esquerda e a linha do
+  // batimento volta a aparecer depois dele, concluindo o rodapé na margem.
+  const xDominio = pagina.width - margemDireita - 88;
   const yOriginal = doc.y;
   const xOriginal = doc.x;
   const margemInferiorOriginal = pagina.margins.bottom;
@@ -189,7 +192,10 @@ function rodapeNoPulso(doc) {
   doc.save();
   doc.strokeColor('#111111').lineWidth(0.7).moveTo(fimNome + 9, y).lineTo(xDominio - 10, y).stroke();
   doc.restore();
-  doc.font('Helvetica').fontSize(7.5).fillColor('#111111').text(dominio, xDominio, yTexto + 1, { width: 69, align: 'right', lineBreak: false });
+  doc.font('Helvetica').fontSize(7.5).fillColor('#111111').text(dominio, xDominio, yTexto + 1, { width: larguraDominio, align: 'right', lineBreak: false });
+  doc.save();
+  doc.strokeColor('#111111').lineWidth(0.7).moveTo(xDominio + larguraDominio + 7, y).lineTo(pagina.width - margemDireita, y).stroke();
+  doc.restore();
   pagina.margins.bottom = margemInferiorOriginal;
   doc.x = xOriginal;
   doc.y = yOriginal;
