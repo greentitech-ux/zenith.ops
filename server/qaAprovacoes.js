@@ -65,6 +65,9 @@ async function criar({
     motivoRejeicao: null,
     erroExecucao: null,
     erroDefinitivo: false,
+    // Rastro enxuto e legível para o Master. O payload continua protegido;
+    // o histórico registra somente o ciclo da decisão, nunca senha ou segredo.
+    historico: [{ evento: 'PEDIDO_CRIADO', em: new Date().toISOString(), porEmail: criadoPorEmail || null }],
   };
   await ref.set(registro);
   cache.invalidar();
@@ -94,6 +97,12 @@ async function marcarDecidido(id, {
     motivoRejeicao: motivoRejeicao || null,
     erroExecucao: erroExecucao || null,
     erroDefinitivo: !!erroDefinitivo,
+    historico: [...(snap.data().historico || [{ evento: 'PEDIDO_CRIADO', em: snap.data().criadoEm || null, porEmail: snap.data().criadoPorEmail || null }]), {
+      evento: status === 'aprovado' ? 'AUTORIZADO_E_EXECUTADO' : status === 'rejeitado' ? 'RECUSADO' : status === 'erro' ? 'ERRO_NA_EXECUCAO' : 'VENCEU',
+      em: new Date().toISOString(), porEmail: decididoPorEmail || null,
+      ...(motivoRejeicao ? { motivo: String(motivoRejeicao).slice(0, 300) } : {}),
+      ...(erroExecucao ? { erro: String(erroExecucao).slice(0, 300) } : {}),
+    }].slice(-12),
   };
   await ref.update(patch);
   cache.invalidar();

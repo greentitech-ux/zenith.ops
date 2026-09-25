@@ -77,6 +77,9 @@ button:disabled{opacity:.6;cursor:default}
 .feito.ok{color:var(--ok,#3ddc97)}
 pre.saida{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);border-radius:9px;padding:10px;font:12px var(--mono,monospace);margin:8px 0 0;max-height:260px;overflow:auto}
 .decidido{opacity:.75}
+.filtros{display:grid;grid-template-columns:170px minmax(0,1fr);gap:8px;margin:14px 0 4px}.filtros select,.filtros input{min-width:0;width:100%;padding:11px 12px;border-radius:9px;border:1px solid var(--line,#232a33);background:var(--panel2,#181d24);color:var(--text,#e7ecf1);font:13px var(--sans,system-ui,sans-serif)}
+.filtro-resumo{font:11.5px var(--mono,monospace);color:var(--muted,#7d8896);margin:7px 0 16px}.linha-tempo{margin:10px 0 0;padding:9px 11px;border-left:2px solid var(--line,#232a33);font-size:11.5px;color:var(--muted,#7d8896);display:grid;gap:5px}.linha-tempo b{color:var(--text,#e7ecf1);font-weight:600}
+@media(max-width:520px){.filtros{grid-template-columns:1fr}}
 .hidden{display:none!important}
 </style>
 </head>
@@ -89,7 +92,12 @@ window.fetch=(url,opcoes={})=>fetchOriginal(url,{...opcoes,headers:{...(opcoes.h
 </script>
 <header><div class="header-top"><button type="button" class="hamburger-btn" aria-label="Abrir menu" title="Menu">☰</button><div class="header-copy"><div class="eyebrow">NOPULSO · SOLUTIONS TI TECH</div><h1 class="page-title">🔐 Autorizações</h1></div></div></header>
 <main>
-  <p class="muted" id="intro">O que o Claude, o Beniboy ou um QA Master prepararam e só roda com a sua autorização.</p>
+   <p class="muted" id="intro">O que o Claude, o Beniboy ou um QA Master prepararam e só roda com a sua autorização.</p>
+   <div class="filtros" aria-label="Filtrar autorizações">
+     <select id="f-origem" onchange="mudarFiltro()"><option value="">Todas as origens</option><option value="cowork">🤖 Claude · Cowork</option><option value="beniboy">💬 Beniboy</option><option value="qa">🧪 QA Master</option></select>
+     <input id="f-busca" type="search" autocomplete="off" placeholder="Buscar ação, pessoa, protocolo ou detalhe…" oninput="mudarFiltro()">
+   </div>
+   <div class="filtro-resumo" id="filtro-resumo"></div>
   <div id="agora"></div>
   <div class="colunas">
     <section class="coluna pendente"><div class="col-topo"><span class="col-nome">Pendente</span><span class="col-conta" id="c-pendente"></span></div><div id="col-pendente"><p class="muted">Carregando…</p></div></section>
@@ -107,6 +115,7 @@ const FOCO=new URLSearchParams(location.search).get('id')||'';
 let LISTA=[];
 let DIGITAL=false;
 const FEITOS=new Map(); // id -> resultado mostrado uma vez (senha temporária inclusive)
+let FILTRO_ORIGEM='';let FILTRO_BUSCA='';
 
 function quando(iso){if(!iso)return '';const m=Math.round((Date.now()-Date.parse(iso))/60000);if(m<1)return 'agora';if(m<60)return 'há '+m+' min';const h=Math.round(m/60);if(h<48)return 'há '+h+'h';return new Date(iso).toLocaleDateString('pt-BR')}
 function vence(iso){if(!iso)return '';const m=Math.round((Date.parse(iso)-Date.now())/60000);if(m<=0)return ' · venceu';if(m<60)return ' · vence em '+m+' min';return ' · vence em '+Math.round(m/60)+'h'}
@@ -122,7 +131,9 @@ function aberto(a){return (a.status==='pendente'||(a.status==='erro'&&!definitiv
 function cartao(a){
   const feito=FEITOS.get(a.id);
   const det=(a.detalhes||[]).length?`<dl class="detalhes">${a.detalhes.map(d=>`<div><dt>${esc(d.rotulo)}</dt><dd>${esc(d.valor)}</dd></div>`).join('')}</dl>`:'';
-  const cabeca=`<span class="origem">${esc(ORIGEM[a.origem]||ORIGEM.qa)}</span><p class="resumo">${esc(a.resumo||a.tipo)}</p><div class="muted">${esc(a.criadoPorEmail||'')} · ${quando(a.criadoEm)}${aberto(a)?vence(a.expiraEm):''}</div>${det}`;
+  const eventos=(a.historico&&a.historico.length?a.historico:[{evento:'PEDIDO_CRIADO',em:a.criadoEm,porEmail:a.criadoPorEmail},...(a.decididoEm?[{evento:a.status==='aprovado'?'AUTORIZADO_E_EXECUTADO':a.status==='rejeitado'?'RECUSADO':a.status==='erro'?'ERRO_NA_EXECUCAO':'VENCEU',em:a.decididoEm,porEmail:a.decididoPorEmail,motivo:a.motivoRejeicao,erro:a.erroExecucao}]:[])]);
+  const tempo=`<div class="linha-tempo">${eventos.map(e=>`<div><b>${esc(String(e.evento||'').replaceAll('_',' '))}</b> · ${esc(quando(e.em))}${e.porEmail?' · '+esc(e.porEmail):''}${e.motivo?' — '+esc(e.motivo):''}${e.erro?' — '+esc(e.erro):''}</div>`).join('')}</div>`;
+  const cabeca=`<span class="origem">${esc(ORIGEM[a.origem]||ORIGEM.qa)}</span><p class="resumo">${esc(a.resumo||a.tipo)}</p><div class="muted">${esc(a.criadoPorEmail||'')} · ${quando(a.criadoEm)}${aberto(a)?vence(a.expiraEm):''}</div>${det}${tempo}`;
   if(feito){
     return `<article class="pedido" id="p-${esc(a.id)}">${cabeca}<div class="feito ok">✅ Autorizado e executado.</div>${feito.saida?`<pre class="saida">${esc(feito.saida)}</pre><button type="button" style="margin-top:8px" onclick="copiar('${esc(a.id)}')">Copiar resultado</button><div class="muted" style="margin-top:6px">Este resultado aparece só agora - não fica gravado.</div>`:''}</article>`;
   }
@@ -184,8 +195,10 @@ function coluna(a){
 }
 
 function pintar(){
-  const agora=LISTA.filter(a=>FEITOS.has(a.id));
-  const nas=k=>LISTA.filter(a=>!FEITOS.has(a.id)&&coluna(a)===k);
+  const texto=(a)=>[a.resumo,a.tipo,a.criadoPorEmail,...(a.detalhes||[]).flatMap(d=>[d.rotulo,d.valor])].join(' ').toLocaleLowerCase('pt-BR');
+  const filtrada=LISTA.filter(a=>(!FILTRO_ORIGEM||a.origem===FILTRO_ORIGEM)&&(!FILTRO_BUSCA||texto(a).includes(FILTRO_BUSCA)));
+  const agora=filtrada.filter(a=>FEITOS.has(a.id));
+  const nas=k=>filtrada.filter(a=>!FEITOS.has(a.id)&&coluna(a)===k);
   // o pedido que o push abriu vem primeiro; depois, o mais novo
   const porNovo=(x,y)=>(y.id===FOCO)-(x.id===FOCO)||Date.parse(y.criadoEm)-Date.parse(x.criadoEm);
   const porDecisao=(x,y)=>Date.parse(y.decididoEm||y.criadoEm)-Date.parse(x.decididoEm||x.criadoEm);
@@ -207,7 +220,10 @@ function pintar(){
   const conta=(el,n)=>{$(el).textContent=n?String(n):''};
   conta('#c-pendente',pendentes.length);conta('#c-erro',erros.length);
   conta('#c-aprovado',aprovados.length);conta('#c-rejeitado',rejeitados.length);conta('#c-expirado',expirados.length);
+  $('#filtro-resumo').textContent=(FILTRO_ORIGEM||FILTRO_BUSCA)?`${filtrada.length} de ${LISTA.length} autorização(ões) no filtro.`:`${LISTA.length} autorização(ões) no histórico.`;
 }
+
+function mudarFiltro(){FILTRO_ORIGEM=$('#f-origem').value;FILTRO_BUSCA=$('#f-busca').value.trim().toLocaleLowerCase('pt-BR');pintar()}
 
 async function carregar(){
   const r=await fetch('/api/qa-aprovacoes');
@@ -220,6 +236,9 @@ async function carregar(){
   pintar();
   if(FOCO){const el=document.getElementById('p-'+FOCO);if(el)el.scrollIntoView({block:'center'})}
 }
+// Atualiza o painel enquanto fica aberto, sem apagar uma senha que o Master
+// esteja digitando para autorizar. O push continua abrindo a tela no pedido.
+setInterval(()=>{if(document.visibilityState==='visible'&&!document.activeElement?.matches('input[type="password"]'))carregar()},20000);
 
 function erro(id,msg){const el=$('#err-'+id);if(!el)return alert(msg);el.textContent=msg;el.classList.remove('hidden')}
 function mostrarSenha(id){$('#sen-'+id).classList.remove('hidden');$('#inp-'+id).focus()}
