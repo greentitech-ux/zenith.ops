@@ -31,6 +31,15 @@ const FAIXA_TITULO = {
   negativa: 'PONTUAÇÃO NEGATIVA',
 };
 
+const MARCAS = {
+  dominos: { nome: 'DOMINO’S', cor: '#006491', apoio: '#e31837' },
+  spoleto: { nome: 'SPOLETO', cor: '#9e1b32', apoio: '#f4b400' },
+  milkymoo: { nome: 'MILKY MOO', cor: '#5b2a86', apoio: '#f6d743' },
+  'milk-moo': { nome: 'MILKY MOO', cor: '#5b2a86', apoio: '#f6d743' },
+  'sao-braz': { nome: 'SÃO BRAZ', cor: '#7a3e1d', apoio: '#d6a44a' },
+  saobraz: { nome: 'SÃO BRAZ', cor: '#7a3e1d', apoio: '#d6a44a' },
+};
+
 function dataBR(iso) {
   const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
@@ -47,16 +56,20 @@ function notaBR(nota) {
 // a página inteira e empurra a ação corretiva pra folha seguinte - que é
 // exatamente o que faz um laudo virar 40 páginas. `fit` mantém a proporção
 // dentro da caixa.
-const FOTO_ALT = 150;
+// Evidência precisa continuar nítida no impresso, mas 150 pt por foto fazia
+// até apontamentos curtos ocuparem uma página inteira. A caixa abaixo mantém
+// leitura confortável em A4 e permite reunir mais de um apontamento por folha.
+const FOTO_ALT = 108;
+const FOTOS_POR_LINHA = 4;
 async function desenharFotos(doc, fotos, largura) {
   if (!fotos || !fotos.length) return;
-  const gap = 8;
-  const porLinha = Math.min(fotos.length, 3);
+  const gap = 6;
+  const porLinha = Math.min(fotos.length, FOTOS_POR_LINHA);
   const larguraFoto = (largura - gap * (porLinha - 1)) / porLinha;
   let x = doc.page.margins.left;
   const y = doc.y;
   let desenhou = 0;
-  for (const foto of fotos.slice(0, 3)) {
+  for (const foto of fotos.slice(0, FOTOS_POR_LINHA)) {
     try {
       const buffer = await storage.baixarArquivo(foto.path);
       doc.image(buffer, x, y, { fit: [larguraFoto, FOTO_ALT], align: 'center' });
@@ -69,22 +82,101 @@ async function desenharFotos(doc, fotos, largura) {
     }
     x += larguraFoto + gap;
   }
-  doc.y = y + FOTO_ALT + 10;
+  doc.y = y + FOTO_ALT + 6;
   doc.x = doc.page.margins.left;
   return desenhou;
 }
 
+function marcaDaVisita(visita) {
+  const modelo = visita.modeloSnap || {};
+  const chave = String(modelo.marca || visita.marca || '').trim().toLowerCase();
+  return MARCAS[chave] || { nome: chave ? chave.toUpperCase() : 'NO PULSO', cor: '#1f2937', apoio: '#b6ff36' };
+}
+
+// Não depende de imagem externa: o laudo não perde a identidade da franquia
+// quando é aberto sem internet ou depois de uma troca de servidor. Para a
+// Domino's, o símbolo de dominó é desenhado junto do nome; nas demais marcas,
+// a assinatura tipográfica usa as cores da identidade cadastrada.
+function desenharMarca(doc, marca, x, y, largura) {
+  const altura = 48;
+  doc.roundedRect(x, y, largura, altura, 8).fill(marca.cor);
+  if (marca.nome === 'DOMINO’S') {
+    const meio = x + 27;
+    doc.roundedRect(x + 10, y + 9, 17, 30, 3).fill('#e31837');
+    doc.roundedRect(x + 28, y + 9, 17, 30, 3).fill('#006491');
+    doc.circle(x + 18.5, y + 17, 2.2).fill('#ffffff');
+    doc.circle(x + 18.5, y + 31, 2.2).fill('#ffffff');
+    doc.circle(x + 36.5, y + 24, 2.2).fill('#ffffff');
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#ffffff').text(marca.nome, meio + 8, y + 15, { width: largura - 72 });
+  } else {
+    doc.rect(x, y, 7, altura).fill(marca.apoio);
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#ffffff').text(marca.nome, x + 18, y + 15, { width: largura - 24 });
+  }
+}
+
+function campoDeCapa(doc, x, y, largura, rotulo, valor) {
+  doc.roundedRect(x, y, largura, 43, 5).fillAndStroke('#f7f8fa', COR.linha);
+  doc.font('Helvetica-Bold').fontSize(6.5).fillColor(COR.fraco).text(String(rotulo).toUpperCase(), x + 9, y + 7, { width: largura - 18 });
+  doc.font('Helvetica').fontSize(9).fillColor(COR.texto).text(String(valor || '—'), x + 9, y + 19, { width: largura - 18, height: 17, ellipsis: true });
+}
+
+function precisaNovaPagina(doc, altura) {
+  return doc.y + altura > doc.page.height - doc.page.margins.bottom;
+}
+
+function alturaApontamento(a) {
+  const texto = [a.texto, a.observacao, a.acaoCorretiva, a.espacoCliente, a.revisao && a.revisao.motivo, a.revisao && a.revisao.parecer]
+    .filter(Boolean).join(' ');
+  const linhas = Math.min(8, Math.max(2, Math.ceil(texto.length / 90)));
+  const fotos = a.fotos && a.fotos.length ? FOTO_ALT + 12 : 0;
+  return 104 + linhas * 12 + fotos + (a.especificacoes && a.especificacoes.length ? 36 : 0) + (a.revisao ? 54 : 0);
+}
+
+function resumoDaCapa(doc, visita, apontamentos, largura) {
+  const x = doc.page.margins.left;
+  const y = doc.y + 10;
+  const gap = 8;
+  const card = (largura - gap * 2) / 3;
+  doc.moveTo(x, y).lineTo(x + largura, y).stroke(COR.linha);
+  doc.x = x;
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(COR.fraco).text('RESUMO EXECUTIVO', x, y + 13);
+  const dados = [
+    ['CONFORMES', visita.conformes || 0, COR.positiva],
+    ['NÃO CONFORMES', visita.naoConformes || 0, COR.negativa],
+    ['ITENS AVALIADOS', visita.total || 0, COR.texto],
+  ];
+  dados.forEach(([rotulo, valor, cor], i) => {
+    const cx = x + i * (card + gap);
+    doc.roundedRect(cx, y + 29, card, 53, 5).fillAndStroke('#f7f8fa', COR.linha);
+    doc.font('Helvetica-Bold').fontSize(18).fillColor(cor).text(String(valor), cx + 10, y + 37, { width: card - 20, align: 'center' });
+    doc.font('Helvetica-Bold').fontSize(6.5).fillColor(COR.fraco).text(rotulo, cx + 6, y + 64, { width: card - 12, align: 'center' });
+  });
+  doc.y = y + 98;
+  doc.x = x;
+
+  if (!apontamentos.length) return;
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(COR.fraco).text('PONTOS QUE EXIGEM AÇÃO', { width: largura });
+  apontamentos.slice(0, 3).forEach((a) => {
+    const setor = a.setor ? `${a.setor} · ` : '';
+    doc.font('Helvetica').fontSize(9).fillColor(COR.texto).text(`• ${setor}${a.texto}`, { width: largura, height: 22, ellipsis: true });
+  });
+  if (apontamentos.length > 3) {
+    doc.font('Helvetica').fontSize(8).fillColor(COR.fraco).text(`e mais ${apontamentos.length - 3} apontamento(s) detalhado(s) a seguir.`);
+  }
+  doc.moveDown(0.1);
+}
+
 function cabecalhoDeBloco(doc, texto, cor) {
-  doc.moveDown(0.2);
-  doc.fontSize(11).fillColor(cor || COR.texto).font('Helvetica-Bold').text(texto, { width: doc.page.width - doc.page.margins.left - doc.page.margins.right });
-  doc.moveDown(0.25);
+  doc.moveDown(0.12);
+  doc.fontSize(10).fillColor(cor || COR.texto).font('Helvetica-Bold').text(texto, { width: doc.page.width - doc.page.margins.left - doc.page.margins.right });
+  doc.moveDown(0.15);
 }
 
 function paragrafo(doc, rotulo, valor) {
   if (!valor) return;
   doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text(String(rotulo).toUpperCase());
-  doc.fontSize(10).fillColor(COR.texto).font('Helvetica').text(String(valor), { width: doc.page.width - doc.page.margins.left - doc.page.margins.right });
-  doc.moveDown(0.4);
+  doc.fontSize(9).fillColor(COR.texto).font('Helvetica').text(String(valor), { width: doc.page.width - doc.page.margins.left - doc.page.margins.right });
+  doc.moveDown(0.22);
 }
 
 // espaço EM BRANCO onde a loja escreve à mão quando o laudo é impresso - é o
@@ -97,36 +189,37 @@ function espacoDoCliente(doc, texto, largura) {
     doc.fontSize(10).fillColor(COR.texto).font('Helvetica').text(texto, { width: largura });
   } else {
     const y = doc.y;
-    doc.rect(doc.page.margins.left, y, largura, 34).stroke(COR.linha);
-    doc.y = y + 40;
+    doc.rect(doc.page.margins.left, y, largura, 24).stroke(COR.linha);
+    doc.y = y + 29;
   }
-  doc.moveDown(0.3);
+  doc.moveDown(0.16);
 }
 
 async function gerarPdf(visita, apontamentos, res, anterior) {
-  const doc = new PDFDocument({ margin: 40, size: 'A4' });
+  const doc = new PDFDocument({ margin: 34, size: 'A4' });
   const largura = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   doc.pipe(res);
 
   // ---------- CAPA ----------
+  const marca = marcaDaVisita(visita);
+  desenharMarca(doc, marca, doc.page.margins.left, 42, 198);
   try {
-    doc.image(LOGO_GRUPO_BRAVO, doc.page.margins.left, 60, { fit: [150, 60] });
+    doc.image(LOGO_GRUPO_BRAVO, doc.page.width - doc.page.margins.right - 110, 40, { fit: [110, 42] });
   } catch (e) { /* sem logo o laudo sai igual */ }
-  doc.y = 150;
-  doc.fontSize(22).fillColor(COR.texto).font('Helvetica-Bold').text('RELATÓRIO DE VISITA TÉCNICA', { width: largura });
-  doc.moveDown(0.4);
-  doc.fontSize(15).fillColor(COR.fraco).font('Helvetica').text(visita.loja || visita.unidadeNome || '', { width: largura });
-  doc.moveDown(1.5);
+  doc.y = 108;
+  doc.fontSize(20).fillColor(COR.texto).font('Helvetica-Bold').text('RELATÓRIO DE VISTORIA', { width: largura });
+  doc.fontSize(12).fillColor(COR.fraco).font('Helvetica').text(visita.loja || visita.unidadeNome || 'Unidade não informada', { width: largura });
+  doc.moveDown(0.7);
 
   const faixa = visita.faixa;
   const corFaixa = COR[faixa] || COR.fraco;
-  doc.fontSize(9).fillColor(COR.fraco).font('Helvetica-Bold').text('NOTA DA VISITA');
-  doc.fontSize(46).fillColor(corFaixa).font('Helvetica-Bold').text(notaBR(visita.nota));
-  if (faixa) doc.fontSize(11).fillColor(corFaixa).font('Helvetica-Bold').text(FAIXA_TITULO[faixa] || '');
-  doc.moveDown(1.2);
+  const notaY = doc.y;
+  doc.roundedRect(doc.page.margins.left, notaY, 126, 104, 8).fillAndStroke('#f7f8fa', COR.linha);
+  doc.fontSize(7).fillColor(COR.fraco).font('Helvetica-Bold').text('NOTA DA VISITA', doc.page.margins.left + 12, notaY + 13);
+  doc.fontSize(36).fillColor(corFaixa).font('Helvetica-Bold').text(notaBR(visita.nota), doc.page.margins.left + 12, notaY + 26);
+  if (faixa) doc.fontSize(8).fillColor(corFaixa).font('Helvetica-Bold').text(FAIXA_TITULO[faixa] || '', doc.page.margins.left + 12, notaY + 78, { width: 102 });
 
-  doc.fontSize(10).fillColor(COR.texto).font('Helvetica');
-  [
+  const campos = [
     ['Data', dataBR(visita.data)],
     ['Hora inicial', horaBR(visita.iniciadaEm || visita.criadoEm) || visita.horario],
     ['Hora final', horaBR(visita.concluidaEm)],
@@ -134,11 +227,15 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
     ['Responsável técnico', visita.nutricionista],
     ['Checklist', `${(visita.modeloSnap || {}).nome || 'Padrão'} (versão ${(visita.modeloSnap || {}).versao || 1})`],
     ['Resultado', `${visita.conformes} conforme(s) · ${visita.naoConformes} não conforme(s) de ${visita.total} itens`],
-  ].filter(([, v]) => v).forEach(([r, v]) => {
-    doc.font('Helvetica-Bold').fillColor(COR.fraco).fontSize(8).text(String(r).toUpperCase(), { continued: false });
-    doc.font('Helvetica').fillColor(COR.texto).fontSize(11).text(String(v));
-    doc.moveDown(0.3);
+  ].filter(([, v]) => v);
+  const infoX = doc.page.margins.left + 138;
+  const infoLargura = largura - 138;
+  campos.forEach(([rotulo, valor], i) => {
+    const coluna = i % 2;
+    const linha = Math.floor(i / 2);
+    campoDeCapa(doc, infoX + coluna * ((infoLargura - 8) / 2 + 8), notaY + linha * 50, (infoLargura - 8) / 2, rotulo, valor);
   });
+  doc.y = notaY + Math.max(104, Math.ceil(campos.length / 2) * 50) + 8;
 
   // COMPARAÇÃO COM A VISITA ANTERIOR DA MESMA LOJA. É pra isso que a nota
   // existe: número solto não diz nada, número contra o da última vez diz se
@@ -161,6 +258,8 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
     }
   }
 
+  resumoDaCapa(doc, visita, apontamentos, largura);
+
   // ---------- APONTAMENTOS ----------
   if (!apontamentos.length) {
     doc.addPage();
@@ -168,9 +267,11 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   }
 
   for (const [i, a] of apontamentos.entries()) {
-    doc.addPage();
+    // Não abre página por padrão: só vira quando o próximo bloco inteiro não
+    // cabe. Assim duas ou mais não conformidades curtas ocupam a mesma folha.
+    if (i === 0 || precisaNovaPagina(doc, alturaApontamento(a))) doc.addPage();
     doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text(`APONTAMENTO ${i + 1} DE ${apontamentos.length}${a.setor ? ' · ' + String(a.setor).toUpperCase() : ''}`);
-    doc.moveDown(0.3);
+    doc.moveDown(0.18);
     cabecalhoDeBloco(doc, a.texto, COR.negativa);
 
     if (a.especificacoes && a.especificacoes.length) {
@@ -178,7 +279,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
       a.especificacoes.forEach((e) => {
         doc.fontSize(10).fillColor(COR.texto).font('Helvetica').text(`• ${e.texto}`, { width: largura });
       });
-      doc.moveDown(0.4);
+      doc.moveDown(0.2);
     }
 
     paragrafo(doc, 'O que foi visto', a.observacao);
@@ -201,7 +302,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
       const titulo = r.status === 'PENDENTE' ? 'REVISÃO SOLICITADA PELA UNIDADE'
         : r.status === 'ACEITA' ? 'CORREÇÃO ACEITA PELO AVALIADOR'
           : 'APONTAMENTO MANTIDO PELO AVALIADOR';
-      doc.moveDown(0.5);
+      doc.moveDown(0.25);
       doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text(titulo);
       paragrafo(doc, 'Defesa / correção informada', r.motivo);
       if (r.evidencia && r.evidencia.nome) {
