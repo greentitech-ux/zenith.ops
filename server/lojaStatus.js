@@ -539,14 +539,13 @@ function idDaMarca(v) {
 // equipamento que ninguem mexe e' uma referencia honesta.
 //
 // O QUE ISSO MEDE, COM PRECISAO (§6 - nao prometer o que o dado nao da)
-// Mede o EQUIPAMENTO sumir da rede da loja, nao o link de internet cair. Se o
-// modem continua ligado e so a internet do provedor some, ele segue
-// respondendo na rede - quem denuncia esse caso e' o heartbeat do agente
-// parando de chegar no servidor, que ja existe. Os dois juntos e' que separam:
-//   agente parou + medidor sumiu   -> a loja inteira caiu (energia/link)
-//   agente parou + medidor de pe   -> foi o computador
-//   agente de pe  + medidor sumiu  -> o modem/roteador morreu
-// Um so dos dois nunca conta essa historia.
+// Mede uma REFERÊNCIA (identificada pelo MAC) não aparecer na varredura LAN;
+// não mede, sozinha, internet ou "a loja caiu". Se o modem continua ligado e
+// só a internet do provedor some, ele ainda pode responder na LAN. A ausência
+// do agente é tratada separadamente pelo heartbeat, com confirmação própria.
+// Portanto, um medidor ausente gera "referência não vista", nunca o diagnóstico
+// conclusivo de queda de rede. Isso evita afirmar uma queda enquanto outro PC
+// da unidade continua acessível por AnyDesk.
 function normalizarEntradaApelido(valor) {
   if (typeof valor === 'string') return { apelido: valor || null, tipo: null, monitorar: false, marca: null, medidorQuedas: false };
   if (valor && typeof valor === 'object') {
@@ -623,6 +622,14 @@ async function definirApelidoDispositivo(codigo, mac, entrada) {
   }
   const monitorar = medidorQuedas || (corpo.monitorar !== undefined ? !!corpo.monitorar : anterior.monitorar);
   const marca = corpo.marca !== undefined ? idDaMarca(corpo.marca) : anterior.marca;
+  // Um MAC localmente administrado pode ser refeito por Android/iOS, VPN ou
+  // adaptador virtual. Ele serve para aparecer no inventário, mas não é uma
+  // identidade suficientemente estável para manter alerta ou ser a referência
+  // de rede da unidade. IP também não entra como alternativa: fica apenas como
+  // última localização do MAC estável.
+  if (nocMaquina.macAleatorio(macOk) && (monitorar || medidorQuedas)) {
+    throw new Error('Este MAC é localmente administrado e pode mudar. Escolha o MAC físico e estável do equipamento para monitorar.');
+  }
   if (!limpo && !tipo && !monitorar && !medidorQuedas) delete daUnidade[macOk];
   else daUnidade[macOk] = { apelido: limpo || null, tipo, monitorar, marca, medidorQuedas };
   await APELIDOS_DOC.set({ unidades: { ...atuais, [codigo]: daUnidade }, tipos: extrasNovos }, { merge: false });
@@ -4203,18 +4210,22 @@ async function varrerAlertas() {
         // "Monitorar" é o alarme de SUMIU da rede. Troca de IP é outra
         // preocupação: qualquer equipamento categorizado acompanha pelo MAC.
         if (!cfg.monitorar && !acompanharIp) continue;
+        // Configurações antigas de MAC aleatório são mantidas para não apagar o
+        // cadastro, porém não podem produzir alerta: a identidade pode mudar
+        // sem o equipamento ter saído da rede.
+        if (cfg.monitorar && nocMaquina.macAleatorio(disp.mac)) continue;
         const estado = alarmeAtual[disp.mac] || null;
         const semVerHaMs = Date.now() - (disp.visto || 0);
         if (cfg.monitorar && !disp.ativo && semVerHaMs >= DISPOSITIVO_OFFLINE_LIMIAR_MS && !(estado && estado.avisadoOffline)) {
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...(estado || {}), avisadoOffline: true, offlineDesde: disp.visto } };
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
-            // o medidor caindo e' a QUEDA DA LOJA, nao "sumiu um aparelho":
-            // quem le o alerta precisa saber qual dos dois aconteceu
-            tipo: cfg.medidorQuedas ? 'rede-unidade-offline' : 'dispositivo-offline', mac: disp.mac,
+            // A referência é evidência de LAN, não prova de queda da unidade.
+            // O alerta de heartbeat do agente é o canal que confirma ausência
+            // de conectividade; aqui dizemos apenas o que a varredura observou.
+            tipo: cfg.medidorQuedas ? 'referencia-rede-ausente' : 'dispositivo-offline', mac: disp.mac,
             apelido: cfg.apelido, tipoDispositivo: cfg.tipo, medidorQuedas: cfg.medidorQuedas,
-            // o agente estar vivo ou nao e' o que separa "caiu a loja" de "caiu
-            // so o modem" - vai junto pra quem le nao ter que adivinhar
+            ultimoVistoEm: disp.visto || null, varridoEm: candidato.dispositivosEm || null,
             agenteVivo: Date.now() - (candidato.ultimoHeartbeatEm || 0) < LIMIAR_OFFLINE_MS,
             tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
           });
@@ -4255,7 +4266,7 @@ async function varrerAlertas() {
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...base, avisadoOffline: false, offlineDesde: null } };
           transicoes.push({
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
-            tipo: cfg.medidorQuedas ? 'rede-unidade-online' : 'dispositivo-online', mac: disp.mac,
+            tipo: cfg.medidorQuedas ? 'referencia-rede-visivel' : 'dispositivo-online', mac: disp.mac,
             apelido: cfg.apelido, tipoDispositivo: cfg.tipo, medidorQuedas: cfg.medidorQuedas,
             // quanto tempo a loja passou fora: o alerta de volta so serve se
             // disser o tamanho da queda

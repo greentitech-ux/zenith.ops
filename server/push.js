@@ -1328,21 +1328,22 @@ function rotuloTipoDispositivo(tipoDispositivo, tipoRotulo) {
 // mesma urgencia do alerta de loja offline: pedido explicito do Master pra
 // esse equipamento especifico ("caso esses equipamentos percam rede
 // precisa alarmar").
-// QUEDA DE REDE DA UNIDADE, medida pelo equipamento que o Master marcou como
-// ponto de medicao (normalmente o modem - ver medidorQuedas em lojaStatus.js).
-//
-// Alerta SEPARADO do "sumiu um aparelho" de proposito: o texto diz o fato e o
-// numero, como manda o tom de voz da casa, e a acao muda conforme o caso. UM
-// ciclo por unidade (a tag e' so o codigo): cai e volta no mesmo card, em vez
-// de dois avisos soltos.
-async function notifyRedeUnidade(unidadeNome, codigo, resumo, caiu) {
+// A referência de rede é um equipamento MAC estável escolhido pelo Master
+// (normalmente modem/roteador). A varredura ARP só prova se ele foi visto na
+// LAN: não prova que a internet ou a unidade inteira caiu. Por isso este ciclo
+// é de ATENÇÃO e nunca recebe o título enganoso "Rede caiu". Queda confirmada
+// continua sendo responsabilidade do alerta de heartbeat do agente.
+async function notifyReferenciaRede(unidadeNome, codigo, apelido, mac, visivel) {
+  const nome = apelido || 'Referência de rede';
   const dados = {
-    title: caiu ? `🔴 Rede caiu · ${unidadeNome || codigo}` : `🟢 Rede voltou · ${unidadeNome || codigo}`,
-    body: resumo,
+    title: visivel ? `🟢 Referência de rede visível · ${unidadeNome || codigo}` : `⚠️ Referência de rede não vista · ${unidadeNome || codigo}`,
+    body: visivel
+      ? `${nome} (MAC ${mac}) voltou a aparecer na varredura da rede local.`
+      : `${nome} (MAC ${mac}) não apareceu em duas varreduras consecutivas (~2 h). Isso não confirma queda da loja; confirme o equipamento e consulte o status dos computadores.`,
     tag: `noc-rede-unidade-${codigo}`,
     url: '/loja-status',
   };
-  await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: caiu ? 'caiu' : 'voltou', tipo: 'noc-rede-unidade', titulo: dados.title, resumo: dados.body, url: dados.url, critico: caiu });
+  await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: visivel ? 'voltou' : 'caiu', tipo: 'noc-referencia-rede', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
@@ -1353,12 +1354,12 @@ async function notifyRedeUnidade(unidadeNome, codigo, resumo, caiu) {
     // reportado 15/09: "as unidades estao recebendo notificacao").
     if (!podeReceberCritico(sub)) continue;
     try {
-      await webpush.sendNotification(sub, payload, { urgency: caiu ? 'high' : 'normal' });
+      await webpush.sendNotification(sub, payload, { urgency: 'normal' });
     } catch (err) {
       // mesma limpeza dos outros: assinatura morta sai da lista em vez de
       // acumular erro a cada alerta
       if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
-      else console.error('Erro ao enviar push (rede da unidade):', err.message);
+      else console.error('Erro ao enviar push (referência de rede):', err.message);
     }
   }
 }
@@ -1399,8 +1400,8 @@ async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispos
   const nome = apelido || mac;
   const { icone, rotulo } = rotuloTipoDispositivo(tipoDispositivo, tipoRotulo);
   const dados = {
-    title: `${icone} ${rotulo} sem rede`,
-    body: `${nome} (${unidadeNome || codigo}) sumiu da rede - verifique cabo/energia do equipamento.`,
+    title: `${icone} ${rotulo} não visto na rede`,
+    body: `${nome} (${unidadeNome || codigo} · MAC ${mac}) não apareceu em duas varreduras consecutivas (~2 h). Verifique cabo/energia; isso não confirma queda da loja.`,
     tag: `noc-dispositivo-${codigo}-${mac}`,
     url: '/loja-status',
   };
@@ -1724,7 +1725,7 @@ module.exports = {
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyRamAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyComandoTravado, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
-  notifyDispositivoOffline, notifyRedeUnidade, notifyImpressoraProblema, notifyImpressoraNormalizou,
+  notifyDispositivoOffline, notifyReferenciaRede, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,
   notifyDivergenciaCaixa, notifyDispositivoOnline,

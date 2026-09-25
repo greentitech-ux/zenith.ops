@@ -7591,15 +7591,15 @@ setTimeout(async () => {
   let okGateRede = false;
   try {
     const srcPush = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
-    const ini = srcPush.indexOf('async function notifyRedeUnidade');
+    const ini = srcPush.indexOf('async function notifyReferenciaRede');
     const fim = srcPush.indexOf('\nasync function ', ini + 10);
     const corpo = srcPush.slice(ini, fim > 0 ? fim : undefined);
     const conf = {
-      'o push de rede da unidade tem o gate crítico (Master ou Suporte)':
+      'o push da referência de rede tem o gate de NOC (Master ou Suporte)':
         /podeReceberCritico\(sub\)/.test(corpo),
-      // O BUG: gate condicionado ao "caiu" deixava o "voltou" vazar
-      'o gate NÃO é condicionado ao "caiu" (senão o "voltou" vaza pra loja)':
-        !/caiu && !podeReceberCritico/.test(corpo)
+      // O BUG: gate condicionado à queda deixava a recuperação vazar pra loja
+      'o gate não depende do estado da referência (senão a volta vaza pra loja)':
+        !/visivel && !podeReceberCritico/.test(corpo)
         && /if \(!podeReceberCritico\(sub\)\) continue;/.test(corpo),
       // e o filtro em si e' Master OU Suporte com a tag
       'podeReceberCritico = Master OU seção suporte':
@@ -7610,7 +7610,7 @@ setTimeout(async () => {
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okGateRede = false; console.log('  erro: ' + e.message); }
   if (!okGateRede) ruins += 1;
-  console.log(`${okGateRede ? '✓' : '✗'} NOC: "Rede voltou" também só vai pra Master/Suporte (a loja não recebe notificação do NOC)`);
+  console.log(`${okGateRede ? '✓' : '✗'} NOC: referência de rede também só vai pra Master/Suporte (a loja não recebe notificação do NOC)`);
 
 
   // ------------------------------------------------------------------
@@ -14277,19 +14277,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
         marcouOutro.status === 200 && quantosMedidores === 1 && primeiroDepois.medidorQuedas === false,
       'desmarcar deixa a unidade sem medidor (não fica preso pra sempre)':
         semNinguem === null,
-      // a queda do medidor NÃO é "sumiu um aparelho" - é a loja
-      'a queda do medidor vira uma transição própria, não a de dispositivo':
-        /tipo: cfg\.medidorQuedas \? 'rede-unidade-offline' : 'dispositivo-offline'/.test(lsTx)
-        && /tipo: cfg\.medidorQuedas \? 'rede-unidade-online' : 'dispositivo-online'/.test(lsTx),
-      // é o CRUZAMENTO dos dois sinais que conta a história certa; um sozinho
-      // não distingue "a loja caiu" de "desligaram o computador"
-      'o alerta diz se o computador caiu junto ou continua de pé':
-        /agenteVivo: Date\.now\(\) - \(candidato\.ultimoHeartbeatEm \|\| 0\) < LIMIAR_OFFLINE_MS/.test(lsTx)
-        && /o computador continua online, então o problema é o equipamento/.test(idx)
-        && /a loja inteira está sem rede ou sem energia/.test(idx),
-      'o alerta de volta diz quanto tempo a loja ficou fora':
-        /foraMs: estado && estado\.offlineDesde \? Date\.now\(\) - estado\.offlineDesde : null/.test(lsTx)
-        && /Ficou \$\{Math\.max\(1, Math\.round\(t\.foraMs \/ 60000\)\)\} min fora/.test(idx),
+      'a ausência do medidor vira referência não vista, não queda de rede':
+        /tipo: cfg\.medidorQuedas \? 'referencia-rede-ausente' : 'dispositivo-offline'/.test(lsTx)
+        && /tipo: cfg\.medidorQuedas \? 'referencia-rede-visivel' : 'dispositivo-online'/.test(lsTx),
+      'o alerta não afirma que a loja caiu e identifica a referência pelo MAC':
+        /notifyReferenciaRede\(nome, t\.codigo, t\.apelido \|\| t\.tipoRotulo, t\.mac, false\)/.test(idx)
+        && /Isso não confirma queda da loja/.test(pushTx)
+        && /MAC \$\{mac\}/.test(pushTx),
       'cai e volta no MESMO card de alerta, um por unidade':
         /tag: `noc-rede-unidade-\$\{codigo\}`/.test(pushTx),
       'a tela marca na lista qual aparelho é o ponto de medição':
