@@ -4856,6 +4856,9 @@ function exigirQA(req, res) {
   res.status(403).json({ error: 'Acesso restrito ao setor Q.A.' });
   return false;
 }
+function temAcessoQAOuUnidade(req) {
+  return req.isMaster || req.isAdmin || users.temTag(req.user, 'qa') || !!((req.permissions && req.permissions.unidades) || []).length;
+}
 
 // A tag dá acesso ao setor; a unidade continua sendo o limite de dados.
 function podeVisitarUnidadeQA(req, unidade) {
@@ -5059,7 +5062,7 @@ app.delete('/api/qualidade/documentos/:id', auth.requireAuth, async (req, res) =
 });
 
 app.get('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
-  if (!exigirQA(req, res)) return;
+  if (!temAcessoQAOuUnidade(req)) return res.status(403).json({ error: 'Sem acesso ao Q.A.' });
   try { res.json(await qualidade.listarModelos()); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -5068,6 +5071,11 @@ app.get('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
 app.post('/api/qualidade/modelos', auth.requireAuth, async (req, res) => {
   if (!exigirQA(req, res)) return;
   try { res.json(await qualidade.salvarModelo(req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/qualidade/contexto', auth.requireAuth, (req, res) => {
+  const podeAvaliar = req.isMaster || req.isAdmin || users.temTag(req.user, 'qa');
+  res.json({ podeAvaliar, podeCancelar: !!req.isMaster });
 });
 
 // O arquivo novo da Domino's atualiza o MESMO modelo oficial. A aprovação
@@ -5081,12 +5089,12 @@ app.put('/api/qualidade/modelos/:id/oficial', auth.requireAuth, async (req, res)
 });
 
 app.get('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
-  if (!exigirQA(req, res)) return;
+  if (!temAcessoQAOuUnidade(req)) return res.status(403).json({ error: 'Sem acesso ao Q.A.' });
   try { res.json((await qualidade.listarVisitas()).filter((v) => podeLerVisitaQA(req, v))); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/qualidade/unidades', auth.requireAuth, async (req, res) => {
-  if (!exigirQA(req, res)) return;
+  if (!temAcessoQAOuUnidade(req)) return res.status(403).json({ error: 'Sem acesso ao Q.A.' });
   try {
     const mapa = await construirUnidadesMapa();
     const codigos = (req.isMaster || req.isAdmin) ? Object.keys(mapa) : ((req.permissions && req.permissions.unidades) || []);
@@ -5135,7 +5143,7 @@ app.post('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
 });
 
 app.get('/api/qualidade/visitas/:id', auth.requireAuth, async (req, res) => {
-  if (!exigirQA(req, res)) return;
+  if (!temAcessoQAOuUnidade(req)) return res.status(403).json({ error: 'Sem acesso ao Q.A.' });
   try {
     const visita = await qualidade.obterVisita(req.params.id);
     if (!podeLerVisitaQA(req, visita)) return res.status(403).json({ error: 'Sem acesso a esta visita.' });
@@ -6214,6 +6222,57 @@ function requireMasterDeVerdade(req, res, next) {
 
 app.get('/api/qa-aprovacoes', requireMasterDeVerdade, async (req, res) => {
   res.json(await qaAprovacoes.listar());
+});
+
+// CONTESTAÇÃO DA UNIDADE. A loja manda defesa + uma evidência nova; não há
+// alteração da foto, resposta ou nota que o avaliador registrou no laudo.
+app.post('/api/qualidade/visitas/:id/item/:itemId/revisao', auth.requireAuth, upload.single('evidencia'), async (req, res) => {
+  try {
+    const visita = await exigirVisitaQA(req, res);
+    if (!visita) return;
+    if (!req.file) return res.status(400).json({ error: 'Anexe uma evidência para solicitar a revisão.' });
+    const caminho = await storage.salvarArquivo(`${req.params.id}-${req.params.itemId}`, req.file, 'qualidade-revisoes');
+    res.json(await qualidade.solicitarRevisao(req.params.id, req.params.itemId, {
+      motivo: (req.body || {}).motivo,
+      evidencia: { nome: req.file.originalname, path: caminho, tipo: req.file.mimetype, enviadaEm: new Date().toISOString() },
+    }, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: storage.erroDeUpload ? storage.erroDeUpload(err) : err.message }); }
+});
+
+app.get('/api/qualidade/visitas/:id/item/:itemId/revisao/evidencia', auth.requireAuth, async (req, res) => {
+  try {
+    const visita = await exigirVisitaQA(req, res);
+    if (!visita) return;
+    const revisao = ((visita.respostas || {})[req.params.itemId] || {}).revisao;
+    if (!revisao || !revisao.evidencia || !revisao.evidencia.path) return res.status(404).json({ error: 'Evidência não encontrada.' });
+    storage.streamArquivo(revisao.evidencia.path, revisao.evidencia.tipo, res);
+  } catch (err) { res.status(404).json({ error: err.message }); }
+});
+
+// Reavaliar não é aprovação administrativa: só a pessoa que assinou a
+// vistoria decide se a prova resolve o apontamento. O Master pode cancelar o
+// laudo, mas não substituir esse parecer técnico.
+app.post('/api/qualidade/visitas/:id/item/:itemId/revisao/decidir', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try {
+    const visita = await exigirVisitaQA(req, res);
+    if (!visita) return;
+    if (String(visita.criadoPorEmail || '').toLowerCase() !== String(req.user && req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Só o avaliador que realizou esta visita pode decidir a revisão.' });
+    }
+    if (typeof (req.body || {}).aprovar !== 'boolean') return res.status(400).json({ error: 'Informe se a revisão foi aceita ou mantida.' });
+    res.json(await qualidade.decidirRevisao(req.params.id, req.params.itemId, req.body || {}, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Só Master cancela. Senha/digital é exigida porque cancelamento retira um
+// laudo de circulação; o registro, motivo e autor permanecem auditáveis.
+app.post('/api/qualidade/visitas/:id/cancelar', auth.requireMaster, async (req, res) => {
+  try {
+    const confere = await auth.verifyPassword(req.user.id, (req.body || {}).password);
+    if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a visita não foi cancelada.' });
+    res.json(await qualidade.cancelarVisita(req.params.id, req.body || {}, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // Leitura curta para a operação 24h: não expõe token, comando ou conteúdo de

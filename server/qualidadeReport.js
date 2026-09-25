@@ -193,6 +193,24 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
 
     espacoDoCliente(doc, a.espacoCliente, largura);
 
+    // A contestação não troca o laudo original: entra abaixo dele, com a
+    // decisão técnica. Assim quem lê o PDF entende o ciclo completo mesmo
+    // sem abrir o sistema.
+    if (a.revisao) {
+      const r = a.revisao;
+      const titulo = r.status === 'PENDENTE' ? 'REVISÃO SOLICITADA PELA UNIDADE'
+        : r.status === 'ACEITA' ? 'CORREÇÃO ACEITA PELO AVALIADOR'
+          : 'APONTAMENTO MANTIDO PELO AVALIADOR';
+      doc.moveDown(0.5);
+      doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text(titulo);
+      paragrafo(doc, 'Defesa / correção informada', r.motivo);
+      if (r.evidencia && r.evidencia.nome) {
+        doc.fontSize(9).fillColor(COR.fraco).font('Helvetica').text(`Evidência anexada: ${r.evidencia.nome}`);
+        doc.moveDown(0.3);
+      }
+      paragrafo(doc, 'Parecer técnico', r.parecer);
+    }
+
     // CORRIGIDO SIM/NÃO, como na planilha - e marcado, se já foi verificado
     const sim = a.corrigido === true ? 'X' : ' ';
     const nao = a.corrigido === false ? 'X' : ' ';

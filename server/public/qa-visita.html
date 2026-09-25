@@ -80,6 +80,8 @@
   .visita-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer;}
   .visita-row:last-child{border-bottom:none;}
   .pill{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:99px;background:var(--panel2);color:var(--muted);}
+  .revisao{margin-top:10px;padding:10px;border:1px solid var(--accent2);border-radius:9px;background:#11202b;}
+  .revisao .status{font-size:11px;font-weight:700;color:var(--accent2);}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -153,6 +155,10 @@
     <a id="v-laudo-link" target="_blank" rel="noopener" class="btn-primary" style="display:block;text-align:center;text-decoration:none;">📄 Abrir o laudo em PDF</a>
     <p class="sub" style="margin:8px 0 0;text-align:center;">Gerado na hora — uma ação corretiva respondida hoje já sai na próxima vez que você abrir.</p>
   </div>
+  <div class="card hidden" id="v-cancelar">
+    <button class="btn" style="width:100%;color:var(--bad);border-color:var(--bad);" onclick="cancelarVisita()">Cancelar visita (somente Master)</button>
+    <p class="sub" style="margin:8px 0 0;text-align:center;">Exige confirmação; o laudo e o motivo permanecem no histórico.</p>
+  </div>
 
   <div id="assin-modal" class="assin-modal hidden">
     <div class="assin-cx">
@@ -184,6 +190,7 @@ function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, (c)=>({'
 let MODELOS = [];
 let UNIDADES = [];
 let VISITA = null;
+let CONTEXTO = { podeAvaliar:false, podeCancelar:false };
 
 function atualizarUnidadesDoModelo(){
   const modelo = MODELOS.find((m) => m.id === $('n-modelo').value) || {};
@@ -209,7 +216,7 @@ function verLista(){
   $('tela-lista').classList.remove('hidden');
   $('tela-nova').classList.add('hidden');
   $('tela-visita').classList.add('hidden');
-  $('btn-nova').classList.remove('hidden');
+  $('btn-nova').classList.toggle('hidden', !CONTEXTO.podeAvaliar);
   $('titulo').textContent = 'Visitas';
   VISITA = null;
   carregarLista();
@@ -235,7 +242,7 @@ async function carregarLista(){
         </div>
         ${v.status==='CONCLUIDA'
           ? `<span class="faixa ${escapeHtml(v.faixa||'')}">${v.nota==null?'—':escapeHtml(String(v.nota).replace('.',','))}</span>`
-          : `<span class="pill">em andamento</span>`}
+          : `<span class="pill">${v.status==='CANCELADA'?'cancelada':'em andamento'}</span>`}
       </div>`).join('');
   }catch(e){ $('lista-visitas').innerHTML = `<div class="vazio">${escapeHtml(e.message)}</div>`; }
 }
@@ -282,9 +289,11 @@ function pintarVisita(){
   const hora = (iso)=>{ if(!iso) return null; try{return new Date(iso).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch(e){return null;} };
   $('v-cabecalho').textContent = [v.data, `Início ${hora(v.iniciadaEm||v.criadoEm)||'—'}`, v.concluidaEm?`Fim ${hora(v.concluidaEm)||'—'}`:null, v.representanteLoja, v.nutricionista].filter(Boolean).join(' · ');
   const concluida = v.status === 'CONCLUIDA';
-  $('v-fechar').classList.toggle('hidden', concluida);
+  const encerrada = v.status !== 'EM_ANDAMENTO';
+  $('v-fechar').classList.toggle('hidden', encerrada);
   $('v-laudo').classList.toggle('hidden', !concluida);
   $('v-assinaturas').classList.toggle('hidden', !concluida);
+  $('v-cancelar').classList.toggle('hidden', !CONTEXTO.podeCancelar || v.status==='CANCELADA');
   pintarAnterior(v.anterior);
   pintarAssinaturas(v.assinaturas||{});
   // o navegador abre o PDF numa aba nova e não manda header nenhum: o token
@@ -302,8 +311,8 @@ function pintarVisita(){
         <span class="sub">▾</span>
       </div>
       <div class="setor-corpo">
-        ${todos.map(i=>pintarItem(i, concluida)).join('')}
-        ${concluida || v.modeloSnap.tipo==='oficial' ? '' : `<div class="item" style="background:var(--panel2);">
+        ${todos.map(i=>pintarItem(i, encerrada)).join('')}
+        ${encerrada || v.modeloSnap.tipo==='oficial' ? '' : `<div class="item" style="background:var(--panel2);">
           <div class="espec">
             <input id="novo-ponto-${escapeHtml(s.id)}" placeholder="Outro ponto que você viu neste setor…">
             <button class="btn" style="color:var(--accent);" onclick="addPonto('${escapeHtml(s.id)}')">+</button>
@@ -341,7 +350,30 @@ function pintarItem(item, concluida){
       ${concluida ? '' : `<label class="btn-foto" style="margin-top:7px;">📷 Tirar foto
         <input type="file" accept="image/*" capture="environment" onchange="enviarFoto('${escapeHtml(item.id)}', this)">
       </label>`}
+      ${VISITA.status==='CONCLUIDA' ? pintarRevisao(item.id, r) : ''}
     </div>` : ''}
+  </div>`;
+}
+
+function pintarRevisao(itemId, r){
+  const rev = r.revisao;
+  const base = `/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/item/${encodeURIComponent(itemId)}/revisao/evidencia?token=${encodeURIComponent(AUTH_TOKEN)}`;
+  if(rev){
+    const rotulo = {PENDENTE:'Aguardando decisão do avaliador',ACEITA:'Correção aceita pelo avaliador',MANTIDA:'Apontamento mantido pelo avaliador'}[rev.status] || rev.status;
+    return `<div class="revisao">
+      <div class="status">REVISÃO · ${escapeHtml(rotulo)}</div>
+      <div class="sub" style="margin-top:5px;">${escapeHtml(rev.motivo||'')}</div>
+      <a class="btn" style="display:inline-block;margin-top:8px;text-decoration:none;" target="_blank" rel="noopener" href="${base}">Ver evidência</a>
+      ${rev.parecer?`<div class="sub" style="margin-top:8px;"><b>Parecer:</b> ${escapeHtml(rev.parecer)}</div>`:''}
+      ${rev.status==='PENDENTE'?`<div style="display:flex;gap:7px;margin-top:9px;"><button class="btn-primary" onclick="decidirRevisao('${escapeHtml(itemId)}',true)">Aceitar correção</button><button class="btn" onclick="decidirRevisao('${escapeHtml(itemId)}',false)">Manter apontamento</button></div>`:''}
+    </div>`;
+  }
+  return `<div class="revisao">
+    <div class="status">UNIDADE · SOLICITAR REVISÃO</div>
+    <div class="sub" style="margin:5px 0;">Explique a correção ou discordância e anexe uma evidência. O avaliador da visita decide.</div>
+    <textarea id="rev-motivo-${escapeHtml(itemId)}" rows="2" placeholder="Defesa da unidade / correção realizada"></textarea>
+    <label class="btn-foto" style="margin-top:7px;">📷 Anexar evidência<input id="rev-evidencia-${escapeHtml(itemId)}" type="file" accept="image/*,application/pdf" capture="environment"></label>
+    <button class="btn-primary" style="margin-top:7px;" onclick="solicitarRevisao('${escapeHtml(itemId)}')">Enviar para reavaliação</button>
   </div>`;
 }
 
@@ -485,10 +517,40 @@ async function concluir(){
   }
   catch(e){ alert(e.message); }
 }
+async function solicitarRevisao(itemId){
+  const motivo = ($('rev-motivo-'+itemId)?.value||'').trim();
+  const arquivo = $('rev-evidencia-'+itemId)?.files?.[0];
+  if(!motivo) return alert('Explique a correção ou discordância.');
+  if(!arquivo) return alert('Anexe uma evidência para a reavaliação.');
+  const corpo = new FormData(); corpo.append('motivo',motivo); corpo.append('evidencia',arquivo);
+  try{
+    const r=await fetch(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/item/${encodeURIComponent(itemId)}/revisao`,{method:'POST',body:corpo,headers:{Authorization:'Bearer '+AUTH_TOKEN}});
+    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||'Não foi possível solicitar a revisão.');}
+    await recarregar();
+  }catch(e){alert(e.message);}
+}
+async function decidirRevisao(itemId, aprovar){
+  const parecer=prompt(aprovar?'Descreva por que a correção foi aceita:':'Descreva por que o apontamento foi mantido:');
+  if(!parecer || !parecer.trim()) return;
+  try{
+    await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/item/${encodeURIComponent(itemId)}/revisao/decidir`,{method:'POST',body:JSON.stringify({aprovar,parecer})});
+    await recarregar();
+  }catch(e){alert(e.message);}
+}
+async function cancelarVisita(){
+  const motivo=prompt('Motivo do cancelamento (obrigatório):');
+  if(!motivo || !motivo.trim()) return;
+  const prova=await window.pedirConfirmacao('cancelar esta visita');
+  if(prova===null) return;
+  try{
+    await api(`/api/qualidade/visitas/${encodeURIComponent(VISITA.id)}/cancelar`,{method:'POST',body:JSON.stringify({motivo,password:prova})});
+    await recarregar();
+  }catch(e){alert(e.message);}
+}
 
 (async function boot(){
   try{
-    [MODELOS, UNIDADES] = await Promise.all([api('/api/qualidade/modelos'), api('/api/qualidade/unidades')]);
+    [MODELOS, UNIDADES, CONTEXTO] = await Promise.all([api('/api/qualidade/modelos'), api('/api/qualidade/unidades'), api('/api/qualidade/contexto')]);
     $('n-modelo').innerHTML = MODELOS.map(m=>`<option value="${escapeHtml(m.id)}">${escapeHtml(m.nome)}</option>`).join('');
     atualizarUnidadesDoModelo();
     $('n-modelo').addEventListener('change', atualizarUnidadesDoModelo);

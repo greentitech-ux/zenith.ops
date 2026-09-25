@@ -86,7 +86,7 @@ function pesoDoItem(item, comPesos) {
 const RESPOSTAS = ['conforme', 'nao-conforme', 'nao-aplica'];
 const RESPOSTA_LABEL = { conforme: 'CONFORME', 'nao-conforme': 'NÃO CONFORME', 'nao-aplica': 'NÃO SE APLICA' };
 // a visita nasce aberta e só fecha quando ela termina de andar pela loja
-const STATUS = ['EM_ANDAMENTO', 'CONCLUIDA'];
+const STATUS = ['EM_ANDAMENTO', 'CONCLUIDA', 'CANCELADA'];
 
 // FAIXAS (decisão do Master, 23/09/2026). As cores são as da planilha
 // (verde 92D050, amarelo FFFF00, vermelho FF0000); os números não estavam
@@ -486,8 +486,10 @@ async function obterVisita(id) {
 // visita CONCLUÍDA não aceita mais resposta (ver ARQUITETURA, item 4) - o
 // que continua aberto depois de fechar é só o ciclo da ação corretiva
 function travarSeConcluida(visita) {
-  if (visita.status === 'CONCLUIDA') {
-    throw new Error('Visita concluída não pode ser alterada. Abra uma visita nova.');
+  if (visita.status !== 'EM_ANDAMENTO') {
+    throw new Error(visita.status === 'CANCELADA'
+      ? 'Visita cancelada não pode ser alterada.'
+      : 'Visita concluída não pode ser alterada. Abra uma visita nova.');
   }
 }
 
@@ -568,10 +570,11 @@ async function adicionarPontoDeCheck(id, setorId, texto, email) {
 // CAPA - a ação corretiva de um apontamento (ver ARQUITETURA, item 3).
 // Continua editável DEPOIS de concluída a visita, de propósito: é o ciclo
 // que segue vivo até a loja corrigir e alguém verificar.
-async function salvarAcaoCorretiva(id, itemId, { acaoCorretiva, responsavel, prazo, espacoCliente, corrigido }, email) {
+async function salvarAcaoCorretiva(id, itemId, { acaoCorretiva, responsavel, prazo, espacoCliente }, email) {
   const snap = await COLLECTION.doc(String(id)).get();
   if (!snap.exists) throw new Error('Visita não encontrada.');
   const visita = snap.data();
+  if (visita.status === 'CANCELADA') throw new Error('Visita cancelada não aceita ação corretiva.');
   const atual = (visita.respostas || {})[itemId] || {};
   const patch = {
     ...atual,
@@ -581,14 +584,76 @@ async function salvarAcaoCorretiva(id, itemId, { acaoCorretiva, responsavel, pra
     // "ESPAÇO CLIENTE" da planilha: o que a loja responde
     espacoCliente: espacoCliente === undefined ? (atual.espacoCliente || null) : (String(espacoCliente || '').trim().slice(0, 4000) || null),
   };
-  if (corrigido !== undefined) {
-    patch.corrigido = corrigido === null ? null : !!corrigido;
-    patch.verificadoEm = corrigido === null ? null : new Date().toISOString();
-    patch.verificadoPorEmail = corrigido === null ? null : (email || null);
-  }
   await gravarResposta(id, visita, itemId, patch);
   cacheLista.invalidar();
   return patch;
+}
+
+// A loja pode pedir revisão de um apontamento, mas não alterar a avaliação.
+// A evidência fica separada das fotos da vistoria: assim o laudo original
+// continua íntegro e fica claro o que foi enviado depois pela unidade.
+async function solicitarRevisao(id, itemId, { motivo, evidencia }, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  if (visita.status !== 'CONCLUIDA') throw new Error('A revisão só pode ser solicitada após a conclusão da visita.');
+  const atual = (visita.respostas || {})[itemId] || {};
+  if (atual.resposta !== 'nao-conforme') throw new Error('Só um apontamento não conforme pode ser revisado.');
+  if ((atual.revisao || {}).status === 'PENDENTE') throw new Error('Já existe uma revisão pendente para este apontamento.');
+  const texto = String(motivo || '').trim().slice(0, 4000);
+  if (!texto) throw new Error('Explique por que a unidade discorda ou como corrigiu o apontamento.');
+  if (!evidencia || !evidencia.path) throw new Error('Anexe uma evidência para solicitar a revisão.');
+  const revisao = {
+    status: 'PENDENTE', motivo: texto, evidencia,
+    solicitadaEm: new Date().toISOString(), solicitadaPorEmail: email || null,
+    decididaEm: null, decididaPorEmail: null, parecer: null,
+  };
+  await gravarResposta(id, visita, itemId, { ...atual, revisao });
+  cacheLista.invalidar();
+  return revisao;
+}
+
+// Só quem realizou a vistoria confirma a correção ou mantém o apontamento.
+// Nem Master, nem outro avaliador substituem o juízo técnico sem abrir uma
+// nova visita; o Master tem a função administrativa de cancelar o laudo.
+async function decidirRevisao(id, itemId, { aprovar, parecer }, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  if (visita.status !== 'CONCLUIDA') throw new Error('Só laudo concluído pode ter revisão decidida.');
+  const atual = (visita.respostas || {})[itemId] || {};
+  if ((atual.revisao || {}).status !== 'PENDENTE') throw new Error('Não há revisão pendente para este apontamento.');
+  const texto = String(parecer || '').trim().slice(0, 4000);
+  if (!texto) throw new Error('Registre o parecer técnico da decisão.');
+  const revisao = {
+    ...atual.revisao,
+    status: aprovar ? 'ACEITA' : 'MANTIDA', parecer: texto,
+    decididaEm: new Date().toISOString(), decididaPorEmail: email || null,
+  };
+  await gravarResposta(id, visita, itemId, {
+    ...atual, revisao,
+    // A nota e a resposta original nunca são reescritas. Isto confirma que a
+    // pendência foi tratada, sem falsificar o retrato da visita daquele dia.
+    corrigido: !!aprovar,
+    verificadoEm: new Date().toISOString(), verificadoPorEmail: email || null,
+  });
+  cacheLista.invalidar();
+  return revisao;
+}
+
+// Cancelamento é excepcional: não apaga o laudo e não pode ser usado para
+// esconder resultado. A rota é protegida por requireMaster em index.js.
+async function cancelarVisita(id, { motivo }, email) {
+  const snap = await COLLECTION.doc(String(id)).get();
+  if (!snap.exists) throw new Error('Visita não encontrada.');
+  const visita = snap.data();
+  if (visita.status === 'CANCELADA') throw new Error('Esta visita já foi cancelada.');
+  const texto = String(motivo || '').trim().slice(0, 2000);
+  if (!texto) throw new Error('Informe o motivo do cancelamento.');
+  const patch = { status: 'CANCELADA', canceladaEm: new Date().toISOString(), canceladaPorEmail: email || null, motivoCancelamento: texto };
+  await COLLECTION.doc(String(id)).set(patch, { merge: true });
+  cacheLista.invalidar();
+  return { ...visita, ...patch };
 }
 
 // ---------------------------------------------------------------------
@@ -807,6 +872,7 @@ function apontamentosDe(visita) {
         prazo: r.prazo || null,
         espacoCliente: r.espacoCliente || null,
         corrigido: r.corrigido === undefined ? null : r.corrigido,
+        revisao: r.revisao || null,
       };
     });
 }
@@ -819,7 +885,7 @@ module.exports = {
   MODELOS_OFICIAIS, listarModelos, modeloPorId, salvarModelo, atualizarModeloOficial, retratoDoModelo, normalizarSetores,
   MAX_SETORES, MAX_ITENS_POR_SETOR,
   criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
-  salvarAcaoCorretiva, concluirVisita, listarVisitas, apontamentosDe,
+  salvarAcaoCorretiva, solicitarRevisao, decidirRevisao, cancelarVisita, concluirVisita, listarVisitas, apontamentosDe,
   MAX_FOTOS_POR_ITEM, anexarFoto, fotoDe,
   QUEM_ASSINA, QUEM_ASSINA_LABEL, MAX_IMAGEM_CHARS, assinarVisita,
   visitaAnteriorDe, pendenciasDaAnterior,
