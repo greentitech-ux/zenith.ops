@@ -132,7 +132,9 @@ function hojeBrasil() {
 }
 
 async function montarSystem(unidades, logado, unidadesPorCodigo = {}) {
-  const temFerramentaPedido = !!(logado && logado.temMonitor);
+  // Consultar andamento de pedido e necessidade da propria loja, nao apenas
+  // de quem abre o painel Monitor. A consulta fica limitada as unidades do acesso.
+  const temFerramentaPedido = !!(logado && (logado.isMaster || (logado.unidades || []).length));
   const [blocoConhecimento, blocoAgente] = await Promise.all([montarBlocoConhecimento(), montarBlocoAgente(logado)]);
   const texto = `Você é o Beniboy, atendente virtual do chat de suporte do NoPulso.
 
@@ -180,13 +182,13 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
 - desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você vai usar a última senha criada?" antes de chamar de novo com lembraSenha=true/false. Com true, só destrave; com false, registre que precisa criar senha nova e acione o Master. NUNCA peça, invente, revele, envie ou repasse senha em chat, telefone ou WhatsApp. O Master recebe o alerta e libera o fluxo seguro de criação de nova senha.${temFerramentaPedido ? `
-- consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
-- Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}${(logado && logado.isMaster) ? `
+- consultar_pedido: quando uma unidade perguntar pelo pedido de um cliente, consulte o status de UM pedido (aprovado, recusado, estornado ou em análise). Peça nome do cliente e valor; se a conta tiver mais de uma unidade, peça também o NOME da loja — nunca código IDPULSE. A busca é limitada às lojas que essa pessoa tem acesso. Devolva somente status, valor, loja e identificação do pedido; nunca dados de cartão. Se não achar, diga isso sem supor fraude/erro e ofereça chamar_atendente. Se o status mudar depois, a pessoa é avisada automaticamente.` : `
+- Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora porque não há uma unidade vinculada à sessão. Use chamar_atendente.`}${(logado && logado.isMaster) ? `
 - executar_acao_agente: executa uma ação do catálogo NOC-NoPulso (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
 
 ## Unidades válidas pra ticket (use exatamente um destes nomes; se a pessoa falar parecido, escolha o mais próximo; se não der pra saber, pergunte)
 ${unidades.map((u) => `- ${u}`).join('\n')}
-${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Tem acesso ao Monitor - pode usar consultar_pedido.' : 'Sem acesso ao Monitor - não tente consultar pedido, use chamar_atendente se precisar.'}${logado.podeCriarTarefa ? ' Pode criar tarefas próprias pelo chat.' : ' Não tem permissão para criar novas tarefas.'}` : ''}
+${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Pode consultar pedido nas próprias unidades pelo chat.' : 'Sem unidade vinculada para consultar pedido; use chamar_atendente se precisar.'}${logado.podeCriarTarefa ? ' Pode criar tarefas próprias pelo chat.' : ' Não tem permissão para criar novas tarefas.'}${!logado.isMaster && (logado.unidades || []).length ? ` Unidades permitidas para consulta: ${(logado.unidades || []).map((codigo) => `${unidadesPorCodigo[codigo] || codigo} [${codigo}]`).join(', ')}.` : ''}` : ''}
 
 ## Data de referência
 Hoje no Brasil é ${hojeBrasil()}. Quando a pessoa disser "hoje", use esta data no formato AAAA-MM-DD.${logado && logado.podeCriarTarefa && !logado.isMaster && Array.isArray(logado.unidades) && logado.unidades.length ? `\nUnidades desta conta para uma tarefa: ${logado.unidades.map((codigo) => `${unidadesPorCodigo[codigo] || codigo} [${codigo}]`).join(', ')}.` : ''}${blocoConhecimento}${blocoAgente}`;
@@ -319,20 +321,19 @@ const TOOLS_BASE = [
   },
 ];
 
-// so entra na lista de ferramentas quando chat.logado.temMonitor (ver
-// usuarioLogadoDoHeader em index.js) - visitante anonimo ou logado sem
-// permissao de Monitor nunca ve nem essa ferramenta oferecida ao modelo
+// Entra para conta logada com pelo menos uma unidade. A ferramenta confere e
+// limita os codigos no servidor; visitante anonimo nunca a recebe.
 const TOOL_CONSULTAR_PEDIDO = {
   name: 'consultar_pedido',
-  description: 'Consulta o status de um pedido/transação específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Só disponível pra quem está logado com acesso (Monitor ou tag de Gerente) - o resultado já vem limitado às lojas dessa pessoa. Exige os 3 dados: código da loja (IDPULSE), nome do cliente e valor.',
+  description: 'Consulta o status de um pedido/transação específico da própria unidade. O resultado é limitado às lojas do usuário. Peça nome do cliente e valor; peça o nome da loja somente se ele tiver acesso a mais de uma unidade. Nunca peça código IDPULSE.',
   input_schema: {
     type: 'object',
     properties: {
-      idPulse: { type: 'string', description: 'Código numérico da loja (IDPULSE), igual aparece na coluna "Unidade" do Fechamento - ex: 19888, 19798, 19911.' },
       nomeCliente: { type: 'string', description: 'Nome do cliente do pedido, como a pessoa souber (pode ser parcial).' },
       valor: { type: 'string', description: 'Valor do pedido em reais, como a pessoa informar (ex: "45,90").' },
+      unidade: { type: 'string', description: 'Nome da loja informado pela pessoa. Obrigatório apenas se ela tiver acesso a mais de uma unidade.' },
     },
-    required: ['idPulse', 'nomeCliente', 'valor'],
+    required: ['nomeCliente', 'valor'],
   },
 };
 
@@ -383,7 +384,7 @@ function montarTools(logado) {
   // time autenticado (Master/Admin/secao Suporte).
   const tools = TOOLS_BASE.filter((tool) => tool.name !== 'consultar_ticket');
   if (logado && logado.ehTimeSuporte) tools.push(TOOLS_BASE.find((tool) => tool.name === 'consultar_ticket'));
-  if (logado && logado.temMonitor) tools.push(TOOL_CONSULTAR_PEDIDO);
+  if (logado && (logado.isMaster || (logado.unidades || []).length)) tools.push(TOOL_CONSULTAR_PEDIDO);
   if (logado && logado.isMaster) tools.push(TOOL_EXECUTAR_ACAO_AGENTE);
   if (!logado || !logado.podeCriarTarefa) {
     const indiceCriarTarefa = tools.findIndex((tool) => tool.name === 'criar_tarefa');
@@ -791,33 +792,49 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     return `Link gerado pra loja "${encontrada.nome}": ${link}\nSe quem está falando com você é o próprio cliente, mande esse link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo (dados do pedido + foto do comprovante), sem precisar de WhatsApp nem de mais ninguém. Se for um funcionário pedindo em nome de um cliente que não está aqui, ele repassa o link pro cliente por onde for mais fácil. De qualquer forma, um atendente humano confere e decide depois - não invente prazo nem promessa de aprovação.`;
   }
   if (nome === 'consultar_pedido') {
-    // defesa em profundidade: mesmo que o modelo tentasse chamar essa tool
-    // fora do previsto, ela so entra em TOOLS quando chat.logado.temMonitor -
-    // aqui checa de novo antes de tocar em qualquer dado do Monitor
-    if (!chat.logado || !chat.logado.temMonitor) return 'Sem acesso a essa consulta - chame um atendente.';
-    const idPulse = String(input.idPulse || '').trim();
+    // Defesa em profundidade: nao basta a ferramenta ter sido apresentada ao
+    // modelo. O servidor restringe a busca a unidade vinculada a sessao.
+    if (!chat.logado || (!chat.logado.isMaster && !(chat.logado.unidades || []).length)) {
+      return 'Sem unidade vinculada para fazer esta consulta - chame um atendente.';
+    }
     const nomeCliente = String(input.nomeCliente || '').trim().toLowerCase();
     const valorTexto = String(input.valor || '').trim();
-    if (!idPulse || !nomeCliente || !valorTexto) return 'Peça pra pessoa informar o código da loja (IDPULSE), o nome do cliente e o valor do pedido.';
+    if (!nomeCliente || !valorTexto) return 'Peça o nome do cliente e o valor do pedido.';
     const valorNum = parseFloat(valorTexto.replace(/[^\d,.-]/g, '').replace(',', '.'));
+    if (Number.isNaN(valorNum)) return 'Peça o valor do pedido em reais, por exemplo R$ 45,90.';
 
-    // resolve o IDPULSE (codigo do Fechamento) pros codigos correspondentes
-    // no espaco do Monitor (merchantAccountCode da Adyen) - sem resolver
-    // (config antiga, sem index.js repassando a funcao), usa o codigo cru
-    const candidatos = new Set(resolverUnidadesPorIdPulse ? resolverUnidadesPorIdPulse(idPulse) : [idPulse]);
+    const normalizarUnidade = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const termoUnidade = normalizarUnidade(input.unidade);
+    const permitidas = chat.logado.isMaster ? Object.keys(unidadesPorCodigo || {}) : (chat.logado.unidades || []);
+    let bases = permitidas;
+    if (termoUnidade) {
+      bases = permitidas.filter((codigo) => {
+        const nomeDaLoja = normalizarUnidade((unidadesPorCodigo || {})[codigo]);
+        const codigoNormalizado = normalizarUnidade(codigo);
+        return codigoNormalizado === termoUnidade || (nomeDaLoja && (nomeDaLoja === termoUnidade
+          || nomeDaLoja.includes(termoUnidade) || termoUnidade.includes(nomeDaLoja)));
+      });
+      if (!bases.length) return 'Não reconheci essa loja dentro do acesso desta conversa. Confirme o nome da unidade.';
+    } else if (bases.length !== 1) {
+      const opcoes = bases.slice(0, 12).map((codigo) => (unidadesPorCodigo || {})[codigo] || codigo).join(', ');
+      return `Peça o nome da loja antes de consultar, pois esta conta tem mais de uma unidade: ${opcoes}.`;
+    }
+
+    // Um mesmo ponto pode ter codigo do Fechamento e outro no Monitor. Expande
+    // somente os codigos da unidade ja autorizada, nunca uma busca global.
+    const candidatos = new Set();
+    for (const codigo of bases) {
+      candidatos.add(codigo);
+      for (const equivalente of (resolverUnidadesPorIdPulse ? resolverUnidadesPorIdPulse(codigo) : [codigo])) candidatos.add(equivalente);
+    }
     let pedidos = store.allOrders().filter((o) => o.unidade && candidatos.has(o.unidade));
-    if (!chat.logado.isMaster) {
-      const permitidas = new Set(chat.logado.unidades || []);
-      pedidos = pedidos.filter((o) => permitidas.has(o.unidade));
-    }
     pedidos = pedidos.filter((o) => String(o.cliente || '').toLowerCase().includes(nomeCliente));
-    if (!Number.isNaN(valorNum)) {
-      pedidos = pedidos.filter((o) => Math.abs((o.valor || 0) - valorNum) < 0.01);
-    }
+    pedidos = pedidos.filter((o) => Math.abs((o.valor || 0) - valorNum) < 0.01);
     const encontrados = pedidos
       .sort((a, b) => String(b.ultimaAtualizacao || '').localeCompare(String(a.ultimaAtualizacao || '')))
       .slice(0, 5);
-    if (!encontrados.length) return 'Nenhum pedido encontrado com esses dados nas lojas que essa pessoa tem acesso (confira o código da loja, o nome e o valor - ou pode ser de outra loja, ou já saiu da retenção do Monitor).';
+    if (!encontrados.length) return 'Nenhum pedido encontrado com esse nome e valor nas unidades permitidas. Confira nome, valor e loja; se necessário, ofereça chamar um atendente.';
     // registra o "retrato" do status visto agora - se mudar depois, a pessoa
     // e avisada sozinha (SSE com o NoPulso aberto + push com fechado), sem
     // precisar voltar aqui perguntar de novo (ver pedidoWatch.js/index.js)
@@ -825,9 +842,8 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       pedidoWatch.registrar({ pedidoId: o.pedidoId, userId: chat.logado.id, unidade: o.unidade, statusVisto: o.statusAtual, chatId: chat.id }).catch(() => {});
     }
     return JSON.stringify(encontrados.map((o) => ({
-      pedido: o.pedidoId, unidade: o.unidade, cliente: o.cliente, valor: o.valor,
-      status: o.statusAtual, metodo: o.metodo, cartaoFinal: o.last4,
-      aprovadoEm: o.dataCompra, estornadoEm: o.dataChargeback, fraudeSuspeita: !!o.fraudeSuspeita,
+      pedido: o.pedidoId, unidade: (unidadesPorCodigo || {})[o.unidade] || o.unidade, valor: o.valor,
+      status: o.statusAtual, atualizadoEm: o.ultimaAtualizacao || null,
     })));
   }
   // ---- impressora Zebra: ler o estado, e so entao reiniciar ----
