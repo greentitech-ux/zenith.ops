@@ -325,7 +325,7 @@ function pintarVisita(){
   // vai na URL, igual à foto do chat da Central (requireAuth aceita os dois)
   // Cada abertura recebe uma URL nova: visualizadores de PDF do celular podem
   // guardar a prévia anterior mesmo quando o laudo é gerado no servidor.
-  $('v-laudo-link').href = `/api/qualidade/visitas/${encodeURIComponent(v.id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}&v=QA-2026.09.25.10&abertoEm=${Date.now()}`;
+  $('v-laudo-link').href = `/api/qualidade/visitas/${encodeURIComponent(v.id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}&v=QA-2026.09.25.11&abertoEm=${Date.now()}`;
 
   $('v-setores').innerHTML = (v.modeloSnap.setores||[]).map((s)=>{
     const extras = (v.extras||{})[s.id] || [];

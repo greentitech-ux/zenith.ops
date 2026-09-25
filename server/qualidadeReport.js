@@ -20,7 +20,7 @@ const LOGO_DOMINOS = path.join(__dirname, 'public', 'branding', 'dominos-pizza.p
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.10';
+const VERSAO_LAUDO = 'QA-2026.09.25.11';
 
 const COR = {
   texto: '#1a1a1a',
@@ -137,13 +137,15 @@ function desenharFundoDaCapa(doc, marca) {
   doc.opacity(0.055).circle(pagina.width - 26, 176, 150).fill(marca.cor);
   doc.opacity(0.035).circle(pagina.width - 116, 255, 210).fill(marca.apoio);
   doc.opacity(1);
-  doc.rect(0, pagina.height - 100, pagina.width, 100).fill(marca.cor);
+  // Faixa institucional mais alta para equilibrar a capa e dar mais presença
+  // ao bloco final, sem invadir a área branca do rodapé NoPulso.
+  doc.rect(0, pagina.height - 130, pagina.width, 130).fill(marca.cor);
   doc.opacity(0.18).circle(pagina.width - 28, pagina.height - 16, 118).fill(marca.apoio);
   doc.restore();
 }
 
 function rodapeDaCapa(doc, visita, marca) {
-  const y = doc.page.height - 72;
+  const y = doc.page.height - 82;
   const largura = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff')
     .text('VISTORIA Q.A. · RELATÓRIO OFICIAL', doc.page.margins.left, y, { width: largura });
