@@ -16,10 +16,11 @@ const PDFDocument = require('pdfkit');
 const storage = require('./storage');
 
 const LOGO_GRUPO_BRAVO = path.join(__dirname, 'public', 'grupo-bravo.png');
+const LOGO_DOMINOS = path.join(__dirname, 'public', 'branding', 'dominos-pizza.png');
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.3';
+const VERSAO_LAUDO = 'QA-2026.09.25.4';
 
 const COR = {
   texto: '#1a1a1a',
@@ -36,7 +37,7 @@ const FAIXA_TITULO = {
 };
 
 const MARCAS = {
-  dominos: { nome: 'DOMINO’S', cor: '#006491', apoio: '#e31837' },
+  dominos: { nome: 'DOMINO’S', cor: '#006491', apoio: '#e31837', logo: LOGO_DOMINOS },
   spoleto: { nome: 'SPOLETO', cor: '#9e1b32', apoio: '#f4b400' },
   milkymoo: { nome: 'MILKY MOO', cor: '#5b2a86', apoio: '#f6d743' },
   'milk-moo': { nome: 'MILKY MOO', cor: '#5b2a86', apoio: '#f6d743' },
@@ -102,7 +103,16 @@ function marcaDaVisita(visita) {
 // Domino's, o símbolo de dominó é desenhado junto do nome; nas demais marcas,
 // a assinatura tipográfica usa as cores da identidade cadastrada.
 function desenharMarca(doc, marca, x, y, largura) {
-  const altura = 48;
+  const altura = marca.logo ? 64 : 48;
+  if (marca.logo) {
+    // A logo oficial é fornecida pela operação e fica local ao projeto: o PDF
+    // mantém a marca certa mesmo sem acesso à internet.
+    doc.roundedRect(x, y, largura, altura, 8).fillAndStroke('#ffffff', COR.linha);
+    try {
+      doc.image(marca.logo, x + 10, y + 7, { fit: [largura - 20, altura - 14], align: 'center', valign: 'center' });
+      return;
+    } catch (e) { /* usa a marca desenhada abaixo se o arquivo não abrir */ }
+  }
   doc.roundedRect(x, y, largura, altura, 8).fill(marca.cor);
   if (marca.nome === 'DOMINO’S') {
     const meio = x + 27;
@@ -224,11 +234,11 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
 
   // ---------- CAPA ----------
   const marca = marcaDaVisita(visita);
-  desenharMarca(doc, marca, doc.page.margins.left, 42, 198);
+  desenharMarca(doc, marca, doc.page.margins.left, 34, 260);
   try {
     doc.image(LOGO_GRUPO_BRAVO, doc.page.width - doc.page.margins.right - 110, 40, { fit: [110, 42] });
   } catch (e) { /* sem logo o laudo sai igual */ }
-  doc.y = 108;
+  doc.y = 116;
   doc.fontSize(20).fillColor(COR.texto).font('Helvetica-Bold').text('RELATÓRIO DE VISTORIA', { width: largura });
   doc.fontSize(12).fillColor(COR.fraco).font('Helvetica').text(visita.loja || visita.unidadeNome || 'Unidade não informada', { width: largura });
   doc.moveDown(0.7);
