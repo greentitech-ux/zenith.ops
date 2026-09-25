@@ -20,7 +20,7 @@ const LOGO_DOMINOS = path.join(__dirname, 'public', 'branding', 'dominos-pizza.p
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.6';
+const VERSAO_LAUDO = 'QA-2026.09.25.7';
 
 const COR = {
   texto: '#1a1a1a',
@@ -246,7 +246,9 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   const marca = marcaDaVisita(visita);
   desenharMarca(doc, marca, doc.page.margins.left, 34, 260);
   try {
-    doc.image(LOGO_GRUPO_BRAVO, doc.page.width - doc.page.margins.right - 150, 34, { fit: [150, 58] });
+    // As duas marcas ocupam a mesma faixa visual (50 pt de altura). `fit`
+    // preserva a proporção original de cada arquivo, sem alargar o Grupo.
+    doc.image(LOGO_GRUPO_BRAVO, doc.page.width - doc.page.margins.right - 130, 41, { fit: [130, 50], align: 'right', valign: 'center' });
   } catch (e) { /* sem logo o laudo sai igual */ }
   doc.y = 116;
   doc.fontSize(20).fillColor(COR.texto).font('Helvetica-Bold').text('RELATÓRIO DE VISTORIA', { width: largura });
