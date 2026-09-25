@@ -7447,12 +7447,17 @@ app.get('/api/fechamentos/caixa-anterior', requireSection('lancamento'), async (
   res.json(await fechamentosLive.caixaFinalAnterior(unidade, data) || { valor: null, de: null });
 });
 
-// registro CRU (sem mesclar com sangria/planilha) de um fechamento - usado
-// pela edicao direta do Master, pra nunca editar em cima de um valor que ja
-// vem somado com a sangria do dia (ver sangrias.js/comoFechamento)
-app.get('/api/fechamentos/:id/bruto', auth.requireMaster, async (req, res) => {
+// Registro cru (sem mesclar com sangria/planilha). Também alimenta o
+// formulário "Pedir correção": quem tem a seção Lançamento pode ler SOMENTE
+// o fechamento da própria unidade e propor mudanças; editar/aprovar continua
+// nas rotas restritas abaixo. Antes esta leitura exigia Master, mas o botão
+// aparecia para a loja e falhava exatamente ao abrir o formulário.
+app.get('/api/fechamentos/:id/bruto', requireSection('lancamento'), async (req, res) => {
   const registro = await fechamentosLive.getOne(req.params.id);
   if (!registro) return res.status(404).json({ error: 'Fechamento não encontrado.' });
+  if (!req.isMaster && !(req.permissions.unidades || []).includes(registro.unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a esse fechamento.' });
+  }
   res.json(registro);
 });
 

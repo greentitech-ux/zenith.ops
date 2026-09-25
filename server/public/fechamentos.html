@@ -3338,9 +3338,12 @@ async function abrirEdicaoFechamento(id, modo = 'editar'){
   // duas vezes (ela ja soma automatico na leitura, ver sangrias.js)
   let d;
   try{
-    d = await fetch(`/api/fechamentos/${id}/bruto`).then(r=>{ if(!r.ok) throw new Error(); return r.json(); });
+    const r = await fetch(`/api/fechamentos/${encodeURIComponent(id)}/bruto`);
+    const resposta = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(resposta.error || 'Não foi possível carregar esse fechamento pra edição.');
+    d = resposta;
   }catch(e){
-    alert('Não foi possível carregar esse fechamento pra edição.');
+    alert(e.message || 'Não foi possível carregar esse fechamento pra edição.');
     return;
   }
   FECHAMENTO_EDITANDO_ID = id;
