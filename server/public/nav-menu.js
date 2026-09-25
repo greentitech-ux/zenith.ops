@@ -102,7 +102,7 @@
       // sair pra loja e parte do trabalho de quem visita.
       { id: 'nav-qa-modelos', href: '/qa-modelos', icone: '📋', rotulo: 'Modelos Q.A', tags: ['qa'] },
       // a pasta é da UNIDADE: quem tem unidade vê, além de quem visita
-      { id: 'nav-qa-documentos', href: '/qa-documentos', icone: '📄', rotulo: 'Pasta da unidade', tagsOuUnidade: ['qa'] },
+      { id: 'nav-qa-documentos', href: '/qa-documentos', icone: '📄', rotulo: 'Documentação', tagsOuUnidade: ['qa'] },
     ] },
     { grupo: 'Saltiverso', itens: [
       { id: 'nav-parque-checkin', href: '/parque-checkin', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },

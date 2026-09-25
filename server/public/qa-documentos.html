@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Pasta da unidade · NoPulso</title>
+<title>Documentação · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -71,12 +71,12 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Q.A · Pasta da unidade</div>
-        <h1>Pasta</h1>
+        <div class="eyebrow">Q.A · Documentação</div>
+        <h1>Documentação</h1>
       </div>
     </div>
     <div style="display:flex;gap:8px;">
-      <button class="btn" id="btn-criar-pasta" onclick="abrirCriarPasta()" title="Abrir a pasta de uma unidade que ainda não tem">📁 Criar Pasta</button>
+      <button class="btn" id="btn-criar-pasta" onclick="abrirCriarPasta()" title="Criar a documentação de uma unidade que ainda não tem registros">📁 Criar documentação</button>
       <button class="btn" id="btn-marca" onclick="semearMarca()" title="Cria os documentos que a franqueadora exige, sem data - a loja preenche">Exigências da marca</button>
       <button class="btn-primary" onclick="abrirNovo()">+ Documento</button>
     </div>
@@ -84,14 +84,14 @@
 </header>
 
 <div class="card" id="cx-criar-pasta" style="display:none;">
-  <h2 style="margin:0 0 4px;font-size:14px;">Criar Pasta de uma unidade</h2>
-  <p class="sub" style="margin:0 0 8px;">Só aparecem as unidades que <b>ainda não têm</b> Pasta. Assim que a unidade ganha o primeiro documento, ela sai desta lista.</p>
-  <label for="cp-unidade">Unidade sem Pasta</label>
+  <h2 style="margin:0 0 4px;font-size:14px;">Criar documentação da unidade</h2>
+  <p class="sub" style="margin:0 0 8px;">Só aparecem as unidades que <b>ainda não têm</b> documentação. Assim que a unidade ganha o primeiro documento, ela sai desta lista.</p>
+  <label for="cp-unidade">Unidade sem documentação</label>
   <select id="cp-unidade" onchange="pintarInfoCriarPasta()"></select>
   <p class="sub" id="cp-info" style="margin:8px 0 0;"></p>
   <div class="linha" style="margin-top:12px;">
     <button class="btn" onclick="fecharCriarPasta()">Cancelar</button>
-    <button class="btn-primary" id="cp-criar" style="flex:1;" onclick="criarPasta()">Criar Pasta</button>
+    <button class="btn-primary" id="cp-criar" style="flex:1;" onclick="criarPasta()">Criar documentação</button>
   </div>
 </div>
 
@@ -212,7 +212,7 @@ function trocarTipo(){
   $('cx-validade').style.display = av ? 'none' : '';
   $('cx-cadencia').style.display = av ? '' : 'none';
   $('dica-tipo').textContent = av
-    ? 'Avaliação e visita não vencem — a pasta cobra pelo tempo desde a mais recente.'
+    ? 'Avaliação e visita não vencem — a documentação cobra pelo tempo desde a mais recente.'
     : 'A data de validade está impressa no documento.';
 }
 
@@ -452,7 +452,7 @@ async function abrirCriarPasta(){
   const semPasta = (COBERTURA && COBERTURA.semPasta) || [];
   if(!semPasta.length){
     sel.innerHTML = '';
-    $('cp-info').innerHTML = '<b>Todas as unidades já têm Pasta.</b>';
+    $('cp-info').innerHTML = '<b>Todas as unidades já têm documentação.</b>';
     $('cp-criar').disabled = true;
     return;
   }
@@ -466,25 +466,25 @@ function pintarInfoCriarPasta(){
   const u = unidadeSemPasta($('cp-unidade').value);
   const total = COBERTURA ? COBERTURA.total : 0;
   const comPasta = COBERTURA ? COBERTURA.comPasta.length : 0;
-  const cobertura = `${comPasta} de ${total} unidades já têm Pasta.`;
+  const cobertura = `${comPasta} de ${total} unidades já têm documentação.`;
   if(!u){ $('cp-info').textContent = cobertura; return; }
-  if(u.temPacote) $('cp-info').innerHTML = `Vou criar a Pasta de <b>${escapeHtml(u.nome)}</b> com os <b>${u.itensExigencia}</b> itens que a ${escapeHtml(u.marcaLabel)} exige (sem data — a loja preenche). · ${cobertura}`;
-  else if(u.marca) $('cp-info').innerHTML = `<b>${escapeHtml(u.nome)}</b> é ${escapeHtml(u.marcaLabel)}, mas ainda não tenho a lista de exigências dessa marca. A Pasta abre no primeiro documento que você adicionar. · ${cobertura}`;
+  if(u.temPacote) $('cp-info').innerHTML = `Vou criar a documentação de <b>${escapeHtml(u.nome)}</b> com os <b>${u.itensExigencia}</b> itens que a ${escapeHtml(u.marcaLabel)} exige (sem data — a loja preenche). · ${cobertura}`;
+  else if(u.marca) $('cp-info').innerHTML = `<b>${escapeHtml(u.nome)}</b> é ${escapeHtml(u.marcaLabel)}, mas ainda não tenho a lista de exigências dessa marca. A documentação começa no primeiro documento que você adicionar. · ${cobertura}`;
   else $('cp-info').innerHTML = `<b>${escapeHtml(u.nome)}</b> não tem marca no perfil. Defina a marca em Unidades pra semear a lista, ou adicione o primeiro documento à mão. · ${cobertura}`;
 }
 async function criarPasta(){
   const u = unidadeSemPasta($('cp-unidade').value);
   if(!u) return;
   if(u.temPacote){
-    if(!confirm(`Criar a Pasta de ${u.nome} com os ${u.itensExigencia} itens que a ${u.marcaLabel} exige?\n\nEles entram SEM data — a loja preenche cada uma olhando o documento.`)) return;
+    if(!confirm(`Criar a documentação de ${u.nome} com os ${u.itensExigencia} itens que a ${u.marcaLabel} exige?\n\nEles entram SEM data — a loja preenche cada uma olhando o documento.`)) return;
     const btn = $('cp-criar'); btn.disabled=true; btn.textContent='Criando…';
     try{
       const r = await api(`/api/qualidade/documentos/exigencias/${encodeURIComponent(u.marca)}`, { method:'POST', body: JSON.stringify({ unidade: u.codigo, unidadeNome: u.nome }) });
       fecharCriarPasta();
       await carregar();
-      alert(`Pasta de ${u.nome} criada: ${r.criados} documento(s).`);
+      alert(`Documentação de ${u.nome} criada: ${r.criados} documento(s).`);
     }catch(e){ alert(e.message); }
-    finally{ btn.disabled=false; btn.textContent='Criar Pasta'; }
+    finally{ btn.disabled=false; btn.textContent='Criar documentação'; }
     return;
   }
   // sem lista da marca: a pasta nasce com o primeiro documento manual
@@ -492,7 +492,7 @@ async function criarPasta(){
   abrirNovo();
   $('f-unidade').value = u.codigo;
   await carregarMarca();
-  alert(`${u.nome} não tem lista de exigências pronta. Adicione o primeiro documento — é ele que cria a Pasta.`);
+  alert(`${u.nome} não tem lista de exigências pronta. Adicione o primeiro documento — é ele que inicia a documentação.`);
 }
 async function semearMarca(){
   const uni = $('f-unidade').value;
@@ -500,7 +500,7 @@ async function semearMarca(){
   if(!MARCA || !MARCA.marca) return alert('Essa unidade ainda não tem marca definida no perfil.\n\nA marca é o Master quem define, em Unidades — ela não é deduzida do nome da loja.');
   if(!MARCA.temPacote) return alert(`Ainda não recebi a lista de documentos da ${MARCA.marcaLabel}.`);
   const nome = (UNIDADES.find(u=>u.codigo===uni)||{}).nome || uni;
-  if(!confirm(`Criar na pasta de ${nome} os ${MARCA.itens} itens que a ${MARCA.marcaLabel} exige?\n\nEles entram SEM data — você preenche cada uma olhando o documento.`)) return;
+  if(!confirm(`Criar na documentação de ${nome} os ${MARCA.itens} itens que a ${MARCA.marcaLabel} exige?\n\nEles entram SEM data — você preenche cada uma olhando o documento.`)) return;
   try{
     const r = await api(`/api/qualidade/documentos/exigencias/${encodeURIComponent(MARCA.marca)}`, { method:'POST', body: JSON.stringify({ unidade: uni, unidadeNome: nome }) });
     alert(`${r.criados} criado(s)${r.jaExistiam?` · ${r.jaExistiam} já existia(m)`:''}.`);
