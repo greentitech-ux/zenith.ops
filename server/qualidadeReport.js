@@ -20,7 +20,7 @@ const LOGO_DOMINOS = path.join(__dirname, 'public', 'branding', 'dominos-pizza.p
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.4';
+const VERSAO_LAUDO = 'QA-2026.09.25.5';
 
 const COR = {
   texto: '#1a1a1a',
@@ -179,14 +179,24 @@ function resumoDaCapa(doc, visita, largura) {
   });
   doc.y = y + 98;
   doc.x = x;
+}
 
+function paginaDeConformes(doc, visita, largura) {
   const porSetor = conformesPorSetor(visita);
-  if (!porSetor.length) return;
+  doc.addPage();
+  doc.font('Helvetica-Bold').fontSize(18).fillColor(COR.positiva).text('ITENS CONFORMES', { width: largura });
+  doc.font('Helvetica').fontSize(10).fillColor(COR.fraco)
+    .text(`${visita.conformes || 0} item(ns) em conformidade, agrupado(s) por setor.`);
+  doc.moveDown(0.8);
 
-  // A capa não deve falar apenas do problema: ela é o retrato completo da
-  // vistoria. O agrupamento por setor permite registrar TODOS os conformes
-  // sem gastar uma página por item e deixa os não conformes para o detalhamento
-  // que começa na folha seguinte.
+  if (!porSetor.length) {
+    doc.font('Helvetica').fontSize(11).fillColor(COR.fraco).text('Nenhum item conforme foi registrado nesta vistoria.');
+    return;
+  }
+
+  // A capa fica limpa, a segunda página traz a visão positiva completa e só
+  // depois começam os apontamentos. Agrupar por setor registra TODOS os
+  // conformes sem transformar cada resposta em uma página individual.
   doc.font('Helvetica-Bold').fontSize(8).fillColor(COR.positiva)
     .text(`ITENS CONFORMES · ${visita.conformes || 0}`, { width: largura });
   porSetor.forEach((setor) => {
@@ -291,6 +301,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   }
 
   resumoDaCapa(doc, visita, largura);
+  paginaDeConformes(doc, visita, largura);
 
   // ---------- APONTAMENTOS ----------
   if (!apontamentos.length) {
