@@ -195,6 +195,11 @@
       nenhuma opção nem mudar o que será salvo. */
   .sections-list{flex-wrap:nowrap;gap:1px;}
   .sections-list label{white-space:normal;min-width:0;}
+  /* Cargo e acessos extras também são listas de permissão, não uma grade.
+     Sem isto o flex-wrap tentava encaixar diversos rótulos na mesma linha e,
+     no celular, separava visualmente cada checkbox do respectivo texto. */
+  .tags-list{flex-wrap:nowrap;gap:1px;}
+  .tags-list label{white-space:normal;min-width:0;}
   /* nos checklists de permissão a letra continua sendo só um rótulo; na
      lista de Acessos ela virou o botão que abre/fecha o grupo */
   .az-letra{width:100%;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent);margin:8px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--line);}
@@ -721,11 +726,11 @@ function tagsFieldsetHtml(prefixo, tags){
   // inicial e o rótulo, como sempre definiu (ver tagPrincipal em users.js).
   const marcadas = new Set(tags.cargos && tags.cargos.length ? tags.cargos : (tags.cargo ? [tags.cargo] : []));
   const cargoHtml = CARGOS.map(([v,l])=>
-    `<label><input type="checkbox" name="${prefixo}-cargo" value="${v}" ${marcadas.has(v)?'checked':''}> ${l}</label>`
+    `<label><input type="checkbox" name="${prefixo}-cargo" value="${v}" ${marcadas.has(v)?'checked':''}><span>${l}</span></label>`
   ).join('');
   return `
     <div class="group-heading">Cargo <span style="text-transform:none;color:var(--muted);">— pode marcar mais de um; o primeiro da lista define a tela inicial</span></div>
-    <div class="checks">${cargoHtml}</div>
+    <div class="checks az-list tags-list">${cargoHtml}</div>
     <div class="group-heading" style="margin-top:10px;">Empresa <span style="text-transform:none;color:var(--muted);">— até onde vai o "vê tudo" do Admin</span></div>
     <div style="margin:4px 0 2px;">
       <select id="${prefixo}-empresa" style="width:100%;max-width:340px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
@@ -735,19 +740,19 @@ function tagsFieldsetHtml(prefixo, tags){
       <div style="font-size:11px;color:var(--muted);margin-top:4px;">Vinculando a uma empresa, esse acesso passa a enxergar <b>só</b> as unidades dela — inclusive se for Admin. Unidade marcada abaixo que não pertença a essa empresa é ignorada pelo servidor.</div>
     </div>
     <div class="group-heading" style="margin-top:10px;">Acessos extras <span style="text-transform:none;color:var(--muted);">— liberam uma ação sem precisar dar Admin</span></div>
-    <div class="checks">
-      <label><input type="checkbox" id="${prefixo}-tag-admin" ${tags.isAdmin?'checked':''}> ⭐ Admin (aprova/recusa na Central)</label>
-      <label><input type="checkbox" id="${prefixo}-tag-catalogo-estoque" ${tags.podeCatalogoEstoque?'checked':''}> 📦 Catálogo do Estoque</label>
-      <label><input type="checkbox" id="${prefixo}-tag-catalogo-insumos" ${tags.podeCatalogoInsumos?'checked':''}> 🥤 Insumos (Abastec. Carrinho)</label>
-      <label><input type="checkbox" id="${prefixo}-tag-operadores" ${tags.podeCadastrarOperadores?'checked':''}> 👥 Operadores (Abastec. Carrinho)</label>
-      <label><input type="checkbox" id="${prefixo}-tag-print" ${tags.podeNoPulsoPrint?'checked':''}> 📸 NoPulsoPrint (botão de print no celular)</label>
-      <label title="Permite pedir correção de fechamentos das unidades já atribuídas. Não permite aprovar nem editar diretamente."><input type="checkbox" id="${prefixo}-tag-pedir-correcao-fechamento" ${tags.podePedirCorrecaoFechamento?'checked':''}> 🧾 Pedir correção de fechamento</label>
-      <label><input type="checkbox" id="${prefixo}-tag-rh-todas-unidades" ${tags.podeRhTodasUnidades?'checked':''}> 🧑‍💼 RH (todas as unidades)</label>
-      <label><input type="checkbox" id="${prefixo}-tag-rh-cadastrar-efetivado" ${tags.podeRhCadastrarEfetivado?'checked':''}> 🧑‍💼 RH: pode cadastrar efetivado direto</label>
-      <label title="Sem esta tag, quem tem a seção Bonificação vê só o próprio card - com ela, vê faturamento/pool/taxas por trás da conta"><input type="checkbox" id="${prefixo}-tag-bonif-valor-total" ${tags.podeBonifVerValorTotal?'checked':''}> 🏆 Bonificação: ver valor total</label>
-      <label title="Sem esta tag, a equipe aparece só como agregado (quantidade + total) - com ela, aparece nome a nome"><input type="checkbox" id="${prefixo}-tag-bonif-colaboradores" ${tags.podeBonifVerColaboradores?'checked':''}> 🏆 Bonificação: ver colaboradores</label>
-      <label><input type="checkbox" id="${prefixo}-tag-sessao-longa" ${tags.sessaoLonga?'checked':''}> 🔒 Manter sempre conectado (30 dias — login de loja/terminal)</label>
-      <label title="Sempre vê/cria todos os tipos de solicitação na Central, e tudo que criar sai marcado TESTE"><input type="checkbox" id="${prefixo}-tag-qa-user" ${tags.qaUser?'checked':''}> 🧪 QA User (testes na Central, marca TESTE)</label>
+    <div class="checks az-list tags-list">
+      <label><input type="checkbox" id="${prefixo}-tag-admin" ${tags.isAdmin?'checked':''}><span>⭐ Admin (aprova/recusa na Central)</span></label>
+      <label><input type="checkbox" id="${prefixo}-tag-catalogo-estoque" ${tags.podeCatalogoEstoque?'checked':''}><span>📦 Catálogo do Estoque</span></label>
+      <label><input type="checkbox" id="${prefixo}-tag-catalogo-insumos" ${tags.podeCatalogoInsumos?'checked':''}><span>🥤 Insumos (Abastec. Carrinho)</span></label>
+      <label><input type="checkbox" id="${prefixo}-tag-operadores" ${tags.podeCadastrarOperadores?'checked':''}><span>👥 Operadores (Abastec. Carrinho)</span></label>
+      <label><input type="checkbox" id="${prefixo}-tag-print" ${tags.podeNoPulsoPrint?'checked':''}><span>📸 NoPulsoPrint (botão de print no celular)</span></label>
+      <label title="Permite pedir correção de fechamentos das unidades já atribuídas. Não permite aprovar nem editar diretamente."><input type="checkbox" id="${prefixo}-tag-pedir-correcao-fechamento" ${tags.podePedirCorrecaoFechamento?'checked':''}><span>🧾 Pedir correção de fechamento</span></label>
+      <label><input type="checkbox" id="${prefixo}-tag-rh-todas-unidades" ${tags.podeRhTodasUnidades?'checked':''}><span>🧑‍💼 RH (todas as unidades)</span></label>
+      <label><input type="checkbox" id="${prefixo}-tag-rh-cadastrar-efetivado" ${tags.podeRhCadastrarEfetivado?'checked':''}><span>🧑‍💼 RH: pode cadastrar efetivado direto</span></label>
+      <label title="Sem esta tag, quem tem a seção Bonificação vê só o próprio card - com ela, vê faturamento/pool/taxas por trás da conta"><input type="checkbox" id="${prefixo}-tag-bonif-valor-total" ${tags.podeBonifVerValorTotal?'checked':''}><span>🏆 Bonificação: ver valor total</span></label>
+      <label title="Sem esta tag, a equipe aparece só como agregado (quantidade + total) - com ela, aparece nome a nome"><input type="checkbox" id="${prefixo}-tag-bonif-colaboradores" ${tags.podeBonifVerColaboradores?'checked':''}><span>🏆 Bonificação: ver colaboradores</span></label>
+      <label><input type="checkbox" id="${prefixo}-tag-sessao-longa" ${tags.sessaoLonga?'checked':''}><span>🔒 Manter sempre conectado (30 dias — login de loja/terminal)</span></label>
+      <label title="Sempre vê/cria todos os tipos de solicitação na Central, e tudo que criar sai marcado TESTE"><input type="checkbox" id="${prefixo}-tag-qa-user" ${tags.qaUser?'checked':''}><span>🧪 QA User (testes na Central, marca TESTE)</span></label>
     </div>`;
 }
 function lerTagsForm(prefixo){

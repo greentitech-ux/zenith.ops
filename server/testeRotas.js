@@ -26071,6 +26071,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /type="checkbox" name="\$\{prefixo\}-cargo"/.test(htmlUsuarios)
         && !/type="radio" name="\$\{prefixo\}-cargo"/.test(htmlUsuarios)
         && /querySelectorAll\(`input\[name="\$\{prefixo\}-cargo"\]:checked`\)/.test(htmlUsuarios),
+      'tags: cada checkbox fica preso ao seu texto em celular, sem grade quebrada':
+        /class="checks az-list tags-list"/.test(htmlUsuarios)
+        && /\.tags-list\{flex-wrap:nowrap;gap:1px;\}/.test(htmlUsuarios)
+        && /<input type="checkbox" name="\$\{prefixo\}-cargo"[^>]*><span>\$\{l\}<\/span>/.test(htmlUsuarios),
       'a lista mostra TODAS as tags, não só a principal':
         /cargosDaPessoa\.forEach/.test(htmlUsuarios),
       // o Beniboy responde toda conversa do widget: o modelo não pode estar
