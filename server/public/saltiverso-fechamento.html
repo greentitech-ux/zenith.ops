@@ -69,6 +69,13 @@
   .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
   .badge.ok{background:var(--ok-dim);color:var(--ok);}
   .badge.bad{background:var(--bad-dim);color:var(--bad);}
+  .fech-sucesso-overlay{position:fixed;inset:0;z-index:1005;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.68);backdrop-filter:blur(2px);}
+  .fech-sucesso-overlay.hidden{display:none!important;}
+  .fech-sucesso-card{width:min(100%,380px);background:var(--panel);border:1px solid var(--ok);border-radius:16px;padding:24px 20px;text-align:center;box-shadow:0 18px 55px rgba(0,0,0,.48);}
+  .fech-sucesso-icone{width:52px;height:52px;margin:0 auto 13px;border-radius:50%;display:grid;place-items:center;background:var(--ok-dim);color:var(--ok);font-size:28px;font-weight:800;}
+  .fech-sucesso-card h2{font-size:18px;margin:0 0 7px;color:var(--text);}
+  .fech-sucesso-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.45;}
+  .fech-sucesso-card button{width:100%;margin-top:20px;background:var(--accent);color:#0b0d10;border:0;border-radius:9px;padding:12px;font:700 14px var(--sans);cursor:pointer;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -151,6 +158,15 @@
 
 </div>
 
+<div class="fech-sucesso-overlay hidden" id="fechamento-sucesso" role="dialog" aria-modal="true" aria-labelledby="fechamento-sucesso-titulo" onclick="if(event.target===this) fecharSucessoFechamento()">
+  <div class="fech-sucesso-card">
+    <div class="fech-sucesso-icone" aria-hidden="true">✓</div>
+    <h2 id="fechamento-sucesso-titulo">Fechamento realizado com sucesso</h2>
+    <p id="fechamento-sucesso-detalhe"></p>
+    <button type="button" id="fechamento-sucesso-continuar" onclick="fecharSucessoFechamento()">Continuar</button>
+  </div>
+</div>
+
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -165,6 +181,16 @@ window.fetch = (url, opts = {}) => {
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 function abrirMenu(){}
 function fecharMenu(){}
+function mostrarSucessoFechamento(titulo, detalhe){
+  document.getElementById('fechamento-sucesso-titulo').textContent = titulo || 'Fechamento realizado com sucesso';
+  document.getElementById('fechamento-sucesso-detalhe').textContent = detalhe || '';
+  document.getElementById('fechamento-sucesso').classList.remove('hidden');
+  document.getElementById('fechamento-sucesso-continuar').focus();
+}
+function fecharSucessoFechamento(){ document.getElementById('fechamento-sucesso').classList.add('hidden'); }
+document.addEventListener('keydown', (ev)=>{
+  if(ev.key === 'Escape' && !document.getElementById('fechamento-sucesso').classList.contains('hidden')) fecharSucessoFechamento();
+});
 
 
 const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
@@ -347,6 +373,7 @@ async function fecharMeuCaixa(origem='balcao'){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error||'Erro ao fechar o caixa.');
     await carregarTudo();
+    mostrarSucessoFechamento('Caixa fechado com sucesso', `${UNIDADES_NOMES[unidadeAtual()] || unidadeAtual()} · ${origem==='festa' ? 'caixa de festa' : 'caixa do balcão'}`);
   }catch(err){ msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 
@@ -423,7 +450,9 @@ async function fecharODia(){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error||'Erro ao fechar o dia.');
     await carregarTudo();
-    alert(data.cardQuebraCaixa ? 'Dia fechado — diferença grande, abri um ticket de Quebra de caixa na Central.' : 'Dia fechado com sucesso.');
+    mostrarSucessoFechamento('Fechamento realizado com sucesso', data.cardQuebraCaixa
+      ? 'O dia foi fechado. Há uma diferença relevante e foi criado um ticket de Quebra de caixa na Central.'
+      : `${UNIDADES_NOMES[unidadeAtual()] || unidadeAtual()} · dia consolidado.`);
   }catch(err){ msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 
