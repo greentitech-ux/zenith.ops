@@ -188,6 +188,13 @@
   .az-list label:hover{background:var(--panel2);}
   .az-list label input[type=checkbox]{flex:none;width:15px;height:15px;margin-top:2px;}
   .az-list label span{flex:1;min-width:0;white-space:normal;line-height:1.4;overflow-wrap:break-word;}
+  /* Seções também são uma lista, mas antes usavam só `.checks`: o flex-wrap
+      distribuía cada rótulo em colunas invisíveis. Em celular, o texto longo
+      escapava da coluna e os checkboxes pareciam soltos no meio da tela.
+      Uma seção por linha preserva a relação checkbox + permissão, sem tirar
+      nenhuma opção nem mudar o que será salvo. */
+  .sections-list{flex-wrap:nowrap;gap:1px;}
+  .sections-list label{white-space:normal;min-width:0;}
   /* nos checklists de permissão a letra continua sendo só um rótulo; na
      lista de Acessos ela virou o botão que abre/fecha o grupo */
   .az-letra{width:100%;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent);margin:8px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--line);}
@@ -609,7 +616,7 @@ function accordionChecklistSecoes(prefixo, checkedSet){
       const checked = checkedSet.has(it.value) ? 'checked' : '';
       return `<label><input type="checkbox" name="sections" value="${escapeHtml(it.value)}" ${checked}><span>${escapeHtml(it.label)}</span></label>`;
     }).join('');
-    return `<div class="group-heading" style="margin-top:8px;">${escapeHtml(rotuloVertical(v))}</div><div class="checks">${linhas}</div>`;
+    return `<div class="group-heading" style="margin-top:8px;">${escapeHtml(rotuloVertical(v))}</div><div class="checks az-list sections-list">${linhas}</div>`;
   }).join('');
   const n = checkedSet.size;
   const headerExtra = `<span class="accordion-badge">${n?n+' selecionad'+(n===1?'a':'as'):''}</span>` +
