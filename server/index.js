@@ -870,6 +870,16 @@ app.get('/api/meta/unidades-publico', async (req, res) => {
 app.get('/api/defesa-arquivo', async (req, res) => {
   const alvo = defesaChargeback.lerLink(req.query.t, process.env.JWT_SECRET || '');
   if (!alvo) return res.status(403).json({ error: 'Link vencido ou inválido. Peça um novo.' });
+  // PDF de formulário (o Claude baixa pra subir no Conecta): gerado na hora,
+  // com as assinaturas que existirem AGORA - nunca uma cópia velha
+  const formPdf = /^formulario-pdf:([\w-]+)$/.exec(alvo.caminho);
+  if (formPdf) {
+    const registro = await formularios.getOne(formPdf[1]);
+    if (!registro) return res.status(404).json({ error: 'Formulário não encontrado.' });
+    res.setHeader('Cache-Control', 'no-store');
+    try { await formularios.gerarPdf(registro, res, {}); } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
+    return;
+  }
   const bytes = await storage.baixarArquivo(alvo.caminho);
   if (!bytes) return res.status(404).json({ error: 'Arquivo não encontrado.' });
   const tipo = /\.pdf$/i.test(alvo.nome) ? 'application/pdf' : /\.png$/i.test(alvo.nome) ? 'image/png' : 'image/jpeg';
@@ -3771,6 +3781,13 @@ const UNIDADES_APELIDOS = {
   'São Braz IL': 'Sao Braz Ilha',
   'Milky Moo Tirol': 'MilkyMoo Tirol',
 };
+// O Claude/Cowork resolve unidade por código, nome ou apelido (sem acento nem
+// maiúscula) a partir das MESMAS listas daqui - ver coworkCatalogo.js. Fica
+// depois das constantes: antes delas, ler UNIDADES_APELIDOS dá erro de TDZ.
+require('./coworkCatalogo').configurar({
+  nomes: async () => ({ ...FECHAMENTO_UNIDADES_NOMES, ...(await unidadesExtras.mapa().catch(() => ({}))) }),
+  apelidos: UNIDADES_APELIDOS,
+});
 
 // classificacao de cada codigo por secao (de qual sistema ele vem - isso que
 // explica a mesma loja ter mais de um codigo) e grupo (franquia/rede a que
@@ -6045,7 +6062,7 @@ const EXECUTORES_QA = {
   'agente.executarAcao': (p) => agenteAcoes.executarAcaoDoAgente(p.acaoId, p.parametros),
   // pedido do Claude/Cowork (ver coworkApi.executarAutorizado): roda o que
   // ficou gravado no pedido, com o ator Master configurado
-  'cowork.executar': (p) => coworkApi.executarAutorizado(p),
+  'cowork.executar': (p, aprovacao) => coworkApi.executarAutorizado(p, aprovacao),
   'agente.acoes.criar': (p) => agenteAcoes.criar(p),
   'agente.acoes.editar': (p) => agenteAcoes.atualizar(p.id, p.dados, p.atualizadoPorEmail),
   'agente.acoes.excluir': (p) => agenteAcoes.remover(p.id),
@@ -6108,8 +6125,17 @@ app.post('/api/qa-aprovacoes/:id/aprovar', requireMasterDeVerdade, async (req, r
     const executor = EXECUTORES_QA[pendente.tipo];
     if (!executor) return res.status(500).json({ error: `Tipo de ação desconhecido: ${pendente.tipo}` });
     let saida;
+    // quem aprovou, com o quê e de onde: a assinatura eletrônica de um
+    // formulário (pedir_assinatura do Claude) sai daqui, nunca do pedido
+    const senhaUsada = String((req.body && req.body.password) || '');
+    const aprovacao = {
+      autorizacaoId: id, usuarioId: req.user.id, email: req.user.email,
+      nome: req.user.nome || req.user.username || req.user.email,
+      metodo: senhaUsada.startsWith('digital.') ? 'digital' : 'senha',
+      dispositivo: formularios.dispositivoDaAssinatura(req.headers['user-agent']),
+    };
     try {
-      saida = await executor(pendente.payload || {});
+      saida = await executor(pendente.payload || {}, aprovacao);
     } catch (execErr) {
       // `definitivo` = a regra que barrou não muda por repetir (cancelar uma
       // tarefa já concluída, por exemplo). O cartão deixa de oferecer
@@ -6361,6 +6387,26 @@ app.post('/api/loja-status/:codigo/computadores/:posto/programas/instalar', auth
     });
     console.log(`[NOC] ${req.user.email} pediu instalação de ${item.wingetId} em ${req.params.codigo}/${req.params.posto}`);
     res.json({ ok: true, comandoId: registro.id, mensagem: `${item.nome} foi colocado na fila do NOCZenith elevado.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// SIIGMA BOX: ação fechada (ver comandoInstalarSiigmaBox). Só o Master, com a
+// senha de novo, e só o código de ativação vem de fora - o endereço é fixo.
+app.post('/api/loja-status/:codigo/computadores/:posto/programas/instalar-siigma', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const codigo = String(req.body?.codigoSiigma || '').trim();
+    if (!lojaStatus.codigoSiigmaValido(codigo)) return res.status(400).json({ error: 'Código do Siigma Box inválido - são 6 a 12 letras/números.' });
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador) return res.status(404).json({ error: 'Computador não encontrado.' });
+    // roda na sessão do usuário logado (instalador com janela): sem requerAdmin
+    const registro = await lojaStatus.enfileirarComando(req.params.codigo, req.params.posto, lojaStatus.comandoInstalarSiigmaBox(codigo), {
+      origem: 'programas-instalar-siigma',
+    });
+    console.log(`[NOC] ${req.user.email} pediu instalação do Siigma Box em ${req.params.codigo}/${req.params.posto}`);
+    res.json({ ok: true, comandoId: registro.id, mensagem: 'Siigma Box foi colocado na fila do NOCZenith. O resultado aparece quando a máquina executar.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

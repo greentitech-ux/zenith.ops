@@ -65,6 +65,24 @@ Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Ap
 - `ler_reuniao` — pauta, participantes, resumo, anotações, decisões e o texto das transcrições anexadas (`.txt`, `.vtt`, `.md`, `.docx`).
 - `consultar_autorizacao` — o andamento de um pedido que ficou aguardando o Master.
 
+**O Claude prepara, o Master só assina (desde 24/09/2026):**
+- **Schema por ferramenta.** Cada ferramenta expõe só os parâmetros que usa. Parâmetro que ela não lê é recusado, com a lista do que ela aceita. `criar_tarefa` passou a aceitar `responsavelEmail`: antes o schema barrava e toda tarefa criada pelo Claude ficava com o Master.
+- **Unidade** é aceita por código, nome ou apelido, sem diferenciar acento e maiúscula ("dom praca aero recife"). Valor inválido (unidade ou tipo) devolve a lista do que existe.
+- `listar_unidades`: código, nome, apelidos, marca, empresa e o cadastro de formulário (rótulo, razão social, CNPJ).
+- `listar_modelos_formulario`: campos, colunas, quem assina, o que é obrigatório pra sair do rascunho e se o tipo só nasce de ticket.
+- `obter_estorno` (`numero` ou `estornoId`): venda, valor, motivo, status, formulário e **links de 2h** dos anexos. CPF, telefone e chave Pix vão **mascarados**: quem copia o dado real pro formulário é o servidor. `consultar_ticket` e `ler_chat_ticket` também acham estorno pelo número.
+- **Ciclo do formulário:**
+  - `criar_formulario` cria em **RASCUNHO**. Com `numero` (o estorno), copia campos e anexos e acha a unidade sozinho.
+  - `validar_formulario` diz o que falta e o que não bate: CPF/CNPJ, data, valor diferente do ticket.
+  - `pedir_assinatura` valida antes e, se faltar algo, recusa na hora. Depois vira autorização com prévia: documento, unidade, valor, favorecido e link do PDF.
+  - Aprovada com a digital, o Master assina **eletronicamente** o papel Responsável/Gerente. O PDF sai com o carimbo "ASSINADO ELETRONICAMENTE", o método (digital ou senha) e o hash do conteúdo, e o ticket de origem recebe o registro.
+  - Link de assinatura de rascunho não abre, e o Claude nunca recebe o token de assinatura.
+- **Conecta é um portal:**
+  - O Claude baixa o PDF assinado (`obter_formulario` → `pdf`, link de 2h) e envia no navegador.
+  - Depois registra com `registrar_envio_conecta` e o `protocolo`. Só formulário ASSINADO, uma vez só, com comentário no ticket.
+- `consultar_noc` devolve `gcom` (o "Possui GCOM" do cadastro da máquina) e aceita o filtro `gcom=true/false`.
+- Fluxo #12029: `obter_estorno numero=12029` → `criar_formulario tipo=estorno numero=12029` → `validar_formulario` → `pedir_assinatura destino=conecta` → digital do Master → `obter_formulario` (PDF) → portal do Conecta → `registrar_envio_conecta protocolo=…`. Só estorno **APROVADO** vira formulário.
+
 **Defesa de chargeback (desde 24/09/2026):**
 - A unidade responde a tarefa de defesa no Meu Dia, e o NoPulso gera o PDF em português.
 - `listar_disputas` (`status`, `unidade`, `somenteProntas`): os casos, pelo prazo mais próximo.

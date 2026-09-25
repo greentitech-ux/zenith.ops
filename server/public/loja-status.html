@@ -1297,6 +1297,12 @@
         <button type="button" class="btn-primary" onclick="instalarProgramaCatalogo()">Instalar</button>
       </div>
       <div class="sub" style="margin-top:7px;font-size:11.5px;">Instala somente itens aprovados. Remover usa a lista real desta máquina e pede a senha Master em cada ação.</div>
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:9px;padding-top:9px;border-top:1px solid var(--line);">
+        <span style="font-weight:700;font-size:12.5px;flex:1 1 100%;">Siigma Box</span>
+        <input id="prog-siigma-cod" maxlength="12" placeholder="Código de ativação (24h)" style="flex:1 1 190px;min-width:0;text-transform:uppercase;">
+        <button type="button" class="btn-primary" onclick="instalarSiigmaBox()">Instalar Siigma Box</button>
+      </div>
+      <div class="sub" style="margin-top:7px;font-size:11.5px;">Baixa do site oficial da Siigma usando só o código, e roda na sessão de quem está no caixa. Pede a senha Master.</div>
       <details style="margin-top:8px;">
         <summary style="cursor:pointer;font-size:12px;">Editar catálogo de instalações</summary>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:7px;">
@@ -2241,7 +2247,7 @@ async function carregarCatalogoProgramas(){
   }catch(e){ alert(e.message); }
 }
 async function salvarCatalogoProgramas(){
-  const password = prompt('Digite sua senha Master para alterar o catálogo de instalações:');
+  const password = await pedirSenhaMaster('alterar o catálogo de instalações');
   if(password === null) return false;
   const r = await fetch('/api/loja-status/programas/catalogo', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({catalogo:PROG_CATALOGO, password}) });
   const d = await r.json().catch(()=>({}));
@@ -2275,7 +2281,7 @@ async function instalarProgramaCatalogo(){
   const item = PROG_CATALOGO.find(x=>x.id===id);
   if(!item) return alert('Escolha um programa válido do catálogo.');
   if(!confirm(`Instalar ${item.nome} em ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nO agente elevado fará a instalação em segundo plano.`)) return;
-  const password = prompt('Digite sua senha Master para autorizar a instalação:');
+  const password = await pedirSenhaMaster(`instalar ${item.nome}`);
   if(password === null) return;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/instalar`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,password})});
@@ -2285,9 +2291,26 @@ async function instalarProgramaCatalogo(){
     await carregar();
   }catch(e){ alert(e.message); }
 }
+async function instalarSiigmaBox(){
+  if(!PROG_ATUAL) return;
+  const campo = document.getElementById('prog-siigma-cod');
+  const codigoSiigma = (campo.value||'').trim().toUpperCase();
+  if(!/^[A-Za-z0-9]{6,12}$/.test(codigoSiigma)) return alert('Código do Siigma Box inválido - são 6 a 12 letras/números, sem espaço nem símbolo.');
+  if(!confirm(`Instalar o Siigma Box (código ${codigoSiigma}) em ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nBaixa do site oficial da Siigma e roda na sessão de quem está usando a máquina.`)) return;
+  const password = await pedirSenhaMaster(`instalar o Siigma Box (${codigoSiigma})`);
+  if(password === null) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/instalar-siigma`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codigoSiigma,password})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui enfileirar a instalação.');
+    alert(d.mensagem || 'Instalação enfileirada.');
+    campo.value='';
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
 async function removerProgramaAtual(nome){
   if(!PROG_ATUAL || !confirm(`Remover “${nome}” de ${PROG_ATUAL.nome || PROG_ATUAL.posto}?\n\nO desinstalador registrado no Windows será executado pelo agente elevado.`)) return;
-  const password = prompt('Digite sua senha Master para autorizar a remoção:');
+  const password = await pedirSenhaMaster(`remover ${nome}`);
   if(password === null) return;
   try{
     const r = await fetch(`/api/loja-status/${encodeURIComponent(PROG_ATUAL.codigo)}/computadores/${encodeURIComponent(PROG_ATUAL.posto)}/programas/remover`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,password})});

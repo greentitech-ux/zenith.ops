@@ -364,6 +364,7 @@ senha, tem token. Chamando sem ela você toma **400 "Senha incorreta."**:
 | `PUT /api/loja-status/programas/catalogo` | alterar o catálogo aprovado de instalações remotas |
 | `POST /api/loja-status/:codigo/computadores/:posto/programas/instalar` | instalar um item do catálogo pelo agente SYSTEM |
 | `POST /api/loja-status/:codigo/computadores/:posto/programas/remover` | remover um programa inventariado, com desinstalador silencioso |
+| `POST /api/loja-status/:codigo/computadores/:posto/programas/instalar-siigma` | instalar o Siigma Box: ação fechada, endereço oficial cravado, só o código de ativação vem de fora, roda na sessão do usuário logado |
 | `POST /api/loja-status/reinicio-diario` | ligar o plano de reinício automático (só ao ligar; desligar não pede) |
 | `POST /api/tarefas/:id/concluir` | concluir tarefa |
 | `PATCH /api/tarefas/status-lote` | concluir em lote (só quando o destino é concluir) |

@@ -998,10 +998,14 @@ function cardHtml(f){
     </div>`;
   }
   const cancelado = f.status==='CANCELADO';
-  return `<div class="form-item${cancelado?' cancelado':''}">
+  const rascunho = f.status==='RASCUNHO';
+  return `<div class="form-item${cancelado?' cancelado':''}"${rascunho?' style="border-style:dashed;"':''}>
     <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
       <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
-      <span class="badge ${cancelado?'cancelado':(f.status==='ASSINADO'?'assinado':'pendente')}">${cancelado?'🚫 cancelado':(f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`)}</span></div>
+      <span class="badge ${cancelado?'cancelado':(f.status==='ASSINADO'?'assinado':'pendente')}">${cancelado?'🚫 cancelado':(rascunho?'📝 rascunho':(f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`))}</span></div>
+    ${f.preparadoPor ? `<div class="fi-sub">🤖 preparado por ${escapeHtml(f.preparadoPor.nome||'Claude')}${rascunho?' · ainda não foi pra assinatura':''}</div>` : ''}
+    ${(f.assinaturas||[]).filter(a=>a.eletronica).map(a=>`<div class="fi-sub" style="color:var(--ok);">✍️ ${escapeHtml(a.rotulo)} assinado eletronicamente${a.nome?` por ${escapeHtml(a.nome)}`:''} (${a.eletronica.metodo==='digital'?'digital':'senha'})</div>`).join('')}
+    ${f.enviadoConecta ? `<div class="fi-sub" style="color:var(--ok);">📤 enviado ao Conecta ${fmtData(f.enviadoConecta.em)}${f.enviadoConecta.protocolo?` · protocolo ${escapeHtml(f.enviadoConecta.protocolo)}`:''}</div>` : ''}
     ${favorecidoDe(f) ? `<div class="fi-favorecido"><span class="rot">favorecido</span> ${escapeHtml(favorecidoDe(f))}</div>` : ''}
     <div class="fi-sub">${fmtData(f.criadoEm)} · ${t && t.soAnexo ? `${(f.anexos||[]).length} documento(s)` : `${f.linhas.length} linha(s)`} · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
     ${cancelado ? `<div class="fi-sub" style="color:var(--bad);">cancelado ${fmtData(f.canceladoEm)} por ${escapeHtml(f.canceladoPorEmail||'')}${f.motivoCancelamento?` · ${escapeHtml(f.motivoCancelamento)}`:''}</div>` : ''}
@@ -1010,7 +1014,7 @@ function cardHtml(f){
     ${f.enviadoPagamento ? `<div class="fi-sub" style="color:var(--ok);">💰 enviado como Pagamento ${fmtData(f.enviadoPagamento.em)} - mesmo Ticket #${f.numeroTicket ?? '—'} na Central</div>` : ''}
     ${faltaComprovanteDeposito(f) ? `<div class="fi-sub" style="color:var(--warn);">⚠️ falta o comprovante de ${escapeHtml(f.campos.depositante)} - o formulário só fecha quando ele anexar e assinar</div>` : ''}
     <div class="acoes-form">
-      ${cancelado ? '' : `<button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>`}
+      ${cancelado || rascunho ? '' : `<button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>`}
       <button type="button" class="btn-ghost" onclick="verPdf('${f.id}')" title="Abrir o PDF pra conferir, sem baixar">👁️ Ver</button>
       <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')" title="Salvar o arquivo no aparelho">⬇️ ${t && t.soAnexo ? 'Baixar assinado' : 'Baixar PDF'}</button>
       ${!cancelado && f.status==='ASSINADO' && !f.enviadoPagamento ? `<button type="button" class="btn-ghost" style="color:var(--ok);" onclick="enviarComoPagamento('${f.id}')">💰 Enviar como Pagamento</button>` : ''}
@@ -1043,6 +1047,9 @@ function statusVisual(f){
   if(f.status==='CANCELADO') return 'CANCELADO';
   if(f.status==='AGUARDANDO_PREENCHIMENTO') return 'AGUARDANDO_PREENCHIMENTO';
   if(f.status==='ASSINADO') return 'ASSINADO';
+  // preparado pelo Claude e ainda não mandado pra assinatura: não é
+  // documento, os links de assinatura nem abrem
+  if(f.status==='RASCUNHO') return 'RASCUNHO';
   return 'PENDENTE'; // lançado, ainda falta assinatura de alguém
 }
 // quando o formulário TERMINOU de ser assinado - o maior assinadoEm entre os
@@ -1109,7 +1116,7 @@ function montarPresetsPeriodoLista(){
 }
 function contagemStatusForm(lista){
   return {
-    P: lista.filter(f=>{ const s=statusVisual(f); return s==='AGUARDANDO_PREENCHIMENTO' || s==='PENDENTE'; }).length,
+    P: lista.filter(f=>{ const s=statusVisual(f); return s==='AGUARDANDO_PREENCHIMENTO' || s==='PENDENTE' || s==='RASCUNHO'; }).length,
     A: lista.filter(f=>statusVisual(f)==='ASSINADO').length,
     C: lista.filter(f=>statusVisual(f)==='CANCELADO').length,
   };
@@ -1168,6 +1175,7 @@ function renderLista(){
   // não empilhar pra sempre); na aba de tipo é o histórico completo, sem
   // esse corte.
   const COLUNAS = [
+    { status:'RASCUNHO', titulo:'Rascunho', icone:'📝' },
     { status:'AGUARDANDO_PREENCHIMENTO', titulo:'Aguardando preenchimento', icone:'🔗' },
     { status:'PENDENTE', titulo:'Aguardando assinatura', icone:'✍️' },
     { status:'ASSINADO', titulo: emTriagem ? 'Assinado hoje' : 'Assinado', icone:'✅' },
