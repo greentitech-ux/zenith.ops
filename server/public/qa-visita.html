@@ -127,6 +127,11 @@
     </div>
     <label for="n-nutri">Responsável técnico</label>
     <input id="n-nutri" placeholder="Suênia Freire CRN 16720">
+    <label for="n-selfie">Selfie de início</label>
+    <label class="btn-foto" for="n-selfie">🤳 Tirar selfie para iniciar a vistoria
+      <input id="n-selfie" type="file" accept="image/*" capture="user" onchange="atualizarSelfieInicio()">
+    </label>
+    <div class="sub" id="n-selfie-status" style="margin-top:6px;">Obrigatória. Registra quem iniciou a vistoria.</div>
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button class="btn" onclick="verLista()">Cancelar</button>
       <button class="btn-primary" style="flex:1;" onclick="criarVisita()">Começar visita</button>
@@ -191,6 +196,7 @@ let MODELOS = [];
 let UNIDADES = [];
 let VISITA = null;
 let CONTEXTO = { podeAvaliar:false, podeCancelar:false };
+let INICIAR_DEPOIS_DA_SELFIE = false;
 
 function atualizarUnidadesDoModelo(){
   const modelo = MODELOS.find((m) => m.id === $('n-modelo').value) || {};
@@ -247,6 +253,11 @@ async function carregarLista(){
 }
 
 async function criarVisita(){
+  const selfie = $('n-selfie').files && $('n-selfie').files[0];
+  // A selfie é o check-in visual da vistoria. No celular, capture="user"
+  // abre a câmera frontal; em tablet/computador, o navegador oferece a câmera
+  // ou o arquivo de foto. Sem ela a visita nem pede a confirmação.
+  if(!selfie){ INICIAR_DEPOIS_DA_SELFIE = true; $('n-selfie').click(); return; }
   // TRAVA: a visita vira laudo assinado, então abrir é um ato identificado.
   // O helper do tema.js oferece senha ou digital conforme o aparelho.
   const prova = await window.pedirConfirmacao('iniciar a vistoria desta loja');
@@ -258,14 +269,29 @@ async function criarVisita(){
       ()=>reject(new Error('Permita a localização para iniciar a vistoria.')),
       {enableHighAccuracy:true,timeout:15000,maximumAge:30000}
     ));
-    const v = await api('/api/qualidade/visitas', { method:'POST', body: JSON.stringify({
-      password: prova,
-      modeloId: $('n-modelo').value,
-      unidade: $('n-unidade').value, gps,
-      representanteLoja: $('n-repr').value, nutricionista: $('n-nutri').value,
-    })});
+    const corpo = new FormData();
+    corpo.append('selfie', selfie);
+    corpo.append('password', prova);
+    corpo.append('modeloId', $('n-modelo').value);
+    corpo.append('unidade', $('n-unidade').value);
+    corpo.append('gps', JSON.stringify(gps));
+    corpo.append('representanteLoja', $('n-repr').value);
+    corpo.append('nutricionista', $('n-nutri').value);
+    const r = await fetch('/api/qualidade/visitas', { method:'POST', headers:{ Authorization:'Bearer '+AUTH_TOKEN }, body:corpo });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Não consegui iniciar a vistoria.');
+    const v = d;
     abrirVisita(v.id);
   }catch(e){ alert(e.message); }
+}
+
+function atualizarSelfieInicio(){
+  const foto = $('n-selfie').files && $('n-selfie').files[0];
+  $('n-selfie-status').textContent = foto ? `Selfie pronta: ${foto.name}` : 'Obrigatória. Registra quem iniciou a vistoria.';
+  if(foto && INICIAR_DEPOIS_DA_SELFIE){
+    INICIAR_DEPOIS_DA_SELFIE = false;
+    criarVisita();
+  }
 }
 
 async function abrirVisita(id){

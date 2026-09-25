@@ -5225,17 +5225,21 @@ app.get('/api/qualidade/unidades', auth.requireAuth, async (req, res) => {
 //
 // auth.verifyPassword aceita a senha OU o comprovante da digital (ver
 // passkeys.emitirConfirmacao), então esta única linha cobre as duas.
-app.post('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
+app.post('/api/qualidade/visitas', auth.requireAuth, upload.single('selfie'), async (req, res) => {
   if (!exigirQA(req, res)) return;
   try {
     const confere = await auth.verifyPassword(req.user.id, (req.body || {}).password);
     if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a visita não foi aberta.' });
+    if (!req.file || !String(req.file.mimetype || '').startsWith('image/')) {
+      return res.status(400).json({ error: 'Tire uma selfie para iniciar a vistoria.' });
+    }
     const unidade = String((req.body || {}).unidade || '');
     if (!podeVisitarUnidadeQA(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     // Igual ao RH: a localização é evidência obrigatória da abertura, não
     // uma cerca geográfica. Vistorias podem começar no estacionamento,
     // shopping, aeroporto ou área técnica antes da entrada da loja.
-    const gps = (req.body || {}).gps || {};
+    let gps = (req.body || {}).gps || {};
+    if (typeof gps === 'string') { try { gps = JSON.parse(gps); } catch (_) { gps = {}; } }
     if (!Number.isFinite(Number(gps.latitude)) || !Number.isFinite(Number(gps.longitude))) {
       return res.status(400).json({ error: 'Localização válida é obrigatória para iniciar a vistoria.' });
     }
@@ -5247,6 +5251,8 @@ app.post('/api/qualidade/visitas', auth.requireAuth, async (req, res) => {
     const mapa = await construirUnidadesMapa();
     req.body.unidadeNome = mapa[unidade] || null;
     req.body.loja = req.body.unidadeNome;
+    const selfiePath = await storage.salvarArquivo(unidade || 'qualidade', req.file, 'qualidade-visitas-inicio');
+    req.body.selfieInicio = { nome: req.file.originalname, path: selfiePath, tipo: req.file.mimetype, registradaEm: new Date().toISOString() };
     res.json(await qualidade.criarVisita(req.body || {}, req.user && req.user.email));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
@@ -6331,6 +6337,16 @@ function requireMasterDeVerdade(req, res, next) {
 
 app.get('/api/qa-aprovacoes', requireMasterDeVerdade, async (req, res) => {
   res.json(await qaAprovacoes.listar());
+});
+
+app.get('/api/qualidade/visitas/:id/selfie-inicio', auth.requireAuth, async (req, res) => {
+  if (!exigirQA(req, res)) return;
+  try {
+    const visita = await exigirVisitaQA(req, res);
+    if (!visita) return;
+    if (!visita.selfieInicio?.path) return res.sendStatus(404);
+    storage.streamArquivo(visita.selfieInicio.path, visita.selfieInicio.tipo, res);
+  } catch (err) { res.status(404).json({ error: err.message }); }
 });
 
 // CONTESTAÇÃO DA UNIDADE. A loja manda defesa + uma evidência nova; não há

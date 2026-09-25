@@ -457,7 +457,7 @@ function retratoDoModelo(modelo) {
   };
 }
 
-async function criarVisita({ modeloId, unidade, unidadeNome, loja, representanteLoja, nutricionista, visitaAnteriorId, gps }, email) {
+async function criarVisita({ modeloId, unidade, unidadeNome, loja, representanteLoja, nutricionista, visitaAnteriorId, gps, selfieInicio }, email) {
   const modelo = await modeloPorId(modeloId);
   const registro = {
     id: novoId(),
@@ -477,6 +477,13 @@ async function criarVisita({ modeloId, unidade, unidadeNome, loja, representante
     gps: gps && Number.isFinite(Number(gps.latitude)) && Number.isFinite(Number(gps.longitude)) ? {
       latitude: Number(gps.latitude), longitude: Number(gps.longitude), accuracy: Number(gps.accuracy) || null,
       registradoEm: String(gps.registradoEm || new Date().toISOString()),
+    } : null,
+    // Selfie do avaliador no instante de abertura. A imagem fica no Storage;
+    // o Firestore guarda somente metadados e o caminho de acesso.
+    selfieInicio: selfieInicio && selfieInicio.path ? {
+      nome: String(selfieInicio.nome || 'selfie-inicio').slice(0, 120),
+      path: String(selfieInicio.path), tipo: String(selfieInicio.tipo || 'image/jpeg'),
+      registradaEm: String(selfieInicio.registradaEm || new Date().toISOString()),
     } : null,
     respostas: {},
     extras: {},
