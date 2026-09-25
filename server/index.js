@@ -4920,6 +4920,36 @@ app.post('/api/qualidade/documentos/exigencias/:marca', auth.requireAuth, async 
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// COBERTURA DA PASTA (pedido do Master, 25/09/2026: "todas as unidades
+// precisam ter sua Pasta"). Uma unidade "tem Pasta" quando tem ao menos um
+// documento guardado. Isto separa quem já tem de quem ainda não tem - o botão
+// "Criar Pasta" lista só as que faltam, e some com a unidade assim que ela
+// ganha o primeiro documento. Semear a lista da marca é o jeito de criar.
+app.get('/api/qualidade/documentos/cobertura', auth.requireMaster, async (req, res) => {
+  try {
+    const mapa = await construirUnidadesMapa();
+    const docs = await qualidadeDocumentos.listar(null);
+    const contagem = {};
+    for (const d of docs) contagem[String(d.unidade)] = (contagem[String(d.unidade)] || 0) + 1;
+    const comPasta = []; const semPasta = [];
+    for (const [codigo, nome] of Object.entries(mapa)) {
+      if (contagem[codigo]) { comPasta.push({ codigo, nome, documentos: contagem[codigo] }); continue; }
+      // marca resolvida no servidor (nunca deduzida do nome): diz se a Criar
+      // Pasta vai poder semear a lista da franqueadora ou nascer vazia
+      const perfil = await unidadesExtras.perfil(codigo).catch(() => null);
+      const marca = (perfil && perfil.marca) || null;
+      const pacote = marca ? qualidadeDocumentos.exigenciasDe(marca) : null;
+      semPasta.push({
+        codigo, nome, marca,
+        marcaLabel: marca ? (unidadesExtras.MARCAS_LABEL[marca] || marca) : null,
+        temPacote: !!pacote, itensExigencia: pacote ? pacote.itens.length : 0,
+      });
+    }
+    const ordena = (a, b) => String(a.nome || a.codigo).localeCompare(String(b.nome || b.codigo), 'pt-BR');
+    res.json({ total: comPasta.length + semPasta.length, comPasta: comPasta.sort(ordena), semPasta: semPasta.sort(ordena) });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/qualidade/documentos', auth.requireAuth, async (req, res) => {
   try {
     if (!podeNaUnidadeQA(req, (req.body || {}).unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });

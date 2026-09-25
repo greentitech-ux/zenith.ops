@@ -28572,6 +28572,15 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const navD = fsD.readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
     const pushD = fsD.readFileSync(__dirname + '/push.js', 'utf8');
     const modD = fsD.readFileSync(__dirname + '/qualidadeDocumentos.js', 'utf8');
+    const htmlDocQA = fsD.readFileSync(__dirname + '/public/qa-documentos.html', 'utf8');
+    const authQd = require(__dirname + '/auth.js');
+    DOCS.set('users/u-qa-loja', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'qa-loja@teste.local', username: 'qaloja',
+      permissions: { sections: ['qualidade-documentos'], unidades: ['19855'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabQaLoja = { Authorization: 'Bearer ' + (await authQd.login('qa-loja@teste.local', 'SenhaDeTeste!2026')).token };
 
     const hoje = '2026-09-24';
     const sit = (validade, aviso) => qd.situacaoDe({ validade, avisarDiasAntes: aviso }, hoje).situacao;
@@ -28686,6 +28695,33 @@ $r | ConvertTo-Json -Depth 4 -Compress
         const daUnidade = (await qd.listar('19821'));
         return r1.criados === 23 && dois.criados === 0 && dois.jaExistiam === 23
           && daUnidade.every((d) => d.validade === null && d.situacao === 'sem_validade');
+      })(),
+      // COBERTURA + CRIAR PASTA (Master, 25/09/2026): "todas as unidades
+      // precisam ter sua Pasta". Uma unidade "tem pasta" com >=1 documento; o
+      // botão Criar Pasta lista só as sem pasta, e a unidade sai da lista
+      // assim que ganha o primeiro documento.
+      'cobertura separa quem tem Pasta de quem não tem, e criar move a unidade': await (async () => {
+        const cabD = token ? { Authorization: 'Bearer ' + token } : {};
+        const c1 = JSON.parse((await pedir('/api/qualidade/documentos/cobertura', cabD)).corpo);
+        if (!c1 || !Array.isArray(c1.semPasta) || !Array.isArray(c1.comPasta)) return false;
+        const em = (arr, cod) => arr.some((u) => u.codigo === cod);
+        // 19821 foi semeada acima: está em comPasta, nunca em semPasta
+        if (!em(c1.comPasta, '19821') || em(c1.semPasta, '19821')) return false;
+        if (c1.total !== c1.comPasta.length + c1.semPasta.length) return false;
+        const alvo = c1.semPasta[0];
+        if (!alvo) return true; // ambiente sem unidade vazia: nada a mover
+        await postarJson('/api/qualidade/documentos', { unidade: alvo.codigo, unidadeNome: alvo.nome, nome: 'Primeiro doc da pasta', validade: '2027-01-01' }, cabD);
+        const c2 = JSON.parse((await pedir('/api/qualidade/documentos/cobertura', cabD)).corpo);
+        return em(c2.comPasta, alvo.codigo) && !em(c2.semPasta, alvo.codigo) && c2.comPasta.length === c1.comPasta.length + 1;
+      })(),
+      'cobertura é só do Master (sem login 401; usuário comum 403)': (await pedir('/api/qualidade/documentos/cobertura')).status === 401 && (await pedir('/api/qualidade/documentos/cobertura', cabQaLoja)).status === 403,
+      'a tela tem o botão Criar Pasta que lê a cobertura e semeia/abre o 1º doc':
+        /onclick="abrirCriarPasta\(\)"/.test(htmlDocQA) && /\/api\/qualidade\/documentos\/cobertura/.test(htmlDocQA) && /function criarPasta\(\)/.test(htmlDocQA),
+      // no celular, tirar foto (escanear) além de escolher arquivo/PDF
+      'a Pasta deixa tirar foto pela câmera e ainda escolher PDF': (() => {
+        const cam = /id="v-camera"[^>]*capture="environment"/.test(htmlDocQA) && /accept="image\/\*"/.test(htmlDocQA);
+        const arq = /id="v-arquivo"[^>]*accept="image\/\*,application\/pdf"/.test(htmlDocQA) && !/id="v-arquivo"[^>]*capture=/.test(htmlDocQA);
+        return cam && arq && /function usarFotoDaCamera\(\)/.test(htmlDocQA);
       })(),
       // milkymoo é marca REAL do parque (unidades.js) e eu não recebi a lista
       // dela - é exatamente o caso que não pode virar lista inventada

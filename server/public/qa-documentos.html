@@ -76,11 +76,24 @@
       </div>
     </div>
     <div style="display:flex;gap:8px;">
+      <button class="btn" id="btn-criar-pasta" onclick="abrirCriarPasta()" title="Abrir a pasta de uma unidade que ainda não tem">📁 Criar Pasta</button>
       <button class="btn" id="btn-marca" onclick="semearMarca()" title="Cria os documentos que a franqueadora exige, sem data - a loja preenche">Exigências da marca</button>
       <button class="btn-primary" onclick="abrirNovo()">+ Documento</button>
     </div>
   </div>
 </header>
+
+<div class="card" id="cx-criar-pasta" style="display:none;">
+  <h2 style="margin:0 0 4px;font-size:14px;">Criar Pasta de uma unidade</h2>
+  <p class="sub" style="margin:0 0 8px;">Só aparecem as unidades que <b>ainda não têm</b> Pasta. Assim que a unidade ganha o primeiro documento, ela sai desta lista.</p>
+  <label for="cp-unidade">Unidade sem Pasta</label>
+  <select id="cp-unidade" onchange="pintarInfoCriarPasta()"></select>
+  <p class="sub" id="cp-info" style="margin:8px 0 0;"></p>
+  <div class="linha" style="margin-top:12px;">
+    <button class="btn" onclick="fecharCriarPasta()">Cancelar</button>
+    <button class="btn-primary" id="cp-criar" style="flex:1;" onclick="criarPasta()">Criar Pasta</button>
+  </div>
+</div>
 
 <div class="card" id="cx-form" style="display:none;">
   <h2 style="margin:0 0 4px;font-size:14px;" id="form-titulo">Novo documento</h2>
@@ -129,8 +142,21 @@
 <div class="card" id="cx-versao" style="display:none;">
   <h2 style="margin:0 0 4px;font-size:14px;">Nova versão de <span id="v-nome"></span></h2>
   <p class="sub" style="margin:0 0 8px;">A anterior não some: ela desce na pilha e continua aberta pra comparar.</p>
-  <label for="v-arquivo">Arquivo (foto ou PDF)</label>
-  <input id="v-arquivo" type="file" accept="image/*,application/pdf" capture="environment">
+  <label>Arquivo (foto ou PDF)</label>
+  <!-- Dois caminhos de propósito: no celular, "Tirar foto" abre a câmera pra
+       escanear o documento na hora (capture=environment). "Escolher arquivo"
+       NÃO tem capture, então continua abrindo galeria/arquivos e aceita PDF -
+       com capture no mesmo input, muito celular força a câmera e some com o
+       PDF. Os dois gravam no MESMO lugar (v-arquivo); a câmera é uma cópia. -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <label class="btn-arq" id="v-btn-foto">📷 Tirar foto
+      <input id="v-camera" type="file" accept="image/*" capture="environment" onchange="usarFotoDaCamera()">
+    </label>
+    <label class="btn-arq">📎 Escolher arquivo
+      <input id="v-arquivo" type="file" accept="image/*,application/pdf" onchange="$('v-camera').value='';mostrarNomeArquivo()">
+    </label>
+    <span id="v-arquivo-nome" class="sub" style="min-width:0;overflow-wrap:anywhere;">Nenhum arquivo escolhido</span>
+  </div>
   <div class="linha">
     <div>
       <label for="v-data">Data do documento</label>
@@ -356,16 +382,33 @@ function abrirVersao(id){
   const d = DOCS.find(x=>x.id===id); if(!d) return;
   VERSAO_DOC = d;
   $('v-nome').textContent = d.nome;
-  $('v-arquivo').value=''; $('v-data').value=''; $('v-validade').value=''; $('v-obs').value='';
+  $('v-arquivo').value=''; $('v-camera').value=''; mostrarNomeArquivo();
+  $('v-data').value=''; $('v-validade').value=''; $('v-obs').value='';
   $('cx-v-validade').style.display = d.tipo === 'avaliacao' ? 'none' : '';
   $('cx-versao').style.display='block';
   window.scrollTo({ top:0, behavior:'smooth' });
 }
 function fecharVersao(){ $('cx-versao').style.display='none'; VERSAO_DOC=null; }
 
+// a foto tirada pela câmera vira o arquivo escolhido: copia pro v-arquivo (é
+// ele que o resto do código lê) e mostra o nome. DataTransfer é o único jeito
+// de setar input.files por script, e funciona no Chrome do parque e no celular.
+function usarFotoDaCamera(){
+  const cam = $('v-camera'); const arq = $('v-arquivo');
+  const f = cam.files && cam.files[0];
+  if(!f) return;
+  try{ const dt = new DataTransfer(); dt.items.add(f); arq.files = dt.files; }
+  catch(e){ /* navegador sem DataTransfer: o envio lê o v-camera direto (ver enviarVersao) */ }
+  mostrarNomeArquivo();
+}
+function mostrarNomeArquivo(){
+  const f = ($('v-arquivo').files && $('v-arquivo').files[0]) || ($('v-camera').files && $('v-camera').files[0]);
+  $('v-arquivo-nome').textContent = f ? f.name : 'Nenhum arquivo escolhido';
+}
 async function enviarVersao(){
   if(!VERSAO_DOC) return;
-  const arquivo = $('v-arquivo').files && $('v-arquivo').files[0];
+  // v-arquivo é o padrão; v-camera cobre o navegador sem DataTransfer
+  const arquivo = ($('v-arquivo').files && $('v-arquivo').files[0]) || ($('v-camera').files && $('v-camera').files[0]);
   if(!arquivo) return alert('Escolha o arquivo ou tire a foto.');
   const fd = new FormData();
   fd.append('arquivo', arquivo);
@@ -379,6 +422,7 @@ async function enviarVersao(){
       { method:'POST', body: fd, headers: { Authorization: 'Bearer ' + AUTH_TOKEN } });
     if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Falha ao enviar o arquivo.'); }
     window.zenithRascunhos?.limparAnexoEnviado($('v-arquivo'));
+    $('v-camera').value='';
     fecharVersao();
     await carregar();
   }catch(e){ alert(e.message); }
@@ -393,6 +437,63 @@ async function tirarVersao(id, versaoId){
 
 // Semeia a pasta com o que a franqueadora exige. Cria SEM DATA - a validade
 // quem preenche é a loja, olhando o documento na mão.
+// CRIAR PASTA (pedido do Master, 25/09/2026). Lista só as unidades SEM pasta
+// (cobertura vem do servidor). Criar = semear a lista da marca; sem marca, cai
+// no "Novo documento" pra a loja pôr o primeiro - é o primeiro documento que
+// faz a pasta existir, então não dá pra "criar vazia".
+let COBERTURA = null;
+async function abrirCriarPasta(){
+  const sel = $('cp-unidade');
+  sel.innerHTML = '<option>Carregando…</option>';
+  $('cx-criar-pasta').style.display='block';
+  window.scrollTo({ top:0, behavior:'smooth' });
+  try{ COBERTURA = await api('/api/qualidade/documentos/cobertura'); }
+  catch(e){ COBERTURA = null; $('cp-info').textContent = e.message; }
+  const semPasta = (COBERTURA && COBERTURA.semPasta) || [];
+  if(!semPasta.length){
+    sel.innerHTML = '';
+    $('cp-info').innerHTML = '<b>Todas as unidades já têm Pasta.</b>';
+    $('cp-criar').disabled = true;
+    return;
+  }
+  $('cp-criar').disabled = false;
+  sel.innerHTML = semPasta.map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome||u.codigo)}</option>`).join('');
+  pintarInfoCriarPasta();
+}
+function fecharCriarPasta(){ $('cx-criar-pasta').style.display='none'; }
+function unidadeSemPasta(codigo){ return ((COBERTURA&&COBERTURA.semPasta)||[]).find(u=>u.codigo===codigo)||null; }
+function pintarInfoCriarPasta(){
+  const u = unidadeSemPasta($('cp-unidade').value);
+  const total = COBERTURA ? COBERTURA.total : 0;
+  const comPasta = COBERTURA ? COBERTURA.comPasta.length : 0;
+  const cobertura = `${comPasta} de ${total} unidades já têm Pasta.`;
+  if(!u){ $('cp-info').textContent = cobertura; return; }
+  if(u.temPacote) $('cp-info').innerHTML = `Vou criar a Pasta de <b>${escapeHtml(u.nome)}</b> com os <b>${u.itensExigencia}</b> itens que a ${escapeHtml(u.marcaLabel)} exige (sem data — a loja preenche). · ${cobertura}`;
+  else if(u.marca) $('cp-info').innerHTML = `<b>${escapeHtml(u.nome)}</b> é ${escapeHtml(u.marcaLabel)}, mas ainda não tenho a lista de exigências dessa marca. A Pasta abre no primeiro documento que você adicionar. · ${cobertura}`;
+  else $('cp-info').innerHTML = `<b>${escapeHtml(u.nome)}</b> não tem marca no perfil. Defina a marca em Unidades pra semear a lista, ou adicione o primeiro documento à mão. · ${cobertura}`;
+}
+async function criarPasta(){
+  const u = unidadeSemPasta($('cp-unidade').value);
+  if(!u) return;
+  if(u.temPacote){
+    if(!confirm(`Criar a Pasta de ${u.nome} com os ${u.itensExigencia} itens que a ${u.marcaLabel} exige?\n\nEles entram SEM data — a loja preenche cada uma olhando o documento.`)) return;
+    const btn = $('cp-criar'); btn.disabled=true; btn.textContent='Criando…';
+    try{
+      const r = await api(`/api/qualidade/documentos/exigencias/${encodeURIComponent(u.marca)}`, { method:'POST', body: JSON.stringify({ unidade: u.codigo, unidadeNome: u.nome }) });
+      fecharCriarPasta();
+      await carregar();
+      alert(`Pasta de ${u.nome} criada: ${r.criados} documento(s).`);
+    }catch(e){ alert(e.message); }
+    finally{ btn.disabled=false; btn.textContent='Criar Pasta'; }
+    return;
+  }
+  // sem lista da marca: a pasta nasce com o primeiro documento manual
+  fecharCriarPasta();
+  abrirNovo();
+  $('f-unidade').value = u.codigo;
+  await carregarMarca();
+  alert(`${u.nome} não tem lista de exigências pronta. Adicione o primeiro documento — é ele que cria a Pasta.`);
+}
 async function semearMarca(){
   const uni = $('f-unidade').value;
   if(!uni) return alert('Cadastre uma unidade antes.');
