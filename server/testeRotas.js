@@ -20396,6 +20396,48 @@ $r | ConvertTo-Json -Depth 4 -Compress
   if (!okSecaoMD) ruins += 1;
   console.log(`${okSecaoMD ? '✓' : '✗'} Meu Dia: a seção libera criar tarefa própria; sem ela a pessoa só responde o que recebeu`);
 
+  // ---- Meu Dia: FILTRO GRUPO só mostra o grupo da pessoa (Master, 25/09/2026)
+  // "A unidade Saltiverso pertence ao GBE, não pode ver outros grupos, precisa
+  // aparecer por padrão." O contexto mandava redes.REDES cru - a lista mostrava
+  // ARCFOOD e Estação pra quem é só de uma empresa. Agora vem filtrada pelas
+  // unidades que a pessoa acessa; Master continua vendo todos.
+  let okGrupoMD = false;
+  try {
+    const senhaG = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    // uma unidade GBE (o "resto") e uma ARCFOOD (lista fechada, 19821)
+    DOCS.set('users/u-gbe-loja', {
+      passwordHash: senhaG, role: 'user', active: true, email: 'gbe-loja@teste.local', username: 'gbeloja',
+      permissions: { sections: ['tarefas'], unidades: ['Dominos Bessa'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    DOCS.set('users/u-arc-loja', {
+      passwordHash: senhaG, role: 'user', active: true, email: 'arc-loja@teste.local', username: 'arcloja',
+      permissions: { sections: ['tarefas'], unidades: ['19821'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabGbe = { Authorization: 'Bearer ' + (await auth.login('gbe-loja@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabArc = { Authorization: 'Bearer ' + (await auth.login('arc-loja@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabMst = { Authorization: 'Bearer ' + token };
+    const ctxG = JSON.parse((await pedir('/api/tarefas/contexto', cabGbe)).corpo);
+    const ctxA = JSON.parse((await pedir('/api/tarefas/contexto', cabArc)).corpo);
+    const ctxM = JSON.parse((await pedir('/api/tarefas/contexto', cabMst)).corpo);
+    const ids = (ctx) => (ctx.redes || []).map((r) => r.id).sort();
+    const htmlMD = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const conf = {
+      'usuário de unidade GBE só vê o grupo GBE': JSON.stringify(ids(ctxG)) === JSON.stringify(['GBE']),
+      'usuário de unidade ARCFOOD só vê o grupo ARCFOOD': JSON.stringify(ids(ctxA)) === JSON.stringify(['ARCFOOD']),
+      'Master continua vendo todos os grupos': ids(ctxM).length === require(__dirname + '/redes.js').REDES.length,
+      'as unidades da pessoa são todas do grupo dela': (ctxG.unidades || []).every((u) => u.grupo === 'GBE') && (ctxA.unidades || []).every((u) => u.grupo === 'ARCFOOD'),
+      // a tela pré-seleciona e trava quando há um grupo só (aparece por padrão)
+      'a tela mostra o grupo por padrão quando é um só': /const umSo=redes\.length===1;/.test(htmlMD) && /\$\('F-GRUPO'\)\.value=umSo\?redes\[0\]\.id:'';/.test(htmlMD) && /\$\('F-GRUPO'\)\.disabled=umSo;/.test(htmlMD),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okGrupoMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (gbe=${JSON.stringify(ids(ctxG))} arc=${JSON.stringify(ids(ctxA))} mst=${JSON.stringify(ids(ctxM))})`);
+  } catch (e) { okGrupoMD = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
+  if (!okGrupoMD) ruins += 1;
+  console.log(`${okGrupoMD ? '✓' : '✗'} Meu Dia: o filtro Grupo só mostra o grupo da pessoa, e aparece por padrão quando é um só`);
+
   // ---- Meu Dia: REAGENDAR com motivo (pedido do Master, 23/09/2026) ----
   // "Preciso poder reagendar tarefa, mudar a data quando entrar em pendente,
   // para situações reais de não possibilidade." Tranca: motivo obrigatório,

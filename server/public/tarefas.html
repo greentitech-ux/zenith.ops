@@ -191,7 +191,18 @@ function aplicarPreset(tipo){presetAtivo=tipo;document.querySelectorAll('#PRESET
 // com um intervalo que não é o mês
 function aoMudarData(){presetAtivo=null;document.querySelectorAll('#PRESETS .preset-btn').forEach(b=>b.classList.remove('active'));render()}
 function aoMudarGrupo(){montarUnidades();render()}
-function limparFiltros(){$('F-SIT').value='abertas';$('F-GRUPO').value='';$('F-TIPO').value='';$('F-BUSCA').value='';$('BUSCA').classList.remove('tem-texto');montarUnidades();aplicarPreset('tudo')}
+// O filtro Grupo mostra só os grupos que a pessoa acessa (o servidor já
+// filtra em CTX.redes). Com UM grupo só - o caso de quem é de uma empresa,
+// como o Saltiverso no GBE - ele aparece por padrão e o "Todos" nem entra:
+// não há outro grupo pra escolher, e "Todos" ali só confundiria.
+function montarFiltroGrupo(){
+  const redes=(CTX.redes)||[];
+  const umSo=redes.length===1;
+  $('F-GRUPO').innerHTML=(umSo?'':'<option value="">Todos</option>')+redes.map(g=>`<option value="${e(g.id)}">${e(g.nome)}</option>`).join('');
+  $('F-GRUPO').value=umSo?redes[0].id:'';
+  $('F-GRUPO').disabled=umSo;
+}
+function limparFiltros(){$('F-SIT').value='abertas';montarFiltroGrupo();$('F-TIPO').value='';$('F-BUSCA').value='';$('BUSCA').classList.remove('tem-texto');montarUnidades();aplicarPreset('tudo')}
 function montarUnidades(){const g=$('F-GRUPO').value,atual=$('F-UNI').value;const lista=((CTX.unidades)||[]).filter(u=>!g||u.grupo===g);$('F-UNI').innerHTML='<option value="">Todas</option><option value="__pessoal">Tarefa pessoal (sem unidade)</option>'+lista.map(u=>`<option value="${e(u.codigo)}">${e(u.nome)}</option>`).join('');$('F-UNI').value=lista.some(u=>u.codigo===atual)||atual==='__pessoal'?atual:''}
 // A coluna "Concluídas" existia, mas o filtro padrão ("Em aberto") a esvaziava:
 // concluir fazia a tarefa SUMIR da tela em vez de mudar de coluna, e não havia
@@ -389,7 +400,7 @@ function atualizarResponsaveis(){const unidade=$('UNIT').value;const lista=elegi
 // servidor) - menos o próprio responsável, que já é o dono
 function montarColabs(){const dono=$('RESP').value,marcados=new Set([...$('COLAB').querySelectorAll('input:checked')].map(i=>i.value));const busca=($('COLABBUSCA')||{}).value||'';const lista=elegiveis($('UNIT').value).filter(u=>u.id!==dono);$('COLAB').innerHTML=lista.map(u=>`<label><input type="checkbox" value="${e(u.id)}"${marcados.has(u.id)?' checked':''}><span>${nomeUsuario(u.nome)}${tagCargo(u)}</span></label>`).join('')||'<span class="empty">Nenhum outro usuário nessa unidade.</span>';$('COLABBUSCAWRAP').innerHTML=lista.length>=LIMIAR_BUSCA_NOMES?campoBuscaNomes('COLABBUSCA','COLAB','COLABCONTA'):'';if($('COLABBUSCA'))$('COLABBUSCA').value=busca;filtrarNomes('COLABBUSCA','COLAB','COLABCONTA');$('COLABROW').hidden=!lista.length}
 const colabsMarcados=()=>[...$('COLAB').querySelectorAll('input:checked')].map(i=>i.value)
-async function contexto(){const r=await fetch('/api/tarefas/contexto');CTX=await r.json();CTX.eu=CTX.eu||'';$('UNIT').innerHTML='<option value="">Tarefa pessoal</option>'+((CTX.unidades)||[]).map(u=>`<option value="${e(u.codigo)}">${e(u.nome)}</option>`).join('');$('F-GRUPO').innerHTML='<option value="">Todos</option>'+((CTX.redes)||[]).map(g=>`<option value="${e(g.id)}">${e(g.nome)}</option>`).join('');montarUnidades();atualizarResponsaveis();$('CREATE').hidden=!CTX.podeCriar}
+async function contexto(){const r=await fetch('/api/tarefas/contexto');CTX=await r.json();CTX.eu=CTX.eu||'';$('UNIT').innerHTML='<option value="">Tarefa pessoal</option>'+((CTX.unidades)||[]).map(u=>`<option value="${e(u.codigo)}">${e(u.nome)}</option>`).join('');montarFiltroGrupo();montarUnidades();atualizarResponsaveis();$('CREATE').hidden=!CTX.podeCriar}
 // Dentro da coluna, o que tem HORA vem primeiro e em ordem de relógio: uma
 // reunião das 9h embaixo de uma tarefa sem hora é o tipo de lista que faz
 // perder reunião. O resto mantém a ordem que já vinha.

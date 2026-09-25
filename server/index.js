@@ -11867,7 +11867,12 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       // a rede de cada unidade vem de redes.js (a mesma regra do resto do app),
       // pro filtro de Grupo do Meu Dia não precisar de uma lista fixa própria
       unidades: codigos.map((codigo) => ({ codigo, nome: mapa[codigo] || codigo, grupo: redes.redeDaUnidade(codigo) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
-      redes: redes.REDES,
+      // O filtro Grupo só mostra os grupos das unidades que a pessoa acessa -
+      // Master vê todos; quem é de uma empresa (ex.: Saltiverso, do GBE) não
+      // pode ver nem escolher outro grupo (Master, 25/09/2026). Antes ia
+      // redes.REDES cru, e a lista mostrava ARCFOOD e Estação pra quem é só GBE.
+      redes: req.isMaster ? redes.REDES
+        : redes.REDES.filter((r) => codigos.some((codigo) => redes.redeDaUnidade(codigo) === r.id)),
       // cargo vai junto pra tela marcar a tag ao lado do nome (nome · Suporte/
       // Gerente/...): mesma tag de /usuarios.html, sem inventar rótulo novo
       responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', cargo: u.role === 'master' ? null : (u.cargo || null), cargos: u.role === 'master' ? [] : users.tagsDe(u), unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
