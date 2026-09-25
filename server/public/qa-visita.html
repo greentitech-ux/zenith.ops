@@ -119,7 +119,7 @@
     <select id="n-modelo"></select>
     <div class="linha">
       <div><label for="n-unidade">Unidade</label><select id="n-unidade"><option>Carregando…</option></select></div>
-      <div><label for="n-data">Data</label><input id="n-data" type="date"></div>
+      <div><label>Data da visita</label><input value="Registrada ao começar" readonly aria-label="Data da visita registrada automaticamente"></div>
     </div>
     <div class="linha">
       <div><label>Hora inicial</label><input value="Registrada ao começar" readonly aria-label="Hora inicial registrada automaticamente"></div>
@@ -227,7 +227,6 @@ function abrirNova(){
   $('tela-visita').classList.add('hidden');
   $('btn-nova').classList.add('hidden');
   $('titulo').textContent = 'Nova visita';
-  $('n-data').value = new Date().toISOString().slice(0,10);
 }
 
 async function carregarLista(){
@@ -262,7 +261,7 @@ async function criarVisita(){
     const v = await api('/api/qualidade/visitas', { method:'POST', body: JSON.stringify({
       password: prova,
       modeloId: $('n-modelo').value,
-      unidade: $('n-unidade').value, gps, data: $('n-data').value,
+      unidade: $('n-unidade').value, gps,
       representanteLoja: $('n-repr').value, nutricionista: $('n-nutri').value,
     })});
     abrirVisita(v.id);

@@ -426,6 +426,17 @@ function novoId() {
   return crypto.randomBytes(12).toString('hex');
 }
 
+// A data do laudo é evidência do início, não uma informação declarada no
+// navegador. Fixar no servidor evita o fuso UTC trocar a data durante a
+// madrugada brasileira.
+function dataDaVisitaAgora() {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const valor = (tipo) => partes.find((p) => p.type === tipo)?.value;
+  return `${valor('year')}-${valor('month')}-${valor('day')}`;
+}
+
 // o retrato do modelo que viaja DENTRO da visita (ver ARQUITETURA, item 1).
 // Só o que o relatório precisa reler: id, texto e criticidade.
 function retratoDoModelo(modelo) {
@@ -444,7 +455,7 @@ function retratoDoModelo(modelo) {
   };
 }
 
-async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, representanteLoja, nutricionista, visitaAnteriorId, gps }, email) {
+async function criarVisita({ modeloId, unidade, unidadeNome, loja, representanteLoja, nutricionista, visitaAnteriorId, gps }, email) {
   const modelo = await modeloPorId(modeloId);
   const registro = {
     id: novoId(),
@@ -453,7 +464,7 @@ async function criarVisita({ modeloId, unidade, unidadeNome, loja, data, represe
     unidade: String(unidade || '').trim() || null,
     unidadeNome: String(unidadeNome || '').trim() || null,
     loja: String(loja || '').trim() || null,
-    data: String(data || '').trim() || new Date().toISOString().slice(0, 10),
+    data: dataDaVisitaAgora(),
     // Horas são geradas pelo servidor: campo digitável permitiria dizer que a
     // visita começou/terminou em outro momento que não o registrado.
     iniciadaEm: new Date().toISOString(),
@@ -884,7 +895,7 @@ module.exports = {
   faixaDaNota, calcularNota, itensDoModelo, totalDeItens,
   MODELOS_OFICIAIS, listarModelos, modeloPorId, salvarModelo, atualizarModeloOficial, retratoDoModelo, normalizarSetores,
   MAX_SETORES, MAX_ITENS_POR_SETOR,
-  criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
+  dataDaVisitaAgora, criarVisita, obterVisita, responderItem, adicionarPontoDeCheck,
   salvarAcaoCorretiva, solicitarRevisao, decidirRevisao, cancelarVisita, concluirVisita, listarVisitas, apontamentosDe,
   MAX_FOTOS_POR_ITEM, anexarFoto, fotoDe,
   QUEM_ASSINA, QUEM_ASSINA_LABEL, MAX_IMAGEM_CHARS, assinarVisita,
