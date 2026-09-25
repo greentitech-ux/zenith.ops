@@ -145,7 +145,7 @@
   </div>
   <div class="escopo-calculo" id="escopo-calculo"></div>
 
-  <div class="painel">
+  <div class="painel" data-recolher>
     <h2>⚠ KPI's não preenchidos <span class="n" id="pendencias-info"></span>
       <span style="float:right;display:inline-flex;gap:6px;"><button type="button" class="preset" onclick="exportarPendenciasCsv()" title="Baixa as pendências de KPI do período em CSV">⬇️ CSV pendências</button></span>
     </h2>
@@ -156,13 +156,13 @@
   <!-- Ofensores primeiro: com 19 KPI's x 5 lojas, a matriz responde
        "quanto deu cada coisa", mas não responde "onde eu olho primeiro".
        Este painel responde só isso. -->
-  <div class="painel">
+  <div class="painel" data-recolher>
     <h2>🔥 Indicadores mais ofensivos <span class="n" id="ofensores-info"></span></h2>
     <div class="sub" style="margin-bottom:10px;" id="ofensores-legenda"></div>
     <div id="ofensores"></div>
   </div>
 
-  <div class="painel">
+  <div class="painel" data-recolher>
     <h2>Comparativo por loja <span class="n" id="matriz-info"></span>
       <span style="float:right;display:inline-flex;gap:6px;">
         <button type="button" class="preset" onclick="exportar('csv')" title="Baixa a matriz do período em CSV">⬇️ CSV</button>
@@ -173,7 +173,7 @@
     <div class="rolagem"><table id="matriz"></table></div>
   </div>
 
-  <div class="painel" id="painel-tendencia">
+  <div class="painel" id="painel-tendencia" data-recolher>
     <h2>Evolução diária <span class="n" id="tend-info"></span></h2>
     <div class="legenda" id="legenda"></div>
     <div id="grafico"></div>
