@@ -52,13 +52,21 @@
   .painel h2{font-size:13px;margin:0 0 10px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .painel h2 .n{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;}
 
-  /* filtros numa linha só, acima dos gráficos (ver interaction.md) */
-  .filtros{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
-  .filtros input[type=date],.filtros select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 9px;font-family:var(--mono);font-size:11.5px;}
+  /* Filtros: cada campo tem rótulo próprio para ninguém confundir grupo,
+     unidade e período no meio de uma consulta operacional. */
+  .filtros{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:10px;}
+  .filtro-campo{display:flex;flex-direction:column;gap:4px;min-width:130px;}
+  .filtro-campo.rotulo-data{min-width:126px;}
+  .filtro-campo span{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  .filtros input[type=date],.filtros select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 9px;font-family:var(--mono);font-size:11.5px;}
   .preset{font-family:var(--mono);font-size:11.5px;padding:6px 12px;border-radius:16px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .preset.active{border-color:var(--accent);color:var(--accent);background:#132029;}
   .sub{color:var(--muted);font-size:11.5px;line-height:1.5;}
   .unidade-kpi{font-family:var(--mono);font-size:10px;color:var(--accent2);font-weight:500;margin-left:5px;letter-spacing:.02em;}
+  .escopo-calculo{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;background:#101a20;border:1px solid #29414d;border-radius:10px;padding:10px 12px;margin:0 0 14px;}
+  .escopo-calculo b{font-size:12px;}
+  .escopo-calculo .sub{flex:1 1 460px;}
+  .celula-apoio{display:block;font-size:9.5px;color:var(--muted);margin-top:2px;}
 
   table{width:100%;border-collapse:collapse;font-size:12px;}
   th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
@@ -92,7 +100,7 @@
   .tt-key{display:flex;align-items:center;gap:6px;}
   .tt-key i{width:9px;height:9px;border-radius:2px;}
   .tt-val{font-family:var(--mono);}
-  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin:-16px -14px 16px;padding:12px 14px;} h1{font-size:17px;} }
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin:-16px -14px 16px;padding:12px 14px;} h1{font-size:17px;} .filtros{display:grid;grid-template-columns:1fr 1fr;align-items:end;} .filtro-campo{min-width:0;} .filtro-campo.filtro-grupo,.filtro-campo.filtro-unidade,.filtro-campo.filtro-agregacao{grid-column:1 / -1;} .preset{padding:7px 8px;} }
 </style>
 </head>
 <body>
@@ -120,20 +128,22 @@
 
 <div id="root" class="hidden">
 
-  <div class="filtros">
-    <select id="f-grupo" onchange="trocarGrupo()"></select>
+  <div class="filtros" aria-label="Filtros dos KPI's operacionais">
+    <label class="filtro-campo filtro-grupo"><span>Grupo</span><select id="f-grupo" onchange="trocarGrupo()"></select></label>
+    <label class="filtro-campo filtro-unidade"><span>Unidade</span><select id="f-unidade" onchange="render()"></select></label>
     <button type="button" class="preset" data-preset="semana" onclick="aplicarPreset('semana')">Semana</button>
     <button type="button" class="preset" data-preset="mes" onclick="aplicarPreset('mes')">Mês</button>
     <button type="button" class="preset" data-preset="trimestre" onclick="aplicarPreset('trimestre')">Trimestre</button>
-    <input type="date" id="f-inicio" onchange="marcarPresetManual();render()">
-    <span class="sub">até</span>
-    <input type="date" id="f-fim" onchange="marcarPresetManual();render()">
-    <select id="f-agregacao" onchange="render()" title="Como juntar os dias do período">
+    <label class="filtro-campo rotulo-data"><span>De</span><input type="date" id="f-inicio" onchange="marcarPresetManual();render()"></label>
+    <label class="filtro-campo rotulo-data"><span>Até</span><input type="date" id="f-fim" onchange="marcarPresetManual();render()"></label>
+    <label class="filtro-campo filtro-agregacao"><span>Cálculo exibido</span><select id="f-agregacao" onchange="render()" title="Como juntar os dias do período">
       <option value="auto">Agregação automática</option>
       <option value="media">Sempre média</option>
       <option value="soma">Sempre soma</option>
-    </select>
+    </select></label>
+    <button type="button" class="preset" onclick="limparFiltros()" title="Voltar para todas as unidades e o período de 30 dias">Limpar</button>
   </div>
+  <div class="escopo-calculo" id="escopo-calculo"></div>
 
   <div class="painel">
     <h2>⚠ KPI's não preenchidos <span class="n" id="pendencias-info"></span>
@@ -159,7 +169,7 @@
         <button type="button" class="preset" onclick="exportar('pdf')" title="Baixa a matriz do período em PDF, com os ofensores no topo">📄 PDF</button>
       </span>
     </h2>
-    <div class="sub" style="margin-bottom:10px;">Cada indicador exibe sua unidade: <b>un.</b>, <b>R$</b>, <b>kg</b>, <b>⏱ tempo</b> ou <b>%</b>. Tempo e percentuais usam <b>média</b> no período; quantidades, valores e pesos usam <b>soma</b> — a coluna confirma a regra aplicada.</div>
+    <div class="sub" style="margin-bottom:10px;">Cada número é calculado direto dos fechamentos filtrados. <b>Soma</b> junta os lançamentos preenchidos; <b>média</b> divide pela quantidade de lançamentos preenchidos. Tempo, percentuais e indicadores <b>por 1.000</b> usam média automática. A linha auxiliar mostra quantos lançamentos entraram em cada célula.</div>
     <div class="rolagem"><table id="matriz"></table></div>
   </div>
 
@@ -226,7 +236,9 @@ function agregaPorMedia(def){
   // TM (ticket médio) é monetário, mas representa uma razão/média: somá-lo
   // entre dias ou lojas produz um valor incorreto. Mantemos essa regra pelo
   // nome para os KPIs já existentes, mesmo que ainda estejam como "moeda".
-  return /\btm\b|time|tempo|otd|taxa|media|média|m[ée]dio/i.test(String(def?.label||''));
+  // Taxas e indicadores "por 1.000" já são razões por fechamento; somá-los
+  // infla o resultado conforme os dias passam e deixa de representar o KPI.
+  return /\btm\b|time|tempo|otd|taxa|media|média|m[ée]dio|per\s*1000|por\s*1000|rate|índice|indice/i.test(String(def?.label||''));
 }
 function modoAgregacao(def){
   const escolha = document.getElementById('f-agregacao').value;
@@ -267,10 +279,14 @@ function fmtEixo(v, def){
 // O servidor já devolve o grupo recortado (ver recortarGruposPorUnidade em
 // index.js) - a checagem aqui é a segunda tranca, pra tela nunca depender
 // só do que veio na resposta.
-function unidadesDoGrupo(){
+function unidadesDisponiveisDoGrupo(){
   const doGrupo = (GRUPO_ATUAL && GRUPO_ATUAL.unidades) || [];
   if(!UNIDADES_PERMITIDAS) return doGrupo;           // null = Master
   return doGrupo.filter(u => UNIDADES_PERMITIDAS.has(u));
+}
+function unidadesDoGrupo(){
+  const selecionada = document.getElementById('f-unidade')?.value || '';
+  return unidadesDisponiveisDoGrupo().filter(u => !selecionada || u === selecionada);
 }
 function kpisDoGrupo(){ return (GRUPO_ATUAL && GRUPO_ATUAL.kpisExtras) || []; }
 
@@ -306,6 +322,22 @@ function agregar(lista, modo){
 function totalLinha(porLoja, lojas, def, modo){
   const todos = lojas.flatMap(u => porLoja[u]);
   return fmtValor(agregar(todos, modo), def, modo);
+}
+
+function renderEscopoCalculo(){
+  const alvo = document.getElementById('escopo-calculo');
+  if(!alvo) return;
+  const linhas = linhasFiltradas();
+  const lojas = unidadesDoGrupo();
+  const disponiveis = unidadesDisponiveisDoGrupo();
+  const dias = new Set(linhas.map(f => f.data).filter(Boolean)).size;
+  const preenchimentos = linhas.reduce((total, f) => total + kpisDoGrupo().filter(k => {
+    const valor = (f.kpisExtras || {})[k.campo];
+    return valor !== undefined && valor !== null && valor !== '';
+  }).length, 0);
+  const nomeUnidade = document.getElementById('f-unidade')?.value || '';
+  const periodo = `${fmtData(document.getElementById('f-inicio').value)} a ${fmtData(document.getElementById('f-fim').value)}`;
+  alvo.innerHTML = `<b>🔎 Escopo real</b><span class="sub"><b>${escapeHtml(nomeUnidade || 'Todas as unidades')}</b> · ${lojas.length} de ${disponiveis.length} unidade(s) · <b>${escapeHtml(periodo)}</b> · ${linhas.length} fechamento(s) em ${dias} dia(s) · ${preenchimentos} valor(es) de KPI preenchido(s). Comparativos usam a <b>média por lançamento</b> de cada loja; a matriz mantém o cálculo escolhido para o período.</span>`;
 }
 
 function pendenciasDoFechamento(f){
@@ -377,10 +409,12 @@ function renderMatriz(){
     const celulas = lojas.map(u => {
       const v = agregar(porLoja[u], modo);
       const txt = fmtValor(v, def, modo);
-      return `<td class="valor">${txt === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txt)}</td>`;
+      const n = porLoja[u].length;
+      return `<td class="valor" title="${n} lançamento(s) preenchido(s) entram neste cálculo">${txt === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txt)}${n ? `<small class="celula-apoio">${n} lançamento(s)</small>` : ''}</td>`;
     }).join('');
     const txtTotal = totalLinha(porLoja, lojas, def, modo);
-    const celTotal = `<td class="valor total-col">${txtTotal === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txtTotal)}</td>`;
+    const nTotal = lojas.reduce((s,u) => s + porLoja[u].length, 0);
+    const celTotal = `<td class="valor total-col" title="Recalculado com os ${nTotal} lançamento(s), sem somar células arredondadas">${txtTotal === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txtTotal)}${nTotal ? `<small class="celula-apoio">${nTotal} lançamento(s)</small>` : ''}</td>`;
     const sel = KPI_SEL === def.campo ? ' sel' : '';
     return `<tr class="kpi-linha${sel}" onclick="escolherKpi('${escapeHtml(def.campo)}')">` +
       `<td>${escapeHtml(def.label)}<span class="unidade-kpi">${escapeHtml(unidadeKpi(def))}</span></td>` +
@@ -421,8 +455,16 @@ function calcularOfensores(){
   kpisDoGrupo().forEach(def => {
     const modo = modoAgregacao(def);
     const porLoja = valoresPorLoja(def.campo, linhas);
-    // só entra loja que preencheu: quem não lançou não é "pior", é ausente
-    const vals = lojas.map(u => ({ loja: u, v: agregar(porLoja[u], modo) })).filter(x => x.v != null);
+    // A tabela acima exibe o total real do período quando a regra é soma. Para
+    // comparar lojas, porém, total bruto pune quem teve mais dias/fechamentos.
+    // Aqui a base é sempre média por lançamento preenchido; isso torna a
+    // comparação auditável sem alterar os valores reais da matriz.
+    const vals = lojas.map(u => ({
+      loja: u,
+      v: agregar(porLoja[u], 'media'),
+      valorPeriodo: agregar(porLoja[u], modo),
+      lancamentos: porLoja[u].length,
+    })).filter(x => x.v != null);
     if(vals.length < 2) return;   // sem comparação não há ofensor
     const med = mediana(vals.map(x => x.v));
     if(med == null) return;
@@ -438,8 +480,9 @@ function calcularOfensores(){
     const desvio = Math.abs(pior.v - med) / Math.abs(med) * 100;
     if(!Number.isFinite(desvio) || desvio < 1) return;
     out.push({
-      campo: def.campo, kpi: def.label, def, loja: pior.loja, valor: pior.v,
-      mediana: med, desvio, direcao, modo,
+      campo: def.campo, kpi: def.label, def, loja: pior.loja, valor: pior.valorPeriodo,
+      mediaPorLancamento: pior.v, lancamentos: pior.lancamentos,
+      mediana: med, diferenca: Math.abs(pior.v - med), desvio, direcao, modo,
       acima: pior.v > med,
     });
   });
@@ -455,8 +498,8 @@ function renderOfensores(){
 
   const comDirecao = kpisDoGrupo().filter(k => k.direcao && k.direcao !== 'neutro').length;
   legenda.innerHTML = comDirecao
-    ? `Ordenado pelo <b>pior desempenho</b> de cada indicador, comparado à mediana das lojas do grupo. ${comDirecao} de ${kpisDoGrupo().length} KPI's têm a direção cadastrada — os demais entram por <b>divergência</b>.`
-    : `Nenhum KPI tem a direção cadastrada, então isto mostra <b>quem mais diverge da mediana</b> do grupo — não necessariamente quem está pior. Pra virar "pior de verdade", marque em <b>Grupos</b> se cada indicador é ruim quando sobe ou quando cai.`;
+    ? `Ordenado pelo <b>pior desempenho</b> de cada indicador. A comparação usa a <b>média por lançamento</b> de cada loja (não o total bruto), contra a mediana das lojas filtradas. ${comDirecao} de ${kpisDoGrupo().length} KPI's têm direção cadastrada — os demais entram por <b>divergência</b>.`
+    : `Nenhum KPI tem a direção cadastrada, então isto mostra <b>quem mais diverge da mediana</b> da média por lançamento — não necessariamente quem está pior. Pra virar "pior de verdade", marque em <b>Grupos</b> se cada indicador é ruim quando sobe ou quando cai.`;
 
   if(!lista.length){
     info.textContent = '';
@@ -473,12 +516,12 @@ function renderOfensores(){
     return `<button type="button" class="ofensor" onclick="escolherKpi('${escapeHtml(o.campo)}')" title="Ver a evolução diária desse KPI">
       <div class="ofensor-topo">
         <span class="ofensor-kpi">${escapeHtml(o.kpi)}</span>
-        <span class="ofensor-pct">${seta} ${o.desvio.toFixed(0)}%</span>
+        <span class="ofensor-pct">${seta} ${escapeHtml(fmtValor(o.diferenca, o.def, 'media'))} <span class="ofensor-med">(${o.desvio.toFixed(0)}%)</span></span>
       </div>
       <div class="ofensor-barra"><i style="width:${larg.toFixed(1)}%;background:${cor};"></i></div>
       <div class="ofensor-pe">
         <span style="color:${CORES[o.loja]||'var(--muted)'};">■</span> ${escapeHtml(o.loja)}
-        · ${escapeHtml(fmtValor(o.valor, o.def, o.modo))} <span class="ofensor-med">(mediana ${escapeHtml(fmtValor(o.mediana, o.def, o.modo))})</span>
+        · período: ${escapeHtml(fmtValor(o.valor, o.def, o.modo))} <span class="ofensor-med">· comparação: ${escapeHtml(fmtValor(o.mediaPorLancamento, o.def, 'media'))}/lanç. (${o.lancamentos} lanç.) · mediana ${escapeHtml(fmtValor(o.mediana, o.def, 'media'))}/lanç.</span>
       </div>
     </button>`;
   }).join('');
@@ -634,7 +677,7 @@ function ligarHover(alvo, ctx){
 }
 function maxDecimais(v){ return Number.isInteger(v) ? 0 : 1; }
 
-function render(){ renderPendenciasKpi(); renderMatriz(); renderOfensores(); renderTendencia(); }
+function render(){ renderEscopoCalculo(); renderPendenciasKpi(); renderMatriz(); renderOfensores(); renderTendencia(); }
 
 function marcarPresetManual(){
   PRESET = null;
@@ -653,11 +696,30 @@ function aplicarPreset(qual){
   render();
 }
 
+function limparFiltros(){
+  const unidade = document.getElementById('f-unidade');
+  const agregacao = document.getElementById('f-agregacao');
+  if(unidade) unidade.value = '';
+  if(agregacao) agregacao.value = 'auto';
+  aplicarPreset('mes');
+}
+
+function preencherFiltroUnidade(){
+  const seletor = document.getElementById('f-unidade');
+  if(!seletor) return;
+  const anterior = seletor.value;
+  const unidades = unidadesDisponiveisDoGrupo();
+  seletor.innerHTML = `<option value="">Todas as unidades (${unidades.length})</option>` +
+    unidades.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+  seletor.value = unidades.includes(anterior) ? anterior : '';
+}
+
 function trocarGrupo(){
   const id = document.getElementById('f-grupo').value;
   GRUPO_ATUAL = GRUPOS.find(g => g.id === id) || GRUPOS[0] || null;
+  preencherFiltroUnidade();
   CORES = {};
-  unidadesDoGrupo().forEach((u,i) => { CORES[u] = PALETA_CATEGORICA[i % PALETA_CATEGORICA.length]; });
+  unidadesDisponiveisDoGrupo().forEach((u,i) => { CORES[u] = PALETA_CATEGORICA[i % PALETA_CATEGORICA.length]; });
   const kpis = kpisDoGrupo();
   KPI_SEL = kpis.length ? kpis[0].campo : null;
   document.getElementById('eyebrow').textContent = 'NoPulso · ' + (GRUPO_ATUAL ? GRUPO_ATUAL.nome : 'Solutions Ti Tech');
