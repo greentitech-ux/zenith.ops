@@ -5251,6 +5251,10 @@ app.post('/api/qualidade/visitas', auth.requireAuth, upload.single('selfie'), as
     const mapa = await construirUnidadesMapa();
     req.body.unidadeNome = mapa[unidade] || null;
     req.body.loja = req.body.unidadeNome;
+    // O modelo aberto não carrega marca. Guardar a marca da unidade no
+    // retrato da visita garante a logo correta no laudo, sem depender do
+    // nome exibido da loja em avaliações futuras.
+    req.body.marca = (perfilUnidade && perfilUnidade.marca) || modelo.marca || null;
     const selfiePath = await storage.salvarArquivo(unidade || 'qualidade', req.file, 'qualidade-visitas-inicio');
     req.body.selfieInicio = { nome: req.file.originalname, path: selfiePath, tipo: req.file.mimetype, registradaEm: new Date().toISOString() };
     res.json(await qualidade.criarVisita(req.body || {}, req.user && req.user.email));

@@ -457,7 +457,7 @@ function retratoDoModelo(modelo) {
   };
 }
 
-async function criarVisita({ modeloId, unidade, unidadeNome, loja, representanteLoja, nutricionista, visitaAnteriorId, gps, selfieInicio }, email) {
+async function criarVisita({ modeloId, unidade, unidadeNome, loja, marca, representanteLoja, nutricionista, visitaAnteriorId, gps, selfieInicio }, email) {
   const modelo = await modeloPorId(modeloId);
   const registro = {
     id: novoId(),
@@ -466,6 +466,7 @@ async function criarVisita({ modeloId, unidade, unidadeNome, loja, representante
     unidade: String(unidade || '').trim() || null,
     unidadeNome: String(unidadeNome || '').trim() || null,
     loja: String(loja || '').trim() || null,
+    marca: String(marca || modelo.marca || '').trim().toLowerCase() || null,
     data: dataDaVisitaAgora(),
     // Horas são geradas pelo servidor: campo digitável permitiria dizer que a
     // visita começou/terminou em outro momento que não o registrado.

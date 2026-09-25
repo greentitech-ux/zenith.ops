@@ -20,7 +20,7 @@ const LOGO_DOMINOS = path.join(__dirname, 'public', 'branding', 'dominos-pizza.p
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.12';
+const VERSAO_LAUDO = 'QA-2026.09.25.13';
 
 const COR = {
   texto: '#1a1a1a',
@@ -64,7 +64,7 @@ function notaBR(nota) {
 // Evidência precisa continuar nítida no impresso, mas 150 pt por foto fazia
 // até apontamentos curtos ocuparem uma página inteira. A caixa abaixo mantém
 // leitura confortável em A4 e permite reunir mais de um apontamento por folha.
-const FOTO_ALT = 108;
+const FOTO_ALT = 84;
 const FOTOS_POR_LINHA = 4;
 async function desenharFotos(doc, fotos, largura) {
   if (!fotos || !fotos.length) return;
@@ -94,7 +94,15 @@ async function desenharFotos(doc, fotos, largura) {
 
 function marcaDaVisita(visita) {
   const modelo = visita.modeloSnap || {};
-  const chave = String(modelo.marca || visita.marca || '').trim().toLowerCase();
+  // Visitas antigas criadas com o "Modelo aberto padrão" ainda não tinham a
+  // marca gravada. A unidade Dom... é um dado estável e recupera a identidade
+  // correta, em vez de esconder a logo da Domino's no laudo legado.
+  const identificador = String(modelo.marca || visita.marca || `${visita.loja || ''} ${visita.unidadeNome || ''}`).trim().toLowerCase();
+  const chave = identificador.includes('domino') || /^dom\b/.test(identificador) ? 'dominos'
+    : identificador.includes('spoleto') ? 'spoleto'
+      : identificador.includes('milky') ? 'milkymoo'
+        : identificador.includes('são braz') || identificador.includes('sao braz') ? 'sao-braz'
+          : String(modelo.marca || visita.marca || '').trim().toLowerCase();
   return MARCAS[chave] || { nome: chave ? chave.toUpperCase() : 'NO PULSO', cor: '#1f2937', apoio: '#b6ff36' };
 }
 
@@ -305,14 +313,16 @@ function paragrafo(doc, rotulo, valor) {
 // "ESPAÇO CLIENTE" da planilha, e ele existe no papel mesmo quando ninguém
 // preencheu no app
 function espacoDoCliente(doc, texto, largura) {
-  doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text('ESPAÇO CLIENTE');
+  doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text('CORREÇÃO / RETORNO DA UNIDADE');
   doc.moveDown(0.2);
   if (texto) {
     doc.fontSize(10).fillColor(COR.texto).font('Helvetica').text(texto, { width: largura });
   } else {
     const y = doc.y;
-    doc.rect(doc.page.margins.left, y, largura, 24).stroke(COR.linha);
-    doc.y = y + 29;
+    // Espaço para a unidade registrar a correção no papel ou anexar a
+    // comprovação depois no sistema.
+    doc.rect(doc.page.margins.left, y, largura, 46).stroke(COR.linha);
+    doc.y = y + 51;
   }
   doc.moveDown(0.16);
 }
@@ -326,18 +336,20 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   const marca = marcaDaVisita(visita);
   desenharFundoDaCapa(doc, marca);
   rodapeNoPulso(doc);
-  desenharMarca(doc, marca, doc.page.margins.left, 34, 260);
+  // A marca da franquia é a assinatura principal da capa. A resolução da
+  // marca acima também cobre os laudos antigos cujo modelo ainda era aberto.
+  desenharMarca(doc, marca, doc.page.margins.left, 38, 230);
   try {
     // As duas marcas ocupam a mesma faixa visual (50 pt de altura). `fit`
     // preserva a proporção original de cada arquivo, sem alargar o Grupo.
-    doc.image(LOGO_GRUPO_BRAVO, doc.page.width - doc.page.margins.right - 130, 41, { fit: [130, 50], align: 'right', valign: 'center' });
+    doc.image(LOGO_GRUPO_BRAVO, doc.page.width - doc.page.margins.right - 118, 43, { fit: [118, 45], align: 'right', valign: 'center' });
   } catch (e) { /* sem logo o laudo sai igual */ }
-  doc.y = 116;
+  doc.y = 126;
   doc.fontSize(8).fillColor(marca.cor).font('Helvetica-Bold').text('Q.A.  •  VISITA TÉCNICA', { width: largura });
   doc.moveDown(0.25);
   doc.fontSize(20).fillColor(COR.texto).font('Helvetica-Bold').text('RELATÓRIO DE VISTORIA', { width: largura });
   doc.fontSize(12).fillColor(COR.fraco).font('Helvetica').text(visita.loja || visita.unidadeNome || 'Unidade não informada', { width: largura });
-  doc.moveDown(0.7);
+  doc.moveDown(0.95);
 
   const faixa = visita.faixa;
   const corFaixa = COR[faixa] || COR.fraco;
@@ -364,7 +376,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
     const linha = Math.floor(i / 2);
     campoDeCapa(doc, infoX + coluna * ((infoLargura - 8) / 2 + 8), notaY + linha * 50, (infoLargura - 8) / 2, rotulo, valor);
   });
-  doc.y = notaY + Math.max(104, Math.ceil(campos.length / 2) * 50) + 8;
+  doc.y = notaY + Math.max(104, Math.ceil(campos.length / 2) * 50) + 16;
 
   // COMPARAÇÃO COM A VISITA ANTERIOR DA MESMA LOJA. É pra isso que a nota
   // existe: número solto não diz nada, número contra o da última vez diz se
@@ -398,9 +410,11 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   }
 
   for (const [i, a] of apontamentos.entries()) {
-    // Não abre página por padrão: só vira quando o próximo bloco inteiro não
-    // cabe. Assim duas ou mais não conformidades curtas ocupam a mesma folha.
-    if (i === 0 || precisaNovaPagina(doc, alturaApontamento(a))) adicionarPaginaComRodape(doc);
+    // Duas não conformidades por folha é deliberado: cada uma reserva área
+    // legível para prazo, correção e provas que a unidade enviará depois.
+    // Não comprimimos três ou quatro registros para reduzir folhas: este
+    // laudo precisa ser preenchido e acompanhado pela operação.
+    if (i % 2 === 0) adicionarPaginaComRodape(doc);
     doc.fontSize(8).fillColor(COR.fraco).font('Helvetica-Bold').text(`APONTAMENTO ${i + 1} DE ${apontamentos.length}${a.setor ? ' · ' + String(a.setor).toUpperCase() : ''}`);
     doc.moveDown(0.18);
     cabecalhoDeBloco(doc, a.texto, COR.negativa);
@@ -415,14 +429,19 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
 
     paragrafo(doc, 'O que foi visto', a.observacao);
     await desenharFotos(doc, a.fotos, largura);
-    paragrafo(doc, 'Ação corretiva', a.acaoCorretiva);
-
     const prazoLinha = [a.responsavel && `Responsável: ${a.responsavel}`, a.prazo && `Prazo: ${dataBR(a.prazo)}`].filter(Boolean).join('   ·   ');
     if (prazoLinha) {
-      doc.fontSize(10).fillColor(COR.texto).font('Helvetica-Bold').text(prazoLinha);
-      doc.moveDown(0.5);
+      doc.fontSize(9).fillColor(COR.texto).font('Helvetica-Bold').text(prazoLinha);
+      doc.moveDown(0.25);
     }
+    paragrafo(doc, 'Ação corretiva', a.acaoCorretiva);
 
+    // O status vem antes do retorno para a unidade preencher os dois juntos.
+    const sim = a.corrigido === true ? 'X' : ' ';
+    const nao = a.corrigido === false ? 'X' : ' ';
+    doc.fontSize(9).fillColor(COR.texto).font('Helvetica-Bold')
+      .text(`CORRIGIDO:    SIM (  ${sim}  )      NÃO (  ${nao}  )`);
+    doc.moveDown(0.16);
     espacoDoCliente(doc, a.espacoCliente, largura);
 
     // A contestação não troca o laudo original: entra abaixo dele, com a
@@ -443,11 +462,21 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
       paragrafo(doc, 'Parecer técnico', r.parecer);
     }
 
-    // CORRIGIDO SIM/NÃO, como na planilha - e marcado, se já foi verificado
-    const sim = a.corrigido === true ? 'X' : ' ';
-    const nao = a.corrigido === false ? 'X' : ' ';
-    doc.fontSize(10).fillColor(COR.texto).font('Helvetica-Bold')
-      .text(`CORRIGIDO:    SIM (  ${sim}  )      NÃO (  ${nao}  )`);
+    // Reserva metade da folha para cada registro. Sem isso, dois apontamentos
+    // curtos acabam "grudados" no topo e o rodapé vira um vazio sem função.
+    // A segunda metade já nasce pronta para a devolutiva e a evidência da loja.
+    if (i % 2 === 0) {
+      const inicioSegundoBloco = doc.page.margins.top + 365;
+      if (doc.y < inicioSegundoBloco) {
+        doc.save();
+        doc.strokeColor(COR.linha).lineWidth(0.6)
+          .moveTo(doc.page.margins.left, inicioSegundoBloco - 12)
+          .lineTo(doc.page.width - doc.page.margins.right, inicioSegundoBloco - 12).stroke();
+        doc.restore();
+        doc.y = inicioSegundoBloco;
+      }
+    }
+
   }
 
   // ---------- ASSINATURAS ----------
