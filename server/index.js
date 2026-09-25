@@ -5321,9 +5321,15 @@ app.get('/api/qualidade/visitas/:id/pdf', auth.requireAuth, async (req, res) => 
   try {
     const visita = await qualidade.obterVisita(req.params.id);
     if (!podeLerVisitaQA(req, visita)) return res.status(403).json({ error: 'Sem acesso a esta visita.' });
-    const nome = `visita-qa-${String(visita.loja || visita.unidade || 'unidade').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${visita.data || ''}.pdf`;
+    // O nome acompanha o padrão pedido na operação. Barra não pode existir em
+    // arquivo no celular/Windows, por isso a data é DD-MM-AAAA no download.
+    const unidadeNoArquivo = String(visita.loja || visita.unidade || 'Unidade')
+      .trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ');
+    const dataNoArquivo = String(visita.data || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const nome = `${unidadeNoArquivo}-QA-${dataNoArquivo ? `${dataNoArquivo[3]}-${dataNoArquivo[2]}-${dataNoArquivo[1]}` : 'sem-data'}.pdf`;
+    const nomeAscii = nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '');
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${nome}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${nomeAscii}"; filename*=UTF-8''${encodeURIComponent(nome)}`);
     // PDF é sempre gerado sob demanda. Alguns visualizadores de celular
     // reaproveitam a URL anterior mesmo depois de uma vistoria ser corrigida;
     // impedir cache evita que a pessoa veja a capa ou os apontamentos velhos.
