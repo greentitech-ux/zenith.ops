@@ -111,6 +111,7 @@ const bonificacaoPerfis = require('./bonificacaoPerfis');
 const bonificacao = require('./bonificacao');
 const rhAdvertencias = require('./rhAdvertencias');
 const unidadesExtras = require('./unidades');
+const treinamentos = require('./treinamentos');
 const migracaoUnidades = require('./migracaoUnidades');
 const pedidoSemanal = require('./pedidoSemanal');
 const lojaStatus = require('./lojaStatus');
@@ -355,6 +356,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/loja-status/reparo-noczenith.ps1',
   '/assinar.html',
   '/reuniao-publica.html',
+  '/treinamento-publico.html',
 ]);
 // A MESMA lista vale SEM o ".html": `/atendimento` e `/atendimento.html`
 // servem a mesma pagina (ver o `extensions` do express.static la embaixo).
@@ -422,7 +424,7 @@ const ROTA_LOJA_CHAT_RESPONDER_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[
 // maquina, sem sessao de usuario. O token do agente continua obrigatorio.
 const ROTA_LOJA_TELEMETRIA_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/telemetria$/;
 function rotaPublicaSemDashboard(path) {
-  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/') || path.startsWith('/api/reunioes/publica/')
+  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/') || path.startsWith('/api/reunioes/publica/') || path.startsWith('/api/treinamentos-publico/')
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
@@ -2854,6 +2856,23 @@ app.post('/api/reunioes/publica/:token/comentarios', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// TREINAMENTO POR LINK: o token individual é a credencial, sem conta ou
+// senha. Ele não dá acesso ao sistema: só ao conteúdo e à assinatura daquela
+// pessoa naquela aplicação.
+app.get('/api/treinamentos-publico/:token', async (req, res) => {
+  try { res.json(await treinamentos.abrirLink(req.params.token)); } catch (err) { res.status(410).json({ error: err.message }); }
+});
+app.get('/api/treinamentos-publico/:token/material/:materialId', async (req, res) => {
+  try {
+    const material = await treinamentos.materialPorLink(req.params.token, req.params.materialId);
+    storage.streamArquivo(material.path, material.mime, res);
+  } catch (err) { res.status(404).json({ error: err.message }); }
+});
+app.post('/api/treinamentos-publico/:token/concluir', async (req, res) => {
+  try { res.json(await treinamentos.concluirPorLink(req.params.token, { ...(req.body || {}), ip:req.ip, userAgent:req.headers['user-agent'] })); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
 app.use('/api', auth.requireAuth);
@@ -4882,6 +4901,57 @@ async function exigirVisitaQA(req, res) {
 function podeNaUnidadeQA(req, unidade) {
   return podeVisitarUnidadeQA(req, unidade);
 }
+
+// TREINAMENTOS é independente do Q.A. A tag própria permite montar acervo e
+// aplicar turmas; gerente da unidade apenas acompanha as aplicações da sua
+// loja. Master/Admin atravessam os dois limites.
+function exigirTreinamento(req, res) {
+  if (req.isMaster || req.isAdmin || users.temTag(req.user, 'treinamento')) return true;
+  res.status(403).json({ error: 'Acesso restrito ao setor Treinamentos.' }); return false;
+}
+function podeVerTreinamentos(req) {
+  return req.isMaster || req.isAdmin || users.temTag(req.user, 'treinamento') || !!((req.permissions && req.permissions.unidades) || []).length;
+}
+
+app.get('/api/treinamentos/contexto', auth.requireAuth, (req, res) => {
+  res.json({ podeGerir: req.isMaster || req.isAdmin || users.temTag(req.user, 'treinamento') });
+});
+app.get('/api/treinamentos/cursos', auth.requireAuth, async (req, res) => {
+  if (!exigirTreinamento(req, res)) return;
+  try { res.json(await treinamentos.listarCursos()); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.get('/api/treinamentos/unidades', auth.requireAuth, async (req, res) => {
+  if (!exigirTreinamento(req, res)) return;
+  try { const mapa=await construirUnidadesMapa(); res.json(Object.entries(mapa).map(([codigo,nome])=>({codigo,nome}))); }
+  catch (err) { res.status(400).json({error:err.message}); }
+});
+app.post('/api/treinamentos/cursos', auth.requireAuth, async (req, res) => {
+  if (!exigirTreinamento(req, res)) return;
+  try { res.json(await treinamentos.salvarCurso(req.body || {}, req.user && req.user.email)); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/treinamentos/cursos/:id/material', auth.requireAuth, upload.single('arquivo'), async (req, res) => {
+  if (!exigirTreinamento(req, res)) return;
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Selecione um material.' });
+    const caminho = await storage.salvarArquivo(req.params.id, req.file, 'treinamentos');
+    res.json(await treinamentos.adicionarMaterial(req.params.id, { id: crypto.randomUUID(), nome:req.file.originalname, tipo:(req.body || {}).tipo || 'arquivo', path:caminho, mime:req.file.mimetype }, req.user && req.user.email));
+  } catch (err) { res.status(400).json({ error: storage.erroDeUpload ? storage.erroDeUpload(err) : err.message }); }
+});
+app.post('/api/treinamentos/aplicacoes', auth.requireAuth, async (req, res) => {
+  if (!exigirTreinamento(req, res)) return;
+  try {
+    const unidade=String((req.body||{}).unidade||'');
+    if (!podeVisitarUnidadeQA(req, unidade)) return res.status(403).json({ error:'Sem acesso a esta unidade.' });
+    const mapa=await construirUnidadesMapa(); req.body.unidadeNome=mapa[unidade] || null;
+    const base=process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    res.json(await treinamentos.criarAplicacao(req.body || {}, req.user && req.user.email, base));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.get('/api/treinamentos/aplicacoes', auth.requireAuth, async (req, res) => {
+  if (!podeVerTreinamentos(req)) return res.status(403).json({ error:'Sem acesso a Treinamentos.' });
+  try { res.json(await treinamentos.listarAplicacoes((req.isMaster || req.isAdmin || users.temTag(req.user,'treinamento')) ? null : (req.permissions.unidades || []))); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
 function unidadesVisiveisQA(req) {
   if (req.isMaster || req.isAdmin) return null; // todas
   return new Set((req.permissions && req.permissions.unidades) || []);

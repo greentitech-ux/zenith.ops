@@ -96,13 +96,17 @@
     // como em todo o resto do app. `tags` aqui é lido por aplicarRegras().
     { grupo: 'Q.A', itens: [
       { id: 'nav-qa-visita', href: '/qa-visita', icone: '🥼', rotulo: 'Visita Q.A', tags: ['qa'] },
-      { id: 'nav-qa-treinamento', href: '/qa-treinamento', icone: '🎓', rotulo: 'Treinamento Q.A', tags: ['qa'] },
       // o checklist que a visita usa. Quem SALVA e Master/Admin (a rota
       // exige), mas quem tem a tag ve a tela - conferir o roteiro antes de
       // sair pra loja e parte do trabalho de quem visita.
       { id: 'nav-qa-modelos', href: '/qa-modelos', icone: '📋', rotulo: 'Modelos Q.A', tags: ['qa'] },
       // a pasta é da UNIDADE: quem tem unidade vê, além de quem visita
       { id: 'nav-qa-documentos', href: '/qa-documentos', icone: '📄', rotulo: 'Documentação', tagsOuUnidade: ['qa'] },
+    ] },
+    { grupo: 'Desenvolvimento', itens: [
+      // Treinamentos não pertencem ao Q.A: atendem Qualidade, Atendimento,
+      // RH, Financeiro e Operações. Tag própria gerencia; unidade acompanha.
+      { id: 'nav-treinamentos', href: '/qa-treinamento', icone: '🎓', rotulo: 'Treinamentos', tagsOuUnidade: ['treinamento'] },
     ] },
     { grupo: 'Saltiverso', itens: [
       { id: 'nav-parque-checkin', href: '/parque-checkin', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },
