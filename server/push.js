@@ -954,12 +954,20 @@ async function notifyComandoSemAdmin(unidadeNome, codigo, computadorNome, posto,
 }
 
 // A fila não pode deixar uma execução sem resposta parecer ativa para sempre.
-// Este push é enviado uma única vez, quando a transação a fecha como erro.
+// Este push é enviado uma única vez, quando a varredura detecta que o agente
+// não devolveu resultado em 10 minutos.
+//
+// A fila NÃO é liberada, de propósito: não há como cancelar com segurança um
+// PowerShell que já chegou à máquina, e promover o próximo comando poderia
+// rodar dois ao mesmo tempo lá dentro (ver marcarComandoTravado em
+// lojaStatus.js). O texto abaixo dizia justamente o contrário - "marcada como
+// erro e a fila foi liberada" - e mandava o Master esperar uma fila que
+// continuava parada.
 async function notifyComandoTravado(unidadeNome, codigo, computadorNome, posto, motivo) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
     title: '⚙️ Comando sem retorno',
-    body: `${prefixo}${unidadeNome || codigo}: ${motivo || 'a execução foi marcada como erro e a fila foi liberada.'}`,
+    body: `${prefixo}${unidadeNome || codigo}: ${motivo || 'o agente não devolveu resultado em 10 minutos; a fila desta máquina está bloqueada até ela confirmar o término.'}`,
     tag: `noc-cmd-travado-${codigo}-${posto || 'principal'}`,
     url: '/loja-status',
   };

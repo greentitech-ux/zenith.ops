@@ -248,7 +248,7 @@ async function criar({
       contato: String(cliente.contato || '').trim().slice(0, 30),
       email: String(cliente.email || '').trim().slice(0, 150),
     },
-    dataVenda: dataVenda || new Date().toISOString().slice(0, 10),
+    dataVenda: dataVenda || hojeBrasilia(),
     dataDeUso,
     horaInicio: horaInicio || null,
     horaFim: horaFim || null,
@@ -354,7 +354,7 @@ async function atualizar(id, patch) {
   }
   if (patch.utilizado !== undefined) {
     merge.utilizado = patch.utilizado === true;
-    merge.dataUtilizacao = merge.utilizado ? (patch.dataUtilizacao || new Date().toISOString().slice(0, 10)) : null;
+    merge.dataUtilizacao = merge.utilizado ? (patch.dataUtilizacao || hojeBrasilia()) : null;
   }
   if (patch.observacao !== undefined) merge.observacao = String(patch.observacao).slice(0, 500);
   if (patch.termoAssinado !== undefined) merge.termoAssinado = patch.termoAssinado === true;
@@ -405,7 +405,7 @@ async function registrarRecebimento(id, { valor, forma, data, porId, porEmail })
     id: crypto.randomBytes(6).toString('hex'),
     valor: v,
     forma: String(forma || '').trim().slice(0, 40),
-    data: data || new Date().toISOString().slice(0, 10),
+    data: data || hojeBrasilia(),
     // o ID (nao so o email) e o que amarra o recebimento ao caixa de quem
     // registrou no fechamento do dia - ver faturadoPorOperador em
     // saltiversoFechamento.js
@@ -446,7 +446,31 @@ async function remover(id) {
 // ---------------------------------------------------------------
 const { FORMAS_PAGAMENTO_SPLIT } = require('./parque');
 
-const soDia = (v) => String(v == null ? '' : v).slice(0, 10);
+// DIA EM BRASÍLIA, NÃO EM UTC (Saltiverso, 25/09/2026).
+//
+// O caso: uma festa vendida às 21:12 de 24/09 caiu no caixa de 25/09 - num
+// dia que ainda nem tinha sido aberto. `new Date().toISOString()` é UTC, e
+// Brasília é UTC-3: TODA venda depois das 21:00 ganhava a data de amanhã.
+// Uma janela de 3 horas por dia, justamente a noite, que é quando o parque
+// vende festa.
+//
+// O `parque.js` e o `saltiversoVendas.js` já usavam America/Sao_Paulo - o
+// `festas.js` era o único da soma do dia que não usava. Por isso só a linha
+// "Festas" pulava de dia, e as outras duas ficavam certas.
+const FUSO_BR = 'America/Sao_Paulo';
+function hojeBrasilia() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: FUSO_BR });
+}
+// `v` pode ser data pura (2026-09-24) ou carimbo ISO completo. Data pura passa
+// direto; carimbo é convertido pro dia de Brasília - cortar os 10 primeiros
+// caracteres de um carimbo é exatamente o que jogava a receita pro dia errado.
+function soDia(v) {
+  const txt = String(v == null ? '' : v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(txt)) return txt;
+  const t = Date.parse(txt);
+  if (!Number.isFinite(t)) return txt.slice(0, 10);
+  return new Date(t).toLocaleDateString('en-CA', { timeZone: FUSO_BR });
+}
 
 function movimentosDoDia(festa, data) {
   const movs = [];

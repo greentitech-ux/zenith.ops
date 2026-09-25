@@ -3677,6 +3677,7 @@ async function detalharComando(comandoId) {
     entregueEm: c.entregueEm || null, executadoEm: c.executadoEm || null,
     canceladoEm: c.canceladoEm || null, canceladoPor: c.canceladoPor || null,
     resultado: c.resultado || null, erro: c.erro || null,
+    timeoutDetectadoEm: c.timeoutDetectadoEm || null, avisoTimeout: c.avisoTimeout || null,
   };
 }
 
@@ -3684,18 +3685,40 @@ async function detalharComando(comandoId) {
 // em erro. Depois que o agente recebe um PowerShell ainda em execução, não há
 // forma genérica e segura de "desexecutá-lo"; fingir que o X parou algo seria
 // perigoso. O erro original permanece no documento para auditoria.
-async function cancelarComandoPendente(comandoId, porEmail) {
+// DESISTIR DE UM COMANDO SEM RETORNO (Master, 25/09/2026).
+//
+// Até aqui, comando entregue nunca podia ser cancelado: não há como
+// "desexecutar" um PowerShell que já chegou na máquina, e liberar a vaga
+// poderia rodar dois ao mesmo tempo lá dentro. A intenção estava certa, mas o
+// efeito era a fila daquela máquina ficar REFÉM: o caso real foi um comando
+// parado há 21 minutos na DOM-BESSA-GERENCIA, sem nada que o Master pudesse
+// fazer - e na prática, um agente que sumiu por 10 minutos quase sempre é
+// máquina reiniciada ou agente morto, onde não há nada rodando.
+//
+// Então: dá pra desistir, com três travas.
+//   1. SÓ depois do limite de 10 min (timeoutDetectadoEm). Comando entregue
+//      há 30 segundos continua intocável - a máquina ainda está trabalhando.
+//   2. Senha do Master, como todo o resto desta tela (ver a rota).
+//   3. O registro NÃO diz que parou nada. Fica `desistidoSemRetorno`, e o
+//      texto avisa que o comando PODE ter rodado na máquina: desistir é
+//      liberar a fila do NoPulso, não desfazer o que já saiu daqui.
+async function cancelarComandoPendente(comandoId, porEmail, opcoes) {
   const id = String(comandoId || '').trim();
   if (!id) throw new Error('Comando inválido.');
+  const desistirSemRetorno = !!(opcoes && opcoes.desistirSemRetorno);
   const comandoRef = COMANDOS_COLLECTION.doc(id);
   let retorno = null;
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(comandoRef);
     if (!snap.exists) throw new Error('Comando não encontrado.');
     const comando = snap.data();
-    if (!['pendente', 'erro'].includes(comando.status)) {
+    const semRetorno = comando.status === 'entregue' && !!comando.timeoutDetectadoEm;
+    const podeDesistir = semRetorno && desistirSemRetorno;
+    if (!['pendente', 'erro'].includes(comando.status) && !podeDesistir) {
       throw new Error(comando.status === 'entregue'
-        ? 'Este comando já foi entregue à máquina e não pode ser cancelado por aqui.'
+        ? (comando.timeoutDetectadoEm
+          ? 'Este comando está sem retorno: use "Desistir e liberar a fila" para destravar a máquina.'
+          : 'Este comando acabou de ser entregue à máquina. Espere o retorno dela, ou os 10 minutos do limite, antes de desistir.')
         : 'Este comando já foi finalizado.');
     }
     const agora = new Date().toISOString();
@@ -3716,6 +3739,9 @@ async function cancelarComandoPendente(comandoId, porEmail) {
       status: 'cancelado', canceladoEm: agora,
       canceladoPor: String(porEmail || '').slice(0, 160) || null,
       canceladoAposErro: comando.status === 'erro',
+      // desistimos de ESPERAR - o comando pode ter rodado na máquina. O
+      // registro não pode dar a entender que alguém o interrompeu.
+      desistidoSemRetorno: podeDesistir,
     };
     tx.update(comandoRef, patch);
     retorno = { id, ...patch, codigo: comando.codigo, posto: comando.posto };
@@ -3877,6 +3903,19 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   const comando = snap.data();
   // Mesmo após alerta de timeout, "entregue" permanece aguardando a resposta
   // autenticada que comprova o término e pode liberar a próxima vaga.
+  // RESPOSTA QUE CHEGA DEPOIS DA DESISTÊNCIA: a fila já foi liberada, então
+  // não há vaga pra mexer - mas o que a máquina diz é a única forma de saber
+  // se o comando rodou de verdade lá dentro. Guarda no registro e devolve sem
+  // erro, senão o agente fica reenviando um resultado que ninguém aceita.
+  if (comando.status === 'cancelado' && comando.desistidoSemRetorno) {
+    await comandoRef.update({
+      respostaTardiaEm: new Date().toISOString(),
+      resultado: d.resultado || null,
+      erro: d.erro || null,
+    });
+    cache.invalidar();
+    return { id: comandoId, status: 'cancelado', respostaTardia: true };
+  }
   if (comando.status !== 'entregue') {
     throw new Error(comando.status === 'erro'
       ? 'O resultado chegou depois do limite e o comando já foi fechado como erro.'
@@ -3970,6 +4009,13 @@ async function listarComandosPendentes(consulta) {
         executadoEm: c.executadoEm || null,
         canceladoEm: c.canceladoEm || null,
         requerAdmin: c.requerAdmin === true,
+        // SEM RETORNO: o servidor detecta em 10 min (marcarComandoTravado),
+        // grava o aviso e BLOQUEIA a fila da máquina de propósito. Até
+        // 25/09 nada disso saía daqui, e a tela mostrava só "executando" -
+        // o Master via um comando parado há 17 min sem nenhuma pista de que
+        // o sistema já sabia, nem de que a fila daquela máquina estava presa.
+        timeoutDetectadoEm: c.timeoutDetectadoEm || null,
+        avisoTimeout: c.avisoTimeout || null,
         nomeComando: nomeSeguroDoComando(c),
       };
     })

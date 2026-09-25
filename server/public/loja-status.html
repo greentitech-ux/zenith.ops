@@ -559,7 +559,10 @@
   .cmd-alvo{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cmd-meta{font:10.5px var(--mono);color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cmd-tipo{font-size:11px;color:var(--text);line-height:1.35;}.cmd-hora{font:10px var(--mono);color:var(--muted);margin-top:4px;}
-  .cmd-status{font:10px var(--mono);white-space:nowrap;text-transform:uppercase;}.cmd-status.pendente{color:var(--warn);}.cmd-status.entregue{color:var(--accent);}.cmd-status.executado{color:var(--ok);}.cmd-status.erro{color:var(--bad);}.cmd-status.cancelado{color:var(--muted);}
+  .cmd-status{font:10px var(--mono);white-space:nowrap;text-transform:uppercase;}.cmd-status.pendente{color:var(--warn);}.cmd-status.entregue{color:var(--accent);}.cmd-status.executado{color:var(--ok);}.cmd-status.erro{color:var(--bad);}.cmd-status.cancelado{color:var(--muted);}.cmd-status.travado{color:var(--warn);}
+  /* sem retorno: a fila daquela maquina esta bloqueada - o aviso fica na linha, nao so no push que ja passou */
+  .cmd-travado{font-size:11px;line-height:1.4;color:var(--warn);margin-top:3px;max-width:52ch;}
+  .cmd-linha.travado{border-left:2px solid var(--warn);}
   /* Cancelar em lote. A caixa so existe na linha que PODE ser cancelada; nas
      outras fica um vazio do mesmo tamanho pra coluna nao desalinhar. */
   .cmd-marca{display:flex;align-items:center;justify-content:center;width:16px;}
@@ -650,7 +653,7 @@
         </div>
         <button type="button" class="btn-secundario" onclick="carregarComandosRecentes()">↻ Atualizar</button>
       </div>
-      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Acompanhe destino, ação, estado e horário sem expor PowerShell ou saída. O <b>✕ Cancelar</b> remove comandos ainda na fila ou encerra registros com erro — marque a caixa de várias linhas para cancelar todas de uma vez, com uma senha só. Comandos executando ou concluídos continuam protegidos contra cancelamento enganoso. Execuções sem retorno por mais de 10 minutos são marcadas como erro automaticamente.</div>
+      <div class="sub" style="font-size:11px;line-height:1.45;margin:0 0 10px;">Acompanhe destino, ação, estado e horário sem expor PowerShell ou saída. O <b>✕ Cancelar</b> remove comandos ainda na fila ou encerra registros com erro — marque a caixa de várias linhas para cancelar todas de uma vez, com uma senha só. Comandos executando ou concluídos continuam protegidos contra cancelamento enganoso. Execução sem retorno por mais de 10 minutos é marcada como <b>sem retorno</b> e avisa no celular — e a fila daquela máquina fica bloqueada até ela confirmar. Aí aparece o <b>✕ Desistir</b>: ele não interrompe nada na máquina (o comando já saiu daqui e pode ter rodado), só faz o NoPulso parar de esperar e liberar a fila.</div>
       <div class="cmd-lote" id="comandos-lote"></div>
       <div class="cmd-lista" id="comandos-lista"></div>
     </div>
@@ -3288,7 +3291,12 @@ let COMANDOS_RECENTES = [];
 let COMANDOS_MARCADOS = new Set();
 // Mesma regra do ✕ da linha e do servidor: fila ou erro. Uma função só
 // pras três leituras (linha, barra do lote e o envio) não divergirem.
-const podeCancelarComando = (c) => c && (c.status==='pendente' || c.status==='erro');
+// O ✕ tambem aparece no comando SEM RETORNO (entregue ha mais de 10 min sem a
+// maquina confirmar): ali ele nao cancela nada na maquina - desiste de esperar
+// e libera a fila DELA, que ficava refem pra sempre. Comando entregue ha pouco
+// segue intocavel: a maquina ainda esta trabalhando.
+const semRetornoComando = (c) => !!(c && c.status==='entregue' && c.timeoutDetectadoEm);
+const podeCancelarComando = (c) => c && (c.status==='pendente' || c.status==='erro' || semRetornoComando(c));
 let FILTRO_COMANDOS = 'todos';
 let PERIODO_COMANDOS = '7d';
 let COMANDOS_CARREGADOS = false;
@@ -3354,20 +3362,26 @@ function renderComandosRecentes(){
   // filtro anterior, oferecendo cancelar o que não está mais listado
   if(!visiveis.length){ lista.innerHTML='<div class="empty" style="padding:16px;">Nenhum comando neste filtro.</div>'; renderLoteComandos([]); return; }
   lista.innerHTML = visiveis.map(c=>{
-    const status = ROTULO_STATUS_COMANDO[c.status] || 'desconhecido';
-    const classe = ROTULO_STATUS_COMANDO[c.status] ? c.status : '';
+    // SEM RETORNO: entregue ha mais de 10 min sem a maquina confirmar. O
+    // servidor ja detectou (timeoutDetectadoEm), avisou no celular e deixou a
+    // fila DESTA maquina bloqueada de proposito. Ate 25/09 a linha dizia so
+    // "executando", e o Master olhava um comando parado ha 17 min sem
+    // nenhuma pista de que o sistema ja sabia.
+    const semRetorno = c.status==='entregue' && !!c.timeoutDetectadoEm;
+    const status = semRetorno ? 'sem retorno' : (ROTULO_STATUS_COMANDO[c.status] || 'desconhecido');
+    const classe = semRetorno ? 'travado' : (ROTULO_STATUS_COMANDO[c.status] ? c.status : '');
     const unidade = UNIDADES_NOMES[c.unidadeCodigo || c.codigo] || c.codigo || 'sem unidade';
     const quando = c.canceladoEm || c.executadoEm || c.entregueEm || c.criadoEm;
     const admin = c.requerAdmin ? ' · admin' : '';
     const podeCancelar = podeCancelarComando(c);
-    const cancelarTitulo = c.status==='erro' ? 'Marcar este erro como cancelado' : 'Cancelar antes da entrega';
+    const cancelarTitulo = semRetorno ? 'Desistir de esperar e liberar a fila desta máquina' : (c.status==='erro' ? 'Marcar este erro como cancelado' : 'Cancelar antes da entrega');
     const marcado = COMANDOS_MARCADOS.has(c.id);
     return `<div class="cmd-linha ${classe}">
       <span class="cmd-marca">${podeCancelar?`<input type="checkbox" ${marcado?'checked':''} onchange="marcarComandoLote('${escapeJs(c.id)}',this.checked)" aria-label="Selecionar para cancelar em lote">`:''}</span>
-      <span class="cmd-indicador" aria-hidden="true">${c.status==='erro'?'●':c.status==='executado'?'●':'◌'}</span>
+      <span class="cmd-indicador" aria-hidden="true">${semRetorno?'⚠':c.status==='erro'?'●':c.status==='executado'?'●':'◌'}</span>
       <div class="cmd-destino"><div class="cmd-alvo" title="${escapeHtml(c.nomeComputador || c.posto)}">${escapeHtml(c.nomeComputador || c.posto || 'Computador')}</div><div class="cmd-meta">${escapeHtml(unidade)} · ${escapeHtml(c.posto || '')}${admin}</div></div>
-      <div class="cmd-tipo-bloco"><div class="cmd-tipo">${escapeHtml(c.nomeComando || 'Comando operacional')}</div><div class="cmd-hora">${escapeHtml(fmtDataHora(quando))} · ${escapeHtml(tempoRelativo(quando))}</div></div>
-      <div class="cmd-estado"><span class="cmd-status ${classe}">${status}</span>${podeCancelar?`<button type="button" class="cmd-cancelar" onclick="cancelarComandoFila('${escapeJs(c.id)}',this)" aria-label="Cancelar comando" title="${cancelarTitulo}">✕ Cancelar</button>`:''}</div>
+      <div class="cmd-tipo-bloco"><div class="cmd-tipo">${escapeHtml(c.nomeComando || 'Comando operacional')}</div><div class="cmd-hora">${escapeHtml(fmtDataHora(quando))} · ${escapeHtml(tempoRelativo(quando))}</div>${semRetorno?`<div class="cmd-travado">⚠️ ${escapeHtml(c.avisoTimeout || 'O agente não devolveu resultado. A fila desta máquina está bloqueada até ela confirmar o término.')}</div>`:''}</div>
+      <div class="cmd-estado"><span class="cmd-status ${classe}">${status}</span>${podeCancelar?`<button type="button" class="cmd-cancelar" onclick="cancelarComandoFila('${escapeJs(c.id)}',this)" aria-label="${semRetorno?'Desistir e liberar a fila':'Cancelar comando'}" title="${cancelarTitulo}">${semRetorno?'✕ Desistir':'✕ Cancelar'}</button>`:''}</div>
     </div>`;
   }).join('');
   renderLoteComandos(cancelaveisVisiveis);
@@ -3440,21 +3454,29 @@ async function carregarComandosRecentes(){
 }
 async function cancelarComandoFila(id, botao){
   const alvo=COMANDOS_RECENTES.find(c=>c.id===id);
-  if(!alvo || !['pendente','erro'].includes(alvo.status)) return carregarComandosRecentes();
+  if(!alvo || !podeCancelarComando(alvo)) return carregarComandosRecentes();
+  const desistir=semRetornoComando(alvo);
   const aposErro=alvo.status==='erro';
-  const explicacao=aposErro
-    ? 'O registro será marcado como cancelado. Isso não executa nem desfaz ações na máquina; o erro original continuará guardado para auditoria.'
-    : 'Ele será removido antes de chegar à máquina.';
-  if(!confirm(`Cancelar “${alvo.nomeComando || 'Comando operacional'}” para ${alvo.nomeComputador || alvo.posto}?\n\n${explicacao}`)) return;
-  const password=await pedirSenhaMaster(aposErro?'cancelar este comando com erro':'cancelar este comando da fila');
+  // DESISTIR NÃO É PARAR. O comando já saiu daqui: pode ter rodado, pode estar
+  // rodando. O que a desistência faz é soltar a fila do NoPulso. Prometer que
+  // "cancelou" seria a tela mentindo sobre a máquina.
+  const explicacao=desistir
+    ? 'Isso NÃO interrompe nada na máquina: o comando já foi entregue e pode ter rodado. O que acontece é o NoPulso parar de esperar o retorno e liberar a fila desta máquina, que está travada desde então.'
+    : (aposErro
+      ? 'O registro será marcado como cancelado. Isso não executa nem desfaz ações na máquina; o erro original continuará guardado para auditoria.'
+      : 'Ele será removido antes de chegar à máquina.');
+  const titulo=desistir?'Desistir de esperar':'Cancelar';
+  if(!confirm(`${titulo} “${alvo.nomeComando || 'Comando operacional'}” para ${alvo.nomeComputador || alvo.posto}?\n\n${explicacao}`)) return;
+  const password=await pedirSenhaMaster(desistir?'desistir deste comando e liberar a fila da máquina':(aposErro?'cancelar este comando com erro':'cancelar este comando da fila'));
   if(password===null) return;
   if(botao) { botao.disabled=true; botao.textContent='Cancelando…'; }
   try{
-    const r=await fetch('/api/loja-status/comandos/'+encodeURIComponent(id),{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+    const r=await fetch('/api/loja-status/comandos/'+encodeURIComponent(id),{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({password,desistirSemRetorno:desistir})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error||'Não consegui cancelar o comando.');
+    if(desistir && d.mensagem) alert(d.mensagem);
     await carregarComandosRecentes();
-  }catch(e){ alert(e.message); if(botao){botao.disabled=false;botao.textContent='✕ Cancelar';} }
+  }catch(e){ alert(e.message); if(botao){botao.disabled=false;botao.textContent=desistir?'✕ Desistir':'✕ Cancelar';} }
 }
 
 // ---------------------------------------------------------------------

@@ -7126,6 +7126,106 @@ setTimeout(async () => {
          && !!cmdTravadoData.timeoutDetectadoEm && /fila permanece bloqueada/i.test(cmdTravadoData.avisoTimeout || ''),
        'a resposta tardia autenticada encerra o comando e só então libera a vaga':
          respostaTardiaTravado.status === 'executado' && !depoisDaConfirmacao.comandoPendenteId,
+       // O SERVIDOR SABIA E A TELA NÃO CONTAVA (25/09/2026). O caso real: um
+       // comando na DOM-BESSA-GERENCIA aparecendo só como "EXECUTANDO · há
+       // 17min". O timeout de 10 min já tinha rodado, já tinha gravado o
+       // aviso e já tinha bloqueado a fila daquela máquina - mas nada disso
+       // saía na listagem, então o painel mostrava um comando "em andamento"
+       // que ninguém mais ia destravar.
+       'o estado "sem retorno" chega na tela junto com o motivo': await (async () => {
+         const naLista = (await ls.listarComandosPendentes({ limite: 200 })).find((c) => c.id === cmdTravado.id);
+         const noDetalhe = await ls.detalharComando(cmdTravado.id);
+         return !!naLista && !!naLista.timeoutDetectadoEm && /fila permanece bloqueada/i.test(naLista.avisoTimeout || '')
+           && !!noDetalhe && !!noDetalhe.timeoutDetectadoEm;
+       })(),
+       // e a linha PINTA isso, em vez de continuar dizendo só "executando"
+       'a linha do comando mostra "sem retorno" e o motivo': (() => {
+         const htmlLs = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+         return /const semRetorno = c\.status==='entregue' && !!c\.timeoutDetectadoEm;/.test(htmlLs)
+           && /semRetorno \? 'sem retorno' :/.test(htmlLs)
+           && /semRetorno\?`<div class="cmd-travado">⚠️ \$\{escapeHtml\(c\.avisoTimeout/.test(htmlLs);
+       })(),
+       // o texto de ajuda dizia o CONTRÁRIO do que o código faz de propósito
+       // ("são marcadas como erro automaticamente"), e o push tinha o mesmo
+       // erro no texto padrão: prometiam uma fila liberada que segue parada
+       'a tela e o push param de prometer que a fila foi liberada sozinha': (() => {
+         const htmlLs = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+         const pushSrc = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+         return !/são marcadas como erro automaticamente/.test(htmlLs)
+           && !/a execução foi marcada como erro e a fila foi liberada/.test(pushSrc)
+           && /a fila desta máquina está bloqueada até ela confirmar o término/.test(pushSrc);
+       })(),
+       // ---- DESISTIR DE UM COMANDO SEM RETORNO (Master, 25/09/2026) ----
+       // A fila daquela máquina ficava refém pra sempre: comando parado há 21
+       // min na DOM-BESSA-GERENCIA e nada que o Master pudesse fazer.
+       'comando entregue HÁ POUCO continua intocável': await (async () => {
+         const c = await ls.enfileirarComando(UNI, posto, 'echo recente', { origem: 'agente' });
+         await bater({ souAdmin: false });
+         const r = await ls.cancelarComandoPendente(c.id, 'm@t', { desistirSemRetorno: true }).catch((e) => ({ erro: e.message }));
+         const doc = (await dbA.collection('lojaStatusComandos').doc(c.id).get()).data();
+         return /Espere o retorno dela/.test(r.erro || '') && doc.status === 'entregue';
+       })(),
+       'desistir do comando SEM RETORNO libera a fila da máquina': await (async () => {
+         const alvo = (await ls.listar()).find((x) => x.codigo === UNI && x.posto === posto);
+         const travadoId = alvo.comandoPendenteId;
+         dbA.collection('lojaStatusComandos').doc(travadoId).set({ entregueEm: new Date(Date.now() - 11 * 60 * 1000).toISOString() }, { merge: true });
+         ls.descartarEspelhoTeste();
+         await ls.varrerAlertas();
+         // sem pedir explicitamente, continua recusando: o ✕ comum não desiste
+         const semPedir = await ls.cancelarComandoPendente(travadoId, 'm@t').catch((e) => ({ erro: e.message }));
+         const r = await ls.cancelarComandoPendente(travadoId, 'm@t', { desistirSemRetorno: true });
+         const doc = (await dbA.collection('lojaStatusComandos').doc(travadoId).get()).data();
+         const depois = (await ls.listar()).find((x) => x.codigo === UNI && x.posto === posto);
+         return /Desistir e liberar a fila/.test(semPedir.erro || '')
+           && r.desistidoSemRetorno === true && doc.status === 'cancelado'
+           && depois.comandoPendenteId !== travadoId;
+       })(),
+       // desistir NÃO para nada na máquina: se ela responder depois, o que
+       // aconteceu de verdade tem que ficar registrado - e o agente não pode
+       // levar erro e ficar reenviando
+       'resposta que chega depois da desistência é guardada, sem erro': await (async () => {
+         const cD = await ls.enfileirarComando(UNI, posto, 'echo desisto', { origem: 'agente' });
+         await bater({ souAdmin: false });
+         dbA.collection('lojaStatusComandos').doc(cD.id).set({ entregueEm: new Date(Date.now() - 11 * 60 * 1000).toISOString() }, { merge: true });
+         ls.descartarEspelhoTeste();
+         await ls.varrerAlertas();
+         await ls.cancelarComandoPendente(cD.id, 'm@t', { desistirSemRetorno: true });
+         const tardia = await ls.marcarComandoExecutado(cD.id, { resultado: 'rodou mesmo assim' }, { codigo: UNI, posto, token: tk })
+           .catch((e) => ({ erro: e.message }));
+         const doc = (await dbA.collection('lojaStatusComandos').doc(cD.id).get()).data();
+         return !tardia.erro && tardia.respostaTardia === true
+           && doc.status === 'cancelado' && /rodou mesmo assim/.test(doc.resultado || '') && !!doc.respostaTardiaEm;
+       })(),
+       // PELA ROTA, não só pelo módulo: é na rota que a INTENÇÃO do operador
+       // viaja (`desistirSemRetorno`). Testando só o módulo, uma rota que
+       // mandasse `true` sempre passava batido - e aí o ✕ comum viraria
+       // desistência sem ninguém ter pedido. Foi o que a sabotagem mostrou.
+       'a rota só desiste quando quem clicou pediu': await (async () => {
+         const cR = await ls.enfileirarComando(UNI, posto, 'echo rota', { origem: 'agente' });
+         await bater({ souAdmin: false });
+         dbA.collection('lojaStatusComandos').doc(cR.id).set({ entregueEm: new Date(Date.now() - 11 * 60 * 1000).toISOString() }, { merge: true });
+         ls.descartarEspelhoTeste();
+         await ls.varrerAlertas();
+         const cab = token ? { Authorization: 'Bearer ' + token } : {};
+         const caminho = '/api/loja-status/comandos/' + encodeURIComponent(cR.id);
+         // sem pedir: a rota tem que RECUSAR e o comando continua entregue
+         const semPedir = await enviarJson('DELETE', caminho, { password: process.env.MASTER_PASSWORD }, cab);
+         const meio = (await dbA.collection('lojaStatusComandos').doc(cR.id).get()).data();
+         // pedindo: desiste e libera
+         const pedindo = await enviarJson('DELETE', caminho, { password: process.env.MASTER_PASSWORD, desistirSemRetorno: true }, cab);
+         const fim = (await dbA.collection('lojaStatusComandos').doc(cR.id).get()).data();
+         return semPedir.status === 400 && /Desistir e liberar a fila/.test(semPedir.corpo)
+           && meio.status === 'entregue'
+           && pedindo.status === 200 && /pode ter rodado na máquina/.test(pedindo.corpo)
+           && fim.status === 'cancelado' && fim.desistidoSemRetorno === true;
+       })(),
+       'a tela oferece o ✕ Desistir e avisa que não interrompe nada': (() => {
+         const htmlLs = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+         return /const semRetornoComando = \(c\) => !!\(c && c\.status==='entregue' && c\.timeoutDetectadoEm\);/.test(htmlLs)
+           && /semRetorno\?'✕ Desistir':'✕ Cancelar'/.test(htmlLs)
+           && /Isso NÃO interrompe nada na máquina/.test(htmlLs)
+           && /desistirSemRetorno:desistir/.test(htmlLs);
+       })(),
        // expiração
       'comando-admin sem executor elevado expira e libera a vaga':
         transExp.length === 1 && !depoisExp.comandoPendenteId
@@ -15630,11 +15730,15 @@ $r | ConvertTo-Json -Depth 4 -Compress
   let okLote = false;
   try {
     const htmlQ = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    // desde 25/09 o `podeCancelarComando` também cobre o comando SEM RETORNO
+    // (ver semRetornoComando), então os DOIS vêm juntos - recortar só um
+    // deixava o outro indefinido no sandbox
+    const mSemRetorno = htmlQ.match(/const semRetornoComando = [^\n]+/);
     const mHelper = htmlQ.match(/const podeCancelarComando = [^\n]+/);
     const ini = htmlQ.indexOf('// A barra do lote só aparece');
     const fim = htmlQ.indexOf('async function carregarComandosRecentes');
-    if (!mHelper || ini < 0 || fim < 0 || fim < ini) throw new Error('não achei o bloco do cancelamento em lote no HTML');
-    const trecho = mHelper[0] + '\n' + htmlQ.slice(ini, fim);
+    if (!mSemRetorno || !mHelper || ini < 0 || fim < 0 || fim < ini) throw new Error('não achei o bloco do cancelamento em lote no HTML');
+    const trecho = mSemRetorno[0] + '\n' + mHelper[0] + '\n' + htmlQ.slice(ini, fim);
 
     // --- dublês. O elemento da barra guarda o innerHTML pra eu poder olhar.
     const barra = { className: '', innerHTML: '' };
@@ -29383,6 +29487,61 @@ $r | ConvertTo-Json -Depth 4 -Compress
   } catch (e) { okNiverPlano = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
   if (!okNiverPlano) ruins += 1;
   console.log(`${okNiverPlano ? '✓' : '✗'} Parque: o desconto de aniversariante também pega quando o plano é escolhido criança a criança`);
+
+  // ------------------------------------------------------------------
+  // A FESTA DE ONTEM CAINDO NO CAIXA DE HOJE (Saltiverso, 25/09/2026).
+  //
+  // O caso: festa vendida às 21:12 de 24/09 apareceu no caixa de 25/09 - num
+  // dia que ainda nem tinha sido aberto. O 24/09 mostrava "Festas R$ 0,00" e
+  // o 25/09, "Festas R$ 559,20".
+  //
+  // Causa: `new Date().toISOString()` é UTC e Brasília é UTC-3, então TODA
+  // venda depois das 21:00 ganhava a data de amanhã. Uma janela de 3 horas
+  // por dia - justamente a noite, que é quando o parque vende festa.
+  //
+  // O `parque.js` e o `saltiversoVendas.js` já usavam America/Sao_Paulo; o
+  // `festas.js` era o único da soma do dia que não usava. Por isso só a linha
+  // "Festas" pulava de dia e as outras duas ficavam certas.
+  let okFestaFuso = false;
+  try {
+    const fs2 = require('fs');
+    const fst = require(__dirname + '/festas.js');
+    const srcFestas = fs2.readFileSync(__dirname + '/festas.js', 'utf8');
+    // 24/09 21:12 em Brasília é 25/09 00:12 em UTC - o carimbo do caso real
+    const CARIMBO = '2026-09-25T00:12:00.000Z';
+    const festaSemData = { id: 'f1', status: 'ativo', sinal: { valor: 559.2, forma: 'pix' }, criadoEm: CARIMBO };
+    const em24 = fst.movimentosDoDia(festaSemData, '2026-09-24');
+    const em25 = fst.movimentosDoDia(festaSemData, '2026-09-25');
+    // recebimento carimbado igual, pelo mesmo caminho
+    const comRecebimento = { id: 'f2', status: 'ativo', recebimentos: [{ valor: 100, forma: 'pix', data: CARIMBO }] };
+    const rec24 = fst.movimentosDoDia(comRecebimento, '2026-09-24');
+    // data pura (o caso normal, digitada na tela) não pode ter mudado
+    const pura = fst.movimentosDoDia({ id: 'f3', status: 'ativo', sinal: { valor: 10, forma: 'pix', data: '2026-09-24' } }, '2026-09-24');
+    // e a madrugada continua no dia dela: 25/09 01:00 BRT = 25/09 04:00 UTC
+    const madrugada = fst.movimentosDoDia({ id: 'f4', status: 'ativo', sinal: { valor: 20, forma: 'pix' }, criadoEm: '2026-09-25T04:00:00.000Z' }, '2026-09-25');
+
+    const conf = {
+      'a festa das 21:12 de 24/09 fica em 24/09': em24.length === 1 && em24[0].valor === 559.2,
+      'e NÃO aparece em 25/09': em25.length === 0,
+      'o recebimento carimbado segue a mesma regra': rec24.length === 1,
+      'data pura digitada na tela continua valendo como está': pura.length === 1,
+      'a madrugada continua no dia dela (não volta pro anterior)': madrugada.length === 1,
+      // sem isto, o conserto seria só na leitura e a PRÓXIMA venda continuaria
+      // nascendo com a data errada gravada
+      'a venda nasce com a data de Brasília, não a de UTC':
+        !/toISOString\(\)\.slice\(0, 10\)/.test(srcFestas)
+        && /dataVenda: dataVenda \|\| hojeBrasilia\(\)/.test(srcFestas)
+        && /data: data \|\| hojeBrasilia\(\)/.test(srcFestas),
+      // os três módulos que somam o dinheiro do dia têm que falar do MESMO dia
+      'os três módulos do faturado usam o mesmo fuso': ['festas.js', 'parque.js', 'saltiversoVendas.js']
+        .every((m) => /America\/Sao_Paulo/.test(fs2.readFileSync(__dirname + '/' + m, 'utf8'))),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFestaFuso = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [em24=${em24.length} em25=${em25.length}]`);
+  } catch (e) { okFestaFuso = false; console.log('  erro: ' + e.message); }
+  if (!okFestaFuso) ruins += 1;
+  console.log(`${okFestaFuso ? '✓' : '✗'} Saltiverso: festa vendida à noite fica no dia dela (o fuso jogava tudo depois das 21h pro dia seguinte)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
