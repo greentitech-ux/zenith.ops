@@ -20,7 +20,7 @@ const LOGO_DOMINOS = path.join(__dirname, 'public', 'branding', 'dominos-pizza.p
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.7';
+const VERSAO_LAUDO = 'QA-2026.09.25.8';
 
 const COR = {
   texto: '#1a1a1a',
@@ -126,6 +126,29 @@ function desenharMarca(doc, marca, x, y, largura) {
     doc.rect(x, y, 7, altura).fill(marca.apoio);
     doc.font('Helvetica-Bold').fontSize(16).fillColor('#ffffff').text(marca.nome, x + 18, y + 15, { width: largura - 24 });
   }
+}
+
+function desenharFundoDaCapa(doc, marca) {
+  const pagina = doc.page;
+  // Cor de marca entra como acabamento, não como fundo pesado: a capa continua
+  // legível quando impressa, mas deixa de parecer uma folha administrativa.
+  doc.save();
+  doc.rect(0, 0, pagina.width, 9).fill(marca.cor);
+  doc.opacity(0.055).circle(pagina.width - 26, 176, 150).fill(marca.cor);
+  doc.opacity(0.035).circle(pagina.width - 116, 255, 210).fill(marca.apoio);
+  doc.opacity(1);
+  doc.rect(0, pagina.height - 100, pagina.width, 100).fill(marca.cor);
+  doc.opacity(0.18).circle(pagina.width - 28, pagina.height - 16, 118).fill(marca.apoio);
+  doc.restore();
+}
+
+function rodapeDaCapa(doc, visita, marca) {
+  const y = doc.page.height - 72;
+  const largura = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff')
+    .text('VISTORIA Q.A. · RELATÓRIO OFICIAL', doc.page.margins.left, y, { width: largura });
+  doc.font('Helvetica').fontSize(9).fillColor('#ffffff')
+    .text(`${visita.loja || visita.unidadeNome || 'Unidade'}  •  ${dataBR(visita.data)}  •  ${marca.nome}`, doc.page.margins.left, y + 16, { width: largura });
 }
 
 function campoDeCapa(doc, x, y, largura, rotulo, valor) {
@@ -244,6 +267,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
 
   // ---------- CAPA ----------
   const marca = marcaDaVisita(visita);
+  desenharFundoDaCapa(doc, marca);
   desenharMarca(doc, marca, doc.page.margins.left, 34, 260);
   try {
     // As duas marcas ocupam a mesma faixa visual (50 pt de altura). `fit`
@@ -251,6 +275,8 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
     doc.image(LOGO_GRUPO_BRAVO, doc.page.width - doc.page.margins.right - 130, 41, { fit: [130, 50], align: 'right', valign: 'center' });
   } catch (e) { /* sem logo o laudo sai igual */ }
   doc.y = 116;
+  doc.fontSize(8).fillColor(marca.cor).font('Helvetica-Bold').text('Q.A.  •  VISITA TÉCNICA', { width: largura });
+  doc.moveDown(0.25);
   doc.fontSize(20).fillColor(COR.texto).font('Helvetica-Bold').text('RELATÓRIO DE VISTORIA', { width: largura });
   doc.fontSize(12).fillColor(COR.fraco).font('Helvetica').text(visita.loja || visita.unidadeNome || 'Unidade não informada', { width: largura });
   doc.moveDown(0.7);
@@ -259,6 +285,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   const corFaixa = COR[faixa] || COR.fraco;
   const notaY = doc.y;
   doc.roundedRect(doc.page.margins.left, notaY, 126, 104, 8).fillAndStroke('#f7f8fa', COR.linha);
+  doc.rect(doc.page.margins.left, notaY + 9, 5, 86).fill(corFaixa);
   doc.fontSize(7).fillColor(COR.fraco).font('Helvetica-Bold').text('NOTA DA VISITA', doc.page.margins.left + 12, notaY + 13);
   doc.fontSize(36).fillColor(corFaixa).font('Helvetica-Bold').text(notaBR(visita.nota), doc.page.margins.left + 12, notaY + 26);
   if (faixa) doc.fontSize(8).fillColor(corFaixa).font('Helvetica-Bold').text(FAIXA_TITULO[faixa] || '', doc.page.margins.left + 12, notaY + 78, { width: 102 });
@@ -303,6 +330,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
   }
 
   resumoDaCapa(doc, visita, largura);
+  rodapeDaCapa(doc, visita, marca);
   paginaDeConformes(doc, visita, largura);
 
   // ---------- APONTAMENTOS ----------
