@@ -19,7 +19,7 @@ const LOGO_GRUPO_BRAVO = path.join(__dirname, 'public', 'grupo-bravo.png');
 // Vai no header HTTP do PDF. Não é decorativo: permite distinguir, no
 // atendimento, um PDF guardado pelo celular de um laudo realmente gerado pelo
 // servidor antigo.
-const VERSAO_LAUDO = 'QA-2026.09.25.2';
+const VERSAO_LAUDO = 'QA-2026.09.25.3';
 
 const COR = {
   texto: '#1a1a1a',
@@ -136,7 +136,19 @@ function alturaApontamento(a) {
   return 104 + linhas * 12 + fotos + (a.especificacoes && a.especificacoes.length ? 36 : 0) + (a.revisao ? 54 : 0);
 }
 
-function resumoDaCapa(doc, visita, apontamentos, largura) {
+function conformesPorSetor(visita) {
+  const respostas = visita.respostas || {};
+  const setores = (visita.modeloSnap && visita.modeloSnap.setores) || [];
+  return setores.map((setor) => {
+    const extras = (visita.extras || {})[setor.id] || [];
+    const itens = [...(setor.itens || []), ...extras]
+      .filter((item) => respostas[item.id] && respostas[item.id].resposta === 'conforme')
+      .map((item) => item.texto || item.id);
+    return { nome: setor.nome || 'Sem setor', itens };
+  }).filter((setor) => setor.itens.length);
+}
+
+function resumoDaCapa(doc, visita, largura) {
   const x = doc.page.margins.left;
   const y = doc.y + 10;
   const gap = 8;
@@ -158,16 +170,22 @@ function resumoDaCapa(doc, visita, apontamentos, largura) {
   doc.y = y + 98;
   doc.x = x;
 
-  if (!apontamentos.length) return;
-  doc.font('Helvetica-Bold').fontSize(8).fillColor(COR.fraco).text('PONTOS QUE EXIGEM AÇÃO', { width: largura });
-  apontamentos.slice(0, 3).forEach((a) => {
-    const setor = a.setor ? `${a.setor} · ` : '';
-    doc.font('Helvetica').fontSize(9).fillColor(COR.texto).text(`• ${setor}${a.texto}`, { width: largura, height: 22, ellipsis: true });
+  const porSetor = conformesPorSetor(visita);
+  if (!porSetor.length) return;
+
+  // A capa não deve falar apenas do problema: ela é o retrato completo da
+  // vistoria. O agrupamento por setor permite registrar TODOS os conformes
+  // sem gastar uma página por item e deixa os não conformes para o detalhamento
+  // que começa na folha seguinte.
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(COR.positiva)
+    .text(`ITENS CONFORMES · ${visita.conformes || 0}`, { width: largura });
+  porSetor.forEach((setor) => {
+    doc.font('Helvetica-Bold').fontSize(7.2).fillColor(COR.fraco)
+      .text(`${setor.nome.toUpperCase()} · ${setor.itens.length}`, { width: largura });
+    doc.font('Helvetica').fontSize(7.5).fillColor(COR.texto)
+      .text(setor.itens.join('  •  '), { width: largura });
+    doc.moveDown(0.12);
   });
-  if (apontamentos.length > 3) {
-    doc.font('Helvetica').fontSize(8).fillColor(COR.fraco).text(`e mais ${apontamentos.length - 3} apontamento(s) detalhado(s) a seguir.`);
-  }
-  doc.moveDown(0.1);
 }
 
 function cabecalhoDeBloco(doc, texto, cor) {
@@ -262,7 +280,7 @@ async function gerarPdf(visita, apontamentos, res, anterior) {
     }
   }
 
-  resumoDaCapa(doc, visita, apontamentos, largura);
+  resumoDaCapa(doc, visita, largura);
 
   // ---------- APONTAMENTOS ----------
   if (!apontamentos.length) {
