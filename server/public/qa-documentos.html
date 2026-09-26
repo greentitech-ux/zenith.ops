@@ -249,6 +249,8 @@ const SIT_LABEL = {
 const rotulo = (d) => d.situacaoLabel || (SIT_LABEL[d.tipo==='avaliacao'?'avaliacao':'validade']||{})[d.situacao] || d.situacao;
 let DOCS = [], UNIDADES = [], EDIT_ID = null, VERSAO_DOC = null, MARCA = null, PADRAO = null;
 let FILTRO_UNIDADE = '', FILTRO_SITUACAO = 'pendentes', FILTRO_BUSCA = '', PREPARAR = null;
+const LIMITE_ARQUIVO_QUALIDADE = 12 * 1024 * 1024;
+function tamanhoArquivo(mb){ return (mb / 1024 / 1024).toFixed(1).replace('.', ',') + ' MB'; }
 
 async function api(caminho, opcoes){
   const r = await fetch(caminho, Object.assign({
@@ -542,6 +544,7 @@ async function enviarVersao(){
   // v-arquivo é o padrão; v-camera cobre o navegador sem DataTransfer
   const arquivo = ($('v-arquivo').files && $('v-arquivo').files[0]) || ($('v-camera').files && $('v-camera').files[0]);
   if(!arquivo) return alert('Escolha o arquivo ou tire a foto.');
+  if(arquivo.size > LIMITE_ARQUIVO_QUALIDADE) return alert(`O arquivo "${arquivo.name}" tem ${tamanhoArquivo(arquivo.size)}. Para enviar a avaliação, use um PDF ou foto de até 12 MB; reduza a qualidade da foto e tente novamente.`);
   const fd = new FormData();
   fd.append('arquivo', arquivo);
   if($('v-data').value) fd.append('data', $('v-data').value);
@@ -557,7 +560,16 @@ async function enviarVersao(){
     $('v-camera').value='';
     fecharVersao();
     await carregar();
-  }catch(e){ alert(e.message); }
+  }catch(e){
+    // TypeError/"Failed to fetch" não traz resposta HTTP: em celular é quase
+    // sempre conexão perdida durante um arquivo grande. Não repetimos o POST
+    // automaticamente, pois ele pode ter concluído no servidor e criar duas
+    // versões do mesmo documento.
+    const msg = String((e && e.message) || e || '');
+    alert(/failed to fetch|networkerror/i.test(msg)
+      ? 'Não foi possível manter a conexão durante o envio. Verifique o sinal de internet e tente novamente. Se a foto foi tirada agora, use uma versão de até 12 MB.'
+      : msg || 'Não foi possível enviar o arquivo agora.');
+  }
   finally{ botao.disabled = false; botao.textContent = 'Enviar versão'; }
 }
 

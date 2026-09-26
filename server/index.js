@@ -212,6 +212,17 @@ const uploadDocumentoIdentidade = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 3 },
 });
 
+// Pasta Q.A.: é comum a unidade fotografar uma avaliação direto do celular.
+// O upload genérico aceita até 50 MB e, em rede móvel, uma foto grande pode
+// ter a conexão interrompida antes de chegar ao tratamento de erro do app.
+// Um limite próprio preserva o Render e devolve uma mensagem JSON explicando
+// como resolver, em vez do navegador mostrar apenas "Failed to fetch".
+const LIMITE_ARQUIVO_QUALIDADE = 12 * 1024 * 1024;
+const uploadQualidadeDocumento = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: LIMITE_ARQUIVO_QUALIDADE, files: 1 },
+});
+
 // arquivo do pedido semanal que a loja anexa pra confirmar (ver
 // pedidoSemanal.js) - vem do sistema do fornecedor, entao pode ser PDF,
 // print da tela ou planilha; 1 por semana, sem teto apertado porque um
@@ -5289,7 +5300,7 @@ app.post('/api/qualidade/documentos', auth.requireAuth, async (req, res) => {
 // `data` é a data DO DOCUMENTO (a da avaliação, a da emissão) e é ela que
 // define a ordem da pilha - quem escaneia em outubro a avaliação de março
 // quer ela no lugar de março.
-app.post('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, upload.single('arquivo'), async (req, res) => {
+app.post('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, uploadQualidadeDocumento.single('arquivo'), async (req, res) => {
   try {
     const atual = await qualidadeDocumentos.obter(req.params.id);
     if (!podeNaUnidadeQA(req, atual.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
