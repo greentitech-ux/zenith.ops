@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Estação da Comida · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<link rel="stylesheet" href="/estacao.css">
+<script src="/tema.js"></script>
+<style>
+  .est-hub-intro{background:linear-gradient(135deg,#182317,#12161b 58%,#12161b);border:1px solid #456128;border-radius:14px;padding:17px;margin-bottom:14px;}
+  .est-hub-intro h2{font-size:19px;margin:0 0 6px;}.est-hub-intro p{margin:0;color:var(--muted);font-size:13px;line-height:1.5;}
+  .est-hub-grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:10px;}
+  .est-hub-atalho{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-height:184px;text-decoration:none;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:13px;padding:16px;transition:border-color .15s ease,transform .15s ease;}
+  .est-hub-atalho:hover{border-color:var(--accent);transform:translateY(-1px);}.est-hub-icone{font-size:28px;line-height:1;}.est-hub-atalho h2{font-size:16px;margin:2px 0 0;}.est-hub-atalho p{font-size:12px;color:var(--muted);line-height:1.45;margin:0;}.est-hub-ir{margin-top:auto;color:var(--accent);font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;}
+  .est-hub-atalho.fechamento{border-color:#5b4a24;}.est-hub-atalho.fechamento .est-hub-ir{color:var(--warn);}
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;"><div class="eyebrow">NoPulso · Estação da Comida</div><h1>Operação</h1></div>
+  </div>
+  <button class="back" onclick="logout()">🚪 Sair</button>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Esta navegação é destinada ao Master, Admin e Gerente da unidade.</div>
+<main id="root" class="hidden">
+  <section class="est-hub-intro">
+    <div class="eyebrow" id="papel">Gestão da operação</div>
+    <h2>Escolha onde vai atuar</h2>
+    <p>Salão atende a mesa. Caixa recebe a conta. Fechamento geral confere todo o dia. Cada tela abre já na unidade escolhida.</p>
+  </section>
+
+  <div class="est-card">
+    <div class="est-barra" style="margin-bottom:0;"><label>Unidade<select id="unidade" onchange="atualizarLinks()"></select></label></div>
+  </div>
+
+  <section class="est-hub-grade">
+    <a class="est-hub-atalho" id="link-salao" href="/estacao-salao">
+      <span class="est-hub-icone">🍽️</span><h2>Atendimento de mesa</h2>
+      <p>Abra comandas, consulte mesas, lance itens e acompanhe o salão em tempo real.</p><span class="est-hub-ir">Abrir Salão →</span>
+    </a>
+    <a class="est-hub-atalho" id="link-caixa" href="/estacao-caixa">
+      <span class="est-hub-icone">💳</span><h2>Caixa</h2>
+      <p>Junte comandas, venda no balcão, registre as formas de pagamento e conclua a conta.</p><span class="est-hub-ir">Abrir Caixa →</span>
+    </a>
+    <a class="est-hub-atalho fechamento" id="link-fechamento" href="/estacao-fechamento">
+      <span class="est-hub-icone">🧾</span><h2>Fechamento geral</h2>
+      <p>Confira total do dia, formas de pagamento, caixas, comandas abertas e os QR Codes das mesas.</p><span class="est-hub-ir">Abrir Fechamento →</span>
+    </a>
+  </section>
+</main>
+
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+<script>
+const authToken = localStorage.getItem('authToken');
+if(!authToken) location = '/';
+const fetchOriginal = fetch.bind(window);
+window.fetch = (url, opcoes = {}) => fetchOriginal(url, { ...opcoes, headers: { ...(opcoes.headers||{}), ...(String(url).startsWith('/api/') ? { Authorization: 'Bearer ' + authToken } : {}) } });
+function logout(){ localStorage.removeItem('authToken'); location = '/'; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function eGestao(me){ return me.role==='master' || me.isAdmin || /gerente/i.test([...(me.cargos||[]), me.cargo||''].join(' ')); }
+function atualizarLinks(){
+  const unidade = document.getElementById('unidade').value;
+  ['salao','caixa','fechamento'].forEach((t)=>document.getElementById('link-'+t).href = `/estacao-${t}?unidade=${encodeURIComponent(unidade)}`);
+}
+async function boot(){
+  const r = await fetch('/api/me');
+  if(!r.ok){ logout(); return; }
+  const me = await r.json();
+  if(!eGestao(me)){ document.getElementById('sem-acesso').classList.remove('hidden'); return; }
+  const papel = me.role==='master' ? 'Master · visão integral' : (me.isAdmin ? 'Admin · gestão do seu escopo' : 'Gerente · gestão da sua unidade');
+  document.getElementById('papel').textContent = papel;
+  const unidades = await fetch('/api/estacao/unidades').then(x=>x.ok ? x.json() : []);
+  const select = document.getElementById('unidade');
+  select.innerHTML = unidades.length ? unidades.map(u=>`<option value="${esc(u.codigo)}">${esc(u.nome)}</option>`).join('') : '<option value="">nenhuma unidade liberada</option>';
+  const desejada = new URLSearchParams(location.search).get('unidade');
+  if(desejada && unidades.some(u=>u.codigo===desejada)) select.value=desejada;
+  atualizarLinks();
+  document.getElementById('root').classList.remove('hidden');
+}
+boot();
+</script>
+</body>
+</html>

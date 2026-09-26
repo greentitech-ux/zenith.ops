@@ -117,6 +117,7 @@
       { id: 'nav-saltiverso-fechamento', href: '/saltiverso-fechamento', icone: '🧾', rotulo: 'Fechamento do balcão', secoes: ['parque-loja'] },
     ] },
     { grupo: 'Estação da Comida', itens: [
+      { id: 'nav-estacao-comida', href: '/estacao-comida', icone: '🍴', rotulo: 'Visão da operação', gerenteOuSecoes: [] },
       { id: 'nav-estacao-salao', href: '/estacao-salao', icone: '🍽️', rotulo: 'Salão', secoes: ['estacao-salao'] },
       { id: 'nav-estacao-caixa', href: '/estacao-caixa', icone: '💳', rotulo: 'Caixa', secoes: ['estacao-caixa'] },
       { id: 'nav-estacao-fechamento', href: '/estacao-fechamento', icone: '🧾', rotulo: 'Fechamento do dia', secoes: ['estacao-fechamento'] },

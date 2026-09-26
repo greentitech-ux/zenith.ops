@@ -416,7 +416,8 @@ async function boot(){
   if(!r.ok){ logout(); return; }
   ME = await r.json();
   IS_MASTER = ME.role === 'master';
-  const secoes = IS_MASTER ? ['estacao-fechamento'] : (ME.permissions?.sections||[]);
+  const eGestao = IS_MASTER || ME.isAdmin || /gerente/i.test([...(ME.cargos||[]), ME.cargo||''].join(' '));
+  const secoes = eGestao ? ['estacao-fechamento'] : (ME.permissions?.sections||[]);
   if(!secoes.includes('estacao-fechamento')){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
@@ -428,6 +429,8 @@ async function boot(){
   document.getElementById('unidade').innerHTML = UNIDADES.length
     ? UNIDADES.map(u=>`<option value="${esc(u.codigo)}">${esc(u.nome)}</option>`).join('')
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
+  const unidadeDaNavegacao = new URLSearchParams(location.search).get('unidade');
+  if(unidadeDaNavegacao && UNIDADES.some(u=>u.codigo===unidadeDaNavegacao)) document.getElementById('unidade').value = unidadeDaNavegacao;
   document.getElementById('root').classList.remove('hidden');
   contarFolhas(); // a faixa padrão já entra dizendo quantas folhas saem
   await carregar();

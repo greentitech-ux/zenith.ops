@@ -10971,6 +10971,20 @@ const podeUnidadeEstacao = (req, unidade) => {
   if (!ESTACAO_UNIDADES_NOMES[u]) return false;
   return req.isMaster || (req.permissions.unidades || []).includes(u);
 };
+// Master e Admin administram a Estação inteira; Gerente/Assistente de
+// Gerente administram a operação apenas nas unidades já liberadas no próprio
+// acesso. Atendente comum continua precisando da seção específica (Salão,
+// Caixa ou Fechamento), para não ganhar funções financeiras por engano.
+const podeGerirEstacao = (req) => {
+  const cargos = [req.user && req.user.cargo, ...((req.user && req.user.cargos) || [])];
+  return req.isMaster || req.isAdmin || cargos.some((cargo) => users.ehCargoGerente(cargo));
+};
+function requireEstacao(section) {
+  return (req, res, next) => {
+    if (podeGerirEstacao(req) || auth.hasSection(req, section)) return next();
+    return res.status(403).json({ error: 'Você não tem acesso a essa área da Estação da Comida.' });
+  };
+}
 
 // As unidades que a pessoa pode ver na Estação. Existe separado de
 // /api/inventario/unidades porque o garçom tem "estacao-salao" e NÃO tem
@@ -10978,14 +10992,17 @@ const podeUnidadeEstacao = (req, unidade) => {
 // seletor de unidade nasce vazio. A lista é a mesma (a permissão de unidade
 // da Estação é a do inventário, ver podeUnidadeEstacao) - o que muda é quem
 // pode perguntar.
-app.get('/api/estacao/unidades', requireAnySection('estacao-salao', 'estacao-caixa', 'estacao-fechamento'), (req, res) => {
+app.get('/api/estacao/unidades', (req, res, next) => {
+  if (podeGerirEstacao(req) || ['estacao-salao', 'estacao-caixa', 'estacao-fechamento'].some((s) => auth.hasSection(req, s))) return next();
+  return res.status(403).json({ error: 'Você não tem acesso a essa área da Estação da Comida.' });
+}, (req, res) => {
   const unidades = req.isMaster
     ? Object.keys(ESTACAO_UNIDADES_NOMES)
     : (req.permissions.unidades || []).filter((u) => ESTACAO_UNIDADES_NOMES[u]);
   res.json(unidades.map((codigo) => ({ codigo, nome: ESTACAO_UNIDADES_NOMES[codigo] })));
 });
 
-app.get('/api/estacao/precos', requireSection('estacao-fechamento'), async (req, res) => {
+app.get('/api/estacao/precos', requireEstacao('estacao-fechamento'), async (req, res) => {
   try {
     if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     res.json(await estacaoComida.getPrecos(req.query.unidade));
@@ -11002,13 +11019,13 @@ app.post('/api/estacao/precos', auth.requireAuth, auth.requireMaster, async (req
 // o salão inteiro numa chamada: mesas derivadas das comandas abertas
 // TURNO DO DIA: quem abre e' o caixa (ver turnoVigente em estacaoComida.js).
 // GET diz qual vale agora e se foi o caixa ou o relogio que decidiu.
-app.get('/api/estacao/turno', requireSection('estacao-caixa'), async (req, res) => {
+app.get('/api/estacao/turno', requireEstacao('estacao-caixa'), async (req, res) => {
   try {
     if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     res.json(await estacaoComida.turnoVigente(req.query.unidade, estacaoComida.hojeBrasiliaISO()));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
-app.post('/api/estacao/turno', requireSection('estacao-caixa'), async (req, res) => {
+app.post('/api/estacao/turno', requireEstacao('estacao-caixa'), async (req, res) => {
   try {
     const unidade = String(req.body?.unidade || '');
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11016,14 +11033,14 @@ app.post('/api/estacao/turno', requireSection('estacao-caixa'), async (req, res)
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.get('/api/estacao/salao', requireSection('estacao-salao'), async (req, res) => {
+app.get('/api/estacao/salao', requireEstacao('estacao-salao'), async (req, res) => {
   try {
     if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     res.json(await estacaoComida.salao(req.query.unidade));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 // o que dá pra lançar na comanda: o catálogo da unidade com preço de venda
-app.get('/api/estacao/itens', requireSection('estacao-salao'), async (req, res) => {
+app.get('/api/estacao/itens', requireEstacao('estacao-salao'), async (req, res) => {
   try {
     const unidade = req.query.unidade;
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11032,7 +11049,7 @@ app.get('/api/estacao/itens', requireSection('estacao-salao'), async (req, res) 
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 // o que o CAIXA pode vender: só os itens marcados como disponíveis no balcão
-app.get('/api/estacao/itens-balcao', requireSection('estacao-caixa'), async (req, res) => {
+app.get('/api/estacao/itens-balcao', requireEstacao('estacao-caixa'), async (req, res) => {
   try {
     if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     res.json(await estacaoComida.itensDoBalcao(req.query.unidade));
@@ -11041,7 +11058,7 @@ app.get('/api/estacao/itens-balcao', requireSection('estacao-caixa'), async (req
 // marcar/desmarcar um item como disponível no balcão. Master OU Gerente da
 // unidade (pedido do Master: "o master ou gerente pode configurar") - não é
 // cadastro novo, é uma marca no item que já existe no catálogo.
-app.patch('/api/estacao/itens/:id/balcao', requireSection('estacao-caixa'), async (req, res) => {
+app.patch('/api/estacao/itens/:id/balcao', requireEstacao('estacao-caixa'), async (req, res) => {
   try {
     // obterItemUnidade devolve a UNIDADE do item (string), não o item
     const unidadeDoItem = await inventario.obterItemUnidade(req.params.id);
@@ -11054,7 +11071,7 @@ app.patch('/api/estacao/itens/:id/balcao', requireSection('estacao-caixa'), asyn
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.post('/api/estacao/comandas', requireSection('estacao-salao'), async (req, res) => {
+app.post('/api/estacao/comandas', requireEstacao('estacao-salao'), async (req, res) => {
   try {
     const { unidade, unidadeNome, numero, mesa, tipoRodizio } = req.body || {};
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11063,7 +11080,7 @@ app.post('/api/estacao/comandas', requireSection('estacao-salao'), async (req, r
     res.json(c);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
-app.patch('/api/estacao/comandas/:id/mesa', requireSection('estacao-salao'), async (req, res) => {
+app.patch('/api/estacao/comandas/:id/mesa', requireEstacao('estacao-salao'), async (req, res) => {
   try {
     const existente = await estacaoComida.getComanda(req.params.id);
     if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11072,7 +11089,7 @@ app.patch('/api/estacao/comandas/:id/mesa', requireSection('estacao-salao'), asy
     res.json(c);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
-app.post('/api/estacao/comandas/:id/itens', requireSection('estacao-salao'), async (req, res) => {
+app.post('/api/estacao/comandas/:id/itens', requireEstacao('estacao-salao'), async (req, res) => {
   try {
     const existente = await estacaoComida.getComanda(req.params.id);
     if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11082,7 +11099,7 @@ app.post('/api/estacao/comandas/:id/itens', requireSection('estacao-salao'), asy
     res.json(c);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
-app.delete('/api/estacao/comandas/:id/itens/:indice', requireSection('estacao-salao'), async (req, res) => {
+app.delete('/api/estacao/comandas/:id/itens/:indice', requireEstacao('estacao-salao'), async (req, res) => {
   try {
     const existente = await estacaoComida.getComanda(req.params.id);
     if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11092,7 +11109,7 @@ app.delete('/api/estacao/comandas/:id/itens/:indice', requireSection('estacao-sa
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 // cancelar é do caixa/gerente, não do salão: é a porta de sair sem pagar
-app.post('/api/estacao/comandas/:id/cancelar', requireSection('estacao-caixa'), async (req, res) => {
+app.post('/api/estacao/comandas/:id/cancelar', requireEstacao('estacao-caixa'), async (req, res) => {
   try {
     const existente = await estacaoComida.getComanda(req.params.id);
     if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11103,7 +11120,7 @@ app.post('/api/estacao/comandas/:id/cancelar', requireSection('estacao-caixa'), 
 });
 
 // CAIXA: a conta de uma ou várias comandas, pelos NÚMEROS do cartão
-app.get('/api/estacao/conta', requireSection('estacao-caixa'), async (req, res) => {
+app.get('/api/estacao/conta', requireEstacao('estacao-caixa'), async (req, res) => {
   try {
     const unidade = req.query.unidade;
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11115,7 +11132,7 @@ app.get('/api/estacao/conta', requireSection('estacao-caixa'), async (req, res) 
     res.json(await estacaoComida.contaDe(unidade, numeros, req.query.servico !== '0', itensBalcao));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
-app.post('/api/estacao/receber', requireSection('estacao-caixa'), async (req, res) => {
+app.post('/api/estacao/receber', requireEstacao('estacao-caixa'), async (req, res) => {
   try {
     const { unidade, unidadeNome, numeros, caixa, pagamentos, comServico, itensBalcao } = req.body || {};
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11129,7 +11146,7 @@ app.post('/api/estacao/receber', requireSection('estacao-caixa'), async (req, re
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.get('/api/estacao/fechamento', requireSection('estacao-fechamento'), async (req, res) => {
+app.get('/api/estacao/fechamento', requireEstacao('estacao-fechamento'), async (req, res) => {
   try {
     const unidade = req.query.unidade;
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -11142,7 +11159,7 @@ app.get('/api/estacao/fechamento', requireSection('estacao-fechamento'), async (
 // o garçom - é tarefa de montar o salão, não de atender. O QR grava a URL
 // oficial (APP_BASE_URL), não o host do pedido: o adesivo fica colado na
 // mesa por meses e não pode apontar pra um endereço de teste.
-app.get('/api/estacao/mesas-qr.pdf', requireSection('estacao-fechamento'), (req, res) => {
+app.get('/api/estacao/mesas-qr.pdf', requireEstacao('estacao-fechamento'), (req, res) => {
   try {
     const unidade = String(req.query.unidade || '').trim();
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });

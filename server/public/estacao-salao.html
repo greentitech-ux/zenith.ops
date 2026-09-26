@@ -493,7 +493,8 @@ async function boot(){
   const r = await fetch('/api/me');
   if(!r.ok){ logout(); return; }
   ME = await r.json();
-  const secoes = ME.role==='master' ? ['estacao-salao'] : (ME.permissions?.sections||[]);
+  const eGestao = ME.role==='master' || ME.isAdmin || /gerente/i.test([...(ME.cargos||[]), ME.cargo||''].join(' '));
+  const secoes = eGestao ? ['estacao-salao'] : (ME.permissions?.sections||[]);
   if(!secoes.includes('estacao-salao')){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
@@ -502,6 +503,8 @@ async function boot(){
   document.getElementById('unidade').innerHTML = UNIDADES.length
     ? UNIDADES.map(u=>`<option value="${esc(u.codigo)}">${esc(u.nome)}</option>`).join('')
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
+  const unidadeDaNavegacao = new URLSearchParams(location.search).get('unidade');
+  if(unidadeDaNavegacao && UNIDADES.some(u=>u.codigo===unidadeDaNavegacao)) document.getElementById('unidade').value = unidadeDaNavegacao;
   document.getElementById('root').classList.remove('hidden');
   // Aberto pelo QR da mesa com a câmera comum do celular (a folha de
   // impressão grava a URL do salão com ?unidade=&mesa=, ver
