@@ -244,6 +244,19 @@ async function juntar(){
 }
 function tirarNumero(n){ NUMEROS = NUMEROS.filter(x=>x!==n); recarregarConta(); }
 
+function resumoDivisaoIgual(){
+  const comandas = CONTA?.comandas || [];
+  if(comandas.length < 2) return '';
+  // É apenas uma referência para quem quer rachar a conta: não substitui os
+  // valores reais exibidos em cada cartão acima e não rateia a cobrança.
+  const total = Math.round(comandas.reduce((s, c) => s + num(c.totais?.total), 0) * 100) / 100;
+  const centavos = Math.round(total * 100), quantidade = comandas.length;
+  const base = Math.floor(centavos / quantidade), resto = centavos % quantidade;
+  const parcelas = resto
+    ? `${quantidade - resto}x ${fmtReal(base / 100)} + ${resto}x ${fmtReal((base + 1) / 100)}`
+    : `${quantidade}x ${fmtReal(base / 100)}`;
+  return `<div class="est-divisao" style="margin-top:10px;"><b>${quantidade} comandas</b><span>Valores reais acima · total ${fmtReal(total)}. Se decidirem dividir igualmente: <strong>${parcelas}</strong>.</span></div>`;
+}
 function renderEscolhidas(){
   document.getElementById('escolhidas').innerHTML = NUMEROS.length
     ? `<div class="est-comandas">${NUMEROS.map(n=>{
@@ -257,7 +270,7 @@ function renderEscolhidas(){
           <span class="est-comanda-val">${c ? fmtReal(c.totais.total) : ''}</span>
           <button type="button" class="est-btn perigo" style="min-height:36px;padding:6px 10px;" onclick="tirarNumero('${esc(n)}')">✕</button>
         </div>`;
-      }).join('')}</div>`
+       }).join('')}</div>${resumoDivisaoIgual()}`
     : '<div class="est-vazio">Nenhuma comanda nesta conta.</div>';
 }
 

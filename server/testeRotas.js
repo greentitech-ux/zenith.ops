@@ -26355,6 +26355,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && /function usarValoresDasComandas/.test(caixa) && /c\.totais\.total/.test(caixa)
         && /Usar valores das comandas/.test(caixa)
         && /saldo restante estiver zerado/.test(caixa),
+      'comandas juntas mostram valor individual e também a sugestão de divisão igual':
+        /function resumoDivisaoIgual/.test(caixa) && /Valores reais acima/.test(caixa)
+        && /Se decidirem dividir igualmente/.test(caixa)
+        && /\$\{quantidade\}x \$\{fmtReal\(base \/ 100\)\}/.test(caixa),
       // CLAUDE.md §2: cor cravada escapa da troca do tema Claro
       'nada de hex cravado no CSS novo (o tema Claro troca o acento)':
         !/#b8ff3c/i.test(css.slice(css.indexOf('O ESTADO DO SERVIÇO'))),
