@@ -26359,6 +26359,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /function resumoDivisaoIgual/.test(caixa) && /Valores reais acima/.test(caixa)
         && /Se decidirem dividir igualmente/.test(caixa)
         && /\$\{quantidade\}x \$\{fmtReal\(base \/ 100\)\}/.test(caixa),
+      'o caixa localiza uma comanda pela mesa, mas permite cobrar uma ou todas':
+        /api\/estacao\/mesas-caixa/.test(caixa) && /function abrirMesaCaixa/.test(caixa)
+        && /function incluirComandas/.test(caixa) && /Juntar todas/.test(caixa)
+        && /Mesa \$\{esc\(mesa\.mesa\)\}/.test(caixa)
+        && /api\/estacao\/mesas-caixa/.test(require('fs').readFileSync(__dirname + '\/index.js', 'utf8')),
       // CLAUDE.md §2: cor cravada escapa da troca do tema Claro
       'nada de hex cravado no CSS novo (o tema Claro troca o acento)':
         !/#b8ff3c/i.test(css.slice(css.indexOf('O ESTADO DO SERVIÇO'))),

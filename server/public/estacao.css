@@ -99,6 +99,11 @@
 
 .est-lista{display:grid;gap:7px;}
 .est-item{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;}
+.est-mesa-caixa{width:100%;cursor:pointer;text-align:left;color:var(--text);font-family:var(--sans);}
+.est-mesa-caixa:hover,.est-mesa-caixa.selecionada{border-color:var(--accent);}
+.est-mesa-caixa.selecionada{background:color-mix(in srgb,var(--accent) 10%,var(--panel2));}
+.est-mesa-foco{margin:0 0 10px;padding:11px;border:1px solid var(--accent);border-radius:11px;background:color-mix(in srgb,var(--accent) 6%,var(--panel));}
+.est-mesa-foco h2{margin:0;font-size:16px;}
 .est-item-nome{flex:1 1 auto;min-width:0;font-size:13px;overflow-wrap:anywhere;}
 .est-item-val{font:600 13px var(--mono);flex:none;}
 

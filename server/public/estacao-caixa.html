@@ -68,17 +68,25 @@
     <div class="est-erro" id="erro-turno"></div>
   </div>
 
-  <!-- QUEM ESTÁ PAGANDO. O Master: "se alguém quiser pagar 2, 3 pessoas é só
-       informar os números das comandas". Por isso é uma LISTA, não um campo. -->
-  <div class="est-card">
-    <h2>Quem está pagando</h2>
-    <div class="est-sub">Digite o número do cartão e toque em juntar. Dá pra juntar quantas pessoas quiser numa conta só.</div>
-    <div class="est-barra" style="margin-bottom:10px;">
-      <label style="flex:1 1 150px;">Número do cartão<input id="numero" type="number" inputmode="numeric" min="1" max="999" placeholder="ex: 12" onkeydown="if(event.key==='Enter'){event.preventDefault();juntar()}"></label>
-      <button type="button" class="est-btn principal" style="flex:none;" onclick="juntar()">+ Juntar</button>
+  <!-- O Caixa começa por UMA comanda. Ao encontrá-la, abre a mesa para que
+       escolha só aquele cartão ou junte todos os que estão na mesma mesa. -->
+  <div class="est-duplo">
+    <div class="est-card">
+      <h2>Comanda para pagamento</h2>
+      <div class="est-sub">Digite o cartão. Se ele estiver em uma mesa, você escolhe uma comanda, várias ou a mesa inteira.</div>
+      <div class="est-barra" style="margin-bottom:10px;">
+        <label style="flex:1 1 150px;">Número do cartão<input id="numero" type="number" inputmode="numeric" min="1" max="999999" placeholder="ex: 1001" onkeydown="if(event.key==='Enter'){event.preventDefault();juntar()}"></label>
+        <button type="button" class="est-btn principal" style="flex:none;" onclick="juntar()">Localizar</button>
+      </div>
+      <div id="mesa-em-foco"></div>
+      <div id="escolhidas"></div>
+      <div class="est-erro" id="erro-numero"></div>
     </div>
-    <div id="escolhidas"></div>
-    <div class="est-erro" id="erro-numero"></div>
+    <div class="est-card">
+      <h2>Mesas em atendimento</h2>
+      <div class="est-sub">Ordenadas pelo número da mesa.</div>
+      <div id="mesas-caixa"><div class="est-vazio">carregando mesas...</div></div>
+    </div>
   </div>
 
   <!-- BALCÃO: quem só passou pra comprar uma água, ou levou uma na saída -->
@@ -144,7 +152,7 @@ const ROTULO_TIPO = { adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':
 const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
 function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
 
-let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGAMENTO_SEQ = 0;
+let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGAMENTO_SEQ = 0, MESAS = [], MESA_EM_FOCO = null;
 
 // ---- TURNO DA VENDA ----
 // O preço do rodízio sai do turno; por isso o caixa precisa ver, em letras
@@ -219,28 +227,79 @@ async function pedir(url, opcoes){
 }
 
 // ---------- comandas escolhidas ----------
+async function carregarMesas(){
+  try{
+    const r = await pedir(`/api/estacao/mesas-caixa?unidade=${encodeURIComponent(unidadeAtual())}&servico=${comServico()?'1':'0'}`);
+    MESAS = r.mesas || [];
+    if(MESA_EM_FOCO && !MESAS.some(m => Number(m.mesa) === Number(MESA_EM_FOCO))) MESA_EM_FOCO = null;
+    renderMesasCaixa(); renderMesaEmFoco();
+  }catch(e){
+    MESAS = [];
+    const alvo = document.getElementById('mesas-caixa');
+    if(alvo) alvo.innerHTML = `<div class="est-vazio">${esc(e.message)}</div>`;
+  }
+}
+function renderMesasCaixa(){
+  const alvo = document.getElementById('mesas-caixa');
+  if(!alvo) return;
+  alvo.innerHTML = MESAS.length ? `<div class="est-lista">${MESAS.map(m => `
+    <button type="button" class="est-item est-mesa-caixa ${Number(MESA_EM_FOCO)===Number(m.mesa)?'selecionada':''}" onclick="abrirMesaCaixa(${Number(m.mesa)})">
+      <span class="est-item-nome">Mesa ${esc(m.mesa)} <span class="est-tag">${m.pessoas} pessoa(s)</span></span>
+      <span class="est-item-val">${m.comandas.length} comanda(s)</span>
+    </button>`).join('')}</div>` : '<div class="est-vazio">Nenhuma mesa com comanda aberta.</div>';
+}
+function abrirMesaCaixa(mesa){ MESA_EM_FOCO = Number(mesa); renderMesasCaixa(); renderMesaEmFoco(); }
+function renderMesaEmFoco(){
+  const alvo = document.getElementById('mesa-em-foco');
+  if(!alvo) return;
+  const mesa = MESAS.find(m => Number(m.mesa) === Number(MESA_EM_FOCO));
+  if(!mesa){ alvo.innerHTML = ''; return; }
+  const numeros = mesa.comandas.map(c => String(c.numero));
+  alvo.innerHTML = `<div class="est-mesa-foco">
+    <div class="est-titulo-linha"><h2>Mesa ${esc(mesa.mesa)}</h2><button type="button" class="est-btn" onclick='incluirComandas(${JSON.stringify(numeros)})'>+ Juntar todas</button></div>
+    <div class="est-sub">Escolha uma por uma ou junte as ${mesa.comandas.length} comandas da mesa.</div>
+    <div class="est-comandas">${mesa.comandas.map(c => {
+      const selecionada = NUMEROS.includes(String(c.numero));
+      return `<div class="est-comanda" style="cursor:default;">
+        <span class="est-comanda-num">${esc(c.numero)}</span>
+        <span class="est-comanda-corpo"><span class="est-comanda-nome">${marcaTipo(c)}</span><span class="est-comanda-meta">valor real da comanda</span></span>
+        <span class="est-comanda-val">${fmtReal(c.totais.total)}</span>
+        <button type="button" class="est-btn ${selecionada?'':'principal'}" ${selecionada?'disabled':''} style="min-height:36px;padding:6px 10px;" onclick="incluirComandas(['${esc(c.numero)}'])">${selecionada?'Na conta':'+'}</button>
+      </div>`;
+    }).join('')}</div>
+  </div>`;
+}
+async function incluirComandas(numeros){
+  const erro = document.getElementById('erro-numero');
+  erro.textContent = '';
+  const antes = [...NUMEROS];
+  const novas = (numeros || []).map(String).filter(n => !NUMEROS.includes(n));
+  if(!novas.length) return;
+  NUMEROS = [...NUMEROS, ...novas];
+  const ok = await recarregarConta();
+  if(!ok){
+    const msg = ULTIMO_ERRO;
+    NUMEROS = antes;
+    await recarregarConta();
+    erro.textContent = msg;
+  }
+}
 async function juntar(){
   const campo = document.getElementById('numero');
   const erro = document.getElementById('erro-numero');
   erro.textContent = '';
   const n = String(campo.value || '').trim();
   if(!n){ erro.textContent = 'Digite o número do cartão.'; return; }
-  if(NUMEROS.includes(n)){ erro.textContent = `A comanda ${n} já está nesta conta.`; return; }
-  NUMEROS.push(n);
   campo.value = '';
+  // a mesa é a próxima decisão do caixa: uma comanda encontrada abre as
+  // demais da mesma mesa, sem obrigar a cobrar tudo junto.
+  await carregarMesas();
+  const mesa = MESAS.find(m => m.comandas.some(c => String(c.numero) === n));
+  if(mesa){ abrirMesaCaixa(mesa.mesa); campo.focus(); return; }
+  // contingência: se uma comanda aberta ainda não tiver mesa, o servidor
+  // continua sendo a fonte de verdade e ela pode ser cobrada sozinha.
+  await incluirComandas([n]);
   campo.focus();
-  // a validação é do servidor: ele é quem sabe se a comanda está aberta
-  const ok = await recarregarConta();
-  if(!ok){
-    // número errado NÃO pode derrubar a conta que já estava montada: tira o
-    // número que falhou e REFAZ a conta com os que valem. Sem o refazer, a
-    // tela continuava mostrando o total antigo mas o botão de receber morria
-    // - o pior estado possível num caixa com fila.
-    NUMEROS = NUMEROS.filter(x=>x!==n);
-    const msg = ULTIMO_ERRO;
-    await recarregarConta();
-    erro.textContent = msg;
-  }
 }
 function tirarNumero(n){ NUMEROS = NUMEROS.filter(x=>x!==n); recarregarConta(); }
 
@@ -272,6 +331,7 @@ function renderEscolhidas(){
         </div>`;
        }).join('')}</div>${resumoDivisaoIgual()}`
     : '<div class="est-vazio">Nenhuma comanda nesta conta.</div>';
+  renderMesaEmFoco();
 }
 
 // ---------- balcão ----------
@@ -313,6 +373,7 @@ async function recarregarConta(){
     CONTA = await pedir(`/api/estacao/conta?unidade=${encodeURIComponent(unidade)}&numeros=${encodeURIComponent(NUMEROS.join(','))}&balcao=${encodeURIComponent(balcao)}&servico=${comServico()?'1':'0'}`);
     ULTIMO_ERRO = '';
   }catch(e){ ULTIMO_ERRO = e.message; CONTA = null; renderEscolhidas(); return false; }
+  await carregarMesas();
   renderEscolhidas();
   renderConta();
   return true;
@@ -424,6 +485,7 @@ async function receber(){
     });
     mostrarRecibo(r);
     await carregarSituacaoComandas();
+    await carregarMesas();
   }catch(e){ erro.textContent = e.message; document.getElementById('btn-receber').disabled = false; }
 }
 
@@ -464,11 +526,12 @@ function limparTudo(){
 async function trocarUnidade(){
   const unidade = unidadeAtual();
   if(!unidade) return;
-  NUMEROS = []; CARRINHO = new Map();
+  NUMEROS = []; CARRINHO = new Map(); MESA_EM_FOCO = null; MESAS = [];
   BALCAO = await fetch(`/api/estacao/itens-balcao?unidade=${encodeURIComponent(unidade)}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
   renderBalcao();
   await carregarTurno();
   await carregarSituacaoComandas();
+  await carregarMesas();
   await recarregarConta();
 }
 

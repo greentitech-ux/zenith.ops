@@ -11039,6 +11039,19 @@ app.get('/api/estacao/salao', requireEstacao('estacao-salao'), async (req, res) 
     res.json(await estacaoComida.salao(req.query.unidade));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
+// O caixa precisa localizar a mesa a partir de UMA comanda, mas não ganha as
+// ações do salão. Devolve somente as mesas abertas, já ordenadas, para que ele
+// escolha uma comanda ou junte a mesa inteira.
+app.get('/api/estacao/mesas-caixa', requireEstacao('estacao-caixa'), async (req, res) => {
+  try {
+    if (!podeUnidadeEstacao(req, req.query.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const salao = await estacaoComida.salao(req.query.unidade, req.query.servico !== '0');
+    res.json({ mesas: salao.mesas.map((m) => ({
+      mesa: m.mesa, pessoas: m.pessoas,
+      comandas: m.comandas.map((c) => ({ numero: c.numero, tipoRodizio: c.tipoRodizio, totais: c.totais })),
+    })) });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 // o que dá pra lançar na comanda: o catálogo da unidade com preço de venda
 app.get('/api/estacao/itens', requireEstacao('estacao-salao'), async (req, res) => {
   try {

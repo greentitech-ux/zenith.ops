@@ -464,14 +464,14 @@ function totaisDaComanda(comanda, servicoPct, comServico = true) {
 // Mesas derivadas das comandas abertas (ver cabeçalho): nada é gravado, nada
 // pode dessincronizar. Comanda sem mesa aparece à parte - é quem já recebeu o
 // cartão na porta mas ainda não sentou.
-async function salao(unidade) {
+async function salao(unidade, comServico = true) {
   const mapa = await garantirEspelho(unidade);
   const precos = await getPrecos(unidade);
   const abertas = [...mapa.values()];
   const porMesa = new Map();
   const semMesa = [];
   abertas.forEach((c) => {
-    const t = totaisDaComanda(c, precos.servicoPct);
+    const t = totaisDaComanda(c, precos.servicoPct, comServico);
     const resumo = { ...c, totais: t };
     if (!c.mesa) { semMesa.push(resumo); return; }
     if (!porMesa.has(c.mesa)) porMesa.set(c.mesa, { mesa: c.mesa, pessoas: 0, consumo: 0, subtotal: 0, comandas: [], desde: c.abertaEm });
@@ -488,7 +488,7 @@ async function salao(unidade) {
     mesas: [...porMesa.values()].sort((a, b) => a.mesa - b.mesa),
     semMesa: semMesa.sort((a, b) => a.numero - b.numero),
     pessoas: abertas.length,
-    subtotalAberto: arred(abertas.reduce((s, c) => s + totaisDaComanda(c, precos.servicoPct).subtotal, 0)),
+    subtotalAberto: arred(abertas.reduce((s, c) => s + totaisDaComanda(c, precos.servicoPct, comServico).subtotal, 0)),
   };
 }
 
