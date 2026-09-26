@@ -203,7 +203,152 @@ async function salvarPrecos(unidade, { rodizio, servicoPct, feriados }, porEmail
 // esquecer de abrir o turno nao pode ficar impedida de vender. O relogio vira
 // o palpite, nao a regra.
 const TURNO_DIA = db.collection('estacaoTurno');
+const OPERACAO_DIA = db.collection('estacaoOperacaoDia');
 function idTurno(unidade, data) { return `${unidade}__${data}`; }
+function idOperacao(unidade, data) { return `${unidade}__${data}`; }
+function horaBrasilia(agora = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-GB', { timeZone: FUSO_BR, hour: '2-digit', hourCycle: 'h23' }).format(new Date(agora)));
+}
+function caixasVazios() {
+  return Object.fromEntries(CAIXAS.map((caixa) => [caixa, { caixa, aberto: false, aberturas: 0 }]));
+}
+function operacaoVazia(unidade, data) {
+  return {
+    id: idOperacao(unidade, data), unidade, data, status: 'NAO_ABERTO',
+    turnoEstado: 'NAO_ABERTO', caixas: caixasVazios(), historicoCaixas: [],
+    abertoEm: null, abertoPorEmail: null, fechadoEm: null, fechadoPorEmail: null,
+  };
+}
+async function operacaoDoDia(unidade, data = hojeBrasiliaISO(), agora = new Date()) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  const snap = await OPERACAO_DIA.doc(idOperacao(unidade, data)).get();
+  const base = operacaoVazia(unidade, data);
+  const d = snap.exists ? { ...base, ...snap.data() } : base;
+  d.caixas = { ...caixasVazios(), ...(d.caixas || {}) };
+  d.todosCaixasFechados = CAIXAS.every((c) => !d.caixas[c]?.aberto);
+  d.teveCaixaAberto = (d.historicoCaixas || []).length > 0 || CAIXAS.some((c) => Number(d.caixas[c]?.aberturas) > 0);
+  d.comandasAbertas = [...(await garantirEspelho(unidade)).values()]
+    .filter((c) => c.data === data && c.status === 'ABERTA').length;
+  d.horaBrasilia = horaBrasilia(agora);
+  return d;
+}
+async function abrirDia(unidade, porEmail, agora = new Date()) {
+  const data = hojeBrasiliaISO(agora);
+  const ref = OPERACAO_DIA.doc(idOperacao(unidade, data));
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const atual = snap.exists ? { ...operacaoVazia(unidade, data), ...snap.data() } : operacaoVazia(unidade, data);
+    if (atual.status === 'FECHADO') throw new Error('O dia já foi fechado e não pode ser reaberto.');
+    if (atual.status === 'ABERTO') return atual;
+    const novo = { ...atual, status: 'ABERTO', abertoEm: new Date(agora).toISOString(), abertoPorEmail: porEmail || null };
+    tx.set(ref, novo);
+    return novo;
+  });
+}
+async function abrirCaixa({ unidade, caixa, fundo, porEmail, agora = new Date() }) {
+  const cx = String(caixa || '');
+  if (!CAIXAS.includes(cx)) throw new Error('Caixa inválido.');
+  const valorFundo = arred(num(fundo));
+  if (valorFundo < 0) throw new Error('Fundo de caixa inválido.');
+  const data = hojeBrasiliaISO(agora);
+  const ref = OPERACAO_DIA.doc(idOperacao(unidade, data));
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.data().status !== 'ABERTO') throw new Error('Abra o dia antes de abrir o caixa.');
+    const atual = { ...operacaoVazia(unidade, data), ...snap.data() };
+    atual.caixas = { ...caixasVazios(), ...(atual.caixas || {}) };
+    if (atual.caixas[cx]?.aberto) throw new Error(`O Caixa ${cx} já está aberto.`);
+    const sessaoId = `${cx}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const abertura = { sessaoId, caixa: cx, fundo: valorFundo, abertoEm: new Date(agora).toISOString(), abertoPorEmail: porEmail || null };
+    atual.caixas[cx] = { ...abertura, aberto: true, aberturas: Number(atual.caixas[cx]?.aberturas || 0) + 1 };
+    atual.historicoCaixas = [...(atual.historicoCaixas || []), abertura].slice(-100);
+    tx.set(ref, atual);
+    return atual;
+  });
+}
+async function fecharCaixa({ unidade, caixa, porEmail, agora = new Date() }) {
+  const cx = String(caixa || '');
+  if (!CAIXAS.includes(cx)) throw new Error('Caixa inválido.');
+  const data = hojeBrasiliaISO(agora);
+  const ref = OPERACAO_DIA.doc(idOperacao(unidade, data));
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.data().status !== 'ABERTO') throw new Error('O dia não está aberto.');
+    const atual = { ...operacaoVazia(unidade, data), ...snap.data() };
+    atual.caixas = { ...caixasVazios(), ...(atual.caixas || {}) };
+    const estado = atual.caixas[cx];
+    if (!estado?.aberto) throw new Error(`O Caixa ${cx} já está fechado.`);
+    const fechadoEm = new Date(agora).toISOString();
+    atual.caixas[cx] = { ...estado, aberto: false, fechadoEm, fechadoPorEmail: porEmail || null };
+    atual.historicoCaixas = (atual.historicoCaixas || []).map((s) => s.sessaoId === estado.sessaoId
+      ? { ...s, fechadoEm, fechadoPorEmail: porEmail || null } : s);
+    tx.set(ref, atual);
+    return atual;
+  });
+}
+async function mudarTurnoOperacao({ unidade, acao, porEmail, agora = new Date() }) {
+  const data = hojeBrasiliaISO(agora);
+  const ref = OPERACAO_DIA.doc(idOperacao(unidade, data));
+  const resultado = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.data().status !== 'ABERTO') throw new Error('Abra o dia antes de abrir o turno.');
+    const atual = { ...operacaoVazia(unidade, data), ...snap.data() };
+    atual.caixas = { ...caixasVazios(), ...(atual.caixas || {}) };
+    if (acao === 'abrir-almoco') {
+      if (atual.turnoEstado !== 'NAO_ABERTO') throw new Error('O almoço já foi aberto hoje.');
+      if (!CAIXAS.some((c) => atual.caixas[c]?.aberto)) throw new Error('Abra pelo menos um caixa com o fundo antes de abrir o almoço.');
+      atual.turnoEstado = 'ALMOCO_ABERTO';
+    } else if (acao === 'virar-jantar') {
+      if (atual.turnoEstado !== 'ALMOCO_ABERTO') throw new Error('Abra o almoço antes de virar para o jantar.');
+      atual.turnoEstado = 'JANTAR_ABERTO';
+    } else if (acao === 'fechar-jantar') {
+      if (atual.turnoEstado !== 'JANTAR_ABERTO') throw new Error('O jantar não está aberto.');
+      if (horaBrasilia(agora) < 22) throw new Error('O jantar só pode ser fechado a partir das 22h.');
+      atual.turnoEstado = 'JANTAR_FECHADO';
+    } else throw new Error('Ação de turno inválida.');
+    atual.turnoAlteradoEm = new Date(agora).toISOString();
+    atual.turnoAlteradoPorEmail = porEmail || null;
+    tx.set(ref, atual);
+    return atual;
+  });
+  if (resultado.turnoEstado === 'ALMOCO_ABERTO') await abrirTurno(unidade, 'almoco', porEmail, agora);
+  if (resultado.turnoEstado === 'JANTAR_ABERTO') await abrirTurno(unidade, 'jantar', porEmail, agora);
+  if (resultado.turnoEstado === 'JANTAR_FECHADO') {
+    await TURNO_DIA.doc(idTurno(unidade, data)).set({ estado: 'FECHADO', fechadoEm: new Date(agora).toISOString(), fechadoPorEmail: porEmail || null }, { merge: true });
+  }
+  return resultado;
+}
+async function fecharDia({ unidade, porEmail, podeAntecipar = false, agora = new Date() }) {
+  const data = hojeBrasiliaISO(agora);
+  const abertas = [...(await garantirEspelho(unidade)).values()].filter((c) => c.data === data && c.status === 'ABERTA');
+  if (abertas.length) throw new Error(`Ainda existem ${abertas.length} comanda(s) aberta(s). Resolva no caixa antes de fechar o dia.`);
+  const ref = OPERACAO_DIA.doc(idOperacao(unidade, data));
+  const fechado = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.data().status !== 'ABERTO') throw new Error('O dia não está aberto.');
+    const atual = { ...operacaoVazia(unidade, data), ...snap.data() };
+    atual.caixas = { ...caixasVazios(), ...(atual.caixas || {}) };
+    if (CAIXAS.some((c) => atual.caixas[c]?.aberto)) throw new Error('Feche todos os caixas antes de fechar o dia.');
+    if (!(atual.historicoCaixas || []).length) throw new Error('Nenhum caixa foi aberto neste dia.');
+    if (!podeAntecipar && horaBrasilia(agora) < 22) throw new Error('O Caixa só pode fechar o dia a partir das 22h.');
+    if (!podeAntecipar && atual.turnoEstado !== 'JANTAR_FECHADO') throw new Error('Feche o jantar antes de fechar o dia.');
+    atual.status = 'FECHADO';
+    atual.turnoEstado = 'JANTAR_FECHADO';
+    atual.fechadoEm = new Date(agora).toISOString();
+    atual.fechadoPorEmail = porEmail || null;
+    tx.set(ref, atual);
+    return atual;
+  });
+  await TURNO_DIA.doc(idTurno(unidade, data)).set({ estado: 'FECHADO', fechadoEm: fechado.fechadoEm, fechadoPorEmail: porEmail || null }, { merge: true });
+  return fechado;
+}
+async function exigirVendaAberta(unidade, caixa, agora = new Date()) {
+  const op = await operacaoDoDia(unidade, hojeBrasiliaISO(agora), agora);
+  if (op.status !== 'ABERTO') throw new Error('O dia não está aberto.');
+  if (!['ALMOCO_ABERTO', 'JANTAR_ABERTO'].includes(op.turnoEstado)) throw new Error('Abra o almoço ou faça a virada para o jantar antes de vender.');
+  if (caixa && !op.caixas[String(caixa)]?.aberto) throw new Error(`Abra o Caixa ${caixa} com o fundo antes de receber.`);
+  return op;
+}
 async function turnoAberto(unidade, data) {
   const snap = await TURNO_DIA.doc(idTurno(unidade, data)).get();
   const d = snap.exists ? snap.data() : null;
@@ -743,6 +888,7 @@ module.exports = {
   hojeBrasiliaISO, diaDaSemanaBR,
   getPrecos, salvarPrecos, precoRodizioDoDia, precosVazios, turnoDe, linhaDaTabela,
   turnoAberto, turnoVigente, abrirTurno,
+  operacaoDoDia, abrirDia, abrirCaixa, fecharCaixa, mudarTurnoOperacao, fecharDia, exigirVendaAberta, horaBrasilia,
   TURNOS, TIPO_ISENTO, ROTULO_TIPO, ROTULO_TURNO, HORA_VIRADA_JANTAR,
   itensDoBalcao, resolverItensBalcao,
   abrirComanda, definirMesa, getComanda, lancarItem, removerItem, cancelarComanda, cancelarMesa,

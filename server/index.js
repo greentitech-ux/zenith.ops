@@ -10979,6 +10979,10 @@ const podeGerirEstacao = (req) => {
   const cargos = [req.user && req.user.cargo, ...((req.user && req.user.cargos) || [])];
   return req.isMaster || req.isAdmin || cargos.some((cargo) => users.ehCargoGerente(cargo));
 };
+const podeAnteciparFechamentoEstacao = (req) => {
+  const cargos = [req.user && req.user.cargo, ...((req.user && req.user.cargos) || [])];
+  return req.isMaster || cargos.some((cargo) => users.ehCargoGerente(cargo));
+};
 function requireEstacao(section) {
   return (req, res, next) => {
     if (podeGerirEstacao(req) || auth.hasSection(req, section)) return next();
@@ -11029,7 +11033,58 @@ app.post('/api/estacao/turno', requireEstacao('estacao-caixa'), async (req, res)
   try {
     const unidade = String(req.body?.unidade || '');
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-    res.json(await estacaoComida.abrirTurno(unidade, req.body?.turno, req.user?.email));
+    const acao = req.body?.turno === 'almoco' ? 'abrir-almoco' : req.body?.turno === 'jantar' ? 'virar-jantar' : null;
+    res.json(await estacaoComida.mudarTurnoOperacao({ unidade, acao, porEmail: req.user?.email }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// CICLO OPERACIONAL: um dia, cinco caixas que podem abrir várias vezes e um
+// único caminho almoço -> jantar -> fechamento. O horário e as permissões são
+// devolvidos pelo servidor para a tela não inventar disponibilidade.
+app.get('/api/estacao/operacao', requireEstacao('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = String(req.query.unidade || '');
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const op = await estacaoComida.operacaoDoDia(unidade);
+    const antecipar = podeAnteciparFechamentoEstacao(req);
+    res.json({ ...op, podeAnteciparFechamento: antecipar,
+      podeFecharDia: op.status === 'ABERTO' && op.todosCaixasFechados && op.teveCaixaAberto && op.comandasAbertas === 0
+        && (antecipar || (op.horaBrasilia >= 22 && op.turnoEstado === 'JANTAR_FECHADO')) });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/dia/abrir', requireEstacao('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = String(req.body?.unidade || '');
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.abrirDia(unidade, req.user?.email));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/turno/:acao', requireEstacao('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = String(req.body?.unidade || '');
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.mudarTurnoOperacao({ unidade, acao: req.params.acao, porEmail: req.user?.email }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/caixas/:caixa/abrir', requireEstacao('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = String(req.body?.unidade || '');
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.abrirCaixa({ unidade, caixa: req.params.caixa, fundo: req.body?.fundo, porEmail: req.user?.email }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/caixas/:caixa/fechar', requireEstacao('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = String(req.body?.unidade || '');
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.fecharCaixa({ unidade, caixa: req.params.caixa, porEmail: req.user?.email }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/estacao/dia/fechar', requireEstacao('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = String(req.body?.unidade || '');
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await estacaoComida.fecharDia({ unidade, porEmail: req.user?.email, podeAntecipar: podeAnteciparFechamentoEstacao(req) }));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -11088,6 +11143,7 @@ app.post('/api/estacao/comandas', requireEstacao('estacao-salao'), async (req, r
   try {
     const { unidade, unidadeNome, numero, mesa, tipoRodizio } = req.body || {};
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    await estacaoComida.exigirVendaAberta(unidade);
     const c = await estacaoComida.abrirComanda({ unidade, unidadeNome, numero, mesa, tipoRodizio, porEmail: req.user.email });
     broadcast('estacao-salao-mudou', { unidade }, 'estacao-salao');
     res.json(c);
@@ -11153,6 +11209,7 @@ app.post('/api/estacao/receber', requireEstacao('estacao-caixa'), async (req, re
   try {
     const { unidade, unidadeNome, numeros, caixa, pagamentos, comServico, itensBalcao } = req.body || {};
     if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    await estacaoComida.exigirVendaAberta(unidade, caixa);
     const r = await estacaoComida.receber({
       unidade, unidadeNome, numeros, caixa, pagamentos, itensBalcao,
       comServico: comServico !== false, porEmail: req.user.email,

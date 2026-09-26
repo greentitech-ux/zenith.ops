@@ -40,7 +40,16 @@
 
   <div class="est-barra">
     <label>Unidade<select id="unidade" onchange="trocarUnidade()"></select></label>
-    <label style="flex:0 1 130px;">Caixa<select id="caixa"></select></label>
+    <label style="flex:0 1 130px;">Caixa<select id="caixa" onchange="trocarCaixa()"></select></label>
+  </div>
+
+  <div class="est-card" id="card-operacao">
+    <div class="est-titulo-linha"><h2>Operação do dia</h2><span class="est-conta" id="hora-operacao"></span></div>
+    <div class="est-sub">Abra o dia, informe o fundo do caixa e encerre cada etapa na ordem correta.</div>
+    <div class="est-estado" id="estado-operacao"></div>
+    <div id="acoes-operacao"></div>
+    <div id="historico-caixa"></div>
+    <div class="est-erro" id="erro-operacao"></div>
   </div>
 
   <div class="est-card" id="card-situacao-comandas">
@@ -62,10 +71,7 @@
          manda ainda é o relógio. -->
     <div id="turno-pastilha" style="margin-bottom:8px;"></div>
     <div class="est-sub" id="turno-sub">—</div>
-    <div class="est-barra" style="margin-top:8px;">
-      <button type="button" class="est-btn" id="btn-almoco" onclick="abrirTurno('almoco')">Abrir almoço</button>
-      <button type="button" class="est-btn" id="btn-jantar" onclick="abrirTurno('jantar')">Abrir jantar</button>
-    </div>
+    <div class="est-acoes" id="acoes-turno" style="margin-top:8px;"></div>
     <div class="est-erro" id="erro-turno"></div>
   </div>
 
@@ -171,43 +177,90 @@ const ROTULO_TIPO = { adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':
 const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
 function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
 
-let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGAMENTO_SEQ = 0, MESAS = [], MESA_EM_FOCO = null, EXCLUSAO_MESA = null;
+let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGAMENTO_SEQ = 0, MESAS = [], MESA_EM_FOCO = null, EXCLUSAO_MESA = null, OPERACAO = null;
 function souMaster(){ return !!(ME && (ME.role === 'master' || ME.isMaster)); }
 
 // ---- TURNO DA VENDA ----
 // O preço do rodízio sai do turno; por isso o caixa precisa ver, em letras
 // grandes, qual está valendo antes de abrir a primeira comanda do serviço.
 let TURNO = null;
-async function carregarTurno(){
-  const sub = document.getElementById('turno-sub');
-  try{
-    TURNO = await pedir(`/api/estacao/turno?unidade=${encodeURIComponent(unidadeAtual())}`);
-  }catch(e){ TURNO = null; sub.textContent = e.message; return; }
-  const rot = TURNO.turno === 'jantar' ? 'JANTAR' : 'ALMOÇO';
-  document.getElementById('turno-pastilha').innerHTML =
-    `<span class="est-turno ${TURNO.porCaixa ? 'aberto' : ''}"><b>${esc(rot)}</b>`
-    + `${TURNO.porCaixa ? 'aberto no caixa' : 'pelo horário'}</span>`;
-  // sem turno aberto, o preço sai pelo RELÓGIO - e um almoço que varou das
-  // 18h passa a cobrar jantar no meio do serviço. Isso não é informação de
-  // rodapé: é aviso, e diz o que fazer.
-  sub.innerHTML = TURNO.porCaixa
-    ? `Todo rodízio lançado agora usa o preço de <b>${rot.toLowerCase()}</b>.`
-    : `<div class="est-aviso"><span>⚠</span><div><b>Ninguém abriu o turno hoje.</b> O preço está saindo pelo horário (${rot.toLowerCase()}) - se o serviço virar, o valor vira junto, no meio das mesas. Abra o turno abaixo pra travar.</div></div>`;
-  document.getElementById('btn-almoco').classList.toggle('principal', TURNO.turno === 'almoco');
-  document.getElementById('btn-jantar').classList.toggle('principal', TURNO.turno === 'jantar');
+function caixaAtual(){ return document.getElementById('caixa').value; }
+function caixaAberto(){ return !!(OPERACAO && OPERACAO.caixas && OPERACAO.caixas[caixaAtual()]?.aberto); }
+function renderTurno(){
+  const estado = OPERACAO?.turnoEstado || 'NAO_ABERTO';
+  const hora = Number(OPERACAO?.horaBrasilia || 0);
+  const temCaixaAberto = OPERACAO && Object.values(OPERACAO.caixas || {}).some(c=>c.aberto);
+  const mapa = {
+    NAO_ABERTO:['AGUARDANDO','Abra o almoço para começar a lançar e receber comandas.'],
+    ALMOCO_ABERTO:['ALMOÇO','Todo rodízio lançado agora usa o preço do almoço.'],
+    JANTAR_ABERTO:['JANTAR','A virada foi realizada. Todo novo rodízio usa o preço do jantar.'],
+    JANTAR_FECHADO:['JANTAR FECHADO','O turno terminou. Feche os caixas restantes para encerrar o dia.'],
+  };
+  const info = mapa[estado] || mapa.NAO_ABERTO;
+  document.getElementById('turno-pastilha').innerHTML = `<span class="est-turno ${estado!=='NAO_ABERTO'?'aberto':''}"><b>${info[0]}</b></span>`;
+  document.getElementById('turno-sub').textContent = info[1];
+  let botoes = '';
+  if(OPERACAO?.status === 'ABERTO' && estado === 'NAO_ABERTO' && temCaixaAberto) botoes = '<button type="button" class="est-btn principal" onclick="acaoTurno(\'abrir-almoco\')">Abrir almoço</button>';
+  if(OPERACAO?.status === 'ABERTO' && estado === 'NAO_ABERTO' && !temCaixaAberto) botoes = '<span class="est-comanda-meta">Abra um caixa com o fundo para liberar o almoço.</span>';
+  if(OPERACAO?.status === 'ABERTO' && estado === 'ALMOCO_ABERTO') botoes = '<button type="button" class="est-btn principal" onclick="acaoTurno(\'virar-jantar\')">Virar para jantar</button>';
+  if(OPERACAO?.status === 'ABERTO' && estado === 'JANTAR_ABERTO' && hora >= 22) botoes = '<button type="button" class="est-btn perigo" onclick="acaoTurno(\'fechar-jantar\')">Fechar jantar</button>';
+  if(OPERACAO?.status === 'ABERTO' && estado === 'JANTAR_ABERTO' && hora < 22) botoes = '<span class="est-comanda-meta">Fechar jantar ficará disponível às 22h.</span>';
+  document.getElementById('acoes-turno').innerHTML = botoes;
 }
-async function abrirTurno(turno){
+function renderOperacao(){
+  const alvo = document.getElementById('estado-operacao');
+  const acoes = document.getElementById('acoes-operacao');
+  const cx = caixaAtual();
+  const estadoCaixa = OPERACAO?.caixas?.[cx] || { aberto:false, aberturas:0 };
+  const caixasAbertos = OPERACAO ? Object.values(OPERACAO.caixas || {}).filter(c=>c.aberto).length : 0;
+  document.getElementById('hora-operacao').textContent = OPERACAO ? `${String(OPERACAO.horaBrasilia).padStart(2,'0')}h · ${esc(OPERACAO.data.split('-').reverse().join('/'))}` : '';
+  alvo.innerHTML = statComanda('Dia', OPERACAO?.status === 'ABERTO' ? 'ABERTO' : OPERACAO?.status === 'FECHADO' ? 'FECHADO' : 'NÃO ABERTO', OPERACAO?.abertoPorEmail || '', OPERACAO?.status === 'ABERTO'?'destaque':'')
+    + statComanda(`Caixa ${cx}`, estadoCaixa.aberto ? 'ABERTO' : 'FECHADO', estadoCaixa.aberto ? `fundo ${fmtReal(estadoCaixa.fundo)}` : `${estadoCaixa.aberturas || 0} abertura(s) hoje`, estadoCaixa.aberto?'destaque':'')
+    + statComanda('Caixas abertos', String(caixasAbertos), caixasAbertos ? 'de 5' : 'todos fechados', caixasAbertos?'destaque':'');
+  if(!OPERACAO || OPERACAO.status === 'NAO_ABERTO'){
+    acoes.innerHTML = '<button type="button" class="est-btn principal" onclick="abrirDiaOperacao()">Abrir dia</button>';
+  }else if(OPERACAO.status === 'FECHADO'){
+    acoes.innerHTML = '<div class="est-vazio">Dia encerrado. O próximo ciclo começa no próximo dia.</div>';
+  }else{
+    acoes.innerHTML = estadoCaixa.aberto
+      ? `<div class="est-acoes"><button type="button" class="est-btn perigo" onclick="fecharCaixaOperacao()">Fechar Caixa ${esc(cx)}</button>${OPERACAO.podeFecharDia?'<button type="button" class="est-btn perigo" onclick="fecharDiaOperacao()">Fechar dia</button>':''}</div>`
+      : `<div class="est-barra" style="margin-bottom:8px;"><label style="flex:1 1 150px;">Fundo do Caixa ${esc(cx)}<input id="fundo-caixa" type="number" min="0" step="0.01" inputmode="decimal" placeholder="R$ 0,00"></label><button type="button" class="est-btn principal" onclick="abrirCaixaOperacao()">Abrir caixa</button></div>
+         ${OPERACAO.podeFecharDia?'<button type="button" class="est-btn perigo" onclick="fecharDiaOperacao()">Fechar dia</button>':(OPERACAO.todosCaixasFechados&&OPERACAO.teveCaixaAberto?`<div class="est-sub" style="margin:6px 0 0;">${OPERACAO.comandasAbertas?`Resolva ${OPERACAO.comandasAbertas} comanda(s) aberta(s) para fechar o dia.`:(OPERACAO.podeAnteciparFechamento?'Todos os caixas estão fechados.':'O Caixa poderá fechar o dia após as 22h, com o jantar fechado.')}</div>`:'')}`;
+  }
+  const sessoes = (OPERACAO?.historicoCaixas || []).filter(s=>String(s.caixa)===String(cx)).slice().reverse();
+  document.getElementById('historico-caixa').innerHTML = sessoes.length ? `<div class="est-comanda-meta" style="margin-top:12px;">Aberturas do Caixa ${esc(cx)} hoje</div><div class="est-lista" style="margin-top:6px;">${sessoes.map((s,i)=>`<div class="est-item"><span class="est-item-nome">${sessoes.length-i}ª abertura · fundo ${fmtReal(s.fundo)}</span><span class="est-tag ${s.fechadoEm?'':'sem-mesa'}">${s.fechadoEm?'fechado':'aberto'}</span></div>`).join('')}</div>` : '';
+  renderTurno();
+  const receber = document.getElementById('btn-receber');
+  if(receber) receber.disabled = !caixaAberto();
+}
+async function carregarOperacao(){
+  try{ OPERACAO = await pedir(`/api/estacao/operacao?unidade=${encodeURIComponent(unidadeAtual())}`); renderOperacao(); }
+  catch(e){ OPERACAO = null; document.getElementById('erro-operacao').textContent = e.message; renderOperacao(); }
+}
+async function acaoOperacao(url, body, confirmar){
+  const erro = document.getElementById('erro-operacao'); erro.textContent = '';
+  if(confirmar && !confirm(confirmar)) return;
+  try{ await pedir(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); await carregarOperacao(); }
+  catch(e){ erro.textContent = e.message; }
+}
+function abrirDiaOperacao(){ return acaoOperacao('/api/estacao/dia/abrir',{unidade:unidadeAtual()}); }
+function abrirCaixaOperacao(){
+  const campo = document.getElementById('fundo-caixa');
+  if(!campo || campo.value.trim()===''){ document.getElementById('erro-operacao').textContent = 'Informe o fundo do caixa, mesmo quando for R$ 0,00.'; return; }
+  const valor = campo ? num(campo.value) : 0;
+  return acaoOperacao(`/api/estacao/caixas/${encodeURIComponent(caixaAtual())}/abrir`,{unidade:unidadeAtual(),fundo:valor},`Abrir o Caixa ${caixaAtual()} com fundo de ${fmtReal(valor)}?`);
+}
+function fecharCaixaOperacao(){ return acaoOperacao(`/api/estacao/caixas/${encodeURIComponent(caixaAtual())}/fechar`,{unidade:unidadeAtual()},`Fechar o Caixa ${caixaAtual()}? Ele poderá ser aberto novamente depois com um novo fundo.`); }
+function fecharDiaOperacao(){ return acaoOperacao('/api/estacao/dia/fechar',{unidade:unidadeAtual()},'Fechar o dia? Esta operação não poderá ser reaberta hoje.'); }
+function trocarCaixa(){ renderOperacao(); }
+async function acaoTurno(acao){
   const erro = document.getElementById('erro-turno');
   erro.textContent = '';
-  // trocar o turno muda o preço das PRÓXIMAS comandas; as já abertas ficam com
-  // o que foi cobrado (o preço congela na abertura) - dizer isso evita a
-  // pergunta "e as mesas que já estão lá?"
-  if(!confirm(`Abrir o ${turno === 'jantar' ? 'jantar' : 'almoço'}?
-
-As próximas comandas passam a usar o preço de ${turno === 'jantar' ? 'jantar' : 'almoço'}. As comandas já abertas continuam com o valor que foi cobrado nelas.`)) return;
+  const textos = { 'abrir-almoco':'Abrir o almoço?', 'virar-jantar':'Virar do almoço para o jantar? As comandas já abertas mantêm o preço original.', 'fechar-jantar':'Fechar o jantar?' };
+  if(!confirm(textos[acao] || 'Confirmar?')) return;
   try{
-    await pedir('/api/estacao/turno', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unidade: unidadeAtual(), turno }) });
-    await carregarTurno();
+    await pedir(`/api/estacao/turno/${acao}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unidade: unidadeAtual() }) });
+    await carregarOperacao();
   }catch(e){ erro.textContent = e.message; }
 }
 
@@ -505,7 +558,7 @@ function atualizarResumoPagamento(){
   falta.textContent = saldo > 0 ? fmtReal(saldo) : 'quitado';
   falta.style.color = saldo > 0 ? 'var(--warn)' : 'var(--ok)';
   const completo = !!CONTA && saldo <= 0.001 && !semForma;
-  document.getElementById('btn-receber').disabled = !completo;
+  document.getElementById('btn-receber').disabled = !completo || !caixaAberto();
   const adicionar = document.getElementById('btn-add-pagamento');
   if(adicionar) adicionar.hidden = completo;
   const resumo = document.getElementById('pagamento-resumo');
@@ -553,6 +606,7 @@ function renderFormas(){
 async function receber(){
   const erro = document.getElementById('erro-receber');
   erro.textContent = '';
+  if(!caixaAberto()){ erro.textContent = `Abra o Caixa ${caixaAtual()} com o fundo antes de receber.`; return; }
   const pagamentos = [...document.querySelectorAll('#lista-pagamentos .est-pagamento-linha')].map(linha => ({
     forma: linha.querySelector('.pagamento-forma').value,
     valor: num(linha.querySelector('.pagamento-valor').value),
@@ -573,7 +627,7 @@ async function receber(){
     mostrarRecibo(r);
     await carregarSituacaoComandas();
     await carregarMesas();
-  }catch(e){ erro.textContent = e.message; document.getElementById('btn-receber').disabled = false; }
+  }catch(e){ erro.textContent = e.message; document.getElementById('btn-receber').disabled = !caixaAberto(); }
 }
 
 function mostrarRecibo(r){
@@ -616,7 +670,7 @@ async function trocarUnidade(){
   NUMEROS = []; CARRINHO = new Map(); MESA_EM_FOCO = null; MESAS = [];
   BALCAO = await fetch(`/api/estacao/itens-balcao?unidade=${encodeURIComponent(unidade)}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
   renderBalcao();
-  await carregarTurno();
+  await carregarOperacao();
   await carregarSituacaoComandas();
   await carregarMesas();
   await recarregarConta();

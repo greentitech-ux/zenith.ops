@@ -14596,6 +14596,30 @@ $r | ConvertTo-Json -Depth 4 -Compress
     let recusouTurnoInvalido = false;
     try { await ec.abrirTurno('TURNO_T', 'madrugada', 'x@y.z'); } catch (e2) { recusouTurnoInvalido = true; }
 
+    // ciclo operacional novo: o mesmo caixa pode fechar e reabrir com outro
+    // fundo, mas o dia e os turnos seguem uma única ordem.
+    const cicloUnidade = 'CICLO_T';
+    const depois22 = new Date('2026-09-15T01:30:00Z'); // 22h30 de 14/09 em Brasília
+    await ec.abrirDia(cicloUnidade, 'caixa@teste.local', meioDia);
+    await ec.abrirCaixa({ unidade: cicloUnidade, caixa: '01', fundo: 100, porEmail: 'caixa@teste.local', agora: meioDia });
+    await ec.fecharCaixa({ unidade: cicloUnidade, caixa: '01', porEmail: 'caixa@teste.local', agora: meioDia });
+    await ec.abrirCaixa({ unidade: cicloUnidade, caixa: '01', fundo: 150, porEmail: 'caixa@teste.local', agora: meioDia });
+    await ec.mudarTurnoOperacao({ unidade: cicloUnidade, acao: 'abrir-almoco', porEmail: 'caixa@teste.local', agora: meioDia });
+    await ec.mudarTurnoOperacao({ unidade: cicloUnidade, acao: 'virar-jantar', porEmail: 'caixa@teste.local', agora: noite });
+    let fechouJantarCedo = false;
+    try { await ec.mudarTurnoOperacao({ unidade: cicloUnidade, acao: 'fechar-jantar', porEmail: 'caixa@teste.local', agora: noite }); } catch (e2) { fechouJantarCedo = /22h/.test(e2.message); }
+    const cicloAberto = await ec.operacaoDoDia(cicloUnidade, hoje, noite);
+    await ec.fecharCaixa({ unidade: cicloUnidade, caixa: '01', porEmail: 'caixa@teste.local', agora: noite });
+    let fechouDiaCedo = false;
+    try { await ec.fecharDia({ unidade: cicloUnidade, porEmail: 'caixa@teste.local', agora: noite }); } catch (e2) { fechouDiaCedo = /22h|jantar/.test(e2.message); }
+    await ec.mudarTurnoOperacao({ unidade: cicloUnidade, acao: 'fechar-jantar', porEmail: 'caixa@teste.local', agora: depois22 });
+    const cicloFechado = await ec.fecharDia({ unidade: cicloUnidade, porEmail: 'caixa@teste.local', agora: depois22 });
+    const gestorUnidade = 'CICLO_GESTOR_T';
+    await ec.abrirDia(gestorUnidade, 'gerente@teste.local', meioDia);
+    await ec.abrirCaixa({ unidade: gestorUnidade, caixa: '02', fundo: 80, porEmail: 'gerente@teste.local', agora: meioDia });
+    await ec.fecharCaixa({ unidade: gestorUnidade, caixa: '02', porEmail: 'gerente@teste.local', agora: meioDia });
+    const gestorFechouCedo = await ec.fecharDia({ unidade: gestorUnidade, porEmail: 'gerente@teste.local', podeAntecipar: true, agora: meioDia });
+
     const idxT = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
     const htmlC = require('fs').readFileSync(__dirname + '/public/estacao-caixa.html', 'utf8');
     const modT = require('fs').readFileSync(__dirname + '/estacaoComida.js', 'utf8');
@@ -14608,9 +14632,17 @@ $r | ConvertTo-Json -Depth 4 -Compress
         almocoNaNoite.turno === 'almoco' && almocoNaNoite.porCaixa === true,
       'virar pro jantar troca tudo, na hora':
         jantarDepois.turno === 'jantar' && jantarDepois.porCaixa === true,
-      'a tela sabe dizer se quem decidiu foi o caixa ou o horário':
-        /porCaixa/.test(htmlC) && /Ninguém abriu o turno hoje/.test(htmlC)
-        && /class="est-turno \$\{TURNO\.porCaixa \? 'aberto' : ''\}"/.test(htmlC),
+      'a tela mostra só a próxima ação do turno':
+        /Abrir almoço/.test(htmlC) && /Virar para jantar/.test(htmlC)
+        && /Fechar jantar ficará disponível às 22h/.test(htmlC),
+      'caixa fecha e reabre quantas vezes precisar, guardando cada fundo':
+        cicloAberto.caixas['01'].aberto === true && cicloAberto.caixas['01'].aberturas === 2
+        && cicloAberto.historicoCaixas.length === 2 && cicloAberto.historicoCaixas[0].fundo === 100
+        && cicloAberto.historicoCaixas[1].fundo === 150,
+      'jantar e dia do Caixa só fecham depois das 22h':
+        fechouJantarCedo && fechouDiaCedo && cicloFechado.status === 'FECHADO',
+      'Master/Gerente podem fechar o dia antes das 22h, com todos os caixas fechados':
+        gestorFechouCedo.status === 'FECHADO' && gestorFechouCedo.fechadoPorEmail === 'gerente@teste.local',
       'turno inválido é recusado': recusouTurnoInvalido,
       // a comanda tem de usar o turno VIGENTE, nao chamar o relogio direto
       'a comanda usa o turno vigente, não o relógio':
@@ -14621,8 +14653,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /o caixa abriu o \$\{ROTULO_TURNO\[turno\]\}/.test(modT)
         && /ninguém abriu turno hoje, então vale o horário/.test(modT),
       'as rotas do turno passam pelo gate da seção do caixa':
-        /app\.get\('\/api\/estacao\/turno', requireSection\('estacao-caixa'\)/.test(idxT)
-        && /app\.post\('\/api\/estacao\/turno', requireSection\('estacao-caixa'\)/.test(idxT),
+        /app\.get\('\/api\/estacao\/turno', requireEstacao\('estacao-caixa'\)/.test(idxT)
+        && /app\.post\('\/api\/estacao\/turno\/:acao', requireEstacao\('estacao-caixa'\)/.test(idxT),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okTurnoEstacao = !falhas.length;
@@ -26342,9 +26374,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && /\.est-estado \.est-stat\.largo\{flex:1 1 160px;\}/.test(css)
         && /const largo = \/dinheiro\/\.test\(classe\|\|''\) \? ' largo' : '';/.test(salao),
       // turno é o PREÇO: em texto cinza ele tinha o peso de uma observação
-      'o turno do caixa é estado visível, e sem turno aberto vira aviso':
-        /class="est-turno \$\{TURNO\.porCaixa \? 'aberto' : ''\}"/.test(caixa)
-        && /est-aviso/.test(caixa) && /Ninguém abriu o turno hoje/.test(caixa)
+      'o turno do caixa mostra uma única próxima ação, na ordem operacional':
+        /turnoEstado/.test(caixa) && /Abrir almoço/.test(caixa)
+        && /Virar para jantar/.test(caixa) && /hora >= 22/.test(caixa)
         && /\.est-turno\.aberto\{border-color:var\(--accent\)/.test(css),
       'o caixa separa comandas em atendimento das que já foram fechadas':
         /Comandas hoje/.test(caixa) && /Abertas continuam em atendimento/.test(caixa)
