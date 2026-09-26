@@ -39,7 +39,9 @@
 // 119: a tela que fica SEM imagem depois (arquivo do fundo arquivado no ZIP,
 // apagado) ganha o modelo basico - antes so se conferia quando mudava logo ou
 // nome, e a maquina que ficou preta depois nunca mais era olhada.
-const VERSAO_VIGIA = 119;
+// 120: fundo preto e logos oficiais padrão no modelo básico, sem depender de
+// upload manual; redesenha as estações que ainda tinham apenas texto.
+const VERSAO_VIGIA = 120;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2052,7 +2054,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
     '      $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic',
     '      $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit',
-    '      $fundo = New-Object System.Drawing.Drawing2D.LinearGradientBrush((New-Object System.Drawing.Rectangle 0, 0, $W, $H), [System.Drawing.ColorTranslator]::FromHtml("#3a4550"), [System.Drawing.ColorTranslator]::FromHtml("#232a32"), [single]90)',
+    '      $fundo = New-Object System.Drawing.Drawing2D.LinearGradientBrush((New-Object System.Drawing.Rectangle 0, 0, $W, $H), [System.Drawing.ColorTranslator]::FromHtml("#050607"), [System.Drawing.ColorTranslator]::FromHtml("#151a20"), [single]90)',
     '      try { $g.FillRectangle($fundo, 0, 0, $W, $H) } finally { $fundo.Dispose() }',
     '      if ($temGrupo) {',
     '        $img = Abrir-ImagemSemTravar $arqGrupo',

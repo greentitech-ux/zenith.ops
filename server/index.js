@@ -2349,6 +2349,11 @@ app.get('/api/loja-status/:codigo/computadores/:posto/logo-carimbo/:tipo', async
   try {
     const logo = await lojaStatus.logoCarimboDaMaquina(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null, req.params.tipo);
     if (!logo) return res.sendStatus(404);
+    // Os padrões são arquivos versionados junto do sistema, não itens do
+    // Storage. Essa propriedade só vem do mapa interno em lojaStatus.js.
+    if (logo.arquivoPublico) {
+      return res.type(logo.tipo || 'image/png').sendFile(path.join(__dirname, 'public', logo.arquivoPublico));
+    }
     storage.streamArquivo(logo.caminho, logo.tipo || 'image/png', res);
   } catch (err) {
     res.status(403).json({ error: err.message });

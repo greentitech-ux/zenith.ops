@@ -13637,9 +13637,9 @@ $r | ConvertTo-Json -Depth 6 -Compress
         && cfgOn0.modeloBasico.maquina === 'PDV Tirol' && cfgOn0.modeloBasico.marcaRotulo === "Domino's",
       'com a chave desligada o modelo também vai (é pra tela sem imagem), mas a política não pede':
         cfgOff0.papelDeParedeSemArte === false && !!cfgOff0.modeloBasico,
-      'antes de qualquer logo, nenhum logo é prometido à máquina':
-        cfgOn0.modeloBasico && cfgOn0.modeloBasico.logoMarca === false && cfgOn0.modeloBasico.logoGrupo === false
-        && logoGrupoAntes.status === 404,
+      'antes de qualquer upload, os logos oficiais padrão já são prometidos à máquina':
+        cfgOn0.modeloBasico && cfgOn0.modeloBasico.logoMarca === true && cfgOn0.modeloBasico.logoGrupo === true
+        && logoGrupoAntes.status === 200,
       'o logo pede a senha do Master, só aceita marca/grupo que existem e só imagem':
         semSenha.status === 400 && tipoRuim.status === 400 && marcaRuim.status === 400 && naoImagem.status === 400
         && envMarca.status === 200 && envGrupo.status === 200,
@@ -13648,7 +13648,7 @@ $r | ConvertTo-Json -Depth 6 -Compress
       'subir logo NÃO mexe na versão da política - só na versão do modelo básico':
         hbOn1.versaoAplicacao === hbOn0.versaoAplicacao && hbOff1.versaoAplicacao === hbOff0.versaoAplicacao
         && hbOn1.versaoModeloBasico !== hbOn0.versaoModeloBasico && hbOff1.versaoModeloBasico !== hbOff0.versaoModeloBasico
-        && hbOn0.versaoModeloBasico === '0|PDV Tirol',
+        && hbOn0.versaoModeloBasico === '2.1|PDV Tirol',
       // se as duas contas divergissem a máquina redesenharia a cada batida
       'heartbeat e configuração dão a MESMA versão do modelo':
         cfgOn1.versaoModeloBasico === hbOn1.versaoModeloBasico,
@@ -13658,9 +13658,9 @@ $r | ConvertTo-Json -Depth 6 -Compress
         logoMaster.status === 200
         && (listaJ.logosCarimbo && listaJ.logosCarimbo.marcas || []).some((m) => m.id === 'dominos' && m.temLogo === true)
         && (listaJ.logosCarimbo && listaJ.logosCarimbo.grupos || []).some((g) => g.id === GRUPO && g.temLogo === true),
-      'logo do grupo vale pra unidade do grupo; removido, some da máquina':
+      'logo do grupo enviado vale pra unidade; ao remover, volta ao padrão oficial':
         cfgOn2.modeloBasico.logoGrupo === true && remSemSenha.status === 400 && rem.status === 200
-        && cfgOn3.modeloBasico.logoGrupo === false && cfgOn3.modeloBasico.logoMarca === true,
+        && cfgOn3.modeloBasico.logoGrupo === true && cfgOn3.modeloBasico.logoMarca === true,
       'com arte, a arte manda: nem modelo nem versão do modelo':
         cfgOnArte.modeloBasico === null && cfgOnArte.papelDeParedeSemArte === false && hbOnArte.versaoModeloBasico === null,
       // ---- script ----

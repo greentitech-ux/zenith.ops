@@ -358,6 +358,28 @@ function versaoAplicacao(politicaVersao, arte) {
 // unidades.js/empresas.js. Nenhuma leitura nova por heartbeat.
 const TIPOS_LOGO_CARIMBO = ['marca', 'grupo'];
 const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
+// A estação não pode depender de um upload manual para ter identidade visual.
+// Estes logos oficiais já acompanham o NoPulso; um logo enviado pelo Master
+// continua tendo prioridade e substitui apenas o seu bloco.
+const REVISAO_MODELO_BASICO = 2;
+const LOGOS_CARIMBO_PADRAO = Object.freeze({
+  marca: Object.freeze({
+    dominos: Object.freeze({ arquivoPublico: 'branding/dominos-pizza.png', tipo: 'image/png', versao: 1 }),
+  }),
+  grupo: Object.freeze({
+    bravo: Object.freeze({ arquivoPublico: 'grupo-bravo.png', tipo: 'image/png', versao: 1 }),
+    arcfood: Object.freeze({ arquivoPublico: 'arcfood-logo-v3-corporativa.png', tipo: 'image/png', versao: 1 }),
+  }),
+});
+function logoPadraoDaMarca(marca) {
+  return LOGOS_CARIMBO_PADRAO.marca[String(marca || '').toLowerCase()] || null;
+}
+function logoPadraoDoGrupo(empresa) {
+  const identificador = `${empresa && empresa.id || ''} ${empresa && empresa.nome || ''}`.toLowerCase();
+  if (/arcfood/.test(identificador)) return LOGOS_CARIMBO_PADRAO.grupo.arcfood;
+  if (/bravo|\bgbe\b/.test(identificador)) return LOGOS_CARIMBO_PADRAO.grupo.bravo;
+  return null;
+}
 async function logosDaUnidade(codigo) {
   const cfg = await getConfig();
   const logos = (cfg && cfg.logosCarimbo) || {};
@@ -366,17 +388,15 @@ async function logosDaUnidade(codigo) {
   const empresa = await empresas.empresaDaUnidade(codigo).catch(() => null);
   const rede = empresa && empresa.id ? String(empresa.id) : null;
   const tem = (k) => (logos[k] && logos[k].caminho ? logos[k] : null);
-  const logoMarca = marca ? tem(chaveLogoCarimbo('marca', marca)) : null;
-  const logoGrupo = rede ? tem(chaveLogoCarimbo('grupo', rede)) : null;
+  const logoMarca = (marca && tem(chaveLogoCarimbo('marca', marca))) || logoPadraoDaMarca(marca);
+  const logoGrupo = (rede && tem(chaveLogoCarimbo('grupo', rede))) || logoPadraoDoGrupo(empresa);
   const versao = Math.max(Number(logoMarca && logoMarca.versao) || 0, Number(logoGrupo && logoGrupo.versao) || 0);
   return { marca, rede, logoMarca, logoGrupo, versao };
 }
-// só paga a resolução quando existe ALGUM logo cadastrado: o heartbeat roda a
-// cada 25s nas 52 máquinas e, sem logo, a resposta é sempre 0
+// O heartbeat precisa considerar também os logos oficiais embutidos. Perfil e
+// empresa já usam cache; isso mantém a versão do heartbeat idêntica à que a
+// rota de configuração entrega ao agente.
 async function versaoLogosDe(codigo) {
-  const cfg = await getConfig();
-  const logos = (cfg && cfg.logosCarimbo) || {};
-  if (!Object.values(logos).some((l) => l && l.caminho)) return 0;
   return (await logosDaUnidade(codigo)).versao;
 }
 
@@ -423,7 +443,9 @@ async function logoCarimboDaMaquina(codigo, posto, token, tipo) {
 // a MESMA conta no heartbeat e na configuração do agente: se as duas
 // divergissem, a máquina redesenharia a cada batida
 function versaoModeloBasicoDe(versaoLogos, doc) {
-  return `${Number(versaoLogos) || 0}|${String((doc && doc.nome) || '').trim()}`;
+  // A revisão também faz as telas que já tinham o fallback textual receberem
+  // o fundo preto e as logos padrão, mesmo sem qualquer upload novo.
+  return `${REVISAO_MODELO_BASICO}.${Number(versaoLogos) || 0}|${String((doc && doc.nome) || '').trim()}`;
 }
 
 // "DOMINO'S · TIROL": o nome da loja já vem com o prefixo da marca ("Dom
