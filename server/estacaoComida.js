@@ -665,13 +665,17 @@ const pagamentosDoDiaCache = createCache(async (chave) => {
 async function fechamentoDoDia(unidade, data) {
   const dia = data || hojeBrasiliaISO();
   const pagos = await pagamentosDoDiaCache.cached(`${unidade}|${dia}`);
-  const vazio = () => ({ pagamentos: 0, pessoas: 0, rodizio: 0, consumo: 0, subtotal: 0, servico: 0, balcao: 0, total: 0, formas: {} });
+  // "pagamentos" é o número de recebimentos (uma conta pode juntar várias
+  // pessoas). "comandasFechadas" é a quantidade real de cartões que passaram
+  // pelo caixa, que é o número usado para comparar com as ainda em atendimento.
+  const vazio = () => ({ pagamentos: 0, comandasFechadas: 0, pessoas: 0, rodizio: 0, consumo: 0, subtotal: 0, servico: 0, balcao: 0, total: 0, formas: {} });
   const total = vazio();
   const porCaixa = new Map(CAIXAS.map((c) => [c, { caixa: c, ...vazio() }]));
   pagos.forEach((p) => {
     const alvos = [total, porCaixa.get(p.caixa) || porCaixa.set(p.caixa, { caixa: p.caixa, ...vazio() }).get(p.caixa)];
     alvos.forEach((a) => {
       a.pagamentos += 1;
+      a.comandasFechadas += Array.isArray(p.numeros) ? p.numeros.length : num(p.pessoas);
       a.pessoas += num(p.pessoas);
       a.rodizio = arred(a.rodizio + num(p.rodizio));
       a.consumo = arred(a.consumo + num(p.consumo));

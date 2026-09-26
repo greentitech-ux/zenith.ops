@@ -201,9 +201,10 @@ function renderDia(f){
   // vira cartão de novo (o CSS cuida), porque 5 colunas não cabem em 390px.
   document.getElementById('por-caixa').innerHTML = `
     <table class="est-tabela">
-      <thead><tr><th>Caixa</th><th>Contas</th><th>Pessoas</th><th>Serviço</th><th>Total</th></tr></thead>
+      <thead><tr><th>Caixa</th><th>Fechadas</th><th>Contas</th><th>Pessoas</th><th>Serviço</th><th>Total</th></tr></thead>
       <tbody>${f.porCaixa.map(c=>`<tr>
         <td>Caixa ${esc(c.caixa)}</td>
+        <td data-rot="Fechadas" class="${c.comandasFechadas?'':'zerado'}">${c.comandasFechadas || 0}</td>
         <td data-rot="Contas" class="${c.pagamentos?'':'zerado'}">${c.pagamentos}</td>
         <td data-rot="Pessoas" class="${c.pessoas?'':'zerado'}">${c.pessoas}</td>
         <td data-rot="Serviço" class="${c.servico?'':'zerado'}">${fmtReal(c.servico)}</td>

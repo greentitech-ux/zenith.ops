@@ -23995,6 +23995,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'o serviço pode ser tirado no caixa': contaSemServico.servico === 0 && contaSemServico.total === 39.9,
       'o fechamento separa serviço de venda e conta por caixa':
         !!caixa02 && caixa02.pagamentos === 1 && caixa02.pessoas === 2
+        && caixa02.comandasFechadas === 2
         && Math.abs(caixa02.total - conta.total) < 0.02 && caixa02.servico > 0
         && Math.abs(caixa02.total - (caixa02.subtotal + caixa02.servico)) < 0.02,
       'o fechamento mostra as formas de pagamento (o split de pix + dinheiro)':
@@ -24002,6 +24003,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && Math.abs(caixa02.formas.pix + caixa02.formas.dinheiro - conta.total) < 0.02,
       'o que ficou ABERTO entra no fechamento (mesa que sobrou é gente que não pagou)':
         fech.abertas.length >= 2 && fech.subtotalAberto > 0,
+      'abertas e fechadas não se confundem: balcão não vira comanda fechada':
+        fech.total.comandasFechadas === fech.porCaixa.reduce((s, c) => s + c.comandasFechadas, 0)
+        && fech.total.comandasFechadas > 0,
       'cada bebida paga dá baixa no estoque': saidas.length === 3 && saidas.some((x) => x.quantidade === 2),
       // ---- venda de balcão pelo caixa ----
       'o caixa só vê os itens MARCADOS como disponíveis no balcão':
@@ -26342,6 +26346,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /class="est-turno \$\{TURNO\.porCaixa \? 'aberto' : ''\}"/.test(caixa)
         && /est-aviso/.test(caixa) && /Ninguém abriu o turno hoje/.test(caixa)
         && /\.est-turno\.aberto\{border-color:var\(--accent\)/.test(css),
+      'o caixa separa comandas em atendimento das que já foram fechadas':
+        /Comandas hoje/.test(caixa) && /Abertas continuam em atendimento/.test(caixa)
+        && /api\/estacao\/comandas-status/.test(caixa)
+        && /comandasFechadas/.test(mod),
       // CLAUDE.md §2: cor cravada escapa da troca do tema Claro
       'nada de hex cravado no CSS novo (o tema Claro troca o acento)':
         !/#b8ff3c/i.test(css.slice(css.indexOf('O ESTADO DO SERVIÇO'))),

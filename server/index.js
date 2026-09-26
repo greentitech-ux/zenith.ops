@@ -11146,6 +11146,24 @@ app.post('/api/estacao/receber', requireEstacao('estacao-caixa'), async (req, re
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// Situação operacional para quem está no caixa. A comanda aberta não recebe
+// número de caixa antes do pagamento; por isso ela aparece como "em
+// atendimento" da unidade, e a fechada é contabilizada no caixa que a baixou.
+// Não devolvemos faturamento aqui: é somente o fluxo das comandas.
+app.get('/api/estacao/comandas-status', requireEstacao('estacao-caixa'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const fechamento = await estacaoComida.fechamentoDoDia(unidade, req.query.data);
+    res.json({
+      data: fechamento.data,
+      abertas: fechamento.abertas.map((c) => ({ numero: c.numero, mesa: c.mesa || null, abertaEm: c.abertaEm })),
+      fechadas: fechamento.total.comandasFechadas,
+      porCaixa: fechamento.porCaixa.map((c) => ({ caixa: c.caixa, fechadas: c.comandasFechadas })),
+    });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.get('/api/estacao/fechamento', requireEstacao('estacao-fechamento'), async (req, res) => {
   try {
     const unidade = req.query.unidade;

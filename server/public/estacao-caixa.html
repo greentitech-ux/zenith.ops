@@ -42,6 +42,13 @@
     <label style="flex:0 1 130px;">Caixa<select id="caixa"></select></label>
   </div>
 
+  <div class="est-card" id="card-situacao-comandas">
+    <h2>Comandas hoje</h2>
+    <div class="est-sub">Abertas continuam em atendimento. Fechadas são as que já passaram pelo caixa.</div>
+    <div class="est-estado" id="situacao-comandas" style="margin-top:12px;"></div>
+    <div id="situacao-por-caixa"></div>
+  </div>
+
   <!-- TURNO: quem abre é o caixa, não o relógio (decisão do Master, 14/09).
        Almoço que vara das 18h continua cobrando almoço; jantar que começa
        17h40 já cobra jantar. Enquanto ninguém abre, o horário é só palpite -
@@ -174,6 +181,30 @@ As próximas comandas passam a usar o preço de ${turno === 'jantar' ? 'jantar' 
     await pedir('/api/estacao/turno', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unidade: unidadeAtual(), turno }) });
     await carregarTurno();
   }catch(e){ erro.textContent = e.message; }
+}
+
+function statComanda(rotulo, valor, sub, classe=''){
+  return `<div class="est-stat"><div class="est-stat-rot">${esc(rotulo)}</div>`
+    + `<div class="est-stat-val ${classe}">${esc(valor)}</div>`
+    + (sub ? `<div class="est-stat-sub">${esc(sub)}</div>` : '') + '</div>';
+}
+
+async function carregarSituacaoComandas(){
+  const alvo = document.getElementById('situacao-comandas');
+  const porCaixa = document.getElementById('situacao-por-caixa');
+  try{
+    const r = await pedir(`/api/estacao/comandas-status?unidade=${encodeURIComponent(unidadeAtual())}`);
+    const abertas = r.abertas || [];
+    alvo.innerHTML = statComanda('Abertas', String(abertas.length), abertas.length ? 'em atendimento' : 'nenhuma pendente', abertas.length ? 'destaque' : '')
+      + statComanda('Fechadas', String(r.fechadas || 0), 'já passaram pelo caixa', 'destaque');
+    porCaixa.innerHTML = `<table class="est-tabela" style="margin-top:6px;">
+      <thead><tr><th>Caixa</th><th>Fechadas</th></tr></thead>
+      <tbody>${(r.porCaixa || []).map(c=>`<tr><td>Caixa ${esc(c.caixa)}</td><td data-rot="Fechadas" class="${c.fechadas?'':'zerado'}">${c.fechadas || 0}</td></tr>`).join('')}</tbody>
+    </table>`;
+  }catch(e){
+    alvo.innerHTML = `<div class="est-vazio">${esc(e.message)}</div>`;
+    porCaixa.innerHTML = '';
+  }
 }
 function unidadeAtual(){ return document.getElementById('unidade').value; }
 function unidadeNomeAtual(){ const u = UNIDADES.find(x=>x.codigo===unidadeAtual()); return u ? u.nome : unidadeAtual(); }
@@ -324,6 +355,7 @@ async function receber(){
       }),
     });
     mostrarRecibo(r);
+    await carregarSituacaoComandas();
   }catch(e){ erro.textContent = e.message; document.getElementById('btn-receber').disabled = false; }
 }
 
@@ -368,6 +400,7 @@ async function trocarUnidade(){
   BALCAO = await fetch(`/api/estacao/itens-balcao?unidade=${encodeURIComponent(unidade)}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
   renderBalcao();
   await carregarTurno();
+  await carregarSituacaoComandas();
   await recarregarConta();
 }
 
