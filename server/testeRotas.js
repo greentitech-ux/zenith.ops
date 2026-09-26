@@ -23895,6 +23895,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
     await est.lancarItem({ comandaId: c1.id, itemId: chopp.id, quantidade: 2, porEmail: 'garcom@teste.local' });
     await est.lancarItem({ comandaId: c1.id, itemId: agua.id, quantidade: 1, porEmail: 'garcom@teste.local' });
     await est.lancarItem({ comandaId: c2.id, itemId: agua.id, quantidade: 1, porEmail: 'garcom@teste.local' });
+    const c2Mais = await est.alterarQuantidadeItem({ comandaId: c2.id, indice: 0, nome: 'Água', delta: 1, porEmail: 'garcom@teste.local' });
+    const c2Menos = await est.alterarQuantidadeItem({ comandaId: c2.id, indice: 0, nome: 'Água', delta: -1, porEmail: 'garcom@teste.local' });
+    await est.lancarItem({ comandaId: c4.id, itemId: agua.id, quantidade: 1, porEmail: 'garcom@teste.local' });
+    const c4Zerada = await est.alterarQuantidadeItem({ comandaId: c4.id, indice: 0, nome: 'Água', delta: -1, porEmail: 'garcom@teste.local' });
     let erroSemPrecoVenda = null;
     try { await est.lancarItem({ comandaId: c2.id, itemId: semPreco.id, quantidade: 1, porEmail: 'g@t' }); } catch (e) { erroSemPrecoVenda = e.message; }
 
@@ -24021,6 +24025,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
         salaoAntes.semMesa.length === 0 && salaoAntes.mesas.every((m) => m.mesa !== null)
         && !!salaoAntes.mesas.find((m) => m.mesa === 80),
       'o preço do item vem do CATÁLOGO, não do navegador': mesa74.consumo === 14.5 * 2 + 6 + 6,
+      'os botões + e − alteram uma unidade e preservam o preço lançado':
+        c2Mais.itens[0].quantidade === 2 && c2Menos.itens[0].quantidade === 1
+        && c2Menos.itens[0].precoUnitario === 6
+        && /est-qtd-btn menos/.test(require('fs').readFileSync(require('path').join(__dirname, 'public', 'estacao-salao.html'), 'utf8')),
+      'diminuir de 1 para zero remove o item e registra a alteração':
+        c4Zerada.itens.length === 0
+        && c4Zerada.remocoes.some((r) => r.nome === 'Água' && r.motivo === 'quantidade reduzida a zero'),
       'item sem preço de venda não pode ser lançado': !!erroSemPrecoVenda && /não tem preço de venda/.test(erroSemPrecoVenda),
       'catálogo recusa preço negativo e balcão sem preço':
         !!erroPrecoNegativo && /Preço de venda inválido/.test(erroPrecoNegativo)

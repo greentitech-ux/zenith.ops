@@ -345,9 +345,13 @@ function pintarComanda(c){
     <h2 style="margin-top:6px;">Lançado</h2>
     ${(c.itens||[]).length ? `<div class="est-lista">${c.itens.map((it,i)=>`
       <div class="est-item">
-        <span class="est-item-nome">${esc(it.nome)}${it.quantidade>1?` <span class="est-tag">${it.quantidade}x</span>`:''}</span>
+        <span class="est-item-nome">${esc(it.nome)}</span>
         <span class="est-item-val">${fmtReal(it.quantidade*it.precoUnitario)}</span>
-        <button type="button" class="est-btn perigo" style="min-height:36px;padding:6px 10px;" onclick="tirar('${esc(c.id)}',${i},'${esc(it.nome)}')">✕</button>
+        <span class="est-qtd-controle" aria-label="Quantidade de ${esc(it.nome)}">
+          <button type="button" class="est-qtd-btn menos" data-nome="${esc(it.nome)}" aria-label="Diminuir ${esc(it.nome)}" onclick="alterarQuantidade('${esc(c.id)}',${i},this.dataset.nome,-1,this)">−</button>
+          <strong class="est-qtd-num">${Number(it.quantidade)||1}</strong>
+          <button type="button" class="est-qtd-btn mais" data-nome="${esc(it.nome)}" aria-label="Aumentar ${esc(it.nome)}" onclick="alterarQuantidade('${esc(c.id)}',${i},this.dataset.nome,1,this)">+</button>
+        </span>
       </div>`).join('')}</div>` : '<div class="est-vazio">Nada lançado ainda.</div>'}`;
 
   document.getElementById('mod-corpo').innerHTML = cabeca + abas
@@ -398,6 +402,16 @@ async function tirar(id, indice, nome){
     await pedir(`/api/estacao/comandas/${encodeURIComponent(id)}/itens/${indice}?nome=${encodeURIComponent(nome)}`, { method: 'DELETE' });
     await carregarSalao();
   }catch(e){ const el = document.getElementById('erro-comanda'); if(el) el.textContent = e.message; }
+}
+async function alterarQuantidade(id, indice, nome, delta, botao){
+  if(botao) botao.disabled = true;
+  try{
+    await enviar(`/api/estacao/comandas/${encodeURIComponent(id)}/itens/${indice}/quantidade`, { nome, delta }, 'PATCH');
+    await carregarSalao();
+  }catch(e){
+    if(botao) botao.disabled = false;
+    const el = document.getElementById('erro-comanda'); if(el) el.textContent = e.message;
+  }
 }
 
 async function abrirComanda(){

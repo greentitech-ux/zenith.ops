@@ -115,6 +115,12 @@
 .est-campo-modal{display:grid;gap:5px;margin-top:10px;font:10px var(--mono);letter-spacing:.07em;color:var(--muted);text-transform:uppercase;}
 .est-item-nome{flex:1 1 auto;min-width:0;font-size:13px;overflow-wrap:anywhere;}
 .est-item-val{font:600 13px var(--mono);flex:none;}
+.est-qtd-controle{display:flex;align-items:center;gap:5px;flex:none;}
+.est-qtd-num{min-width:24px;text-align:center;font:700 14px var(--mono);color:var(--text);}
+.est-qtd-btn{width:36px;min-width:36px;height:36px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--text);font:700 20px/1 var(--mono);cursor:pointer;}
+.est-qtd-btn.mais{border-color:color-mix(in srgb,var(--accent) 58%,var(--line));color:var(--accent);}
+.est-qtd-btn.menos{color:#ff6f75;}
+.est-qtd-btn:disabled{opacity:.45;cursor:wait;}
 
 .est-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;}
 .est-grade .est-btn{display:grid;gap:3px;text-align:left;align-content:center;}

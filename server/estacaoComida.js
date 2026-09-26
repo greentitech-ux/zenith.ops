@@ -563,7 +563,49 @@ async function lancarItem({ comandaId, itemId, quantidade, porEmail, agora = new
     em: new Date(agora).toISOString(),
     porEmail: porEmail || null,
   };
-  return gravarEEspelhar({ ...comanda, itens: [...(comanda.itens || []), linha] });
+  const itens = [...(comanda.itens || [])];
+  // Toques repetidos no mesmo produto viram quantidade na mesma linha. Só
+  // funde quando o preço congelado também é igual: se o cadastro mudar durante
+  // o atendimento, a venda antiga continua preservada pelo valor original.
+  const existente = itens.findIndex((i) => i.itemId === linha.itemId && num(i.precoUnitario) === linha.precoUnitario);
+  if (existente >= 0) {
+    const novaQuantidade = num(itens[existente].quantidade) + qtd;
+    if (novaQuantidade > 99) throw new Error('A quantidade máxima por item é 99.');
+    itens[existente] = { ...itens[existente], quantidade: novaQuantidade };
+  } else {
+    itens.push(linha);
+  }
+  return gravarEEspelhar({ ...comanda, itens });
+}
+
+// Ajuste rápido do consumo já lançado. O navegador manda somente +1 ou -1;
+// preço, item e comanda continuam vindo do registro confiável do servidor.
+// Diminuir uma unidade que está em 1 remove a linha, mas deixa auditoria.
+async function alterarQuantidadeItem({ comandaId, indice, nome, delta, porEmail }) {
+  const comanda = await getComanda(comandaId);
+  if (comanda.status !== 'ABERTA') throw new Error('Essa comanda já foi fechada.');
+  const itens = [...(comanda.itens || [])];
+  const i = Math.trunc(num(indice));
+  if (!(i >= 0) || i >= itens.length) throw new Error('Lançamento não encontrado.');
+  if (nome && texto(itens[i].nome, 80) !== texto(nome, 80)) {
+    throw new Error('A lista mudou desde que você abriu a tela - confira de novo antes de alterar.');
+  }
+  const passo = Math.trunc(num(delta));
+  if (![1, -1].includes(passo)) throw new Error('A quantidade só pode aumentar ou diminuir uma unidade por vez.');
+  const anterior = Math.max(1, Math.trunc(num(itens[i].quantidade) || 1));
+  const nova = anterior + passo;
+  if (nova > 99) throw new Error('A quantidade máxima por item é 99.');
+  const em = new Date().toISOString();
+  const alteracoesQuantidade = [...(comanda.alteracoesQuantidade || []), {
+    itemId: itens[i].itemId, nome: itens[i].nome, de: anterior, para: Math.max(0, nova), em, porEmail: porEmail || null,
+  }].slice(-100);
+  if (nova <= 0) {
+    const [removida] = itens.splice(i, 1);
+    const remocoes = [...(comanda.remocoes || []), { ...removida, removidoEm: em, removidoPorEmail: porEmail || null, motivo: 'quantidade reduzida a zero' }];
+    return gravarEEspelhar({ ...comanda, itens, remocoes, alteracoesQuantidade });
+  }
+  itens[i] = { ...itens[i], quantidade: nova };
+  return gravarEEspelhar({ ...comanda, itens, alteracoesQuantidade });
 }
 
 // Tirar uma linha lançada errado. Pelo ÍNDICE e com o nome conferido: no
@@ -895,7 +937,7 @@ module.exports = {
   operacaoDoDia, abrirDia, abrirCaixa, fecharCaixa, mudarTurnoOperacao, fecharDia, exigirVendaAberta, horaBrasilia,
   TURNOS, TIPO_ISENTO, ROTULO_TIPO, ROTULO_TURNO, HORA_VIRADA_JANTAR,
   itensDoBalcao, resolverItensBalcao,
-  abrirComanda, definirMesa, getComanda, lancarItem, removerItem, cancelarComanda, cancelarMesa,
+  abrirComanda, definirMesa, getComanda, lancarItem, alterarQuantidadeItem, removerItem, cancelarComanda, cancelarMesa,
   totaisDaComanda, salao, contaDe, receber, abertaDoNumero,
   fechamentoDoDia, invalidarFechamento,
   _limparEspelhoTeste,

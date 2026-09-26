@@ -11184,6 +11184,18 @@ app.post('/api/estacao/comandas/:id/itens', requireEstacao('estacao-salao'), asy
     res.json(c);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
+app.patch('/api/estacao/comandas/:id/itens/:indice/quantidade', requireEstacao('estacao-salao'), async (req, res) => {
+  try {
+    const existente = await estacaoComida.getComanda(req.params.id);
+    if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const c = await estacaoComida.alterarQuantidadeItem({
+      comandaId: req.params.id, indice: req.params.indice,
+      nome: (req.body || {}).nome, delta: (req.body || {}).delta, porEmail: req.user.email,
+    });
+    broadcast('estacao-salao-mudou', { unidade: c.unidade }, 'estacao-salao');
+    res.json(c);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 app.delete('/api/estacao/comandas/:id/itens/:indice', requireEstacao('estacao-salao'), async (req, res) => {
   try {
     const existente = await estacaoComida.getComanda(req.params.id);
