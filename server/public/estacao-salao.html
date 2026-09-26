@@ -97,13 +97,27 @@
 <div class="est-modal" id="modal" onclick="if(event.target===this)fecharComanda()">
   <div class="est-dialogo">
     <div class="est-dialogo-topo">
-      <div>
+      <div style="min-width:0;flex:1;">
         <div class="eyebrow" id="mod-eyebrow">Comanda</div>
-        <h1 id="mod-titulo" style="font-size:22px;">—</h1>
+        <div class="est-modal-titulo-linha">
+          <h1 id="mod-titulo" style="font-size:22px;">—</h1>
+          <div class="est-modal-acoes" id="mod-acoes-topo"></div>
+        </div>
       </div>
       <button type="button" class="est-fechar" onclick="fecharComanda()" aria-label="Fechar">×</button>
     </div>
     <div id="mod-corpo"></div>
+  </div>
+</div>
+
+<!-- Conferência de bebida: aparece cinco segundos depois do último toque,
+     para uma sequência de 5 cocas virar UM aviso, não cinco interrupções. -->
+<div class="est-modal est-alerta-bebidas" id="alerta-bebidas" role="alertdialog" aria-modal="true" aria-labelledby="alerta-bebidas-titulo">
+  <div class="est-dialogo est-alerta-dialogo">
+    <div class="eyebrow">Conferência de consumo</div>
+    <h1 id="alerta-bebidas-titulo">Confirme as bebidas</h1>
+    <div id="alerta-bebidas-texto" class="est-alerta-texto"></div>
+    <button type="button" class="est-btn principal" onclick="confirmarAlertaBebidas()">OK, conferido</button>
   </div>
 </div>
 
@@ -134,7 +148,8 @@ const ROTULO_TURNO = { almoco:'almoço', jantar:'jantar' };
 const LIMITE_GRADE_SOLTA = 12;
 function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
 
-let ME = null, UNIDADES = [], SALAO = null, CATALOGO = [], COMANDA_ABERTA = null;
+let ME = null, UNIDADES = [], SALAO = null, CATALOGO = [], COMANDA_ABERTA = null, MESA_ABERTA = null;
+let TROCA_MARCADAS = new Set();
 
 function unidadeAtual(){ return document.getElementById('unidade').value; }
 function unidadeNomeAtual(){ const u = UNIDADES.find(x=>x.codigo===unidadeAtual()); return u ? u.nome : unidadeAtual(); }
@@ -161,7 +176,7 @@ async function carregarSalao(){
     SALAO = await pedir(`/api/estacao/salao?unidade=${encodeURIComponent(unidade)}`);
   }catch(e){ document.getElementById('resumo-salao').textContent = e.message; return; }
   renderSalao();
-  if(COMANDA_ABERTA) pintarComanda(acharComanda(COMANDA_ABERTA));
+  if(MESA_ABERTA || COMANDA_ABERTA) pintarComanda(acharComanda(COMANDA_ABERTA));
 }
 
 function todasComandas(){
@@ -261,79 +276,72 @@ function verMesa(mesa){
   // o toque vira erro de JS e a tela trava
   const m = SALAO && SALAO.mesas.find(x=>Number(x.mesa)===Number(mesa));
   if(!m) return false;
-  COMANDA_ABERTA = null;
-  document.getElementById('mod-eyebrow').textContent = 'Mesa';
-  document.getElementById('mod-titulo').textContent = String(mesa);
-  document.getElementById('mod-corpo').innerHTML = `
-    <div class="est-sub">${m.pessoas} pessoa(s) · aberta desde ${esc(horaCurta(m.desde))}</div>
-    <div class="est-comandas">${m.comandas.map(linhaComanda).join('')}</div>
-    <div class="est-totais">
-      <div class="est-linha"><span>Consumo da mesa</span><b>${fmtReal(m.consumo)}</b></div>
-      <div class="est-linha total"><span>Subtotal</span><b>${fmtReal(m.subtotal)}</b></div>
-    </div>
-    <div class="est-sub" style="margin-top:10px;">O pagamento é feito no caixa, pelos números dos cartões.</div>`;
+  MESA_ABERTA = Number(mesa);
+  COMANDA_ABERTA = (m.comandas[0] || {}).id || null;
+  MODO_FICHA = 'consumo';
+  TROCA_MARCADAS = new Set();
+  pintarComanda(acharComanda(COMANDA_ABERTA));
   document.getElementById('modal').classList.add('aberto');
   return true;
 }
 
 // ---------- uma comanda ----------
 function abrirFicha(id){
+  const c = acharComanda(id);
   COMANDA_ABERTA = id;
+  MESA_ABERTA = c && c.mesa ? Number(c.mesa) : null;
   // comanda recém-aberta cai direto no consumo; se ainda não tem mesa, cai na
   // mesa - é a única coisa que falta nela
-  MODO_FICHA = (acharComanda(id) || {}).mesa ? 'consumo' : 'mesa';
-  pintarComanda(acharComanda(id));
+  MODO_FICHA = c && c.mesa ? 'consumo' : 'mesa';
+  TROCA_MARCADAS = new Set(c ? [c.id] : []);
+  pintarComanda(c);
   document.getElementById('modal').classList.add('aberto');
 }
-function fecharComanda(){ COMANDA_ABERTA = null; document.getElementById('modal').classList.remove('aberto'); }
+function fecharComanda(){
+  COMANDA_ABERTA = null; MESA_ABERTA = null; TROCA_MARCADAS = new Set();
+  document.getElementById('modal').classList.remove('aberto');
+}
 
-function pintarComanda(c){
-  if(!c){ fecharComanda(); return; }
-  const t = c.totais || {};
-  document.getElementById('mod-eyebrow').textContent = `Comanda · ${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}${c.turno?` · ${ROTULO_TURNO[c.turno]||c.turno}`:''}`;
-  document.getElementById('mod-titulo').textContent = 'Nº ' + c.numero;
-  // O NÚMERO DA COMANDA VEM ANTES DA MESA. É por ele que tudo acontece - o
-  // caixa cobra por ele, o garçom acha a pessoa por ele - e no celular o
-  // título da janela sai de vista assim que a lista rola.
-  const cabeca = `<div class="est-comanda" style="cursor:default;margin-bottom:10px;">
-      <span class="est-comanda-num">${c.numero}</span>
-      <span class="est-comanda-corpo">
-        <span class="est-comanda-nome">${marcaTipo(c)} ${c.mesa?`· mesa <b>${c.mesa}</b>`:'<span class="est-tag sem-mesa">sem mesa</span>'}</span>
-        <span class="est-comanda-meta">aberta às ${esc(horaCurta(c.abertaEm))} · ${(c.itens||[]).length} item(ns)</span>
-      </span>
-    </div>`;
+function mesaAbertaAtual(){
+  return SALAO && SALAO.mesas.find(m=>Number(m.mesa)===Number(MESA_ABERTA));
+}
 
-  // DUAS AÇÕES, uma de cada vez: trocar a mesa e lançar consumo. Antes a
-  // ficha abria com o campo da mesa e o cardápio inteiro juntos - no celular
-  // isso é uma parede, e quem só queria lançar uma coca passava por cima do
-  // campo da mesa.
-  const abas = `<div class="est-acoes" style="margin-bottom:12px;">
-      <button type="button" class="est-btn${MODO_FICHA==='mesa'?' principal':''}" onclick="modoFicha('mesa')">↔ Trocar mesa</button>
-      <button type="button" class="est-btn${MODO_FICHA==='consumo'?' principal':''}" onclick="modoFicha('consumo')">🍽 Consumo</button>
-    </div>`;
+function seletorComandasDaMesa(m){
+  return `<div class="est-comandas-rapidas" aria-label="Comandas da mesa ${m.mesa}">${m.comandas.map(x=>`
+    <button type="button" class="est-comanda-rapida${x.id===COMANDA_ABERTA?' ativa':''}" onclick="selecionarComandaMesa('${esc(x.id)}')">
+      <b>${x.numero}</b><span>• ${esc(ROTULO_TIPO[x.tipoRodizio]||x.tipoRodizio)}</span>
+    </button>`).join('')}</div>`;
+}
 
-  const painelMesa = `
-    <div class="est-barra">
-      <label style="flex:1 1 130px;">Mesa<input id="mesa-comanda" type="number" inputmode="numeric" min="1" max="9999" value="${c.mesa||''}" placeholder="onde sentou"></label>
-      <button type="button" class="est-btn principal" style="flex:none;" onclick="salvarMesa('${esc(c.id)}')">Salvar</button>
+function painelTrocaMesa(m){
+  const todos = m.comandas.length && m.comandas.every(x=>TROCA_MARCADAS.has(x.id));
+  return `<div class="est-troca-cabeca">
+      <div><h2>Quem vai mudar de mesa?</h2><div class="est-sub">Marque uma, várias pessoas ou a mesa inteira.</div></div>
+      <button type="button" class="est-btn${todos?' principal':''}" onclick="selecionarTodosTroca()"><span class="est-selecao-check">${todos?'✓':''}</span> Todos</button>
     </div>
-    ${(c.historicoMesa||[]).length ? `<div class="est-sub" style="margin-top:4px;">Trocas desta comanda</div>
-      <div class="est-lista">${(c.historicoMesa||[]).slice().reverse().map(h=>`
-        <div class="est-item">
-          <span class="est-item-nome" style="font-family:var(--mono);">${h.de==null?'sem mesa':h.de} <span style="color:var(--accent);">→</span> ${h.para==null?'sem mesa':h.para}</span>
-          <span class="est-comanda-meta">${esc(horaCurta(h.em))}</span>
-        </div>`).join('')}</div>` : ''}`;
+    <div class="est-comandas">${m.comandas.map(x=>`
+      <button type="button" class="est-comanda${TROCA_MARCADAS.has(x.id)?' marcada':''}" onclick="alternarTroca('${esc(x.id)}')">
+        <span class="est-selecao-check">${TROCA_MARCADAS.has(x.id)?'✓':''}</span>
+        <span class="est-comanda-num">${x.numero}</span>
+        <span class="est-comanda-corpo"><span class="est-comanda-nome">${marcaTipo(x)}</span><span class="est-comanda-meta">${(x.itens||[]).reduce((s,i)=>s+(Number(i.quantidade)||1),0)} item(ns)</span></span>
+      </button>`).join('')}</div>
+    <div class="est-barra est-troca-destino">
+      <label style="flex:1 1 130px;">Nova mesa<input id="mesa-lote" type="number" inputmode="numeric" min="1" max="9999" placeholder="ex: 108"></label>
+      <button type="button" class="est-btn principal" style="flex:none;" onclick="salvarMesaSelecionadas()">Mover ${TROCA_MARCADAS.size||''}</button>
+    </div>`;
+}
 
-  // O CARDÁPIO SEMPRE NO TOPO, agrupado pelo tipo do item (Refrigerantes,
-  // Cervejas, Sobremesas...). O tipo é o que o estoque já usa - a tela não
-  // inventa categoria.
+function painelConsumoComanda(c){
+  const t = c.totais || {};
   const porTipo = new Map();
   CATALOGO.forEach(i=>{
     const g = (i.tipo || 'OUTROS');
     if(!porTipo.has(g)) porTipo.set(g, []);
     porTipo.get(g).push(i);
   });
-  const painelConsumo = `
+  return `<div class="est-consumo-selecionado">
+      <b>Comanda ${c.numero}</b><span>${esc(ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio)}</span>
+    </div>
     ${CATALOGO.length ? [...porTipo.entries()].map(([grupo, itens])=>`
       <div class="est-sub" style="margin:0 0 6px;">${esc(grupo)}</div>
       <div class="est-grade" style="margin-bottom:12px;">${itens.map(i=>`
@@ -341,8 +349,7 @@ function pintarComanda(c){
       : `<div class="est-vazio">Nenhum item disponível para consumo. O item precisa estar ativo e ter preço de venda maior que zero.
           ${podeConfigurarCatalogo()?'<div style="margin-top:10px;"><button type="button" class="est-btn principal" onclick="abrirCatalogo()">⚙ Configurar itens de consumo</button></div>':''}
         </div>`}
-
-    <h2 style="margin-top:6px;">Lançado</h2>
+    <h2 style="margin-top:6px;">Lançado nesta comanda</h2>
     ${(c.itens||[]).length ? `<div class="est-lista">${c.itens.map((it,i)=>`
       <div class="est-item">
         <span class="est-item-nome">${esc(it.nome)}</span>
@@ -352,23 +359,59 @@ function pintarComanda(c){
           <strong class="est-qtd-num">${Number(it.quantidade)||1}</strong>
           <button type="button" class="est-qtd-btn mais" data-nome="${esc(it.nome)}" aria-label="Aumentar ${esc(it.nome)}" onclick="alterarQuantidade('${esc(c.id)}',${i},this.dataset.nome,1,this)">+</button>
         </span>
-      </div>`).join('')}</div>` : '<div class="est-vazio">Nada lançado ainda.</div>'}`;
-
-  document.getElementById('mod-corpo').innerHTML = cabeca + abas
-    + `<div class="est-erro" id="erro-comanda"></div>`
-    + (MODO_FICHA==='mesa' ? painelMesa : painelConsumo)
-    + `<div class="est-totais">
-      <div class="est-linha"><span>Rodízio · ${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}${c.turno?` (${ROTULO_TURNO[c.turno]})`:''}</span><b>${t.rodizio?fmtReal(t.rodizio):'não paga'}</b></div>
+      </div>`).join('')}</div>` : '<div class="est-vazio">Nada lançado ainda.</div>'}
+    <div class="est-totais">
+      <div class="est-linha"><span>Rodízio · ${esc(ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio)}${c.turno?` (${esc(ROTULO_TURNO[c.turno])})`:''}</span><b>${t.rodizio?fmtReal(t.rodizio):'não paga'}</b></div>
       <div class="est-linha"><span>Consumo</span><b>${fmtReal(t.consumo)}</b></div>
       <div class="est-linha"><span>Serviço ${t.servicoPct||0}%</span><b>${fmtReal(t.servico)}</b></div>
       <div class="est-linha total"><span>Total desta pessoa</span><b>${fmtReal(t.total)}</b></div>
-    </div>
-    <div class="est-sub" style="margin-top:10px;">O pagamento é no caixa, pelo número ${c.numero}.</div>`;
+    </div>`;
+}
+
+function pintarComanda(c){
+  const m = mesaAbertaAtual();
+  if(m){
+    if(!c || !m.comandas.some(x=>x.id===c.id)){
+      c = m.comandas[0] || null;
+      COMANDA_ABERTA = c && c.id;
+    }
+    if(!c){ fecharComanda(); return; }
+    TROCA_MARCADAS = new Set([...TROCA_MARCADAS].filter(id=>m.comandas.some(x=>x.id===id)));
+    document.getElementById('mod-eyebrow').textContent = 'Mesa';
+    document.getElementById('mod-titulo').textContent = String(m.mesa);
+    document.getElementById('mod-acoes-topo').innerHTML = `
+      <button type="button" class="est-btn compacto${MODO_FICHA==='mesa'?' principal':''}" onclick="modoFicha('mesa')">↔ Trocar mesa</button>
+      <button type="button" class="est-btn compacto${MODO_FICHA==='consumo'?' principal':''}" onclick="modoFicha('consumo')">🍽 Consumo</button>`;
+    document.getElementById('mod-corpo').innerHTML = `<div class="est-sub est-mesa-resumo">${m.pessoas} pessoa(s) · aberta desde ${esc(horaCurta(m.desde))}</div>
+      <div class="est-erro" id="erro-comanda"></div>
+      ${MODO_FICHA==='mesa' ? painelTrocaMesa(m) : seletorComandasDaMesa(m) + painelConsumoComanda(c)}`;
+    return;
+  }
+  if(!c){ fecharComanda(); return; }
+  document.getElementById('mod-eyebrow').textContent = `Comanda · ${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}`;
+  document.getElementById('mod-titulo').textContent = 'Nº ' + c.numero;
+  document.getElementById('mod-acoes-topo').innerHTML = '';
+  document.getElementById('mod-corpo').innerHTML = `<div class="est-erro" id="erro-comanda"></div>
+    <div class="est-sub">Esta comanda está sem mesa. Informe onde a pessoa sentou.</div>
+    <div class="est-barra"><label style="flex:1 1 130px;">Mesa<input id="mesa-comanda" type="number" inputmode="numeric" min="1" max="9999" placeholder="onde sentou"></label>
+    <button type="button" class="est-btn principal" style="flex:none;" onclick="salvarMesa('${esc(c.id)}')">Salvar</button></div>`;
 }
 // qual painel está aberto na ficha. Começa no CONSUMO: é o que o garçom faz
 // dez vezes por mesa; trocar de mesa acontece uma vez, se acontecer.
 let MODO_FICHA = 'consumo';
-function modoFicha(m){ MODO_FICHA = m; pintarComanda(acharComanda(COMANDA_ABERTA)); }
+function modoFicha(m){
+  MODO_FICHA = m;
+  if(m==='mesa' && !TROCA_MARCADAS.size && COMANDA_ABERTA) TROCA_MARCADAS.add(COMANDA_ABERTA);
+  pintarComanda(acharComanda(COMANDA_ABERTA));
+}
+function selecionarComandaMesa(id){ COMANDA_ABERTA = id; MODO_FICHA = 'consumo'; pintarComanda(acharComanda(id)); }
+function alternarTroca(id){ TROCA_MARCADAS.has(id) ? TROCA_MARCADAS.delete(id) : TROCA_MARCADAS.add(id); pintarComanda(acharComanda(COMANDA_ABERTA)); }
+function selecionarTodosTroca(){
+  const m = mesaAbertaAtual(); if(!m) return;
+  const todos = m.comandas.every(x=>TROCA_MARCADAS.has(x.id));
+  TROCA_MARCADAS = todos ? new Set() : new Set(m.comandas.map(x=>x.id));
+  pintarComanda(acharComanda(COMANDA_ABERTA));
+}
 
 // O ciclo do garçom em um toque: fecha o que estiver aberto, sobe pro começo
 // e deixa o cursor no número do cartão - o próximo gesto já é digitar.
@@ -385,14 +428,70 @@ function voltarALancar(){
 async function salvarMesa(id){
   const mesa = document.getElementById('mesa-comanda').value;
   try{
-    await enviar(`/api/estacao/comandas/${encodeURIComponent(id)}/mesa`, { mesa }, 'PATCH');
+    const atualizada = await enviar(`/api/estacao/comandas/${encodeURIComponent(id)}/mesa`, { mesa }, 'PATCH');
+    MESA_ABERTA = Number(atualizada.mesa);
     await carregarSalao();
   }catch(e){ document.getElementById('erro-comanda').textContent = e.message; }
+}
+async function salvarMesaSelecionadas(){
+  const campo = document.getElementById('mesa-lote');
+  const erro = document.getElementById('erro-comanda');
+  const mesa = Number(campo && campo.value);
+  if(!TROCA_MARCADAS.size){ erro.textContent = 'Selecione ao menos uma comanda ou use Todos.'; return; }
+  if(!(mesa > 0)){ erro.textContent = 'Informe a nova mesa.'; campo && campo.focus(); return; }
+  try{
+    const r = await enviar('/api/estacao/comandas/mover-mesa', { ids:[...TROCA_MARCADAS], mesa }, 'PATCH');
+    MESA_ABERTA = Number(r.mesa);
+    COMANDA_ABERTA = (r.comandas.find(c=>c.id===COMANDA_ABERTA) || r.comandas[0] || {}).id || null;
+    MODO_FICHA = 'consumo'; TROCA_MARCADAS = new Set();
+    await carregarSalao();
+  }catch(e){ erro.textContent = e.message; }
+}
+
+// Acima de 3 bebidas, espera cinco segundos desde o último toque. Isso
+// deixa o garçom lançar 5 cocas seguidas e conferir uma única vez o total.
+const AGUARDO_BEBIDA_MS = 5000;
+const TIMERS_BEBIDA = new Map();
+const FILA_ALERTAS_BEBIDA = [];
+let ALERTA_BEBIDA_ATIVO = false;
+function itemEhBebida(item){
+  const cat = CATALOGO.find(x=>x.id===item.itemId) || {};
+  return /BEBIDA|REFRIG|CERVEJ|SUCO|AGUA|ÁGUA|COCA|GUARAN|CHA|CHÁ|VINHO|DRINK/i.test(`${cat.tipo||''} ${cat.nome||''} ${item.nome||''}`);
+}
+function resumoBebidas(c){
+  const itens = (c && c.itens || []).filter(itemEhBebida).map(i=>({ nome:i.nome, quantidade:Number(i.quantidade)||1 }));
+  return { itens, total:itens.reduce((s,i)=>s+i.quantidade,0) };
+}
+function agendarConferenciaBebidas(id){
+  if(TIMERS_BEBIDA.has(id)) clearTimeout(TIMERS_BEBIDA.get(id));
+  const agora = resumoBebidas(acharComanda(id));
+  if(agora.total <= 3){ TIMERS_BEBIDA.delete(id); return; }
+  TIMERS_BEBIDA.set(id, setTimeout(()=>{
+    TIMERS_BEBIDA.delete(id);
+    const c = acharComanda(id), resumo = resumoBebidas(c);
+    if(!c || resumo.total <= 3) return;
+    FILA_ALERTAS_BEBIDA.push({ numero:c.numero, ...resumo });
+    mostrarProximoAlertaBebidas();
+  }, AGUARDO_BEBIDA_MS));
+}
+function mostrarProximoAlertaBebidas(){
+  if(ALERTA_BEBIDA_ATIVO || !FILA_ALERTAS_BEBIDA.length) return;
+  ALERTA_BEBIDA_ATIVO = true;
+  const aviso = FILA_ALERTAS_BEBIDA.shift();
+  const lista = aviso.itens.map(i=>`${i.quantidade} ${esc(i.nome)}`).join(' · ');
+  document.getElementById('alerta-bebidas-texto').innerHTML = `<b>Confirme ${aviso.total} bebida${aviso.total===1?'':'s'} para a comanda ${aviso.numero}.</b><span>${lista}</span>`;
+  document.getElementById('alerta-bebidas').classList.add('aberto');
+}
+function confirmarAlertaBebidas(){
+  document.getElementById('alerta-bebidas').classList.remove('aberto');
+  ALERTA_BEBIDA_ATIVO = false;
+  setTimeout(mostrarProximoAlertaBebidas, 100);
 }
 async function lancar(id, itemId){
   try{
     await enviar(`/api/estacao/comandas/${encodeURIComponent(id)}/itens`, { itemId, quantidade: 1 });
     await carregarSalao();
+    agendarConferenciaBebidas(id);
   }catch(e){ const el = document.getElementById('erro-comanda'); if(el) el.textContent = e.message; }
 }
 async function tirar(id, indice, nome){
@@ -408,6 +507,7 @@ async function alterarQuantidade(id, indice, nome, delta, botao){
   try{
     await enviar(`/api/estacao/comandas/${encodeURIComponent(id)}/itens/${indice}/quantidade`, { nome, delta }, 'PATCH');
     await carregarSalao();
+    if(delta > 0) agendarConferenciaBebidas(id);
   }catch(e){
     if(botao) botao.disabled = false;
     const el = document.getElementById('erro-comanda'); if(el) el.textContent = e.message;
@@ -505,6 +605,7 @@ function mesaDoQr(texto){
 async function trocarUnidade(){
   const unidade = unidadeAtual();
   if(!unidade) return;
+  if(SALAO) fecharComanda();
   CATALOGO = await fetch(`/api/estacao/itens?unidade=${encodeURIComponent(unidade)}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
   await carregarSalao();
 }

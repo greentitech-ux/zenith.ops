@@ -537,6 +537,29 @@ async function definirMesa(id, mesa, porEmail) {
   return gravarEEspelhar({ ...comanda, mesa: nova, mesaPorEmail: porEmail || null, historicoMesa });
 }
 
+// Troca uma pessoa, algumas ou a mesa inteira de uma vez. Primeiro valida o
+// lote completo; assim um cartão fechado/inexistente não deixa metade do grupo
+// na mesa antiga e metade na nova.
+async function definirMesaVarios({ ids, mesa, porEmail }) {
+  const unicos = [...new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!unicos.length) throw new Error('Selecione ao menos uma comanda.');
+  if (unicos.length > 100) throw new Error('Selecione no máximo 100 comandas por troca.');
+  const nova = sanitizarMesa(mesa, { obrigatoria: true });
+  const comandas = await Promise.all(unicos.map((id) => getComanda(id)));
+  if (comandas.some((c) => c.status !== 'ABERTA')) throw new Error('Uma das comandas selecionadas já foi fechada. Atualize a mesa e tente de novo.');
+  const unidades = [...new Set(comandas.map((c) => c.unidade))];
+  if (unidades.length !== 1) throw new Error('As comandas selecionadas precisam ser da mesma unidade.');
+  const em = new Date().toISOString();
+  const atualizadas = await Promise.all(comandas.map((comanda) => {
+    const anterior = comanda.mesa || null;
+    const historicoMesa = anterior === nova
+      ? (comanda.historicoMesa || [])
+      : [...(comanda.historicoMesa || []), { de: anterior, para: nova, em, porEmail: porEmail || null }].slice(-20);
+    return gravarEEspelhar({ ...comanda, mesa: nova, mesaPorEmail: porEmail || null, historicoMesa });
+  }));
+  return { comandas: atualizadas, unidade: unidades[0], mesa: nova };
+}
+
 async function getComanda(id) {
   const snap = await COMANDAS.doc(String(id || '')).get();
   if (!snap.exists) throw new Error('Comanda não encontrada.');
@@ -937,7 +960,7 @@ module.exports = {
   operacaoDoDia, abrirDia, abrirCaixa, fecharCaixa, mudarTurnoOperacao, fecharDia, exigirVendaAberta, horaBrasilia,
   TURNOS, TIPO_ISENTO, ROTULO_TIPO, ROTULO_TURNO, HORA_VIRADA_JANTAR,
   itensDoBalcao, resolverItensBalcao,
-  abrirComanda, definirMesa, getComanda, lancarItem, alterarQuantidadeItem, removerItem, cancelarComanda, cancelarMesa,
+  abrirComanda, definirMesa, definirMesaVarios, getComanda, lancarItem, alterarQuantidadeItem, removerItem, cancelarComanda, cancelarMesa,
   totaisDaComanda, salao, contaDe, receber, abertaDoNumero,
   fechamentoDoDia, invalidarFechamento,
   _limparEspelhoTeste,

@@ -11165,6 +11165,18 @@ app.post('/api/estacao/comandas', requireEstacao('estacao-salao'), async (req, r
     res.json(c);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
+app.patch('/api/estacao/comandas/mover-mesa', requireEstacao('estacao-salao'), async (req, res) => {
+  try {
+    const ids = [...new Set((Array.isArray((req.body || {}).ids) ? req.body.ids : []).map((id) => String(id || '').trim()).filter(Boolean))];
+    if (ids.length > 100) return res.status(400).json({ error: 'Selecione no máximo 100 comandas por troca.' });
+    const existentes = await Promise.all(ids.map((id) => estacaoComida.getComanda(id)));
+    if (!existentes.length) return res.status(400).json({ error: 'Selecione ao menos uma comanda.' });
+    if (existentes.some((c) => !podeUnidadeEstacao(req, c.unidade))) return res.status(403).json({ error: 'Você não tem acesso a uma das unidades selecionadas.' });
+    const resultado = await estacaoComida.definirMesaVarios({ ids, mesa: (req.body || {}).mesa, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade: resultado.unidade }, 'estacao-salao');
+    res.json(resultado);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 app.patch('/api/estacao/comandas/:id/mesa', requireEstacao('estacao-salao'), async (req, res) => {
   try {
     const existente = await estacaoComida.getComanda(req.params.id);

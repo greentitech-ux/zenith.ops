@@ -23899,6 +23899,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const c2Menos = await est.alterarQuantidadeItem({ comandaId: c2.id, indice: 0, nome: 'Água', delta: -1, porEmail: 'garcom@teste.local' });
     await est.lancarItem({ comandaId: c4.id, itemId: agua.id, quantidade: 1, porEmail: 'garcom@teste.local' });
     const c4Zerada = await est.alterarQuantidadeItem({ comandaId: c4.id, indice: 0, nome: 'Água', delta: -1, porEmail: 'garcom@teste.local' });
+    const c4Movida = await est.definirMesaVarios({ ids: [c4.id], mesa: 82, porEmail: 'garcom@teste.local' });
+    const c4DeVolta = await est.definirMesaVarios({ ids: [c4.id], mesa: 80, porEmail: 'garcom@teste.local' });
     let erroSemPrecoVenda = null;
     try { await est.lancarItem({ comandaId: c2.id, itemId: semPreco.id, quantidade: 1, porEmail: 'g@t' }); } catch (e) { erroSemPrecoVenda = e.message; }
 
@@ -24032,6 +24034,15 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'diminuir de 1 para zero remove o item e registra a alteração':
         c4Zerada.itens.length === 0
         && c4Zerada.remocoes.some((r) => r.nome === 'Água' && r.motivo === 'quantidade reduzida a zero'),
+      'troca de mesa aceita seleção em lote e preserva o histórico':
+        c4Movida.comandas[0].mesa === 82 && c4DeVolta.comandas[0].mesa === 80
+        && c4DeVolta.comandas[0].historicoMesa.slice(-2).map((h) => `${h.de}>${h.para}`).join(',') === '80>82,82>80',
+      'mesa vira o cabeçalho, consumo alterna comandas e bebida pede conferência em 5 segundos': (() => {
+        const tela = require('fs').readFileSync(require('path').join(__dirname, 'public', 'estacao-salao.html'), 'utf8');
+        return /mod-titulo[^]*String\(m\.mesa\)/.test(tela)
+          && /est-comandas-rapidas/.test(tela) && /selecionarTodosTroca/.test(tela)
+          && /AGUARDO_BEBIDA_MS\s*=\s*5000/.test(tela) && /Confirme \$\{aviso\.total\} bebida/.test(tela);
+      })(),
       'item sem preço de venda não pode ser lançado': !!erroSemPrecoVenda && /não tem preço de venda/.test(erroSemPrecoVenda),
       'catálogo recusa preço negativo e balcão sem preço':
         !!erroPrecoNegativo && /Preço de venda inválido/.test(erroPrecoNegativo)
