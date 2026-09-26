@@ -3231,7 +3231,10 @@ app.post('/webhooks/adyen', async (req, res) => {
       const foiAprovado = !!pedido && pedido.history.some((h) => h.status === 'APROVADO');
       if (foiAprovado) {
         const cliente = String(tx.nomeCliente || tx.cardHolder || pedido.cliente || 'Cliente').slice(0, 80);
-        const aviso = `Pedido #${pedidoIdAtual} · ${cliente} · R$ ${Number(tx.valor || pedido.valor || 0).toFixed(2)} foi estornado após aprovação. Não produzir/não entregar; confirme com o Suporte.`;
+        // A referência da Adyen é um UUID interno e não ajuda a operação na
+        // loja. Ela continua no Monitor/Suporte, mas não vai para a tela dos
+        // computadores da unidade.
+        const aviso = `${cliente} · R$ ${Number(tx.valor || pedido.valor || 0).toFixed(2)} foi estornado após aprovação. Não produzir/não entregar; confirme com o Suporte.`;
         try {
           const novo = await push.notifyCriticoUnico(
             `estorno-operacional-${tx.unidade || 'sem-unidade'}-${pedidoIdAtual}`,
@@ -5090,7 +5093,7 @@ async function alertarBloqueioFraudeNaLoja(tx, pedidoId, motivo) {
       return;
     }
     const cliente = String(tx.nomeCliente || tx.cardHolder || 'Cliente').slice(0, 80);
-    const texto = `🚫 NÃO PRODUZIR/NÃO ENTREGAR: pedido #${pedidoId} · ${cliente} · R$ ${Number(tx.valor || 0).toFixed(2)}. ACIONE O SUPORTE e aguarde a liberação do Master.`;
+    const texto = `🚫 NÃO PRODUZIR/NÃO ENTREGAR: ${cliente} · R$ ${Number(tx.valor || 0).toFixed(2)}. ACIONE O SUPORTE e aguarde a liberação.`;
     await lojaStatus.enviarMensagemMuitos(computadores.map((c) => ({ codigo: c.codigo, posto: c.posto })), texto, 'deteccao-automatica@sistema');
     console.log(`[fraude] bloqueio do pedido ${pedidoId} avisado em ${computadores.length} computador(es) de ${nomeAlvo}: ${motivo}`);
   } catch (err) {
@@ -5109,7 +5112,7 @@ async function alertarEstornoNaLoja(tx, pedidoId, cliente, valorDoPedido) {
       return;
     }
     const valor = Number(tx.valor || valorDoPedido || 0).toFixed(2);
-    const texto = `🔴 ESTORNO CONFIRMADO: pedido #${pedidoId} · ${cliente} · R$ ${valor}. O pagamento foi aprovado e depois estornado. NÃO PRODUZIR/NÃO ENTREGAR; confirme com o Suporte.`;
+    const texto = `🔴 ESTORNO CONFIRMADO: ${cliente} · R$ ${valor}. O pagamento foi aprovado e depois estornado. NÃO PRODUZIR/NÃO ENTREGAR; confirme com o Suporte.`;
     const resultado = await lojaStatus.enviarMensagemMuitos(
       computadores.map((c) => ({ codigo: c.codigo, posto: c.posto })),
       texto,
@@ -5126,8 +5129,8 @@ async function alertarDecisaoFraudeNaLoja(registro, liberado) {
     const { computadores } = await computadoresOperacionaisDaUnidade(registro.unidade);
     if (!computadores.length) return;
     const texto = liberado
-      ? `✅ PEDIDO #${registro.pedidoId} LIBERADO PELO MASTER. A unidade pode produzir/entregar normalmente.`
-      : `🚫 FRAUDE CONFIRMADA: pedido #${registro.pedidoId}. MANTENHA BLOQUEADO, não produza/não entregue e acione o suporte.`;
+      ? '✅ PEDIDO LIBERADO PELO SUPORTE. A unidade pode produzir/entregar normalmente.'
+      : '🚫 FRAUDE CONFIRMADA. MANTENHA BLOQUEADO, não produza/não entregue e acione o Suporte.';
     await Promise.all(computadores.map((c) => lojaStatus.enviarMensagem(c.codigo, c.posto, texto, registro.atualizadoPorEmail || 'master')));
   } catch (err) {
     console.error(`[fraude] não consegui avisar a decisão do pedido ${registro.pedidoId}:`, err.message);
