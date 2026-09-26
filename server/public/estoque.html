@@ -494,7 +494,7 @@
   <button type="button" class="btn-add" onclick="abrirNovoItem()">+ Novo item</button>
   <div class="tablewrap" style="margin-top:12px;">
     <table>
-      <thead><tr><th>Nome</th><th>Setor</th><th>Tipo</th><th>Unid.</th><th>Custo ref.</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Nome</th><th>Setor</th><th>Tipo</th><th>Unid.</th><th>Custo ref.</th><th>Preço venda</th><th>Disponível</th><th>Status</th><th></th></tr></thead>
       <tbody id="catalogo-body"></tbody>
     </table>
   </div>
@@ -548,6 +548,17 @@
       <div class="grid2">
         <div><label>Unidade de medida</label><input type="text" id="i-unidade" placeholder="KG, LT, UN..." required oninput="atualizarCampoPesoItem()"></div>
         <div><label>Custo de referência (R$)</label><input type="number" step="0.01" id="i-custo" value="0"></div>
+      </div>
+      <div class="grid2" id="i-venda-wrap">
+        <div>
+          <label>Preço de venda (R$)</label>
+          <input type="number" min="0" step="0.01" id="i-preco-venda" placeholder="ex: 8,00">
+          <div class="sub" style="margin-top:5px;">Com valor maior que zero, o item aparece em Salão → Comanda → Consumo.</div>
+        </div>
+        <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;padding-top:18px;">
+          <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="i-no-balcao" style="width:auto;"> Disponível também no balcão do caixa</label>
+          <label style="display:flex;align-items:center;gap:8px;margin:0;"><input type="checkbox" id="i-ativo" style="width:auto;" checked> Item ativo</label>
+        </div>
       </div>
       <div class="grid2">
         <div><label>Qtd. padrão de compra (opcional)</label><input type="number" step="1" min="0" id="i-quantidade-padrao" placeholder="ex: 10 embalagens"></div>
@@ -634,6 +645,7 @@ let TIPOS_ITEM = [];
 
 let ME = null;
 let IS_MASTER = false;
+let PODE_CATALOGO = false;
 let UNIDADES = [];
 let CATALOGO = [];
 let RECEBIMENTOS = [];
@@ -1773,13 +1785,15 @@ function renderCatalogo(){
         <td><span class="badge-tipo">${i.tipo}</span></td>
         <td>${escapeHtml(i.unidadeMedida)}</td>
         <td class="valor">${fmtMoney(i.custoReferencia)}</td>
+        <td class="valor">${i.precoVenda>0 ? fmtMoney(i.precoVenda) : '<span style="color:var(--muted);">Não informado</span>'}</td>
+        <td>${i.precoVenda>0 && i.ativo!==false ? `Salão${i.noBalcao===true ? ' + balcão' : ''}` : '<span style="color:var(--muted);">—</span>'}</td>
         <td>${i.ativo===false ? '<span style="color:var(--muted);">Inativo</span>' : '<span style="color:var(--ok);">Ativo</span>'}</td>
         <td>
           <button type="button" class="acao-btn" onclick="abrirEditarItem('${i.id}')">✏️</button>
           <button type="button" class="acao-btn excluir" onclick="excluirItem('${i.id}')">🗑️</button>
         </td>
       </tr>`)
-  ).join('') || '<tr><td colspan="7" class="empty">Nenhum item cadastrado ainda nesta loja.</td></tr>';
+  ).join('') || '<tr><td colspan="9" class="empty">Nenhum item cadastrado ainda nesta loja.</td></tr>';
 }
 
 async function carregarCatalogoPadrao(){
@@ -1826,6 +1840,9 @@ function abrirNovoItem(){
   document.getElementById('item-modal-titulo').textContent = 'Novo item';
   document.getElementById('form-item').reset();
   document.getElementById('i-custo').value = 0;
+  document.getElementById('i-preco-venda').value = '';
+  document.getElementById('i-no-balcao').checked = false;
+  document.getElementById('i-ativo').checked = true;
   atualizarCampoPesoItem();
   document.getElementById('msg-item').classList.add('hidden');
   document.getElementById('overlay-item').classList.remove('hidden');
@@ -1841,6 +1858,9 @@ function abrirEditarItem(id){
   document.getElementById('i-tipo').value = item.tipo;
   document.getElementById('i-unidade').value = item.unidadeMedida;
   document.getElementById('i-custo').value = item.custoReferencia;
+  document.getElementById('i-preco-venda').value = item.precoVenda ?? '';
+  document.getElementById('i-no-balcao').checked = item.noBalcao === true;
+  document.getElementById('i-ativo').checked = item.ativo !== false;
   document.getElementById('i-quantidade-padrao').value = item.quantidadePadrao ?? '';
   document.getElementById('i-peso-embalagem').value = item.pesoEmbalagemG ?? '';
   atualizarCampoPesoItem();
@@ -1861,6 +1881,11 @@ document.getElementById('form-item').addEventListener('submit', async (ev)=>{
       tipo: document.getElementById('i-tipo').value,
       unidadeMedida: document.getElementById('i-unidade').value,
       custoReferencia: document.getElementById('i-custo').value,
+      ...(PODE_CATALOGO ? {
+        precoVenda: document.getElementById('i-preco-venda').value || null,
+        noBalcao: document.getElementById('i-no-balcao').checked,
+        ativo: document.getElementById('i-ativo').checked,
+      } : {}),
       quantidadePadrao: document.getElementById('i-quantidade-padrao').value || null,
       pesoEmbalagemG: unidadeUsaPeso(document.getElementById('i-unidade').value) ? (document.getElementById('i-peso-embalagem').value || null) : null,
     };
@@ -2000,7 +2025,9 @@ async function boot(){
     return;
   }
   const podeCatalogo = isMaster || !!ME.podeCatalogoEstoque;
+  PODE_CATALOGO = podeCatalogo;
   document.getElementById('tab-btn-catalogo').classList.toggle('hidden', !podeCatalogo);
+  document.getElementById('i-venda-wrap').classList.toggle('hidden', !podeCatalogo);
   document.getElementById('btn-catalogo-seed').classList.toggle('hidden', !isMaster);
   document.getElementById('tab-btn-ocorrencias').classList.toggle('hidden', !isMaster);
 

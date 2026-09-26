@@ -8880,7 +8880,16 @@ app.get('/api/inventario/catalogo', requireSection('inventario'), async (req, re
 app.post('/api/inventario/catalogo', requireSection('inventario'), async (req, res) => {
   try {
     if (!podeUnidadeInventario(req, req.body.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-    res.json(await inventario.criarItem(req.body));
+    const body = { ...req.body };
+    // Quem usa a contagem pode cadastrar um insumo que ainda não existe, mas
+    // preço de venda e disponibilidade no caixa são configurações comerciais
+    // do Catálogo: ficam com Master ou gerente autorizado.
+    if (!req.isMaster && !req.podeCatalogoEstoque) {
+      delete body.precoVenda;
+      delete body.noBalcao;
+      delete body.ativo;
+    }
+    res.json(await inventario.criarItem(body));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

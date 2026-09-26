@@ -440,7 +440,7 @@ function requireMasterOrAdmin(req, res, next) {
 
 // Master ou usuario com a permissao de Catalogo do Estoque (atribuida pelo
 // Master em usuarios.html) - deixa um gerente organizar setor/tipo, ajustar
-// custo de referencia e ativar/desativar item sem precisar de acesso Master
+// custo/preço de venda, canais e ativar/desativar item sem precisar de acesso Master
 function requireMasterOuCatalogoEstoque(req, res, next) {
   if (!req.isMaster && !req.podeCatalogoEstoque) return res.status(403).json({ error: 'Você não tem permissão pra gerenciar o Catálogo do Estoque.' });
   next();
