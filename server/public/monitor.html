@@ -439,9 +439,21 @@
 
 <div class="overlay" id="fraude-popup-overlay">
   <div class="modal" style="width:min(420px,92vw);border-color:var(--bad);">
-    <h3 style="color:var(--bad);">🚫 Pedido recusado — suspeita de fraude</h3>
+    <h3 id="fraude-popup-titulo" style="color:var(--bad);">🚫 Pedido recusado — suspeita de fraude</h3>
     <div id="fraude-popup-info" style="font-size:13px;margin-top:6px;"></div>
-    <button type="button" class="btn-disputa" style="width:100%;margin-top:16px;padding:10px;font-size:13px;border-color:var(--bad);color:var(--bad);" onclick="fecharPopupFraude()">OK (<span id="fraude-popup-contagem">10</span>s)</button>
+    <button type="button" id="fraude-popup-ok" class="btn-disputa" style="width:100%;margin-top:16px;padding:10px;font-size:13px;border-color:var(--bad);color:var(--bad);" onclick="fecharPopupFraude()">OK (<span id="fraude-popup-contagem">10</span>s)</button>
+  </div>
+</div>
+
+<div class="overlay" id="fraude-decisao-overlay">
+  <div class="modal" style="width:min(440px,92vw);border-color:var(--bad);">
+    <h3 id="fraude-decisao-titulo">Decidir bloqueio antifraude</h3>
+    <div id="fraude-decisao-info" style="font-size:12px;color:var(--muted);margin-bottom:12px;"></div>
+    <label>Confirme sua senha de Master</label>
+    <input type="password" id="fraude-decisao-password" autocomplete="new-password" data-digital style="width:100%;">
+    <p id="fraude-decisao-erro" class="hidden" style="color:var(--bad);font-size:11.5px;margin-top:8px;"></p>
+    <button type="button" id="fraude-decisao-confirmar" style="width:100%;margin-top:10px;">Confirmar decisão</button>
+    <button class="close" onclick="fecharDecisaoFraude()">Cancelar</button>
   </div>
 </div>
 
@@ -1750,6 +1762,47 @@ async function removerMarcaFraude(pedidoId){
   await refreshFraudMarks();
 }
 
+let DECISAO_FRAUDE = null;
+function acoesBloqueioFraude(m){
+  if(!m.entregaBloqueada) return m.bloqueioStatus==='LIBERADO_PELO_MASTER'
+    ? `<span class="flag" style="background:var(--ok-dim);color:var(--ok);">✓ ENTREGA LIBERADA PELO MASTER</span>` : '';
+  const aviso = `<span class="flag" style="background:var(--bad-dim);color:var(--bad);font-weight:800;">🚫 NÃO PRODUZIR / NÃO ENTREGAR · ACIONAR SUPORTE</span>`;
+  if(ME.role!=='master') return aviso;
+  return `${aviso}<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:7px;">
+    <button type="button" class="btn-disputa" onclick="abrirDecisaoFraude('${jsAttr(m.pedidoId)}','liberar')">✓ Liberar pedido</button>
+    <button type="button" class="btn-disputa" style="color:var(--bad);border-color:var(--bad);" onclick="abrirDecisaoFraude('${jsAttr(m.pedidoId)}','confirmar')">🚫 Confirmar fraude</button>
+  </div>`;
+}
+function abrirDecisaoFraude(pedidoId, acao){
+  const m=FRAUDE_MARKS.find(x=>String(x.pedidoId)===String(pedidoId));
+  DECISAO_FRAUDE={pedidoId,acao};
+  document.getElementById('fraude-decisao-titulo').textContent=acao==='liberar'?'Liberar produção/entrega':'Confirmar fraude e manter bloqueado';
+  document.getElementById('fraude-decisao-info').textContent=`Pedido ${pedidoId} · ${m?.unidade||''} · ${m?.clienteNome||'cliente'} · ${fmtMoney(m?.valor||0)}`;
+  document.getElementById('fraude-decisao-password').value='';
+  document.getElementById('fraude-decisao-erro').classList.add('hidden');
+  document.getElementById('fraude-decisao-overlay').classList.add('show');
+}
+function fecharDecisaoFraude(){
+  DECISAO_FRAUDE=null;
+  document.getElementById('fraude-decisao-overlay').classList.remove('show');
+}
+document.getElementById('fraude-decisao-confirmar').addEventListener('click', async()=>{
+  if(!DECISAO_FRAUDE) return;
+  const btn=document.getElementById('fraude-decisao-confirmar');
+  const erro=document.getElementById('fraude-decisao-erro');
+  const password=document.getElementById('fraude-decisao-password').value;
+  if(!password){ erro.textContent='Informe a senha ou use a digital.'; erro.classList.remove('hidden'); return; }
+  btn.disabled=true; erro.classList.add('hidden');
+  try{
+    const sufixo=DECISAO_FRAUDE.acao==='liberar'?'liberar-entrega':'confirmar';
+    const r=await fetch(`/api/fraude/${encodeURIComponent(DECISAO_FRAUDE.pedidoId)}/${sufixo}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não foi possível registrar a decisão.');
+    fecharDecisaoFraude(); await refreshFraudMarks();
+  }catch(e){ erro.textContent=e.message; erro.classList.remove('hidden'); }
+  finally{ btn.disabled=false; }
+});
+
 // pedidos suspeitos/fraude ficam colapsados numa "thread" por cliente (mesmo
 // nome) - abre/fecha guardado aqui pra sobreviver aos re-renders (SSE fica
 // atualizando esse painel o tempo todo)
@@ -1792,7 +1845,8 @@ function renderFraudeMonitor(){
         <div class="body" style="flex:1;">
           <div class="t1">${badge} ${esc(m.clienteNome||'cliente desconhecido')} · ${esc(m.unidade||'—')} · ${fmtMoney(m.valor)}</div>
           <div class="t2">Pedido ${esc(m.pedidoId)} · marcado por ${esc(m.atualizadoPorEmail||m.criadoPorEmail||'—')} em ${fmtDT(m.atualizadoEm)}${m.motivo?(' · '+esc(m.motivo)):''}</div>
-          <div style="margin-top:8px;">
+          <div style="margin-top:7px;">${acoesBloqueioFraude(m)}</div>
+          <div style="margin-top:8px;${m.entregaBloqueada?'display:none;':''}">
             <button type="button" class="btn-disputa" onclick="removerMarcaFraude('${jsAttr(m.pedidoId)}')">✕ Remover</button>
           </div>
         </div>
@@ -1805,7 +1859,8 @@ function renderFraudeMonitor(){
     const detalhes = marcas.map(m=>`
         <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px;">
           <div class="t2">Pedido ${esc(m.pedidoId)} · ${esc(m.unidade||'—')} · ${fmtMoney(m.valor)} · ${fmtDT(m.atualizadoEm)}${m.motivo?(' · '+esc(m.motivo)):''}</div>
-          <button type="button" class="btn-disputa" style="margin-top:4px;" onclick="removerMarcaFraude('${jsAttr(m.pedidoId)}')">✕ Remover</button>
+          <div style="margin-top:6px;">${acoesBloqueioFraude(m)}</div>
+          ${m.entregaBloqueada?'':`<button type="button" class="btn-disputa" style="margin-top:4px;" onclick="removerMarcaFraude('${jsAttr(m.pedidoId)}')">✕ Remover</button>`}
         </div>`).join('');
 
     return `
@@ -2114,16 +2169,28 @@ filtrarHoje();
 const FILA_POPUP_FRAUDE = [];
 let POPUP_FRAUDE_TIMER = null;
 function enfileirarPopupFraude(tx){
+  const chave=String(tx.pedidoId||tx.pspReference||'');
+  if(chave && FILA_POPUP_FRAUDE.some(x=>String(x.pedidoId||x.pspReference||'')===chave)) return;
   FILA_POPUP_FRAUDE.push(tx);
   if(FILA_POPUP_FRAUDE.length===1) mostrarPopupFraude();
 }
 function mostrarPopupFraude(){
   const tx = FILA_POPUP_FRAUDE[0];
   if(!tx) return;
+  const bloqueado = !!tx.entregaBloqueada;
+  document.getElementById('fraude-popup-titulo').textContent = bloqueado
+    ? '🚫 PEDIDO BLOQUEADO — NÃO PRODUZIR/NÃO ENTREGAR'
+    : '🚫 Pedido recusado — suspeita de fraude';
   document.getElementById('fraude-popup-info').innerHTML =
-    `${esc(tx.nomeCliente||tx.cardHolder||'Cliente desconhecido')} · ${esc(tx.unidade||'—')} · ${fmtMoney(tx.valor)}${tx.last4?(' · •• '+esc(tx.last4)):''}${tx.motivo?('<br><span style="color:var(--muted);font-size:12px;">'+esc(tx.motivo)+'</span>'):''}`;
+    `${esc(tx.nomeCliente||tx.clienteNome||tx.cardHolder||'Cliente desconhecido')} · ${esc(tx.unidade||'—')} · ${fmtMoney(tx.valor)}${tx.last4?(' · •• '+esc(tx.last4)):''}${tx.motivo?('<br><span style="color:var(--muted);font-size:12px;">'+esc(tx.motivo)+'</span>'):''}${bloqueado?'<br><b style="display:block;margin-top:9px;color:var(--bad);">Acione o suporte e aguarde a decisão do Master.</b>':''}`;
   document.getElementById('fraude-popup-overlay').classList.add('show');
   tocarAlerta();
+  if(bloqueado){
+    document.getElementById('fraude-popup-ok').innerHTML='OK — estou ciente';
+    clearInterval(POPUP_FRAUDE_TIMER);
+    return;
+  }
+  document.getElementById('fraude-popup-ok').innerHTML='OK (<span id="fraude-popup-contagem">10</span>s)';
   let restante = 10;
   document.getElementById('fraude-popup-contagem').textContent = restante;
   clearInterval(POPUP_FRAUDE_TIMER);
@@ -2234,7 +2301,8 @@ function connectStream(){
   });
   es.addEventListener('fraude-marcada', (e)=>{
     const m = JSON.parse(e.data);
-    if(m.nivel==='FRAUDE') tocarAlerta();
+    if(m.entregaBloqueada && m.bloqueioNovo!==false) enfileirarPopupFraude(m);
+    else if(m.nivel==='FRAUDE') tocarAlerta();
     refreshFraudMarks();
   });
   es.addEventListener('fraude-removida', ()=>{

@@ -9600,6 +9600,7 @@ setTimeout(async () => {
   try {
     const fi = require('./fraudIdentity');
     const ch = require('./cardHopping');
+    const reuse = require('./cardReuseRisk');
     const pix = require('./pixRepetido');
 
     // gerador deterministico (mesma semente sempre) - teste nao pode variar
@@ -9664,6 +9665,23 @@ setTimeout(async () => {
     const pixFraude = pixIds.some((id) => marcas.get(id) && marcas.get(id).nivel === 'FRAUDE');
     const pixSuspeito = pixIds.some((id) => marcas.get(id) && marcas.get(id).nivel === 'SUSPEITO');
 
+    // Caso real Tirol: mesmo final aprovado, mas comprador/titular variam.
+    // O primeiro pedido apenas alimenta a janela; o segundo precisa reter a
+    // entrega. Um cliente normal repetindo o próprio nome não pode disparar.
+    const t1 = fi.registrarPedido('TIROL1', 'Karina Farias', 'Karina Andrea da Silva Faria', 'Tirol');
+    const bloqueouPrimeiro = reuse.registrar({ unidade: 'Tirol', status: 'APROVADO', metodo: 'mc', last4: '2420' }, t1, 'TIROL1', 1000);
+    const t2 = fi.registrarPedido('TIROL2', 'Karina Silva', 'Karina Andrea da Silva', 'Tirol');
+    const bloqueouSegundo = reuse.registrar({ unidade: 'Tirol', status: 'APROVADO', metodo: 'mc', last4: '2420' }, t2, 'TIROL2', 2000);
+    const normal1 = fi.registrarPedido('NORMAL1', 'Marina Vasconcelos', 'Marina Vasconcelos', 'Unidade Normal');
+    const falso1 = reuse.registrar({ unidade: 'Unidade Normal', status: 'APROVADO', metodo: 'visa', last4: '1111' }, normal1, 'NORMAL1', 1000);
+    const normal2 = fi.registrarPedido('NORMAL2', 'Marina Vasconcelos', 'Marina Vasconcelos', 'Unidade Normal');
+    const falso2 = reuse.registrar({ unidade: 'Unidade Normal', status: 'APROVADO', metodo: 'visa', last4: '1111' }, normal2, 'NORMAL2', 2000);
+    const agoraPersistido = Date.now();
+    const atualPersistido = { unidade: 'Tirol Reinicio', status: 'APROVADO', metodo: 'mc', last4: '2420', nomeCliente: 'Karina Silva', cardHolder: 'Karina Andrea da Silva' };
+    const bloqueouAposReinicio = reuse.registrar(atualPersistido, { clusterId: 9999, totalPedidos: 1, nomesDistintos: 2 }, 'PERSIST2', agoraPersistido, [{
+      ...atualPersistido, merchantReference: 'PERSIST1', nomeCliente: 'Karina Farias', cardHolder: 'Karina Andrea da Silva Faria', dataHora: new Date(agoraPersistido - 60000).toISOString(),
+    }]);
+
     const fonteFi = require('fs').readFileSync(require('path').join(__dirname, 'fraudIdentity.js'), 'utf8');
     const fonteIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
 
@@ -9674,6 +9692,9 @@ setTimeout(async () => {
       'anel com nomes cruzados continua sendo pego': pegouAnel,
       'Pix nunca leva FRAUDE': !pixFraude,
       'Pix repetido leva SUSPEITO': pixSuspeito,
+      'caso Tirol bloqueia automaticamente so a partir do segundo pedido': !bloqueouPrimeiro && !!bloqueouSegundo,
+      'mesmo cliente legitimo repetindo compra nao e bloqueado': !falso1 && !falso2,
+      'reinicio do servidor nao apaga o primeiro pedido da janela': !!bloqueouAposReinicio,
       'Pix nao entra na malha de identidade nem no cardHopping':
         /const clusterInfo = ehPixTx/.test(fonteIdx) && /&& !ehPixTx\) \{/.test(fonteIdx),
       'a malha e escopada por unidade': /chaveEscopo\(unidade, t\)/.test(fonteFi)
@@ -9681,8 +9702,12 @@ setTimeout(async () => {
       'termo comum nao liga sozinho': /TERMOS_COMUNS\.has\(token\)/.test(fonteFi),
       'cluster que explode para de valer como identidade': /MAX_PEDIDOS_CLUSTER/.test(fonteFi)
         && /cluster\.saturado = true/.test(fonteFi),
-      'SUSPEITO exige nomes CRUZADOS, nao cliente que pediu 2x':
-        /clusterInfo\.nomesDistintos >= 2/.test(fonteIdx),
+      'SUSPEITO exige segundo pedido e nomes CRUZADOS':
+        /clusterInfo\.totalPedidos >= 2 && clusterInfo\.nomesDistintos >= 2/.test(fonteIdx),
+      'bloqueio automatico avisa a unidade e manda acionar suporte':
+        /alertarBloqueioFraudeNaLoja/.test(fonteIdx) && /ACIONE O SUPORTE/.test(fonteIdx),
+      'marcacao bloqueada nao pode ser removida para contornar o Master':
+        /marca && marca\.entregaBloqueada/.test(fonteIdx) && /liberar ou confirmar a fraude/.test(fonteIdx),
       'a limpeza nunca apaga marcacao que humano criou ou confirmou':
         /m\.criadoPorEmail === EMAIL_DETECCAO && m\.atualizadoPorEmail === EMAIL_DETECCAO/
           .test(require('fs').readFileSync(require('path').join(__dirname, 'fraudMarks.js'), 'utf8')),

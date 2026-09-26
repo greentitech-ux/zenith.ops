@@ -18,13 +18,15 @@ function docId(pedidoId) {
   return String(pedidoId).replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
 
-async function marcar({ pedidoId, unidade, nivel, motivo, clienteChave, clienteNome, statusPedido, valor, marcadoPorEmail }) {
+async function marcar({ pedidoId, unidade, nivel, motivo, clienteChave, clienteNome, statusPedido, valor, marcadoPorEmail, entregaBloqueada, bloqueioMotivo }) {
   if (!pedidoId) throw new Error('pedidoId é obrigatório.');
   if (!NIVEIS.includes(nivel)) throw new Error('Nível inválido.');
 
   const ref = COLLECTION.doc(docId(pedidoId));
   const existente = await ref.get();
   const agora = new Date().toISOString();
+  const anterior = existente.exists ? existente.data() : {};
+  const bloquearAgora = entregaBloqueada === true;
   const registro = {
     id: ref.id,
     pedidoId,
@@ -35,6 +37,14 @@ async function marcar({ pedidoId, unidade, nivel, motivo, clienteChave, clienteN
     valor: valor || 0,
     nivel,
     motivo: motivo || '',
+    entregaBloqueada: bloquearAgora ? true : !!anterior.entregaBloqueada,
+    bloqueioStatus: bloquearAgora ? 'AGUARDANDO_MASTER' : (anterior.bloqueioStatus || null),
+    bloqueioMotivo: bloquearAgora ? (bloqueioMotivo || motivo || 'Revisão antifraude obrigatória.') : (anterior.bloqueioMotivo || null),
+    bloqueadoEm: bloquearAgora ? agora : (anterior.bloqueadoEm || null),
+    liberadoEm: bloquearAgora ? null : (anterior.liberadoEm || null),
+    liberadoPorEmail: bloquearAgora ? null : (anterior.liberadoPorEmail || null),
+    fraudeConfirmadaEm: anterior.fraudeConfirmadaEm || null,
+    fraudeConfirmadaPorEmail: anterior.fraudeConfirmadaPorEmail || null,
     // sempre volta a ficar ativo ao (re)marcar, mesmo que ja tivesse sido
     // removido antes (ex: o mesmo pedido entra de novo por outro motivo)
     removido: false,
@@ -47,7 +57,40 @@ async function marcar({ pedidoId, unidade, nivel, motivo, clienteChave, clienteN
   };
   await ref.set(registro);
   invalidarCache();
-  return registro;
+  // Campo transitório (não vai pro Firestore): impede webhook repetido de
+  // reenviar o mesmo alarme pra loja. Se o Master liberou e o risco reaparece,
+  // `anterior.entregaBloqueada` é false e o alerta volta corretamente.
+  return { ...registro, bloqueioNovo: bloquearAgora && !anterior.entregaBloqueada };
+}
+
+async function liberarEntrega(pedidoId, liberadoPorEmail) {
+  const ref = COLLECTION.doc(docId(pedidoId));
+  const snap = await ref.get();
+  if (!snap.exists || snap.data().removido) throw new Error('Marcação antifraude não encontrada.');
+  const agora = new Date().toISOString();
+  const mudancas = {
+    entregaBloqueada: false, bloqueioStatus: 'LIBERADO_PELO_MASTER',
+    liberadoEm: agora, liberadoPorEmail: liberadoPorEmail || null,
+    atualizadoEm: agora, atualizadoPorEmail: liberadoPorEmail || null,
+  };
+  await ref.update(mudancas);
+  invalidarCache();
+  return { ...snap.data(), ...mudancas };
+}
+
+async function confirmarFraude(pedidoId, confirmadoPorEmail) {
+  const ref = COLLECTION.doc(docId(pedidoId));
+  const snap = await ref.get();
+  if (!snap.exists || snap.data().removido) throw new Error('Marcação antifraude não encontrada.');
+  const agora = new Date().toISOString();
+  const mudancas = {
+    nivel: 'FRAUDE', entregaBloqueada: true, bloqueioStatus: 'FRAUDE_CONFIRMADA',
+    fraudeConfirmadaEm: agora, fraudeConfirmadaPorEmail: confirmadoPorEmail || null,
+    atualizadoEm: agora, atualizadoPorEmail: confirmadoPorEmail || null,
+  };
+  await ref.update(mudancas);
+  invalidarCache();
+  return { ...snap.data(), ...mudancas };
 }
 
 async function remover(pedidoId, removidoPorEmail) {
@@ -191,7 +234,7 @@ async function listFraudeNomes() {
 }
 
 module.exports = {
-  NIVEIS, marcar, remover, listAll, listAllCached, listHistorico, listFraudeNomes, normalizarNome,
+  NIVEIS, marcar, remover, liberarEntrega, confirmarFraude, listAll, listAllCached, listHistorico, listFraudeNomes, normalizarNome,
   EMAIL_DETECCAO, contarAutomaticasAtivas, removerAutomaticasAtivas,
   invalidar: invalidarCache,
 };

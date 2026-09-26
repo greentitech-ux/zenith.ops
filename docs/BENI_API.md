@@ -369,6 +369,8 @@ senha, tem token. Chamando sem ela você toma **400 "Senha incorreta."**:
 | `POST /api/tarefas/:id/concluir` | concluir tarefa |
 | `PATCH /api/tarefas/status-lote` | concluir em lote (só quando o destino é concluir) |
 | `POST /api/refund-requests` | abrir solicitação de estorno |
+| `POST /api/fraude/:pedidoId/liberar-entrega` | liberar produção/entrega de pedido retido pela automação antifraude |
+| `POST /api/fraude/:pedidoId/confirmar` | confirmar fraude e manter o pedido bloqueado |
 | `POST /api/sangrias` | lançar sangria / depósito |
 | `POST /api/empresas/:id/arquivar` | arquivar empresa |
 | `POST /api/empresas/:id/desarquivar` | desarquivar empresa |

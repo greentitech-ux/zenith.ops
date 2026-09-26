@@ -20,6 +20,7 @@ const { lookupBank } = require('./binLookup');
 const push = require('./push');
 const cardTesting = require('./cardTesting');
 const cardHopping = require('./cardHopping');
+const cardReuseRisk = require('./cardReuseRisk');
 const disputes = require('./disputes');
 const fraudMarks = require('./fraudMarks');
 const fraudReport = require('./fraudReport');
@@ -3153,7 +3154,7 @@ function hmacValid(item) {
 // (padrao de troca de cartao intensificou, ou ja existe outra marca FRAUDE
 // no mesmo cluster), qualquer marca SUSPEITO ainda ativa nesse cluster
 // tambem vira FRAUDE - "intensificou, muda a tag toda do grupo junto"
-async function escalarClusterParaFraude(nomes, motivo) {
+async function escalarClusterParaFraude(nomes, motivo, bloquearEntrega = false) {
   if (!nomes || !nomes.length) return;
   const nomesNorm = new Set(nomes.map(fraudMarks.normalizarNome));
   const marcas = await fraudMarks.listAllCached();
@@ -3170,6 +3171,8 @@ async function escalarClusterParaFraude(nomes, motivo) {
       statusPedido: m.statusPedido,
       valor: m.valor,
       marcadoPorEmail: 'deteccao-automatica@sistema',
+      entregaBloqueada: bloquearEntrega && m.statusPedido === 'APROVADO',
+      bloqueioMotivo: bloquearEntrega && m.statusPedido === 'APROVADO' ? motivo : null,
     });
     broadcast('fraude-marcada', registro, 'monitor');
   }
@@ -3301,6 +3304,8 @@ app.post('/webhooks/adyen', async (req, res) => {
             statusPedido: tx.status,
             valor: tx.valor,
             marcadoPorEmail: 'deteccao-automatica@sistema',
+            entregaBloqueada: tx.status === 'APROVADO',
+            bloqueioMotivo: tx.status === 'APROVADO' ? 'Troca de cartões em sequência pela mesma identidade.' : null,
           });
           broadcast('fraude-marcada', registro, 'monitor');
           push.notifyRaw(
@@ -3310,11 +3315,67 @@ app.post('/webhooks/adyen', async (req, res) => {
             tx.unidade
           );
           if (clusterInfo) {
-            await escalarClusterParaFraude(clusterInfo.nomes, 'Escalado: padrão de troca de cartão confirmado no mesmo grupo de pedidos.');
+            await escalarClusterParaFraude(clusterInfo.nomes, 'Escalado: padrão de troca de cartão confirmado no mesmo grupo de pedidos.', tx.status === 'APROVADO');
           }
+          if (tx.status === 'APROVADO' && registro.bloqueioNovo) alertarBloqueioFraudeNaLoja(tx, pedidoIdAtual, registro.motivo);
         } catch (err) {
           console.error('Erro ao marcar fraude automática (troca de cartão):', err.message);
         }
+      }
+    }
+
+    // Mesmo cartão aprovado repetidamente, mas com comprador/titular trocando
+    // de nome dentro da mesma identidade forte. Era exatamente o buraco dos
+    // dois pedidos da Tirol: ambos ficavam apenas SUSPEITO e a operação podia
+    // entregar. Agora o pedido fica retido até o Master liberar ou confirmar.
+    const repeticaoMesmoCartao = !ehPixTx
+      ? cardReuseRisk.registrar(tx, clusterInfo, pedidoIdAtual, Date.now(), store.allTransactions())
+      : null;
+    if (repeticaoMesmoCartao && !jaFraudeNativaAdyen) {
+      try {
+        const clienteNome = tx.nomeCliente || tx.cardHolder || null;
+        const motivoBloqueio = `Mesmo cartão em ${repeticaoMesmoCartao.pedidos} pedidos aprovados ligados, com variação de nomes, em até ${repeticaoMesmoCartao.janelaMinutos} min.`;
+        const registro = await fraudMarks.marcar({
+          pedidoId: pedidoIdAtual, unidade: tx.unidade, nivel: 'SUSPEITO',
+          motivo: `Bloqueio automático: ${motivoBloqueio}`,
+          clienteChave: clienteNome ? `nome:${clienteNome}` : null,
+          clienteNome, statusPedido: tx.status, valor: tx.valor,
+          marcadoPorEmail: 'deteccao-automatica@sistema', entregaBloqueada: true,
+          bloqueioMotivo: motivoBloqueio,
+        });
+        broadcast('fraude-marcada', registro, 'monitor');
+        if (registro.bloqueioNovo) push.notifyRaw(
+          `🚫 PEDIDO BLOQUEADO — ${tx.unidade || ''}`,
+          `${clienteNome || 'Cliente'} · R$ ${Number(tx.valor || 0).toFixed(2)} · NÃO produzir/entregar; acione o suporte`,
+          `fraude-bloqueio-${pedidoIdAtual}`, tx.unidade
+        );
+        await escalarClusterParaFraude(clusterInfo.nomes, 'Bloqueado: mesmo cartão aprovado em pedidos ligados com variação de nomes.', true);
+        if (registro.bloqueioNovo) alertarBloqueioFraudeNaLoja(tx, pedidoIdAtual, motivoBloqueio);
+      } catch (err) {
+        console.error('Erro ao bloquear reincidência com o mesmo cartão:', err.message);
+      }
+    }
+
+    // Sinal nativo da Adyen em pagamento APROVADO também precisa produzir
+    // consequência operacional. Antes aparecia só como uma flag visual.
+    if (tx.status === 'APROVADO' && jaFraudeNativaAdyen && !ehPixTx) {
+      try {
+        const clienteNome = tx.nomeCliente || tx.cardHolder || null;
+        const registro = await fraudMarks.marcar({
+          pedidoId: pedidoIdAtual, unidade: tx.unidade, nivel: 'SUSPEITO',
+          motivo: 'Bloqueio automático: risco de fraude informado pela Adyen em pagamento aprovado.',
+          clienteChave: clienteNome ? `nome:${clienteNome}` : null,
+          clienteNome, statusPedido: tx.status, valor: tx.valor,
+          marcadoPorEmail: 'deteccao-automatica@sistema', entregaBloqueada: true,
+          bloqueioMotivo: 'Risco de fraude informado pela Adyen.',
+        });
+        broadcast('fraude-marcada', registro, 'monitor');
+        if (registro.bloqueioNovo) {
+          push.notifyRaw(`🚫 PEDIDO BLOQUEADO — ${tx.unidade || ''}`, `${clienteNome || 'Cliente'} · risco apontado pela Adyen · não produza/entregue; acione o suporte`, `fraude-bloqueio-${pedidoIdAtual}`, tx.unidade);
+          alertarBloqueioFraudeNaLoja(tx, pedidoIdAtual, registro.motivo);
+        }
+      } catch (err) {
+        console.error('Erro ao bloquear aprovação com risco nativo Adyen:', err.message);
       }
     }
 
@@ -3350,6 +3411,8 @@ app.post('/webhooks/adyen', async (req, res) => {
               statusPedido: tx.status,
               valor: tx.valor,
               marcadoPorEmail: 'deteccao-automatica@sistema',
+              entregaBloqueada: tx.status === 'APROVADO',
+              bloqueioMotivo: tx.status === 'APROVADO' ? 'Cliente ligado a fraude já confirmada.' : null,
             });
             broadcast('fraude-marcada', registro, 'monitor');
             push.notifyRaw(
@@ -3358,13 +3421,12 @@ app.post('/webhooks/adyen', async (req, res) => {
               `fraude-auto-${pedidoIdAtual}`,
               tx.unidade
             );
+            if (tx.status === 'APROVADO' && registro.bloqueioNovo) alertarBloqueioFraudeNaLoja(tx, pedidoIdAtual, registro.motivo);
           }
-          await escalarClusterParaFraude(clusterInfo.nomes, 'Escalado: outro pedido do mesmo grupo já confirmado como fraude.');
-        } else if (!jaMarcadoNesse && clusterInfo.nomesDistintos >= 2) {
+          await escalarClusterParaFraude(clusterInfo.nomes, 'Escalado: outro pedido do mesmo grupo já confirmado como fraude.', tx.status === 'APROVADO');
+        } else if (!jaMarcadoNesse && clusterInfo.totalPedidos >= 2 && clusterInfo.nomesDistintos >= 2) {
           // o sinal e o CRUZAMENTO de nomes diferentes na mesma identidade,
-          // nao o cliente que pediu duas vezes. Antes a condicao era
-          // totalPedidos >= 2, o que marcava SUSPEITO todo cliente fiel que
-          // pedisse duas vezes no mesmo dia.
+          // nao um unico pedido em que comprador e titular sao diferentes.
           const registro = await fraudMarks.marcar({
             pedidoId: pedidoIdAtual,
             unidade: tx.unidade,
@@ -3629,6 +3691,8 @@ app.post('/api/fraude/marcar', requireSection('monitor'), async (req, res) => {
     const registro = await fraudMarks.marcar({
       pedidoId, unidade, nivel, motivo, clienteChave, clienteNome, statusPedido, valor,
       marcadoPorEmail: req.user.email,
+      entregaBloqueada: nivel === 'FRAUDE' && statusPedido === 'APROVADO',
+      bloqueioMotivo: nivel === 'FRAUDE' && statusPedido === 'APROVADO' ? 'Fraude confirmada manualmente; não produzir/entregar.' : null,
     });
     broadcast('fraude-marcada', registro, 'monitor');
     if (nivel === 'FRAUDE') {
@@ -3638,6 +3702,7 @@ app.post('/api/fraude/marcar', requireSection('monitor'), async (req, res) => {
         `fraude-${registro.pedidoId}`,
         registro.unidade
       );
+      if (statusPedido === 'APROVADO' && registro.bloqueioNovo) alertarBloqueioFraudeNaLoja({ unidade, nomeCliente: clienteNome, valor }, pedidoId, registro.motivo);
     }
     res.json(registro);
   } catch (err) {
@@ -3645,9 +3710,35 @@ app.post('/api/fraude/marcar', requireSection('monitor'), async (req, res) => {
   }
 });
 
+app.post('/api/fraude/:pedidoId/liberar-entrega', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const registro = await fraudMarks.liberarEntrega(decodeURIComponent(req.params.pedidoId), req.user.email);
+    broadcast('fraude-marcada', registro, 'monitor');
+    alertarDecisaoFraudeNaLoja(registro, true);
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fraude/:pedidoId/confirmar', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const registro = await fraudMarks.confirmarFraude(decodeURIComponent(req.params.pedidoId), req.user.email);
+    broadcast('fraude-marcada', registro, 'monitor');
+    push.notifyRaw('🚫 Fraude confirmada pelo Master', `${registro.clienteNome || 'Cliente'} · ${registro.unidade || ''} · pedido mantido bloqueado`, `fraude-confirmada-${registro.pedidoId}`, registro.unidade);
+    alertarDecisaoFraudeNaLoja(registro, false);
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.delete('/api/fraude/:pedidoId', requireSection('monitor'), async (req, res) => {
-  await fraudMarks.remover(decodeURIComponent(req.params.pedidoId), req.user.email);
-  broadcast('fraude-removida', { pedidoId: req.params.pedidoId }, 'monitor');
+  const pedidoId = decodeURIComponent(req.params.pedidoId);
+  const marca = (await fraudMarks.listAllCached()).find((m) => String(m.pedidoId) === String(pedidoId));
+  if (marca && marca.entregaBloqueada) {
+    return res.status(409).json({ error: 'Pedido bloqueado: somente o Master pode liberar ou confirmar a fraude com senha/digital.' });
+  }
+  await fraudMarks.remover(pedidoId, req.user.email);
+  broadcast('fraude-removida', { pedidoId }, 'monitor');
   res.json({ ok: true });
 });
 
@@ -4884,6 +4975,38 @@ function exigirQA(req, res) {
   if (req.isMaster || req.isAdmin || users.temTag(req.user, 'qa')) return true;
   res.status(403).json({ error: 'Acesso restrito ao setor Q.A.' });
   return false;
+}
+
+// Um bloqueio que fica apenas no Monitor central ainda deixa a loja produzir.
+// Esta mensagem vai automaticamente para TODOS os computadores cadastrados da
+// unidade; o banner do agente informa claramente que a entrega depende do
+// Master. Falha no NOC não derruba o webhook nem desfaz o bloqueio persistido.
+async function alertarBloqueioFraudeNaLoja(tx, pedidoId, motivo) {
+  try {
+    const nomeAlvo = nomeCanonicoUnidade(tx.unidade, tx.unidade);
+    const computadores = (await lojaStatus.listar())
+      .filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo);
+    const cliente = String(tx.nomeCliente || tx.cardHolder || 'Cliente').slice(0, 80);
+    const texto = `🚫 NÃO PRODUZIR/NÃO ENTREGAR: pedido #${pedidoId} · ${cliente} · R$ ${Number(tx.valor || 0).toFixed(2)}. ACIONE O SUPORTE e aguarde a liberação do Master.`;
+    await Promise.all(computadores.map((c) => lojaStatus.enviarMensagem(c.codigo, c.posto, texto, 'deteccao-automatica@sistema')));
+    console.log(`[fraude] bloqueio do pedido ${pedidoId} avisado em ${computadores.length} computador(es) de ${nomeAlvo}: ${motivo}`);
+  } catch (err) {
+    console.error(`[fraude] não consegui alertar a loja sobre o bloqueio do pedido ${pedidoId}:`, err.message);
+  }
+}
+
+async function alertarDecisaoFraudeNaLoja(registro, liberado) {
+  try {
+    const nomeAlvo = nomeCanonicoUnidade(registro.unidade, registro.unidade);
+    const computadores = (await lojaStatus.listar())
+      .filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo);
+    const texto = liberado
+      ? `✅ PEDIDO #${registro.pedidoId} LIBERADO PELO MASTER. A unidade pode produzir/entregar normalmente.`
+      : `🚫 FRAUDE CONFIRMADA: pedido #${registro.pedidoId}. MANTENHA BLOQUEADO, não produza/não entregue e acione o suporte.`;
+    await Promise.all(computadores.map((c) => lojaStatus.enviarMensagem(c.codigo, c.posto, texto, registro.atualizadoPorEmail || 'master')));
+  } catch (err) {
+    console.error(`[fraude] não consegui avisar a decisão do pedido ${registro.pedidoId}:`, err.message);
+  }
 }
 function temAcessoQAOuUnidade(req) {
   return req.isMaster || req.isAdmin || users.temTag(req.user, 'qa') || !!((req.permissions && req.permissions.unidades) || []).length;
