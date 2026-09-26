@@ -5062,18 +5062,36 @@ function exigirQA(req, res) {
   return false;
 }
 
+// Nem toda máquina da unidade deve tocar um alerta operacional. O alvo é quem
+// pode produzir, expedir ou interromper um pedido: PDV/ATM (inclusive quando
+// vierem com sufixo, como "PDV.01"), Dispatch e Delivery. O texto pode estar
+// no nome exibido ou no posto legado, por isso ambos são considerados.
+function ehPostoOperacionalDePedido(computador) {
+  const identificacao = `${computador && computador.nome || ''} ${computador && computador.posto || ''}`.toUpperCase();
+  return /(^|[^A-Z0-9])(PDV|ATM|DISPATCH|DELIVERY)([^A-Z0-9]|$)/.test(identificacao);
+}
+
+async function computadoresOperacionaisDaUnidade(unidade) {
+  const nomeAlvo = nomeCanonicoUnidade(unidade, unidade);
+  const computadores = (await lojaStatus.listar())
+    .filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo)
+    .filter(ehPostoOperacionalDePedido);
+  return { nomeAlvo, computadores };
+}
+
 // Um bloqueio que fica apenas no Monitor central ainda deixa a loja produzir.
-// Esta mensagem vai automaticamente para TODOS os computadores cadastrados da
-// unidade; o banner do agente informa claramente que a entrega depende do
-// Master. Falha no NOC não derruba o webhook nem desfaz o bloqueio persistido.
+// Vai só aos postos operacionais; falha no NOC não derruba o webhook nem
+// desfaz o bloqueio persistido.
 async function alertarBloqueioFraudeNaLoja(tx, pedidoId, motivo) {
   try {
-    const nomeAlvo = nomeCanonicoUnidade(tx.unidade, tx.unidade);
-    const computadores = (await lojaStatus.listar())
-      .filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo);
+    const { nomeAlvo, computadores } = await computadoresOperacionaisDaUnidade(tx.unidade);
+    if (!computadores.length) {
+      console.warn(`[fraude] nenhum PDV/ATM/Dispatch/Delivery cadastrado para alertar em ${nomeAlvo} (pedido ${pedidoId}).`);
+      return;
+    }
     const cliente = String(tx.nomeCliente || tx.cardHolder || 'Cliente').slice(0, 80);
     const texto = `🚫 NÃO PRODUZIR/NÃO ENTREGAR: pedido #${pedidoId} · ${cliente} · R$ ${Number(tx.valor || 0).toFixed(2)}. ACIONE O SUPORTE e aguarde a liberação do Master.`;
-    await Promise.all(computadores.map((c) => lojaStatus.enviarMensagem(c.codigo, c.posto, texto, 'deteccao-automatica@sistema')));
+    await lojaStatus.enviarMensagemMuitos(computadores.map((c) => ({ codigo: c.codigo, posto: c.posto })), texto, 'deteccao-automatica@sistema');
     console.log(`[fraude] bloqueio do pedido ${pedidoId} avisado em ${computadores.length} computador(es) de ${nomeAlvo}: ${motivo}`);
   } catch (err) {
     console.error(`[fraude] não consegui alertar a loja sobre o bloqueio do pedido ${pedidoId}:`, err.message);
@@ -5081,16 +5099,13 @@ async function alertarBloqueioFraudeNaLoja(tx, pedidoId, motivo) {
 }
 
 // O estorno confirmado depois de uma aprovação pode chegar enquanto o pedido
-// ainda está no Make, Dispatch ou PDV. A mensagem vai a TODOS os computadores
-// cadastrados da unidade; se algum estiver offline, fica na fila segura do
-// heartbeat e abre quando a máquina voltar, além de entrar no chat dela.
+// ainda está no Make, Dispatch ou PDV. A mensagem vai apenas aos postos
+// operacionais; se algum estiver offline, fica na fila segura do heartbeat.
 async function alertarEstornoNaLoja(tx, pedidoId, cliente, valorDoPedido) {
   try {
-    const nomeAlvo = nomeCanonicoUnidade(tx.unidade, tx.unidade);
-    const computadores = (await lojaStatus.listar())
-      .filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo);
+    const { nomeAlvo, computadores } = await computadoresOperacionaisDaUnidade(tx.unidade);
     if (!computadores.length) {
-      console.warn(`[estorno] nenhum computador cadastrado para alertar em ${nomeAlvo} (pedido ${pedidoId}).`);
+      console.warn(`[estorno] nenhum PDV/ATM/Dispatch/Delivery cadastrado para alertar em ${nomeAlvo} (pedido ${pedidoId}).`);
       return;
     }
     const valor = Number(tx.valor || valorDoPedido || 0).toFixed(2);
@@ -5108,9 +5123,8 @@ async function alertarEstornoNaLoja(tx, pedidoId, cliente, valorDoPedido) {
 
 async function alertarDecisaoFraudeNaLoja(registro, liberado) {
   try {
-    const nomeAlvo = nomeCanonicoUnidade(registro.unidade, registro.unidade);
-    const computadores = (await lojaStatus.listar())
-      .filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo);
+    const { computadores } = await computadoresOperacionaisDaUnidade(registro.unidade);
+    if (!computadores.length) return;
     const texto = liberado
       ? `✅ PEDIDO #${registro.pedidoId} LIBERADO PELO MASTER. A unidade pode produzir/entregar normalmente.`
       : `🚫 FRAUDE CONFIRMADA: pedido #${registro.pedidoId}. MANTENHA BLOQUEADO, não produza/não entregue e acione o suporte.`;
