@@ -333,13 +333,6 @@ function limitarValorPagamento(input){
   const maximo = Math.max(0, total - outros);
   if(num(input.value) > maximo + 0.001) input.value = maximo > 0 ? maximo.toFixed(2) : '';
 }
-function parcelasIguais(total, quantidade){
-  // Divide em centavos para R$ 98,78 ÷ 4 nunca virar R$ 98,76 ou R$ 98,80.
-  const q = Math.max(1, Math.floor(Number(quantidade) || 1));
-  const centavos = Math.round(num(total) * 100);
-  const base = Math.floor(centavos / q), resto = centavos % q;
-  return Array.from({ length:q }, (_, i) => (base + (i < resto ? 1 : 0)) / 100);
-}
 function atualizarResumoPagamento(){
   const total = CONTA ? CONTA.total : 0;
   const soma = somaPagamentos();
@@ -360,7 +353,7 @@ function atualizarResumoPagamento(){
     : semForma ? 'Escolha a forma de pagamento de cada valor informado.'
       : `Falta registrar ${fmtReal(saldo)} de ${fmtReal(total)}.`;
 }
-function adicionarPagamento(valor = ''){
+function adicionarPagamento(valor = '', referencia = ''){
   if(!CONTA || somaPagamentos() >= CONTA.total - 0.001) return;
   PAGAMENTO_SEQ++;
   const id = `pagamento-${PAGAMENTO_SEQ}`;
@@ -368,25 +361,28 @@ function adicionarPagamento(valor = ''){
   linha.className = 'est-pagamento-linha'; linha.id = id;
   linha.innerHTML = `<div class="est-pagamento-campos">
     <label>Forma<select class="pagamento-forma" onchange="atualizarResumoPagamento()"><option value="">selecione...</option>${FORMAS.map(([forma, rotulo])=>`<option value="${forma}">${rotulo}</option>`).join('')}</select></label>
-    <label>Valor aplicado<input class="pagamento-valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00" value="${valor === '' ? '' : Number(valor).toFixed(2)}" oninput="limitarValorPagamento(this);atualizarResumoPagamento()"></label>
+    <label>${referencia ? `${esc(referencia)} · valor aplicado` : 'Valor aplicado'}<input class="pagamento-valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00" value="${valor === '' ? '' : Number(valor).toFixed(2)}" oninput="limitarValorPagamento(this);atualizarResumoPagamento()"></label>
     <button type="button" class="est-btn perigo est-pagamento-remover" title="Remover forma" aria-label="Remover forma" onclick="document.getElementById('${id}').remove();atualizarResumoPagamento()">✕</button>
   </div>`;
   document.getElementById('lista-pagamentos').appendChild(linha);
   atualizarResumoPagamento();
 }
-function dividirPorComandas(){
+function usarValoresDasComandas(){
   if(!CONTA || CONTA.comandas.length < 2) return;
-  const parcelas = parcelasIguais(CONTA.total, CONTA.comandas.length);
+  // Não rateia: cada comanda já tem sua dívida calculada com rodízio, consumo
+  // e serviço. Quem consumiu mais paga a própria comanda maior.
+  const valores = CONTA.comandas.map(c => ({ referencia:`Comanda ${c.numero}`, valor:c.totais.total }));
+  if(CONTA.balcao > 0) valores.push({ referencia:'Balcão', valor:CONTA.balcao });
   document.getElementById('lista-pagamentos').innerHTML = '';
   PAGAMENTO_SEQ = 0;
-  parcelas.forEach(valor => adicionarPagamento(valor));
+  valores.forEach(({ valor, referencia }) => adicionarPagamento(valor, referencia));
   const resumo = document.getElementById('pagamento-resumo');
-  resumo.textContent = `${CONTA.comandas.length} comandas divididas exatamente: ${parcelas.map(fmtReal).join(' + ')}. Escolha a forma de cada parcela.`;
+  resumo.textContent = `Valores reais das comandas: ${valores.map(x => `${x.referencia} ${fmtReal(x.valor)}`).join(' + ')}. Escolha a forma de cada uma.`;
 }
 function renderFormas(){
   PAGAMENTO_SEQ = 0;
   document.getElementById('formas').innerHTML = `
-    ${CONTA.comandas.length > 1 ? `<div class="est-divisao"><b>${CONTA.comandas.length} comandas juntas</b><span>Se forem dividir igual, o sistema reparte até os centavos.</span><button type="button" class="est-btn" onclick="dividirPorComandas()">÷ Dividir por ${CONTA.comandas.length}</button></div>` : ''}
+    ${CONTA.comandas.length > 1 ? `<div class="est-divisao"><b>${CONTA.comandas.length} comandas juntas</b><span>Cada comanda mantém seu valor real, mesmo quando uma consumiu mais que a outra.</span><button type="button" class="est-btn" onclick="usarValoresDasComandas()">☷ Usar valores das comandas</button></div>` : ''}
     <div id="lista-pagamentos"></div>
     <button type="button" class="est-btn" id="btn-add-pagamento" onclick="adicionarPagamento()">+ Adicionar outra forma</button>
     <div class="est-comanda-meta" id="pagamento-resumo" style="margin-top:8px;"></div>`;
