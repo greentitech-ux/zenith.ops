@@ -489,7 +489,7 @@
       <button type="button" class="btn-add" id="btn-catalogo-seed" onclick="carregarCatalogoPadrao()">⬇️ Carregar catálogo padrão (Domino's)</button>
     </div>
   </h2>
-  <div class="sub" style="margin:-6px 0 10px;">Catálogo da loja selecionada acima - cada loja tem o seu (posição, setor e itens ativos são independentes entre lojas).</div>
+  <div class="sub" style="margin:-6px 0 10px;">Catálogo da unidade selecionada. Para aparecer no consumo do Salão, o item precisa estar ativo e ter Preço de venda maior que zero. Marque “Disponível também no balcão” somente para o que o caixa vende diretamente.</div>
   <div class="msg hidden" id="msg-catalogo-seed"></div>
   <button type="button" class="btn-add" onclick="abrirNovoItem()">+ Novo item</button>
   <div class="tablewrap" style="margin-top:12px;">
@@ -1874,6 +1874,11 @@ document.getElementById('form-item').addEventListener('submit', async (ev)=>{
   const msg = document.getElementById('msg-item');
   msg.classList.add('hidden');
   try{
+    const precoVenda = document.getElementById('i-preco-venda').value;
+    const noBalcao = document.getElementById('i-no-balcao').checked;
+    if(PODE_CATALOGO && noBalcao && !(Number(precoVenda)>0)){
+      throw new Error('Informe um Preço de venda maior que zero para liberar o item no balcão.');
+    }
     const body = {
       unidade: unidadeAtual(),
       nome: document.getElementById('i-nome').value,
@@ -1882,8 +1887,8 @@ document.getElementById('form-item').addEventListener('submit', async (ev)=>{
       unidadeMedida: document.getElementById('i-unidade').value,
       custoReferencia: document.getElementById('i-custo').value,
       ...(PODE_CATALOGO ? {
-        precoVenda: document.getElementById('i-preco-venda').value || null,
-        noBalcao: document.getElementById('i-no-balcao').checked,
+        precoVenda: precoVenda || null,
+        noBalcao,
         ativo: document.getElementById('i-ativo').checked,
       } : {}),
       quantidadePadrao: document.getElementById('i-quantidade-padrao').value || null,
@@ -2052,6 +2057,11 @@ async function boot(){
   document.getElementById('sel-unidade').innerHTML = UNIDADES.length
     ? UNIDADES.map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('')
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
+  const params = new URLSearchParams(location.search);
+  const unidadePedida = params.get('unidade');
+  if(unidadePedida && UNIDADES.some(u=>u.codigo===unidadePedida)){
+    document.getElementById('sel-unidade').value = unidadePedida;
+  }
 
   await Promise.all([carregarSetoresTipos(), carregarCatalogo(), carregarRecebimentos(), carregarSaidas(), carregarEstoqueHoje()]);
   document.getElementById('i-setor').innerHTML = ORDEM_SETORES.map(s=>`<option value="${s}">${escapeHtml(SETORES[s])}</option>`).join('');
@@ -2060,7 +2070,12 @@ async function boot(){
   popularSelectsItem();
   aplicarPresetDif('semana');
   document.getElementById('root').classList.remove('hidden');
-  mudarAba('contagem');
+  const abaPedida = params.get('aba');
+  const abasValidas = new Set(['contagem','recebimento','saida','diferencas','historico','catalogo','estoque','ocorrencias']);
+  const podeAbrirAbaPedida = abasValidas.has(abaPedida)
+    && (abaPedida!=='catalogo' || podeCatalogo)
+    && (abaPedida!=='ocorrencias' || isMaster);
+  mudarAba(podeAbrirAbaPedida ? abaPedida : 'contagem');
 }
 boot();
 </script>

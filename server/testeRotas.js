@@ -23855,6 +23855,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const chopp = await inv.criarItem({ unidade: UNI, nome: 'Chopp', setor: 'geladeira', tipo: 'BEBIDA', unidadeMedida: 'un', precoVenda: 14.5 });
     const agua = await inv.criarItem({ unidade: UNI, nome: 'Água', setor: 'geladeira', tipo: 'BEBIDA', unidadeMedida: 'un', precoVenda: 6 });
     const semPreco = await inv.criarItem({ unidade: UNI, nome: 'Guardanapo', setor: 'estoque_seco', tipo: 'EMBALAGEM', unidadeMedida: 'un' });
+    const inativo = await inv.criarItem({ unidade: UNI, nome: 'Item inativo', setor: 'estoque_seco', tipo: 'COMIDA', unidadeMedida: 'un', precoVenda: 5, ativo: false });
+    let erroPrecoNegativo = null;
+    try { await inv.criarItem({ unidade: UNI, nome: 'Preço inválido', setor: 'estoque_seco', tipo: 'COMIDA', unidadeMedida: 'un', precoVenda: -1 }); } catch (e) { erroPrecoNegativo = e.message; }
+    let erroBalcaoSemPreco = null;
+    try { await inv.criarItem({ unidade: UNI, nome: 'Balcão sem preço', setor: 'estoque_seco', tipo: 'BEBIDA', unidadeMedida: 'un', noBalcao: true }); } catch (e) { erroBalcaoSemPreco = e.message; }
 
     const emTerca = new Date('2026-09-15T20:00:00-03:00');
     const abrir = (numero, mesa, tipo = 'adulto') => est.abrirComanda({ unidade: UNI, numero, mesa, tipoRodizio: tipo, porEmail: 'garcom@teste.local', agora: emTerca });
@@ -24008,6 +24013,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && !!salaoAntes.mesas.find((m) => m.mesa === 80),
       'o preço do item vem do CATÁLOGO, não do navegador': mesa74.consumo === 14.5 * 2 + 6 + 6,
       'item sem preço de venda não pode ser lançado': !!erroSemPrecoVenda && /não tem preço de venda/.test(erroSemPrecoVenda),
+      'catálogo recusa preço negativo e balcão sem preço':
+        !!erroPrecoNegativo && /Preço de venda inválido/.test(erroPrecoNegativo)
+        && !!erroBalcaoSemPreco && /preço de venda maior que zero/.test(erroBalcaoSemPreco),
+      'item novo respeita a opção inativo': inativo.ativo === false,
       // a isenta entra com 0: o subtotal é o mesmo de antes dela
       'a mesa soma rodízio + consumo das comandas dela': mesa74.subtotal === Math.round((79.9 * 2 + 39.9 + 0 + 14.5 * 2 + 6 + 6) * 100) / 100,
       'aumentar a tabela NO MEIO DO SERVIÇO não mexe em quem já está na mesa':

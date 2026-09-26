@@ -138,6 +138,10 @@ let ME = null, UNIDADES = [], SALAO = null, CATALOGO = [], COMANDA_ABERTA = null
 
 function unidadeAtual(){ return document.getElementById('unidade').value; }
 function unidadeNomeAtual(){ const u = UNIDADES.find(x=>x.codigo===unidadeAtual()); return u ? u.nome : unidadeAtual(); }
+function podeConfigurarCatalogo(){ return !!ME && (ME.role==='master' || !!ME.podeCatalogoEstoque); }
+function abrirCatalogo(){
+  location.href = `/estoque?unidade=${encodeURIComponent(unidadeAtual())}&aba=catalogo`;
+}
 
 async function pedir(url, opcoes){
   const r = await fetch(url, opcoes);
@@ -334,7 +338,9 @@ function pintarComanda(c){
       <div class="est-sub" style="margin:0 0 6px;">${esc(grupo)}</div>
       <div class="est-grade" style="margin-bottom:12px;">${itens.map(i=>`
         <button type="button" class="est-btn" onclick="lancar('${esc(c.id)}','${esc(i.id)}')"><span>${esc(i.nome)}</span><small>${fmtReal(i.precoVenda)}</small></button>`).join('')}</div>`).join('')
-      : '<div class="est-vazio">Nenhum item com preço de venda no catálogo desta unidade.</div>'}
+      : `<div class="est-vazio">Nenhum item disponível para consumo. O item precisa estar ativo e ter preço de venda maior que zero.
+          ${podeConfigurarCatalogo()?'<div style="margin-top:10px;"><button type="button" class="est-btn principal" onclick="abrirCatalogo()">⚙ Configurar itens de consumo</button></div>':''}
+        </div>`}
 
     <h2 style="margin-top:6px;">Lançado</h2>
     ${(c.itens||[]).length ? `<div class="est-lista">${c.itens.map((it,i)=>`

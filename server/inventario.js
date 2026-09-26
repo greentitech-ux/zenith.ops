@@ -52,6 +52,12 @@ function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+function normalizarPrecoVenda(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new Error('Preço de venda inválido. Informe zero ou um valor positivo.');
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
 function arred(v, casas = 2) {
   const f = 10 ** casas;
   return Math.round((v + Number.EPSILON) * f) / f;
@@ -137,7 +143,7 @@ async function obterItemUnidade(id) {
   return snap.exists ? snap.data().unidade : null;
 }
 
-async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoReferencia, quantidadePadrao, pesoEmbalagemG, precoVenda, noBalcao }) {
+async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoReferencia, quantidadePadrao, pesoEmbalagemG, precoVenda, noBalcao, ativo }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   nome = String(nome || '').trim();
   if (!nome) throw new Error('Nome do item é obrigatório.');
@@ -152,6 +158,10 @@ async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoRefer
   const proximaOrdem = itensDoSetor.length
     ? Math.max(...itensDoSetor.map((i) => num(i.ordem))) + 1
     : 0;
+  const precoVendaNormalizado = normalizarPrecoVenda(precoVenda);
+  if (noBalcao === true && !(precoVendaNormalizado > 0)) {
+    throw new Error('Informe um preço de venda maior que zero para disponibilizar o item no balcão.');
+  }
   const registro = {
     id: ref.id,
     unidade,
@@ -170,14 +180,14 @@ async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoRefer
     // custoReferencia (custo interno). So faz sentido pra item vendido direto
     // (ex: bebida/meia do Saltiverso, ver saltiversoVendas.js) - itens de
     // insumo de cozinha (Domino's) simplesmente nunca preenchem isso
-    precoVenda: precoVenda != null && precoVenda !== '' ? num(precoVenda) : null,
+    precoVenda: precoVendaNormalizado,
     // "fica disponivel no balcao": o caixa da Estacao da Comida so vende o
     // que estiver marcado aqui (ver estacaoComida.js). O garcao lanca
     // qualquer item com preco; o caixa, so a agua/refri que ficam na
     // geladeira do balcao - senao ele venderia chopp sem passar pelo salao.
     noBalcao: noBalcao === true,
     ordem: proximaOrdem,
-    ativo: true,
+    ativo: ativo !== false,
     createdAt: new Date().toISOString(),
   };
   await ref.set(registro);
@@ -232,8 +242,13 @@ async function atualizarItem(id, { nome, setor, tipo, unidadeMedida, custoRefere
   if (ativo != null) patch.ativo = !!ativo;
   if (quantidadePadrao !== undefined) patch.quantidadePadrao = quantidadePadrao != null && quantidadePadrao !== '' ? num(quantidadePadrao) : null;
   if (pesoEmbalagemG !== undefined) patch.pesoEmbalagemG = pesoEmbalagemG != null && pesoEmbalagemG !== '' ? num(pesoEmbalagemG) : null;
-  if (precoVenda !== undefined) patch.precoVenda = precoVenda != null && precoVenda !== '' ? num(precoVenda) : null;
+  if (precoVenda !== undefined) patch.precoVenda = normalizarPrecoVenda(precoVenda);
   if (noBalcao !== undefined) patch.noBalcao = noBalcao === true;
+  const proximoPrecoVenda = patch.precoVenda !== undefined ? patch.precoVenda : atual.precoVenda;
+  const proximoNoBalcao = patch.noBalcao !== undefined ? patch.noBalcao : atual.noBalcao;
+  if (proximoNoBalcao === true && !(proximoPrecoVenda > 0)) {
+    throw new Error('Informe um preço de venda maior que zero para disponibilizar o item no balcão.');
+  }
   await ref.update(patch);
   catalogoCache.invalidar(atual.unidade);
   return (await ref.get()).data();

@@ -178,6 +178,10 @@ const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
 function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
 
 let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGAMENTO_SEQ = 0, MESAS = [], MESA_EM_FOCO = null, EXCLUSAO_MESA = null, OPERACAO = null;
+function podeConfigurarCatalogo(){ return !!ME && (ME.role==='master' || !!ME.podeCatalogoEstoque); }
+function abrirCatalogo(){
+  location.href = `/estoque?unidade=${encodeURIComponent(unidadeAtual())}&aba=catalogo`;
+}
 function souMaster(){ return !!(ME && (ME.role === 'master' || ME.isMaster)); }
 
 // ---- TURNO DA VENDA ----
@@ -478,7 +482,9 @@ async function excluirMesaInteira(){
 function renderBalcao(){
   document.getElementById('grade-balcao').innerHTML = BALCAO.length
     ? BALCAO.map(i=>`<button type="button" class="est-btn" onclick="addBalcao('${esc(i.id)}')"><span>${esc(i.nome)}</span><small>${fmtReal(i.precoVenda)}</small></button>`).join('')
-    : '<div class="est-vazio">Nenhum item liberado pro balcão nesta unidade.</div>';
+    : `<div class="est-vazio">Nenhum item disponível no balcão. Cadastre um preço de venda e marque “Disponível também no balcão”.
+        ${podeConfigurarCatalogo()?'<div style="margin-top:10px;"><button type="button" class="est-btn principal" onclick="abrirCatalogo()">⚙ Configurar itens do balcão</button></div>':''}
+      </div>`;
   const linhas = [...CARRINHO.entries()].map(([id, qtd]) => {
     const it = BALCAO.find(x=>x.id===id);
     if(!it) return '';
