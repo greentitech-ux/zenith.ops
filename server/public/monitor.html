@@ -2182,7 +2182,7 @@ function mostrarPopupFraude(){
     ? '🚫 PEDIDO BLOQUEADO — NÃO PRODUZIR/NÃO ENTREGAR'
     : '🚫 Pedido recusado — suspeita de fraude';
   document.getElementById('fraude-popup-info').innerHTML =
-    `${esc(tx.nomeCliente||tx.clienteNome||tx.cardHolder||'Cliente desconhecido')} · ${esc(tx.unidade||'—')} · ${fmtMoney(tx.valor)}${tx.last4?(' · •• '+esc(tx.last4)):''}${tx.motivo?('<br><span style="color:var(--muted);font-size:12px;">'+esc(tx.motivo)+'</span>'):''}${bloqueado?'<br><b style="display:block;margin-top:9px;color:var(--bad);">Acione o suporte e aguarde a decisão do Master.</b>':''}`;
+    `${esc(tx.nomeCliente||tx.clienteNome||tx.cardHolder||'Cliente desconhecido')} · ${esc(tx.unidade||'—')} · ${fmtMoney(tx.valor)}${tx.last4?(' · •• '+esc(tx.last4)):''}${tx.motivo?('<br><span style="color:var(--muted);font-size:12px;">'+esc(tx.motivo)+'</span>'):''}${bloqueado?'<br><b style="display:block;margin-top:9px;color:var(--bad);">Acione o Suporte e aguarde a decisão.</b>':''}`;
   document.getElementById('fraude-popup-overlay').classList.add('show');
   tocarAlerta();
   if(bloqueado){

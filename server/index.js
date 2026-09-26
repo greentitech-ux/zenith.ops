@@ -3222,7 +3222,7 @@ app.post('/webhooks/adyen', async (req, res) => {
           : `${rajadaAmex.tentativas} recusas AMEX na unidade em ${rajadaAmex.janelaMinutos} min`;
         push.notifyCritico(
           `🚨 Possível ataque AMEX — ${tx.unidade || ''}`,
-          `${motivo}. Não produza pedidos AMEX aprovados sem validação do Master; acione o suporte.`,
+          `${motivo}. Não produza pedidos AMEX aprovados sem validação do Suporte; acione o Suporte.`,
           `amex-velocity-${tx.unidade}-${rajadaAmex.tipo}`,
           tx.unidade
         );
@@ -3269,7 +3269,7 @@ app.post('/webhooks/adyen', async (req, res) => {
 
     // Uma aprovação AMEX logo depois de uma rajada de recusas é o caso que
     // transforma card testing em prejuízo. Retém somente AMEX da própria
-    // unidade por 30 min; Master pode liberar pelo fluxo já existente.
+    // unidade por 30 min; o Suporte pode liberar pelo fluxo já existente.
     const ataqueAmexAtivo = tx.status === 'APROVADO' && !ehPixTx
       ? amexVelocity.ataqueAtivo(tx)
       : null;
@@ -3373,7 +3373,7 @@ app.post('/webhooks/adyen', async (req, res) => {
     // Mesmo cartão aprovado repetidamente, mas com comprador/titular trocando
     // de nome dentro da mesma identidade forte. Era exatamente o buraco dos
     // dois pedidos da Tirol: ambos ficavam apenas SUSPEITO e a operação podia
-    // entregar. Agora o pedido fica retido até o Master liberar ou confirmar.
+    // entregar. Agora o pedido fica retido até o Suporte liberar ou confirmar.
     const repeticaoMesmoCartao = !ehPixTx
       ? cardReuseRisk.registrar(tx, clusterInfo, pedidoIdAtual, Date.now(), store.allTransactions())
       : null;
@@ -3771,7 +3771,7 @@ app.post('/api/fraude/:pedidoId/confirmar', auth.requireMaster, async (req, res)
     if (!(await exigirSenhaDoMaster(req, res))) return;
     const registro = await fraudMarks.confirmarFraude(decodeURIComponent(req.params.pedidoId), req.user.email);
     broadcast('fraude-marcada', registro, 'monitor');
-    push.notifyRaw('🚫 Fraude confirmada pelo Master', `${registro.clienteNome || 'Cliente'} · ${registro.unidade || ''} · pedido mantido bloqueado`, `fraude-confirmada-${registro.pedidoId}`, registro.unidade);
+    push.notifyRaw('🚫 Fraude confirmada pelo Suporte', `${registro.clienteNome || 'Cliente'} · ${registro.unidade || ''} · pedido mantido bloqueado`, `fraude-confirmada-${registro.pedidoId}`, registro.unidade);
     alertarDecisaoFraudeNaLoja(registro, false);
     res.json(registro);
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -3781,7 +3781,7 @@ app.delete('/api/fraude/:pedidoId', requireSection('monitor'), async (req, res) 
   const pedidoId = decodeURIComponent(req.params.pedidoId);
   const marca = (await fraudMarks.listAllCached()).find((m) => String(m.pedidoId) === String(pedidoId));
   if (marca && marca.entregaBloqueada) {
-    return res.status(409).json({ error: 'Pedido bloqueado: somente o Master pode liberar ou confirmar a fraude com senha/digital.' });
+    return res.status(409).json({ error: 'Pedido bloqueado: somente o Suporte pode liberar ou confirmar a fraude com senha/digital.' });
   }
   await fraudMarks.remover(pedidoId, req.user.email);
   broadcast('fraude-removida', { pedidoId }, 'monitor');
