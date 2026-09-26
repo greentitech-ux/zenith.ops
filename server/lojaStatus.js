@@ -3309,9 +3309,12 @@ const JANELA_REINICIO_MS = 8 * 60 * 1000;
 // alerta diz. Antes, a máquina sumia e o push mandava "verifique a
 // internet/computador da loja" mesmo tendo sido o próprio NOC quem pediu o
 // reinício: afirmava como causa justamente o que a gente sabia ser falso.
-async function marcarReinicioComandado(codigo, posto) {
+async function marcarReinicioComandado(codigo, posto, origem) {
   await COLLECTION.doc(docIdFor(codigo, posto)).set({
     reinicioComandadoEm: Date.now(), reinicioNaoVoltouAvisado: false,
+    // Distingue uma reinicialização manual da rotina agendada. Só a segunda
+    // pode desligar o próprio agendamento caso a estação não volte.
+    reinicioComandadoOrigem: origem || null,
   }, { merge: true });
   invalidarEspelho();
   cache.invalidar();
@@ -3535,12 +3538,12 @@ async function definirReinicioDiario(alvos, semanal, tolerancia, porEmail) {
   return [...feitos, ...naoElegiveis];
 }
 
-async function marcarOcorrenciaFeita(doc, chave, detalhe) {
+async function marcarOcorrenciaFeita(doc, chave, detalhe, tipo) {
   const em = Date.now();
   await gravarEEspelhar(doc.codigo, doc.posto, {
     reinicioDiarioUltima: chave,
     reinicioDiarioUltimoEm: em,
-    eventos: [...(doc.eventos || []), { tipo: REINICIO_DIARIO_ORIGEM, em, detalhe }].slice(-EVENTOS_MAX),
+    eventos: [...(doc.eventos || []), { tipo: tipo || REINICIO_DIARIO_ORIGEM, em, detalhe }].slice(-EVENTOS_MAX),
   });
 }
 
@@ -3556,10 +3559,19 @@ async function varrerReinicioDiario(ms) {
     const hora = chave.split('|')[1];
     const detalhe = `reinício automático das ${hora}`;
     try {
+      // Enfileirar para um agente que está sem heartbeat não faz a máquina
+      // reiniciar: só cria uma fila que ela pode nunca buscar. Registra a
+      // ocorrência como tratada para o timer não insistir durante a tolerância.
+      const online = !!doc.ultimoHeartbeatEm && (Date.now() - doc.ultimoHeartbeatEm) < LIMIAR_OFFLINE_MS;
+      if (!online) {
+        await marcarOcorrenciaFeita(doc, chave, `${detalhe} - não enviado: computador sem comunicação`, 'reinicio-diario-pulado-offline');
+        feitos.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, hora, puladoOffline: true });
+        continue;
+      }
       await enfileirarComando(doc.codigo, doc.posto, COMANDO_REINICIAR, { origem: REINICIO_DIARIO_ORIGEM });
       // o NOC precisa saber que o sumico da maquina foi ELE que pediu - senao
       // o push de queda afirma "verifique a internet da loja" as 4h da manha
-      await marcarReinicioComandado(doc.codigo, doc.posto);
+      await marcarReinicioComandado(doc.codigo, doc.posto, REINICIO_DIARIO_ORIGEM);
       await marcarOcorrenciaFeita(doc, chave, detalhe);
       feitos.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, hora });
     } catch (err) {
@@ -4030,6 +4042,7 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
 // para virar outro console. A consulta já nasce limitada no Firestore: não lê
 // o histórico inteiro a cada atualização do NOC.
 function nomeSeguroDoComando(c) {
+  if (c.origem === REINICIO_DIARIO_ORIGEM) return 'Reinício automático agendado';
   if (c.origem === 'noc-console-operacional') return 'Console operacional';
   if (c.acaoId) return 'Ação aprovada do catálogo';
   if (c.origem === 'diagnostico-rede') return 'Diagnóstico de rede';
@@ -4554,7 +4567,7 @@ async function varrerAlertas() {
       const quedaCurta = !!doc.quedaPushPendente;
       await gravarEEspelhar(doc.codigo, doc.posto, {
         avisadoOffline: false, offlineDesde: null, quedaPushPendente: false,
-        reinicioComandadoEm: null, reinicioNaoVoltouAvisado: false,
+        reinicioComandadoEm: null, reinicioComandadoOrigem: null, reinicioNaoVoltouAvisado: false,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
       });
       transicoes.push({
@@ -4568,7 +4581,23 @@ async function varrerAlertas() {
       // é um alerta diferente do "caiu", porque aqui a gente sabe a causa
       // provável (o reinício não completou: travou no boot, desligou de
       // vez, ou perdeu a rede ao subir).
-      await gravarEEspelhar(doc.codigo, doc.posto, { reinicioNaoVoltouAvisado: true });
+      const foiAgendado = doc.reinicioComandadoOrigem === REINICIO_DIARIO_ORIGEM;
+      const tinhaAgendamento = !!planoSemanalDe(doc);
+      const em = Date.now();
+      const detalhe = foiAgendado && tinhaAgendamento
+        ? 'reinício automático desligado: computador não voltou após o comando agendado'
+        : null;
+      await gravarEEspelhar(doc.codigo, doc.posto, {
+        reinicioNaoVoltouAvisado: true,
+        // Uma estação que não confirmou a volta não deve receber uma nova
+        // ordem automática na próxima madrugada. A configuração fica no
+        // histórico e pode ser reativada pelo Master quando ela for reparada.
+        ...(foiAgendado && tinhaAgendamento ? {
+          reinicioSemanal: null, reinicioDiario: null, reinicioTolerancia: null,
+          reinicioDiarioDesligadoPorFalhaEm: em,
+          eventos: [...(doc.eventos || []), { tipo: 'reinicio-diario-desativado-falha', em, detalhe }].slice(-EVENTOS_MAX),
+        } : {}),
+      });
       transicoes.push({
         codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'reinicio-nao-voltou',
         minutos: Math.round((Date.now() - doc.reinicioComandadoEm) / 60000),

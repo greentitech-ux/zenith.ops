@@ -3420,10 +3420,13 @@ function renderLoteComandos(cancelaveis){
   if(!barra) return;
   if(cancelaveis.length < 2){ barra.className='cmd-lote'; barra.innerHTML=''; return; }
   const marcados = COMANDOS_MARCADOS.size;
+  const cancelaveisMarcados = cancelaveis.filter(c=>COMANDOS_MARCADOS.has(c.id) && !semRetornoComando(c)).length;
+  const desistiveis = cancelaveis.filter(c=>COMANDOS_MARCADOS.has(c.id) && semRetornoComando(c)).length;
   const todos = marcados === cancelaveis.length;
   barra.className='cmd-lote visivel';
   barra.innerHTML = `<label><input type="checkbox" ${todos?'checked':''} onchange="marcarTodosComandosLote(this.checked)">Selecionar os ${cancelaveis.length} canceláveis desta lista</label>
-    <button type="button" class="cmd-cancelar" id="cmd-lote-botao" onclick="cancelarComandosSelecionados(this)" ${marcados?'':'disabled'}>✕ Cancelar ${marcados} selecionado${marcados===1?'':'s'}</button>
+    <button type="button" class="cmd-cancelar" id="cmd-lote-botao" onclick="cancelarComandosSelecionados(this)" ${cancelaveisMarcados?'':'disabled'}>✕ Cancelar ${cancelaveisMarcados} selecionado${cancelaveisMarcados===1?'':'s'}</button>
+    <button type="button" class="cmd-cancelar" id="cmd-lote-desistir" onclick="desistirComandosSelecionados(this)" ${desistiveis?'':'disabled'}>✕ Desistir ${desistiveis} sem retorno</button>
     <span class="cmd-lote-conta">${marcados} de ${cancelaveis.length} marcado${marcados===1?'':'s'}</span>`;
 }
 function marcarComandoLote(id, ligado){
@@ -3438,7 +3441,7 @@ function marcarTodosComandosLote(ligado){
 // Uma senha para o lote inteiro, não uma por comando: o Master aprova a AÇÃO,
 // não cada linha. O servidor continua conferindo a senha em cada DELETE.
 async function cancelarComandosSelecionados(botao){
-  const alvos = COMANDOS_RECENTES.filter(c=>COMANDOS_MARCADOS.has(c.id) && podeCancelarComando(c));
+  const alvos = COMANDOS_RECENTES.filter(c=>COMANDOS_MARCADOS.has(c.id) && podeCancelarComando(c) && !semRetornoComando(c));
   if(!alvos.length) return;
   const comErro = alvos.filter(c=>c.status==='erro').length;
   const naFila = alvos.length - comErro;
@@ -3462,6 +3465,28 @@ async function cancelarComandosSelecionados(botao){
   // Falha parcial é o caso normal aqui (um comando pode ter sido entregue no
   // meio do lote), então o resultado diz o número dos dois lados.
   if(falhas.length) alert(`${ok} de ${alvos.length} cancelados.\n\nNão deu pra cancelar:\n${falhas.join('\n')}`);
+}
+// Em lote, "desistir" continua com o mesmo significado da ação individual:
+// não interrompe o que já chegou à estação; apenas libera a fila do NoPulso.
+async function desistirComandosSelecionados(botao){
+  const alvos = COMANDOS_RECENTES.filter(c=>COMANDOS_MARCADOS.has(c.id) && semRetornoComando(c));
+  if(!alvos.length) return;
+  if(!confirm(`Desistir de esperar ${alvos.length} comando${alvos.length===1?'':'s'} sem retorno?\n\nIsso NÃO interrompe nada nas máquinas. Os comandos já foram entregues e podem ter rodado; esta ação só libera as filas do NoPulso.`)) return;
+  const password = await pedirSenhaMaster(`desistir de esperar ${alvos.length} comandos sem retorno e liberar suas filas`);
+  if(password===null) return;
+  if(botao){ botao.disabled=true; botao.textContent='Liberando filas…'; }
+  let ok=0; const falhas=[];
+  for(const c of alvos){
+    try{
+      const r=await fetch('/api/loja-status/comandos/'+encodeURIComponent(c.id),{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({password,desistirSemRetorno:true})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error||'recusado pelo servidor');
+      ok++; COMANDOS_MARCADOS.delete(c.id);
+    }catch(e){ falhas.push(`${c.nomeComputador||c.posto||'Computador'}: ${e.message}`); }
+  }
+  await carregarComandosRecentes();
+  if(falhas.length) alert(`${ok} de ${alvos.length} filas liberadas.\n\nNão foi possível liberar:\n${falhas.join('\n')}`);
+  else alert(`${ok} fila${ok===1?'':'s'} liberada${ok===1?'':'s'}. Nenhum comando foi interrompido na máquina.`);
 }
 async function carregarComandosRecentes(){
   const lista = document.getElementById('comandos-lista');
