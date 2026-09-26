@@ -26361,9 +26361,20 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && /\$\{quantidade\}x \$\{fmtReal\(base \/ 100\)\}/.test(caixa),
       'o caixa localiza uma comanda pela mesa, mas permite cobrar uma ou todas':
         /api\/estacao\/mesas-caixa/.test(caixa) && /function abrirMesaCaixa/.test(caixa)
-        && /function incluirComandas/.test(caixa) && /Juntar todas/.test(caixa)
+        && /function incluirComandas/.test(caixa) && /Selecionar todas/.test(caixa)
         && /Mesa \$\{esc\(mesa\.mesa\)\}/.test(caixa)
         && /api\/estacao\/mesas-caixa/.test(require('fs').readFileSync(__dirname + '\/index.js', 'utf8')),
+      'seleção no caixa é um toque para marcar ou desmarcar, sem duplicar cartões':
+        /function alternarComanda/.test(caixa) && /Limpar mesa/.test(caixa)
+        && /comanda\(s\) na cobrança/.test(caixa) && /est-selecao-check/.test(caixa),
+      'cada mesa tem X somente para Master e exclusão exige senha ou digital': (() => {
+        const idx = require('fs').readFileSync(__dirname + '\/index.js', 'utf8');
+        return /souMaster\(\)[^\n]+est-mesa-excluir/.test(caixa)
+          && /data-digital/.test(caixa) && /\/digital\.js/.test(caixa)
+          && /comandas\/:id\/cancelar'[^\n]+auth\.requireMaster/.test(idx)
+          && /mesas\/:mesa\/cancelar'[^\n]+auth\.requireMaster/.test(idx)
+          && /cancelarMesa/.test(idx) && /motivoCancelamento/.test(mod);
+      })(),
       // CLAUDE.md §2: cor cravada escapa da troca do tema Claro
       'nada de hex cravado no CSS novo (o tema Claro troca o acento)':
         !/#b8ff3c/i.test(css.slice(css.indexOf('O ESTADO DO SERVIÇO'))),

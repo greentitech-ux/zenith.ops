@@ -11048,7 +11048,7 @@ app.get('/api/estacao/mesas-caixa', requireEstacao('estacao-caixa'), async (req,
     const salao = await estacaoComida.salao(req.query.unidade, req.query.servico !== '0');
     res.json({ mesas: salao.mesas.map((m) => ({
       mesa: m.mesa, pessoas: m.pessoas,
-      comandas: m.comandas.map((c) => ({ numero: c.numero, tipoRodizio: c.tipoRodizio, totais: c.totais })),
+      comandas: m.comandas.map((c) => ({ id: c.id, numero: c.numero, tipoRodizio: c.tipoRodizio, totais: c.totais })),
     })) });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
@@ -11121,9 +11121,13 @@ app.delete('/api/estacao/comandas/:id/itens/:indice', requireEstacao('estacao-sa
     res.json(c);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
-// cancelar é do caixa/gerente, não do salão: é a porta de sair sem pagar
-app.post('/api/estacao/comandas/:id/cancelar', requireEstacao('estacao-caixa'), async (req, res) => {
+// Excluir/cancelar comanda aberta é ação exclusiva do Master. Senha ou
+// digital impedem que um caixa livre uma mesa sem deixar a cobrança passar.
+// O documento não é apagado: permanece CANCELADA com a trilha de auditoria.
+app.post('/api/estacao/comandas/:id/cancelar', requireEstacao('estacao-caixa'), auth.requireMaster, async (req, res) => {
   try {
+    const confere = await auth.verifyPassword(req.user.id, (req.body || {}).password);
+    if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a comanda não foi excluída.' });
     const existente = await estacaoComida.getComanda(req.params.id);
     if (!podeUnidadeEstacao(req, existente.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const c = await estacaoComida.cancelarComanda({ id: req.params.id, motivo: (req.body || {}).motivo, porEmail: req.user.email });
@@ -11174,6 +11178,18 @@ app.get('/api/estacao/comandas-status', requireEstacao('estacao-caixa'), async (
       fechadas: fechamento.total.comandasFechadas,
       porCaixa: fechamento.porCaixa.map((c) => ({ caixa: c.caixa, fechadas: c.comandasFechadas })),
     });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/estacao/mesas/:mesa/cancelar', requireEstacao('estacao-caixa'), auth.requireMaster, async (req, res) => {
+  try {
+    const { unidade, motivo, password } = req.body || {};
+    if (!podeUnidadeEstacao(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const confere = await auth.verifyPassword(req.user.id, password);
+    if (!confere) return res.status(400).json({ error: 'Senha ou digital não confere - a mesa não foi excluída.' });
+    const resultado = await estacaoComida.cancelarMesa({ unidade, mesa: req.params.mesa, motivo, porEmail: req.user.email });
+    broadcast('estacao-salao-mudou', { unidade }, 'estacao-salao');
+    res.json(resultado);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 

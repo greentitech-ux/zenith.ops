@@ -11,6 +11,7 @@
 <meta name="theme-color" content="#0b0d10">
 <link rel="stylesheet" href="/estacao.css">
 <script src="/tema.js"></script>
+<script src="/digital.js" defer></script>
 </head>
 <body>
 
@@ -129,6 +130,24 @@
 
 </div>
 
+<div class="est-modal" id="modal-excluir-mesa" role="dialog" aria-modal="true" aria-labelledby="titulo-excluir-mesa">
+  <div class="est-dialogo">
+    <div class="est-dialogo-topo">
+      <div><div class="eyebrow">Ação exclusiva do Master</div><h2 id="titulo-excluir-mesa">Excluir comanda ou mesa</h2></div>
+      <button type="button" class="est-fechar" onclick="fecharExclusaoMesa()" aria-label="Fechar">×</button>
+    </div>
+    <div class="est-aviso" style="margin-bottom:12px;"><span>⚠</span><div>A exclusão libera a comanda para a operação, mas preserva o registro como <b>cancelado</b>, com motivo, data e Master responsável.</div></div>
+    <div id="exclusao-mesa-resumo"></div>
+    <label class="est-campo-modal">Motivo da exclusão<textarea id="exclusao-motivo" rows="2" maxlength="200" placeholder="Explique o motivo"></textarea></label>
+    <label class="est-campo-modal">Senha do Master<input id="exclusao-password" type="password" autocomplete="new-password" data-digital placeholder="Senha ou use a digital abaixo"></label>
+    <div class="est-erro" id="erro-exclusao-mesa"></div>
+    <div class="est-acoes" style="margin-top:10px;">
+      <button type="button" class="est-btn perigo" id="btn-excluir-mesa-inteira" onclick="excluirMesaInteira()">Excluir mesa inteira</button>
+      <button type="button" class="est-btn" onclick="fecharExclusaoMesa()">Voltar</button>
+    </div>
+  </div>
+</div>
+
 <script src="/recolher.js"></script>
 <script src="/nav-menu.js"></script>
 <script>
@@ -152,7 +171,8 @@ const ROTULO_TIPO = { adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':
 const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
 function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
 
-let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGAMENTO_SEQ = 0, MESAS = [], MESA_EM_FOCO = null;
+let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGAMENTO_SEQ = 0, MESAS = [], MESA_EM_FOCO = null, EXCLUSAO_MESA = null;
+function souMaster(){ return !!(ME && (ME.role === 'master' || ME.isMaster)); }
 
 // ---- TURNO DA VENDA ----
 // O preço do rodízio sai do turno; por isso o caixa precisa ver, em letras
@@ -243,10 +263,13 @@ function renderMesasCaixa(){
   const alvo = document.getElementById('mesas-caixa');
   if(!alvo) return;
   alvo.innerHTML = MESAS.length ? `<div class="est-lista">${MESAS.map(m => `
-    <button type="button" class="est-item est-mesa-caixa ${Number(MESA_EM_FOCO)===Number(m.mesa)?'selecionada':''}" onclick="abrirMesaCaixa(${Number(m.mesa)})">
-      <span class="est-item-nome">Mesa ${esc(m.mesa)} <span class="est-tag">${m.pessoas} pessoa(s)</span></span>
-      <span class="est-item-val">${m.comandas.length} comanda(s)</span>
-    </button>`).join('')}</div>` : '<div class="est-vazio">Nenhuma mesa com comanda aberta.</div>';
+    <div class="est-item est-mesa-caixa ${Number(MESA_EM_FOCO)===Number(m.mesa)?'selecionada':''}">
+      <button type="button" class="est-mesa-abrir" onclick="abrirMesaCaixa(${Number(m.mesa)})">
+        <span class="est-item-nome">Mesa ${esc(m.mesa)} <span class="est-tag">${m.pessoas} pessoa(s)</span></span>
+        <span class="est-item-val">${m.comandas.length} comanda(s)</span>
+      </button>
+      ${souMaster() ? `<button type="button" class="est-mesa-excluir" title="Excluir comanda ou mesa" aria-label="Excluir comanda ou mesa ${esc(m.mesa)}" onclick="abrirExclusaoMesa(${Number(m.mesa)})">×</button>` : ''}
+    </div>`).join('')}</div>` : '<div class="est-vazio">Nenhuma mesa com comanda aberta.</div>';
 }
 function abrirMesaCaixa(mesa){ MESA_EM_FOCO = Number(mesa); renderMesasCaixa(); renderMesaEmFoco(); }
 function renderMesaEmFoco(){
@@ -255,17 +278,22 @@ function renderMesaEmFoco(){
   const mesa = MESAS.find(m => Number(m.mesa) === Number(MESA_EM_FOCO));
   if(!mesa){ alvo.innerHTML = ''; return; }
   const numeros = mesa.comandas.map(c => String(c.numero));
+  const selecionadas = numeros.filter(n => NUMEROS.includes(n));
   alvo.innerHTML = `<div class="est-mesa-foco">
-    <div class="est-titulo-linha"><h2>Mesa ${esc(mesa.mesa)}</h2><button type="button" class="est-btn" onclick='incluirComandas(${JSON.stringify(numeros)})'>+ Juntar todas</button></div>
-    <div class="est-sub">Escolha uma por uma ou junte as ${mesa.comandas.length} comandas da mesa.</div>
+    <div class="est-titulo-linha"><h2>Mesa ${esc(mesa.mesa)}</h2><span class="est-conta">${selecionadas.length} de ${numeros.length} selecionada(s)</span></div>
+    <div class="est-sub">Toque em cada comanda para marcar ou desmarcar.</div>
+    <div class="est-acoes" style="margin-bottom:9px;">
+      <button type="button" class="est-btn principal" onclick='incluirComandas(${JSON.stringify(numeros)})'>Selecionar todas</button>
+      ${selecionadas.length ? `<button type="button" class="est-btn" onclick='removerComandas(${JSON.stringify(numeros)})'>Limpar mesa</button>` : ''}
+    </div>
     <div class="est-comandas">${mesa.comandas.map(c => {
       const selecionada = NUMEROS.includes(String(c.numero));
-      return `<div class="est-comanda" style="cursor:default;">
+      return `<button type="button" class="est-comanda ${selecionada?'marcada':''}" onclick="alternarComanda('${esc(c.numero)}')">
         <span class="est-comanda-num">${esc(c.numero)}</span>
-        <span class="est-comanda-corpo"><span class="est-comanda-nome">${marcaTipo(c)}</span><span class="est-comanda-meta">valor real da comanda</span></span>
+        <span class="est-comanda-corpo"><span class="est-comanda-nome">${marcaTipo(c)}</span><span class="est-comanda-meta">${selecionada?'incluída na cobrança':'toque para incluir'}</span></span>
         <span class="est-comanda-val">${fmtReal(c.totais.total)}</span>
-        <button type="button" class="est-btn ${selecionada?'':'principal'}" ${selecionada?'disabled':''} style="min-height:36px;padding:6px 10px;" onclick="incluirComandas(['${esc(c.numero)}'])">${selecionada?'Na conta':'+'}</button>
-      </div>`;
+        <span class="est-selecao-check">${selecionada?'✓':'+'}</span>
+      </button>`;
     }).join('')}</div>
   </div>`;
 }
@@ -283,6 +311,16 @@ async function incluirComandas(numeros){
     await recarregarConta();
     erro.textContent = msg;
   }
+}
+async function alternarComanda(numero){
+  const n = String(numero);
+  if(NUMEROS.includes(n)) return removerComandas([n]);
+  return incluirComandas([n]);
+}
+async function removerComandas(numeros){
+  const remover = new Set((numeros || []).map(String));
+  NUMEROS = NUMEROS.filter(n => !remover.has(String(n)));
+  await recarregarConta();
 }
 async function juntar(){
   const campo = document.getElementById('numero');
@@ -318,20 +356,69 @@ function resumoDivisaoIgual(){
 }
 function renderEscolhidas(){
   document.getElementById('escolhidas').innerHTML = NUMEROS.length
-    ? `<div class="est-comandas">${NUMEROS.map(n=>{
-        const c = (CONTA?.comandas||[]).find(x=>String(x.numero)===String(n));
-        return `<div class="est-comanda" style="cursor:default;">
-          <span class="est-comanda-num">${esc(n)}</span>
-          <span class="est-comanda-corpo">
-            <span class="est-comanda-nome">${c ? marcaTipo(c) + (c.mesa?` · mesa ${c.mesa}`:'') : 'conferindo...'}</span>
-            <span class="est-comanda-meta">${c ? `${(c.itens||[]).length} item(ns) no consumo` : ''}</span>
-          </span>
-          <span class="est-comanda-val">${c ? fmtReal(c.totais.total) : ''}</span>
-          <button type="button" class="est-btn perigo" style="min-height:36px;padding:6px 10px;" onclick="tirarNumero('${esc(n)}')">✕</button>
-        </div>`;
-       }).join('')}</div>${resumoDivisaoIgual()}`
-    : '<div class="est-vazio">Nenhuma comanda nesta conta.</div>';
+    ? `<div class="est-selecao-resumo"><div><b>${NUMEROS.length} comanda(s) na cobrança</b><span>${NUMEROS.map(esc).join(' · ')}</span></div><button type="button" class="est-btn" onclick="removerComandas([...NUMEROS])">Limpar seleção</button></div>${resumoDivisaoIgual()}`
+    : '<div class="est-vazio">Selecione uma ou mais comandas da mesa.</div>';
   renderMesaEmFoco();
+}
+
+function abrirExclusaoMesa(numeroMesa){
+  if(!souMaster()) return;
+  const mesa = MESAS.find(m => Number(m.mesa) === Number(numeroMesa));
+  if(!mesa) return;
+  EXCLUSAO_MESA = mesa;
+  document.getElementById('titulo-excluir-mesa').textContent = `Mesa ${mesa.mesa}`;
+  document.getElementById('exclusao-motivo').value = '';
+  document.getElementById('exclusao-password').value = '';
+  document.getElementById('erro-exclusao-mesa').textContent = '';
+  document.getElementById('exclusao-mesa-resumo').innerHTML = `<div class="est-comandas" style="margin-bottom:12px;">${mesa.comandas.map(c=>`
+    <div class="est-comanda" style="cursor:default;">
+      <span class="est-comanda-num">${esc(c.numero)}</span>
+      <span class="est-comanda-corpo"><span class="est-comanda-nome">${marcaTipo(c)}</span><span class="est-comanda-meta">excluir somente esta comanda</span></span>
+      <span class="est-comanda-val">${fmtReal(c.totais.total)}</span>
+      <button type="button" class="est-btn perigo" onclick="excluirUmaComanda('${esc(c.id)}','${esc(c.numero)}')">Excluir</button>
+    </div>`).join('')}</div>`;
+  document.getElementById('btn-excluir-mesa-inteira').textContent = `Excluir mesa inteira (${mesa.comandas.length} comandas)`;
+  document.getElementById('modal-excluir-mesa').classList.add('aberto');
+  if(window.nopulsoDigital) window.nopulsoDigital.varrer();
+}
+function fecharExclusaoMesa(){
+  document.getElementById('modal-excluir-mesa').classList.remove('aberto');
+  EXCLUSAO_MESA = null;
+}
+function dadosExclusao(){
+  const motivo = document.getElementById('exclusao-motivo').value.trim();
+  const password = document.getElementById('exclusao-password').value;
+  if(!motivo) throw new Error('Informe o motivo da exclusão.');
+  if(!password) throw new Error('Confirme com a senha ou digital do Master.');
+  return { motivo, password };
+}
+async function concluirExclusao(numerosCancelados){
+  const removidos = new Set((numerosCancelados || []).map(String));
+  NUMEROS = NUMEROS.filter(n => !removidos.has(String(n)));
+  fecharExclusaoMesa();
+  await carregarMesas();
+  await carregarSituacaoComandas();
+  await recarregarConta();
+}
+async function excluirUmaComanda(id, numero){
+  const erro = document.getElementById('erro-exclusao-mesa');
+  erro.textContent = '';
+  try{
+    const dados = dadosExclusao();
+    await pedir(`/api/estacao/comandas/${encodeURIComponent(id)}/cancelar`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(dados) });
+    await concluirExclusao([numero]);
+  }catch(e){ erro.textContent = e.message; }
+}
+async function excluirMesaInteira(){
+  const erro = document.getElementById('erro-exclusao-mesa');
+  erro.textContent = '';
+  try{
+    if(!EXCLUSAO_MESA) throw new Error('Mesa não encontrada.');
+    const numeros = EXCLUSAO_MESA.comandas.map(c=>c.numero);
+    const dados = dadosExclusao();
+    await pedir(`/api/estacao/mesas/${encodeURIComponent(EXCLUSAO_MESA.mesa)}/cancelar`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ...dados, unidade:unidadeAtual() }) });
+    await concluirExclusao(numeros);
+  }catch(e){ erro.textContent = e.message; }
 }
 
 // ---------- balcão ----------

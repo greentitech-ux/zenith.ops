@@ -446,6 +446,43 @@ async function cancelarComanda({ id, motivo, porEmail }) {
   });
 }
 
+// Excluir uma mesa no Caixa significa CANCELAR todas as comandas que ainda
+// estão abertas nela. Nada é apagado: cada cartão guarda motivo, data e Master
+// responsável. A transação evita deixar metade da mesa cancelada se uma das
+// comandas tiver sido paga em outro caixa entre a abertura do modal e o OK.
+async function cancelarMesa({ unidade, mesa, motivo, porEmail }) {
+  const numeroMesa = Math.trunc(num(mesa));
+  if (!unidade || !(numeroMesa > 0)) throw new Error('Mesa inválida.');
+  const texto_ = texto(motivo, 200);
+  if (!texto_) throw new Error('Diga por que está excluindo a mesa.');
+  const abertas = [...(await garantirEspelho(unidade)).values()]
+    .filter((c) => c.status === 'ABERTA' && Number(c.mesa) === numeroMesa);
+  if (!abertas.length) throw new Error('Essa mesa não tem comandas abertas.');
+  const em = new Date().toISOString();
+  const canceladas = await db.runTransaction(async (tx) => {
+    const atuais = [];
+    for (const aberta of abertas) {
+      const snap = await tx.get(COMANDAS.doc(aberta.id));
+      if (!snap.exists || snap.data().status !== 'ABERTA') {
+        throw new Error(`A comanda ${aberta.numero} mudou enquanto você confirmava. Atualize e confira novamente.`);
+      }
+      const atual = snap.data();
+      if (atual.unidade !== unidade || Number(atual.mesa) !== numeroMesa) {
+        throw new Error(`A comanda ${aberta.numero} não pertence mais a essa mesa.`);
+      }
+      atuais.push(atual);
+    }
+    atuais.forEach((c) => tx.set(COMANDAS.doc(c.id), {
+      status: 'CANCELADA', canceladaEm: em, canceladaPorEmail: porEmail || null,
+      motivoCancelamento: texto_, canceladaComMesa: numeroMesa,
+    }, { merge: true }));
+    return atuais.map((c) => ({ ...c, status: 'CANCELADA', canceladaEm: em,
+      canceladaPorEmail: porEmail || null, motivoCancelamento: texto_, canceladaComMesa: numeroMesa }));
+  });
+  await Promise.all(canceladas.map(aplicarNoEspelho));
+  return { unidade, mesa: numeroMesa, quantidade: canceladas.length, comandas: canceladas };
+}
+
 // ------------------------------------------------------------- totais
 //
 // Pura, e usada nos dois lados (tela e cobrança) - duas contas diferentes pro
@@ -708,7 +745,7 @@ module.exports = {
   turnoAberto, turnoVigente, abrirTurno,
   TURNOS, TIPO_ISENTO, ROTULO_TIPO, ROTULO_TURNO, HORA_VIRADA_JANTAR,
   itensDoBalcao, resolverItensBalcao,
-  abrirComanda, definirMesa, getComanda, lancarItem, removerItem, cancelarComanda,
+  abrirComanda, definirMesa, getComanda, lancarItem, removerItem, cancelarComanda, cancelarMesa,
   totaisDaComanda, salao, contaDe, receber, abertaDoNumero,
   fechamentoDoDia, invalidarFechamento,
   _limparEspelhoTeste,

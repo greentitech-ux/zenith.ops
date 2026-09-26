@@ -99,11 +99,20 @@
 
 .est-lista{display:grid;gap:7px;}
 .est-item{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;}
-.est-mesa-caixa{width:100%;cursor:pointer;text-align:left;color:var(--text);font-family:var(--sans);}
+.est-mesa-caixa{width:100%;padding:0;display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:0;overflow:hidden;color:var(--text);font-family:var(--sans);}
 .est-mesa-caixa:hover,.est-mesa-caixa.selecionada{border-color:var(--accent);}
 .est-mesa-caixa.selecionada{background:color-mix(in srgb,var(--accent) 10%,var(--panel2));}
+.est-mesa-abrir{min-height:58px;padding:9px 11px;display:flex;gap:10px;align-items:center;justify-content:space-between;border:0;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer;}
+.est-mesa-excluir{width:44px;min-height:58px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--bad);font-size:22px;cursor:pointer;}
+.est-mesa-excluir:hover{background:var(--bad-dim);}
 .est-mesa-foco{margin:0 0 10px;padding:11px;border:1px solid var(--accent);border-radius:11px;background:color-mix(in srgb,var(--accent) 6%,var(--panel));}
 .est-mesa-foco h2{margin:0;font-size:16px;}
+.est-selecao-check{width:31px;height:31px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex:none;background:var(--accent);color:#0b0d10;font-weight:800;}
+.est-comanda:not(.marcada) .est-selecao-check{background:var(--panel);color:var(--accent);border:1px solid var(--accent);}
+.est-selecao-resumo{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;margin-top:10px;border:1px solid var(--accent);border-radius:10px;background:color-mix(in srgb,var(--accent) 8%,var(--panel2));}
+.est-selecao-resumo div{display:grid;gap:3px;}.est-selecao-resumo b{font-size:13px;}.est-selecao-resumo span{font:10px var(--mono);color:var(--muted);overflow-wrap:anywhere;}
+.est-selecao-resumo .est-btn{min-height:36px;padding:7px 10px;flex:none;}
+.est-campo-modal{display:grid;gap:5px;margin-top:10px;font:10px var(--mono);letter-spacing:.07em;color:var(--muted);text-transform:uppercase;}
 .est-item-nome{flex:1 1 auto;min-width:0;font-size:13px;overflow-wrap:anywhere;}
 .est-item-val{font:600 13px var(--mono);flex:none;}
 
