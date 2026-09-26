@@ -80,6 +80,20 @@ async function resolverBucket() {
   return getStorage().bucket(candidatos()[0]);
 }
 
+// Para anexos grandes o arquivo chega ao Storage em fluxo, sem existir todo
+// na memória do processo. Antes de abrir esse fluxo, descobrimos o bucket com
+// uma escrita minúscula e descartável. Assim mantemos o fallback entre os
+// nomes de bucket sem precisar repetir (ou perder) o stream grande.
+async function bucketParaUpload() {
+  if (bucketFixado) return bucketFixado;
+  const teste = `diagnostico/sonda-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`;
+  return comBucket(async (bucket) => {
+    await bucket.file(teste).save('', { contentType: 'text/plain' });
+    await bucket.file(teste).delete({ ignoreNotFound: true });
+    return bucket;
+  });
+}
+
 // testa um upload minusculo de verdade em cada bucket candidato e devolve o
 // resultado individual (ok ou o erro cru do GCS) - usado pela rota de
 // diagnostico do Master pra descobrir em producao POR QUE os anexos estao
@@ -106,4 +120,4 @@ async function diagnostico() {
   };
 }
 
-module.exports = { resolverBucket, comBucket, diagnostico };
+module.exports = { resolverBucket, comBucket, bucketParaUpload, diagnostico };

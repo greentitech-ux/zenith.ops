@@ -4,7 +4,8 @@
 // do Firestore) - nao expomos URL publica, os arquivos sao servidos via
 // streaming pelo proprio backend (index.js).
 require('./firestore'); // garante que o app do firebase-admin ja foi inicializado
-const { resolverBucket, comBucket } = require('./storageBucket');
+const fs = require('fs');
+const { resolverBucket, comBucket, bucketParaUpload } = require('./storageBucket');
 
 // COBRANÇA DO GOOGLE CLOUD SUSPENSA tem cara de erro passageiro e não é.
 // O Storage devolve 403 accountDisabled ("The billing account for the owning
@@ -66,6 +67,30 @@ async function salvarArquivo(pedidoId, file, pasta = 'disputes') {
   return caminho;
 }
 
+// Para arquivos grandes, o Multer escreve primeiro no diretório temporário e
+// este código encaminha os bytes ao Storage em fluxo. Assim um PDF de 100 MB
+// não vira um Buffer de 100 MB na memória da instância.
+async function salvarArquivoDoDisco(pedidoId, file, pasta = 'disputes') {
+  const caminho = `${pasta}/${caminhoSeguro(pedidoId)}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${caminhoSeguro(file.originalname)}`;
+  try {
+    const bucket = await bucketParaUpload();
+    await new Promise((resolve, reject) => {
+      const leitura = fs.createReadStream(file.path);
+      const escrita = bucket.file(caminho).createWriteStream({
+        resumable: file.size > 10 * 1024 * 1024,
+        metadata: { contentType: file.mimetype || 'application/octet-stream' },
+      });
+      leitura.on('error', reject);
+      escrita.on('error', reject);
+      escrita.on('finish', resolve);
+      leitura.pipe(escrita);
+    });
+  } catch (err) {
+    throw erroDeUpload(err);
+  }
+  return caminho;
+}
+
 async function streamArquivo(caminho, tipo, res) {
   const bucket = await resolverBucket();
   if (tipo) res.set('Content-Type', tipo);
@@ -109,4 +134,4 @@ async function apagarArquivo(caminho) {
   await bucket.file(caminho).delete({ ignoreNotFound: true });
 }
 
-module.exports = { salvarArquivo, streamArquivo, baixarArquivo, apagarArquivo, ehCobrancaSuspensa, ERRO_COBRANCA, erroDeUpload };
+module.exports = { salvarArquivo, salvarArquivoDoDisco, streamArquivo, baixarArquivo, apagarArquivo, ehCobrancaSuspensa, ERRO_COBRANCA, erroDeUpload };

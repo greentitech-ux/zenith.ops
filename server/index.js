@@ -4,6 +4,7 @@ const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 
 // Arquivos visuais de pessoas não ficam em `public`: são imagens pessoais e
@@ -212,14 +213,17 @@ const uploadDocumentoIdentidade = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 3 },
 });
 
-// Pasta Q.A.: é comum a unidade fotografar uma avaliação direto do celular.
-// O upload genérico aceita até 50 MB e, em rede móvel, uma foto grande pode
-// ter a conexão interrompida antes de chegar ao tratamento de erro do app.
-// Um limite próprio preserva o Render e devolve uma mensagem JSON explicando
-// como resolver, em vez do navegador mostrar apenas "Failed to fetch".
-const LIMITE_ARQUIVO_QUALIDADE = 12 * 1024 * 1024;
+// Pasta Q.A.: laudos, licenças e certificados podem passar de 100 MB. Eles
+// ficam só temporariamente no disco e depois sobem ao Storage em fluxo (ver
+// storage.salvarArquivoDoDisco), sem ocupar a memória da instância.
+// 150 MB dá margem real sem deixar que anexos excepcionalmente grandes elevem
+// o consumo da conta. O teto não reserva espaço: só arquivos enviados contam.
+const LIMITE_ARQUIVO_QUALIDADE = 150 * 1024 * 1024;
 const uploadQualidadeDocumento = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, os.tmpdir()),
+    filename: (_req, file, cb) => cb(null, `nopulso-qa-${Date.now()}-${crypto.randomBytes(8).toString('hex')}${path.extname(file.originalname || '')}`),
+  }),
   limits: { fileSize: LIMITE_ARQUIVO_QUALIDADE, files: 1 },
 });
 
@@ -5300,12 +5304,22 @@ app.post('/api/qualidade/documentos', auth.requireAuth, async (req, res) => {
 // `data` é a data DO DOCUMENTO (a da avaliação, a da emissão) e é ela que
 // define a ordem da pilha - quem escaneia em outubro a avaliação de março
 // quer ela no lugar de março.
-app.post('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, uploadQualidadeDocumento.single('arquivo'), async (req, res) => {
+async function prepararUploadDocumentoQualidade(req, res, next) {
   try {
     const atual = await qualidadeDocumentos.obter(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Documento não encontrado.' });
     if (!podeNaUnidadeQA(req, atual.unidade)) return res.status(403).json({ error: 'Sem acesso a essa unidade.' });
+    req.documentoQualidade = atual;
+    return next();
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+}
+
+app.post('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, prepararUploadDocumentoQualidade, uploadQualidadeDocumento.single('arquivo'), async (req, res) => {
+  try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
-    const caminho = await storage.salvarArquivo(req.params.id, req.file, 'qualidade-documentos');
+    const caminho = await storage.salvarArquivoDoDisco(req.params.id, req.file, 'qualidade-documentos');
     res.json(await qualidadeDocumentos.empilhar(req.params.id, {
       arquivo: { nome: req.file.originalname, path: caminho, tipo: req.file.mimetype },
       // multipart: os campos chegam como texto no req.body
@@ -5313,7 +5327,15 @@ app.post('/api/qualidade/documentos/:id/arquivo', auth.requireAuth, uploadQualid
       validade: (req.body || {}).validade || null,
       observacao: (req.body || {}).observacao || null,
     }, req.user && req.user.email));
-  } catch (err) { res.status(400).json({ error: storage.erroDeUpload ? storage.erroDeUpload(err) : err.message }); }
+  } catch (err) {
+    // salvarArquivoDoDisco já transforma a falha de Storage numa mensagem
+    // segura para a unidade; não a processar de novo evita ocultar a causa.
+    res.status(400).json({ error: err.message || 'Não foi possível enviar o arquivo agora.' });
+  } finally {
+    // O disco do Render é temporário e compartilhado pela instância: não
+    // guardar cópia local depois que o Storage confirmou (ou recusou) o envio.
+    if (req.file && req.file.path) fs.promises.unlink(req.file.path).catch(() => {});
+  }
 });
 
 // O ARQUIVO QUE ESTÁ VALENDO (o topo da pilha).
