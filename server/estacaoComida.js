@@ -73,6 +73,9 @@ const ROTULO_TURNO = { almoco: 'almoço', jantar: 'jantar' };
 // o cardápio: almoço até as 18h (11h-15h em dia de semana, 11h-18h no fim de
 // semana), jantar das 18h às 23h. A virada às 18h atende os dois calendários.
 const HORA_VIRADA_JANTAR = 18;
+// A gerência pode antecipar manualmente a virada em relação ao horário padrão,
+// mas nunca antes das 16h. A trava fica no servidor para não depender do botão.
+const HORA_MINIMA_VIRADA_MANUAL_JANTAR = 16;
 // os 5 caixas da casa (o Master: "e assim e fechado pelo caixa 01 02 03 04 ou
 // 05"). Lista fechada de propósito: caixa é conferência de dinheiro, e um
 // campo livre viraria "caixa 3", "Caixa 3", "cx3" no mesmo fechamento.
@@ -300,6 +303,7 @@ async function mudarTurnoOperacao({ unidade, acao, porEmail, agora = new Date() 
       atual.turnoEstado = 'ALMOCO_ABERTO';
     } else if (acao === 'virar-jantar') {
       if (atual.turnoEstado !== 'ALMOCO_ABERTO') throw new Error('Abra o almoço antes de virar para o jantar.');
+      if (horaBrasilia(agora) < HORA_MINIMA_VIRADA_MANUAL_JANTAR) throw new Error('A virada para o jantar só fica disponível a partir das 16h.');
       atual.turnoEstado = 'JANTAR_ABERTO';
     } else if (acao === 'fechar-jantar') {
       if (atual.turnoEstado !== 'JANTAR_ABERTO') throw new Error('O jantar não está aberto.');
