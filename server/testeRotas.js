@@ -9601,6 +9601,7 @@ setTimeout(async () => {
     const fi = require('./fraudIdentity');
     const ch = require('./cardHopping');
     const reuse = require('./cardReuseRisk');
+    const amexVelocity = require('./amexVelocity');
     const pix = require('./pixRepetido');
 
     // gerador deterministico (mesma semente sempre) - teste nao pode variar
@@ -9681,6 +9682,24 @@ setTimeout(async () => {
     const bloqueouAposReinicio = reuse.registrar(atualPersistido, { clusterId: 9999, totalPedidos: 1, nomesDistintos: 2 }, 'PERSIST2', agoraPersistido, [{
       ...atualPersistido, merchantReference: 'PERSIST1', nomeCliente: 'Karina Farias', cardHolder: 'Karina Andrea da Silva Faria', dataHora: new Date(agoraPersistido - 60000).toISOString(),
     }]);
+    // Rajada real AMEX: vários cartões, mesmo valor, em segundos. O terceiro
+    // pedido aprovado deve ficar retido até o Master decidir.
+    const baseAmex = 1700000000000;
+    const a1 = amexVelocity.registrarRecusa({ unidade: 'Tirol AMEX', metodo: 'amex', status: 'RECUSADO', valor: 178.70 }, baseAmex);
+    const a2 = amexVelocity.registrarRecusa({ unidade: 'Tirol AMEX', metodo: 'amex', status: 'RECUSADO', valor: 178.70 }, baseAmex + 20000);
+    const a3 = amexVelocity.registrarRecusa({ unidade: 'Tirol AMEX', metodo: 'amex', status: 'RECUSADO', valor: 178.70 }, baseAmex + 40000);
+    const amexAtivo = amexVelocity.ataqueAtivo({ unidade: 'Tirol AMEX', metodo: 'amex' }, baseAmex + 60000);
+    const fimRetencaoAmex = baseAmex + 40000 + amexVelocity.RETENCAO_ATAQUE_MS + 1;
+    const amexExpirou = amexVelocity.ataqueAtivo({ unidade: 'Tirol AMEX', metodo: 'amex' }, fimRetencaoAmex);
+    amexVelocity.limparAntigos(fimRetencaoAmex);
+    const agora33Min = Date.now();
+    const bloqueouEm33Min = reuse.registrar(
+      { unidade: 'Tirol 33min', status: 'APROVADO', metodo: 'mc', last4: '2420', nomeCliente: 'Karina Silva', cardHolder: 'Karina Andrea da Silva' },
+      { clusterId: 10001, totalPedidos: 1, nomesDistintos: 2 }, 'TIROL-33-2', agora33Min, [{
+        unidade: 'Tirol 33min', status: 'APROVADO', metodo: 'mc', last4: '2420', merchantReference: 'TIROL-33-1',
+        nomeCliente: 'Karina Farias', cardHolder: 'Karina Andrea da Silva Faria', dataHora: new Date(agora33Min - 33 * 60 * 1000).toISOString(),
+      }]
+    );
 
     const fonteFi = require('fs').readFileSync(require('path').join(__dirname, 'fraudIdentity.js'), 'utf8');
     const fonteIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
@@ -9695,6 +9714,10 @@ setTimeout(async () => {
       'caso Tirol bloqueia automaticamente so a partir do segundo pedido': !bloqueouPrimeiro && !!bloqueouSegundo,
       'mesmo cliente legitimo repetindo compra nao e bloqueado': !falso1 && !falso2,
       'reinicio do servidor nao apaga o primeiro pedido da janela': !!bloqueouAposReinicio,
+      'caso Tirol separado por 33 min continua bloqueado': !!bloqueouEm33Min,
+      'rajada AMEX de mesmo valor dispara no terceiro evento': !a1 && !a2 && !!a3,
+      'aprovação AMEX é retida enquanto a rajada está ativa': !!amexAtivo,
+      'retenção AMEX expira sem manter a unidade bloqueada': !amexExpirou,
       'Pix nao entra na malha de identidade nem no cardHopping':
         /const clusterInfo = ehPixTx/.test(fonteIdx) && /&& !ehPixTx\) \{/.test(fonteIdx),
       'a malha e escopada por unidade': /chaveEscopo\(unidade, t\)/.test(fonteFi)

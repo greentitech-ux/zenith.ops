@@ -21,6 +21,7 @@ const push = require('./push');
 const cardTesting = require('./cardTesting');
 const cardHopping = require('./cardHopping');
 const cardReuseRisk = require('./cardReuseRisk');
+const amexVelocity = require('./amexVelocity');
 const disputes = require('./disputes');
 const fraudMarks = require('./fraudMarks');
 const fraudReport = require('./fraudReport');
@@ -3214,6 +3215,18 @@ app.post('/webhooks/adyen', async (req, res) => {
           tx.unidade
         );
       }
+      const rajadaAmex = amexVelocity.registrarRecusa(tx);
+      if (rajadaAmex) {
+        const motivo = rajadaAmex.tipo === 'mesmo-valor'
+          ? `${rajadaAmex.tentativas} recusas AMEX de R$ ${rajadaAmex.valor.toFixed(2)} em ${rajadaAmex.janelaMinutos} min`
+          : `${rajadaAmex.tentativas} recusas AMEX na unidade em ${rajadaAmex.janelaMinutos} min`;
+        push.notifyCritico(
+          `🚨 Possível ataque AMEX — ${tx.unidade || ''}`,
+          `${motivo}. Não produza pedidos AMEX aprovados sem validação do Master; acione o suporte.`,
+          `amex-velocity-${tx.unidade}-${rajadaAmex.tipo}`,
+          tx.unidade
+        );
+      }
     }
 
     // identificador de pedido usado em todo o bloco de deteccao de fraude
@@ -3253,6 +3266,39 @@ app.post('/webhooks/adyen', async (req, res) => {
     // rodar pro Pix (mudanca de status, chargeback, alerta de pedido que
     // alguem esta acompanhando pelo Beniboy).
     const ehPixTx = pixRepetido.ehPix(tx);
+
+    // Uma aprovação AMEX logo depois de uma rajada de recusas é o caso que
+    // transforma card testing em prejuízo. Retém somente AMEX da própria
+    // unidade por 30 min; Master pode liberar pelo fluxo já existente.
+    const ataqueAmexAtivo = tx.status === 'APROVADO' && !ehPixTx
+      ? amexVelocity.ataqueAtivo(tx)
+      : null;
+    if (ataqueAmexAtivo) {
+      try {
+        const clienteNome = tx.nomeCliente || tx.cardHolder || null;
+        const motivoBloqueio = `Aprovação AMEX durante ataque de recusas detectado (${ataqueAmexAtivo.tentativas} tentativas em ${ataqueAmexAtivo.janelaMinutos} min).`;
+        const registro = await fraudMarks.marcar({
+          pedidoId: pedidoIdAtual, unidade: tx.unidade, nivel: 'SUSPEITO',
+          motivo: `Bloqueio automático: ${motivoBloqueio}`,
+          clienteChave: clienteNome ? `nome:${clienteNome}` : null,
+          clienteNome, statusPedido: tx.status, valor: tx.valor,
+          marcadoPorEmail: 'deteccao-automatica@sistema', entregaBloqueada: true,
+          bloqueioMotivo: motivoBloqueio,
+        });
+        broadcast('fraude-marcada', registro, 'monitor');
+        if (registro.bloqueioNovo) {
+          await push.notifyCritico(
+            `🚫 PEDIDO AMEX BLOQUEADO — ${tx.unidade || ''}`,
+            `${clienteNome || 'Cliente'} · R$ ${Number(tx.valor || 0).toFixed(2)} · NÃO produzir/entregar; acione o suporte.`,
+            `amex-bloqueio-${pedidoIdAtual}`,
+            tx.unidade
+          );
+          await alertarBloqueioFraudeNaLoja(tx, pedidoIdAtual, motivoBloqueio);
+        }
+      } catch (err) {
+        console.error('Erro ao bloquear aprovação AMEX após rajada:', err.message);
+      }
+    }
 
     // cruza o nome do cliente (shopper) com o nome impresso no cartao pra
     // ligar pedidos de nomes "diferentes" que na verdade sao o mesmo anel

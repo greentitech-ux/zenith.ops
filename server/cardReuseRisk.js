@@ -9,7 +9,9 @@
 // menos dois pedidos distintos, e o conjunto ja contem tres nomes diferentes.
 // Quando a Adyen manda `aliasCartao`, ele e preferido por ser um identificador
 // muito melhor que o final do cartao.
-const JANELA_MS = 30 * 60 * 1000;
+// Os dois pedidos confirmados da Tirol ficaram separados por 33 minutos. A
+// janela anterior de 30 min deixava exatamente esse caso passar.
+const JANELA_MS = 60 * 60 * 1000;
 const fraudIdentity = require('./fraudIdentity');
 
 const ocorrencias = new Map(); // chave -> [{ pedidoId, ts }]
