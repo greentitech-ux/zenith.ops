@@ -3215,9 +3215,37 @@ app.post('/webhooks/adyen', async (req, res) => {
     }
 
     const tx = normalize(item);
+    // A mesma chave liga AUTHORISATION e REFUND: no estorno a Adyen costuma
+    // mandar um PSP novo, mas preserva merchantReference/originalReference.
+    const pedidoIdAtual = tx.merchantReference || tx.originalReference || tx.pspReference;
     store.addOrUpdate(tx);
     broadcast('transaction', tx, 'monitor');
     push.notify(tx); // estorno, estorno agendado, chargeback ou fraude -> push no celular/navegador
+
+    // Estorno é uma mudança operacional, não só financeira: quando um pedido
+    // antes aprovado passa a ESTORNADO, a loja precisa saber antes de produzir
+    // ou entregar. `registrarUnico` dentro do push impede que um retry do
+    // webhook faça a sirene tocar e replique o chat em todas as máquinas.
+    if (tx.status === 'ESTORNADO') {
+      const pedido = store.orderFor(pedidoIdAtual);
+      const foiAprovado = !!pedido && pedido.history.some((h) => h.status === 'APROVADO');
+      if (foiAprovado) {
+        const cliente = String(tx.nomeCliente || tx.cardHolder || pedido.cliente || 'Cliente').slice(0, 80);
+        const aviso = `Pedido #${pedidoIdAtual} · ${cliente} · R$ ${Number(tx.valor || pedido.valor || 0).toFixed(2)} foi estornado após aprovação. Não produzir/não entregar; confirme com o Suporte.`;
+        try {
+          const novo = await push.notifyCriticoUnico(
+            `estorno-operacional-${tx.unidade || 'sem-unidade'}-${pedidoIdAtual}`,
+            `🔴 ESTORNO APÓS APROVAÇÃO — ${tx.unidade || ''}`,
+            aviso,
+            `estorno-operacional-${pedidoIdAtual}`,
+            tx.unidade
+          );
+          if (novo) await alertarEstornoNaLoja(tx, pedidoIdAtual, cliente, pedido.valor);
+        } catch (err) {
+          console.error(`[estorno] não consegui disparar o alerta operacional do pedido ${pedidoIdAtual}:`, err.message);
+        }
+      }
+    }
 
     // recusas seguidas do mesmo cartao em poucos minutos -> possivel teste de cartao clonado
     if (tx.status === 'RECUSADO') {
@@ -3243,10 +3271,6 @@ app.post('/webhooks/adyen', async (req, res) => {
         );
       }
     }
-
-    // identificador de pedido usado em todo o bloco de deteccao de fraude
-    // abaixo (mesmo calculo usado no resto do arquivo)
-    const pedidoIdAtual = tx.merchantReference || tx.originalReference || tx.pspReference;
 
     // ---------- Pix: regra propria (decisao do Master) ----------
     // Pix NAO recebe tag de FRAUDE nem de SUSPEITO pelas regras de cartao -
@@ -5053,6 +5077,32 @@ async function alertarBloqueioFraudeNaLoja(tx, pedidoId, motivo) {
     console.log(`[fraude] bloqueio do pedido ${pedidoId} avisado em ${computadores.length} computador(es) de ${nomeAlvo}: ${motivo}`);
   } catch (err) {
     console.error(`[fraude] não consegui alertar a loja sobre o bloqueio do pedido ${pedidoId}:`, err.message);
+  }
+}
+
+// O estorno confirmado depois de uma aprovação pode chegar enquanto o pedido
+// ainda está no Make, Dispatch ou PDV. A mensagem vai a TODOS os computadores
+// cadastrados da unidade; se algum estiver offline, fica na fila segura do
+// heartbeat e abre quando a máquina voltar, além de entrar no chat dela.
+async function alertarEstornoNaLoja(tx, pedidoId, cliente, valorDoPedido) {
+  try {
+    const nomeAlvo = nomeCanonicoUnidade(tx.unidade, tx.unidade);
+    const computadores = (await lojaStatus.listar())
+      .filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo);
+    if (!computadores.length) {
+      console.warn(`[estorno] nenhum computador cadastrado para alertar em ${nomeAlvo} (pedido ${pedidoId}).`);
+      return;
+    }
+    const valor = Number(tx.valor || valorDoPedido || 0).toFixed(2);
+    const texto = `🔴 ESTORNO CONFIRMADO: pedido #${pedidoId} · ${cliente} · R$ ${valor}. O pagamento foi aprovado e depois estornado. NÃO PRODUZIR/NÃO ENTREGAR; confirme com o Suporte.`;
+    const resultado = await lojaStatus.enviarMensagemMuitos(
+      computadores.map((c) => ({ codigo: c.codigo, posto: c.posto })),
+      texto,
+      'adyen-webhook@nopulso'
+    );
+    console.log(`[estorno] pedido ${pedidoId} avisado em ${resultado.enviados.length}/${computadores.length} computador(es) de ${nomeAlvo}.`);
+  } catch (err) {
+    console.error(`[estorno] não consegui enviar o alerta à loja do pedido ${pedidoId}:`, err.message);
   }
 }
 

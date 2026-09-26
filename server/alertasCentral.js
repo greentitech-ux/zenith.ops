@@ -8,6 +8,7 @@
 // disponivel em /central-alertas.html mesmo que o push tenha falhado/nao
 // tocado, ou que a pessoa so va olhar horas depois.
 const db = require('./firestore');
+const crypto = require('crypto');
 const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('alertasCentral');
@@ -70,6 +71,32 @@ async function registrar({ tipo, titulo, resumo, url, critico }) {
   cache.invalidar();
   invalidarIncremental();
   return registro;
+}
+
+// Webhooks podem ser reenviados pela Adyen. Um alerta operacional não pode
+// tocar novamente na loja só porque o mesmo evento foi entregue duas vezes.
+// A chave vira um id estável, persistido no Firestore, então a proteção
+// continua válida mesmo depois de reinício ou deploy do NoPulso.
+async function registrarUnico({ chave, tipo, titulo, resumo, url, critico }) {
+  if (!chave) return { novo: true, registro: await registrar({ tipo, titulo, resumo, url, critico }) };
+  const id = `unico-${crypto.createHash('sha256').update(String(chave)).digest('hex')}`;
+  const ref = COLLECTION.doc(id);
+  const registro = {
+    id, tipo, titulo, resumo: resumo || null, url: url || '/', critico: !!critico,
+    criadoEm: new Date().toISOString(), atendidoEm: null, atendidoPorEmail: null,
+  };
+  let novo = false;
+  await db.runTransaction(async (tx) => {
+    const anterior = await tx.get(ref);
+    if (anterior.exists) return;
+    tx.set(ref, registro);
+    novo = true;
+  });
+  if (novo) {
+    cache.invalidar();
+    invalidarIncremental();
+  }
+  return { novo, registro: novo ? registro : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -176,4 +203,4 @@ async function atender(id, porEmail) {
   return snap.exists ? snap.data() : null;
 }
 
-module.exports = { listar, listarDesde, registrar, registrarCiclo, atender };
+module.exports = { listar, listarDesde, registrar, registrarUnico, registrarCiclo, atender };

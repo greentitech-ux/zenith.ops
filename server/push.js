@@ -223,6 +223,15 @@ async function notifyCritico(title, body, tag, unidade, url = '/monitor') {
   await sendToAll({ title, body, tag, critical: true, url }, { unidade, section: 'monitor' });
 }
 
+// Igual ao alerta crítico, mas com uma chave persistente contra reentrega de
+// webhook. Retorna false quando esse mesmo incidente já foi avisado.
+async function notifyCriticoUnico(chave, title, body, tag, unidade, url = '/monitor') {
+  const alerta = await alertasCentral.registrarUnico({ chave, tipo: 'monitor', titulo: title, resumo: body, url, critico: true });
+  if (!alerta.novo) return false;
+  await sendToAll({ title, body, tag, critical: true, url }, { unidade, section: 'monitor' });
+  return true;
+}
+
 // alerta generico (ex: teste de cartao clonado) - nao depende de uma
 // transacao especifica normalizada
 async function notifyRaw(title, body, tag, unidade) {
@@ -1729,6 +1738,6 @@ module.exports = {
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,
   notifyDivergenciaCaixa, notifyDispositivoOnline,
-  notifyQaAprovacaoPendente, notifyCritico, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
+  notifyQaAprovacaoPendente, notifyCritico, notifyCriticoUnico, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,
 };
