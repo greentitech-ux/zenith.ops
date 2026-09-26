@@ -26350,6 +26350,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /Comandas hoje/.test(caixa) && /Abertas continuam em atendimento/.test(caixa)
         && /api\/estacao\/comandas-status/.test(caixa)
         && /comandasFechadas/.test(mod),
+      'o recebimento aceita várias formas sem fechar abaixo do total, e divide em centavos':
+        /Adicionar outra forma/.test(caixa) && /function limitarValorPagamento/.test(caixa)
+        && /function parcelasIguais/.test(caixa) && /Dividir por \$\{CONTA\.comandas\.length\}/.test(caixa)
+        && /saldo restante estiver zerado/.test(caixa),
       // CLAUDE.md §2: cor cravada escapa da troca do tema Claro
       'nada de hex cravado no CSS novo (o tema Claro troca o acento)':
         !/#b8ff3c/i.test(css.slice(css.indexOf('O ESTADO DO SERVIÇO'))),

@@ -100,11 +100,11 @@
 
   <div class="est-card" id="card-pagamento" hidden>
     <h2>Recebimento</h2>
-    <div class="est-sub">Some as formas até fechar o total. O troco não entra aqui: registre o que de fato entrou.</div>
+    <div class="est-sub">Registre uma forma por vez. Se o primeiro valor for menor, o saldo fica aberto para a próxima forma. O caixa só fecha com o total exato.</div>
     <div id="formas"></div>
     <div class="est-totais">
-      <div class="est-linha"><span>Informado</span><b id="soma-pago">R$ 0,00</b></div>
-      <div class="est-linha"><span>Falta</span><b id="falta">R$ 0,00</b></div>
+      <div class="est-linha"><span>Registrado</span><b id="soma-pago">R$ 0,00</b></div>
+      <div class="est-linha"><span>Saldo restante</span><b id="falta">R$ 0,00</b></div>
     </div>
     <div class="est-acoes" style="margin-top:12px;">
       <button type="button" class="est-btn principal" id="btn-receber" onclick="receber()">Receber e fechar</button>
@@ -144,7 +144,7 @@ const ROTULO_TIPO = { adulto:'Adulto', crianca:'Criança 6-10', 'crianca-ate-5':
 const CLASSE_TIPO = { adulto:'', crianca:'crianca', 'crianca-ate-5':'crianca' };
 function marcaTipo(c){ return `<span class="est-tag ${CLASSE_TIPO[c.tipoRodizio]||''}">${ROTULO_TIPO[c.tipoRodizio]||c.tipoRodizio}</span>`; }
 
-let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGOS = {};
+let ME = null, UNIDADES = [], BALCAO = [], NUMEROS = [], CARRINHO = new Map(), CONTA = null, PAGAMENTO_SEQ = 0;
 
 // ---- TURNO DA VENDA ----
 // O preço do rodízio sai do turno; por isso o caixa precisa ver, em letras
@@ -321,29 +321,88 @@ function renderConta(){
 }
 
 // ---------- recebimento ----------
-function renderFormas(){
-  document.getElementById('formas').innerHTML = `<div class="est-barra" style="margin-bottom:0;">${
-    FORMAS.map(([id, rotulo])=>`<label style="flex:1 1 120px;">${rotulo}<input type="text" inputmode="decimal" id="pg-${id}" value="${PAGOS[id]||''}" placeholder="0,00" oninput="somarPagos()"></label>`).join('')
-  }</div>`;
-  somarPagos();
+// Mesmo ciclo que o Saltiverso: cada forma fica em uma linha, a próxima só
+// aparece enquanto houver saldo, e o valor não pode ultrapassar a conta.
+function somaPagamentos(){
+  return [...document.querySelectorAll('#lista-pagamentos .pagamento-valor')]
+    .reduce((s, i) => s + Math.max(0, num(i.value)), 0);
 }
-function somarPagos(){
-  FORMAS.forEach(([id])=>{ PAGOS[id] = document.getElementById('pg-'+id)?.value || ''; });
-  const soma = FORMAS.reduce((s,[id]) => s + num(PAGOS[id]), 0);
+function limitarValorPagamento(input){
   const total = CONTA ? CONTA.total : 0;
-  const falta = Math.round((total - soma) * 100) / 100;
+  const outros = somaPagamentos() - Math.max(0, num(input.value));
+  const maximo = Math.max(0, total - outros);
+  if(num(input.value) > maximo + 0.001) input.value = maximo > 0 ? maximo.toFixed(2) : '';
+}
+function parcelasIguais(total, quantidade){
+  // Divide em centavos para R$ 98,78 ÷ 4 nunca virar R$ 98,76 ou R$ 98,80.
+  const q = Math.max(1, Math.floor(Number(quantidade) || 1));
+  const centavos = Math.round(num(total) * 100);
+  const base = Math.floor(centavos / q), resto = centavos % q;
+  return Array.from({ length:q }, (_, i) => (base + (i < resto ? 1 : 0)) / 100);
+}
+function atualizarResumoPagamento(){
+  const total = CONTA ? CONTA.total : 0;
+  const soma = somaPagamentos();
+  const saldo = Math.max(0, Math.round((total - soma) * 100) / 100);
+  const semForma = [...document.querySelectorAll('#lista-pagamentos .est-pagamento-linha')]
+    .some(linha => num(linha.querySelector('.pagamento-valor').value) > 0 && !linha.querySelector('.pagamento-forma').value);
   document.getElementById('soma-pago').textContent = fmtReal(soma);
-  const el = document.getElementById('falta');
-  el.textContent = falta > 0 ? fmtReal(falta) : (falta < 0 ? 'troco ' + fmtReal(-falta) : 'nada');
-  el.style.color = falta > 0 ? 'var(--warn)' : 'var(--ok)';
-  document.getElementById('btn-receber').disabled = !CONTA || soma <= 0;
+  const falta = document.getElementById('falta');
+  falta.textContent = saldo > 0 ? fmtReal(saldo) : 'quitado';
+  falta.style.color = saldo > 0 ? 'var(--warn)' : 'var(--ok)';
+  const completo = !!CONTA && saldo <= 0.001 && !semForma;
+  document.getElementById('btn-receber').disabled = !completo;
+  const adicionar = document.getElementById('btn-add-pagamento');
+  if(adicionar) adicionar.hidden = completo;
+  const resumo = document.getElementById('pagamento-resumo');
+  if(resumo) resumo.textContent = completo
+    ? `✅ Pagamento completo · ${fmtReal(total)}`
+    : semForma ? 'Escolha a forma de pagamento de cada valor informado.'
+      : `Falta registrar ${fmtReal(saldo)} de ${fmtReal(total)}.`;
+}
+function adicionarPagamento(valor = ''){
+  if(!CONTA || somaPagamentos() >= CONTA.total - 0.001) return;
+  PAGAMENTO_SEQ++;
+  const id = `pagamento-${PAGAMENTO_SEQ}`;
+  const linha = document.createElement('div');
+  linha.className = 'est-pagamento-linha'; linha.id = id;
+  linha.innerHTML = `<div class="est-pagamento-campos">
+    <label>Forma<select class="pagamento-forma" onchange="atualizarResumoPagamento()"><option value="">selecione...</option>${FORMAS.map(([forma, rotulo])=>`<option value="${forma}">${rotulo}</option>`).join('')}</select></label>
+    <label>Valor aplicado<input class="pagamento-valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00" value="${valor === '' ? '' : Number(valor).toFixed(2)}" oninput="limitarValorPagamento(this);atualizarResumoPagamento()"></label>
+    <button type="button" class="est-btn perigo est-pagamento-remover" title="Remover forma" aria-label="Remover forma" onclick="document.getElementById('${id}').remove();atualizarResumoPagamento()">✕</button>
+  </div>`;
+  document.getElementById('lista-pagamentos').appendChild(linha);
+  atualizarResumoPagamento();
+}
+function dividirPorComandas(){
+  if(!CONTA || CONTA.comandas.length < 2) return;
+  const parcelas = parcelasIguais(CONTA.total, CONTA.comandas.length);
+  document.getElementById('lista-pagamentos').innerHTML = '';
+  PAGAMENTO_SEQ = 0;
+  parcelas.forEach(valor => adicionarPagamento(valor));
+  const resumo = document.getElementById('pagamento-resumo');
+  resumo.textContent = `${CONTA.comandas.length} comandas divididas exatamente: ${parcelas.map(fmtReal).join(' + ')}. Escolha a forma de cada parcela.`;
+}
+function renderFormas(){
+  PAGAMENTO_SEQ = 0;
+  document.getElementById('formas').innerHTML = `
+    ${CONTA.comandas.length > 1 ? `<div class="est-divisao"><b>${CONTA.comandas.length} comandas juntas</b><span>Se forem dividir igual, o sistema reparte até os centavos.</span><button type="button" class="est-btn" onclick="dividirPorComandas()">÷ Dividir por ${CONTA.comandas.length}</button></div>` : ''}
+    <div id="lista-pagamentos"></div>
+    <button type="button" class="est-btn" id="btn-add-pagamento" onclick="adicionarPagamento()">+ Adicionar outra forma</button>
+    <div class="est-comanda-meta" id="pagamento-resumo" style="margin-top:8px;"></div>`;
+  adicionarPagamento();
 }
 
 async function receber(){
   const erro = document.getElementById('erro-receber');
   erro.textContent = '';
-  const pagamentos = FORMAS.map(([id]) => ({ forma: id, valor: num(PAGOS[id]) })).filter(p=>p.valor > 0);
+  const pagamentos = [...document.querySelectorAll('#lista-pagamentos .est-pagamento-linha')].map(linha => ({
+    forma: linha.querySelector('.pagamento-forma').value,
+    valor: num(linha.querySelector('.pagamento-valor').value),
+  })).filter(p => p.forma && p.valor > 0);
   if(!pagamentos.length){ erro.textContent = 'Informe como foi pago.'; return; }
+  const soma = pagamentos.reduce((s, p) => s + p.valor, 0);
+  if(Math.abs(soma - CONTA.total) > 0.01){ erro.textContent = 'O caixa só pode fechar quando o saldo restante estiver zerado.'; return; }
   document.getElementById('btn-receber').disabled = true;
   try{
     const r = await pedir('/api/estacao/receber', {
@@ -384,7 +443,7 @@ function voltarALancar(){
 }
 
 function limparTudo(){
-  NUMEROS = []; CARRINHO = new Map(); CONTA = null; PAGOS = {};
+  NUMEROS = []; CARRINHO = new Map(); CONTA = null; PAGAMENTO_SEQ = 0;
   document.getElementById('card-recibo').hidden = true;
   document.getElementById('card-balcao').hidden = false;
   document.getElementById('numero').value = '';
