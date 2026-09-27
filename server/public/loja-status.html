@@ -3929,7 +3929,7 @@ async function manutEnviar(tarefa){
       st.textContent = `Selecione somente máquinas marcadas como ${rotuloVm}.`;
       st.className = 'msg err'; st.classList.remove('hidden'); return;
     }
-    if(!confirm(`Reiniciar ${rotuloVm} em ${alvos.length} máquina(s) em ${unidades} unidade(s)?\n\nSó a VM marcada será reiniciada após o aviso de 2 minutos. O host e as demais VMs não serão tocados. Use “Abortar reinício” dentro da contagem se necessário.`)) return;
+    if(!confirm(`Reiniciar ${rotuloVm} em ${alvos.length} máquina(s) em ${unidades} unidade(s)?\n\nO reinício é silencioso: a VM não mostra mensagem. O NOC mantém 2 minutos para você usar “Abortar reinício” se necessário. O host e as demais VMs não serão tocados.`)) return;
   }
   if(tarefa === 'limpeza-segura'){
     if(!confirm(`Liberar espaço seguro em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO NOC remove apenas temporários do Windows, temporários do usuário e itens da Lixeira. Não remove documentos, Downloads, programas ou dados do sistema, e NÃO reinicia a máquina. O resultado informa o espaço livre antes e depois.`)) return;

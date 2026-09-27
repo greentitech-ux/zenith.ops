@@ -2919,6 +2919,20 @@ const COMANDO_REINICIAR = [
   '"Reinicio agendado para daqui a 2 minutos."',
 ].join('\n');
 
+// VMs não devem exibir aviso na tela operacional. Em vez de `shutdown /t`,
+// que sempre avisa a sessão interativa, o agente SYSTEM cria uma tarefa local
+// oculta para daqui a dois minutos. O NOC ainda registra a contagem e o botão
+// Abort ar remove esta tarefa antes que ela execute.
+const NOME_TAREFA_REINICIO_VM_SILENCIOSO = 'NoPulsoNocVmRestart';
+const COMANDO_REINICIAR_VM_SILENCIOSO = [
+  `$tarefa = '${NOME_TAREFA_REINICIO_VM_SILENCIOSO}'`,
+  'try { Unregister-ScheduledTask -TaskName $tarefa -Confirm:$false -ErrorAction SilentlyContinue } catch {}',
+  '$acao = New-ScheduledTaskAction -Execute "shutdown.exe" -Argument "/r /f /t 0"',
+  '$gatilho = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2)',
+  'Register-ScheduledTask -TaskName $tarefa -Action $acao -Trigger $gatilho -RunLevel Highest -User "SYSTEM" -Force | Out-Null',
+  '"Reinicio silencioso da VM agendado para daqui a 2 minutos. O NOC pode abortar nesse intervalo."',
+].join('\n');
+
 // REINICIAR O SERVICO DO ANYDESK, sem reiniciar a maquina. Pedido do
 // Master: quando o AnyDesk cai, o acesso remoto some e a unica saida era
 // reiniciar o computador inteiro - o que derruba o caixa junto, por causa de
@@ -3160,14 +3174,14 @@ function comandoReiniciarVmPulse(doc) {
   if (!doc || !doc.ehVmPulse) {
     throw new Error('esta máquina não está marcada como “VM PULSE”; marque a VM antes de usar esta ação.');
   }
-  return COMANDO_REINICIAR;
+  return COMANDO_REINICIAR_VM_SILENCIOSO;
 }
 
 function comandoReiniciarVmGcom(doc) {
   if (!doc || !doc.temGcom) {
     throw new Error('esta máquina não está marcada como “Possui GCOM”; marque a VM antes de usar esta ação.');
   }
-  return COMANDO_REINICIAR;
+  return COMANDO_REINICIAR_VM_SILENCIOSO;
 }
 
 // RESET DA ZEBRA POR ZPL, sem ir na loja. Pedido do Master: "o mesmo botao
@@ -3285,7 +3299,11 @@ function comandoResetZebra(impressoras) {
 
 // janela de arrependimento: cancela um reinício que ainda está na contagem
 const COMANDO_ABORTAR_REINICIO = [
-  'try { shutdown /a; "Reinicio abortado." } catch { "Nao havia reinicio em contagem." }',
+  'try { shutdown /a 2>$null } catch {}',
+  `$tarefa = '${NOME_TAREFA_REINICIO_VM_SILENCIOSO}'`,
+  '$silencioso = $false',
+  'try { $silencioso = !!(Get-ScheduledTask -TaskName $tarefa -ErrorAction SilentlyContinue); Unregister-ScheduledTask -TaskName $tarefa -Confirm:$false -ErrorAction SilentlyContinue } catch {}',
+  'if ($silencioso) { "Reinicio silencioso da VM abortado." } else { "Reinicio abortado, se estava em contagem." }',
 ].join('\n');
 
 // Nome tratado como dado literal: nunca interpolar em codigo PowerShell executavel.
@@ -5048,7 +5066,7 @@ module.exports = {
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   dispositivosComTipoDe, resumoDe,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_REINICIAR_VM_SILENCIOSO, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf, comandoReiniciarVmPulse, comandoReiniciarVmGcom,
   ESTADOS, estadoDe, motivosDeDegradacao,
