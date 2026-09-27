@@ -6512,9 +6512,9 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 const EXECUTORES_QA = {
   'manutencao.resetarSenha': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoResetSenha(p.nomeConta), { origem: 'manutencao-reset-senha', requerAdmin: true }),
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
-  'manutencao.reiniciarVmPulse': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoReiniciarVmPulse, { origem: 'manutencao-reiniciar-vm-pulse' }),
-  'manutencao.reiniciarVmGcom': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoReiniciarVmGcom, { origem: 'manutencao-reiniciar-vm-gcom' }),
-  'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
+  'manutencao.reiniciarVmPulse': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoReiniciarVmPulse, { origem: 'manutencao-reiniciar-vm-pulse', requerAdmin: true }),
+  'manutencao.reiniciarVmGcom': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoReiniciarVmGcom, { origem: 'manutencao-reiniciar-vm-gcom', requerAdmin: true }),
+  'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar', requerAdmin: true }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
   'manutencao.reiniciarGsurfRsa': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_GSURF_RSA, { origem: 'manutencao-gsurf-rsa' }),
   'manutencao.encerrarGcomWcf': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoEncerrarGcomWcf, { origem: 'manutencao-gcom-wcf' }),
@@ -6945,9 +6945,9 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     const nomeConta = tarefa === 'reset-senha' ? req.body.nomeConta : undefined;
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
-      'reiniciar-vm-pulse': { acao: 'manutencao.reiniciarVmPulse', verbo: 'Reiniciar a VM PULSE de', comando: lojaStatus.comandoReiniciarVmPulse, origem: 'manutencao-reiniciar-vm-pulse' },
-      'reiniciar-vm-gcom': { acao: 'manutencao.reiniciarVmGcom', verbo: 'Reiniciar a VM GCOM de', comando: lojaStatus.comandoReiniciarVmGcom, origem: 'manutencao-reiniciar-vm-gcom' },
-      abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
+      'reiniciar-vm-pulse': { acao: 'manutencao.reiniciarVmPulse', verbo: 'Reiniciar a VM PULSE de', comando: lojaStatus.comandoReiniciarVmPulse, origem: 'manutencao-reiniciar-vm-pulse', requerAdmin: true },
+      'reiniciar-vm-gcom': { acao: 'manutencao.reiniciarVmGcom', verbo: 'Reiniciar a VM GCOM de', comando: lojaStatus.comandoReiniciarVmGcom, origem: 'manutencao-reiniciar-vm-gcom', requerAdmin: true },
+      abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar', requerAdmin: true },
       'diagnostico-desempenho': { acao: 'manutencao.diagnosticoDesempenho', verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
       'inventario-estacao': { acao: 'manutencao.inventarioEstacao', verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
       'limpeza-segura': { acao: 'manutencao.limpezaSegura', verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },

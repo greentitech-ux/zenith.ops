@@ -2930,7 +2930,8 @@ const COMANDO_REINICIAR_VM_SILENCIOSO = [
   'try { Unregister-ScheduledTask -TaskName $tarefa -Confirm:$false -ErrorAction SilentlyContinue } catch {}',
   '$acao = New-ScheduledTaskAction -Execute "shutdown.exe" -Argument "/r /f /t 0"',
   '$gatilho = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2)',
-  'Register-ScheduledTask -TaskName $tarefa -Action $acao -Trigger $gatilho -RunLevel Highest -User "SYSTEM" -Force | Out-Null',
+  '$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest',
+  'Register-ScheduledTask -TaskName $tarefa -Action $acao -Trigger $gatilho -Principal $principal -Force | Out-Null',
   '"Reinicio silencioso da VM agendado para daqui a 2 minutos. O NOC pode abortar nesse intervalo."',
 ].join('\n');
 
@@ -3171,10 +3172,19 @@ function comandoEncerrarGcomWcf(doc) {
 
 // VM PULSE e VM GCOM são marcadas explicitamente na ficha. Não inferimos pelo
 // nome: uma ação de reinício não pode atingir uma estação ou host parecido.
+function exigeAgenteElevadoVm(doc) {
+  // Só a instância SYSTEM pode criar/remover a tarefa silenciosa. A prova é
+  // renovada pelo próprio agente elevado a cada poucos minutos; sem ela, não
+  // enfileiramos algo que a VM não conseguiria executar ou abortar.
+  if (!doc || Number(doc.nocElevadoEm) < Date.now() - (10 * 60 * 1000)) {
+    throw new Error('o agente elevado da VM não está ativo; instale/repare o NOCZenith como Administrador e aguarde o escudo aparecer.');
+  }
+}
 function comandoReiniciarVmPulse(doc) {
   if (!doc || !doc.ehVmPulse) {
     throw new Error('esta máquina não está marcada como “VM PULSE”; marque a VM antes de usar esta ação.');
   }
+  exigeAgenteElevadoVm(doc);
   return COMANDO_REINICIAR_VM_SILENCIOSO;
 }
 
@@ -3182,6 +3192,7 @@ function comandoReiniciarVmGcom(doc) {
   if (!doc || !doc.ehVmGcom) {
     throw new Error('esta máquina não está marcada como “VM GCOM”; marque a VM antes de usar esta ação.');
   }
+  exigeAgenteElevadoVm(doc);
   return COMANDO_REINICIAR_VM_SILENCIOSO;
 }
 
