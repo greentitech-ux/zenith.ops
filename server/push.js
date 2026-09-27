@@ -1678,6 +1678,33 @@ async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, 
   }
 }
 
+// Armazenamento USB tambem e evento de seguranca: usa a mesma Central de
+// Alertas, urgencia e publico (somente Master) do acesso remoto. O agente nao
+// envia conteudo do dispositivo, apenas o tipo/modelo do disco conectado.
+async function notifyUsbArmazenamentoDetectado(unidadeNome, codigo, computadorNome, posto, detalhe) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const dados = {
+    title: '💾 Pendrive ou HD externo conectado',
+    body: `${prefixo}${unidadeNome || codigo} · ${detalhe || 'armazenamento USB'}`,
+    tag: `usb-armazenamento-${codigo}-${posto || 'principal'}-${Date.now()}`,
+    critical: true,
+    url: '/loja-status',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-usb-armazenamento', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAcessoRemoto(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (armazenamento USB):', err.message);
+    }
+  }
+}
+
 // fechamento do dia lançado por uma loja (POST /api/fechamentos/lancar) -
 // pedido do Master: "quero receber notificação quando os fechamentos forem
 // realizados". E AVISO DE ROTINA, nunca alarme: chega um por loja por dia, e
@@ -1738,6 +1765,6 @@ module.exports = {
   notifyInternetUnidade, notifyInternetUnidadeNormalizou, textoInternetRuim,
   notifyDispositivoIpMudou, notifyAlertaExterno,
   notifyDivergenciaCaixa, notifyDispositivoOnline,
-  notifyQaAprovacaoPendente, notifyCritico, notifyCriticoUnico, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
+  notifyQaAprovacaoPendente, notifyCritico, notifyCriticoUnico, notifyAcessoRemotoDetectado, notifyUsbArmazenamentoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,
 };

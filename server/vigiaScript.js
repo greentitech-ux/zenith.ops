@@ -41,7 +41,7 @@
 // nome, e a maquina que ficou preta depois nunca mais era olhada.
 // 120: fundo preto e logos oficiais padrão no modelo básico, sem depender de
 // upload manual; redesenha as estações que ainda tinham apenas texto.
-const VERSAO_VIGIA = 120;
+const VERSAO_VIGIA = 121;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -62,7 +62,8 @@ function paginaDoTipo(tipo) {
 //   fechar + reporta o IP local, a cada ~120s (tick rapido de 20s com
 //   contador, pra nao atrasar a deteccao de acesso remoto).
 // Os dois tipos, alem disso, TODO tick: (1) checam acesso remoto (AnyDesk/
-// TeamViewer/DWService/etc conectado - ver Verificar-AcessoRemoto) e, numa
+// TeamViewer/DWService/etc conectado - ver Verificar-AcessoRemoto) e discos
+// USB externos (ver Verificar-UsbArmazenamento) e, numa
 // cadencia bem mais espacada (~1h), (2) checam se existe uma versao nova
 // do proprio script esperando (ver Verificar-Atualizacao) - se sim, baixa
 // o conteudo novo, sobrescreve o proprio arquivo e reinicia sozinho.
@@ -169,6 +170,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
   const urlReportarIp = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
   const urlHeartbeat = `${APP_BASE_URL}/api/loja-status/heartbeat`;
   const urlAcessoRemoto = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/acesso-remoto`;
+  const urlUsbArmazenamento = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/usb-armazenamento`;
   const urlComandoResultado = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-resultado`;
   const urlChatResponder = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/chat-responder`;
   const urlEstadoAgente = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/estado-agente`;
@@ -636,6 +638,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# ficam FORA da lista. Best-effort: cobre os casos comuns, nao e garantia',
     '# absoluta pra toda ferramenta que existe.',
     '$UrlAcessoRemoto = "' + urlAcessoRemoto + '"',
+    '$UrlUsbArmazenamento = "' + urlUsbArmazenamento + '"',
     '# ferramentas de nuvem sempre-ligadas (Splashtop SRServer/SRManager, LogMeIn',
     '# LMIGuardianSvc, GoToMyPC g2mcomm/g2svc) foram REMOVIDAS de proposito: o',
     '# batimento 24h delas nao indica sessao de verdade e so gerava alerta falso.',
@@ -645,6 +648,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  "Supremo", "vncserver", "winvnc", "tvnserver"',
     ')',
     '$JaAvisados = New-Object System.Collections.Generic.HashSet[string]',
+    '$UsbArmazenamentoVistos = New-Object System.Collections.Generic.HashSet[string]',
+    '# A primeira leitura apenas cria a linha de base: atualizar/reiniciar o',
+    '# agente nao pode fingir que um HD ja conectado foi inserido agora.',
+    '$PrimeiraVarreduraUsb = $true',
     '',
     // ---- SESSAO DE VERDADE x SERVICO CONECTADO ----------------------------
     // Pergunta do Master (09/09/2026): "conseguimos fazer com que esse tipo de
@@ -758,6 +765,39 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    }',
     '  }',
     '  $script:JaAvisados = $vistosAgora',
+    '}',
+    '',
+    '# ---- pendrive, HD ou SSD externo conectado -----------------------------',
+    '# Win32_DiskDrive com InterfaceType USB enxerga apenas armazenamento de',
+    '# massa. Nao inclui impressora, pin pad, teclado, mouse, camera nem le',
+    '# arquivos/pastas do dispositivo. A chave existe apenas localmente para',
+    '# avisar uma vez por insercao; ao remover, o proximo encaixe volta a alertar.',
+    'function Verificar-UsbArmazenamento {',
+    '  $vistosAgora = New-Object System.Collections.Generic.HashSet[string]',
+    '  try {',
+    '    $discos = @(Get-CimInstance Win32_DiskDrive -ErrorAction Stop | Where-Object { $_.InterfaceType -eq "USB" })',
+    '  } catch {',
+    '    try { $discos = @(Get-WmiObject Win32_DiskDrive -ErrorAction Stop | Where-Object { $_.InterfaceType -eq "USB" }) } catch { $discos = @() }',
+    '  }',
+    '  foreach ($disco in $discos) {',
+    '    if ($disco.MediaLoaded -eq $false) { continue }',
+    '    $chave = ("$($disco.PNPDeviceID)|$($disco.SerialNumber)|$($disco.DeviceID)").Trim().ToUpperInvariant()',
+    '    if (-not $chave) { continue }',
+    '    [void]$vistosAgora.Add($chave)',
+    '    if ($PrimeiraVarreduraUsb) { continue }',
+    '    if ($UsbArmazenamentoVistos.Contains($chave)) { continue }',
+    '    $modelo = ("$($disco.Model)").Trim()',
+    '    if (-not $modelo) { $modelo = "dispositivo sem modelo informado" }',
+    '    $tipo = "Armazenamento USB externo"',
+    '    try {',
+    '      $corpoUsb = @{ detalhe = "$tipo · $modelo" } | ConvertTo-Json',
+    '      Invoke-RestMethod -Uri $UrlUsbArmazenamento -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpoUsb -TimeoutSec 10 -ErrorAction Stop | Out-Null',
+    '      Escrever-Log "Armazenamento USB conectado: $tipo · $modelo"',
+    '      [void]$UsbArmazenamentoVistos.Add($chave)',
+    '    } catch { Escrever-Log "Falha ao avisar armazenamento USB: $($_.Exception.Message)" }',
+    '  }',
+    '  $script:UsbArmazenamentoVistos = $vistosAgora',
+    '  $script:PrimeiraVarreduraUsb = $false',
     '}',
     '',
     // ---- estado do servico do AnyDesk ----
@@ -3506,6 +3546,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      Marcar-Etapa "Acesso remoto (logs do AnyDesk/TeamViewer)"',
     '      try { Verificar-SessaoRemota } catch { Escrever-Log "Falha ao ler log de sessao: $($_.Exception.Message)" }',
     '      try { Verificar-AcessoRemoto } catch { Escrever-Log "Falha ao checar acesso remoto: $($_.Exception.Message)" }',
+    '      try { Verificar-UsbArmazenamento } catch { Escrever-Log "Falha ao checar armazenamento USB: $($_.Exception.Message)" }',
     '    }',
     '    $contador++',
     '    # o resultado fica guardado em $DiagRede e viaja no PROXIMO heartbeat',
@@ -3621,6 +3662,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // inclusive o auto-update.
     '    try { Verificar-SessaoRemota } catch { Escrever-Log "Falha ao ler log de sessao: $($_.Exception.Message)" }',
     '    try { Verificar-AcessoRemoto } catch { Escrever-Log "Falha ao checar acesso remoto: $($_.Exception.Message)" }',
+    '    try { Verificar-UsbArmazenamento } catch { Escrever-Log "Falha ao checar armazenamento USB: $($_.Exception.Message)" }',
     '    $contador++',
     '    # Nos quiosques, quem bate o heartbeat é o navegador. A configuração',
     '    # do agente é consultada aqui para o Ctrl+Q continuar independente dele.',

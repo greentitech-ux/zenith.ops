@@ -2737,6 +2737,37 @@ async function registrarAcessoRemoto(codigo, posto, detalhe, token, ehSessao) {
   return { codigo, posto, nome: atual && atual.nome, ultimoAcessoRemotoDetalhe: limpo, ehSessao: !!ehSessao };
 }
 
+// Um armazenamento USB conectado (pendrive, HD ou SSD externo) e um evento de
+// seguranca diferente de teclado, mouse, impressora ou leitor: o agente so
+// envia modelo/tipo do DISCO, nunca arquivos, pastas ou qualquer conteudo do
+// dispositivo. A deduplicacao principal fica no agente e esta segunda trava
+// protege o historico caso ele seja reiniciado enquanto o mesmo disco continua
+// conectado.
+async function registrarUsbArmazenamento(codigo, posto, detalhe, token) {
+  const id = docIdFor(codigo, posto);
+  const limpo = String(detalhe || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 200);
+  if (!limpo) throw new Error('Detalhe do armazenamento USB é obrigatório.');
+  const snap = await COLLECTION.doc(id).get();
+  const atual = snap.exists ? snap.data() : null;
+  exigirTokenSeTiver(atual, token);
+  const agora = Date.now();
+  const eventosAtuais = (atual && atual.eventos) || [];
+  const ultimo = eventosAtuais[eventosAtuais.length - 1];
+  const repetido = ultimo && ultimo.tipo === 'usb-armazenamento' && ultimo.detalhe === limpo
+    && (agora - ultimo.em) < 2 * 60 * 1000;
+  const patch = {
+    codigo,
+    posto,
+    ultimoHeartbeatEm: agora,
+    ultimoUsbArmazenamentoEm: agora,
+    ultimoUsbArmazenamentoDetalhe: limpo,
+  };
+  if (!repetido) patch.eventos = [...eventosAtuais, { tipo: 'usb-armazenamento', em: agora, detalhe: limpo }].slice(-EVENTOS_MAX);
+  await COLLECTION.doc(id).set(patch, { merge: true });
+  espelharEscrita(id, patch);
+  return { codigo, posto, nome: atual && atual.nome, detalhe: limpo, repetido: !!repetido };
+}
+
 // enfileira um comando (ver agenteAcoes.js executarAcaoDoAgente) pro
 // computador buscar no proximo heartbeat. So aceita computador tipo
 // 'interno' (unico que processa comando - ver heartbeat() acima) e so um
@@ -5082,7 +5113,7 @@ module.exports = {
   COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf, comandoReiniciarVmPulse, comandoReiniciarVmGcom,
   ESTADOS, estadoDe, motivosDeDegradacao,
-  marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
+  marcarComandoExecutado, registrarAcessoRemoto, registrarUsbArmazenamento, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
   sanitizarOcupado, AGENTE_OCUPADO_LIMIAR_MS,
   logosDaUnidade, versaoLogosDe, versaoModeloBasicoDe, linhaDoCarimbo, chaveLogoCarimbo, TIPOS_LOGO_CARIMBO,
   definirLogoCarimbo, removerLogoCarimbo, logoCarimboSalvo, logoCarimboDaMaquina,

@@ -449,6 +449,9 @@ const ROTA_LOJA_COMANDO_RESULTADO_RE = /^\/api\/loja-status\/[^/]+\/computadores
 // TeamViewer, DWService etc - ver loja-status.html "Baixar vigia") - mesmo
 // motivo publico do ip-local: quem chama e a maquina, sem sessao de usuario
 const ROTA_LOJA_ACESSO_REMOTO_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/acesso-remoto$/;
+// NOCZenith reporta a conexao de pendrive/HD/SSD USB. A rota e publica para
+// sessao de usuario, mas continua autenticada pelo X-NOC-Token da maquina.
+const ROTA_LOJA_USB_ARMAZENAMENTO_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/usb-armazenamento$/;
 // o proprio conteudo do NOCZenith (ver vigiaScript.js) - usada tanto pelo
 // botao "Baixar NOCZenith" quanto pela autoatualizacao do script ja rodando
 // (Verificar-Atualizacao), por isso publica igual as outras: a maquina
@@ -467,7 +470,7 @@ function rotaPublicaSemDashboard(path) {
     || path.startsWith('/api/pedido-evidencias/publico/')
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
-    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
+    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_USB_ARMAZENAMENTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
     || ROTA_LOJA_TELEMETRIA_RE.test(path) || ROTA_LOJA_CONFIG_AGENTE_RE.test(path)
     || ROTA_LOJA_PAPEL_PAREDE_RE.test(path)
     || ROTA_LOJA_PROGRAMAS_RE.test(path)
@@ -2232,6 +2235,25 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
   }
 });
 
+// ---------- pendrive/HD/SSD externo conectado, detectado pelo NOCZenith ---
+// O agente filtra Win32_DiskDrive com InterfaceType USB; por isso impressora,
+// teclado, mouse e outros perifericos USB nao entram aqui. So o Master recebe
+// o alerta, da mesma forma que os alertas de acesso remoto.
+app.post('/api/loja-status/:codigo/computadores/:posto/usb-armazenamento', async (req, res) => {
+  try {
+    const token = req.headers['x-noc-token'] || req.body.token || null;
+    const registro = await lojaStatus.registrarUsbArmazenamento(req.params.codigo, req.params.posto, req.body.detalhe, token);
+    if (!registro.repetido) {
+      const mapa = await construirUnidadesMapa();
+      push.notifyUsbArmazenamentoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, registro.detalhe)
+        .catch((err) => console.error('Erro no push de armazenamento USB:', err.message));
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- versao/conteudo do NOCZenith (ver vigiaScript.js) - a versao e
 // o que a autoatualizacao (Verificar-Atualizacao, dentro do proprio script)
 // confere periodicamente pra saber se precisa baixar de novo; o .ps1 e o
@@ -3848,7 +3870,6 @@ app.get('/api/fraude', requireSection('monitor'), async (req, res) => {
   // de alimentar o Monitor. PIX não é fraude nem suspeito por esta política.
   res.json(auth.filterByUnidade(req, lista).filter((m) => !pedidoEhPix(m.pedidoId)));
 });
-
 
 app.post('/api/fraude/marcar', requireSection('monitor'), async (req, res) => {
   try {
