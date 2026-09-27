@@ -15707,11 +15707,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
         /Endereço de \$\{d\.enderecoTipo===/.test(htmlMonitor)
         && /if\(!rep\.enderecoCliente && t\.enderecoCliente\)/.test(htmlMonitor)
         && /\(d\.enderecoCliente\|\|''\)\.toLowerCase\(\)\.includes\(q\)/.test(htmlMonitor),
-      'Raio-X mostra métricas, regras e reserva confirmação para chargeback':
+      'Raio-X só confirma chargeback efetivo da mesma identidade, nunca por nome ou aviso':
         /function raioXRisco\(pedido\)/.test(htmlMonitor)
         && /\['Pedidos',pedidos\.length\].*\['Cartões',cartoes\.size\]/s.test(htmlMonitor)
-        && /um único dado nunca confirma fraude/.test(htmlMonitor)
-        && /chargebacks>0/.test(htmlMonitor),
+        && /Nome sozinho nunca é chave de fraude/.test(htmlMonitor)
+        && /EVENTOS_CHARGEBACK_EFETIVO/.test(htmlMonitor)
+        && /pedidoTemChargebackEfetivo/.test(htmlMonitor)
+        && /CHARGEBACK_REVERTIDO/.test(htmlMonitor),
       'Monitor permite arrastar colunas, persiste a ordem e oferece restauração':
         /data-col="data"/.test(htmlMonitor)
         && /function configurarColunasArrastaveis\(\)/.test(htmlMonitor)

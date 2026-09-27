@@ -1514,7 +1514,7 @@ function normalizarIdentidadeRisco(v){
 }
 
 const REGRAS_RISCO = [
-  {id:'chargeback', pontos:100, titulo:'Chargeback', criterio:'1 ou mais', decisao:'Fraude confirmada pelo fluxo financeiro'},
+  {id:'chargeback', pontos:100, titulo:'Chargeback efetivado', criterio:'1 ou mais na mesma identidade verificada', decisao:'Confirmado somente por evento efetivo da Adyen'},
   {id:'cartoes', pontos:45, titulo:'Cartões diferentes', criterio:'3 ou mais na mesma identidade', decisao:'Forte indício; exige revisão'},
   {id:'recusas', pontos:30, titulo:'Pedidos recusados', criterio:'3 ou mais', decisao:'Prioriza revisão'},
   {id:'score-adyen', pontos:35, titulo:'Score da Adyen', criterio:'30 ou mais', decisao:'Prioriza revisão'},
@@ -1527,14 +1527,33 @@ const REGRAS_RISCO = [
 function renderRegrasRisco(){
   const el=document.getElementById('regras-risco-lista');
   if(!el) return;
-  el.innerHTML=`<div style="font-size:11.5px;color:var(--muted);margin-bottom:9px;">O placar organiza a fila; não condena sozinho. <b style="color:var(--text);">30 pontos = revisar, 60 = forte indício.</b> Só chargeback ou confirmação humana vira fraude confirmada.</div>
+  el.innerHTML=`<div style="font-size:11.5px;color:var(--muted);margin-bottom:9px;">O placar organiza a fila; não condena sozinho. <b style="color:var(--text);">30 pontos = revisar, 60 = forte indício.</b> Só um chargeback efetivado pela Adyen, ligado por identidade verificável, ou confirmação humana vira fraude confirmada.</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px;">${REGRAS_RISCO.map(r=>`<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel2);"><div style="display:flex;justify-content:space-between;gap:8px;"><b style="font-size:12px;">${esc(r.titulo)}</b><span class="tag">+${r.pontos}</span></div><div style="font-size:10.5px;color:var(--muted);margin-top:4px;">${esc(r.criterio)} · ${esc(r.decisao)}</div></div>`).join('')}</div>`;
+}
+
+// "NotificationOfChargeback" é só aviso/abertura de disputa; reversão e
+// decisões ganhas anulam a perda. Para não chamar alguém de fraudador por um
+// aviso, por uma disputa revertida ou por homônimo, esta é a única regra que
+// pode confirmar automaticamente um histórico de chargeback.
+const EVENTOS_CHARGEBACK_EFETIVO = new Set(['CHARGEBACK','SECOND_CHARGEBACK']);
+const EVENTOS_CHARGEBACK_REVERTIDO = new Set([
+  'CHARGEBACK_REVERTIDO','CHARGEBACK_REVERSED','PREARBITRATION_WON',
+  'SCHEME_ARBITRATION_WON','ISSUER_RESPONSE_TIMEFRAME_EXPIRED',
+]);
+function codigoEventoChargeback(t){ return String(t.eventCode || t.status || '').trim().toUpperCase(); }
+function pedidoTemChargebackEfetivo(eventos){
+  let efetivado=false;
+  [...eventos].sort((a,b)=>String(a.dataHora||'').localeCompare(String(b.dataHora||''))).forEach((evento)=>{
+    const codigo=codigoEventoChargeback(evento);
+    if(EVENTOS_CHARGEBACK_EFETIVO.has(codigo) || evento.status==='CHARGEBACK') efetivado=true;
+    if(efetivado && EVENTOS_CHARGEBACK_REVERTIDO.has(codigo)) efetivado=false;
+  });
+  return efetivado;
 }
 
 function raioXRisco(pedido){
   if(!pedido) return '';
   const unidade = String(pedido.unidade||'');
-  const nome = normalizarIdentidadeRisco(pedido.nomeCliente||pedido.cardHolder);
   const email = normalizarIdentidadeRisco(pedido.emailCliente);
   const telefone = String(pedido.telefoneCliente||'').replace(/\D/g,'');
   const shopper = String(pedido.shopperReference||'').trim();
@@ -1543,7 +1562,9 @@ function raioXRisco(pedido){
     if(shopper && String(t.shopperReference||'')===shopper) return true;
     if(email && normalizarIdentidadeRisco(t.emailCliente)===email) return true;
     if(telefone && String(t.telefoneCliente||'').replace(/\D/g,'')===telefone) return true;
-    return !!nome && normalizarIdentidadeRisco(t.nomeCliente||t.cardHolder)===nome;
+    // Nome sozinho nunca é chave de fraude: pode ser homônimo, estar truncado
+    // ou nem ser o nome que a Adyen registra para o pagamento.
+    return false;
   });
   const porPedido = new Map();
   relacionados.forEach(t=>{
@@ -1555,12 +1576,16 @@ function raioXRisco(pedido){
   const cartoes=unicos('last4'), ips=unicos('shopperIp'), emails=unicos('emailCliente'), telefones=unicos('telefoneCliente',v=>String(v||'').replace(/\D/g,'')), enderecos=unicos('enderecoCliente');
   const aprovadas=pedidos.filter(t=>t.status==='APROVADO').length;
   const recusadas=pedidos.filter(t=>t.status==='RECUSADO').length;
-  // olha todo o histórico do pedido: um evento posterior não pode apagar o
-  // fato de que houve chargeback.
-  const chargebacks=new Set(relacionados.filter(t=>/CHARGEBACK/.test(t.status||t.eventCode||'')).map(orderKeyOf)).size;
+  const eventosPorPedido=new Map();
+  relacionados.forEach(t=>{
+    const k=orderKeyOf(t);
+    if(!eventosPorPedido.has(k)) eventosPorPedido.set(k,[]);
+    eventosPorPedido.get(k).push(t);
+  });
+  const chargebacks=[...eventosPorPedido.values()].filter(pedidoTemChargebackEfetivo).length;
   const scoreMax=Math.max(0,...relacionados.map(t=>Number(t.scoreRiscoAdyen)||0));
   const sinais=[];
-  if(chargebacks) sinais.push({peso:100,texto:`${chargebacks} pedido(s) com chargeback — fraude confirmada pelo fluxo financeiro`});
+  if(chargebacks) sinais.push({peso:100,texto:`${chargebacks} chargeback(s) efetivado(s) pela Adyen na mesma identidade verificada`});
   if(cartoes.size>=3) sinais.push({peso:45,texto:`${cartoes.size} cartões diferentes para a mesma identidade`});
   if(recusadas>=3) sinais.push({peso:30,texto:`${recusadas} pedidos recusados`});
   if(scoreMax>=30) sinais.push({peso:35,texto:`score máximo da Adyen: ${scoreMax}`});
@@ -1581,7 +1606,7 @@ function raioXRisco(pedido){
     <div style="display:flex;gap:5px;flex-wrap:wrap;">${metricas.map(([k,v])=>`<span class="tag">${k}: <b>${v}</b></span>`).join('')}</div>
     <div style="margin-top:8px;color:${cor};font-weight:700;font-family:var(--mono);font-size:11px;">${rotulo}${confirmado?'':` · ${pontos}/100`}</div>
     <div style="margin-top:5px;font-size:11px;color:var(--muted);line-height:1.5;">${sinais.length?sinais.map(s=>`• ${esc(s.texto)}`).join('<br>'):'Nenhuma regra objetiva disparou. Ausência de sinal não garante legitimidade.'}</div>
-    <div style="margin-top:5px;font-size:10.5px;color:var(--muted);">Regra: um único dado nunca confirma fraude. Chargeback confirma; os demais sinais apenas priorizam revisão humana.</div>
+    <div style="margin-top:5px;font-size:10.5px;color:var(--muted);">Regra: nome isolado, aviso de chargeback e chargeback revertido nunca confirmam fraude. Os demais sinais apenas priorizam revisão humana.</div>
   </div>`;
 }
 
