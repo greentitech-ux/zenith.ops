@@ -4813,7 +4813,7 @@ function urlComputador(codigo, posto, tipo) {
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
     if (!(await unidadesExtras.apareceEm(req.params.codigo, 'noc'))) return res.status(400).json({ error: 'Essa unidade não tem NOC habilitado.' });
-    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo);
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo, req.body.ehVmPulse, req.body.ehHostVm);
     const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -4823,7 +4823,7 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo);
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo, req.body.ehVmPulse, req.body.ehHostVm);
     const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -6512,6 +6512,8 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 const EXECUTORES_QA = {
   'manutencao.resetarSenha': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoResetSenha(p.nomeConta), { origem: 'manutencao-reset-senha', requerAdmin: true }),
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
+  'manutencao.reiniciarVmPulse': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoReiniciarVmPulse, { origem: 'manutencao-reiniciar-vm-pulse' }),
+  'manutencao.reiniciarVmGcom': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoReiniciarVmGcom, { origem: 'manutencao-reiniciar-vm-gcom' }),
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
   'manutencao.reiniciarGsurfRsa': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_GSURF_RSA, { origem: 'manutencao-gsurf-rsa' }),
@@ -6939,10 +6941,12 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'gsurfRsa', 'diagnostico-tef', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'reiniciar-vm-pulse', 'reiniciar-vm-gcom', 'abortar', 'anydesk', 'gsurfRsa', 'diagnostico-tef', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const nomeConta = tarefa === 'reset-senha' ? req.body.nomeConta : undefined;
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
+      'reiniciar-vm-pulse': { acao: 'manutencao.reiniciarVmPulse', verbo: 'Reiniciar a VM PULSE de', comando: lojaStatus.comandoReiniciarVmPulse, origem: 'manutencao-reiniciar-vm-pulse' },
+      'reiniciar-vm-gcom': { acao: 'manutencao.reiniciarVmGcom', verbo: 'Reiniciar a VM GCOM de', comando: lojaStatus.comandoReiniciarVmGcom, origem: 'manutencao-reiniciar-vm-gcom' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
       'diagnostico-desempenho': { acao: 'manutencao.diagnosticoDesempenho', verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
       'inventario-estacao': { acao: 'manutencao.inventarioEstacao', verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
@@ -6995,7 +6999,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       // 2 minutos de contagem na tela da loja - é a janela pra abortar. Só
       // o reinício da MÁQUINA tem contagem; o do AnyDesk é imediato e não
       // interrompe ninguém, então não há o que abortar.
-      abortavelPorSegundos: tarefa === 'reiniciar' ? 120 : 0,
+      abortavelPorSegundos: ['reiniciar', 'reiniciar-vm-pulse', 'reiniciar-vm-gcom'].includes(tarefa) ? 120 : 0,
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

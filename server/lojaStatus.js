@@ -2209,7 +2209,7 @@ async function nomeDoComputador(codigo, posto) {
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
@@ -2218,7 +2218,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
     // Características operacionais declaradas no cadastro. Não inferimos pelo
     // nome: "Servidor" e "GCOM" precisam ser visíveis e confiáveis no NOC.
-    ehServidor: !!ehServidor, temGcom: !!temGcom, medeQuedas: !!medeQuedas,
+    ehServidor: !!ehServidor, temGcom: !!temGcom, ehVmPulse: !!ehVmPulse, ehHostVm: !!ehHostVm, medeQuedas: !!medeQuedas,
     // Captura local opt-in: o arquivo nunca passa pelo NoPulso nem pelo servidor.
     noPulsoPrint: !!noPulsoPrint,
     // Server 2012 R2 / 7 / 8: agente na versao especifica (ver vigiaScript.js)
@@ -2238,7 +2238,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -2252,6 +2252,8 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServido
     ehNotebook: !!ehNotebook,
     ehServidor: !!ehServidor,
     temGcom: !!temGcom,
+    ehVmPulse: !!ehVmPulse,
+    ehHostVm: !!ehHostVm,
     // Ponto de medição da unidade: só esta máquina entra no relatório de
     // quedas. Pode haver mais de uma por redundância; o relatório consolida
     // ocorrências simultâneas em uma única queda da loja.
@@ -3152,6 +3154,22 @@ function comandoEncerrarGcomWcf(doc) {
   return COMANDO_ENCERRAR_GCOM_WCF;
 }
 
+// VM PULSE e VM GCOM são marcadas explicitamente na ficha. Não inferimos pelo
+// nome: uma ação de reinício não pode atingir uma estação ou host parecido.
+function comandoReiniciarVmPulse(doc) {
+  if (!doc || !doc.ehVmPulse) {
+    throw new Error('esta máquina não está marcada como “VM PULSE”; marque a VM antes de usar esta ação.');
+  }
+  return COMANDO_REINICIAR;
+}
+
+function comandoReiniciarVmGcom(doc) {
+  if (!doc || !doc.temGcom) {
+    throw new Error('esta máquina não está marcada como “Possui GCOM”; marque a VM antes de usar esta ação.');
+  }
+  return COMANDO_REINICIAR;
+}
+
 // RESET DA ZEBRA POR ZPL, sem ir na loja. Pedido do Master: "o mesmo botao
 // do AnyDesk, mas que faz o reset da impressora Zebra pelo ZPL - o codigo
 // executaria de acordo com a impressora Zebra que esteja com a tag que foi
@@ -3333,7 +3351,9 @@ async function enfileirarComandoEmAlvos(alvos, comando, opcoes) {
       const texto = typeof comando === 'function' ? await comando(doc) : comando;
       if (!texto) throw new Error('nenhuma impressora Zebra marcada nesta unidade');
       await enfileirarComando(doc.codigo, doc.posto, texto, opcoes);
-      if ((opcoes || {}).origem === 'manutencao-reiniciar') await marcarReinicioComandado(doc.codigo, doc.posto);
+      if (['manutencao-reiniciar', 'manutencao-reiniciar-vm-pulse', 'manutencao-reiniciar-vm-gcom'].includes((opcoes || {}).origem)) {
+        await marcarReinicioComandado(doc.codigo, doc.posto, (opcoes || {}).origem);
+      }
       return { ...base, ok: true };
     } catch (err) {
       const jaTinha = /comando pendente/i.test(err.message || '');
@@ -5030,7 +5050,7 @@ module.exports = {
   dispositivosComTipoDe, resumoDe,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, comandoResetSenha,
-  comandoResetZebra, comandoEncerrarGcomWcf,
+  comandoResetZebra, comandoEncerrarGcomWcf, comandoReiniciarVmPulse, comandoReiniciarVmGcom,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, horaDoLogEmBrasilia, responderChat, registrarTelemetria,
   sanitizarOcupado, AGENTE_OCUPADO_LIMIAR_MS,
