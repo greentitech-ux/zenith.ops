@@ -22,6 +22,7 @@ const push = require('./push');
 const cardTesting = require('./cardTesting');
 const cardHopping = require('./cardHopping');
 const cardReuseRisk = require('./cardReuseRisk');
+const primeiraCompraSemRastro = require('./primeiraCompraSemRastro');
 const amexVelocity = require('./amexVelocity');
 const disputes = require('./disputes');
 const fraudMarks = require('./fraudMarks');
@@ -3361,6 +3362,42 @@ app.post('/webhooks/adyen', async (req, res) => {
     // O objetivo da nossa deteccao e pegar o que a Adyen NAO pegou sozinha.
     const jaFraudeNativaAdyen = !!tx.fraudeSuspeita;
 
+    // A primeira compra pode ser legítima. Porém, se for cartão e não houver
+    // IP, contato ou endereço, além de um nome pouco identificável, a unidade
+    // precisa conferir ANTES de produzir. É SUSPEITO operacional, não fraude
+    // confirmada, e não bloqueia a entrega por si só.
+    const riscoPrimeiraCompra = !ehPixTx && !jaFraudeNativaAdyen
+      ? primeiraCompraSemRastro.avaliar(tx, store.allTransactions())
+      : null;
+    if (riscoPrimeiraCompra) {
+      try {
+        const clienteNome = tx.nomeCliente || tx.cardHolder || null;
+        const registro = await fraudMarks.marcar({
+          pedidoId: pedidoIdAtual,
+          unidade: tx.unidade,
+          nivel: 'SUSPEITO',
+          motivo: `Revisão antes de produzir: ${riscoPrimeiraCompra.motivo}`,
+          clienteChave: clienteNome ? `nome:${clienteNome}` : null,
+          clienteNome,
+          statusPedido: tx.status,
+          valor: tx.valor,
+          marcadoPorEmail: 'deteccao-automatica@sistema',
+        });
+        broadcast('fraude-marcada', registro, 'monitor');
+        if (registro.marcaNova) {
+          await push.notifyRaw(
+            `⚠️ CONFERIR PEDIDO — ${tx.unidade || ''}`,
+            `${clienteNome || 'Cliente'} · R$ ${Number(tx.valor || 0).toFixed(2)} · primeira compra sem dados suficientes`,
+            `primeira-compra-sem-rastro-${pedidoIdAtual}`,
+            tx.unidade
+          );
+          await alertarConferenciaPrimeiraCompraNaLoja(tx, pedidoIdAtual);
+        }
+      } catch (err) {
+        console.error('Erro ao sinalizar primeira compra sem rastreabilidade:', err.message);
+      }
+    }
+
     // mesmo cliente (mesmo nome) testando varios finais de cartao
     // DIFERENTES num intervalo curto -> padrao classico de cartao
     // clonado/roubado, com ou sem nenhuma aprovacao acontecer (um ataque
@@ -5098,6 +5135,28 @@ async function alertarBloqueioFraudeNaLoja(tx, pedidoId, motivo) {
     console.log(`[fraude] bloqueio do pedido ${pedidoId} avisado em ${computadores.length} computador(es) de ${nomeAlvo}: ${motivo}`);
   } catch (err) {
     console.error(`[fraude] não consegui alertar a loja sobre o bloqueio do pedido ${pedidoId}:`, err.message);
+  }
+}
+
+// Não é bloqueio: a unidade recebe uma conferência operacional, mas o pedido
+// continua aprovado até que alguém confira os dados ou acione o Suporte.
+async function alertarConferenciaPrimeiraCompraNaLoja(tx, pedidoId) {
+  try {
+    const { nomeAlvo, computadores } = await computadoresOperacionaisDaUnidade(tx.unidade);
+    if (!computadores.length) {
+      console.warn(`[fraude] nenhum PDV/ATM/Dispatch/Delivery cadastrado para conferir primeira compra em ${nomeAlvo} (pedido ${pedidoId}).`);
+      return;
+    }
+    const cliente = String(tx.nomeCliente || tx.cardHolder || 'Cliente').slice(0, 80);
+    const texto = `⚠️ CONFERIR ANTES DE PRODUZIR: ${cliente} · R$ ${Number(tx.valor || 0).toFixed(2)}. Primeira compra no cartão sem dados de rastreabilidade suficientes. Confirme o pedido ou acione o Suporte.`;
+    const resultado = await lojaStatus.enviarMensagemMuitos(
+      computadores.map((c) => ({ codigo: c.codigo, posto: c.posto })),
+      texto,
+      'deteccao-automatica@sistema'
+    );
+    console.log(`[fraude] primeira compra sem rastro do pedido ${pedidoId} avisada em ${resultado.enviados.length}/${computadores.length} computador(es) de ${nomeAlvo}.`);
+  } catch (err) {
+    console.error(`[fraude] não consegui alertar a loja sobre a primeira compra sem rastro ${pedidoId}:`, err.message);
   }
 }
 
