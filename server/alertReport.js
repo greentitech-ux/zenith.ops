@@ -45,7 +45,7 @@ function construirAlertas(transacoes) {
     }
   });
   recusadas.filter((d) => d.metodo === 'amex').forEach((d) => alerts.push({ tipo: 'Tentativa de venda Amex recusada', nome: d.cardHolder || d.nomeCliente || 'cliente', unidade: d.unidade, valor: d.valor, dt: d.dataHora }));
-  transacoes.filter((d) => d.fraudeSuspeita && !(d.status || '').includes('CHARGEBACK')).forEach((d) => alerts.push({ tipo: 'Fraude suspeita (Adyen)', nome: d.cardHolder || d.nomeCliente || 'cliente', unidade: d.unidade, valor: d.valor, dt: d.dataHora }));
+  transacoes.filter((d) => d.fraudeSuspeita && !/pix/i.test(String(d.metodo || '')) && !(d.status || '').includes('CHARGEBACK')).forEach((d) => alerts.push({ tipo: 'Fraude suspeita (Adyen)', nome: d.cardHolder || d.nomeCliente || 'cliente', unidade: d.unidade, valor: d.valor, dt: d.dataHora }));
   transacoes.filter((d) => d.status === 'DISPUTE_DEFENSE_PERIOD_ENDED').forEach((d) => alerts.push({ tipo: 'Período de disputa encerrado', nome: d.cardHolder || d.nomeCliente || 'cliente', unidade: d.unidade, valor: d.valor, dt: d.dataHora }));
   return alerts;
 }

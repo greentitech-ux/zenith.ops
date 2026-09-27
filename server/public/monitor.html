@@ -822,7 +822,7 @@ function renderChargebacks(){
     <div class="alert ${novo?'item-novo':''}">
       <div class="sev high"></div>
       <div class="body" style="flex:1;">
-        <div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}•• ${esc(o.last4||'????')} · ${esc(o.unidade||'—')} · ${fmtDT(o.dataCompra)} · ${fmtMoney(o.valor)} · ${esc(o.cliente||'cliente desconhecido')}${o.fraudeSuspeita?' <span class="flag">FRAUDE?</span>':''}</div>
+        <div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}•• ${esc(o.last4||'????')} · ${esc(o.unidade||'—')} · ${fmtDT(o.dataCompra)} · ${fmtMoney(o.valor)} · ${esc(o.cliente||'cliente desconhecido')}${o.fraudeSuspeita&&!/pix/i.test(String(o.metodo||''))?' <span class="flag">FRAUDE?</span>':''}</div>
         <div class="t2">Pedido ${esc(o.pedidoId)} · <span style="color:${prazo.cor}">${prazo.texto}</span>${marcadorDisputa(o.pedidoId)}</div>
         <div style="margin-top:8px;">
           <button type="button" class="btn-disputa" onclick="abrirDisputa('${jsAttr(o.pedidoId)}','${jsAttr(o.unidade||'')}')">📎 Registrar disputa</button>
@@ -961,7 +961,7 @@ function computeSummary(rows){
   const recusadas = semChargeback.filter(t=>t.status==='RECUSADO');
   const estornos = semChargeback.filter(t=>t.status==='ESTORNADO');
   const chargebacksRows = rows.filter(t=>(t.status||'').includes('CHARGEBACK'));
-  const fraudeRows = semChargeback.filter(t=>t.fraudeSuspeita);
+  const fraudeRows = semChargeback.filter(t=>t.fraudeSuspeita && !/pix/i.test(String(t.metodo||'')));
   const soma = list=>+list.reduce((s,t)=>s+(t.valor||0),0).toFixed(2);
   return {
     total: semChargeback.length,
@@ -1086,7 +1086,7 @@ function renderUnidadesTable(rows){
     if(t.status==='APROVADO'){ c.aprovadas++; c.volumeAprovado += t.valor||0; }
     if(t.status==='RECUSADO') c.recusadas++;
     if(t.status==='ESTORNADO') c.estornos++;
-    if(t.fraudeSuspeita) c.fraudes++;
+    if(t.fraudeSuspeita && !/pix/i.test(String(t.metodo||''))) c.fraudes++;
     if((t.status||'').includes('CHARGEBACK')) c.chargebacks++;
   });
   const linhas = Object.entries(porUnidade).sort((a,b)=>b[1].total-a[1].total);
@@ -1123,7 +1123,7 @@ function renderOrdersChanged(){
         <span>${novo?'<span class="flag novo">NOVO</span> ':''}${esc(o.unidade||'—')}</span>
         <span class="valor">${fmtMoney(o.valor)}</span>
       </div>
-      <div class="id">${esc(o.metodo||'?')} · ${esc(o.cliente||'cliente desconhecido')} · ${o.last4?('•• '+esc(o.last4)):'—'}${o.fraudeSuspeita?' <span class="flag">FRAUDE?</span>':''}${marcadorDisputa(o.pedidoId)}</div>
+      <div class="id">${esc(o.metodo||'?')} · ${esc(o.cliente||'cliente desconhecido')} · ${o.last4?('•• '+esc(o.last4)):'—'}${o.fraudeSuspeita&&!/pix/i.test(String(o.metodo||''))?' <span class="flag">FRAUDE?</span>':''}${marcadorDisputa(o.pedidoId)}</div>
       <div class="timeline">
         ${o.history.map((h,i)=>`${i>0?'<span class="arrow">→</span>':''}<span class="step"><span class="badge ${esc(h.status)}">${esc(h.status)}</span><span class="ts">${fmtDT(h.dataHora)}</span></span>`).join('')}
       </div>
@@ -1262,9 +1262,10 @@ function renderAlerts(rows){
   // alerta individual, mesmo sem repetir (diferente das outras bandeiras,
   // que so alertam a partir de 2 recusas seguidas do mesmo cliente)
   recusadas.filter(d=>d.metodo==='amex').forEach(d=>alerts.push({sev:'high', nome:d.cardHolder||d.nomeCliente||'cliente', t1:`Tentativa de venda Amex recusada — ${d.cardHolder||d.nomeCliente||'cliente'}`, t2:`${fmtMoney(d.valor)} · final ${d.last4||'????'} · ${d.motivo||'sem motivo'} · ${d.unidade}`, dt:d.dataHora, psp:d.pspReference}));
+  rows.filter(d=>d.alertaPixChargeback).forEach(d=>alerts.push({sev:'med', nome:d.nomeCliente||d.cardHolder||'cliente', t1:`Alerta PIX — histórico de chargeback`, t2:`${fmtMoney(d.valor)} · ${d.alertaPixChargeback.quantidade||2} chargebacks anteriores · ${d.unidade} · conferir manualmente; PIX não foi bloqueado`, dt:d.dataHora, psp:d.pspReference}));
   // chargeback tem painel proprio (com prazo de recorrer, evidencias etc.) -
   // nao entra aqui pra nao duplicar/inflar os alertas de falha/fraude
-  rows.filter(d=>d.fraudeSuspeita && !d.status.includes('CHARGEBACK')).forEach(d=>alerts.push({sev:'high', nome:d.cardHolder||d.nomeCliente||'cliente', t1:`Fraude suspeita — ${d.cardHolder||'cliente'}`, t2:`${fmtMoney(d.valor)} · final ${d.last4||'????'} · ${d.unidade}`, dt:d.dataHora, psp:d.pspReference}));
+  rows.filter(d=>d.fraudeSuspeita && !/pix/i.test(String(d.metodo||'')) && !d.status.includes('CHARGEBACK')).forEach(d=>alerts.push({sev:'high', nome:d.cardHolder||d.nomeCliente||'cliente', t1:`Fraude suspeita — ${d.cardHolder||'cliente'}`, t2:`${fmtMoney(d.valor)} · final ${d.last4||'????'} · ${d.unidade}`, dt:d.dataHora, psp:d.pspReference}));
   rows.filter(d=>d.status==='DISPUTE_DEFENSE_PERIOD_ENDED').forEach(d=>alerts.push({sev:'med', nome:d.cardHolder||d.nomeCliente||'cliente', t1:`Período de disputa encerrado — ${d.cardHolder||'cliente'}`, t2:`${fmtMoney(d.valor)} · ${d.unidade}`, dt:d.dataHora, psp:d.pspReference}));
   alerts.sort((a,b)=>(b.dt||'').localeCompare(a.dt||''));
   document.getElementById('alert-count').textContent = alerts.length;
@@ -1776,6 +1777,10 @@ async function refreshFraudMarks(){
 // nivel de suspeita/fraude aplicavel a um pedido: marcacao direta nele, ou
 // herdada por ser o mesmo cliente de um pedido ja confirmado como fraude antes
 function fraudeInfoDoPedido(d){
+  // PIX nunca recebe selo/ação de suspeita ou fraude. Mesmo marcas antigas
+  // ficam fora desta tela; o único sinal possível é o alerta neutro de
+  // histórico recorrente de chargeback, calculado pelo servidor.
+  if(/pix/i.test(String(d && d.metodo || ''))) return null;
   const direto = FRAUDE_POR_PEDIDO[orderKeyOf(d)];
   if(direto) return { nivel: direto.nivel, direto: true };
   const chave = chaveClienteIdentificavel(d);
@@ -2071,7 +2076,7 @@ function removerOfferClosedSuperado(pedidos){
             if(d.status==='APROVADO') c.aprovadas++;
             if(d.status==='RECUSADO') c.recusadas++;
             if(ESTORNO_STATUSES_HIST.includes(d.status)) c.estornadas++;
-            if(d.fraudeSuspeita) c.fraude++;
+            if(d.fraudeSuspeita && !/pix/i.test(String(d.metodo||''))) c.fraude++;
       });
 
       // pedidos RECUSADOS repetidos da mesma identidade (mesmo sem marcacao
@@ -2101,7 +2106,7 @@ function removerOfferClosedSuperado(pedidos){
             const ESTORNO_STATUSES = ['ESTORNADO','FALHA_ESTORNO','ESTORNO_AGENDADO','ESTORNO_REVERTIDO'];
             const infoFraude = fraudeInfoDoPedido(d); // marcacao manual, separada do status da Adyen
             let statusCls = '';
-            if(d.fraudeSuspeita || (infoFraude && infoFraude.nivel==='FRAUDE')) statusCls = 'row-fraude';
+            if(!/pix/i.test(String(d.metodo||'')) && (d.fraudeSuspeita || (infoFraude && infoFraude.nivel==='FRAUDE'))) statusCls = 'row-fraude';
             else if((d.status||'').includes('CHARGEBACK')) statusCls = 'row-chargeback';
             else if(ESTORNO_STATUSES.includes(d.status)) statusCls = 'row-estornado';
             else if(d.status==='RECUSADO') statusCls = 'row-recusado';
@@ -2128,7 +2133,8 @@ function removerOfferClosedSuperado(pedidos){
             const fraudeRemoverHtml = infoFraude && infoFraude.direto
               ? `<div class="tx-comentario" onclick="event.stopPropagation(); removerMarcaFraude('${pedidoIdEsc}')">✕ remover marcação</div>`
               : '';
-            const fraudeAcoesHtml = (infoFraude && infoFraude.direto) ? '' :
+            const ehPix = /pix/i.test(String(d.metodo||''));
+            const fraudeAcoesHtml = ehPix || (infoFraude && infoFraude.direto) ? '' :
               `<div style="display:flex;gap:10px;">
                 <div class="tx-comentario" onclick="event.stopPropagation(); marcarFraude('${pedidoIdEsc}','${unidadeEsc}','SUSPEITO','${chaveClienteEsc}','${nomeClienteEsc}',${d.valor||0},'${d.status}')">⚠️ Suspeito</div>
                 <div class="tx-comentario" style="color:var(--bad);" onclick="event.stopPropagation(); marcarFraude('${pedidoIdEsc}','${unidadeEsc}','FRAUDE','${chaveClienteEsc}','${nomeClienteEsc}',${d.valor||0},'${d.status}')">🚫 Fraude</div>
@@ -2136,6 +2142,9 @@ function removerOfferClosedSuperado(pedidos){
             const fraudeBadge = !infoFraude ? '' : infoFraude.nivel==='FRAUDE'
               ? `<span class="flag" style="background:var(--bad-dim);color:var(--bad);">🚫 FRAUDE${infoFraude.direto?'':' (recorrente)'}</span>`
               : `<span class="flag" style="background:var(--warn-dim);color:var(--warn);">⚠️ SUSPEITO</span>`;
+            const alertaPixChargeback = d.alertaPixChargeback
+              ? `<span class="flag" style="background:var(--warn-dim);color:var(--warn);">⚠️ ALERTA PIX: ${esc(String(d.alertaPixChargeback.quantidade||2))} chargebacks anteriores</span>`
+              : '';
             // resposta/observacao da Adyen (motivo da recusa, do estorno etc.) -
             // so faz sentido pra quem nao foi aprovado
             const observacao = (d.status!=='APROVADO' && d.motivo) ? d.motivo : '—';
@@ -2144,7 +2153,7 @@ function removerOfferClosedSuperado(pedidos){
                       <td>${fmtDT(d.dataHora)}${fraudeRemoverHtml}${fraudeAcoesHtml}</td>
                             <td class="valor">${soNumero(d.unidade)}</td>
                                   <td title="${esc(d.nomeCliente||'')}">${esc(d.nomeCliente||'—')}${contatoResumido(d)}${comentarioHtml}</td>
-                                        <td class="statuscell" title="${esc(d.status)}">${novo?'<span class="flag novo">NOVO</span>':''}<span class="badge ${esc(d.status)}">${esc(d.status)}</span>${fraudeBadge}${d.fraudeSuspeita?'<span class="flag">FRAUDE?</span>':''}${REPEATED_PSPS.has(d.pspReference)?'<span class="flag">REPETIDO?</span>':''}${marcadorDisputa(orderKeyOf(d))}</td>
+                      <td class="statuscell" title="${esc(d.status)}">${novo?'<span class="flag novo">NOVO</span>':''}<span class="badge ${esc(d.status)}">${esc(d.status)}</span>${fraudeBadge}${!ehPix&&d.fraudeSuspeita?'<span class="flag">FRAUDE?</span>':''}${alertaPixChargeback}${REPEATED_PSPS.has(d.pspReference)?'<span class="flag">REPETIDO?</span>':''}${marcadorDisputa(orderKeyOf(d))}</td>
                                               <td class="truncate" title="${esc(d.cardHolder||'')}">${esc(d.cardHolder||'—')}</td>
                                                     <td>${esc(d.metodo||'—')}</td>
                                                           <td class="valor">${fmtMoney(d.valor)}</td>
@@ -2311,8 +2320,8 @@ function connectStream(){
     const tx = JSON.parse(e.data);
     DATA.push(tx);
     marcarNovo('tx:'+tx.pspReference);
-    if(tx.status==='RECUSADO' && tx.fraudeSuspeita) enfileirarPopupFraude(tx);
-    else if(tx.fraudeSuspeita || ALERT_STATUSES.has(tx.status)) tocarAlerta();
+    if(tx.status==='RECUSADO' && tx.fraudeSuspeita && !/pix/i.test(String(tx.metodo||''))) enfileirarPopupFraude(tx);
+    else if(tx.alertaPixChargeback || (!/pix/i.test(String(tx.metodo||'')) && tx.fraudeSuspeita) || ALERT_STATUSES.has(tx.status)) tocarAlerta();
     populateFilters(); render();
   });
   es.addEventListener('update', (e)=>{
@@ -2320,7 +2329,7 @@ function connectStream(){
     const idx = DATA.findIndex(d=>d.pspReference===tx.pspReference && d.eventCode===tx.eventCode);
     if(idx>=0) DATA[idx]=tx;
     marcarNovo('tx:'+tx.pspReference);
-    if(tx.fraudeSuspeita || ALERT_STATUSES.has(tx.status)) tocarAlerta();
+    if(tx.alertaPixChargeback || (!/pix/i.test(String(tx.metodo||'')) && tx.fraudeSuspeita) || ALERT_STATUSES.has(tx.status)) tocarAlerta();
     render();
   });
   es.addEventListener('order-changed', (e)=>{

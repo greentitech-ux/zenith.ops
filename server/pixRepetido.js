@@ -9,16 +9,16 @@
 // identidade por nome, que so olha nome e por isso nao distingue Pix de
 // cartao nenhum - e era ela que enchia o Monitor de tag em cima de Pix.
 //
-// A UNICA marca que Pix pode receber e SUSPEITO com o motivo "Repetido":
-// o mesmo cliente pagando por Pix varias vezes na mesma janela curta. Isso
-// e o que a operacao de fato quer olhar num Pix (cobranca duplicada,
-// pedido em duplicidade), e reaproveita o criterio que o Monitor ja usa na
-// secao "Pedidos repetidos" (monitorReport.js: mesma chave de cliente,
-// LIMIAR_REPETIDOS pedidos dentro de JANELA_REPETIDOS_MS).
+// PIX não recebe marca de SUSPEITO nem de FRAUDE, inclusive se o mesmo
+// cliente pagar duas vezes. Repetição continua sendo uma informação da seção
+// operacional "Pedidos repetidos", não uma acusação antifraude. A única
+// exceção visual é o alerta neutro de histórico recorrente de chargeback,
+// tratado no webhook com os registros persistidos (store.js).
 const JANELA_MS = 30 * 60 * 1000; // = JANELA_REPETIDOS_MS do monitorReport.js
 const LIMIAR = 2;                 // = LIMIAR_REPETIDOS do monitorReport.js
 
-// nome que aparece na tag - vocabulario do proprio Monitor, nao inventado
+// Mantido para compatibilidade com históricos/testes anteriores. Não deve
+// ser usado para criar fraudMark.
 const MOTIVO_REPETIDO = 'Repetido';
 
 const porCliente = new Map(); // chave -> [timestamps]

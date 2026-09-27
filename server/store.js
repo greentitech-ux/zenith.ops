@@ -349,6 +349,64 @@ function chargebacks() {
     .sort((a, b) => (b.ultimaAtualizacao || '').localeCompare(a.ultimaAtualizacao || ''));
 }
 
+// PIX não entra na malha antifraude. Ainda assim, se a mesma identidade já
+// acumulou chargebacks reais, a operação precisa ser avisada para conferir o
+// caso. Esta função devolve somente esse histórico objetivo; quem chama deve
+// mostrar um alerta neutro, jamais uma marca de SUSPEITO/FRAUDE ou bloqueio.
+//
+// shopperReference é a chave preferida porque vem da própria Adyen. Quando
+// ela não existe, o nome completo normalizado é apenas um fallback para
+// alerta humano (e exige dois chargebacks em pedidos distintos), nunca uma
+// decisão automática contra o cliente.
+function normalizarNomeParaHistorico(nome) {
+  return String(nome || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function historicoChargebackDoCliente(tx) {
+  const referencia = String(tx && tx.shopperReference || '').trim();
+  const nome = normalizarNomeParaHistorico(tx && (tx.nomeCliente || tx.cardHolder));
+  if (!referencia && nome.length < 8) return { quantidade: 0, criterio: null, pedidos: [] };
+
+  const pedidoAtual = orderKey(tx || {});
+  const porPedido = new Map();
+  const eventos = load();
+  for (const evento of eventos) {
+    const pedidoId = orderKey(evento);
+    if (pedidoId === pedidoAtual) continue;
+    // Pedido de informação e fim de prazo ficam no painel financeiro, mas
+    // não provam que o cliente abriu chargeback. Para este alerta contam só
+    // as aberturas reais registradas pela adquirente.
+    if (!ABERTURA_CHARGEBACK_STATUSES.includes(evento.status)) continue;
+    if (!porPedido.has(pedidoId)) porPedido.set(pedidoId, []);
+    porPedido.get(pedidoId).push(evento);
+  }
+
+  const pedidos = [];
+  let usouReferencia = false;
+  for (const [pedidoId, eventosChargeback] of porPedido) {
+    const eventosDoPedido = eventos.filter((evento) => orderKey(evento) === pedidoId);
+    const mesmaReferencia = !!referencia && eventosDoPedido.some((evento) => String(evento.shopperReference || '').trim() === referencia);
+    const mesmoNome = !referencia && eventosDoPedido.some((evento) =>
+      normalizarNomeParaHistorico(evento.nomeCliente || evento.cardHolder) === nome
+    );
+    if (!mesmaReferencia && !mesmoNome) continue;
+    if (mesmaReferencia) usouReferencia = true;
+    pedidos.push({
+      pedidoId,
+      data: eventosChargeback[0].dataHora || null,
+      unidade: eventosChargeback[0].unidade || null,
+    });
+  }
+
+  return {
+    quantidade: pedidos.length,
+    criterio: pedidos.length ? (usouReferencia ? 'shopperReference' : 'nome-completo') : null,
+    pedidos,
+  };
+}
+
 function clientStats(key, allowedUnidades) {
   const all = load();
   let rows = all.filter((t) => clientKey(t) === key);
@@ -386,4 +444,5 @@ module.exports = {
   orderFor,
   ordersChanged,
   chargebacks,
+  historicoChargebackDoCliente,
 };

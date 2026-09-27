@@ -3291,9 +3291,37 @@ app.post('/webhooks/adyen', async (req, res) => {
     // A mesma chave liga AUTHORISATION e REFUND: no estorno a Adyen costuma
     // mandar um PSP novo, mas preserva merchantReference/originalReference.
     const pedidoIdAtual = tx.merchantReference || tx.originalReference || tx.pspReference;
+    const ehPixTx = pixRepetido.ehPix(tx);
+
+    // PIX não participa de suspeita/fraude, nem quando a Adyen tiver trazido
+    // uma flag genérica. Ele pode somente trazer um alerta operacional neutro
+    // se a MESMA identidade já acumulou chargebacks em pedidos anteriores.
+    // Dois casos confirmados são o mínimo para não transformar coincidência de
+    // nome em acusação. O alerta não bloqueia produção nem cria fraudMark.
+    if (ehPixTx) {
+      tx.fraudeSuspeita = false;
+      const historico = store.historicoChargebackDoCliente(tx);
+      if (tx.status === 'APROVADO' && historico.quantidade >= 2) {
+        tx.alertaPixChargeback = {
+          quantidade: historico.quantidade,
+          criterio: historico.criterio,
+          mensagem: `PIX aprovado para cliente com ${historico.quantidade} chargebacks anteriores. Conferir manualmente.`,
+        };
+      }
+    }
     store.addOrUpdate(tx);
     broadcast('transaction', tx, 'monitor');
     push.notify(tx); // estorno, estorno agendado, chargeback ou fraude -> push no celular/navegador
+
+    if (tx.alertaPixChargeback) {
+      const cliente = String(tx.nomeCliente || tx.cardHolder || 'Cliente').slice(0, 80);
+      push.notifyRaw(
+        `⚠️ ALERTA PIX — ${tx.unidade || ''}`,
+        `${cliente} · ${tx.alertaPixChargeback.quantidade} chargebacks anteriores. Conferir manualmente; PIX não foi bloqueado.`,
+        `pix-chargeback-${pedidoIdAtual}`,
+        tx.unidade
+      );
+    }
 
     // Estorno é uma mudança operacional, não só financeira: quando um pedido
     // antes aprovado passa a ESTORNADO, a loja precisa saber antes de produzir
@@ -3348,39 +3376,10 @@ app.post('/webhooks/adyen', async (req, res) => {
       }
     }
 
-    // ---------- Pix: regra propria (decisao do Master) ----------
-    // Pix NAO recebe tag de FRAUDE nem de SUSPEITO pelas regras de cartao -
-    // elas nao se aplicam (nao ha cartao, nao ha final de cartao, nao ha
-    // chargeback). A unica marca possivel e SUSPEITO/"Repetido", quando o
-    // mesmo cliente paga por Pix mais de uma vez na janela curta - mesmo
-    // criterio da secao "Pedidos repetidos" do Monitor. Ver pixRepetido.js.
-    if (pixRepetido.ehPix(tx)) {
-      const repetido = pixRepetido.registrarPix(tx);
-      if (repetido) {
-        try {
-          const clienteNome = tx.nomeCliente || tx.cardHolder || null;
-          const registro = await fraudMarks.marcar({
-            pedidoId: pedidoIdAtual,
-            unidade: tx.unidade,
-            nivel: 'SUSPEITO',
-            motivo: `${pixRepetido.MOTIVO_REPETIDO}: ${repetido.repeticoes} Pix do mesmo cliente em ${repetido.janelaMinutos} min.`,
-            clienteChave: clienteNome ? `nome:${clienteNome}` : null,
-            clienteNome,
-            statusPedido: tx.status,
-            valor: tx.valor,
-            marcadoPorEmail: 'deteccao-automatica@sistema',
-          });
-          broadcast('fraude-marcada', registro, 'monitor');
-        } catch (err) {
-          console.error('Erro ao marcar Pix repetido:', err.message);
-        }
-      }
-    }
-    // trava do resto do bloco de fraude: nenhuma regra de cartao encosta num
+    // Trava do resto do bloco de fraude: nenhuma regra de cartão encosta num
     // Pix. NAO da pra usar `continue` aqui - o resto do laco ainda precisa
     // rodar pro Pix (mudanca de status, chargeback, alerta de pedido que
     // alguem esta acompanhando pelo Beniboy).
-    const ehPixTx = pixRepetido.ehPix(tx);
 
     // Uma aprovação AMEX logo depois de uma rajada de recusas é o caso que
     // transforma card testing em prejuízo. Retém somente AMEX da própria
@@ -3838,8 +3837,16 @@ app.get('/api/monitor/relatorio-comparativo-unidade.pdf', requireSection('monito
 
 // ---------- marcacao manual de suspeita/fraude por pedido (monitoramento
 // efetivo, separado do status que vem da Adyen - esse continua intacto) ----------
-app.get('/api/fraude', requireSection('monitor'), (req, res) => {
-  fraudMarks.listAllCached().then((lista) => res.json(auth.filterByUnidade(req, lista)));
+function pedidoEhPix(pedidoId) {
+  const pedido = store.orderFor(pedidoId);
+  return !!pedido && pixRepetido.ehPix({ metodo: pedido.metodo });
+}
+
+app.get('/api/fraude', requireSection('monitor'), async (req, res) => {
+  const lista = await fraudMarks.listAllCached();
+  // Marcas antigas de PIX são preservadas no histórico/auditoria, mas deixam
+  // de alimentar o Monitor. PIX não é fraude nem suspeito por esta política.
+  res.json(auth.filterByUnidade(req, lista).filter((m) => !pedidoEhPix(m.pedidoId)));
 });
 
 
@@ -3848,6 +3855,9 @@ app.post('/api/fraude/marcar', requireSection('monitor'), async (req, res) => {
     const { pedidoId, unidade, nivel, motivo, clienteChave, clienteNome, statusPedido, valor } = req.body;
     if (!req.isMaster && unidade && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    if (pedidoEhPix(pedidoId)) {
+      return res.status(400).json({ error: 'PIX não pode ser marcado como suspeito ou fraude. Use apenas o alerta de histórico de chargeback, quando houver.' });
     }
     const registro = await fraudMarks.marcar({
       pedidoId, unidade, nivel, motivo, clienteChave, clienteNome, statusPedido, valor,
@@ -3884,7 +3894,11 @@ app.post('/api/fraude/:pedidoId/liberar-entrega', auth.requireMaster, async (req
 app.post('/api/fraude/:pedidoId/confirmar', auth.requireMaster, async (req, res) => {
   try {
     if (!(await exigirSenhaDoMaster(req, res))) return;
-    const registro = await fraudMarks.confirmarFraude(decodeURIComponent(req.params.pedidoId), req.user.email);
+    const pedidoId = decodeURIComponent(req.params.pedidoId);
+    if (pedidoEhPix(pedidoId)) {
+      return res.status(400).json({ error: 'PIX não pode ser confirmado como fraude por esta tela.' });
+    }
+    const registro = await fraudMarks.confirmarFraude(pedidoId, req.user.email);
     broadcast('fraude-marcada', registro, 'monitor');
     push.notifyRaw('🚫 Fraude confirmada pelo Suporte', `${registro.clienteNome || 'Cliente'} · ${registro.unidade || ''} · pedido mantido bloqueado`, `fraude-confirmada-${registro.pedidoId}`, registro.unidade);
     alertarDecisaoFraudeNaLoja(registro, false);
@@ -3943,7 +3957,9 @@ app.post('/api/fraude/limpeza-automatica', auth.requireMaster, async (req, res) 
 app.get('/api/fraude/relatorio.csv', auth.requireMaster, async (req, res) => {
   const { inicio, fim } = req.query;
   const historico = await fraudMarks.listHistorico();
-  const filtrado = historico.filter((m) => (!inicio || (m.criadoEm || '') >= inicio) && (!fim || (m.criadoEm || '') <= fim + 'T23:59:59'));
+  const filtrado = historico.filter((m) => !pedidoEhPix(m.pedidoId)
+    && (!inicio || (m.criadoEm || '') >= inicio)
+    && (!fim || (m.criadoEm || '') <= fim + 'T23:59:59'));
   const linhas = fraudReport.agruparPorCliente(filtrado);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${fraudReport.slugify('relatorio-fraude')}-${reportUtil.dataArquivo()}.csv"`);
@@ -3953,7 +3969,9 @@ app.get('/api/fraude/relatorio.csv', auth.requireMaster, async (req, res) => {
 app.get('/api/fraude/relatorio.pdf', auth.requireMaster, async (req, res) => {
   const { inicio, fim } = req.query;
   const historico = await fraudMarks.listHistorico();
-  const filtrado = historico.filter((m) => (!inicio || (m.criadoEm || '') >= inicio) && (!fim || (m.criadoEm || '') <= fim + 'T23:59:59'));
+  const filtrado = historico.filter((m) => !pedidoEhPix(m.pedidoId)
+    && (!inicio || (m.criadoEm || '') >= inicio)
+    && (!fim || (m.criadoEm || '') <= fim + 'T23:59:59'));
   const linhas = fraudReport.agruparPorCliente(filtrado);
   const periodo = inicio || fim ? ` · período: ${inicio || 'início'} a ${fim || 'hoje'}` : '';
   const subtitulo = `Exportado em ${agoraBrasiliaFmt()}${periodo} · ${linhas.length} cliente(s) monitorado(s)`;

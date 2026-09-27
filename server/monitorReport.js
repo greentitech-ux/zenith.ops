@@ -334,7 +334,7 @@ function prepararComparativoUnidade(txs) {
     if (t.status === 'APROVADO') { c.aprovadas++; c.volumeAprovado += t.valor || 0; }
     if (t.status === 'RECUSADO') c.recusadas++;
     if (t.status === 'ESTORNADO') c.estornos++;
-    if (t.fraudeSuspeita) c.fraudes++;
+    if (t.fraudeSuspeita && !/pix/i.test(String(t.metodo || ''))) c.fraudes++;
     if ((t.status || '').includes('CHARGEBACK')) c.chargebacks++;
   });
   const linhas = Object.entries(porUnidade).sort((a, b) => b[1].total - a[1].total).map(([u, c]) => ({
