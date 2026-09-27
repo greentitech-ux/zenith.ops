@@ -24,6 +24,7 @@ const cardHopping = require('./cardHopping');
 const cardReuseRisk = require('./cardReuseRisk');
 const amexVelocity = require('./amexVelocity');
 const disputes = require('./disputes');
+const pedidoEvidencias = require('./pedidoEvidencias');
 const fraudMarks = require('./fraudMarks');
 const fraudReport = require('./fraudReport');
 const alertReport = require('./alertReport');
@@ -144,6 +145,25 @@ const upload = multer({
   // de ligacao (maiores) - ate 8 arquivos de 50MB cada por registro
   limits: { fileSize: 50 * 1024 * 1024, files: 8 },
 });
+
+// Uma selfie enviada por link público não é um anexo genérico: aceita somente
+// formatos de imagem comuns, um arquivo e tamanho compatível com 4G.
+const uploadEvidenciaPedido = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.mimetype || '')) {
+      return cb(new Error('Envie uma imagem JPEG, PNG ou WebP.'));
+    }
+    cb(null, true);
+  },
+});
+function receberSelfiePedido(req, res, next) {
+  uploadEvidenciaPedido.single('selfie')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Não foi possível receber a selfie.' });
+    next();
+  });
+}
 
 // ANEXOS DE FORMULARIO. Um boleto de fornecedor as vezes vem com dezenas de
 // paginas em arquivos separados, e o teto de 5 travava a assinatura. Sobe pra
@@ -375,6 +395,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/assinar.html',
   '/reuniao-publica.html',
   '/treinamento-publico.html',
+  '/evidencia-pedido.html',
 ]);
 // A MESMA lista vale SEM o ".html": `/atendimento` e `/atendimento.html`
 // servem a mesma pagina (ver o `extensions` do express.static la embaixo).
@@ -443,6 +464,7 @@ const ROTA_LOJA_CHAT_RESPONDER_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[
 const ROTA_LOJA_TELEMETRIA_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/telemetria$/;
 function rotaPublicaSemDashboard(path) {
   return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/') || path.startsWith('/api/reunioes/publica/') || path.startsWith('/api/treinamentos-publico/')
+    || path.startsWith('/api/pedido-evidencias/publico/')
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
@@ -2565,6 +2587,57 @@ app.post('/api/rh/publico/:token/checkin/saida', upload.single('foto'), async (r
     res.json({ id: registro.id, status: registro.status, saida: registro.saida.horario });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- evidência de pedido por link público ----------
+// O Monitor cria o link para UM pedido. Quem o recebe decide tirar a selfie e
+// conceder a localização ao navegador; o token é aleatório, expira em 24h e
+// é consumido uma única vez. As rotas ficam antes do portão global de /api.
+app.get('/api/pedido-evidencias/publico/:token', async (req, res) => {
+  const registro = await pedidoEvidencias.porToken(req.params.token);
+  const estado = pedidoEvidencias.estadoPublico(registro);
+  if (estado === 'INVALIDO') return res.status(404).json({ error: 'Link inválido.' });
+  res.json({ estado, unidade: registro.unidade || null, expiraEm: registro.expiraEm || null });
+});
+
+app.post('/api/pedido-evidencias/publico/:token', receberSelfiePedido, async (req, res) => {
+  let registro = null;
+  let reservado = false;
+  try {
+    registro = await pedidoEvidencias.porToken(req.params.token);
+    const estado = pedidoEvidencias.estadoPublico(registro);
+    if (!registro || estado !== 'PENDENTE') {
+      const mensagem = estado === 'USADO' ? 'Esta evidência já foi enviada.'
+        : estado === 'EXPIRADO' ? 'Este link expirou. Peça um novo link.'
+          : estado === 'PROCESSANDO' ? 'A evidência já está sendo enviada. Aguarde alguns instantes.'
+            : 'Link inválido.';
+      return res.status(400).json({ error: mensagem });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Tire ou escolha uma selfie para continuar.' });
+    const localizacao = lerLocalizacaoDoBody(req.body);
+    if (!localizacao) return res.status(400).json({ error: 'Não foi possível confirmar a localização. Permita o acesso e tente de novo.' });
+    reservado = await pedidoEvidencias.reservar(registro.id);
+    if (!reservado) return res.status(409).json({ error: 'Este link acabou de ser usado ou expirou. Peça um novo link.' });
+    const caminho = await storage.salvarArquivo(registro.pedidoId, req.file, 'pedido-evidencias');
+    const recebidoEm = new Date().toISOString();
+    const disputa = await disputes.create({
+      pedidoId: registro.pedidoId,
+      unidade: registro.unidade,
+      nomeContato: '',
+      telefoneContato: '',
+      notas: `📷 Evidência recebida por link público em ${recebidoEm}. Selfie e localização confirmadas pelo dispositivo.`,
+      anexos: [{ nome: 'selfie-evidencia.jpg', path: caminho, tipo: req.file.mimetype || 'image/jpeg' }],
+      origem: 'LINK_EVIDENCIA_PUBLICO',
+      localizacao,
+      recebidoEm,
+    });
+    await pedidoEvidencias.concluir(registro.id, disputa.id);
+    broadcast('dispute-changed', { pedidoId: disputa.pedidoId, status: disputa.status, unidade: disputa.unidade }, 'disputas');
+    res.json({ ok: true, recebidoEm });
+  } catch (err) {
+    if (reservado && registro) await pedidoEvidencias.liberar(registro.id).catch(() => {});
+    res.status(400).json({ error: err.message || 'Não foi possível enviar a evidência.' });
   }
 });
 
@@ -4799,6 +4872,33 @@ app.post('/api/monitor/alertar-loja', requireSection('monitor'), async (req, res
   }
 });
 
+// Gera um link temporário para a loja anexar uma selfie e a localização ao
+// pedido. O link não mostra dados do pedido e só pode ser consumido uma vez.
+app.post('/api/monitor/evidencias-link', requireSection('monitor'), async (req, res) => {
+  try {
+    const pedidoId = String(req.body.pedidoId || '').trim().slice(0, 80);
+    const unidade = String(req.body.unidade || '').trim().slice(0, 120);
+    if (!pedidoId || !unidade) return res.status(400).json({ error: 'Pedido e unidade são obrigatórios.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const link = await pedidoEvidencias.criar({
+      pedidoId,
+      unidade,
+      cliente: String(req.body.cliente || '').slice(0, 120),
+      valor: req.body.valor,
+      criadoPor: req.user.email,
+    });
+    res.json({
+      ok: true,
+      url: `${APP_BASE_URL}/evidencia-pedido.html?t=${encodeURIComponent(link.token)}`,
+      expiraEm: link.expiraEm,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Não foi possível criar o link.' });
+  }
+});
+
 // tipo 'interno' (computador de escritorio/servidor, so pro monitoramento)
 // aponta pra tela normal de login do NoPulso; 'atendimento' (o default,
 // tablet/quiosque na entrada da loja) aponta pro chat publico do Beniboy -
@@ -4895,6 +4995,12 @@ function disputaPermitida(req, registro) {
   if (req.isMaster) return true;
   return !registro.unidade || (req.permissions.unidades || []).includes(registro.unidade);
 }
+// Selfies seguem o acesso normal às evidências do pedido. Já a coordenada
+// exata é sensível: apenas o Master recebe o campo de localização.
+function disputaVista(req, registro) {
+  if (!registro || req.isMaster) return registro;
+  return { ...registro, localizacao: undefined };
+}
 
 app.post('/api/disputes', requireSection('disputas'), upload.array('anexos', 8), async (req, res) => {
   try {
@@ -4920,7 +5026,7 @@ app.post('/api/disputes', requireSection('disputas'), upload.array('anexos', 8),
 });
 
 app.get('/api/disputes', requireSection('disputas'), async (req, res) => {
-  res.json(auth.filterByUnidade(req, (await disputes.listAll()).filter((d) => req.isMaster || !d.unidade || (req.permissions.unidades || []).includes(d.unidade))));
+  res.json(auth.filterByUnidade(req, (await disputes.listAll()).filter((d) => req.isMaster || !d.unidade || (req.permissions.unidades || []).includes(d.unidade)).map((d) => disputaVista(req, d))));
 });
 
 // relatorio (CSV/PDF) da tela de Relatórios de disputa (relatorios.html) -
@@ -4957,7 +5063,7 @@ app.get('/api/disputes/relatorio.:formato(csv|pdf)', requireSection('disputas'),
 
 app.get('/api/disputes/:pedidoId', requireSection('disputas'), async (req, res) => {
   const lista = await disputes.listByPedido(decodeURIComponent(req.params.pedidoId));
-  res.json(lista.filter((d) => disputaPermitida(req, d)));
+  res.json(lista.filter((d) => disputaPermitida(req, d)).map((d) => disputaVista(req, d)));
 });
 
 app.patch('/api/disputes/:id/status', requireSection('disputas'), async (req, res) => {
@@ -10861,9 +10967,11 @@ app.delete('/api/rh/funcionarios/:id', auth.requireMaster, async (req, res) => {
 function lerLocalizacaoDoBody(body) {
   const lat = Number(body.lat);
   const lng = Number(body.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  // Não basta ser número: aceitar coordenadas fora do globo permitiria gravar
+  // lixo (ou uma localização forjada por um cliente malformado) na evidência.
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   const precisao = Number(body.precisao);
-  return { lat, lng, precisao: Number.isFinite(precisao) ? precisao : null };
+  return { lat, lng, precisao: Number.isFinite(precisao) && precisao >= 0 && precisao <= 100000 ? precisao : null };
 }
 
 // a localizacao so aparece pra quem e Master de verdade (nem Admin, nem RH

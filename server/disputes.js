@@ -19,7 +19,7 @@ const COLLECTION = db.collection('disputes');
 // Exibido como "ERRO SISTEMA" (o underscore e so pra classe CSS/valor).
 const STATUSES = ['MONITORANDO', 'ABERTA', 'ENVIADA', 'GANHA', 'PERDIDA', 'ERRO_SISTEMA'];
 
-async function create({ pedidoId, unidade, nomeContato, telefoneContato, notas, anexos }) {
+async function create({ pedidoId, unidade, nomeContato, telefoneContato, notas, anexos, origem, localizacao, recebidoEm }) {
   const doc = COLLECTION.doc();
   const agora = new Date().toISOString();
   const registro = {
@@ -31,6 +31,9 @@ async function create({ pedidoId, unidade, nomeContato, telefoneContato, notas, 
     notas: notas || '',
     status: 'MONITORANDO',
     anexos: anexos || [], // [{ nome, path, tipo }] - path e a chave no Cloud Storage, tipo e o mimetype
+    origem: origem || null,
+    localizacao: localizacao || null,
+    recebidoEm: recebidoEm || null,
     criadoEm: agora,
     atualizadoEm: agora,
   };

@@ -465,6 +465,8 @@
     <p id="alerta-loja-erro" class="hidden" style="color:var(--bad);font-size:11.5px;margin-top:8px;"></p>
     <p id="alerta-loja-ok" class="hidden" style="color:var(--ok);font-size:11.5px;margin-top:8px;"></p>
     <button type="button" id="alerta-loja-enviar" onclick="enviarAlertaLoja()" style="width:100%;margin-top:12px;padding:9px;border-radius:6px;border:1px solid #5c1e1e;background:var(--panel2);color:var(--bad);cursor:pointer;font-family:var(--sans);font-size:12.5px;font-weight:600;">Enviar alerta</button>
+    <button type="button" id="alerta-loja-evidencia" onclick="gerarLinkEvidenciaPedido()" style="width:100%;margin-top:8px;padding:9px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--accent);cursor:pointer;font-family:var(--sans);font-size:12.5px;font-weight:600;">📷 Gerar link de selfie + localização</button>
+    <div id="alerta-loja-evidencia-link" class="hidden" style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);font-size:11.5px;"></div>
     <button class="close" onclick="document.getElementById('alerta-loja-overlay').classList.remove('show')">Fechar</button>
   </div>
 </div>
@@ -850,6 +852,15 @@ function renderAnexo(disputeId, index, anexo){
   return `<a href="${url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);">📄 ${esc(anexo.nome||'arquivo')}</a>`;
 }
 
+function resumoEvidenciaPublica(registro){
+  const l = registro && registro.localizacao;
+  if(!l || !Number.isFinite(Number(l.lat)) || !Number.isFinite(Number(l.lng))) return '';
+  const lat = Number(l.lat), lng = Number(l.lng);
+  const precisao = Number.isFinite(Number(l.precisao)) ? ` · precisão de ${Math.round(Number(l.precisao))} m` : '';
+  const mapa = `https://www.google.com/maps?q=${encodeURIComponent(lat+','+lng)}`;
+  return `<div class="notas" style="margin-top:7px;">📍 <b>Evidência por link público</b>${precisao} · <a href="${mapa}" target="_blank" rel="noopener" style="color:var(--accent);">abrir localização</a></div>`;
+}
+
 async function abrirDisputa(pedidoId, unidade){
   DISPUTE_PEDIDO = { pedidoId, unidade };
   document.getElementById('dispute-modal-title').textContent = 'Registro do pedido — ' + pedidoId;
@@ -871,7 +882,8 @@ async function carregarHistoricoDisputas(pedidoId){
         <span style="color:var(--muted);font-family:var(--mono);">${fmtDT(d.criadoEm)}</span>
       </div>
       ${(d.nomeContato||d.telefoneContato)?`<div class="notas">${esc(d.nomeContato||'—')}${d.telefoneContato?(' · '+esc(d.telefoneContato)):''}</div>`:''}
-      ${d.notas?`<div class="notas">${esc(d.notas)}</div>`:''}
+       ${d.notas?`<div class="notas">${esc(d.notas)}</div>`:''}
+       ${resumoEvidenciaPublica(d)}
       <div class="imgs">
         ${(d.anexos||[]).map((a,i)=>renderAnexo(d.id,i,a)).join('')}
       </div>
@@ -1623,6 +1635,7 @@ async function abrirAlertaLoja(pedidoId, unidade){
   lista.innerHTML = '<div class="empty">Carregando computadores...</div>';
   document.getElementById('alerta-loja-erro').classList.add('hidden');
   document.getElementById('alerta-loja-ok').classList.add('hidden');
+  document.getElementById('alerta-loja-evidencia-link').classList.add('hidden');
   btn.disabled = true;
   document.getElementById('alerta-loja-overlay').classList.add('show');
   try{
@@ -1673,6 +1686,32 @@ async function enviarAlertaLoja(){
   }finally{
     btn.disabled = false; btn.textContent = 'Enviar alerta';
   }
+}
+
+async function gerarLinkEvidenciaPedido(){
+  if(!ALERTA_LOJA_PEDIDO) return;
+  const btn = document.getElementById('alerta-loja-evidencia');
+  const box = document.getElementById('alerta-loja-evidencia-link');
+  btn.disabled = true; btn.textContent = 'Gerando link...';
+  try{
+    const resp = await fetch('/api/monitor/evidencias-link', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(ALERTA_LOJA_PEDIDO) });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(data.error || 'Não foi possível criar o link.');
+    box.innerHTML = `<b style="display:block;color:var(--accent);margin-bottom:4px;">Link pronto · vale por 24 horas e registra uma única evidência.</b><span style="display:block;color:var(--muted);margin-bottom:7px;">A pessoa escolhe tirar a selfie e autoriza a localização no próprio celular.</span><div style="display:flex;gap:6px;"><input id="alerta-loja-evidencia-url" readonly value="${esc(data.url)}" style="min-width:0;flex:1;margin:0;padding:7px;font-size:10.5px;"><button type="button" onclick="copiarLinkEvidenciaPedido()" style="flex:none;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--text);padding:7px 9px;cursor:pointer;">Copiar</button></div>`;
+    box.classList.remove('hidden');
+  }catch(e){
+    box.textContent = e.message; box.style.color = 'var(--bad)'; box.classList.remove('hidden');
+  }finally{
+    btn.disabled = false; btn.textContent = '📷 Gerar link de selfie + localização';
+  }
+}
+
+function copiarLinkEvidenciaPedido(){
+  const input = document.getElementById('alerta-loja-evidencia-url');
+  if(!input) return;
+  const ok = () => { const b = input.nextElementSibling; if(b) { b.textContent = 'Copiado ✓'; setTimeout(()=>b.textContent='Copiar', 1600); } };
+  if(navigator.clipboard?.writeText) navigator.clipboard.writeText(input.value).then(ok).catch(()=>{ input.select(); document.execCommand('copy'); ok(); });
+  else { input.select(); document.execCommand('copy'); ok(); }
 }
 
 // comentario manual num estorno (ex: "estornei eu mesmo pelo painel da
