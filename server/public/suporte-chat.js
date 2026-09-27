@@ -143,6 +143,16 @@
   .szc-pp-fechar{position:absolute;top:8px;right:8px;background:none;border:none;color:#7d8896;font-size:14px;cursor:pointer;}
   @keyframes szc-pp-in{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
   @media (prefers-reduced-motion:reduce){ .szc-pp-card{animation:none;} }
+  /* RESPOSTA DA LOJA: quando uma unidade responde a um alerta, a mensagem não
+     pode se perder apenas porque o Master/Suporte já está vendo outra conversa.
+     Este aviso fica na tela até alguém abrir a conversa certa ou dispensá-lo. */
+  .szc-resposta-loja{position:fixed;top:16px;right:16px;z-index:99997;width:min(360px,calc(100vw - 32px));
+    background:#201415;color:#fff;border:2px solid #ff5c5c;border-radius:12px;padding:12px 14px;
+    box-shadow:0 12px 32px rgba(0,0,0,.58);font-family:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;}
+  .szc-resposta-loja b{display:block;color:#ff8a8a;font-size:12px;letter-spacing:.04em;margin-bottom:5px;}
+  .szc-resposta-loja .szc-rl-texto{font-size:13px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .szc-resposta-loja button{margin-top:10px;background:#b8ff3c;color:#101510;border:0;border-radius:8px;padding:8px 11px;font-weight:800;cursor:pointer;}
+  .szc-resposta-loja .szc-rl-fechar{float:right;margin:0;padding:0;background:none;color:#ffb6b6;font-size:17px;font-weight:400;}
   /* MENSAGEM DIRETA: caixa de dialogo de verdade, nao um aviso que some.
      Fica por cima de qualquer tela do NoPulso e so sai quando a pessoa
      fecha - e dentro dela da pra responder (ver mensagensDiretas.js) */
@@ -727,6 +737,7 @@
   // - MASTER: o proprio icone 💬 vira a central de chats (lista + conversa).
   const ATEND = { ativo: false, ehMaster: false, podeAlarme: false, chats: [], chatAberto: null, timer: null };
   const LS_ATEND_VISTO = 'szcAtendVisto:'; // + chatId -> "em" da ultima msg de visitante ja vista
+  let respostaLojaMostrada = null;
 
   const badge = el('<span style="position:absolute;top:-4px;right:-4px;background:#ff5c5c;color:#fff;font-size:10.5px;font-weight:700;border-radius:10px;padding:1px 6px;display:none;font-family:ui-monospace,monospace;">0</span>');
   btn.style.position = 'fixed';
@@ -764,6 +775,55 @@
     return ATEND.chats.filter((c) => c.status === 'ABERTO' && ultimaMsgVisitante(c));
   }
 
+  // Diferente da fila (que só traz quem está aguardando atendimento), este
+  // filtro enxerga QUALQUER nova fala da unidade. É o que evita a resposta a
+  // um alerta desaparecer quando o Beniboy falou por último ou quando outro
+  // chat já está aberto na tela do Master/Suporte.
+  function ultimaMensagemNovaDaLoja(chat) {
+    if (chat.status !== 'ABERTO') return null;
+    const visto = localStorage.getItem(LS_ATEND_VISTO + chat.id) || '';
+    const msgs = chat.mensagens || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.de === 'visitante' && m.em > visto) return m;
+    }
+    return null;
+  }
+
+  function conversaComRespostaNova() {
+    return ATEND.chats
+      .filter((c) => ultimaMensagemNovaDaLoja(c))
+      .sort((a, b) => String(ultimaMensagemNovaDaLoja(b).em).localeCompare(String(ultimaMensagemNovaDaLoja(a).em)))[0] || null;
+  }
+
+  const respostaLojaEl = el(`<div class="szc-resposta-loja szc-hidden" role="alert" aria-live="assertive">
+    <button type="button" class="szc-rl-fechar" aria-label="Dispensar aviso">×</button>
+    <b>🔴 RESPOSTA DA LOJA</b><div class="szc-rl-texto"></div>
+    <button type="button" class="szc-rl-abrir">Abrir conversa agora</button>
+  </div>`);
+  document.body.appendChild(respostaLojaEl);
+
+  function mostrarRespostaDaLoja(chat) {
+    const msg = ultimaMensagemNovaDaLoja(chat);
+    if (!msg) return;
+    respostaLojaMostrada = chat.id;
+    respostaLojaEl.querySelector('.szc-rl-texto').textContent = `${chat.nome || 'Loja'}: ${msg.texto || 'enviou uma mensagem'}`;
+    respostaLojaEl.classList.remove('szc-hidden');
+  }
+  respostaLojaEl.querySelector('.szc-rl-abrir').addEventListener('click', () => {
+    const chat = ATEND.chats.find((c) => c.id === respostaLojaMostrada);
+    respostaLojaEl.classList.add('szc-hidden');
+    respostaLojaMostrada = null;
+    if (!chat) return;
+    aberto = true;
+    panel.classList.remove('szc-hidden');
+    atendRenderConversa(chat);
+  });
+  respostaLojaEl.querySelector('.szc-rl-fechar').addEventListener('click', () => {
+    respostaLojaEl.classList.add('szc-hidden');
+    respostaLojaMostrada = null;
+  });
+
   async function atendCarregar() {
     try {
       const r = await rawFetch('/api/suporte-chats', { headers: authHeaders() });
@@ -779,15 +839,16 @@
         const atual = ATEND.chats.find((c) => c.id === ATEND.chatAberto);
         if (atual) atendAtualizarThreadAoVivo(atual);
       }
-      // popup automatico: mensagem de visitante mais nova que o marcador
-      const nova = fila.find((c) => {
-        const m = ultimaMsgVisitante(c);
-        return m && m.em > (localStorage.getItem(LS_ATEND_VISTO + c.id) || '');
-      });
+      // A resposta da unidade sempre recebe uma rota visível. Se não há painel
+      // aberto, a própria conversa abre; se há outra conversa em atendimento,
+      // o aviso vermelho permanece na tela em vez de ocultar a resposta.
+      const nova = conversaComRespostaNova();
       if (nova && !aberto) {
         aberto = true;
         panel.classList.remove('szc-hidden');
         atendRenderConversa(nova);
+      } else if (nova && ATEND.chatAberto !== nova.id) {
+        mostrarRespostaDaLoja(nova);
       }
     } catch (e) { /* rede fora - tenta no proximo ciclo */ }
   }
@@ -800,13 +861,18 @@
   function atendRenderLista() {
     ATEND.chatAberto = null;
     rodape.classList.add('szc-hidden');
-    const abertos = ATEND.chats.filter((c) => c.status === 'ABERTO');
+    const abertos = ATEND.chats.filter((c) => c.status === 'ABERTO').sort((a, b) => {
+      const aNova = !!ultimaMensagemNovaDaLoja(a);
+      const bNova = !!ultimaMensagemNovaDaLoja(b);
+      if (aNova !== bNova) return aNova ? -1 : 1;
+      return String((b.mensagens || []).at(-1)?.em || '').localeCompare(String((a.mensagens || []).at(-1)?.em || ''));
+    });
     corpo.innerHTML = '<div class="szc-aviso">💬 Chats de suporte — toque pra atender. Histórico e finalização ficam na <b>Central do Beniboy</b>.</div>' + (abertos.map((c) => {
       const msgs = c.mensagens || [];
       const ultima = msgs[msgs.length - 1];
       const aguarda = !!ultimaMsgVisitante(c);
       return `<button type="button" class="szc-input" style="text-align:left;cursor:pointer;${aguarda ? 'border-color:#ff5c5c;' : ''}" data-atend-chat="${esc(c.id)}">
-        <b style="font-size:12.5px;">${aguarda ? '🔴 ' : ''}${esc(c.nome)}${c.numeroTicket ? ' · #' + c.numeroTicket : ''}</b>
+        <b style="font-size:12.5px;">${ultimaMensagemNovaDaLoja(c) ? '🔴 NOVA RESPOSTA · ' : (aguarda ? '🔴 ' : '')}${esc(c.nome)}${c.numeroTicket ? ' · #' + c.numeroTicket : ''}</b>
         <span style="display:block;font-size:11px;color:#7d8896;">${esc((ultima && ultima.texto || '').slice(0, 60))}</span>
       </button>`;
     }).join('') || '<div class="szc-fim">Nenhuma conversa aberta. 🎉</div>') +
