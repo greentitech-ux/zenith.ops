@@ -1509,7 +1509,6 @@ const REGRAS_RISCO = [
   {id:'contatos', pontos:15, titulo:'E-mails, telefones ou endereços', criterio:'2 ou mais de cada tipo', decisao:'Sinal complementar'},
   {id:'3ds', pontos:20, titulo:'3D Secure', criterio:'Oferecido e não autenticado', decisao:'Sinal complementar'},
   {id:'avs-cvc', pontos:20, titulo:'AVS/CVC', criterio:'Falha ou divergência', decisao:'Sinal complementar'},
-  {id:'sem-rastro', pontos:30, titulo:'Primeira compra sem rastreabilidade', criterio:'Cartão + nome incompleto + sem IP/contato/endereço', decisao:'Alertar a loja para conferir'},
 ];
 
 function renderRegrasRisco(){
@@ -1558,9 +1557,6 @@ function raioXRisco(pedido){
   if(enderecos.size>=2) sinais.push({peso:15,texto:`${enderecos.size} endereços diferentes`});
   if(relacionados.some(t=>String(t.threeDOferecido).toLowerCase()==='true' && String(t.threeDAutenticado).toLowerCase()==='false')) sinais.push({peso:20,texto:'3D Secure oferecido, mas não autenticado'});
   if(relacionados.some(t=>/fail|failed|no match|not matched/i.test(`${t.resultadoAvs||''} ${t.resultadoCvc||''}`))) sinais.push({peso:20,texto:'AVS ou CVC retornou falha/divergência'});
-  const nomeTokens=normalizarIdentidadeRisco(pedido.nomeCliente||pedido.cardHolder).split(/[^a-z0-9]+/).filter(t=>t.length>=3 && !['das','dos'].includes(t));
-  const semRastro=!pedido.shopperIp && !pedido.emailCliente && !pedido.telefoneCliente && !pedido.enderecoCliente;
-  if(pedidos.length===1 && pedido.last4 && semRastro && nomeTokens.length<2) sinais.push({peso:30,texto:'Primeira compra no cartão sem IP, contato ou endereço e com nome incompleto — loja avisada para conferir'});
   const pontos=Math.min(100,sinais.reduce((n,s)=>n+s.peso,0));
   const confirmado=chargebacks>0;
   const nivel=confirmado?'confirmada':pontos>=60?'alto':pontos>=30?'revisar':'baixo';

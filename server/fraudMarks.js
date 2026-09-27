@@ -60,7 +60,7 @@ async function marcar({ pedidoId, unidade, nivel, motivo, clienteChave, clienteN
   // Campo transitório (não vai pro Firestore): impede webhook repetido de
   // reenviar o mesmo alarme pra loja. Se o Master liberou e o risco reaparece,
   // `anterior.entregaBloqueada` é false e o alerta volta corretamente.
-  return { ...registro, bloqueioNovo: bloquearAgora && !anterior.entregaBloqueada, marcaNova: !existente.exists || !!anterior.removido };
+  return { ...registro, bloqueioNovo: bloquearAgora && !anterior.entregaBloqueada };
 }
 
 async function liberarEntrega(pedidoId, liberadoPorEmail) {
