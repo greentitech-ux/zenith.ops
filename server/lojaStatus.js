@@ -2209,7 +2209,7 @@ async function nomeDoComputador(codigo, posto) {
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
@@ -2218,7 +2218,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
     // Características operacionais declaradas no cadastro. Não inferimos pelo
     // nome: "Servidor" e "GCOM" precisam ser visíveis e confiáveis no NOC.
-    ehServidor: !!ehServidor, temGcom: !!temGcom, ehVmPulse: !!ehVmPulse, ehHostVm: !!ehHostVm, medeQuedas: !!medeQuedas,
+    ehServidor: !!ehServidor, temGcom: !!temGcom, ehVmPulse: !!ehVmPulse, ehHostVm: !!ehHostVm, ehVmGcom: !!ehVmGcom, medeQuedas: !!medeQuedas,
     // Captura local opt-in: o arquivo nunca passa pelo NoPulso nem pelo servidor.
     noPulsoPrint: !!noPulsoPrint,
     // Server 2012 R2 / 7 / 8: agente na versao especifica (ver vigiaScript.js)
@@ -2238,7 +2238,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -2254,6 +2254,7 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServido
     temGcom: !!temGcom,
     ehVmPulse: !!ehVmPulse,
     ehHostVm: !!ehHostVm,
+    ehVmGcom: !!ehVmGcom,
     // Ponto de medição da unidade: só esta máquina entra no relatório de
     // quedas. Pode haver mais de uma por redundância; o relatório consolida
     // ocorrências simultâneas em uma única queda da loja.
@@ -3178,8 +3179,8 @@ function comandoReiniciarVmPulse(doc) {
 }
 
 function comandoReiniciarVmGcom(doc) {
-  if (!doc || !doc.temGcom) {
-    throw new Error('esta máquina não está marcada como “Possui GCOM”; marque a VM antes de usar esta ação.');
+  if (!doc || !doc.ehVmGcom) {
+    throw new Error('esta máquina não está marcada como “VM GCOM”; marque a VM antes de usar esta ação.');
   }
   return COMANDO_REINICIAR_VM_SILENCIOSO;
 }

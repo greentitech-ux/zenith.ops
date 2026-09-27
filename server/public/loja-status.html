@@ -669,14 +669,6 @@
     <div id="grid-unidades" class="uni-grid"></div>
   </div>
 
-  <div class="uni-panel" id="host-vm-panel">
-    <button type="button" class="uni-panel-head" onclick="alternarPainelHostVm()" aria-expanded="true" aria-controls="grid-host-vm">
-      <span><span class="uni-caret" id="host-vm-caret">▾</span> 🗄️ HOST &amp; VM</span>
-      <span class="uni-panel-sub" id="host-vm-sub">carregando…</span>
-    </button>
-    <div id="grid-host-vm" class="uni-grid"></div>
-  </div>
-
   <!-- Quedas de conexao por unidade. Existe pra uma decisao concreta: vale
        ou nao fazer o app funcionar offline? Recolhido por padrao - e' um
        relatorio de analise, nao a operacao do dia a dia. -->
@@ -1061,7 +1053,7 @@
        <button type="button" class="btn-ghost" id="manut-diagnostico-tef" onclick="manutEnviar('diagnostico-tef')" title="Somente leitura: identifica o estado do Listener, GCOM, portas seriais, dispositivos/driver do pinpad e logs recentes. Não interrompe venda.">💳 Diagnosticar TEF/pinpad</button>
        <button type="button" class="btn-ghost" id="manut-gcom-wcf" onclick="manutEnviar('gcomWcf')" title="Encerra somente GcomClient.WCF.exe nas VMs marcadas como GCOM; a própria VM o inicia novamente">🟥 Encerrar GCOM</button>
        <button type="button" class="btn-ghost" id="manut-reiniciar-vm-pulse" onclick="manutEnviar('reiniciar-vm-pulse')" title="Reinicia somente as máquinas marcadas como VM PULSE; não reinicia o host nem outras VMs">🔁 Reiniciar VM PULSE</button>
-       <button type="button" class="btn-ghost" id="manut-reiniciar-vm-gcom" onclick="manutEnviar('reiniciar-vm-gcom')" title="Contingência: reinicia somente as máquinas marcadas como GCOM; não reinicia o host nem outras VMs">🔁 Reiniciar VM GCOM</button>
+       <button type="button" class="btn-ghost" id="manut-reiniciar-vm-gcom" onclick="manutEnviar('reiniciar-vm-gcom')" title="Contingência: reinicia somente as máquinas marcadas como VM GCOM; não reinicia o host nem outras VMs">🔁 Reiniciar VM GCOM</button>
        <button type="button" class="btn-ghost" id="manut-diagnostico" onclick="manutEnviar('diagnostico-desempenho')" title="Lê eventos de tela azul, falha de disco/hardware, minidumps e consumo atual; não altera a máquina">🩺 Diagnosticar falha</button>
        <button type="button" class="btn-ghost" id="manut-limpeza-segura" onclick="manutEnviar('limpeza-segura')" title="Remove apenas temporários do Windows e do usuário, além da Lixeira; mede o espaço livre antes e depois; não reinicia a máquina">🧹 Liberar espaço seguro</button>
        <button type="button" class="btn-ghost" id="manut-memoria-limitada" onclick="manutEnviar('corrigir-memoria-limitada')" title="Remove somente limites indevidos de memória na inicialização do Windows 64 bits; exige reinício e explica quando a causa é Windows 32 bits ou hardware">🧠 Corrigir memória limitada</button>
@@ -1152,6 +1144,10 @@
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="novo-comp-vm-pulse" style="margin-top:3px;">
       <span><b>⚙️ É VM PULSE</b><small style="display:block;color:var(--muted);">libera exclusivamente o reinício protegido da VM PULSE</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="novo-comp-vm-gcom" style="margin-top:3px;">
+      <span><b>⚙️ É VM GCOM</b><small style="display:block;color:var(--muted);">entra no painel HOST &amp; VM e libera a contingência de reinício da VM GCOM</small></span>
     </label>
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="novo-comp-host-vm" style="margin-top:3px;">
@@ -1249,6 +1245,10 @@
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="editar-comp-vm-pulse" style="margin-top:3px;">
       <span><b>⚙️ É VM PULSE</b><small style="display:block;color:var(--muted);">libera exclusivamente o reinício protegido da VM PULSE</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="editar-comp-vm-gcom" style="margin-top:3px;">
+      <span><b>⚙️ É VM GCOM</b><small style="display:block;color:var(--muted);">entra no painel HOST &amp; VM e libera a contingência de reinício da VM GCOM</small></span>
     </label>
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="editar-comp-host-vm" style="margin-top:3px;">
@@ -1773,6 +1773,7 @@ function equipTileHtml(codigo, c){
   const marcadorServidor = c.ehServidor ? '<span class="btn-anydesk" title="Servidor">🗄️</span>' : '';
   const marcadorHostVm = c.ehHostVm ? '<span class="btn-anydesk" title="HOST de VM">H</span>' : '';
   const marcadorVmPulse = c.ehVmPulse ? '<span class="btn-anydesk" title="VM PULSE">P</span>' : '';
+  const marcadorVmGcom = c.ehVmGcom ? '<span class="btn-anydesk" title="VM GCOM">V</span>' : '';
   // O escudo e' prova operacional, nao apenas versao: aparece quando a
   // instancia SYSTEM do NOC confirmou presenca recentemente. Sem escudo, a
   // estacao pode estar atualizada mas ainda precisa rodar o comando com UAC.
@@ -1785,7 +1786,7 @@ function equipTileHtml(codigo, c){
     <div class="equip-tile-head">
       <span class="status-dot ${status}"></span>
       <span class="equip-tile-nome" title="${unidadeOk}">${unidadeOk}</span>
-       ${marcadorServidor}${marcadorHostVm}${marcadorVmPulse}${marcadorNocElevado}${marcadorGcom}${marcadorQuedas}${btnAnydesk}
+       ${marcadorServidor}${marcadorHostVm}${marcadorVmPulse}${marcadorVmGcom}${marcadorNocElevado}${marcadorGcom}${marcadorQuedas}${btnAnydesk}
     </div>
     <div class="equip-tile-unidade" title="${nomeOk}">${nomeOk}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
@@ -2098,7 +2099,7 @@ function atualizarConteudoDetalhe(codigo, c){
   renderPoliticaComputador(codigo, c);
   document.getElementById('detalhe-comp-editar-hero').onclick = () => {
     fecharDetalheComputador();
-    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.ehVmPulse, !!c.ehHostVm, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo, true);
+    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.ehVmPulse, !!c.ehHostVm, !!c.ehVmGcom, !!c.medeQuedas, !!c.noPulsoPrint, !!c.windowsAntigo, true);
   };
 }
 function copiarDadoRede(valor, rotulo){
@@ -2785,32 +2786,13 @@ function setFiltroStatus(v){
   render();
 }
 
-function ehHostOuVm(c){ return !!(c.ehHostVm || c.ehVmPulse || c.temGcom); }
+function ehHostOuVm(c){ return !!(c.ehHostVm || c.ehVmPulse || c.ehVmGcom); }
 function alternarFiltroHostVm(){
   FILTRO_HOST_VM = !FILTRO_HOST_VM;
   FILTRO_SERVIDOR = '';
   render();
 }
 
-function alternarPainelHostVm(){
-  const painel = document.getElementById('host-vm-panel');
-  const recolhido = painel.classList.toggle('recolhido');
-  document.getElementById('host-vm-caret').textContent = recolhido ? '▸' : '▾';
-  painel.querySelector('.uni-panel-head').setAttribute('aria-expanded', String(!recolhido));
-}
-
-function renderHostVm(){
-  const grid = document.getElementById('grid-host-vm');
-  const sub = document.getElementById('host-vm-sub');
-  if(!grid || !sub) return;
-  const lista = computadoresReais().filter(ehHostOuVm).sort((a,b) => {
-    const ordem = { offline:0, degradado:1, nunca:2, online:3 };
-    return (ordem[statusDe(a)] ?? 9) - (ordem[statusDe(b)] ?? 9) || (UNIDADES_NOMES[a.codigo]||a.codigo).localeCompare(UNIDADES_NOMES[b.codigo]||b.codigo, 'pt-BR') || (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
-  });
-  const fora = lista.filter(c => statusDe(c) === 'offline').length;
-  sub.textContent = lista.length ? `${lista.length} marcado(s)${fora ? ` · ⚠ ${fora} offline` : ' · todos acessíveis'}` : 'marque HOST, VM PULSE ou GCOM na ficha da máquina';
-  grid.innerHTML = lista.length ? lista.map(c => equipTileHtml(c.codigo, c)).join('') : '<div class="empty">Nenhum HOST ou VM marcado ainda.</div>';
-}
 // clique num dos dois numeros do card ("46 · 1"): filtra o status E a metade
 // (regulares ou servidores). Pedido do Master (13/09): "se clicar em 47 mostra
 // todas as maquinas daquele grupo; se clicar em 1 aparece todos os
@@ -3221,7 +3203,6 @@ function render(){
   sincronizarBuscaDoCampo();
   renderKpis();
   renderUnidades();
-  renderHostVm();
   renderFantasmas();
   // antes do return adiantado lá embaixo: filtro que esconde todos os
   // computadores não pode esconder junto os dispositivos da loja
@@ -3922,7 +3903,7 @@ async function manutEnviar(tarefa){
     if(!confirm(`Encerrar GcomClient.WCF.exe em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO NOC não reinicia a VM nem tenta abrir o programa: apenas finaliza esse processo específico. A própria VM o inicia novamente pelo mecanismo padrão.`)) return;
   }
   if(tarefa === 'reiniciar-vm-pulse' || tarefa === 'reiniciar-vm-gcom'){
-    const campo = tarefa === 'reiniciar-vm-pulse' ? 'ehVmPulse' : 'temGcom';
+    const campo = tarefa === 'reiniciar-vm-pulse' ? 'ehVmPulse' : 'ehVmGcom';
     const rotuloVm = tarefa === 'reiniciar-vm-pulse' ? 'VM PULSE' : 'VM GCOM';
     const selecionados = computadoresReais().filter(c => MANUT_MARCADOS.has(manutChave(c)));
     if(selecionados.some(c => !c[campo])){
@@ -4132,6 +4113,7 @@ function abrirModalNovoComputador(){
   document.getElementById('novo-comp-windows-antigo').checked = false;
   document.getElementById('novo-comp-gcom').checked = false;
   document.getElementById('novo-comp-vm-pulse').checked = false;
+  document.getElementById('novo-comp-vm-gcom').checked = false;
   document.getElementById('novo-comp-host-vm').checked = false;
   document.getElementById('novo-comp-mede-quedas').checked = false;
   document.getElementById('novo-comp-nopulso-print').checked = false;
@@ -4152,7 +4134,7 @@ async function salvarNovoComputador(){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo, ehServidor: document.getElementById('novo-comp-servidor').checked, temGcom: document.getElementById('novo-comp-gcom').checked, ehVmPulse: document.getElementById('novo-comp-vm-pulse').checked, ehHostVm: document.getElementById('novo-comp-host-vm').checked, medeQuedas: document.getElementById('novo-comp-mede-quedas').checked, noPulsoPrint: document.getElementById('novo-comp-nopulso-print').checked, windowsAntigo: document.getElementById('novo-comp-windows-antigo').checked }),
+      body: JSON.stringify({ nome, tipo, ehServidor: document.getElementById('novo-comp-servidor').checked, temGcom: document.getElementById('novo-comp-gcom').checked, ehVmPulse: document.getElementById('novo-comp-vm-pulse').checked, ehVmGcom: document.getElementById('novo-comp-vm-gcom').checked, ehHostVm: document.getElementById('novo-comp-host-vm').checked, medeQuedas: document.getElementById('novo-comp-mede-quedas').checked, noPulsoPrint: document.getElementById('novo-comp-nopulso-print').checked, windowsAntigo: document.getElementById('novo-comp-windows-antigo').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
@@ -4379,13 +4361,14 @@ async function baixarVigia(codigo, posto, tipo){
 let EDITAR_COMP_CODIGO = null;
 let EDITAR_COMP_POSTO = null;
 let EDITAR_COMP_ORIGEM = null;
-function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom, ehVmPulse, ehHostVm, medeQuedas, noPulsoPrint, windowsAntigo, veioDaFicha = false){
+function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom, ehVmPulse, ehHostVm, ehVmGcom, medeQuedas, noPulsoPrint, windowsAntigo, veioDaFicha = false){
   document.getElementById('editar-comp-notebook').checked = !!ehNotebook;
   document.getElementById('editar-comp-windows-antigo').checked = !!windowsAntigo;
   document.getElementById('editar-comp-servidor').checked = !!ehServidor;
   document.getElementById('editar-comp-gcom').checked = !!temGcom;
   document.getElementById('editar-comp-vm-pulse').checked = !!ehVmPulse;
   document.getElementById('editar-comp-host-vm').checked = !!ehHostVm;
+  document.getElementById('editar-comp-vm-gcom').checked = !!ehVmGcom;
   document.getElementById('editar-comp-mede-quedas').checked = !!medeQuedas;
   document.getElementById('editar-comp-nopulso-print').checked = !!noPulsoPrint;
   EDITAR_COMP_CODIGO = codigo;
@@ -4440,7 +4423,7 @@ async function salvarEdicaoComputador(){
     }
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked, ehServidor: document.getElementById('editar-comp-servidor').checked, temGcom: document.getElementById('editar-comp-gcom').checked, ehVmPulse: document.getElementById('editar-comp-vm-pulse').checked, ehHostVm: document.getElementById('editar-comp-host-vm').checked, medeQuedas: document.getElementById('editar-comp-mede-quedas').checked, noPulsoPrint: document.getElementById('editar-comp-nopulso-print').checked, windowsAntigo: document.getElementById('editar-comp-windows-antigo').checked }),
+      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked, ehServidor: document.getElementById('editar-comp-servidor').checked, temGcom: document.getElementById('editar-comp-gcom').checked, ehVmPulse: document.getElementById('editar-comp-vm-pulse').checked, ehVmGcom: document.getElementById('editar-comp-vm-gcom').checked, ehHostVm: document.getElementById('editar-comp-host-vm').checked, medeQuedas: document.getElementById('editar-comp-mede-quedas').checked, noPulsoPrint: document.getElementById('editar-comp-nopulso-print').checked, windowsAntigo: document.getElementById('editar-comp-windows-antigo').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
