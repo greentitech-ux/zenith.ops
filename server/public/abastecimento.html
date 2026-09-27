@@ -620,9 +620,15 @@
       <div class="sub" id="correcao-resumo"></div>
       <div style="display:flex;gap:8px;margin:10px 0 12px;">
         <button type="button" class="tab-switch on" id="correcao-tab-alterar" onclick="correcaoAcao('alterar')">✏️ Alterar quantidades</button>
+        <button type="button" class="tab-switch off" id="correcao-tab-datahora" onclick="correcaoAcao('data-hora')">🕒 Alterar data e hora</button>
         <button type="button" class="tab-switch off" id="correcao-tab-remover" onclick="correcaoAcao('remover')">🗑 Remover lançamento</button>
       </div>
       <div id="correcao-itens" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <div id="correcao-datahora-bloco" class="hidden" style="margin-top:10px;">
+        <label for="correcao-datahora">Data e hora reais do lançamento</label>
+        <input type="datetime-local" id="correcao-datahora" style="width:100%;box-sizing:border-box;margin-top:6px;">
+        <div class="sub" style="margin-top:6px;">O horário original fica preservado no histórico de auditoria.</div>
+      </div>
       <div class="sub hidden" id="correcao-aviso-remover" style="color:var(--bad);margin-top:4px;">O lançamento inteiro será removido se o Master aprovar.</div>
       <!-- bloco de justificativa+assinatura: so no fluxo de "pedir correção"
            (Ticket pro Master decidir); a edicao DIRETA do Master (so
@@ -632,8 +638,8 @@
         <textarea id="correcao-motivo" placeholder="ex: foi enviada quantidade errada / envio lançado fora do horário real / lançamento duplicado..."></textarea>
         <!-- assinatura: QUALQUER operador de balcao (pede ou envia) confirma
              com usuario+senha, como todo lancamento -->
-        <label>Quem está pedindo? <span style="text-transform:none;letter-spacing:0;">(login do operador — qualquer ponta)</span></label>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <label id="correcao-assinatura-label">Quem está pedindo? <span style="text-transform:none;letter-spacing:0;">(login do operador — qualquer ponta)</span></label>
+        <div id="correcao-assinatura-operador" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <input type="text" id="correcao-op-usuario" maxlength="4" autocomplete="off" list="dl-operadores" placeholder="usuário (4 letras)" style="text-transform:lowercase;">
           <input type="password" id="correcao-op-senha" maxlength="4" inputmode="numeric" autocomplete="new-password" placeholder="senha (4 números)">
         </div>
@@ -807,12 +813,14 @@ let ME = null;
 let IS_MASTER = false;
 let TEM_PEDIDO = false;   // lado do carrinho (secao abastecimento-carrinho)
 let TEM_ENVIO = false;    // lado da loja (secao abastecimento-loja)
+let PODE_VER_CORRECAO = false;
 // Master/Admin enxergam a tela toda (as duas pontas) mas nao operam o
 // balcao - os popups automaticos (pedido novo, recebimento pendente,
 // lembrete de contagem) sao so pra quem esta na ponta de verdade
 let SOU_OPERADOR_PONTA = false;
 let PODE_CATALOGO = false;
 let REGS = [];
+function souGestorCorrecao(){ return IS_MASTER || !!ME?.isAdmin || ['gerente','assistente-gerente'].includes(ME?.cargo); }
 // mesmo breakpoint do CSS (680px) - acima disso o feed agrupa Pendentes
 // primeiro (renderLista); troca de largura (ex: girar o tablet) re-renderiza
 // a lista sozinha, sem precisar de F5
@@ -1291,7 +1299,8 @@ function correcaoHtml(r){
   const c = r.correcao;
   if(c && c.numeroTicket){
     const st = c.status || 'pendente';
-    const dica = `${c.acao==='remover'?'Remover lançamento':'Alterar quantidades'} — ${c.motivo||''}`;
+    const rotulo = c.acao==='remover' ? 'Remover lançamento' : c.acao==='data-hora' ? 'Alterar data e hora' : 'Alterar quantidades';
+    const dica = `${rotulo} — ${c.motivo||''}`;
     if(st==='pendente'){
       let html = `<span class="badge" style="background:var(--warn-dim);color:var(--warn);" title="${escapeHtml(dica)}">🛠 em análise · Ticket #${c.numeroTicket}</span>`;
       if(IS_MASTER){
@@ -1303,7 +1312,7 @@ function correcaoHtml(r){
     if(st==='aprovada') return `<span class="badge atendido" title="${escapeHtml(dica)}">✅ corrigido · Ticket #${c.numeroTicket}</span>`;
     return `<span class="badge" style="background:var(--bad-dim);color:var(--bad);" title="${escapeHtml(dica)}">✖ correção recusada · Ticket #${c.numeroTicket}</span>`;
   }
-  return `<button type="button" class="link-badge-btn" onclick="abrirPedirCorrecao('${r.id}')">🛠 pedir correção</button>`;
+  return `<button type="button" class="link-badge-btn" onclick="abrirPedirCorrecao('${r.id}')">🛠 pedir correção</button>${IS_MASTER ? ` <button type="button" class="link-badge-btn" onclick="abrirPedirCorrecao('${r.id}', false, true)">🕒 data/hora</button>` : ''}`;
 }
 
 function regCardHtml(r){
@@ -2044,6 +2053,7 @@ let CORRECAO_ACAO = 'alterar';
 // modal do "pedir correção", mas sem motivo/assinatura/ticket: aplica na
 // hora via /editar-direto. CORRECAO_DIRETO controla o que o modal mostra.
 let CORRECAO_DIRETO = false;
+let CORRECAO_DATA_HORA = false;
 // itens do modal de correção/edição.
 // CONTAGEM: a mesma logica do lançamento original - pizzas SEMPRE os 3
 // sabores + TODO o catálogo de insumos ATIVO (não só o que foi lançado),
@@ -2111,23 +2121,35 @@ function montarItensCorrecaoHtml(r){
   });
   return html || '<div class="empty" style="padding:8px;">—</div>';
 }
-function abrirPedirCorrecao(id, direto){
+function dataHoraLocalInput(iso){
+  const partes = new Intl.DateTimeFormat('en-CA', { timeZone:FUSO_BR, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).formatToParts(new Date(iso));
+  const pega = (tipo) => partes.find(p=>p.type===tipo)?.value || '';
+  return `${pega('year')}-${pega('month')}-${pega('day')}T${pega('hour')}:${pega('minute')}`;
+}
+function abrirPedirCorrecao(id, direto, dataHora){
   const r = REGS.find(x=>x.id===id);
   if(!r) return;
   CORRECAO_REG_ID = id;
-  CORRECAO_DIRETO = !!direto;
-  document.getElementById('correcao-titulo').textContent = CORRECAO_DIRETO ? '✏️ Editar contagem' : '🛠 Pedir correção';
+  CORRECAO_DATA_HORA = !!dataHora;
+  CORRECAO_DIRETO = !!direto || (IS_MASTER && CORRECAO_DATA_HORA);
+  document.getElementById('correcao-titulo').textContent = CORRECAO_DIRETO
+    ? (CORRECAO_DATA_HORA ? '🕒 Alterar data e hora' : '✏️ Editar contagem')
+    : '🛠 Pedir correção';
   document.getElementById('correcao-resumo').textContent =
     `${r.tipo==='PEDIDO'?'🛒 Pedido':(r.tipo==='CONTAGEM'?'📋 Contagem':'🚚 Envio')} de ${fmtHora(r.criadoEm)} · por ${r.operadorNome||r.criadoPorNome||'—'}`;
   document.getElementById('correcao-itens').innerHTML = montarItensCorrecaoHtml(r);
+  document.getElementById('correcao-datahora').value = dataHoraLocalInput(r.criadoEm);
   // edicao direta so ALTERA (remocao do lançamento continua sendo o 🗑
   // excluir, que ja existe pro Master) - a aba "remover" fica escondida
   // dentro de correcaoAcao() (chamada logo abaixo); aqui so o bloco de
   // justificativa/assinatura, que so faz sentido no fluxo de ticket
   document.getElementById('correcao-bloco-solicitacao').classList.toggle('hidden', CORRECAO_DIRETO);
-  document.getElementById('btn-correcao-ok').textContent = CORRECAO_DIRETO ? 'Salvar edição' : 'Enviar pra aprovação';
-  correcaoAcao('alterar');
+  document.getElementById('btn-correcao-ok').textContent = CORRECAO_DIRETO ? 'Salvar alteração' : 'Enviar pra aprovação';
+  correcaoAcao(CORRECAO_DATA_HORA ? 'data-hora' : 'alterar');
   document.getElementById('correcao-motivo').value = '';
+  const gestor = souGestorCorrecao();
+  document.getElementById('correcao-assinatura-operador').classList.toggle('hidden', gestor);
+  document.getElementById('correcao-assinatura-label').classList.toggle('hidden', gestor);
   // lembra so o USUARIO do ultimo operador (a senha nunca fica salva)
   document.getElementById('correcao-op-usuario').value = localStorage.getItem('abastOperadorUsuario') || '';
   document.getElementById('correcao-op-senha').value = '';
@@ -2137,15 +2159,19 @@ function abrirPedirCorrecao(id, direto){
 // alternar entre propor ALTERACAO (inputs editaveis) e REMOCAO do lancamento
 // - na edicao direta do Master so existe "alterar" (ver abrirPedirCorrecao)
 function correcaoAcao(acao){
-  if(CORRECAO_DIRETO) acao = 'alterar';
+  if(CORRECAO_DIRETO && !CORRECAO_DATA_HORA) acao = 'alterar';
+  if(CORRECAO_DIRETO && CORRECAO_DATA_HORA) acao = 'data-hora';
   CORRECAO_ACAO = acao;
-  document.getElementById('correcao-tab-alterar').className = 'tab-switch ' + (acao==='alterar'?'on':'off');
+  document.getElementById('correcao-tab-alterar').className = 'tab-switch ' + (acao==='alterar'?'on':'off') + (CORRECAO_DIRETO&&CORRECAO_DATA_HORA?' hidden':'');
+  document.getElementById('correcao-tab-datahora').className = 'tab-switch ' + (acao==='data-hora'?'on':'off') + (CORRECAO_DIRETO&&!CORRECAO_DATA_HORA?' hidden':'');
   // className e reescrito aqui (nao classList.add) - a aba "remover" so
   // existe no fluxo de ticket, entao o "hidden" da edicao direta e
   // reaplicado sempre que o className e trocado, senao ele se perde
   document.getElementById('correcao-tab-remover').className = 'tab-switch ' + (acao==='remover'?'on':'off') + (CORRECAO_DIRETO?' hidden':'');
+  document.getElementById('correcao-itens').style.display = acao==='data-hora' ? 'none' : '';
   document.getElementById('correcao-itens').style.opacity = acao==='alterar' ? '' : '.35';
   document.querySelectorAll('#correcao-itens input').forEach(inp=>{ inp.disabled = acao!=='alterar'; });
+  document.getElementById('correcao-datahora-bloco').classList.toggle('hidden', acao!=='data-hora');
   document.getElementById('correcao-aviso-remover').classList.toggle('hidden', acao!=='remover');
 }
 function fecharPedirCorrecao(){ document.getElementById('overlay-correcao').classList.add('hidden'); CORRECAO_REG_ID = null; }
@@ -2185,8 +2211,13 @@ async function salvarEdicaoDireta(){
   msg.classList.add('hidden');
   btn.disabled = true; btn.textContent = 'Salvando...';
   try{
-    const { pizzas, insumos } = itensCorrigidosDosInputs(r);
-    const resp = await fetch(`/api/abastecimento/${CORRECAO_REG_ID}/editar-direto`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pizzas, insumos }) });
+    const url = CORRECAO_DATA_HORA
+      ? `/api/abastecimento/${CORRECAO_REG_ID}/editar-data-hora`
+      : `/api/abastecimento/${CORRECAO_REG_ID}/editar-direto`;
+    const body = CORRECAO_DATA_HORA
+      ? { dataHora: document.getElementById('correcao-datahora').value }
+      : itensCorrigidosDosInputs(r);
+    const resp = await fetch(url, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
     fecharPedirCorrecao();
@@ -2194,7 +2225,7 @@ async function salvarEdicaoDireta(){
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }finally{
-    btn.disabled = false; btn.textContent = 'Salvar edição';
+    btn.disabled = false; btn.textContent = 'Salvar alteração';
   }
 }
 async function enviarPedirCorrecao(){
@@ -2217,6 +2248,7 @@ async function enviarPedirCorrecao(){
       // proposta: quantidades dos inputs por cima do que foi lancado
       Object.assign(body, itensCorrigidosDosInputs(r));
     }
+    if(CORRECAO_ACAO==='data-hora') body.propostaDataHora = document.getElementById('correcao-datahora').value;
     const resp = await fetch(`/api/abastecimento/${CORRECAO_REG_ID}/pedir-correcao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await resp.json();
     if(!resp.ok){ document.getElementById('correcao-op-senha').value = ''; throw new Error(data.error || 'Erro ao pedir a correção.'); }
@@ -2235,7 +2267,11 @@ async function enviarPedirCorrecao(){
 async function decidirCorrecao(id, aprovar){
   const r = REGS.find(x=>x.id===id);
   if(!r || !r.correcao) return;
-  const oQue = r.correcao.acao==='remover' ? 'REMOVER o lançamento inteiro' : 'ALTERAR as quantidades pra proposta enviada';
+  const oQue = r.correcao.acao==='remover'
+    ? 'REMOVER o lançamento inteiro'
+    : r.correcao.acao==='data-hora'
+      ? 'ALTERAR a data e hora para a proposta enviada'
+      : 'ALTERAR as quantidades pra proposta enviada';
   if(!confirm(`${aprovar?'Aprovar':'Recusar'} a correção do Ticket #${r.correcao.numeroTicket}?${aprovar?` Isso vai ${oQue}.`:''}\n\nJustificativa: ${r.correcao.motivo||'—'}`)) return;
   try{
     const resp = await fetch(`/api/abastecimento/${id}/correcao/decidir`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ aprovar }) });
@@ -2891,6 +2927,8 @@ async function boot(){
   const secoes = ME.permissions?.sections||[];
   // permissao POR PONTA: quem PEDE (carrinho) x quem ENVIA (loja) -
   // Master/Admin fazem os dois. O catalogo de insumos tem permissao propria
+  const gestorCorrecao = ['gerente','assistente-gerente'].includes(ME.cargo);
+  PODE_VER_CORRECAO = IS_MASTER || !!ME.isAdmin || gestorCorrecao;
   TEM_PEDIDO = IS_MASTER || !!ME.isAdmin || secoes.includes('abastecimento-carrinho');
   TEM_ENVIO = IS_MASTER || !!ME.isAdmin || secoes.includes('abastecimento-loja');
   PODE_CATALOGO = IS_MASTER || !!ME.isAdmin || !!ME.podeCatalogoInsumos;
@@ -2905,7 +2943,7 @@ async function boot(){
   // (abastecimento-relatorios.html) - esta tela e a operacao, fica aberta
   // o dia todo no tablet do carrinho/loja
 
-  if(!TEM_PEDIDO && !TEM_ENVIO){
+  if(!TEM_PEDIDO && !TEM_ENVIO && !PODE_VER_CORRECAO){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
   }

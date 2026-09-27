@@ -653,13 +653,13 @@ async function getOne(id) {
 // Ticket pro Master e fica PENDENTE ate ele aprovar/recusar. So na
 // aprovacao a proposta e aplicada de verdade. 1 correcao aberta por
 // lancamento, pra nao chover ticket repetido.
-async function registrarPedidoCorrecao(id, { acao, propostaPizzas, propostaInsumos, motivo, numeroTicket, porEmail, porNome, operador }) {
+async function registrarPedidoCorrecao(id, { acao, propostaPizzas, propostaInsumos, propostaCriadoEm, motivo, numeroTicket, porEmail, porNome, operador }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Registro não encontrado.');
   if (atual.correcao && atual.correcao.numeroTicket && (atual.correcao.status || 'pendente') === 'pendente') {
     throw new Error(`Já existe um pedido de correção em análise pra esse lançamento (Ticket #${atual.correcao.numeroTicket}).`);
   }
-  const acaoLimpa = acao === 'remover' ? 'remover' : 'alterar';
+  const acaoLimpa = ['remover', 'data-hora'].includes(acao) ? acao : 'alterar';
   const correcao = {
     acao: acaoLimpa,
     status: 'pendente',
@@ -668,6 +668,10 @@ async function registrarPedidoCorrecao(id, { acao, propostaPizzas, propostaInsum
     propostaInsumos: acaoLimpa === 'alterar'
       ? (Array.isArray(propostaInsumos) ? propostaInsumos.slice(0, 40) : [])
       : null,
+    // A data/hora proposta ja chega normalizada pelo servidor. Guardar a
+    // proposta separada do criadoEm original permite ao Master comparar e
+    // aprovar sem perder o rastro do horario em que o registro nasceu.
+    propostaCriadoEm: acaoLimpa === 'data-hora' ? propostaCriadoEm : null,
     motivo: String(motivo || '').trim().slice(0, 500),
     numeroTicket: numeroTicket || null,
     solicitadaEm: new Date().toISOString(),
@@ -707,6 +711,13 @@ async function decidirCorrecao(id, { aprovar, porEmail, porNome }) {
     merge.pizzas = sanitizarPizzas(c.propostaPizzas);
     merge.insumos = await resolverInsumos((c.propostaInsumos || []).filter((i) => Number(i.quantidade) > 0), { permitirInativo: true });
   }
+  if (aprovar && c.acao === 'data-hora') {
+    merge.criadoEmOriginal = atual.criadoEmOriginal || atual.criadoEm;
+    merge.criadoEm = c.propostaCriadoEm;
+    merge.dataHoraCorrigidaEm = decisao.decididaEm;
+    merge.dataHoraCorrigidaPorEmail = porEmail || null;
+    merge.dataHoraCorrigidaPorNome = porNome || null;
+  }
   await COLLECTION.doc(id).update(merge);
   cache.invalidar();
   return { removido: false, registro: { ...atual, ...merge } };
@@ -728,6 +739,27 @@ async function editarDireto(id, { pizzas, insumos }, { editadoPorEmail, editadoP
     editadoEm: new Date().toISOString(),
     editadoPorEmail: editadoPorEmail || null,
     editadoPorNome: editadoPorNome || null,
+  };
+  await COLLECTION.doc(id).update(merge);
+  cache.invalidar();
+  return { ...atual, ...merge };
+}
+
+// Data/hora e' uma correcao administrativa diferente da edicao de itens:
+// Master pode acertar o horario real imediatamente, mas o valor original
+// permanece preservado para auditoria. Gerente/Admin usam o pedido acima.
+async function editarDataHoraDireto(id, criadoEm, { editadoPorEmail, editadoPorNome } = {}) {
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Registro não encontrado.');
+  if (atual.correcao && atual.correcao.numeroTicket && (atual.correcao.status || 'pendente') === 'pendente') {
+    throw new Error(`Há uma correção em análise para este lançamento (Ticket #${atual.correcao.numeroTicket}). Decida o ticket antes de alterar a data/hora.`);
+  }
+  const merge = {
+    criadoEm,
+    criadoEmOriginal: atual.criadoEmOriginal || atual.criadoEm,
+    dataHoraCorrigidaEm: new Date().toISOString(),
+    dataHoraCorrigidaPorEmail: editadoPorEmail || null,
+    dataHoraCorrigidaPorNome: editadoPorNome || null,
   };
   await COLLECTION.doc(id).update(merge);
   cache.invalidar();
@@ -996,7 +1028,7 @@ async function arquivarAntigos() {
 }
 
 module.exports = {
-  TIPOS, SABORES, criar, remakesDoDia, sanitizarRemake, pizzasDoRemake, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, salvarCapacidades, arquivarAntigos,
+  TIPOS, SABORES, criar, remakesDoDia, sanitizarRemake, pizzasDoRemake, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, editarDataHoraDireto, getConfig, salvarConfig, salvarCapacidades, arquivarAntigos,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, buscarOperadorPorUsuario, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };

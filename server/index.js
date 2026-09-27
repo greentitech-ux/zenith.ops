@@ -14705,15 +14705,48 @@ app.delete('/api/ativos-ti/:id', auth.requireMaster, async (req, res) => {
 // O broadcast vai sem filtro de secao porque as duas pontas tem secoes
 // diferentes e o payload e so { id } ----------
 function podePedirAbastecimento(req) {
-  return req.isAdmin || auth.hasSection(req, 'abastecimento-carrinho');
+  return req.isMaster || req.isAdmin || auth.hasSection(req, 'abastecimento-carrinho');
 }
 function podeEnviarAbastecimento(req) {
-  return req.isAdmin || auth.hasSection(req, 'abastecimento-loja');
+  return req.isMaster || req.isAdmin || auth.hasSection(req, 'abastecimento-loja');
+}
+function podeVerAbastecimento(req) {
+  return podePedirAbastecimento(req)
+    || podeEnviarAbastecimento(req)
+    || req.isMaster
+    || req.isAdmin
+    || users.ehCargoGerente(req.user?.cargo);
+}
+
+// Mesma protecao aplicada aos fechamentos: gerente/Admin podem propor
+// correcao; operador so pode propor mudanca no proprio lancamento, provando
+// isso com a senha do operador que assinou o card. O navegador nunca decide.
+function podePedirCorrecaoAbastecimento(req, registro, operador) {
+  if (req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo)) return true;
+  return !!(registro?.operadorUsuario && operador?.usuario
+    && String(registro.operadorUsuario).toLowerCase() === String(operador.usuario).toLowerCase());
+}
+
+// O input datetime-local chega sem fuso. O abastecimento e' operado em
+// Brasilia, portanto convertemos explicitamente para ISO/UTC e rejeitamos
+// datas que o Date normalizaria silenciosamente (ex.: 31/02).
+function dataHoraBrasiliaParaIso(valor) {
+  const m = String(valor || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!m) throw new Error('Informe data e hora válidas.');
+  const [, anoTxt, mesTxt, diaTxt, horaTxt, minutoTxt] = m;
+  const ano = Number(anoTxt); const mes = Number(mesTxt); const dia = Number(diaTxt);
+  const hora = Number(horaTxt); const minuto = Number(minutoTxt);
+  const local = new Date(Date.UTC(ano, mes - 1, dia, hora, minuto));
+  if (local.getUTCFullYear() !== ano || local.getUTCMonth() !== mes - 1 || local.getUTCDate() !== dia
+    || local.getUTCHours() !== hora || local.getUTCMinutes() !== minuto) {
+    throw new Error('Informe uma data e hora existentes no calendário.');
+  }
+  return new Date(local.getTime() + 3 * 60 * 60 * 1000).toISOString();
 }
 
 // leitura: qualquer ponta - e tambem Master/Admin (indicadores no Painel)
 app.get('/api/abastecimento', auth.requireAuth, async (req, res) => {
-  if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req)) {
+  if (!podeVerAbastecimento(req)) {
     return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
   }
   res.json(await abastecimentoCarrinho.listAll());
@@ -15080,7 +15113,7 @@ app.post('/api/abastecimento/:id/divergencia', auth.requireAuth, async (req, res
 // Central e marca o card com o numero (as duas pontas podem pedir)
 app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, res) => {
   try {
-    if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req)) {
+    if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req) && !req.isMaster && !users.ehCargoGerente(req.user?.cargo)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     }
     const reg = await abastecimentoCarrinho.getOne(req.params.id);
@@ -15090,27 +15123,37 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
     }
     const motivo = String(req.body.motivo || '').trim().slice(0, 500);
     if (!motivo) return res.status(400).json({ error: 'Descreva a justificativa da correção.' });
-    // assinatura obrigatoria: QUALQUER operador de balcao (pede ou envia)
-    // autentica com usuario+senha pra confirmar o pedido de correcao
-    const operador = await abastecimentoCarrinho.validarOperadorQualquerPapel({
-      usuario: req.body.operadorUsuario,
-      senha: req.body.operadorSenha,
-    });
-    const acao = req.body.acao === 'remover' ? 'remover' : 'alterar';
+    // Assinatura local e obrigatoria: para operador ela tambem prova que o
+    // card foi criado por ele; gestor assina pela propria sessao autenticada.
+    const gestor = req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
+    const usuarioOperador = String(req.body.operadorUsuario || '').trim();
+    const senhaOperador = String(req.body.operadorSenha || '').trim();
+    const operador = gestor && !usuarioOperador && !senhaOperador
+      ? null
+      : await abastecimentoCarrinho.validarOperadorQualquerPapel({ usuario: usuarioOperador, senha: senhaOperador });
+    if (!podePedirCorrecaoAbastecimento(req, reg, operador)) {
+      return res.status(403).json({ error: 'Operador só pode pedir correção de lançamento assinado por ele. Gerente, Admin ou Master podem solicitar para a equipe.' });
+    }
+    const acao = req.body.acao === 'remover' ? 'remover' : (req.body.acao === 'data-hora' ? 'data-hora' : 'alterar');
+    const propostaCriadoEm = acao === 'data-hora' ? dataHoraBrasiliaParaIso(req.body.propostaDataHora) : null;
     const itensTxtDe = (pizzas, insumos) => abastecimentoCarrinho.SABORES
       .filter((s) => Number(pizzas?.[s]) > 0).map((s) => `${pizzas[s]} ${s}`)
       .concat((insumos || []).filter((i) => Number(i.quantidade) > 0)
         .map((i) => i.insumoId ? `${i.nome || i.insumoId} (${i.quantidade} ${i.embalagem === 'caixa' ? 'cx' : 'un'})` : `${i.descricao || ''} (${i.quantidade})`))
       .join(', ') || '—';
     const enviadoTxt = itensTxtDe(reg.pizzas, reg.insumos);
-    const propostaTxt = acao === 'remover' ? 'REMOVER o lançamento inteiro' : itensTxtDe(req.body.pizzas, req.body.insumos);
+    const propostaTxt = acao === 'remover'
+      ? 'REMOVER o lançamento inteiro'
+      : acao === 'data-hora'
+        ? `DATA/HORA: ${new Date(propostaCriadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+        : itensTxtDe(req.body.pizzas, req.body.insumos);
     const quando = new Date(reg.criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const ticket = await solicitacoes.create({
       tipo: 'suporte-ti',
       unidade: "Domino's Carrinho Aeroporto Recife",
       unidadeNome: 'Dom Car Aero Recife',
       titulo: `Abastecimento: correção solicitada (${reg.tipo} de ${quando})`,
-      observacao: `Correção pedida pelo operador ${operador.nome || operador.usuario} (@${operador.usuario}), na sessão de ${req.user.username || req.user.email}.\n\nLançamento: ${reg.tipo} de ${quando}, por ${reg.operadorNome || reg.criadoPorNome || '—'}${reg.operadorUsuario ? ' (@' + reg.operadorUsuario + ')' : ''}.\nLançado: ${enviadoTxt}\nProposta: ${propostaTxt}\n\nJustificativa: ${motivo}\n\nAprovar ou recusar direto no card, na tela do Abastecimento.`,
+      observacao: `Correção pedida por ${gestor ? (req.user.username || req.user.email) : `${operador.nome || operador.usuario} (@${operador.usuario})`}, na sessão de ${req.user.username || req.user.email}.\n\nLançamento: ${reg.tipo} de ${quando}, por ${reg.operadorNome || reg.criadoPorNome || '—'}${reg.operadorUsuario ? ' (@' + reg.operadorUsuario + ')' : ''}.\nLançado: ${enviadoTxt}\nProposta: ${propostaTxt}\n\nJustificativa: ${motivo}\n\nAprovar ou recusar direto no card, na tela do Abastecimento.`,
       prioridade: 'alta',
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,
@@ -15118,11 +15161,12 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
       direcionadoParaEmail: null,
     });
     broadcast('solicitacao-criada', ticket, 'solicitacoes');
-    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Correção no Abastecimento`, `${acao === 'remover' ? 'Remover lançamento' : 'Alterar quantidades'} — ${motivo.slice(0, 100)}`, ticket.id);
+    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Correção no Abastecimento`, `${acao === 'remover' ? 'Remover lançamento' : acao === 'data-hora' ? 'Alterar data/hora' : 'Alterar quantidades'} — ${motivo.slice(0, 100)}`, ticket.id);
     const registro = await abastecimentoCarrinho.registrarPedidoCorrecao(req.params.id, {
       acao,
       propostaPizzas: req.body.pizzas,
       propostaInsumos: req.body.insumos,
+      propostaCriadoEm,
       motivo,
       numeroTicket: ticket.numeroTicket,
       porEmail: req.user.email,
@@ -15148,6 +15192,21 @@ app.post('/api/abastecimento/:id/correcao/decidir', auth.requireMaster, async (r
     });
     broadcast('abastecimento-atualizado', { id: req.params.id });
     res.json(resultado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Master corrige data/hora diretamente, mantendo o horário original e quem
+// fez a alteração no documento para auditoria.
+app.patch('/api/abastecimento/:id/editar-data-hora', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const registro = await abastecimentoCarrinho.editarDataHoraDireto(req.params.id, dataHoraBrasiliaParaIso(req.body.dataHora), {
+      editadoPorEmail: req.user.email,
+      editadoPorNome: req.user.username || req.user.email,
+    });
+    broadcast('abastecimento-atualizado', { id: registro.id });
+    res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
