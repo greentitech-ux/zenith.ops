@@ -3164,14 +3164,38 @@ function renderQuedas(){
   }).join('');
   corpo.innerHTML = `${filtrosQuedas()}<div class="quedas-wrap"><table class="quedas-tab"><thead><tr><th>${cabecalhoQuedas('Unidade','unidadeNome')}</th><th>${cabecalhoQuedas('Quedas','quedas')}</th><th>${cabecalhoQuedas('Confirmadas','confirmadas')}</th><th>${cabecalhoQuedas('Oscilações','oscilacoes')}</th><th>${cabecalhoQuedas('Tempo fora','horasFora')}</th><th>${cabecalhoQuedas('Maior','maiorMin')}</th></tr></thead><tbody>${linhas}</tbody></table></div>${detalhesQuedasHoje(unidades)}<div class="quedas-nota"><b>Correlação automática (histórico)</b> usa todos os computadores fixos da unidade enquanto ninguém escolhe pontos oficiais; se um deles ficou online, não soma como queda de link. <b>Pontos marcados</b> substituem a inferência e são a configuração definitiva.<br><b>Confirmada</b> = ficou fora tempo suficiente pra virar alerta crítico. <b>Oscilação</b> = caiu e voltou em poucos minutos — não pede app offline.<br>Não entram: reinício que o NOC mandou, e notebook (sai da loja e volta).<br>O histórico é limitado a ${dados.eventosMaximoPorComputador} eventos por computador — em máquina que oscila muito, queda antiga já saiu da lista. <b>O número é piso, não teto.</b></div>`;
 }
-function baixarRelatorioQuedas(){
+async function baixarRelatorioQuedas(){
   const p = new URLSearchParams();
   if(QUEDAS_PERIODO === 'personalizado'){ p.set('inicio',QUEDAS_DE); p.set('fim',QUEDAS_ATE); }
   else if(QUEDAS_PERIODO === 'hoje' || QUEDAS_PERIODO === 'ontem') p.set('periodo',QUEDAS_PERIODO);
   else p.set('dias',QUEDAS_PERIODO);
   if(QUEDAS_GRUPO) p.set('grupo',QUEDAS_GRUPO);
   if(QUEDAS_UNIDADE) p.set('unidade',QUEDAS_UNIDADE);
-  window.open('/api/loja-status/quedas/relatorio.pdf?'+p.toString(), '_blank', 'noopener');
+  const botao = document.querySelector('.quedas-acoes button[onclick="baixarRelatorioQuedas()"]');
+  const textoOriginal = botao?.textContent;
+  if(botao){ botao.disabled = true; botao.textContent = 'Gerando PDF…'; }
+  try{
+    // A camada de fetch desta tela acrescenta o token Bearer. Abrir uma nova aba
+    // não leva esse cabeçalho, fazendo o servidor responder "Autenticação necessária".
+    const r = await fetch('/api/loja-status/quedas/relatorio.pdf?'+p.toString());
+    if(!r.ok){
+      const erro = await r.json().catch(()=>({}));
+      throw new Error(erro.error || `Não foi possível gerar o PDF (HTTP ${r.status}).`);
+    }
+    const arquivo = await r.blob();
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'relatorio-quedas.pdf';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }catch(e){
+    alert(e.message || 'Não foi possível gerar o PDF.');
+  }finally{
+    if(botao){ botao.disabled = false; botao.textContent = textoOriginal || '📄 PDF'; }
+  }
 }
 // aceita número de dias (janela rolante) ou 'hoje'/'ontem' (dia de calendário
 // da loja, fechado no fuso de Brasília pelo servidor - ver relatorioQuedas)
