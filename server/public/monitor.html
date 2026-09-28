@@ -1262,7 +1262,7 @@ function renderAlerts(rows){
   // alerta individual, mesmo sem repetir (diferente das outras bandeiras,
   // que so alertam a partir de 2 recusas seguidas do mesmo cliente)
   recusadas.filter(d=>d.metodo==='amex').forEach(d=>alerts.push({sev:'high', nome:d.cardHolder||d.nomeCliente||'cliente', t1:`Tentativa de venda Amex recusada — ${d.cardHolder||d.nomeCliente||'cliente'}`, t2:`${fmtMoney(d.valor)} · final ${d.last4||'????'} · ${d.motivo||'sem motivo'} · ${d.unidade}`, dt:d.dataHora, psp:d.pspReference}));
-  rows.filter(d=>d.alertaPixChargeback).forEach(d=>alerts.push({sev:'med', nome:d.nomeCliente||d.cardHolder||'cliente', t1:`Alerta PIX — histórico de chargeback`, t2:`${fmtMoney(d.valor)} · ${d.alertaPixChargeback.quantidade||2} chargebacks anteriores · ${d.unidade} · conferir manualmente; PIX não foi bloqueado`, dt:d.dataHora, psp:d.pspReference}));
+  rows.filter(d=>d.alertaPixChargeback && d.alertaPixChargeback.criterio==='shopperReference-verificada').forEach(d=>alerts.push({sev:'med', nome:d.nomeCliente||d.cardHolder||'cliente', t1:`Alerta PIX — chargebacks formais comprovados`, t2:`${fmtMoney(d.valor)} · ${d.alertaPixChargeback.quantidade||2} chargebacks Adyen em aberto, vinculados por identidade verificável · ${d.unidade} · conferir manualmente; PIX não foi bloqueado`, dt:d.dataHora, psp:d.pspReference}));
   // chargeback tem painel proprio (com prazo de recorrer, evidencias etc.) -
   // nao entra aqui pra nao duplicar/inflar os alertas de falha/fraude
   rows.filter(d=>d.fraudeSuspeita && !/pix/i.test(String(d.metodo||'')) && !d.status.includes('CHARGEBACK')).forEach(d=>alerts.push({sev:'high', nome:d.cardHolder||d.nomeCliente||'cliente', t1:`Fraude suspeita — ${d.cardHolder||'cliente'}`, t2:`${fmtMoney(d.valor)} · final ${d.last4||'????'} · ${d.unidade}`, dt:d.dataHora, psp:d.pspReference}));
@@ -2167,8 +2167,8 @@ function removerOfferClosedSuperado(pedidos){
             const fraudeBadge = !infoFraude ? '' : infoFraude.nivel==='FRAUDE'
               ? `<span class="flag" style="background:var(--bad-dim);color:var(--bad);">🚫 FRAUDE${infoFraude.direto?'':' (recorrente)'}</span>`
               : `<span class="flag" style="background:var(--warn-dim);color:var(--warn);">⚠️ SUSPEITO</span>`;
-            const alertaPixChargeback = d.alertaPixChargeback
-              ? `<span class="flag" style="background:var(--warn-dim);color:var(--warn);">⚠️ ALERTA PIX: ${esc(String(d.alertaPixChargeback.quantidade||2))} chargebacks anteriores</span>`
+            const alertaPixChargeback = d.alertaPixChargeback && d.alertaPixChargeback.criterio==='shopperReference-verificada'
+              ? `<span class="flag" style="background:var(--warn-dim);color:var(--warn);">⚠️ ALERTA PIX: ${esc(String(d.alertaPixChargeback.quantidade||2))} chargebacks Adyen comprovados</span>`
               : '';
             // resposta/observacao da Adyen (motivo da recusa, do estorno etc.) -
             // so faz sentido pra quem nao foi aprovado
@@ -2346,7 +2346,7 @@ function connectStream(){
     DATA.push(tx);
     marcarNovo('tx:'+tx.pspReference);
     if(tx.status==='RECUSADO' && tx.fraudeSuspeita && !/pix/i.test(String(tx.metodo||''))) enfileirarPopupFraude(tx);
-    else if(tx.alertaPixChargeback || (!/pix/i.test(String(tx.metodo||'')) && tx.fraudeSuspeita) || ALERT_STATUSES.has(tx.status)) tocarAlerta();
+    else if((tx.alertaPixChargeback && tx.alertaPixChargeback.criterio==='shopperReference-verificada') || (!/pix/i.test(String(tx.metodo||'')) && tx.fraudeSuspeita) || ALERT_STATUSES.has(tx.status)) tocarAlerta();
     populateFilters(); render();
   });
   es.addEventListener('update', (e)=>{
@@ -2354,7 +2354,7 @@ function connectStream(){
     const idx = DATA.findIndex(d=>d.pspReference===tx.pspReference && d.eventCode===tx.eventCode);
     if(idx>=0) DATA[idx]=tx;
     marcarNovo('tx:'+tx.pspReference);
-    if(tx.alertaPixChargeback || (!/pix/i.test(String(tx.metodo||'')) && tx.fraudeSuspeita) || ALERT_STATUSES.has(tx.status)) tocarAlerta();
+    if((tx.alertaPixChargeback && tx.alertaPixChargeback.criterio==='shopperReference-verificada') || (!/pix/i.test(String(tx.metodo||'')) && tx.fraudeSuspeita) || ALERT_STATUSES.has(tx.status)) tocarAlerta();
     render();
   });
   es.addEventListener('order-changed', (e)=>{

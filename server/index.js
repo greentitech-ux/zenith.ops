@@ -3322,12 +3322,17 @@ app.post('/webhooks/adyen', async (req, res) => {
     // nome em acusação. O alerta não bloqueia produção nem cria fraudMark.
     if (ehPixTx) {
       tx.fraudeSuspeita = false;
+      // Webhooks podem ser repetidos. Nunca preservar na memória o alerta
+      // calculado por uma regra antiga: ele só sobrevive se for reprovado pela
+      // função estrita abaixo, com a prova de vínculo individual.
+      delete tx.alertaPixChargeback;
       const historico = store.historicoChargebackDoCliente(tx);
       if (tx.status === 'APROVADO' && historico.quantidade >= 2) {
         tx.alertaPixChargeback = {
           quantidade: historico.quantidade,
           criterio: historico.criterio,
-          mensagem: `PIX aprovado para cliente com ${historico.quantidade} chargebacks anteriores. Conferir manualmente.`,
+          pedidos: historico.pedidos,
+          mensagem: `PIX aprovado para cliente com ${historico.quantidade} chargebacks formais da Adyen, vinculados por identidade verificável. Conferir manualmente.`,
         };
       }
     }

@@ -165,6 +165,14 @@ function normalize(item) {
   );
   const endereco = enderecoDoWebhook(additional, item);
   const scoreRisco = Number(additional.totalFraudScore);
+  // A referência "CONTA_DA_LOJA:" que existia quando não vinha dado do
+  // comprador não identifica uma pessoa: todos os clientes daquela unidade
+  // ficavam com a mesma chave. Guardar a origem impede que ela seja usada em
+  // correlações sensíveis, especialmente no alerta de PIX/chargeback.
+  const shopperReferenceExplicita = contatoTexto(additional.shopperReference);
+  const shopperReference = shopperReferenceExplicita
+    || (emailCliente ? `${item.merchantAccountCode || ''}:${emailCliente}` : null);
+  const shopperReferenceOrigem = shopperReferenceExplicita ? 'adyen' : (emailCliente ? 'email' : 'ausente');
 
   return {
     pspReference: item.pspReference,
@@ -214,7 +222,8 @@ function normalize(item) {
     dispositivo: contatoTexto(additional.deviceType),
     navegador: contatoTexto(additional.browserCode),
     aliasCartao: contatoTexto(additional.alias),
-    shopperReference: additional.shopperReference || item.merchantAccountCode + ':' + (additional.shopperEmail || ''),
+    shopperReference,
+    shopperReferenceOrigem,
     unidade: normalizarCodigoUnidade(item.merchantAccountCode),
     // o código cru da conta na Adyen: a API de disputas pede ele, e o
     // `unidade` acima já vem normalizado (adyenDisputas.js, 24/09/2026)

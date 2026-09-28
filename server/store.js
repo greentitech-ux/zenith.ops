@@ -349,25 +349,24 @@ function chargebacks() {
     .sort((a, b) => (b.ultimaAtualizacao || '').localeCompare(a.ultimaAtualizacao || ''));
 }
 
-// PIX não entra na malha antifraude. Ainda assim, se a mesma identidade já
-// acumulou chargebacks reais, a operação precisa ser avisada para conferir o
-// caso. Esta função devolve somente esse histórico objetivo; quem chama deve
-// mostrar um alerta neutro, jamais uma marca de SUSPEITO/FRAUDE ou bloqueio.
-//
-// shopperReference é a chave preferida porque vem da própria Adyen. Quando
-// ela não existe, o nome completo normalizado é apenas um fallback para
-// alerta humano (e exige dois chargebacks em pedidos distintos), nunca uma
-// decisão automática contra o cliente.
-function normalizarNomeParaHistorico(nome) {
-  return String(nome || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .trim().toLowerCase().replace(/\s+/g, ' ');
+// PIX não entra na malha antifraude. O alerta operacional só pode existir se
+// a Adyen forneceu uma identidade individual verificável: shopperReference
+// explícita ou e-mail. Nome nunca é vínculo suficiente e "CONTA_DA_LOJA:"
+// também não — era o fallback antigo, compartilhado por todos da unidade.
+function referenciaIndividualVerificavel(tx) {
+  const referencia = String(tx && tx.shopperReference || '').trim();
+  if (!referencia || /:\s*$/.test(referencia)) return null;
+  const origem = String(tx && tx.shopperReferenceOrigem || '').trim();
+  if (origem) return ['adyen', 'email'].includes(origem) ? referencia : null;
+  // Registros legados não trazem a origem. Só são aproveitados se a referência
+  // não parecer a chave montada "conta:"; e-mail ou ID sem separador são
+  // identidade individual suficiente para o alerta neutro.
+  return referencia.includes('@') || !referencia.includes(':') ? referencia : null;
 }
 
 function historicoChargebackDoCliente(tx) {
-  const referencia = String(tx && tx.shopperReference || '').trim();
-  const nome = normalizarNomeParaHistorico(tx && (tx.nomeCliente || tx.cardHolder));
-  if (!referencia && nome.length < 8) return { quantidade: 0, criterio: null, pedidos: [] };
+  const referencia = referenciaIndividualVerificavel(tx);
+  if (!referencia) return { quantidade: 0, criterio: null, pedidos: [] };
 
   const pedidoAtual = orderKey(tx || {});
   const porPedido = new Map();
@@ -384,25 +383,27 @@ function historicoChargebackDoCliente(tx) {
   }
 
   const pedidos = [];
-  let usouReferencia = false;
   for (const [pedidoId, eventosChargeback] of porPedido) {
     const eventosDoPedido = eventos.filter((evento) => orderKey(evento) === pedidoId);
-    const mesmaReferencia = !!referencia && eventosDoPedido.some((evento) => String(evento.shopperReference || '').trim() === referencia);
-    const mesmoNome = !referencia && eventosDoPedido.some((evento) =>
-      normalizarNomeParaHistorico(evento.nomeCliente || evento.cardHolder) === nome
-    );
-    if (!mesmaReferencia && !mesmoNome) continue;
-    if (mesmaReferencia) usouReferencia = true;
+    // Chargeback revertido não é histórico negativo ativo. A abertura fica
+    // guardada para auditoria/defesa, mas não pode disparar alerta de PIX.
+    const revertido = eventosDoPedido.some((evento) => evento.status === 'CHARGEBACK_REVERTIDO'
+      || String(evento.eventCode || '').toUpperCase() === 'CHARGEBACK_REVERSED');
+    if (revertido) continue;
+    const mesmaReferencia = eventosDoPedido.some((evento) => referenciaIndividualVerificavel(evento) === referencia);
+    if (!mesmaReferencia) continue;
     pedidos.push({
       pedidoId,
       data: eventosChargeback[0].dataHora || null,
       unidade: eventosChargeback[0].unidade || null,
+      pspReference: eventosChargeback[0].pspReference || null,
+      status: eventosChargeback[0].status,
     });
   }
 
   return {
     quantidade: pedidos.length,
-    criterio: pedidos.length ? (usouReferencia ? 'shopperReference' : 'nome-completo') : null,
+    criterio: pedidos.length ? 'shopperReference-verificada' : null,
     pedidos,
   };
 }
