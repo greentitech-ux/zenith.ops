@@ -64,6 +64,11 @@
     cursor:pointer;font-size:17px;color:#7d8896;border-radius:8px;}
   .szc-anexo-btn:hover{color:var(--accent,#b8ff3c);}
   .szc-anexo-btn.szc-anexo-tem{color:var(--accent,#b8ff3c);}
+  .szc-audio-btn{border:0;background:transparent;width:36px;flex-shrink:0;border-radius:8px;
+    cursor:pointer;font-size:17px;color:#7d8896;}
+  .szc-audio-btn:hover{color:var(--accent,#b8ff3c);background:rgba(184,255,60,.08);}
+  .szc-audio-btn.gravando{color:#ff5c5c;animation:szc-piscar .9s infinite;}
+  @keyframes szc-piscar{50%{opacity:.35;}}
   /* anexo no FORMULARIO DE ABERTURA: quem abre o chamado normalmente já está
      com o print na mão - mandar depois numa segunda mensagem se perdia */
   .szc-anexo-inicial-wrap{position:relative;margin-bottom:10px;}
@@ -78,6 +83,7 @@
   .szc-anexo-inicial-remover:hover{background:rgba(248,81,73,.15);color:#ff5c5c;}
   .szc-anexo-inicial-remover.szc-hidden{display:none;}
   .szc-msg img.szc-anexo-img{max-width:180px;max-height:180px;border-radius:8px;border:1px solid #232a33;margin-top:4px;display:block;}
+  .szc-msg audio.szc-anexo-audio{display:block;width:min(240px,100%);height:34px;margin-top:6px;}
   /* previa do que vai junto. O icone 📎 -> ✅ sozinho e discreto demais pra
      quem acabou de colar um print: sem VER a imagem, a duvida "colou?" faz
      colar de novo e mandar duas */
@@ -215,16 +221,16 @@
     } catch (e) { alert('Erro ao gerar o PDF.'); }
   }
 
-  // anexo de uma mensagem (foto/PDF - pedido explicito do usuario: "precisa
-  // permitir enviar foto e anexos no chat"). Imagem aparece embutida
-  // (clicavel, abre em tamanho real); outros tipos (so PDF, ver
-  // segurancaChat.js) viram um link de download
+  // anexo de uma mensagem. Imagem aparece embutida; áudio toca no próprio
+  // chat; PDF/ZIP continuam como link de download.
   function anexoHtml(anexo, url) {
     if (!anexo) return '';
     const ehImagem = /^image\//.test(anexo.tipo || '');
+    const ehAudio = /^audio\//.test(anexo.tipo || '');
     if (ehImagem) {
       return `<a href="${url}" target="_blank" rel="noopener"><img class="szc-anexo-img" src="${url}" alt="${esc(anexo.nome || 'anexo')}"></a>`;
     }
+    if (ehAudio) return `<audio class="szc-anexo-audio" controls preload="metadata" src="${url}">🎙️ ${esc(anexo.nome || 'áudio')}</audio>`;
     return `<a class="szc-anexo-arq" href="${url}" target="_blank" rel="noopener">📎 ${esc(anexo.nome || 'arquivo')}</a>`;
   }
   // alterna o icone do botao de anexo (📎 -> ✅) conforme um arquivo foi
@@ -271,14 +277,62 @@
     if (!caixa) return;
     if (!arq) { caixa.classList.remove('tem'); caixa.innerHTML = ''; return; }
     const ehImagem = /^image\//.test(arq.type || '');
+    const ehAudio = /^audio\//.test(arq.type || '');
     const url = ehImagem ? URL.createObjectURL(arq) : null;
-    caixa.innerHTML = (url ? `<img alt="print colado" src="${url}">` : '<span>📎</span>')
+    const audioUrl = ehAudio ? URL.createObjectURL(arq) : null;
+    caixa.innerHTML = (url ? `<img alt="print colado" src="${url}">` : audioUrl ? `<audio controls preload="metadata" src="${audioUrl}"></audio>` : '<span>📎</span>')
       + `<span class="szc-previa-nome">${esc(arq.name || 'anexo')} · ${Math.round(arq.size / 1024)} KB</span>`
       + '<button type="button" title="Tirar">✕</button>';
     caixa.classList.add('tem');
     caixa.querySelector('button').addEventListener('click', () => {
       if (url) URL.revokeObjectURL(url);
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
       limparAnexo(inputEl, iconeEl);
+    });
+  }
+
+  // 🎙️ grava no próprio navegador e reaproveita o MESMO input de anexo. Assim
+  // o áudio passa por tamanho, validação, Storage e permissão já existentes;
+  // não há uma segunda rota pública nem um serviço de mídia adicional.
+  function ligarGravadorAudio(botao, inputEl, iconeEl) {
+    if (!botao || !inputEl || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      if (botao) botao.style.display = 'none';
+      return;
+    }
+    let gravador = null;
+    let stream = null;
+    let partes = [];
+    const pararStream = () => { if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; };
+    const resetar = () => {
+      botao.classList.remove('gravando');
+      botao.textContent = '🎙️';
+      botao.title = 'Gravar áudio (até 8 MB)';
+    };
+    botao.addEventListener('click', async () => {
+      if (gravador && gravador.state === 'recording') { gravador.stop(); return; }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const formatos = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'];
+        const mimeType = formatos.find((tipo) => MediaRecorder.isTypeSupported(tipo));
+        gravador = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+        partes = [];
+        gravador.ondataavailable = (evento) => { if (evento.data.size) partes.push(evento.data); };
+        gravador.onstop = () => {
+          const tipo = gravador.mimeType || 'audio/webm';
+          const extensao = tipo.includes('ogg') ? 'ogg' : tipo.includes('mp4') ? 'm4a' : 'webm';
+          const arquivo = new File([new Blob(partes, { type: tipo })], `audio-${new Date().toISOString().replace(/[:.]/g, '-')}.${extensao}`, { type: tipo });
+          pararStream(); resetar(); gravador = null;
+          if (arquivo.size > LIMITE_ANEXO_BYTES) { alert('O áudio passou de 8 MB. Grave uma mensagem menor.'); return; }
+          const arquivos = new DataTransfer(); arquivos.items.add(arquivo); inputEl.files = arquivos.files;
+          inputEl.dispatchEvent(new Event('change'));
+        };
+        gravador.onerror = () => { pararStream(); resetar(); gravador = null; alert('Não consegui gravar o áudio.'); };
+        gravador.start();
+        botao.classList.add('gravando'); botao.textContent = '⏹'; botao.title = 'Parar gravação';
+      } catch (erro) {
+        pararStream(); resetar();
+        alert('Permita o uso do microfone para gravar um áudio.');
+      }
     });
   }
 
@@ -326,10 +380,11 @@
       <div class="szc-corpo" id="szc-corpo"></div>
       <div class="szc-previa" id="szc-previa-msg"></div>
       <div class="szc-rodape szc-hidden" id="szc-rodape">
-        <label class="szc-anexo-btn" id="szc-anexo-label" title="Anexar foto ou PDF">
+        <label class="szc-anexo-btn" id="szc-anexo-label" title="Anexar foto, áudio ou PDF">
           <span id="szc-anexo-icone">📎</span>
-          <input type="file" id="szc-nova-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+          <input type="file" id="szc-nova-anexo" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,audio/aac,audio/flac,application/pdf" hidden>
         </label>
+        <button type="button" class="szc-audio-btn" id="szc-gravar-audio" title="Gravar áudio (até 8 MB)">🎙️</button>
         <input type="text" class="szc-input nao-maiusc" id="szc-nova-msg" placeholder="escreva sua mensagem..." maxlength="1000">
         <button type="button" class="szc-enviar" id="szc-enviar-msg">➤</button>
       </div>
@@ -344,6 +399,7 @@
     panel.querySelector('#szc-anexo-icone'),
     panel.querySelector('#szc-previa-msg'),
   );
+  ligarGravadorAudio(panel.querySelector('#szc-gravar-audio'), panel.querySelector('#szc-nova-anexo'), panel.querySelector('#szc-anexo-icone'));
   // Ctrl+V com print na area de transferencia vira anexo (ver ligarColarImagem)
   ligarColarImagem(
     panel.querySelector('#szc-nova-msg'),
@@ -473,8 +529,8 @@
       <div class="szc-anexo-inicial-wrap">
         <label class="szc-anexo-abrir" id="szc-inicial-anexo-label">
           <span id="szc-inicial-anexo-icone">📎</span>
-          <span id="szc-inicial-anexo-nome">Anexar print, foto ou PDF</span>
-          <input type="file" id="szc-inicial-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+          <span id="szc-inicial-anexo-nome">Anexar print, foto, áudio ou PDF</span>
+          <input type="file" id="szc-inicial-anexo" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,audio/aac,audio/flac,application/pdf" hidden>
         </label>
         <button type="button" class="szc-anexo-inicial-remover szc-hidden" id="szc-inicial-anexo-remover" title="Remover anexo" aria-label="Remover anexo">×</button>
       </div>
@@ -488,7 +544,7 @@
     const atualizarInicialAnexo = () => {
       const arq = inicialAnexo.files[0];
       corpo.querySelector('#szc-inicial-anexo-icone').textContent = arq ? '✅' : '📎';
-      corpo.querySelector('#szc-inicial-anexo-nome').textContent = arq ? arq.name : 'Anexar print, foto ou PDF';
+      corpo.querySelector('#szc-inicial-anexo-nome').textContent = arq ? arq.name : 'Anexar print, foto, áudio ou PDF';
       corpo.querySelector('#szc-inicial-anexo-label').classList.toggle('szc-anexo-tem', !!arq);
       removerInicialAnexo.classList.toggle('szc-hidden', !arq);
     };
@@ -910,10 +966,11 @@
       <div id="szc-atend-thread">${montarThreadHtml(chat)}</div>
       <div class="szc-previa" id="szc-atend-previa" style="margin:0 0 6px;"></div>
       <div style="display:flex;gap:6px;">
-        <label class="szc-anexo-btn" id="szc-atend-anexo-label" title="Anexar foto ou PDF">
+        <label class="szc-anexo-btn" id="szc-atend-anexo-label" title="Anexar foto, áudio ou PDF">
           <span id="szc-atend-anexo-icone">📎</span>
-          <input type="file" id="szc-atend-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+          <input type="file" id="szc-atend-anexo" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,audio/aac,audio/flac,application/pdf" hidden>
         </label>
+        <button type="button" class="szc-audio-btn" id="szc-atend-gravar-audio" title="Gravar áudio (até 8 MB)">🎙️</button>
         <input type="text" class="szc-input nao-maiusc" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
         <button type="button" class="szc-enviar" id="szc-atend-enviar">➤</button>
       </div>
@@ -926,6 +983,7 @@
       corpo.querySelector('#szc-atend-anexo-icone'),
       corpo.querySelector('#szc-atend-previa'),
     );
+    ligarGravadorAudio(corpo.querySelector('#szc-atend-gravar-audio'), corpo.querySelector('#szc-atend-anexo'), corpo.querySelector('#szc-atend-anexo-icone'));
     // quem atende manda print o tempo todo (foi daqui que veio o pedido)
     ligarColarImagem(
       corpo.querySelector('#szc-atend-msg'),

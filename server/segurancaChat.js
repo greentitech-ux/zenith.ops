@@ -34,7 +34,10 @@ const EXTENSOES_BLOQUEADAS = /\.(exe|bat|cmd|com|scr|msi|ps1|psm1|vbs|vbe|js|mjs
 // ZIP e' permitido como EVIDENCIA/diagnostico compactado. Continua bloqueado
 // para qualquer extensao executavel e o servidor apenas armazena/entrega o
 // arquivo: nunca descompacta nem executa seu conteudo.
-const MIME_PERMITIDOS = /^(image\/(jpeg|png|gif|webp|heic|heif)|application\/(pdf|zip|x-zip-compressed|x-compressed))$/i;
+// Áudio é evidência útil no atendimento, mas continua sendo apenas
+// armazenado/servido como anexo: nunca é executado, nem transcrito pelo
+// servidor. Incluímos os formatos que Android, iPhone e MediaRecorder usam.
+const MIME_PERMITIDOS = /^(image\/(jpeg|png|gif|webp|heic|heif)|audio\/(mpeg|mp4|x-m4a|wav|x-wav|ogg|webm|aac|flac)|application\/(pdf|zip|x-zip-compressed|x-compressed))$/i;
 
 function validarAnexo(file) {
   const nome = String((file && file.originalname) || '');
@@ -42,7 +45,7 @@ function validarAnexo(file) {
     return { ok: false, motivo: `Tipo de arquivo não permitido (.${nome.split('.').pop()}).` };
   }
   if (!MIME_PERMITIDOS.test((file && file.mimetype) || '')) {
-    return { ok: false, motivo: 'Só é permitido enviar imagens, PDF ou ZIP.' };
+    return { ok: false, motivo: 'Só é permitido enviar imagens, áudio, PDF ou ZIP.' };
   }
   return { ok: true };
 }
