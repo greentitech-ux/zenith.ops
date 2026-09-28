@@ -45,7 +45,7 @@ async function criarTarefaBloqueio(email, userId, unidadesUsuario, usuarioNome) 
   const master = responsavelDoc.data();
   await tarefas.criar({
     titulo: `🔒 Desbloquear login: ${nome}`,
-    descricao: `Acesso de ${nome} bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nSomente o Master pode desbloquear. A ação pode manter a senha atual ou exigir uma nova senha no próximo acesso.`,
+    descricao: `Acesso de ${nome} bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nSomente o Master pode desbloquear: mantendo a senha atual ou definindo a senha temporária 12345678, que obriga a pessoa a cadastrar uma nova senha no primeiro acesso.`,
     dataInicio: new Date().toISOString().slice(0, 10), dataEntrega: new Date().toISOString().slice(0, 10),
     unidade, unidadeNome, prioridade: 'critica', origem: 'bloqueio-login',
     usuario: { id: userId, email, username: nome, nome },

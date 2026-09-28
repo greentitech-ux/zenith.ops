@@ -6725,16 +6725,17 @@ const EXECUTORES_QA = {
     if (!bloqueio?.usuarioId || !['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO'].includes(tarefa.status)) {
       throw new Error('A tarefa de desbloqueio não está mais disponível.');
     }
-    const pedirTrocaSenha = !!p.pedirTrocaSenha;
-    await users.desbloquear(bloqueio.usuarioId, { pedirTrocaSenha });
+    const senhaTemporaria = p.senhaTemporaria === true;
+    if (senhaTemporaria) await users.resetPassword(bloqueio.usuarioId, '12345678');
+    else await users.desbloquear(bloqueio.usuarioId, { pedirTrocaSenha: false });
     const concluida = await tarefas.concluir(tarefa.id, {
       usuario: { id: aprovacao.usuarioId, email: aprovacao.email, username: aprovacao.nome, nome: aprovacao.nome },
       isMaster: true, isAdmin: false, unidades: [],
-      observacao: pedirTrocaSenha
-        ? 'Login desbloqueado por aprovação de Master; a pessoa deverá cadastrar uma nova senha no próximo acesso.'
+      observacao: senhaTemporaria
+        ? 'Login desbloqueado por aprovação de Master com senha temporária 12345678; a pessoa deverá cadastrar uma nova senha no primeiro acesso.'
         : 'Login desbloqueado por aprovação de Master, mantendo a senha atual.',
     });
-    avisarLoginDesbloqueado(bloqueio.usuarioId, { porId: aprovacao.usuarioId, porEmail: aprovacao.email, pedirTrocaSenha });
+    avisarLoginDesbloqueado(bloqueio.usuarioId, { porId: aprovacao.usuarioId, porEmail: aprovacao.email, senhaTemporaria });
     broadcast('tarefas-atualizada', { id: concluida.id, unidade: concluida.unidade }, 'tarefas');
     return concluida;
   },
@@ -13323,16 +13324,17 @@ app.post('/api/tarefas/:id/desbloquear-login', auth.requireMaster, async (req, r
     if (!['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO'].includes(tarefa.status)) {
       return res.status(400).json({ error: 'Esta tarefa de desbloqueio já foi encerrada.' });
     }
-    if (await desviarSeQaMaster(req, res, 'tarefas.desbloquearLogin', `Desbloquear acesso de ${bloqueio.nome || bloqueio.email}`, { id: tarefa.id, pedirTrocaSenha: !!req.body?.pedirTrocaSenha })) return;
-    const pedirTrocaSenha = !!req.body?.pedirTrocaSenha;
-    await users.desbloquear(bloqueio.usuarioId, { pedirTrocaSenha });
+    const senhaTemporaria = req.body?.senhaTemporaria === true;
+    if (await desviarSeQaMaster(req, res, 'tarefas.desbloquearLogin', `Desbloquear acesso de ${bloqueio.nome || bloqueio.email}`, { id: tarefa.id, senhaTemporaria })) return;
+    if (senhaTemporaria) await users.resetPassword(bloqueio.usuarioId, '12345678');
+    else await users.desbloquear(bloqueio.usuarioId, { pedirTrocaSenha: false });
     const concluida = await tarefas.concluir(tarefa.id, {
       ...acessoDasTarefas(req),
-      observacao: pedirTrocaSenha
-        ? 'Login desbloqueado pelo Master; a pessoa deverá cadastrar uma nova senha no próximo acesso.'
+      observacao: senhaTemporaria
+        ? 'Login desbloqueado pelo Master com senha temporária 12345678; a pessoa deverá cadastrar uma nova senha no primeiro acesso.'
         : 'Login desbloqueado pelo Master, mantendo a senha atual.',
     });
-    avisarLoginDesbloqueado(bloqueio.usuarioId, { porId: req.user.id, porEmail: req.user.email, pedirTrocaSenha });
+    avisarLoginDesbloqueado(bloqueio.usuarioId, { porId: req.user.id, porEmail: req.user.email, senhaTemporaria });
     broadcast('tarefas-atualizada', { id: concluida.id, unidade: concluida.unidade }, 'tarefas');
     res.json(concluida);
   } catch (err) {
@@ -16622,9 +16624,11 @@ function avisarMensagemDireta(userId, conversaId, deNome, texto) {
 // e push no celular - que é o canal que chega ANTES do login, o estado
 // provável de quem estava bloqueado. Nunca derruba o desbloqueio: avisar é
 // bônus, a conta já está aberta.
-async function avisarLoginDesbloqueado(userId, { porId, porEmail, pedirTrocaSenha } = {}) {
+async function avisarLoginDesbloqueado(userId, { porId, porEmail, pedirTrocaSenha, senhaTemporaria } = {}) {
   if (!userId) return;
-  const texto = pedirTrocaSenha
+  const texto = senhaTemporaria
+    ? '🔓 Login desbloqueado! Use a senha temporária informada pelo Master e cadastre uma senha nova assim que entrar.'
+    : pedirTrocaSenha
     ? '🔓 Login desbloqueado! Você já pode entrar de novo - na entrada, o sistema vai pedir pra você definir uma senha nova.'
     : '🔓 Login desbloqueado! Você já pode entrar de novo com a mesma senha de sempre.';
   try {
