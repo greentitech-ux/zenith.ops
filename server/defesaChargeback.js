@@ -786,7 +786,7 @@ async function gerarPdf({ caso, tarefa, nomeUnidade = (c) => c, anexosDeEvidenci
 
 // Chamado quando a tarefa de defesa é concluída (index.js): gera o PDF,
 // guarda no Storage e marca o caso como pronto pro Claude anexar na Adyen.
-async function aoConcluirTarefa({ tarefa, storage, push, masters = [], nomeUnidade = (c) => c }) {
+async function aoConcluirTarefa({ tarefa, storage, push, masters = [], notificarMasters = true, nomeUnidade = (c) => c }) {
   if (!tarefa || !tarefa.defesaChargeback) return null;
   const caso = await disputes.getOne(tarefa.defesaChargeback.disputaId);
   if (!caso) return null;
@@ -803,9 +803,11 @@ async function aoConcluirTarefa({ tarefa, storage, push, masters = [], nomeUnida
       evidencias: evidencias.map((a) => ({ evidencia: a.evidencia, nome: a.nome, path: a.path, tipo: a.tipo })),
     });
     const aceitar = respostas.decisao === OPCAO_ACEITAR;
-    for (const m of masters) {
-      push.notifyUsuario(m.id, aceitar ? `⚖️ Unidade decidiu aceitar o chargeback · ${reais(caso.valor)}` : `⚖️ Defesa pronta para anexar na Adyen · ${reais(caso.valor)}`,
-        `${nomeUnidade(caso.unidade)} · prazo da Adyen ${dataBR(caso.prazoDefesa)}`, `defesa-pronta-${caso.id}`, `/tarefas?tarefa=${encodeURIComponent(tarefa.id)}`).catch(() => {});
+    if (notificarMasters) {
+      for (const m of masters) {
+        push.notifyUsuario(m.id, aceitar ? `⚖️ Unidade decidiu aceitar o chargeback · ${reais(caso.valor)}` : `⚖️ Defesa pronta para anexar na Adyen · ${reais(caso.valor)}`,
+          `${nomeUnidade(caso.unidade)} · prazo da Adyen ${dataBR(caso.prazoDefesa)}`, `defesa-pronta-${caso.id}`, `/tarefas?tarefa=${encodeURIComponent(tarefa.id)}`).catch(() => {});
+      }
     }
     return { ok: true, pdf: { paginas: pdf.paginas, tamanho: pdf.bytes.length, avisos: pdf.avisos } };
   } catch (err) {

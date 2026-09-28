@@ -3000,9 +3000,9 @@ app.post('/api/treinamentos-publico/:token/concluir', async (req, res) => {
 app.use('/api', auth.requireAuth);
 
 // ---------- DEFESA DE CHARGEBACK (ver defesaChargeback.js) ----------
-async function gerarDefesaAoConcluir(tarefa) {
+async function gerarDefesaAoConcluir(tarefa, { notificarMasters = true } = {}) {
   const masters = (await users.list()).filter((u) => u.active !== false && u.role === 'master');
-  return defesaChargeback.aoConcluirTarefa({ tarefa, storage, push, masters, nomeUnidade: (c) => nomeCanonicoUnidade(c, c) });
+  return defesaChargeback.aoConcluirTarefa({ tarefa, storage, push, masters, notificarMasters, nomeUnidade: (c) => nomeCanonicoUnidade(c, c) });
 }
 // a tela desenha o questionário daqui: a pergunta e a validação são uma coisa só
 app.get('/api/defesa-chargeback/questionario', (req, res) => {
@@ -12978,6 +12978,17 @@ app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('
     }
     const caminho = await storage.salvarArquivo(req.params.id, file, 'tarefas');
     const atualizada = await tarefas.adicionarAnexo(req.params.id, acessoDasTarefas(req), { nome: file.originalname, path: caminho, tipo: file.mimetype, tamanho: file.size, evidencia });
+    // A tarefa pode já ter sido concluída enquanto a Adyen ainda não recebeu a
+    // defesa. Nesse caso o botão de evidência complementar não pode deixar o
+    // PDF/caso congelado na versão anterior. Só regeneramos enquanto o caso
+    // segue ABERTO: depois de ENVIADA, uma nova prova precisa de decisão humana
+    // antes de qualquer nova ação na Adyen.
+    if (evidencia && atualizada.defesaChargeback && atualizada.status === 'CONCLUIDA') {
+      const caso = await disputes.getOne(atualizada.defesaChargeback.disputaId);
+      if (caso?.status === 'ABERTA' && !caso.envioAdyen) {
+        await gerarDefesaAoConcluir(atualizada, { notificarMasters: false });
+      }
+    }
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
   } catch (err) {
