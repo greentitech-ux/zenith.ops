@@ -265,6 +265,28 @@ const uploadLoginFundo = multer({
 
 const app = express();
 
+// Documentos da pasta de Q.A. podem ter até 150 MB. O domínio principal passa
+// por uma camada pública que pode encerrar uploads grandes antes de eles
+// chegarem ao Express; por isso a tela usa o endereço direto do Render nesses
+// casos. Esta é a ÚNICA rota que aceita chamada entre as duas origens e ela
+// continua exigindo o Bearer token normal — CORS não concede acesso.
+const ORIGENS_UPLOAD_DOCUMENTO_QA = new Set([
+  'https://www.nopulso.com.br',
+  'https://nopulso.com.br',
+]);
+app.use('/api/qualidade/documentos', (req, res, next) => {
+  const origem = String(req.headers.origin || '').replace(/\/$/, '');
+  if (ORIGENS_UPLOAD_DOCUMENTO_QA.has(origem)) {
+    res.setHeader('Access-Control-Allow-Origin', origem);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    res.setHeader('Access-Control-Max-Age', '600');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+  }
+  next();
+});
+
 // cabecalhos de seguranca basicos em TODA resposta (sem dependencia nova):
 // - nosniff: navegador nao "adivinha" tipo de arquivo (evita executar
 //   upload malicioso como script)

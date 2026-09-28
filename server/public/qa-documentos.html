@@ -250,6 +250,11 @@ const rotulo = (d) => d.situacaoLabel || (SIT_LABEL[d.tipo==='avaliacao'?'avalia
 let DOCS = [], UNIDADES = [], EDIT_ID = null, VERSAO_DOC = null, MARCA = null, PADRAO = null;
 let FILTRO_UNIDADE = '', FILTRO_SITUACAO = 'pendentes', FILTRO_BUSCA = '', PREPARAR = null;
 const LIMITE_ARQUIVO_QUALIDADE = 150 * 1024 * 1024;
+// Acima de 90 MB, o domínio principal pode ser interrompido pelo proxy antes
+// de o servidor receber o arquivo. O endereço direto é a MESMA aplicação,
+// autenticada pelo mesmo token, e evita essa camada só para este upload.
+const LIMITE_UPLOAD_DIRETO_QUALIDADE = 90 * 1024 * 1024;
+const BASE_UPLOAD_DIRETO_QUALIDADE = 'https://adyen-monitor.onrender.com';
 function tamanhoArquivo(mb){ return (mb / 1024 / 1024).toFixed(1).replace('.', ',') + ' MB'; }
 
 async function api(caminho, opcoes){
@@ -550,10 +555,13 @@ async function enviarVersao(){
   if($('v-data').value) fd.append('data', $('v-data').value);
   if(VERSAO_DOC.tipo !== 'avaliacao' && $('v-validade').value) fd.append('validade', $('v-validade').value);
   if($('v-obs').value.trim()) fd.append('observacao', $('v-obs').value.trim());
-  const botao = $('v-enviar'); botao.disabled = true; botao.textContent = 'Enviando…';
+  const botao = $('v-enviar'); botao.disabled = true;
+  const usarRotaDireta = arquivo.size > LIMITE_UPLOAD_DIRETO_QUALIDADE;
+  botao.textContent = usarRotaDireta ? 'Enviando documento grande…' : 'Enviando…';
   try{
     // sem Content-Type: o navegador põe o boundary do multipart sozinho
-    const r = await fetch(`/api/qualidade/documentos/${encodeURIComponent(VERSAO_DOC.id)}/arquivo`,
+    const rota = `/api/qualidade/documentos/${encodeURIComponent(VERSAO_DOC.id)}/arquivo`;
+    const r = await fetch((usarRotaDireta ? BASE_UPLOAD_DIRETO_QUALIDADE : '') + rota,
       { method:'POST', body: fd, headers: { Authorization: 'Bearer ' + AUTH_TOKEN } });
     if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Falha ao enviar o arquivo.'); }
     window.zenithRascunhos?.limparAnexoEnviado($('v-arquivo'));
