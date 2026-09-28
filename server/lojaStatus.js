@@ -123,6 +123,10 @@ async function setConfig(patch) {
 const CATALOGO_PROGRAMAS_PADRAO = [
   { id: 'google-chrome', nome: 'Google Chrome', wingetId: 'Google.Chrome', descricao: 'Navegador Google Chrome' },
   { id: 'anydesk', nome: 'AnyDesk', wingetId: 'AnyDeskSoftwareGmbH.AnyDesk', descricao: 'Acesso remoto AnyDesk' },
+  // Pacote oficial registrado no repositório do Windows Package Manager. O
+  // NOC só instala o Host; vincular uma conta Google e definir o PIN seguem
+  // sendo passos deliberados feitos na própria máquina/conta autorizada.
+  { id: 'chrome-remote-desktop-host', nome: 'Chrome Remote Desktop Host', wingetId: 'Google.ChromeRemoteDesktopHost', descricao: 'Host oficial de acesso remoto do Google' },
   { id: 'advanced-ip-scanner', nome: 'Advanced IP Scanner', wingetId: 'Famatech.AdvancedIPScanner', descricao: 'Varredura de rede' },
   { id: 'ifood-gestor', nome: 'iFood Gestor', wingetId: 'ifood.ifood', descricao: 'Gestor de Pedidos iFood' },
 ];
@@ -143,7 +147,12 @@ function catalogoProgramasSeguro(lista) {
 async function listarCatalogoProgramas() {
   const config = await getConfig();
   const salvo = catalogoProgramasSeguro(config.catalogoProgramas);
-  return salvo.length ? salvo : CATALOGO_PROGRAMAS_PADRAO;
+  // Os itens nativos são a base segura do NOC e não podem desaparecer só
+  // porque o Master já salvou um catálogo personalizado no passado. Itens
+  // extras continuam disponíveis; uma cópia com ID de item nativo é ignorada
+  // para ninguém conseguir trocar seu wingetId por outro programa.
+  const idsNativos = new Set(CATALOGO_PROGRAMAS_PADRAO.map((item) => item.id));
+  return [...CATALOGO_PROGRAMAS_PADRAO, ...salvo.filter((item) => !idsNativos.has(item.id))];
 }
 
 async function salvarCatalogoProgramas(lista) {
