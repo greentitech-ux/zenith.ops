@@ -20,42 +20,38 @@ if (!JWT_SECRET) {
 
 const usersRef = db.collection('users');
 
-// email "de sistema" usado nesses tickets automaticos de bloqueio - index.js
-// usa essa mesma constante pra reconhecer o ticket na hora de aprovar (ver
-// PATCH /api/solicitacoes/:id/status) e disparar o desbloqueio automatico,
-// em vez do fluxo normal de Chamado de TI com tecnico
+// Email de sistema preservado para reconhecer tickets históricos criados antes
+// do fluxo direto de tarefa de desbloqueio.
 const ROBO_BLOQUEIO_EMAIL = 'robô de bloqueio (login)';
 
-// require tardio (nao no topo) so pra deixar bem explicito que e uma
-// dependencia "de efeito colateral" do login, nao do modulo em si -
-// solicitacoes.js nao depende de auth.js, entao nao ha ciclo real.
-function criarChamadoBloqueio(email, userId, unidadesUsuario, usuarioNome) {
-  const solicitacoes = require('./solicitacoes');
+// Bloqueio de senha é uma decisão de acesso, não um atendimento de TI. Por
+// isso nasce direto no Meu Dia do Master, sem poluir a fila de chamados nem
+// depender de técnico. O require tardio evita ciclo auth -> tarefas -> auth.
+async function criarTarefaBloqueio(email, userId, unidadesUsuario, usuarioNome) {
+  const tarefas = require('./tarefas');
   const unidades = Array.isArray(unidadesUsuario) ? unidadesUsuario.filter(Boolean) : [];
   const unidade = unidades[0] || 'geral';
-  // o campo estruturado (unidade/unidadeNome) e usado pra agrupar/filtrar
-  // chamados por loja (ver "por unidade" em central-inicio.html) - juntar
-  // TODAS as unidades do login aqui virava uma "loja" fantasma por
-  // combinação (ex: "Loja A, Loja B, Loja C"), que nunca bate com nenhuma
-  // unidade de verdade e polui a contagem por loja. A lista completa
-  // continua na observação, pra quem aprova ver todas as unidades do login.
   const unidadeNome = unidades.length ? unidade : 'Sem unidade vinculada a este login';
   const unidadesTexto = unidades.length ? unidades.join(', ') : 'nenhuma';
   const agora = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short',
   }).format(new Date());
   const nome = String(usuarioNome || 'Usuário').trim().slice(0, 80) || 'Usuário';
-  solicitacoes
-    .create({
-      tipo: 'suporte-ti',
-      unidade,
-      unidadeNome,
-      titulo: `Login bloqueado: ${nome}`,
-      observacao: `Acesso de ${nome} bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nAo aprovar este ticket, o acesso é desbloqueado com a MESMA senha de sempre (a pessoa não precisa trocar nada). Se quiser pedir pra ela cadastrar uma senha nova mesmo assim, marque a opção "pedir pra atualizar a senha" ao aprovar.`,
-      criadoPorId: userId,
-      criadoPorEmail: ROBO_BLOQUEIO_EMAIL, criadoPorNome: nome,
-    })
-    .catch((e) => console.error('Falha ao criar chamado automático de Suporte TI (bloqueio de senha):', e.message));
+  const masters = await usersRef.where('role', '==', 'master').get();
+  const responsavelDoc = masters.docs
+    .filter((doc) => doc.data().active !== false)
+    .sort((a, b) => String(a.data().email || a.id).localeCompare(String(b.data().email || b.id)))[0];
+  if (!responsavelDoc) throw new Error('Nenhum Master ativo foi encontrado para receber a tarefa de desbloqueio.');
+  const master = responsavelDoc.data();
+  await tarefas.criar({
+    titulo: `🔒 Desbloquear login: ${nome}`,
+    descricao: `Acesso de ${nome} bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nSomente o Master pode desbloquear. A ação pode manter a senha atual ou exigir uma nova senha no próximo acesso.`,
+    dataInicio: new Date().toISOString().slice(0, 10), dataEntrega: new Date().toISOString().slice(0, 10),
+    unidade, unidadeNome, prioridade: 'critica', origem: 'bloqueio-login',
+    usuario: { id: userId, email, username: nome, nome },
+    responsavel: { id: responsavelDoc.id, email: master.email, username: master.username, nome: master.nome },
+    desbloqueioLogin: { usuarioId: userId, email, nome, unidades, bloqueadoEm: agora },
+  });
 }
 
 // permissoes vazias por padrao - o Master preenche na hora de criar o acesso
@@ -155,7 +151,8 @@ async function login(identifier, password, contexto = {}) {
     const bloqueou = tentativas >= MAX_TENTATIVAS && user.role !== 'master';
     await doc.ref.update({ failedAttempts: tentativas, locked: bloqueou });
     if (bloqueou) {
-      criarChamadoBloqueio(user.email, doc.id, user.permissions?.unidades, user.username || user.nome);
+      criarTarefaBloqueio(user.email, doc.id, user.permissions?.unidades, user.username || user.nome)
+        .catch((e) => console.error('Falha ao criar tarefa automática de desbloqueio:', e.message));
       throw new Error('Acesso bloqueado após 3 tentativas de senha erradas. Fale com o Master.');
     }
     throw new Error('Usuário/email ou senha inválidos.');

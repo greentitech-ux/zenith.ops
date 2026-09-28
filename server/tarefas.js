@@ -325,7 +325,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null, defesaChargeback = null }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null, defesaChargeback = null, desbloqueioLogin = null }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -376,6 +376,14 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
       disputaId: String(defesaChargeback.disputaId), pedidoId: String(defesaChargeback.pedidoId || ''),
       prazoDefesa: defesaChargeback.prazoDefesa || null, prazoInterno: defesaChargeback.prazoInterno || null,
       motivo: String(defesaChargeback.motivo || '').slice(0, 200), respostas: {},
+    } : null,
+    // Bloqueio de login é tarefa direta do Master: guarda apenas o alvo e o
+    // contexto necessário para a rota exclusiva de desbloqueio, nunca senha.
+    desbloqueioLogin: desbloqueioLogin && desbloqueioLogin.usuarioId ? {
+      usuarioId: String(desbloqueioLogin.usuarioId), email: String(desbloqueioLogin.email || '').slice(0, 160),
+      nome: String(desbloqueioLogin.nome || '').slice(0, 100),
+      unidades: Array.isArray(desbloqueioLogin.unidades) ? desbloqueioLogin.unidades.map(String).slice(0, 30) : [],
+      bloqueadoEm: String(desbloqueioLogin.bloqueadoEm || '').slice(0, 80),
     } : null,
     // Dados de triagem não são exibidos na descrição. Servem apenas para que
     // Master/Suporte decidam, depois, se o pedido merece virar uma solicitação.

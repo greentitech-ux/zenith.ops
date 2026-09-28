@@ -6719,6 +6719,25 @@ const EXECUTORES_QA = {
     avisarLoginDesbloqueado(p.id, { pedirTrocaSenha: !!p.pedirTrocaSenha });
     return r;
   },
+  'tarefas.desbloquearLogin': async (p, aprovacao) => {
+    const tarefa = await tarefas.getOne(p.id);
+    const bloqueio = tarefa?.desbloqueioLogin;
+    if (!bloqueio?.usuarioId || !['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO'].includes(tarefa.status)) {
+      throw new Error('A tarefa de desbloqueio não está mais disponível.');
+    }
+    const pedirTrocaSenha = !!p.pedirTrocaSenha;
+    await users.desbloquear(bloqueio.usuarioId, { pedirTrocaSenha });
+    const concluida = await tarefas.concluir(tarefa.id, {
+      usuario: { id: aprovacao.usuarioId, email: aprovacao.email, username: aprovacao.nome, nome: aprovacao.nome },
+      isMaster: true, isAdmin: false, unidades: [],
+      observacao: pedirTrocaSenha
+        ? 'Login desbloqueado por aprovação de Master; a pessoa deverá cadastrar uma nova senha no próximo acesso.'
+        : 'Login desbloqueado por aprovação de Master, mantendo a senha atual.',
+    });
+    avisarLoginDesbloqueado(bloqueio.usuarioId, { porId: aprovacao.usuarioId, porEmail: aprovacao.email, pedirTrocaSenha });
+    broadcast('tarefas-atualizada', { id: concluida.id, unidade: concluida.unidade }, 'tarefas');
+    return concluida;
+  },
   'usuarios.username': (p) => users.updateUsername(p.id, p.username),
   'usuarios.usernamesEmMassa': (p) => users.updateUsernamesEmMassa(p.itens),
   'usuarios.excluir': (p) => users.remove(p.id),
@@ -13241,6 +13260,7 @@ app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
         const tarefa = await tarefas.getOne(id);
         if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acesso)) throw new Error('Sem acesso a esta tarefa.');
         if (status === 'CONCLUIDA') {
+          if (tarefa.desbloqueioLogin) throw new Error('Use a ação “Desbloquear login” dentro da tarefa.');
           if (!tarefas.podeMoverStatusTarefa(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não concluir.');
           if (solicitacaoIdDaTarefa(tarefa)) {
             await finalizarSolicitacaoPelaTarefa(tarefa, req, 'Conclusão em lote.');
@@ -13271,6 +13291,9 @@ app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
     const anterior = await tarefas.getOne(req.params.id);
     if (!anterior) return res.status(404).json({ error: 'Tarefa não encontrada.' });
     if (!tarefas.podeParticiparTarefa(anterior, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
+    if (anterior.desbloqueioLogin && req.body?.status === 'CONCLUIDA') {
+      return res.status(400).json({ error: 'Use a ação “Desbloquear login” dentro da tarefa.' });
+    }
     // Reabrir uma tarefa ligada a ticket também reabre sua execução; assim a
     // Central e o Meu Dia não ficam mostrando estados contraditórios.
     const solicitacaoId = solicitacaoIdDaTarefa(anterior);
@@ -13284,6 +13307,34 @@ app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
     const atualizada = await tarefas.atualizarStatus(req.params.id, acesso, req.body?.status);
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Uma falha repetida de senha gera tarefa, não chamado de TI. Só o Master
+// executa o desbloqueio; a própria ação conclui a tarefa e avisa a pessoa.
+app.post('/api/tarefas/:id/desbloquear-login', auth.requireMaster, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    const bloqueio = tarefa.desbloqueioLogin;
+    if (!bloqueio?.usuarioId) return res.status(400).json({ error: 'Esta não é uma tarefa de desbloqueio de login.' });
+    if (!['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO'].includes(tarefa.status)) {
+      return res.status(400).json({ error: 'Esta tarefa de desbloqueio já foi encerrada.' });
+    }
+    if (await desviarSeQaMaster(req, res, 'tarefas.desbloquearLogin', `Desbloquear acesso de ${bloqueio.nome || bloqueio.email}`, { id: tarefa.id, pedirTrocaSenha: !!req.body?.pedirTrocaSenha })) return;
+    const pedirTrocaSenha = !!req.body?.pedirTrocaSenha;
+    await users.desbloquear(bloqueio.usuarioId, { pedirTrocaSenha });
+    const concluida = await tarefas.concluir(tarefa.id, {
+      ...acessoDasTarefas(req),
+      observacao: pedirTrocaSenha
+        ? 'Login desbloqueado pelo Master; a pessoa deverá cadastrar uma nova senha no próximo acesso.'
+        : 'Login desbloqueado pelo Master, mantendo a senha atual.',
+    });
+    avisarLoginDesbloqueado(bloqueio.usuarioId, { porId: req.user.id, porEmail: req.user.email, pedirTrocaSenha });
+    broadcast('tarefas-atualizada', { id: concluida.id, unidade: concluida.unidade }, 'tarefas');
+    res.json(concluida);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -13420,6 +13471,7 @@ app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
     if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada.' });
     const acesso = acessoDasTarefas(req);
     if (!tarefas.podeParticiparTarefa(tarefa, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
+    if (tarefa.desbloqueioLogin) return res.status(400).json({ error: 'Use a ação “Desbloquear login” dentro da tarefa.' });
     // Concluir é o registro de que a pessoa fez o serviço, e a máquina da loja
     // é compartilhada - a senha diz QUEM está finalizando (mesma
     // reautenticação do estorno e da sangria). 400 e não 401: o wrapper de
