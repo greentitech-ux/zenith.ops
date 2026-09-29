@@ -7650,6 +7650,35 @@ app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo
     res.status(400).json({ error: err.message });
   }
 });
+// Remove a arte exatamente do escopo escolhido no painel (parque, marca ou
+// grupo+marca). A troca é reversível no sentido operacional: a máquina cai na
+// próxima arte disponível e, sem nenhuma, no modelo básico preto.
+app.delete('/api/loja-status/papel-de-parede', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const { marca, chave } = await chaveDaArteDoPedido(req.body || {});
+    if (req.body && req.body.marca && !marca) return res.status(400).json({ error: 'Marca inválida.' });
+    const atual = await lojaStatus.getConfig();
+    let removida = null;
+    if (!marca) {
+      removida = atual && atual.papelDeParede;
+      if (!removida || !removida.caminho) return res.status(404).json({ error: 'Não há imagem padrão para remover.' });
+      await lojaStatus.setConfig({ papelDeParede: null });
+    } else {
+      const porMarca = { ...((atual && atual.papelDeParedePorMarca) || {}) };
+      removida = porMarca[chave];
+      if (!removida || !removida.caminho) return res.status(404).json({ error: 'Não há imagem nesse grupo ou marca para remover.' });
+      delete porMarca[chave];
+      await lojaStatus.setConfig({ papelDeParedePorMarca: porMarca });
+    }
+    // O cadastro é removido antes do arquivo: mesmo que o Storage esteja
+    // temporariamente indisponível, nenhuma estação continuará recebendo a arte.
+    await storage.apagarArquivo(removida.caminho).catch((err) => console.error('Não consegui apagar arte de papel de parede:', err.message));
+    res.json({ ok: true, chave: chave || 'padrao' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 // LOGOS DO MODELO BÁSICO (Master). Um PNG por marca e um por grupo; a
 // máquina SEM ARTE monta o desenho com eles. A arte que o Master sobe acima
 // continua mandando - isto não substitui arte nenhuma.
