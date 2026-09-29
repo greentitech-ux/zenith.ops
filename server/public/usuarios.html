@@ -301,7 +301,9 @@
       <button type="button" class="back" style="cursor:pointer;" onclick="abrirCriarQaMaster()">🧪 Criar acesso QA Master</button>
     </div>
     <form class="create" id="create-form">
+      <label>Nome completo<input type="text" id="c-nome" required maxlength="120"></label>
       <label>Email<input type="email" id="c-email" required></label>
+      <label>Telefone<input type="tel" id="c-telefone" inputmode="tel" placeholder="DDD + número"></label>
       <label>Usuário (login curto, opcional - ex: "jn")<input type="text" class="valor-exato" id="c-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
       <label>Senha temporária (mín. 8 caracteres)<input type="text" id="c-password" required minlength="8"></label>
 
@@ -446,7 +448,9 @@
   <form class="modal" id="qa-master-form" style="max-width:380px;">
     <h3 style="margin:0;">🧪 Criar acesso QA Master</h3>
     <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">Acesso 100% Master, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) sempre vão pra fila de aprovação - nunca executam direto.</p>
+    <label>Nome completo<input type="text" id="qm-nome" required maxlength="120"></label>
     <label>Email<input type="email" id="qm-email" required></label>
+    <label>Telefone<input type="tel" id="qm-telefone" inputmode="tel" placeholder="DDD + número"></label>
     <label>Usuário (login curto, opcional)<input type="text" class="valor-exato" id="qm-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
     <label>Senha temporária (mín. 8 caracteres)<input type="text" id="qm-password" required minlength="8"></label>
     <p class="err hidden" id="qa-master-err"></p>
@@ -454,6 +458,19 @@
       <button type="button" id="qa-master-cancel">Cancelar</button>
       <button type="submit" class="primary" id="qa-master-submit-btn">Criar</button>
     </div>
+  </form>
+</div>
+
+<div class="overlay" id="perfil-overlay">
+  <form class="modal" id="perfil-form" style="max-width:420px;">
+    <h3 id="perfil-title" style="margin:0;">Dados do perfil</h3>
+    <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">Nome, e-mail, telefone e usuário são alterados exclusivamente pelo Master.</p>
+    <label>Nome completo<input type="text" id="p-nome" required maxlength="120"></label>
+    <label>Email<input type="email" id="p-email" required></label>
+    <label>Telefone<input type="tel" id="p-telefone" inputmode="tel" placeholder="DDD + número"></label>
+    <label>Usuário (login curto, opcional)<input type="text" class="valor-exato" id="p-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
+    <p class="err hidden" id="perfil-err"></p>
+    <div class="modal-actions"><button type="button" id="perfil-cancel">Cancelar</button><button type="submit" class="primary">Salvar perfil</button></div>
   </form>
 </div>
 
@@ -1136,7 +1153,7 @@ function passaBuscaUsuario(u){
     u.podeRhCadastrarEfetivado?'rh cadastrar efetivado':'',
     u.podeBonifVerValorTotal?'bonificação valor total':'', u.podeBonifVerColaboradores?'bonificação colaboradores':'',
   ];
-  const alvo = [u.email, u.username, ...tags, ...(perms.sections||[]), ...secoesLabels, ...(perms.unidades||[]), ...unidadesLabels]
+  const alvo = [u.nome, u.email, u.telefone, u.username, ...tags, ...(perms.sections||[]), ...secoesLabels, ...(perms.unidades||[]), ...unidadesLabels]
     .filter(Boolean).join(' ').toLowerCase();
   return FILTRO_USERS_BUSCA.split(/\s+/).every(p=>alvo.includes(p));
 }
@@ -1158,7 +1175,7 @@ function renderFiltroStatusUsuarios(apósBusca){
 function renderUsers(){
   renderResumoAcessos();
   const container = document.getElementById('users-list');
-  const todosOrdenados = [...USERS].sort((a,b)=>a.email.localeCompare(b.email,'pt-BR',{sensitivity:'base'}));
+  const todosOrdenados = [...USERS].sort((a,b)=>(a.nome || a.email).localeCompare((b.nome || b.email),'pt-BR',{sensitivity:'base'}));
   const apósBusca = todosOrdenados.filter(passaBuscaUsuario);
   renderFiltroStatusUsuarios(apósBusca);
   const ordenados = !FILTRO_USERS_STATUS ? apósBusca : apósBusca.filter(u=>
@@ -1212,7 +1229,8 @@ function renderUsers(){
     return `<div class="user-row">
       <span class="user-status-dot ${status.cor}" title="${status.texto}"></span>
       <div class="user-info">
-        <div class="user-nome" onclick="toggleDetalheUsuario('${u.id}')" title="Clique pra ver os detalhes">${escapeHtml(u.email)}</div>
+         <div class="user-nome" onclick="toggleDetalheUsuario('${u.id}')" title="Clique pra ver os detalhes">${escapeHtml(u.nome || u.email)}</div>
+         ${u.nome ? `<div style="font-size:11px;color:var(--muted);word-break:break-all;">${escapeHtml(u.email)}${u.telefone ? ' · '+escapeHtml(u.telefone) : ''}</div>` : ''}
         <div class="user-sub">
           <span class="user-username">${u.username ? escapeHtml(u.username) : '—'}</span>
           <span class="tags">${tags.join('')}</span>
@@ -1276,7 +1294,7 @@ function abrirAcoes(id){
     document.getElementById('acoes-lista').innerHTML = `
       <div class="master-nota">Conta Master: edição de identificação e segurança. O escopo global não pode ser limitado, desativado ou excluído por esta tela.</div>
       <button type="button" onclick="fecharAcoes();abrirSessoes('${u.id}')">📍 Ver sessões e locais conectados</button>
-      <button type="button" onclick="fecharAcoes();definirUsername('${u.id}', '${escapeHtml(u.username||'')}')">🆔 ${u.username?'Editar usuário':'Definir usuário'}</button>
+       <button type="button" onclick="fecharAcoes();editarPerfil('${u.id}')">👤 Dados do perfil</button>
       <button type="button" onclick="fecharAcoes();editarPerfilVisual('${u.id}')">🎨 Personalização visual</button>
       <button type="button" onclick="fecharAcoes();resetarSenha('${u.id}')">🔒 Redefinir senha</button>
       <button type="button" onclick="fecharAcoes();alternarSessaoLongaMaster('${u.id}', ${!u.sessaoLonga})">${u.sessaoLonga?'🔓 Desativar sessão de 30 dias':'🔒 Manter conectado por 30 dias'}</button>`;
@@ -1289,7 +1307,7 @@ function abrirAcoes(id){
     <button type="button" onclick="fecharAcoes();abrirHorario('${u.id}')">🕐 Horário de acesso</button>
     ${u.locked ? `<button type="button" onclick="fecharAcoes();desbloquearAcesso('${u.id}')">🔓 Desbloquear (mantém a senha)</button>` : ''}
     <button type="button" onclick="fecharAcoes();resetarSenha('${u.id}')">🔒 Nova senha</button>
-    <button type="button" onclick="fecharAcoes();definirUsername('${u.id}', '${escapeHtml(u.username||'')}')">🆔 ${u.username?'Editar usuário':'Definir usuário'}</button>
+    <button type="button" onclick="fecharAcoes();editarPerfil('${u.id}')">👤 Dados do perfil</button>
     <button type="button" onclick="fecharAcoes();editarPerfilVisual('${u.id}')">🎨 Personalização visual${u.perfilVisual?' · ativa':''}</button>
     <div class="acoes-sep">Conta</div>
     <button type="button" class="danger" onclick="fecharAcoes();alternarAtivo('${u.id}', ${!u.active})">${u.active?'🚫 Desativar acesso':'✅ Reativar acesso'}</button>
@@ -1298,6 +1316,31 @@ function abrirAcoes(id){
   document.getElementById('acoes-overlay').classList.add('show');
 }
 function fecharAcoes(){ document.getElementById('acoes-overlay').classList.remove('show'); }
+
+let PERFIL_EDITANDO = null;
+const perfilOverlay = document.getElementById('perfil-overlay');
+function editarPerfil(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  PERFIL_EDITANDO=id;
+  document.getElementById('perfil-title').textContent='Dados do perfil · '+(u.nome || u.email);
+  document.getElementById('p-nome').value=u.nome || '';
+  document.getElementById('p-email').value=u.email || '';
+  document.getElementById('p-telefone').value=u.telefone || '';
+  document.getElementById('p-username').value=u.username || '';
+  document.getElementById('perfil-err').classList.add('hidden');
+  perfilOverlay.classList.add('show');
+}
+document.getElementById('perfil-cancel').addEventListener('click',()=>perfilOverlay.classList.remove('show'));
+perfilOverlay.addEventListener('click',(e)=>{if(e.target===perfilOverlay)perfilOverlay.classList.remove('show')});
+document.getElementById('perfil-form').addEventListener('submit',async(e)=>{
+  e.preventDefault(); if(!PERFIL_EDITANDO)return;
+  const err=document.getElementById('perfil-err'); err.classList.add('hidden');
+  try{
+    const r=await fetch('/api/users/'+encodeURIComponent(PERFIL_EDITANDO)+'/perfil',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:document.getElementById('p-nome').value,email:document.getElementById('p-email').value,telefone:document.getElementById('p-telefone').value,username:document.getElementById('p-username').value})});
+    const d=await r.json().catch(()=>({})); if(!r.ok)throw Error(d.error||'Não foi possível salvar o perfil.');
+    perfilOverlay.classList.remove('show'); await carregarUsuarios();
+  }catch(x){err.textContent=x.message;err.classList.remove('hidden')}
+});
 
 async function editarPerfilVisual(id){
   const u = USERS.find(x=>x.id===id); if(!u) return;
@@ -1473,7 +1516,9 @@ document.getElementById('qa-master-form').addEventListener('submit', async (e)=>
   const errEl = document.getElementById('qa-master-err');
   errEl.classList.add('hidden');
   const payload = {
+    nome: document.getElementById('qm-nome').value,
     email: document.getElementById('qm-email').value,
+    telefone: document.getElementById('qm-telefone').value,
     username: document.getElementById('qm-username').value,
     password: document.getElementById('qm-password').value,
   };
@@ -1502,7 +1547,9 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
   const errEl = document.getElementById('create-err');
   errEl.classList.add('hidden');
   const payload = {
+    nome: document.getElementById('c-nome').value,
     email: document.getElementById('c-email').value,
+    telefone: document.getElementById('c-telefone').value,
     username: document.getElementById('c-username').value,
     password: document.getElementById('c-password').value,
     permissions: {

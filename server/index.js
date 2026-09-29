@@ -6741,6 +6741,7 @@ const EXECUTORES_QA = {
     avisarLoginDesbloqueado(p.id, { pedirTrocaSenha: !!p.pedirTrocaSenha });
     return r;
   },
+  'usuarios.perfil': (p) => users.updatePerfil(p.id, p.perfil),
   'tarefas.desbloquearLogin': async (p, aprovacao) => {
     const tarefa = await tarefas.getOne(p.id);
     const bloqueio = tarefa?.desbloqueioLogin;
@@ -13330,6 +13331,21 @@ app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
     const atualizada = await tarefas.atualizarStatus(req.params.id, acesso, req.body?.status);
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/users/:id/perfil', auth.requireMaster, async (req, res) => {
+  try {
+    const perfil = {
+      nome: req.body?.nome,
+      email: req.body?.email,
+      telefone: req.body?.telefone,
+      username: req.body?.username,
+    };
+    if (await desviarSeQaMaster(req, res, 'usuarios.perfil', `Editar perfil do acesso ${req.params.id}`, { id: req.params.id, perfil })) return;
+    res.json(await users.updatePerfil(req.params.id, perfil));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

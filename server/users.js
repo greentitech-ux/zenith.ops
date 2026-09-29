@@ -99,6 +99,26 @@ function sanitizeUsername(raw) {
   return u;
 }
 
+function sanitizeNome(raw) {
+  const nome = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (nome.length > 120) throw new Error('Nome muito longo (máximo 120 caracteres).');
+  return nome || null;
+}
+
+function sanitizeTelefone(raw) {
+  const telefone = String(raw || '').trim();
+  if (!telefone) return null;
+  const numeros = telefone.replace(/\D/g, '');
+  if (numeros.length < 8 || numeros.length > 15) throw new Error('Telefone inválido. Informe DDD e número.');
+  return numeros;
+}
+
+function sanitizeEmail(raw) {
+  const email = String(raw || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Email inválido.');
+  return email;
+}
+
 async function garantirUsernameLivre(username, idAtual) {
   if (!username) return;
   const existing = await usersRef.where('username', '==', username).limit(1).get();
@@ -162,11 +182,13 @@ const list = usersCache.cached;
 // verdade). O botao no front agora trava durante a chamada (ver
 // usuarios.html) - isso aqui e a segunda camada, pra cobrir qualquer outra
 // forma de disparar 2 chamadas ao mesmo tempo (rede lenta com retry, etc)
-async function create({ email, password, permissions, username }) {
-  email = String(email || '').trim().toLowerCase();
+async function create({ email, password, permissions, username, nome, telefone }) {
+  email = sanitizeEmail(email);
   if (!email || !password) throw new Error('Email e senha são obrigatórios.');
   if (password.length < 8) throw new Error('A senha deve ter pelo menos 8 caracteres.');
   const usernameOk = sanitizeUsername(username);
+  const nomeOk = sanitizeNome(nome);
+  const telefoneOk = sanitizeTelefone(telefone);
   const passwordHash = await bcrypt.hash(password, 12);
 
   const novoId = await db.runTransaction(async (tx) => {
@@ -179,6 +201,8 @@ async function create({ email, password, permissions, username }) {
     const ref = usersRef.doc();
     tx.set(ref, {
       email,
+      nome: nomeOk,
+      telefone: telefoneOk,
       username: usernameOk || null,
       passwordHash,
       role: 'user',
@@ -210,11 +234,13 @@ async function create({ email, password, permissions, username }) {
 // verdade revisar antes.
 // mesma protecao contra dupla-criacao do create() acima (checagem +
 // gravacao numa unica transacao)
-async function createQaMaster({ email, password, username }) {
-  email = String(email || '').trim().toLowerCase();
+async function createQaMaster({ email, password, username, nome, telefone }) {
+  email = sanitizeEmail(email);
   if (!email || !password) throw new Error('Email e senha são obrigatórios.');
   if (password.length < 8) throw new Error('A senha deve ter pelo menos 8 caracteres.');
   const usernameOk = sanitizeUsername(username);
+  const nomeOk = sanitizeNome(nome);
+  const telefoneOk = sanitizeTelefone(telefone);
   const passwordHash = await bcrypt.hash(password, 12);
 
   const novoId = await db.runTransaction(async (tx) => {
@@ -227,6 +253,8 @@ async function createQaMaster({ email, password, username }) {
     const ref = usersRef.doc();
     tx.set(ref, {
       email,
+      nome: nomeOk,
+      telefone: telefoneOk,
       username: usernameOk || null,
       passwordHash,
       role: 'master',
@@ -266,6 +294,31 @@ async function updateUsername(id, username) {
   const usernameOk = sanitizeUsername(username);
   await garantirUsernameLivre(usernameOk, id);
   await ref.update({ username: usernameOk || null });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
+// Identificação e contato pertencem ao cadastro, não às permissões. Esta
+// função é chamada apenas pela rota Master: a própria pessoa não consegue
+// trocar nome, e-mail, telefone nem o login curto.
+async function updatePerfil(id, { nome, email, telefone, username }) {
+  const ref = usersRef.doc(id);
+  const emailOk = sanitizeEmail(email);
+  const nomeOk = sanitizeNome(nome);
+  const telefoneOk = sanitizeTelefone(telefone);
+  const usernameOk = sanitizeUsername(username);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new Error('Acesso não encontrado.');
+    const emailExistente = await tx.get(usersRef.where('email', '==', emailOk).limit(1));
+    if (!emailExistente.empty && emailExistente.docs[0].id !== id) throw new Error('Já existe um acesso com esse email.');
+    if (usernameOk) {
+      const usernameExistente = await tx.get(usersRef.where('username', '==', usernameOk).limit(1));
+      if (!usernameExistente.empty && usernameExistente.docs[0].id !== id) throw new Error('Já existe um acesso com esse usuário.');
+    }
+    tx.update(ref, { nome: nomeOk, email: emailOk, telefone: telefoneOk, username: usernameOk || null });
+  });
   invalidarUsuario(id);
   usersCache.invalidar();
   return toPublic(await ref.get());
@@ -821,7 +874,9 @@ function toPublic(doc) {
   const data = doc.data();
   return {
     id: doc.id,
+    nome: data.nome || null,
     email: data.email,
+    telefone: data.telefone || null,
     username: data.username || null,
     role: data.role,
     active: data.active !== false,
@@ -1001,6 +1056,7 @@ module.exports = {
   updateSessaoLonga,
   updateCargo,
   updateUsername,
+  updatePerfil,
   updatePerfilVisual,
   updateUsernamesEmMassa,
   resetPassword,
