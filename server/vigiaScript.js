@@ -43,7 +43,8 @@
 // upload manual; redesenha as estações que ainda tinham apenas texto.
 // 122: o atalho automático só é criado se ainda não existir; servidor, HOST e
 // VMs não recebem o PWA do NoPulso.
-const VERSAO_VIGIA = 122;
+// 123: o cartão central usa a cor de fundo do próprio logo, sem borda de tom.
+const VERSAO_VIGIA = 123;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2074,6 +2075,21 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $dw = $img.Width * $esc; $dh = $img.Height * $esc',
     '  $g.DrawImage($img, [single]($x + ($w - $dw) / 2), [single]($y + ($h - $dh) / 2), [single]$dw, [single]$dh)',
     '}',
+    // Logos podem vir com branco puro, gelo ou outra cor de fundo. O cartão
+    // não pode usar uma cor fixa, pois isso deixa uma moldura visível em volta
+    // da imagem. A amostra vem do canto (fora do desenho da marca).
+    'function Cor-DeFundoDoLogo($img, $padrao) {',
+    '  if (-not $img) { return $padrao }',
+    '  try {',
+    '    $bmp = New-Object System.Drawing.Bitmap -ArgumentList $img',
+    '    try {',
+    '      $x = [int][math]::Min(8, [math]::Max(0, $bmp.Width - 1)); $y = [int][math]::Min(8, [math]::Max(0, $bmp.Height - 1))',
+    '      $p = $bmp.GetPixel($x, $y)',
+    '      if ($p.A -ge 230) { return [System.Drawing.Color]::FromArgb(255, $p.R, $p.G, $p.B) }',
+    '    } finally { $bmp.Dispose() }',
+    '  } catch {}',
+    '  return $padrao',
+    '}',
     'function Texto-Centralizado($g, [string]$texto, $fonte, $cor, $cx, $y) {',
     '  $tam = $g.MeasureString($texto, $fonte)',
     '  $br = New-Object System.Drawing.SolidBrush($cor)',
@@ -2115,12 +2131,13 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '        $sombra = Retangulo-RedondoCarimbo ([single]$cxCartao) ([single]($y + 8 * $e)) ([single]$cw) ([single]$ch) ([single](18 * $e))',
     '        $brS = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(70, 0, 0, 0))',
     '        try { $g.FillPath($brS, $sombra) } finally { $brS.Dispose(); $sombra.Dispose() }',
+    '        $imgMarca = $null; $corCartao = [System.Drawing.ColorTranslator]::FromHtml("#f4f5f2")',
+    '        if ($arqMarca) { $imgMarca = Abrir-ImagemSemTravar $arqMarca; $corCartao = Cor-DeFundoDoLogo $imgMarca $corCartao }',
     '        $cartao = Retangulo-RedondoCarimbo ([single]$cxCartao) ([single]$y) ([single]$cw) ([single]$ch) ([single](18 * $e))',
-    '        $brC = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml("#f4f5f2"))',
+    '        $brC = New-Object System.Drawing.SolidBrush($corCartao)',
     '        try { $g.FillPath($brC, $cartao) } finally { $brC.Dispose(); $cartao.Dispose() }',
-    '        if ($arqMarca) {',
-    '          $img = Abrir-ImagemSemTravar $arqMarca',
-    '          try { Desenhar-ImagemNaCaixa $g $img ($cxCartao + 28 * $e) ($y + 28 * $e) ($cw - 56 * $e) ($ch - 56 * $e) } finally { $img.Dispose() }',
+    '        if ($imgMarca) {',
+    '          try { Desenhar-ImagemNaCaixa $g $imgMarca ($cxCartao + 28 * $e) ($y + 28 * $e) ($cw - 56 * $e) ($ch - 56 * $e) } finally { $imgMarca.Dispose() }',
     '        } else {',
     '          $fMarca = Nova-FonteCarimbo @("Segoe UI Black","Segoe UI Semibold","Arial") (84 * $e) ([System.Drawing.FontStyle]::Bold)',
     '          try { $t = $g.MeasureString($rotuloMarca, $fMarca); Texto-Centralizado $g $rotuloMarca $fMarca ([System.Drawing.ColorTranslator]::FromHtml("#1d2733")) $cx ($y + ($ch - $t.Height) / 2) } finally { $fMarca.Dispose() }',
