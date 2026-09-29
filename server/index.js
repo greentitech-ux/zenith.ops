@@ -26,6 +26,7 @@ const amexVelocity = require('./amexVelocity');
 const disputes = require('./disputes');
 const pedidoEvidencias = require('./pedidoEvidencias');
 const fraudMarks = require('./fraudMarks');
+const fraudIdentityLedger = require('./fraudIdentityLedger');
 const fraudReport = require('./fraudReport');
 const alertReport = require('./alertReport');
 const fraudIdentity = require('./fraudIdentity');
@@ -3329,6 +3330,59 @@ async function escalarClusterParaFraude(nomes, motivo, bloquearEntrega = false) 
   }
 }
 
+function transacoesDoPedido(pedidoId) {
+  return store.allTransactions().filter((tx) => (
+    tx.merchantReference === pedidoId || tx.originalReference === pedidoId || tx.pspReference === pedidoId
+  ));
+}
+
+// Uma confirmação humana vira uma memória persistente de hashes. A bandeira
+// não participa da chave, então a tentativa seguinte é reconhecida mesmo que
+// o fraudador troque AMEX por Visa/Mastercard. Falhar ao gravar essa memória
+// nunca desfaz a confirmação do pedido atual.
+async function registrarIdentidadeDeFraudeConfirmada(pedidoId, confirmadoPorEmail) {
+  const transacoes = transacoesDoPedido(pedidoId);
+  if (!transacoes.length) return { identificadores: 0 };
+  return fraudIdentityLedger.registrarConfirmada(transacoes, { pedidoId, confirmadoPorEmail });
+}
+
+async function tratarReincidenciaFraudeConfirmada(tx, pedidoId) {
+  if (pixRepetido.ehPix(tx) || tx.status !== 'APROVADO') return null;
+  const risco = await fraudIdentityLedger.consultar(tx);
+  if (!risco.revisar) return null;
+  const clienteNome = tx.nomeCliente || tx.cardHolder || null;
+  const descritores = [...risco.fortes, ...risco.revisao].join(', ');
+  const motivo = risco.bloquear
+    ? `Bloqueio preventivo: identidade vinculada a fraude confirmada (${descritores}). Exige liberação do Master.`
+    : `Revisar: dado associado a fraude confirmada (${descritores}). Um dado isolado não bloqueia o pedido.`;
+  const registro = await fraudMarks.marcar({
+    pedidoId, unidade: tx.unidade, nivel: 'SUSPEITO', motivo,
+    clienteChave: clienteNome ? `nome:${clienteNome}` : null,
+    clienteNome, statusPedido: tx.status, valor: tx.valor,
+    marcadoPorEmail: 'deteccao-automatica@sistema',
+    entregaBloqueada: risco.bloquear,
+    bloqueioMotivo: risco.bloquear ? motivo : null,
+  });
+  broadcast('fraude-marcada', registro, 'monitor');
+  if (registro.bloqueioNovo) {
+    await push.notifyCritico(
+      `🚫 PEDIDO RETIDO — identidade já confirmada como fraude`,
+      `${tx.unidade || ''} · ${clienteNome || 'Cliente'} · confira com o Master antes de produzir/entregar.`,
+      `fraude-registro-${pedidoId}`,
+      tx.unidade
+    );
+    await alertarBloqueioFraudeNaLoja(tx, pedidoId, motivo);
+  } else {
+    await push.notifyRaw(
+      `⚠️ REVISAR PEDIDO — identidade conhecida`,
+      `${tx.unidade || ''} · ${clienteNome || 'Cliente'} · há um único sinal associado a fraude confirmada; não foi bloqueado.`,
+      `fraude-revisao-${pedidoId}`,
+      tx.unidade
+    );
+  }
+  return registro;
+}
+
 // ---------- endpoint de webhook ----------
 app.post('/webhooks/adyen', async (req, res) => {
   const items = req.body?.notificationItems || [];
@@ -3379,6 +3433,15 @@ app.post('/webhooks/adyen', async (req, res) => {
     store.addOrUpdate(tx);
     broadcast('transaction', tx, 'monitor');
     push.notify(tx); // estorno, estorno agendado, chargeback ou fraude -> push no celular/navegador
+
+    // Consulta a base persistente de fraude confirmada depois de o evento
+    // entrar no store. A consulta usa hashes de dados fortes e independe da
+    // bandeira; nome isolado nunca aciona bloqueio (ver fraudIdentityLedger).
+    try {
+      await tratarReincidenciaFraudeConfirmada(tx, pedidoIdAtual);
+    } catch (err) {
+      console.error('Erro ao consultar base de fraude confirmada:', err.message);
+    }
 
     if (tx.alertaPixChargeback) {
       const cliente = String(tx.nomeCliente || tx.cardHolder || 'Cliente').slice(0, 80);
@@ -3606,52 +3669,16 @@ app.post('/webhooks/adyen', async (req, res) => {
       }
     }
 
-    // identidade cruzada (cluster de nomes/cartoes ligados, ver acima): a
-    // partir do 2º pedido conectado no mesmo cluster ja marca SUSPEITO,
-    // mesmo sem repetir cartao - nao precisa esperar acumular varias
-    // tentativas iguais, o simples cruzamento de nome ja e o sinal. Se o
-    // cluster ja tem FRAUDE confirmada (por essa via ou pela troca de
-    // cartao acima, ou por marcacao manual), propaga pro pedido novo e
-    // escala qualquer SUSPEITO residual do mesmo grupo junto. Preferimos
-    // alertar demais a deixar passar batido - o Master sempre pode
-    // remover a marcacao de um pedido especifico se for engano.
+    // Cruzamento recente de nomes continua podendo sinalizar revisão, mas
+    // NUNCA propaga uma fraude anterior pelo nome. Homônimos e nomes de
+    // familiares eram a fonte de falsos positivos. Reincidência confirmada
+    // agora vem exclusivamente da base persistente e hash de dados fortes.
     if (clusterInfo && !ehPixTx) {
       try {
         const marcasExistentes = await fraudMarks.listAllCached();
         const jaMarcadoNesse = marcasExistentes.some((m) => m.pedidoId === pedidoIdAtual);
-
-        const nomesClusterNorm = new Set(clusterInfo.nomes.map(fraudMarks.normalizarNome));
-        const marcaFraudeCluster = marcasExistentes.find(
-          (m) => m.nivel === 'FRAUDE' && nomesClusterNorm.has(fraudMarks.normalizarNome(m.clienteNome))
-        );
         const clienteNome = tx.nomeCliente || tx.cardHolder || null;
-
-        if (marcaFraudeCluster) {
-          if (!jaMarcadoNesse && !jaFraudeNativaAdyen) {
-            const registro = await fraudMarks.marcar({
-              pedidoId: pedidoIdAtual,
-              unidade: tx.unidade,
-              nivel: 'FRAUDE',
-              motivo: 'Cliente já identificado como fraude (nome ou cartão relacionado a pedido(s) anterior(es)).',
-              clienteChave: clienteNome ? `nome:${clienteNome}` : null,
-              clienteNome,
-              statusPedido: tx.status,
-              valor: tx.valor,
-              marcadoPorEmail: 'deteccao-automatica@sistema',
-              entregaBloqueada: tx.status === 'APROVADO',
-              bloqueioMotivo: tx.status === 'APROVADO' ? 'Cliente ligado a fraude já confirmada.' : null,
-            });
-            broadcast('fraude-marcada', registro, 'monitor');
-            push.notifyRaw(
-              `🚫 Fraude (cliente já conhecido) — ${tx.unidade || ''}`,
-              `${clienteNome || 'Cliente'} está ligado a pedido(s) já confirmado(s) como fraude`,
-              `fraude-auto-${pedidoIdAtual}`,
-              tx.unidade
-            );
-            if (tx.status === 'APROVADO' && registro.bloqueioNovo) alertarBloqueioFraudeNaLoja(tx, pedidoIdAtual, registro.motivo);
-          }
-          await escalarClusterParaFraude(clusterInfo.nomes, 'Escalado: outro pedido do mesmo grupo já confirmado como fraude.', tx.status === 'APROVADO');
-        } else if (!jaMarcadoNesse && clusterInfo.totalPedidos >= 2 && clusterInfo.nomesDistintos >= 2) {
+        if (!jaMarcadoNesse && clusterInfo.totalPedidos >= 2 && clusterInfo.nomesDistintos >= 2) {
           // o sinal e o CRUZAMENTO de nomes diferentes na mesma identidade,
           // nao um unico pedido em que comprador e titular sao diferentes.
           const registro = await fraudMarks.marcar({
@@ -3965,10 +3992,22 @@ app.post('/api/fraude/:pedidoId/confirmar', auth.requireMaster, async (req, res)
       return res.status(400).json({ error: 'PIX não pode ser confirmado como fraude por esta tela.' });
     }
     const registro = await fraudMarks.confirmarFraude(pedidoId, req.user.email);
+    // A decisão humana é o único caminho que alimenta a lista permanente.
+    // Uma marca automática, "FRAUDE?" ou chargeback ainda em disputa não é
+    // suficiente para cadastrar uma pessoa na base.
+    let identidade = { identificadores: 0 };
+    try {
+      identidade = await registrarIdentidadeDeFraudeConfirmada(pedidoId, req.user.email);
+    } catch (err) {
+      // A confirmação atual já foi salva e não pode parecer que falhou por
+      // causa do espelho antifraude. O log permite corrigir a base depois.
+      identidade = { identificadores: 0, pendente: true };
+      console.error('Erro ao registrar identidade de fraude confirmada:', err.message);
+    }
     broadcast('fraude-marcada', registro, 'monitor');
     push.notifyRaw('🚫 Fraude confirmada pelo Suporte', `${registro.clienteNome || 'Cliente'} · ${registro.unidade || ''} · pedido mantido bloqueado`, `fraude-confirmada-${registro.pedidoId}`, registro.unidade);
     alertarDecisaoFraudeNaLoja(registro, false);
-    res.json(registro);
+    res.json({ ...registro, baseAntifraude: identidade });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -18162,6 +18201,15 @@ function aquecerBoot(promessa, ms) {
       ? '🤖 Beniboy (chat de suporte) ATIVO - ANTHROPIC_API_KEY configurada.'
       : '🤖 Beniboy (chat de suporte) desativado - configure a env var ANTHROPIC_API_KEY pra ligar.');
     console.log(`Webhook: POST http://localhost:${PORT}/webhooks/adyen`);
+
+    // Migração única: traz para a nova base apenas fraudes já confirmadas
+    // pelo Master no histórico. Não lê nem cadastra "FRAUDE?"/automáticas.
+    tarefaDeBoot(async () => {
+      const resultado = await fraudIdentityLedger.importarConfirmacoesHistoricas(
+        await fraudMarks.listHistorico(), transacoesDoPedido
+      );
+      if (!resultado.jaImportada) console.log(`[antifraude] base histórica criada: ${resultado.pedidos} pedido(s), ${resultado.identificadores} identificador(es) protegidos.`);
+    }, 'migrar fraudes confirmadas para a base antifraude');
 
     const contas = Object.keys(HMAC_KEYS);
     if (contas.length) console.log(`HMAC configurada para: ${contas.join(', ')}`);
