@@ -119,6 +119,35 @@ function sanitizeEmail(raw) {
   return email;
 }
 
+// Dados escritos numa conversa são texto não confiável. Esta extração serve
+// exclusivamente para COMPLETAR um campo vazio da própria conta já
+// autenticada (ver preencherContatoAusenteDoChat); ela jamais identifica uma
+// pessoa pelo conteúdo do chat nem substitui um dado de cadastro existente.
+function extrairContatoDoTexto(partes) {
+  const texto = (Array.isArray(partes) ? partes : [partes])
+    .filter((parte) => typeof parte === 'string')
+    .join('\n');
+  const emailEncontrado = texto.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i);
+  let email = null;
+  if (emailEncontrado) {
+    try { email = sanitizeEmail(emailEncontrado[0]); } catch (e) { /* ignora candidato malformado */ }
+  }
+
+  // Número brasileiro completo: DDD + 8 ou 9 dígitos, com ou sem +55. Não
+  // aceitamos sequências curtas para evitar que hora, protocolo ou valor
+  // sejam registrados como telefone.
+  const telefones = texto.match(/(?:\+?55[\s.\-]*)?\(?[1-9]\d\)?[\s.\-]?(?:9[\s.\-]?)?\d{4}[\s.\-]?\d{4}\b/g) || [];
+  let telefone = null;
+  for (const candidato of telefones) {
+    const numeros = candidato.replace(/\D/g, '');
+    const tamanhoNacional = numeros.length === 10 || numeros.length === 11;
+    const tamanhoComPais = numeros.startsWith('55') && (numeros.length === 12 || numeros.length === 13);
+    if (!tamanhoNacional && !tamanhoComPais) continue;
+    try { telefone = sanitizeTelefone(numeros); break; } catch (e) { /* tenta o próximo */ }
+  }
+  return { email, telefone };
+}
+
 async function garantirUsernameLivre(username, idAtual) {
   if (!username) return;
   const existing = await usersRef.where('username', '==', username).limit(1).get();
@@ -322,6 +351,48 @@ async function updatePerfil(id, { nome, email, telefone, username }) {
   invalidarUsuario(id);
   usersCache.invalidar();
   return toPublic(await ref.get());
+}
+
+// Complementa o perfil a partir de uma conversa somente quando o chat já foi
+// associado pelo token à MESMA conta. Não usa nome, contato livre, e-mail ou
+// telefone para encontrar usuários; esses valores não são prova de identidade.
+// Também não sobrescreve nada: em caso de conflito de e-mail apenas ignora o
+// candidato e preserva o cadastro para revisão do Master.
+async function preencherContatoAusenteDoChat(id, partes, { chatId } = {}) {
+  if (!id) return { alterou: false, campos: [] };
+  const candidatos = extrairContatoDoTexto(partes);
+  if (!candidatos.email && !candidatos.telefone) return { alterou: false, campos: [] };
+  const ref = usersRef.doc(id);
+  const campos = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return [];
+    const atual = snap.data();
+    const patch = {};
+    const camposAlterados = [];
+    if (!String(atual.email || '').trim() && candidatos.email) {
+      const mesmoEmail = await tx.get(usersRef.where('email', '==', candidatos.email).limit(1));
+      if (mesmoEmail.empty || mesmoEmail.docs[0].id === id) {
+        patch.email = candidatos.email;
+        camposAlterados.push('email');
+      }
+    }
+    if (!String(atual.telefone || '').trim() && candidatos.telefone) {
+      patch.telefone = candidatos.telefone;
+      camposAlterados.push('telefone');
+    }
+    if (!Object.keys(patch).length) return [];
+    // Auditoria sem copiar a mensagem ou outro conteúdo sensível do chat.
+    patch.contatoPreenchidoPorChatEm = new Date().toISOString();
+    patch.contatoPreenchidoPorChatId = chatId ? String(chatId) : null;
+    patch.contatoPreenchidoPorChatCampos = camposAlterados;
+    tx.update(ref, patch);
+    return camposAlterados;
+  });
+  if (campos.length) {
+    invalidarUsuario(id);
+    usersCache.invalidar();
+  }
+  return { alterou: campos.length > 0, campos };
 }
 
 // Visual é uma preferência de apresentação. Não participa de permissões,
@@ -1057,6 +1128,7 @@ module.exports = {
   updateCargo,
   updateUsername,
   updatePerfil,
+  preencherContatoAusenteDoChat,
   updatePerfilVisual,
   updateUsernamesEmMassa,
   resetPassword,

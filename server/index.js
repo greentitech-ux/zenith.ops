@@ -1955,6 +1955,21 @@ async function usuarioLogadoDoHeader(req) {
   };
 }
 
+// Só completa contato quando o chat está ligado pelo token à própria conta.
+// Nome, e-mail e telefone escritos no chat nunca servem para localizar outra
+// pessoa; e a rotina em users.js só preenche campos vazios, sem substituir o
+// cadastro que o Master mantém.
+async function completarContatoAusenteDoChat(logado, chat, partes) {
+  if (!logado?.id || !chat || chat.logado?.id !== logado.id) return;
+  try {
+    await users.preencherContatoAusenteDoChat(logado.id, partes, { chatId: chat.id });
+  } catch (err) {
+    // Enriquecimento de perfil não pode impedir o envio de uma mensagem de
+    // suporte. O erro fica registrado para investigação, sem expor o texto.
+    console.error('Erro ao completar contato do usuário a partir do chat:', err.message);
+  }
+}
+
 // forense minima de quem mandou uma mensagem/anexo suspeito no chat publico -
 // pedido explicito do usuario: "tentar pegar o máximo de informação do
 // acesso que tentou infiltrar malicioso". So o que da pra tirar de um
@@ -2009,6 +2024,7 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
       logado, lojaContexto: req.body.lojaContexto, unidadeContexto: req.body.unidadeContexto,
       postoContexto: req.body.postoContexto, anexo,
     });
+    await completarContatoAusenteDoChat(logado, chat, [req.body.contato, req.body.texto]);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Novo chat de suporte`, `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico');
     res.json({ id: chat.id, token: chat.token, numeroTicket: chat.numeroTicket });
@@ -2055,6 +2071,7 @@ app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), asyn
     if (logado && chat.logado?.id !== logado.id) {
       chat = await suporteChat.atualizarLogado(chat.id, logado);
     }
+    await completarContatoAusenteDoChat(logado, chat, [texto]);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     // notificacao no celular do time tambem em MENSAGEM nova (nao so na
     // abertura da conversa) - o atendente ve e responde de onde estiver
