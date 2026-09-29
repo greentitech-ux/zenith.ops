@@ -164,7 +164,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - Para uma Zebra confirmada, se não houver Zebra cadastrada/monitorada ou nenhum computador NOC disponível, registre o motivo e chame um atendente. Nunca invente que o reset foi enviado.
 
 ## O que você sabe do NoPulso
-- Problema para entrar: depois de receber o nome de usuário, SEMPRE use desbloquear_login para diagnosticar antes de concluir que é senha. A ferramenta diferencia bloqueio por tentativas, horário restrito, acesso desativado e conta já liberada. Só quando for bloqueio real ela destrava mantendo a MESMA senha; se for horário, ela aciona o Master para revisar a liberação sem mudar a senha.
+- Problema para entrar: depois de receber o nome de usuário, SEMPRE use desbloquear_login para diagnosticar antes de concluir que é senha. A ferramenta diferencia bloqueio por tentativas, horário restrito, acesso desativado e conta já liberada. Só quando for bloqueio real ela destrava mantendo a MESMA senha; se for horário, ela aciona o Master para revisar a liberação sem mudar a senha. Se a própria pessoa disser que esqueceu ou quer trocar a senha, chame a ferramenta com pedirNovaSenha=true: isso cria uma tarefa direta para o Master, nunca um chamado de TI. Depois da aprovação, a senha temporária é 12345678 e a pessoa cria a nova senha no primeiro acesso.
 - Estorno: NÃO dá pra você abrir esse ticket direto (exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja foi a compra (pule essa pergunta se já souber pela "loja" do início da conversa) e use gerar_link_estorno_cliente. Se quem fala com você É o cliente (o mais comum), mande o link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo - não precisa de WhatsApp nem de mais ninguém no meio. Se for um funcionário pedindo em nome de um cliente que não está no chat, aí sim ele repassa o link pro cliente por onde for mais fácil (WhatsApp é uma opção, não a única).
 - Pausar item ou fechar a loja no iFood/99food: quem faz é o COWORK AGREGADOR, o robô que opera os painéis - não é com um atendente. Use bloquear_no_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item. Depois é só avisar que está sendo feito; a confirmação cai na conversa sozinha - nunca prometa prazo nem diga que já está feito antes da confirmação chegar.
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
@@ -183,7 +183,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - bloquear_no_agregador: põe na fila do Cowork Agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel e confirma nessa conversa sozinho; você continua nela (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que já está sendo feito. Só chame com loja, app e - pra pausar item - o item em mãos.
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
-- desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você vai usar a última senha criada?" antes de chamar de novo com lembraSenha=true/false. Com true, só destrave; com false, registre que precisa criar senha nova e acione o Master. NUNCA peça, invente, revele, envie ou repasse senha em chat, telefone ou WhatsApp. O Master recebe o alerta e libera o fluxo seguro de criação de nova senha.${temFerramentaPedido ? `
+- desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se a pessoa esqueceu ou quer trocar a senha, use pedirNovaSenha=true: abre uma tarefa direta para o Master, nunca chamado de TI. Quando o Master liberar, ela entra com 12345678 e define a nova senha no primeiro acesso. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você vai usar a última senha criada?" antes de chamar de novo com lembraSenha=true/false. Com true, só destrave; com false, use pedirNovaSenha=true. NUNCA peça senha atual nem use/mande a senha temporária no chat.${temFerramentaPedido ? `
 - consultar_pedido: quando uma unidade perguntar pelo pedido de um cliente, consulte o status de UM pedido (aprovado, recusado, estornado ou em análise). Peça nome do cliente e valor. Se a conta tiver mais de uma unidade e o computador não tiver uma loja fixada, mostre as opções permitidas e peça que a pessoa escolha uma delas — nunca peça código IDPULSE nem aceite loja fora da lista. A busca é limitada às lojas que essa pessoa tem acesso. Devolva somente status, valor, loja e identificação do pedido; nunca dados de cartão. Se não achar, diga isso sem supor fraude/erro e ofereça chamar_atendente. Se o status mudar depois, a pessoa é avisada automaticamente.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora porque não há uma unidade vinculada à sessão. Use chamar_atendente.`}${(logado && logado.isMaster) ? `
 - executar_acao_agente: executa uma ação do catálogo NOC-NoPulso (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
@@ -276,12 +276,13 @@ const TOOLS_BASE = [
   },
   {
     name: 'desbloquear_login',
-    description: 'Diagnostica um login que não entra e resolve bloqueio por 3 senhas erradas quando for seguro. Diferencia horário restrito, acesso desativado e conta já liberada; só desbloqueia quando a causa for bloqueio real e, por padrão, mantém a mesma senha. Peça o nome de usuário antes de chamar.',
+    description: 'Diagnostica um login que não entra e resolve bloqueio por 3 senhas erradas quando for seguro. Para a própria pessoa que esqueceu ou quer trocar a senha, use pedirNovaSenha=true: cria tarefa direta ao Master, nunca chamado de TI. Peça o nome de usuário antes de chamar.',
     input_schema: {
       type: 'object',
       properties: {
         username: { type: 'string', description: 'Nome de usuário (login curto) de quem está bloqueado.' },
         lembraSenha: { type: 'boolean', description: 'Só preencha quando a ferramenta avisar que esse acesso já foi desbloqueado antes e travou de novo: true se a pessoa vai usar a última senha criada, false se ela só lembra de senha antiga ou não sabe a última.' },
+        pedirNovaSenha: { type: 'boolean', description: 'true quando a própria pessoa esqueceu ou quer trocar a senha. Cria tarefa direta para o Master liberar a senha temporária; nunca abre chamado de TI.' },
       },
       required: ['username'],
     },
@@ -685,6 +686,23 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       if (alvo.active === false) {
         return `O acesso de "${alvo.username || alvo.email}" está desativado. Isso não é bloqueio de senha; chame um atendente para avaliar a reativação.`;
       }
+      if (input.pedirNovaSenha === true) {
+        // Pedido de troca não pode ser aberto por alguém que só sabe o login
+        // alheio. Time de suporte continua podendo diagnosticar bloqueio, mas
+        // só o próprio dono autenticado/validado pelo e-mail — ou Master —
+        // inicia uma redefinição de senha.
+        if (!propriaSessao && !contatoBate && !chat.logado?.isMaster) {
+          return 'Para pedir uma senha nova, entre no NoPulso com a sua conta e mande a solicitação novamente, ou informe o e-mail cadastrado.';
+        }
+        const tarefa = await auth.criarTarefaResetSenha(alvo.email, alvo.id, alvo.permissions?.unidades, alvo.username || alvo.nome);
+        await suporteChat.registrarNotaInterna(chat.id, {
+          resumo: `Redefinição de senha solicitada por ${alvo.username || alvo.email}.`,
+          situacao: 'PENDENTE',
+          pendencia: `Tarefa direta ${tarefa.id} para o Master liberar a senha temporária; não abrir chamado de TI nem enviar senha neste chat.`,
+        }).catch(() => {});
+        resultado.alertaMaster = { tipo: 'nova-senha', usuario: alvo.username || alvo.email, tarefaId: tarefa.id, motivo: 'A própria pessoa solicitou redefinição de senha.' };
+        return `Certo. Enviei a solicitação direto para o Master liberar sua nova senha. Assim que ele aprovar, você entra com a senha temporária informada por ele e cadastra uma senha nova no primeiro acesso.`;
+      }
       // Diagnóstico ANTES de qualquer desbloqueio: um horário restrito produz
       // a mesma sensação de "não entra", mas a senha continua válida. O bot
       // não altera essa política; abre handoff auditável para o Master revisar.
@@ -731,17 +749,15 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
         resultado.alertaMaster = { tipo: 'desbloqueio', usuario: alvo.username || alvo.email, motivo };
         return `Desbloqueado de novo, mesma senha de sempre. Se travar outra vez, é bem provável que a senha esteja errada mesmo - vale perguntar de novo se lembra.`;
       }
-      const motivo = `Login @${alvo.username || alvo.email} foi bloqueado novamente; a pessoa não tem a última senha criada (informou senha antiga ou não lembra). Solicita ao Master liberar a criação de nova senha, sem transmitir senha por chat, telefone ou WhatsApp.`;
+      const tarefa = await auth.criarTarefaResetSenha(alvo.email, alvo.id, alvo.permissions?.unidades, alvo.username || alvo.nome);
+      const motivo = `Login @${alvo.username || alvo.email} foi bloqueado novamente; a pessoa não tem a última senha criada. Tarefa direta ${tarefa.id} criada para o Master liberar a senha temporária, sem chamado de TI e sem transmitir senha por chat.`;
       await suporteChat.registrarNotaInterna(chat.id, {
         resumo: `Diagnóstico Beniboy · ${motivo}`,
         situacao: 'PENDENTE',
-        pendencia: 'Master deve validar e liberar a criação segura de nova senha; não definir nem transmitir senha temporária.',
+        pendencia: 'Master deve liberar a senha temporária na tarefa direta; não abrir chamado de TI nem transmitir senha neste chat.',
       }).catch(() => {});
-      await suporteChat.desativarBot(chat.id);
-      resultado.chamouAtendente = true;
-      resultado.motivoAtendente = motivo;
-      resultado.alertaMaster = { tipo: 'nova-senha', usuario: alvo.username || alvo.email, motivo };
-      return `A última senha não está disponível, então não vou criar nem enviar uma senha por aqui. O Master foi avisado para liberar a criação segura de uma nova senha.`;
+      resultado.alertaMaster = { tipo: 'nova-senha', usuario: alvo.username || alvo.email, tarefaId: tarefa.id, motivo };
+      return `A última senha não está disponível. Enviei a solicitação direto para o Master liberar a nova senha; você a troca no primeiro acesso.`;
     }
 
     // nao achou no login principal do NoPulso - tenta o login de operador do

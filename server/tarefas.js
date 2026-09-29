@@ -384,6 +384,7 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
       nome: String(desbloqueioLogin.nome || '').slice(0, 100),
       unidades: Array.isArray(desbloqueioLogin.unidades) ? desbloqueioLogin.unidades.map(String).slice(0, 30) : [],
       bloqueadoEm: String(desbloqueioLogin.bloqueadoEm || '').slice(0, 80),
+      tipo: desbloqueioLogin.tipo === 'reset-senha' ? 'reset-senha' : 'bloqueio',
     } : null,
     // Dados de triagem não são exibidos na descrição. Servem apenas para que
     // Master/Suporte decidam, depois, se o pedido merece virar uma solicitação.

@@ -24,10 +24,11 @@ const usersRef = db.collection('users');
 // do fluxo direto de tarefa de desbloqueio.
 const ROBO_BLOQUEIO_EMAIL = 'robô de bloqueio (login)';
 
-// Bloqueio de senha é uma decisão de acesso, não um atendimento de TI. Por
-// isso nasce direto no Meu Dia do Master, sem poluir a fila de chamados nem
-// depender de técnico. O require tardio evita ciclo auth -> tarefas -> auth.
-async function criarTarefaBloqueio(email, userId, unidadesUsuario, usuarioNome) {
+// Bloqueio ou redefinição de senha é uma decisão de acesso, não um
+// atendimento de TI. Por isso nasce direto no Meu Dia do Master, sem poluir a
+// fila de chamados nem depender de técnico. O require tardio evita ciclo
+// auth -> tarefas -> auth.
+async function criarTarefaDeAcesso(email, userId, unidadesUsuario, usuarioNome, tipo = 'bloqueio') {
   const tarefas = require('./tarefas');
   const unidades = Array.isArray(unidadesUsuario) ? unidadesUsuario.filter(Boolean) : [];
   const unidade = unidades[0] || 'geral';
@@ -37,21 +38,39 @@ async function criarTarefaBloqueio(email, userId, unidadesUsuario, usuarioNome) 
     timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short',
   }).format(new Date());
   const nome = String(usuarioNome || 'Usuário').trim().slice(0, 80) || 'Usuário';
+  const redefinicao = tipo === 'reset-senha';
+  // Repetir a mesma mensagem no chat não pode gerar várias tarefas para o
+  // mesmo acesso. A primeira pendente continua sendo a fonte de verdade.
+  const existente = (await tarefas.listarAbertas()).find((tarefa) => (
+    String(tarefa?.desbloqueioLogin?.usuarioId || '') === String(userId)
+    && String(tarefa?.desbloqueioLogin?.tipo || 'bloqueio') === (redefinicao ? 'reset-senha' : 'bloqueio')
+  ));
+  if (existente) return existente;
   const masters = await usersRef.where('role', '==', 'master').get();
   const responsavelDoc = masters.docs
     .filter((doc) => doc.data().active !== false)
     .sort((a, b) => String(a.data().email || a.id).localeCompare(String(b.data().email || b.id)))[0];
   if (!responsavelDoc) throw new Error('Nenhum Master ativo foi encontrado para receber a tarefa de desbloqueio.');
   const master = responsavelDoc.data();
-  await tarefas.criar({
-    titulo: `🔒 Desbloquear login: ${nome}`,
-    descricao: `Acesso de ${nome} bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nSomente o Master pode desbloquear: mantendo a senha atual ou definindo a senha temporária 12345678, que obriga a pessoa a cadastrar uma nova senha no primeiro acesso.`,
+  return tarefas.criar({
+    titulo: `${redefinicao ? '🔑 Redefinir senha' : '🔒 Desbloquear login'}: ${nome}`,
+    descricao: redefinicao
+      ? `A própria pessoa solicitou uma nova senha.\n\nUnidade(s) vinculada(s): ${unidadesTexto}\nSolicitado em: ${agora}\n\nSomente o Master pode liberar a senha temporária 12345678. No primeiro acesso, a pessoa deverá cadastrar a própria senha nova.`
+      : `Acesso de ${nome} bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nSomente o Master pode desbloquear: mantendo a senha atual ou definindo a senha temporária 12345678, que obriga a pessoa a cadastrar uma nova senha no primeiro acesso.`,
     dataInicio: new Date().toISOString().slice(0, 10), dataEntrega: new Date().toISOString().slice(0, 10),
-    unidade, unidadeNome, prioridade: 'critica', origem: 'bloqueio-login',
+    unidade, unidadeNome, prioridade: redefinicao ? 'alta' : 'critica', origem: redefinicao ? 'reset-senha' : 'bloqueio-login',
     usuario: { id: userId, email, username: nome, nome },
     responsavel: { id: responsavelDoc.id, email: master.email, username: master.username, nome: master.nome },
-    desbloqueioLogin: { usuarioId: userId, email, nome, unidades, bloqueadoEm: agora },
+    desbloqueioLogin: { usuarioId: userId, email, nome, unidades, bloqueadoEm: agora, tipo: redefinicao ? 'reset-senha' : 'bloqueio' },
   });
+}
+
+async function criarTarefaBloqueio(email, userId, unidadesUsuario, usuarioNome) {
+  return criarTarefaDeAcesso(email, userId, unidadesUsuario, usuarioNome, 'bloqueio');
+}
+
+async function criarTarefaResetSenha(email, userId, unidadesUsuario, usuarioNome) {
+  return criarTarefaDeAcesso(email, userId, unidadesUsuario, usuarioNome, 'reset-senha');
 }
 
 // permissoes vazias por padrao - o Master preenche na hora de criar o acesso
@@ -559,4 +578,5 @@ module.exports = {
   dentroDoHorarioPermitido,
   invalidarUsuario,
   ROBO_BLOQUEIO_EMAIL,
+  criarTarefaResetSenha,
 };
