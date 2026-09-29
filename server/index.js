@@ -2126,7 +2126,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // a entrega do comando/chat (ver lojaStatus.heartbeat); presenca/IP nao
     // dependem dele, pra maquina legada nao sumir do painel
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico, avisoBateria } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico, versaoForcarPapelDeParede, avisoBateria } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
       // o que o navegador sabe do aparelho (bateria, armazenamento, rede, SO
       // - ver public/aparelho.js). Entra na MESMA escrita do heartbeat, que
@@ -2153,7 +2153,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       ocupado: req.body.ocupado,
       instancia: req.body.instancia,
     }, token);
-    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico });
+    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora, versaoAplicacao, versaoModeloBasico, versaoForcarPapelDeParede });
     // BATERIA DO TABLET (ver public/aparelho.js). Sai uma vez por descarga -
     // o aparelho voltando a carregar rearma o aviso. Vai pro mesmo público
     // do NOC (Master/Suporte), nunca pra loja.

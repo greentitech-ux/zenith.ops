@@ -45,7 +45,9 @@
 // VMs não recebem o PWA do NoPulso.
 // 123: o cartão central usa a cor de fundo do próprio logo, sem borda de tom.
 // 124: nome da máquina ocupa proporcionalmente a placa nas artes enviadas.
-const VERSAO_VIGIA = 124;
+// 125: revisão própria reaplica o fundo configurado pelo NOC, inclusive sobre
+//      uma imagem antiga válida, sem reaplicar a política inteira.
+const VERSAO_VIGIA = 125;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2283,6 +2285,27 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  Aplicar-ModeloBasicoDaConfig $cfg $versao',
     '}',
     '',
+    // A política guarda uma versão única para papel, USB, atalhos, barra e
+    // arquivamento. Isso é correto para não repetir ações pesadas, mas impede
+    // trocar um fundo que já existia quando só a arte visual é revisada. Esta
+    // marca é independente e chama SOMENTE Aplicar-PapelDeParede.
+    'function Caminho-VersaoForcaPapelDeParede { return (Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-forca-versao.txt") }',
+    'function VersaoForcaPapelDeParedeAplicada {',
+    '  $arq = Caminho-VersaoForcaPapelDeParede',
+    '  if (-not (Test-Path -LiteralPath $arq)) { return "" }',
+    '  try { return ([string](Get-Content -LiteralPath $arq -First 1)).Trim() } catch { return "" }',
+    '}',
+    'function Forcar-PapelDeParedeDaConfig([string]$versao) {',
+    '  if ($Servico) { return }',
+    '  try { $cfg = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 20 }',
+    '  catch { Escrever-Log "Papel de parede: nao busquei a revisao forcada ($($_.Exception.Message))."; return }',
+    '  if (-not [bool]($cfg.politica -and $cfg.politica.papelDeParedeAtivo)) { return }',
+    '  if (Aplicar-PapelDeParede $true ([bool]$cfg.papelDeParedeSemArte) $cfg.modeloBasico) {',
+    '    try { Set-Content -Path (Caminho-VersaoForcaPapelDeParede) -Value $versao -Force -ErrorAction Stop } catch {}',
+    '    Escrever-Log "Papel de parede: revisao forcada $versao aplicada."',
+    '  }',
+    '}',
+    '',
     'function Aplicar-PapelDeParede($ligado, $semArte = $false, $modelo = $null) {',
     '  if ($Servico) { return }   # SYSTEM nao tem area de trabalho',
     '  $bruto = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede.jpg"',
@@ -3539,6 +3562,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // uma consulta a cada volta do laco.
     '      if ($resp.inventarioAtalhosPendenteEm -or ($null -ne $resp.versaoAplicacao -and -not (Politica-EstaAplicada "$($resp.versaoAplicacao)"))) {',
     '        try { Sincronizar-Politica } catch { Escrever-Log "Politica nao sincronizou: $($_.Exception.Message)" }',
+    '      }',
+    '      if (-not $Servico -and $null -ne $resp.versaoForcarPapelDeParede -and "$($resp.versaoForcarPapelDeParede)" -ne (VersaoForcaPapelDeParedeAplicada)) {',
+    '        try { Forcar-PapelDeParedeDaConfig "$($resp.versaoForcarPapelDeParede)" } catch { Escrever-Log "Papel de parede: revisao forcada nao sincronizou ($($_.Exception.Message))" }',
     '      }',
     // modelo basico (maquina sem arte): versao propria, fora da politica -
     // ver Atualizar-ModeloBasico. Servidor antigo nao manda o campo: nada roda.

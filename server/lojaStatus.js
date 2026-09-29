@@ -373,6 +373,10 @@ const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
 // Revisão visual do papel padrão. Ao mudar, o agente redesenha somente o
 // wallpaper básico, sem reaplicar as demais políticas da estação.
 const REVISAO_MODELO_BASICO = 3;
+// Uma revisão visual não deve reexecutar USB, atalhos, barra e arquivamento.
+// O heartbeat leva esta chave separada: quando ela mudar, o agente troca só o
+// papel de parede, inclusive se o Windows ainda estiver com uma imagem antiga.
+const REVISAO_FORCAR_PAPEL_DE_PAREDE = 1;
 const LOGOS_CARIMBO_PADRAO = Object.freeze({
   marca: Object.freeze({
     dominos: Object.freeze({ arquivoPublico: 'branding/dominos-pizza.png', tipo: 'image/png', versao: 1 }),
@@ -1418,6 +1422,9 @@ async function heartbeat(codigo, posto, info, token) {
     capturarAgora,
     versaoAplicacao: versaoAplicacao(atual && atual.politicaVersao, arteDaMaquina),
     versaoModeloBasico,
+    versaoForcarPapelDeParede: politicaLigada
+      ? `${REVISAO_FORCAR_PAPEL_DE_PAREDE}|${versaoAplicacao(atual && atual.politicaVersao, arteDaMaquina)}`
+      : null,
     // Pedido one-shot também viaja no heartbeat. A versão da política é o
     // gatilho normal, mas um marcador local antigo ou uma corrida entre as
     // instâncias de login/SYSTEM não pode deixar a leitura presa para sempre.
