@@ -2207,6 +2207,16 @@ async function ehServidorDoComputador(codigo, posto) {
   return snap.exists && !!snap.data().ehServidor;
 }
 
+// O app NoPulso é para a estação de uso da loja. HOST e VMs têm função de
+// infraestrutura e não podem receber automaticamente PWA/atalho no Desktop.
+// A decisão vem somente das marcações explícitas da ficha, nunca do nome.
+async function bloquearAppNoPulsoDoComputador(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  if (!snap.exists) return false;
+  const doc = snap.data();
+  return !!(doc.ehServidor || doc.ehHostVm || doc.ehVmPulse || doc.ehVmGcom);
+}
+
 // nome que o Master deu ao computador no NOC ("Caixa 1", "DOM-CR-ATM01") - vai
 // assado no .ps1 pro carimbo do papel de parede. Sem cadastro, cai no posto
 // (id interno) so pra nao carimbar vazio, mas o certo e o computador ter nome.
@@ -5131,6 +5141,6 @@ module.exports = {
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, pedirInventarioAtalhos, registrarInventarioAtalhos, noPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, pedirInventarioAtalhos, registrarInventarioAtalhos, noPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, bloquearAppNoPulsoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
   BATERIA_BAIXA, BATERIA_CRITICA, sanitizarAparelho,
 };

@@ -41,7 +41,9 @@
 // nome, e a maquina que ficou preta depois nunca mais era olhada.
 // 120: fundo preto e logos oficiais padrão no modelo básico, sem depender de
 // upload manual; redesenha as estações que ainda tinham apenas texto.
-const VERSAO_VIGIA = 121;
+// 122: o atalho automático só é criado se ainda não existir; servidor, HOST e
+// VMs não recebem o PWA do NoPulso.
+const VERSAO_VIGIA = 122;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -141,7 +143,7 @@ function adaptarParaWindowsAntigo(texto) {
   return out;
 }
 
-function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, ehServidor, unidadeNome, maquinaNome }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, ehServidor, bloquearAppNoPulso, unidadeNome, maquinaNome }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
   // segredo desse computador (ver lojaStatus.js) - vai assado no script e
@@ -247,10 +249,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# UiEstaAtiva no loop.',
     'param([switch]$Loop, [switch]$Servico)',
     '',
-    // Esta caracteristica vem do cadastro da maquina no NOC. Nao inferimos pelo
-    // nome nem pelo tipo: um "Caixa servidor" continua podendo ter o app se nao
-    // estiver expressamente marcado como servidor.
+    // Esta característica vem do cadastro da máquina no NOC. Não inferimos pelo
+    // nome: servidor, HOST e VMs não recebem o PWA/atalho automaticamente.
     '$EhServidor = $' + (!!ehServidor),
+    '$NaoInstalarAppNoPulso = $' + (!!bloquearAppNoPulso),
     '',
     '# ---- o APP "NoPulso" na maquina (pedido do Master, 12/09/2026) ----',
     '# Do jeito que ele faz na mao: abre o site no Chrome e "Instalar app" - vira',
@@ -259,15 +261,15 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# Chrome/Edge (HKCU, vale sem dominio) manda o navegador instalar o PWA',
     '# dessa URL na proxima abertura. E o app ANTIGO "Zenith Ops" (mesma coisa,',
     '# do endereco velho) e desinstalado pelo proprio UninstallString que o',
-    '# navegador registrou. Idempotente: roda na instalacao e uma vez por versao',
-    '# do vigia; NUNCA na instancia de boot (SYSTEM nao tem perfil de navegador).',
+    '# navegador registrou. O atalho só é solicitado quando não existe outro',
+    '# no Desktop; NUNCA roda na instância de boot (SYSTEM não tem perfil).',
     'function Instalar-AppNoPulso {',
-    '  if ($Servico) { return }',
+    '  if ($Servico -or $NaoInstalarAppNoPulso) { return }',
     '  $urlApp = "' + APP_BASE_URL + '/"',
     '  # 1) tira o "Zenith Ops" antigo (PWA registrado pelo Chrome/Edge)',
     '  $chaves = @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")',
-    '  # Remove app antigo "Zenith Ops" E duplicatas de "NoPulso"',
-    '  $antigos = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { ($_.DisplayName -match "^Zenith ?Ops$|^NoPulso(\s*\(\d+\))?$") -and $_.UninstallString -match "--uninstall-app-id=" })',
+    '  # Remove só o app legado. Reinstalar o NoPulso a cada versão criava "NoPulso (1)".',
+    '  $antigos = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match "^Zenith ?Ops$" -and $_.UninstallString -match "--uninstall-app-id=" })',
     '  foreach ($a in $antigos) {',
     '    try {',
     '      # UninstallString: "C:\\...\\chrome.exe" --profile-directory=Default --uninstall-app-id=xxxx',
@@ -277,14 +279,20 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      }',
     '    } catch { Escrever-Log "Nao consegui remover o app ($($a.DisplayName)): $($_.Exception.Message)" }',
     '  }',
-    '  # Remove atalhos antigos e duplicatas de atalhos NoPulso',
-    '  foreach ($lnk in @("$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Zenith Ops.lnk", "$env:USERPROFILE\\Desktop\\Zenith Ops.lnk", "$env:PUBLIC\\Desktop\\Zenith Ops.lnk", "$env:USERPROFILE\\Desktop\\NoPulso*.lnk", "$env:PUBLIC\\Desktop\\NoPulso*.lnk")) {',
+    '  # Remove o legado, mas preserva um único atalho NoPulso já existente.',
+    '  foreach ($lnk in @("$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Zenith Ops.lnk", "$env:USERPROFILE\\Desktop\\Zenith Ops.lnk", "$env:PUBLIC\\Desktop\\Zenith Ops.lnk")) {',
     '    foreach ($item in @(Get-Item $lnk -Force -ErrorAction SilentlyContinue)) {',
     '      Remove-Item $item -Force -ErrorAction SilentlyContinue',
     '    }',
     '  }',
-    '  # 2) manda o Chrome e o Edge instalarem o app NoPulso (icone na area de trabalho, abre em janela)',
-    '  $politica = \'[{"url":"\' + $urlApp + \'","create_desktop_shortcut":true,"default_launch_container":"window"}]\'',
+    '  $atalhosNoPulso = @(Get-Item "$env:USERPROFILE\\Desktop\\NoPulso*.lnk", "$env:PUBLIC\\Desktop\\NoPulso*.lnk" -Force -ErrorAction SilentlyContinue | Sort-Object @{ Expression = { if ($_.BaseName -ieq "NoPulso") { 0 } else { 1 } } }, LastWriteTime)',
+    '  if ($atalhosNoPulso.Count -gt 1) {',
+    '    foreach ($duplicado in @($atalhosNoPulso | Select-Object -Skip 1)) { try { Remove-Item -LiteralPath $duplicado.FullName -Force -ErrorAction Stop; Escrever-Log "App NoPulso: atalho duplicado removido: $($duplicado.Name)" } catch { Escrever-Log "App NoPulso: não consegui remover atalho duplicado $($duplicado.Name): $($_.Exception.Message)" } }',
+    '    $atalhosNoPulso = @($atalhosNoPulso | Select-Object -First 1)',
+    '  }',
+    '  $criarAtalho = ($atalhosNoPulso.Count -eq 0)',
+    '  # 2) Chrome/Edge só podem criar o ícone se ele ainda não existir.',
+    '  $politica = \'[{"url":"\' + $urlApp + \'","create_desktop_shortcut":\' + $(if ($criarAtalho) { "true" } else { "false" }) + \',"default_launch_container":"window"}]\'',
     // -ErrorAction Stop NAO e detalhe: sem ele, New-Item e New-ItemProperty
     // falham com erro NAO-TERMINANTE, que try/catch nao pega. O catch abaixo
     // era decoracao - o erro escapava e o Windows despejava um bloco vermelho
@@ -304,7 +312,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  }',
     // dizer "gravada" quando nada foi gravado e' pior que nao dizer nada: o log
     // e' o unico lugar onde se descobre por que o icone nunca apareceu
-    '  if ($okPolitica -gt 0) { Escrever-Log "App NoPulso: politica de instalacao gravada em $okPolitica navegador(es) ($urlApp) - instala na proxima abertura."; Set-Content -Path (Join-Path $env:LOCALAPPDATA "NOCZenith\\app-nopulso-gerenciado.ativo") -Value $urlApp -Force -ErrorAction SilentlyContinue }',
+    '  if ($okPolitica -gt 0) { Escrever-Log "App NoPulso: política gravada em $okPolitica navegador(es) ($urlApp) - $([string]$(if ($criarAtalho) { "cria o atalho na próxima abertura" } else { "atalho existente preservado" }))."; Set-Content -Path (Join-Path $env:LOCALAPPDATA "NOCZenith\\app-nopulso-gerenciado.ativo") -Value $urlApp -Force -ErrorAction SilentlyContinue }',
     '  else { Escrever-Log "App NoPulso: nenhum navegador aceitou a politica (maquina gerenciada bloqueia HKCU\\Software\\Policies). O icone tem de ser criado na mao, em Chrome > Instalar app." }',
     '}',
     '',
@@ -3373,7 +3381,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '',
     'function Rodar-Loop {',
     '  # app NoPulso: uma vez por versao do vigia (o auto-update cai direto aqui, sem passar pela instalacao)',
-    '  if (-not $Servico -and $EhServidor) {',
+    '  if (-not $Servico -and $NaoInstalarAppNoPulso) {',
     '    try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "Remover-AppAutomaticoNoPulso falhou: $($_.Exception.Message)" }',
     '  } elseif (-not $Servico) {',
     '    $marcaApp = Join-Path $env:LOCALAPPDATA ("NOCZenith\\app-nopulso-v" + $VersaoScript + ".ok")',
@@ -3642,7 +3650,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '',
     'function Rodar-Loop {',
     '  # app NoPulso: uma vez por versao do vigia (o auto-update cai direto aqui, sem passar pela instalacao)',
-    '  if (-not $Servico -and $EhServidor) {',
+    '  if (-not $Servico -and $NaoInstalarAppNoPulso) {',
     '    try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "Remover-AppAutomaticoNoPulso falhou: $($_.Exception.Message)" }',
     '  } elseif (-not $Servico) {',
     '    $marcaApp = Join-Path $env:LOCALAPPDATA ("NOCZenith\\app-nopulso-v" + $VersaoScript + ".ok")',
@@ -3827,7 +3835,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  } else {',
     '    Escrever-Log "Instalado sem Administrador: apos reinicio, o NOCZenith volta no proximo login."',
     '  }',
-    '  if ($EhServidor) { try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "App NoPulso automatico nao foi removido: $($_.Exception.Message)" } }',
+    '  if ($NaoInstalarAppNoPulso) { try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "App NoPulso automatico nao foi removido: $($_.Exception.Message)" } }',
     '  else { try { Instalar-AppNoPulso } catch { Escrever-Log "App NoPulso nao configurado: $($_.Exception.Message)" } }',
     '  # reinstalacao com o agente ja rodando: encerra a copia antiga ANTES de',
     '  # subir a nova - o -MultipleInstances IgnoreNew da tarefa nao alcanca este',
