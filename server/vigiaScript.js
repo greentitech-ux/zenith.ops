@@ -44,7 +44,8 @@
 // 122: o atalho automático só é criado se ainda não existir; servidor, HOST e
 // VMs não recebem o PWA do NoPulso.
 // 123: o cartão central usa a cor de fundo do próprio logo, sem borda de tom.
-const VERSAO_VIGIA = 123;
+// 124: nome da máquina ocupa proporcionalmente a placa nas artes enviadas.
+const VERSAO_VIGIA = 124;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -1971,14 +1972,12 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '          $loja = ([string]$NomeLojaArte).ToUpper()',
     '          $maq = ([string]$NomeMaquinaArte).ToUpper()',
     '          $tamFonteLoja = 50; if ($vertical) { $tamFonteLoja = 46 }',
-    '          $tamFonteMaquina = 46; if ($vertical) { $tamFonteMaquina = 58 }',
     '          $corRegua = [System.Drawing.ColorTranslator]::FromHtml("#e0a33e")',
     '          $corMaquina = [System.Drawing.ColorTranslator]::FromHtml("#0a4f79")',
     '          $fLoja = Nova-FonteCarimbo @("Barlow Condensed SemiBold","Barlow Condensed","Oswald","Segoe UI Semibold","Arial Narrow") ($tamFonteLoja * $esc) ([System.Drawing.FontStyle]::Bold)',
-    '          $fMaq = Nova-FonteCarimbo @("Barlow SemiBold","Barlow","Segoe UI Semibold","Arial") ($tamFonteMaquina * $esc) ([System.Drawing.FontStyle]::Bold)',
+    '          $fMaq = $null',
     '          try {',
     '            $tamLoja = $g.MeasureString($loja, $fLoja)',
-    '            $tamMaq = $g.MeasureString($maq, $fMaq)',
     '            # Placa da maquina: slot fixo da campanha, dentro do card central.',
     '            if ($vertical) {',
     '              $placaW = 560 * $esc; $placaH = 86 * $esc; $topoPlaca = $img.Height * (651.0 / 1920.0); $raio = 14 * $esc',
@@ -1986,6 +1985,16 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '              $placaW = 440 * $esc; $placaH = 70 * $esc; $topoPlaca = $img.Height * (575.0 / 1080.0); $raio = 12 * $esc',
     '            }',
     '            $xPlaca = ($img.Width - $placaW) / 2.0',
+    '            # O nome não tem tamanho fixo: começa grande, proporcional à altura',
+    '            # da placa, e reduz só se um nome longo ameaçar a margem lateral.',
+    '            $tamFonteMaq = [math]::Min(78 * $esc, $placaH * 0.74); $minFonteMaq = 18 * $esc; $limiteMaq = $placaW * 0.88',
+    '            do {',
+    '              if ($fMaq) { $fMaq.Dispose() }',
+    '              $fMaq = Nova-FonteCarimbo @("Barlow SemiBold","Barlow","Segoe UI Semibold","Arial") $tamFonteMaq ([System.Drawing.FontStyle]::Bold)',
+    '              $tamMaq = $g.MeasureString($maq, $fMaq)',
+    '              if ($tamMaq.Width -le $limiteMaq -or $tamFonteMaq -le $minFonteMaq) { break }',
+    '              $tamFonteMaq -= [math]::Max(1, 2 * $esc)',
+    '            } while ($true)',
     '            $sombra = Retangulo-RedondoCarimbo ([single]$xPlaca) ([single]($topoPlaca + (10 * $esc))) ([single]$placaW) ([single]$placaH) ([single]$raio)',
     '            $brSombra = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(61, 10, 50, 80))',
     '            $g.FillPath($brSombra, $sombra)',
@@ -2012,7 +2021,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '            $brLoja = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)',
     '            $g.DrawString($loja, $fLoja, $brLoja, [single]$xLoja, [single]($topoLoja + $reguaH + $gap))',
     '            $brLoja.Dispose()',
-    '          } finally { $fLoja.Dispose(); $fMaq.Dispose() }',
+    '          } finally { $fLoja.Dispose(); if ($fMaq) { $fMaq.Dispose() } }',
     '        } finally { $g.Dispose() }',
     '        $bmp.Save($destino, [System.Drawing.Imaging.ImageFormat]::Png)',
     '      } finally { $bmp.Dispose() }',
