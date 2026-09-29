@@ -151,11 +151,27 @@
   #restaurar-fechamento-overlay input[type=text],#restaurar-fechamento-overlay select{width:100%;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto;z-index:50;}
   .overlay.show{display:flex;}
-  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto;box-sizing:border-box;}
   .modal h3{margin:0 0 14px;font-size:14px;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
   .modal-actions button{font-family:var(--sans);font-size:12.5px;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
   .modal-actions button.primary{border:none;background:var(--accent);color:#0b0d10;font-weight:600;}
+  /* Formulários de perfil: os rótulos precisam ficar acima dos campos. Sem
+     este bloco o label é inline no navegador e, no celular, "Email" e os
+     inputs disputam a mesma linha e saem por cima um do outro. */
+  #perfil-form,#qa-master-form{display:flex;flex-direction:column;gap:10px;}
+  #perfil-form h3,#qa-master-form h3{margin-bottom:0;overflow-wrap:anywhere;}
+  #perfil-form label,#qa-master-form label{display:flex;flex-direction:column;gap:5px;min-width:0;font-size:12px;color:var(--muted);}
+  #perfil-form input,#qa-master-form input{width:100%;min-width:0;box-sizing:border-box;margin:0;padding:10px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:inherit;font-size:14px;}
+  #perfil-form input:focus,#qa-master-form input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(184,255,60,.14);}
+  #perfil-form .modal-actions,#qa-master-form .modal-actions{margin-top:6px;}
+  @media(max-width:520px){
+    .overlay{padding:16px 12px;align-items:center;}
+    .modal{padding:18px 16px;max-height:calc(100vh - 32px);border-radius:14px;}
+    #perfil-form,#qa-master-form{gap:12px;}
+    #perfil-form .modal-actions,#qa-master-form .modal-actions{display:grid;grid-template-columns:1fr 1.25fr;gap:9px;width:100%;}
+    #perfil-form .modal-actions button,#qa-master-form .modal-actions button{width:100%;min-height:44px;padding:9px 8px;}
+  }
   .legend-actions{display:inline-flex;gap:6px;margin-left:8px;text-transform:none;}
   .legend-actions button{font-family:var(--sans);font-size:10.5px;padding:2px 8px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .legend-actions button:hover{border-color:var(--accent);color:var(--text);}
