@@ -2083,9 +2083,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $rotuloMarca = [string]$(if ($modelo) { $modelo.marcaRotulo } else { "" })',
     '  $temGrupo = [bool]$arqGrupo',
     '  $temCartao = [bool]$arqMarca -or ($rotuloMarca -ne "")',
-    // blocos, de cima pra baixo (em px de referencia): logo do grupo 110,
-    // respiro 85, cartao 410, respiro 70, nome ~80, linha verde, unidade
-    '  $alturaBloco = 245.0; if ($temCartao) { $alturaBloco += 480 }; if ($temGrupo) { $alturaBloco += 195 }',
+    // blocos, de cima pra baixo (em px de referencia): logos centralizados e
+    // maiores, com pouco espaco morto no cartao da marca. A composicao inteira
+    // continua centralizada na tela, inclusive em monitor vertical.
+    '  $alturaBloco = 245.0; if ($temCartao) { $alturaBloco += 480 }; if ($temGrupo) { $alturaBloco += 220 }',
     '  $y = ($H - $alturaBloco * $e) / 2.0; $cx = $W / 2.0',
     '  $bmp = New-Object System.Drawing.Bitmap -ArgumentList $W, $H',
     '  try {',
@@ -2098,11 +2099,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      try { $g.FillRectangle($fundo, 0, 0, $W, $H) } finally { $fundo.Dispose() }',
     '      if ($temGrupo) {',
     '        $img = Abrir-ImagemSemTravar $arqGrupo',
-    '        try { Desenhar-ImagemNaCaixa $g $img ($cx - 170 * $e) $y (340 * $e) (110 * $e) } finally { $img.Dispose() }',
-    '        $y += 195 * $e',
+    '        try { Desenhar-ImagemNaCaixa $g $img ($cx - 220 * $e) $y (440 * $e) (140 * $e) } finally { $img.Dispose() }',
+    '        $y += 220 * $e',
     '      }',
     '      if ($temCartao) {',
-    '        $cw = 640 * $e; $ch = 410 * $e; $cxCartao = $cx - $cw / 2',
+    '        $cw = 720 * $e; $ch = 410 * $e; $cxCartao = $cx - $cw / 2',
     '        $sombra = Retangulo-RedondoCarimbo ([single]$cxCartao) ([single]($y + 8 * $e)) ([single]$cw) ([single]$ch) ([single](18 * $e))',
     '        $brS = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(70, 0, 0, 0))',
     '        try { $g.FillPath($brS, $sombra) } finally { $brS.Dispose(); $sombra.Dispose() }',
@@ -2111,7 +2112,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '        try { $g.FillPath($brC, $cartao) } finally { $brC.Dispose(); $cartao.Dispose() }',
     '        if ($arqMarca) {',
     '          $img = Abrir-ImagemSemTravar $arqMarca',
-    '          try { Desenhar-ImagemNaCaixa $g $img ($cxCartao + 60 * $e) ($y + 60 * $e) ($cw - 120 * $e) ($ch - 120 * $e) } finally { $img.Dispose() }',
+    '          try { Desenhar-ImagemNaCaixa $g $img ($cxCartao + 28 * $e) ($y + 28 * $e) ($cw - 56 * $e) ($ch - 56 * $e) } finally { $img.Dispose() }',
     '        } else {',
     '          $fMarca = Nova-FonteCarimbo @("Segoe UI Black","Segoe UI Semibold","Arial") (84 * $e) ([System.Drawing.FontStyle]::Bold)',
     '          try { $t = $g.MeasureString($rotuloMarca, $fMarca); Texto-Centralizado $g $rotuloMarca $fMarca ([System.Drawing.ColorTranslator]::FromHtml("#1d2733")) $cx ($y + ($ch - $t.Height) / 2) } finally { $fMarca.Dispose() }',

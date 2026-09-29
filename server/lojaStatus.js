@@ -370,7 +370,9 @@ const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
 // A estação não pode depender de um upload manual para ter identidade visual.
 // Estes logos oficiais já acompanham o NoPulso; um logo enviado pelo Master
 // continua tendo prioridade e substitui apenas o seu bloco.
-const REVISAO_MODELO_BASICO = 2;
+// Revisão visual do papel padrão. Ao mudar, o agente redesenha somente o
+// wallpaper básico, sem reaplicar as demais políticas da estação.
+const REVISAO_MODELO_BASICO = 3;
 const LOGOS_CARIMBO_PADRAO = Object.freeze({
   marca: Object.freeze({
     dominos: Object.freeze({ arquivoPublico: 'branding/dominos-pizza.png', tipo: 'image/png', versao: 1 }),
