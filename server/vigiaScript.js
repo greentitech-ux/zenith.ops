@@ -47,7 +47,7 @@
 // 124: nome da máquina ocupa proporcionalmente a placa nas artes enviadas.
 // 125: revisão própria reaplica o fundo configurado pelo NOC, inclusive sobre
 //      uma imagem antiga válida, sem reaplicar a política inteira.
-const VERSAO_VIGIA = 125;
+const VERSAO_VIGIA = 126;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -1980,16 +1980,17 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '          $fMaq = $null',
     '          try {',
     '            $tamLoja = $g.MeasureString($loja, $fLoja)',
-    '            # Placa da maquina: slot fixo da campanha, dentro do card central.',
+    '            # Placa da máquina: cresce junto com o nome. O modelo reserva',
+    '            # uma largura mínima, mas um host longo não pode invadir o fundo azul',
+    '            # nem virar texto minúsculo.',
     '            if ($vertical) {',
-    '              $placaW = 560 * $esc; $placaH = 86 * $esc; $topoPlaca = $img.Height * (651.0 / 1920.0); $raio = 14 * $esc',
+    '              $placaMinW = 560 * $esc; $placaMaxW = [math]::Min($img.Width - (96 * $esc), 920 * $esc); $placaH = 86 * $esc; $topoPlaca = $img.Height * (651.0 / 1920.0); $raio = 14 * $esc',
     '            } else {',
-    '              $placaW = 440 * $esc; $placaH = 70 * $esc; $topoPlaca = $img.Height * (575.0 / 1080.0); $raio = 12 * $esc',
+    '              $placaMinW = 440 * $esc; $placaMaxW = [math]::Min($img.Width - (128 * $esc), 1320 * $esc); $placaH = 70 * $esc; $topoPlaca = $img.Height * (575.0 / 1080.0); $raio = 12 * $esc',
     '            }',
-    '            $xPlaca = ($img.Width - $placaW) / 2.0',
-    '            # O nome não tem tamanho fixo: começa grande, proporcional à altura',
-    '            # da placa, e reduz só se um nome longo ameaçar a margem lateral.',
-    '            $tamFonteMaq = [math]::Min(78 * $esc, $placaH * 0.74); $minFonteMaq = 18 * $esc; $limiteMaq = $placaW * 0.88',
+    '            # Primeiro preserva uma fonte legível e calcula a placa pela largura',
+    '            # real do texto. Só reduz a fonte se mesmo a placa máxima não couber.',
+    '            $tamFonteMaq = [math]::Min(78 * $esc, $placaH * 0.74); $minFonteMaq = 18 * $esc; $margemMaq = [math]::Max(24 * $esc, $placaH * 0.32); $limiteMaq = $placaMaxW - (2 * $margemMaq)',
     '            do {',
     '              if ($fMaq) { $fMaq.Dispose() }',
     '              $fMaq = Nova-FonteCarimbo @("Barlow SemiBold","Barlow","Segoe UI Semibold","Arial") $tamFonteMaq ([System.Drawing.FontStyle]::Bold)',
@@ -1997,6 +1998,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '              if ($tamMaq.Width -le $limiteMaq -or $tamFonteMaq -le $minFonteMaq) { break }',
     '              $tamFonteMaq -= [math]::Max(1, 2 * $esc)',
     '            } while ($true)',
+    '            $placaW = [math]::Max($placaMinW, [math]::Min($placaMaxW, $tamMaq.Width + (2 * $margemMaq)))',
+    '            $xPlaca = ($img.Width - $placaW) / 2.0',
     '            $sombra = Retangulo-RedondoCarimbo ([single]$xPlaca) ([single]($topoPlaca + (10 * $esc))) ([single]$placaW) ([single]$placaH) ([single]$raio)',
     '            $brSombra = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(61, 10, 50, 80))',
     '            $g.FillPath($brSombra, $sombra)',
