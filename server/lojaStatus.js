@@ -2063,9 +2063,11 @@ function sanitizarItensVisuais(entrada, limite = 100) {
 async function pedirInventarioAtalhos(codigo, posto) {
   const atual = (await COLLECTION.doc(docIdFor(codigo, posto)).get()).data();
   if (!atual) throw new Error('Computador não encontrado.');
-  const politicaVersao = Number(atual.politicaVersao || 0) + 1;
-  await gravarEEspelhar(codigo, posto, { inventarioAtalhosPendenteEm: Date.now(), politicaVersao });
-  return { codigo, posto, politicaVersao };
+  // Ler é somente consultar o que o usuário já tem na tela. Não sobe a versão
+  // nem reaplica política: o heartbeat leva este marcador one-shot ao agente.
+  const inventarioAtalhosPendenteEm = Date.now();
+  await gravarEEspelhar(codigo, posto, { inventarioAtalhosPendenteEm });
+  return { codigo, posto, politicaVersao: Number(atual.politicaVersao || 0), inventarioAtalhosPendenteEm };
 }
 
 async function registrarInventarioAtalhos(codigo, posto, dados, token) {
