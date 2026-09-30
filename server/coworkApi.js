@@ -129,6 +129,7 @@ const PROPRIEDADES_COMUNS = {
   dataFim: { type: 'string', description: 'AAAA-MM-DD (noite operacional final).' },
   horaFim: { type: 'string', description: 'HH:MM. Com horaFim <= horaInicio a janela cruza a meia-noite (ex.: 22:00→05:00).' },
   agrupar: { type: 'string', enum: ['nenhum', 'dia', 'hora', 'produto', 'tipo'], description: 'listar_abastecimento_carrinho: como somar. nenhum = linha por registro.' },
+  pagina: { type: 'number', description: 'listar_abastecimento_carrinho: página dos registros, começando em 1. Os totais sempre consideram todo o filtro.' },
   estornoId: { type: 'string', description: 'Id interno do estorno (vem de obter_estorno).' },
   protocolo: { type: 'string', description: 'Número do protocolo de suporte/Beniboy ou do portal Conecta, conforme a ferramenta.' },
   resumo: { type: 'string', description: 'Resumo interno objetivo do que foi resolvido no atendimento.' },
@@ -168,7 +169,7 @@ const PARAMETROS = Object.freeze({
   consultar_autorizacao: ['autorizacaoId'],
   preparar_reuniao: ['termo', 'unidade', 'limite'],
   consultar_noc: ['unidade', 'gcom'],
-  listar_abastecimento_carrinho: ['unidade', 'dataInicio', 'dataFim', 'horaInicio', 'horaFim', 'tipo', 'agrupar', 'limite'],
+  listar_abastecimento_carrinho: ['unidade', 'dataInicio', 'dataFim', 'horaInicio', 'horaFim', 'tipo', 'agrupar', 'limite', 'pagina'],
   pesquisar_emails: ['consulta', 'limite'],
   ler_email: ['emailId'],
   enviar_email: ['para', 'assunto', 'texto'],
@@ -1039,10 +1040,10 @@ async function registrarNaDisputa(nome, p, ator) {
 // infere da contagem. É uma operação só (Dom Car Aero Recife), então não há
 // unidade por registro. Sabores: calabresa, pepperoni, mussarela.
 const TIPO_ABAST = { envio: 'ENVIO', remake: 'REMAKE', pedido: 'PEDIDO', contagem: 'CONTAGEM' };
-// hora/dia LOCAL. São Paulo e Recife estão os dois em UTC-3 em 2026 (nenhum
-// tem horário de verão), então o corte bate com o resto do módulo.
+// Hora/dia LOCAL do carrinho. Recife é o fuso explícito do relatório; não
+// dependemos de ele coincidir hoje com outra capital para classificar a noite.
 function parteLocalAbast(iso) {
-  const s = new Date(iso).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+  const s = new Date(iso).toLocaleString('sv-SE', { timeZone: 'America/Recife' });
   const [data, hora] = s.split(' ');
   return { data, hora: (hora || '00:00:00').slice(0, 5) };
 }
@@ -1056,12 +1057,47 @@ function pizzasDoRegistro(r) {
 }
 function totalPizzas(pz) { return abastecimentoCarrinho.SABORES.reduce((t, s) => t + (Number((pz || {})[s]) || 0), 0); }
 
+const UNIDADE_ABASTECIMENTO = 'Dom Car Aero Recife (carrinho do aeroporto)';
+const APELIDOS_UNIDADE_ABASTECIMENTO = new Set([
+  'dom car aero recife', 'dominos car aero recife', 'carrinho aeroporto',
+  'carrinho do aeroporto', 'dom car aeroporto', 'aeroporto',
+]);
+const DIAS_SEMANA = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
+function normalizarAbast(v) {
+  return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('pt-BR');
+}
+function dataOperacionalValida(valor, campo) {
+  const texto = String(valor || '').trim();
+  if (!texto) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(texto) || Number.isNaN(Date.parse(`${texto}T12:00:00Z`))) {
+    throw new Error(`${campo} deve ser AAAA-MM-DD.`);
+  }
+  const d = new Date(`${texto}T12:00:00Z`);
+  if (d.toISOString().slice(0, 10) !== texto) throw new Error(`${campo} não é uma data válida.`);
+  return texto;
+}
+function horaAbastValida(valor, campo) {
+  const texto = String(valor || '').trim();
+  if (!texto) return null;
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(texto)) throw new Error(`${campo} deve ser HH:MM.`);
+  return texto;
+}
+function diaSemanaDaNoite(data) {
+  return DIAS_SEMANA[new Date(`${data}T12:00:00Z`).getUTCDay()];
+}
+
 async function listarAbastecimentoCarrinho(p) {
   const SABORES = abastecimentoCarrinho.SABORES;
-  const dataInicio = String(p.dataInicio || '').trim();
-  const dataFim = String(p.dataFim || '').trim();
-  const horaInicio = /^\d{2}:\d{2}$/.test(String(p.horaInicio || '')) ? p.horaInicio : null;
-  const horaFim = /^\d{2}:\d{2}$/.test(String(p.horaFim || '')) ? p.horaFim : null;
+  const unidadeInformada = normalizarAbast(p.unidade);
+  if (unidadeInformada && !APELIDOS_UNIDADE_ABASTECIMENTO.has(unidadeInformada)) {
+    throw catalogo.erroComLista('Unidade', p.unidade, [UNIDADE_ABASTECIMENTO, 'Carrinho Aeroporto']);
+  }
+  const dataInicio = dataOperacionalValida(p.dataInicio, 'dataInicio');
+  const dataFim = dataOperacionalValida(p.dataFim, 'dataFim');
+  if (dataInicio && dataFim && dataFim < dataInicio) throw new Error('dataFim não pode ser anterior a dataInicio.');
+  const horaInicio = horaAbastValida(p.horaInicio, 'horaInicio');
+  const horaFim = horaAbastValida(p.horaFim, 'horaFim');
+  if (!!horaInicio !== !!horaFim) throw new Error('Informe horaInicio e horaFim juntas, ou deixe as duas vazias.');
   const cruzaMeiaNoite = horaInicio && horaFim && horaFim <= horaInicio;
   const noJanela = (hora) => {
     if (!horaInicio || !horaFim) return true;
@@ -1090,6 +1126,8 @@ async function listarAbastecimentoCarrinho(p) {
     linhas.push({
       dataHoraLocal: `${data} ${hora}`, noiteOperacional: noite, hora,
       tipo: r.tipo, origem: r.origem || null,
+      unidadeOrigem: r.origem === 'LOJA' ? 'Loja Dom Car Aero Recife' : 'Carrinho do Aeroporto',
+      unidadeDestino: r.origem === 'LOJA' ? 'Carrinho do Aeroporto' : 'Loja Dom Car Aero Recife',
       pizzas: Object.fromEntries(SABORES.map((s) => [s, Number((pz || {})[s]) || 0])),
       totalPizzas: totalPizzas(pz),
       motivoRemake: r.tipo === 'REMAKE' ? ((r.remake && r.remake.motivo) || null) : null,
@@ -1104,12 +1142,26 @@ async function listarAbastecimentoCarrinho(p) {
   const porTipo = {}; for (const l of linhas) porTipo[l.tipo] = (porTipo[l.tipo] || 0) + l.totalPizzas;
   const porHora = {}; for (const l of linhas) { porHora[l.hora] = porHora[l.hora] || {}; porHora[l.hora][l.tipo] = (porHora[l.hora][l.tipo] || 0) + l.totalPizzas; }
   const porNoite = {}; for (const l of linhas) { porNoite[l.noiteOperacional] = porNoite[l.noiteOperacional] || {}; porNoite[l.noiteOperacional][l.tipo] = (porNoite[l.noiteOperacional][l.tipo] || 0) + l.totalPizzas; }
+  const porDiaSemana = {};
+  for (const [noite, totais] of Object.entries(porNoite)) {
+    const dia = diaSemanaDaNoite(noite);
+    const envioNoite = Number(totais.ENVIO) || 0;
+    const remakeNoite = Number(totais.REMAKE) || 0;
+    const atual = porDiaSemana[dia] || { noites: 0, pizzasEnviadas: 0, remakes: 0 };
+    atual.noites += 1; atual.pizzasEnviadas += envioNoite; atual.remakes += remakeNoite;
+    porDiaSemana[dia] = atual;
+  }
+  for (const atual of Object.values(porDiaSemana)) {
+    atual.mediaEnviadaPorNoite = Math.round((atual.pizzasEnviadas / atual.noites) * 10) / 10;
+  }
   const noites = Object.keys(porNoite).length;
   const enviado = soma(linhas.filter((l) => l.tipo === 'ENVIO'));
   const remakes = soma(linhas.filter((l) => l.tipo === 'REMAKE'));
 
   const agrupar = String(p.agrupar || 'nenhum').toLowerCase();
-  const limite = Math.min(2000, Math.max(1, Number(p.limite) || 1000));
+  const limite = Math.min(2000, Math.max(1, Math.floor(Number(p.limite) || 1000)));
+  const pagina = Math.max(1, Math.floor(Number(p.pagina) || 1));
+  const inicioPagina = (pagina - 1) * limite;
   let agrupado = null;
   if (agrupar === 'dia') agrupado = porNoite;
   else if (agrupar === 'hora') agrupado = porHora;
@@ -1119,16 +1171,17 @@ async function listarAbastecimentoCarrinho(p) {
   }
 
   return {
-    unidade: 'Dom Car Aero Recife (carrinho do aeroporto)',
+    unidade: UNIDADE_ABASTECIMENTO,
     periodo: { dataInicio: dataInicio || null, dataFim: dataFim || null, horaInicio: horaInicio || null, horaFim: horaFim || null, cruzaMeiaNoite },
     // o que o módulo NÃO tem - pra ninguém montar relatório com número inventado (CLAUDE.md §6)
     aviso: 'Este módulo registra o que ENTRA no carrinho (ENVIO) e o descarte (REMAKE); não registra VENDA nem valor. O que "sai" (vendido) não está aqui - sai do fechamento/PDV, ou se infere da contagem (enviado − sobra na CONTAGEM − remake), e só se a contagem foi feita.',
     totais: { registros: linhas.length, noitesComRegistro: noites, pizzasEnviadas: enviado, remakes,
       mediaEnviadaPorNoite: noites ? Math.round((enviado / noites) * 10) / 10 : 0,
-      percentRemakeSobreEnvio: enviado ? Math.round((remakes / enviado) * 1000) / 10 : null, porTipo },
+      percentRemakeSobreEnvio: enviado ? Math.round((remakes / enviado) * 1000) / 10 : null, porTipo, porDiaSemana },
     agrupamento: agrupar === 'nenhum' ? null : { por: agrupar, valores: agrupado },
-    mostrando: Math.min(limite, linhas.length),
-    registros: linhas.slice(0, limite),
+    paginacao: { pagina, limite, totalRegistros: linhas.length, totalPaginas: Math.max(1, Math.ceil(linhas.length / limite)) },
+    mostrando: Math.max(0, Math.min(limite, linhas.length - inicioPagina)),
+    registros: linhas.slice(inicioPagina, inicioPagina + limite),
   };
 }
 

@@ -28050,7 +28050,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const soEnvio = await chamar({ dataInicio: '2026-09-01', dataFim: '2026-09-30', horaInicio: '22:00', horaFim: '05:00', tipo: 'envio' });
     const noite1 = await chamar({ dataInicio: '2026-09-01', dataFim: '2026-09-01', horaInicio: '22:00', horaFim: '05:00' });
     const porNoite = await chamar({ dataInicio: '2026-09-01', dataFim: '2026-09-30', horaInicio: '22:00', horaFim: '05:00', agrupar: 'dia' });
+    const pagina2 = await chamar({ unidade: 'Carrinho Aeroporto', dataInicio: '2026-09-01', dataFim: '2026-09-30', horaInicio: '22:00', horaFim: '05:00', limite: 1, pagina: 2 });
     const tipoRuim = await (async () => { try { await chamar({ tipo: 'venda' }); return null; } catch (e) { return e.message; } })();
+    const unidadeRuim = await (async () => { try { await chamar({ unidade: 'Outra unidade' }); return null; } catch (e) { return e.message; } })();
+    const horaRuim = await (async () => { try { await chamar({ horaInicio: '25:00', horaFim: '05:00' }); return null; } catch (e) { return e.message; } })();
 
     const conf = {
       'janela 22h-05h cruza a meia-noite: 01:30 do dia 02 cai na noite de 01': (() => {
@@ -28067,6 +28070,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'tipo=envio traz só ENVIO': soEnvio.registros.every((x) => x.tipo === 'ENVIO') && !soEnvio.registros.some((x) => x.tipo === 'REMAKE'),
       'remake carrega o motivo': r.registros.some((x) => x.tipo === 'REMAKE' && x.motivoRemake === 'queimou'),
       '% de remake sobre envio calculado': r.totais.percentRemakeSobreEnvio === Math.round((2 / 21) * 1000) / 10,
+      'média por dia da semana soma cada noite operacional uma vez': r.totais.porDiaSemana.terca && r.totais.porDiaSemana.terca.noites === 1 && r.totais.porDiaSemana.quarta && r.totais.porDiaSemana.quarta.noites === 1,
+      'paginação mantém os totais e devolve a página pedida': pagina2.paginacao.pagina === 2 && pagina2.paginacao.totalRegistros === r.totais.registros && pagina2.registros.length === 1,
+      'valida a unidade e a hora em vez de ignorar filtro errado': /Valores aceitos/.test(unidadeRuim || '') && /horaInicio deve ser HH:MM/.test(horaRuim || ''),
       'não inventa venda: tipo inválido é recusado com a lista, e o aviso diz que não há venda': /Valores aceitos/.test(tipoRuim || '') && /envio/.test(tipoRuim || '') && /não registra VENDA/i.test(r.aviso || ''),
       'a ferramenta é de leitura (sem idempotencyKey)': (cw.ferramentasMcp().find((f) => f.name === 'listar_abastecimento_carrinho') || {}).annotations.readOnlyHint === true,
     };
