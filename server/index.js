@@ -4965,6 +4965,43 @@ app.get('/api/loja-status/maquinas', requireSection('suporte'), async (req, res)
   }
 });
 
+// NetWork-Private: inventário da malha privada. A rota é só de Master porque
+// revela endereços internos de VPN e será a base das futuras ações de entrada
+// e reparo do Tailscale. Nunca devolve chave de autenticação nem configuração
+// do cliente; o agente já envia somente o estado público da própria máquina.
+app.get('/api/loja-status/network-private', auth.requireMaster, async (_req, res) => {
+  try {
+    const computadores = await lojaStatus.listar();
+    const maquinas = computadores.map((c) => ({
+      codigo: c.codigo,
+      posto: c.posto,
+      nome: c.nome || c.posto,
+      tipo: c.tipo || null,
+      online: !!c.online,
+      ultimoHeartbeatEm: c.ultimoHeartbeatEm || null,
+      ehServidor: !!c.ehServidor,
+      tailscale: c.tailscale || null,
+    }));
+    const comTailscale = maquinas.filter((m) => m.tailscale && m.tailscale.instalado);
+    res.json({
+      maquinas,
+      resumo: {
+        total: maquinas.length,
+        instalado: comTailscale.length,
+        conectado: comTailscale.filter((m) => m.tailscale.estado === 'Running').length,
+        aguardandoLogin: comTailscale.filter((m) => m.tailscale.estado === 'NeedsLogin').length,
+        semAgente: maquinas.filter((m) => !m.tailscale).length,
+      },
+      // A adesão automática será habilitada somente quando o Master cadastrar
+      // o OAuth restrito no ambiente do servidor. A tela não finge que uma
+      // máquina está autorizada só porque tem o aplicativo instalado.
+      automacaoDisponivel: false,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Central operacional do NOC. A fonte é a mesma Central de Alertas que já
 // recebe cada push do agente: assim "atender" não cria um segundo estado nem
 // deixa a tela NOC dizendo aberto enquanto a Central diz resolvido. Suporte
