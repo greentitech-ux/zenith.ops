@@ -31,6 +31,20 @@ const CAIXA_EDICOES = db.collection('saltiversoCaixaEdicoes');
 // balcão de parque, melhor poder ajustar cada um sem acoplar os dois
 const LIMITE_QUEBRA_SALTIVERSO = 10;
 const DATA_RE = /^\d{4}-\d{2}-\d{2}$/;
+const FUSO_BR = 'America/Sao_Paulo';
+
+function hojeBrasiliaISO() {
+  const partes = new Intl.DateTimeFormat('en-CA', { timeZone: FUSO_BR, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const data = {};
+  partes.forEach((p) => { if (p.type !== 'literal') data[p.type] = p.value; });
+  return `${data.year}-${data.month}-${data.day}`;
+}
+
+function diaAnteriorISO(data) {
+  const [ano, mes, dia] = String(data).split('-').map(Number);
+  const anterior = new Date(Date.UTC(ano, mes - 1, dia - 1));
+  return anterior.toISOString().slice(0, 10);
+}
 
 // os 4 "baldes" que o usuário descreveu como os comprovantes reais do fim
 // do dia: maquininha (débito+crédito juntos, o que a maquininha imprime),
@@ -282,17 +296,24 @@ async function estadoDoDia(unidade, data) {
 
 // trava anti-fraude: caixa lancado so muda por pedido de alteracao aprovado
 // pelo Master. So vale ANTES do dia fechar (depois, o Master corrige o dia).
-async function solicitarAlteracaoCaixa(caixaId, { declarado, motivo, solicitadoPorId, solicitadoPorEmail }) {
+async function solicitarAlteracaoCaixa(caixaId, { declarado, motivo, solicitadoPorId, solicitadoPorEmail, podeAlterarOutroCaixa = false }) {
   const caixa = await getCaixa(caixaId);
   if (!caixa) throw new Error('Caixa não encontrado.');
+  if (String(caixa.operadorId) !== String(solicitadoPorId) && !podeAlterarOutroCaixa) {
+    throw new Error('Você só pode pedir alteração do seu próprio caixa.');
+  }
   if (await getOne(docId(caixa.unidade, caixa.data))) throw new Error('O dia já foi fechado — a alteração agora é feita pelo Master no fechamento do dia.');
+  const motivoOk = String(motivo || '').trim();
+  if (!motivoOk) throw new Error('Informe o motivo da alteração.');
+  const existentes = await CAIXA_EDICOES.where('caixaId', '==', caixaId).get();
+  if (existentes.docs.some((d) => d.data().status === 'PENDENTE')) throw new Error('Já existe um pedido de alteração pendente para este caixa.');
   const novo = sanitizarTotalDeclarado(declarado);
   const id = `${caixaId}__${Date.now()}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
   const registro = {
     id, caixaId, unidade: caixa.unidade, unidadeNome: caixa.unidadeNome, data: caixa.data,
     operadorEmail: caixa.operadorEmail, operadorNome: caixa.operadorNome,
     antes: caixa.declarado, novo,
-    motivo: motivo ? String(motivo).trim().slice(0, 500) : null,
+    motivo: motivoOk.slice(0, 500),
     status: 'PENDENTE',
     solicitadoPorId: solicitadoPorId || null, solicitadoPorEmail: solicitadoPorEmail || null,
     criadoEm: new Date().toISOString(), decididoEm: null, decididoPorEmail: null,
@@ -465,6 +486,29 @@ async function listFechamentos(unidade, dataInicio, dataFim) {
     && (!dataFim || f.data <= dataFim));
 }
 
+// Operador não pode inferir o faturado pelo histórico. Ele só precisa saber
+// que aquele dia foi consolidado, nunca os valores, diferença ou observação.
+function historicoParaOperador(f) {
+  return { id: f.id, unidade: f.unidade, data: f.data, fechado: true, valoresOcultos: true };
+}
+
+// Antes de começar uma venda no novo dia, o dia anterior que teve movimento
+// precisa estar integralmente concluído: caixas individuais e consolidação.
+// Dias sem movimento não bloqueiam a primeira operação da unidade.
+async function exigirDiaAnteriorFechado(unidade, dataAtual = hojeBrasiliaISO()) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  const anterior = diaAnteriorISO(dataAtual);
+  if (await getOne(docId(unidade, anterior))) return { ok: true, data: anterior };
+  const estadoAnterior = await estadoDoDia(unidade, anterior);
+  const houveMovimento = estadoAnterior.faturado > 0 || estadoAnterior.caixas.length > 0;
+  if (!houveMovimento) return { ok: true, data: anterior };
+  const pendentes = estadoAnterior.pendentes.length;
+  const detalhe = pendentes
+    ? ` Ainda faltam ${pendentes} caixa(s) individual(is).`
+    : ' Os caixas já lançados precisam ser consolidados pelo gerente.';
+  throw new Error(`Venda bloqueada: o dia ${anterior} ainda não foi encerrado. Feche os caixas e consolide o dia antes de vender em ${dataAtual}.${detalhe}`);
+}
+
 // todos os dias fechados, de qualquer unidade - usado por GET /api/fechamentos
 // (ver comoFechamento abaixo) pra esses dias aparecerem no painel geral de
 // Fechamentos junto com as lojas, e nao só na tela dedicada do Saltiverso
@@ -516,4 +560,5 @@ module.exports = {
   // caixas individuais por operador
   faturadoPorOperador, lancarCaixa, listCaixasDoDia, getCaixa, estadoDoDia,
   solicitarAlteracaoCaixa, listAlteracoesPendentes, decidirAlteracaoCaixa,
+  historicoParaOperador, exigirDiaAnteriorFechado,
 };

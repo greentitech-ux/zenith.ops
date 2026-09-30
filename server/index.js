@@ -9391,6 +9391,15 @@ function podeVerFaturadoSaltiverso(req, unidade) {
   return !!(req.user && users.ehCargoGerente(req.user.cargo) && (req.permissions.unidades || []).includes(unidade));
 }
 
+// A trava é deliberadamente aplicada no servidor, antes de qualquer venda ou
+// recebimento. Assim não pode ser contornada por tela antiga, outra máquina ou
+// chamada direta à API.
+async function exigirDiaAnteriorFechadoSaltiverso(unidade) {
+  if (await unidadesExtras.apareceEm(unidade, 'parque')) {
+    await saltiversoFechamento.exigirDiaAnteriorFechado(unidade);
+  }
+}
+
 app.get('/api/inventario/unidades', requireSection('inventario'), (req, res) => {
   const unidades = req.isMaster
     ? Object.keys(INVENTARIO_UNIDADES_NOMES)
@@ -9863,6 +9872,7 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     if (!(await unidadesExtras.apareceEm(unidade, 'parque'))) return res.status(400).json({ error: 'Essa unidade não tem Parque habilitado.' });
+    await exigirDiaAnteriorFechadoSaltiverso(unidade);
     // credito de tempo guardado de um checkout antecipado anterior (ver
     // parque.checkout) - consome antes de criar, pra nao aplicar minutos
     // que na verdade nao estavam mais disponiveis
@@ -10138,6 +10148,7 @@ app.post('/api/parque/checkins/:id/adicionar-tempo', requireAnySection('parque',
     if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    await exigirDiaAnteriorFechadoSaltiverso(atual.unidade);
     const registro = await parque.adicionarTempo(req.params.id, {
       minutos: req.body.minutos,
       metodoPagamento: req.body.metodoPagamento,
@@ -10161,6 +10172,7 @@ app.post('/api/parque/checkins/:id/relancar', requireSection('parque-checkin'), 
     if (!req.isMaster && !(req.permissions.unidades || []).includes(origem.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    await exigirDiaAnteriorFechadoSaltiverso(origem.unidade);
     const registro = await parque.relancar(req.params.id, {
       tempoMinutos: req.body.tempoMinutos,
       metodoPagamento: req.body.metodoPagamento,
@@ -10524,6 +10536,7 @@ app.post('/api/festas', requireSection('festas'), async (req, res) => {
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    if (Number(sinal) > 0) await exigirDiaAnteriorFechadoSaltiverso(unidade);
     const registro = await festas.criar({
       unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, desconto, sinal, restante, observacao, referenciaVendaOriginal,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
@@ -10596,6 +10609,7 @@ app.post('/api/festas/:id/recebimentos', requireSection('festas'), async (req, r
     if (!podeReceberFesta(req, atual.unidade)) {
       return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin pode lançar recebimento.' });
     }
+    await exigirDiaAnteriorFechadoSaltiverso(atual.unidade);
     const registro = await festas.registrarRecebimento(req.params.id, {
       valor: req.body.valor, forma: req.body.forma, data: req.body.data,
       porId: req.user.id, porEmail: req.user.email,
@@ -11878,6 +11892,7 @@ app.post('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, re
   try {
     const { unidade, unidadeNome, itens, pagamentos } = req.body;
     if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    await exigirDiaAnteriorFechadoSaltiverso(unidade);
     const venda = await saltiversoVendas.criarVenda({
       unidade, unidadeNome, itens, pagamentos,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
@@ -12030,9 +12045,15 @@ app.post('/api/saltiverso/fechamento/caixa', requireSection('parque-loja'), asyn
 // aprovacao do Master
 app.post('/api/saltiverso/fechamento/caixa/:id/solicitar-alteracao', requireSection('parque-loja'), async (req, res) => {
   try {
+    const caixa = await saltiversoFechamento.getCaixa(req.params.id);
+    if (!caixa) return res.status(404).json({ error: 'Caixa não encontrado.' });
+    if (!podeUnidadeInventario(req, caixa.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const podeAlterarOutroCaixa = req.isMaster || req.isAdmin
+      || (users.ehCargoGerente(req.user?.cargo) && (req.permissions.unidades || []).includes(caixa.unidade));
     const pedido = await saltiversoFechamento.solicitarAlteracaoCaixa(req.params.id, {
       declarado: req.body.declarado, motivo: req.body.motivo,
       solicitadoPorId: req.user.id, solicitadoPorEmail: req.user.email,
+      podeAlterarOutroCaixa,
     });
     broadcast('saltiverso-caixa-alteracao', pedido, 'parque-loja');
     res.json(pedido);
@@ -12085,7 +12106,8 @@ app.put('/api/saltiverso/fechamento/:id', auth.requireMaster, async (req, res) =
 app.get('/api/saltiverso/fechamentos', requireSection('parque-loja'), async (req, res) => {
   const { unidade, dataInicio, dataFim } = req.query;
   if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-  res.json(await saltiversoFechamento.listFechamentos(unidade, dataInicio, dataFim));
+  const fechamentos = await saltiversoFechamento.listFechamentos(unidade, dataInicio, dataFim);
+  res.json(podeVerFaturadoSaltiverso(req, unidade) ? fechamentos : fechamentos.map(saltiversoFechamento.historicoParaOperador));
 });
 
 // ---------- Saltiverso Patteo: passaporte mensal (mensalistas) - reaproveita

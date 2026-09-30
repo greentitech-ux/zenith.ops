@@ -491,6 +491,9 @@ async function carregarHistorico(){
   const fechamentos = await fetch(`/api/saltiverso/fechamentos?unidade=${encodeURIComponent(unidade)}&dataInicio=${diasAtras(30)}&dataFim=${hojeBrasilia()}`).then(r=>r.json()).catch(()=>[]);
   if(!fechamentos.length){ el.innerHTML = '<div class="empty">Nenhum fechamento nos últimos 30 dias.</div>'; return; }
   el.innerHTML = fechamentos.map(f=>{
+    if(f.valoresOcultos){
+      return `<div class="card"><div class="linha1"><span>${fmtData(f.data)} · fechamento consolidado</span><span class="badge ok">concluído</span></div></div>`;
+    }
     const okDiferenca = Math.abs(f.diferenca) <= 10;
     return `
     <div class="card">
