@@ -48,7 +48,8 @@
 // 125: revisão própria reaplica o fundo configurado pelo NOC, inclusive sobre
 //      uma imagem antiga válida, sem reaplicar a política inteira.
 // 128: cartão do Suporte TI no canto inferior direito do modelo básico escuro.
-const VERSAO_VIGIA = 128;
+// 129: refino do cartão: branco translúcido e colunas sem sobreposição.
+const VERSAO_VIGIA = 129;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2153,29 +2154,34 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // uma tela institucional: quando não há imagem enviada, ele precisa deixar
     // visível como pedir suporte sem cobrir a identidade da máquina.
     'function Desenhar-ContatoSuporte($g, $W, $H, $e) {',
-    '  $largura = [math]::Min(470 * $e, $W - (48 * $e)); $altura = 104 * $e',
+    '  $largura = [math]::Min(500 * $e, $W - (48 * $e)); $altura = 104 * $e',
     // A margem de baixo deixa o cartão visível acima da barra de tarefas.
     '  $x = $W - $largura - (34 * $e); $y = $H - $altura - (74 * $e)',
     '  $cartao = Retangulo-RedondoCarimbo ([single]$x) ([single]$y) ([single]$largura) ([single]$altura) ([single](16 * $e))',
-    '  $brCartao = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml("#0a527f"))',
+    // No fundo preto, um branco discreto integra melhor do que repetir a cor
+    // azul de uma arte que pode não existir nesta unidade.
+    '  $brCartao = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(34, 255, 255, 255))',
     '  try { $g.FillPath($brCartao, $cartao) } finally { $brCartao.Dispose(); $cartao.Dispose() }',
+    '  $borda = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(64, 255, 255, 255), [single][math]::Max(1, 1 * $e))',
+    '  $cartaoBorda = Retangulo-RedondoCarimbo ([single]$x) ([single]$y) ([single]$largura) ([single]$altura) ([single](16 * $e))',
+    '  try { $g.DrawPath($borda, $cartaoBorda) } finally { $borda.Dispose(); $cartaoBorda.Dispose() }',
     '  $caneta = New-Object System.Drawing.Pen([System.Drawing.Color]::White, [single][math]::Max(2, 3 * $e))',
     '  try {',
     '    $caneta.StartCap = [System.Drawing.Drawing2D.LineCap]::Round; $caneta.EndCap = [System.Drawing.Drawing2D.LineCap]::Round',
-    '    $onda = @((New-Object System.Drawing.PointF([single]($x + 27 * $e), [single]($y + 62 * $e))), (New-Object System.Drawing.PointF([single]($x + 43 * $e), [single]($y + 62 * $e))), (New-Object System.Drawing.PointF([single]($x + 53 * $e), [single]($y + 40 * $e))), (New-Object System.Drawing.PointF([single]($x + 68 * $e), [single]($y + 78 * $e))), (New-Object System.Drawing.PointF([single]($x + 82 * $e), [single]($y + 58 * $e))), (New-Object System.Drawing.PointF([single]($x + 108 * $e), [single]($y + 58 * $e))))',
+    '    $onda = @((New-Object System.Drawing.PointF([single]($x + 24 * $e), [single]($y + 59 * $e))), (New-Object System.Drawing.PointF([single]($x + 39 * $e), [single]($y + 59 * $e))), (New-Object System.Drawing.PointF([single]($x + 49 * $e), [single]($y + 40 * $e))), (New-Object System.Drawing.PointF([single]($x + 63 * $e), [single]($y + 75 * $e))), (New-Object System.Drawing.PointF([single]($x + 76 * $e), [single]($y + 56 * $e))), (New-Object System.Drawing.PointF([single]($x + 91 * $e), [single]($y + 56 * $e))))',
     '    $g.DrawLines($caneta, [System.Drawing.PointF[]]$onda)',
     '  } finally { $caneta.Dispose() }',
-    '  $divisor = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(115, 214, 235, 248))',
-    '  try { $g.FillRectangle($divisor, [single]($x + 200 * $e), [single]($y + 20 * $e), [single][math]::Max(1, 2 * $e), [single]($altura - 40 * $e)) } finally { $divisor.Dispose() }',
-    '  $fNome = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (31 * $e) ([System.Drawing.FontStyle]::Bold)',
-    '  $fInfo = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (15 * $e) ([System.Drawing.FontStyle]::Bold)',
-    '  $fTelefone = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (28 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  $divisor = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(105, 255, 255, 255))',
+    '  try { $g.FillRectangle($divisor, [single]($x + 250 * $e), [single]($y + 20 * $e), [single][math]::Max(1, 2 * $e), [single]($altura - 40 * $e)) } finally { $divisor.Dispose() }',
+    '  $fNome = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (28 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  $fInfo = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (14 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  $fTelefone = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (24 * $e) ([System.Drawing.FontStyle]::Bold)',
     '  try {',
     '    $brBranco = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)',
     '    try {',
-    '      $g.DrawString("NoPulso", $fNome, $brBranco, [single]($x + 118 * $e), [single]($y + 37 * $e))',
-    '      $g.DrawString("SUPORTE TI · 24H", $fInfo, $brBranco, [single]($x + 222 * $e), [single]($y + 17 * $e))',
-    '      $g.DrawString("(81) 99514-8654", $fTelefone, $brBranco, [single]($x + 222 * $e), [single]($y + 44 * $e))',
+    '      $g.DrawString("NoPulso", $fNome, $brBranco, [single]($x + 103 * $e), [single]($y + 37 * $e))',
+    '      $g.DrawString("SUPORTE TI · 24H", $fInfo, $brBranco, [single]($x + 274 * $e), [single]($y + 17 * $e))',
+    '      $g.DrawString("(81) 99514-8654", $fTelefone, $brBranco, [single]($x + 274 * $e), [single]($y + 45 * $e))',
     '    } finally { $brBranco.Dispose() }',
     '  } finally { $fNome.Dispose(); $fInfo.Dispose(); $fTelefone.Dispose() }',
     '}',
