@@ -49,7 +49,8 @@
 //      uma imagem antiga válida, sem reaplicar a política inteira.
 // 128: cartão do Suporte TI no canto inferior direito do modelo básico escuro.
 // 129: refino do cartão: branco translúcido e colunas sem sobreposição.
-const VERSAO_VIGIA = 129;
+// 130: ID do AnyDesk lido também dos arquivos locais quando --get-id falha.
+const VERSAO_VIGIA = 130;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -856,9 +857,31 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $u = Get-ItemProperty \'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\',\'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like \'AnyDesk*\' }',
     '    foreach ($i in @($u)) { if ($i.InstallLocation) { [void]$candidatos.Add((Join-Path $i.InstallLocation \'AnyDesk.exe\')) }; if ($i.DisplayIcon) { $icone = ([string]$i.DisplayIcon -replace \'^"|",?\\d+$\', \'\'); if ($icone) { [void]$candidatos.Add($icone) } } }',
     '    $exe = @($candidatos | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique -First 1)[0]',
-    '    if (-not $exe) { return $null }',
-    '    $id = (((& $exe --get-id 2>&1) | Out-String).Trim() -replace \'\\D\', \'\')',
-    '    if ($id -match \'^\\d{6,16}$\') { return $id }',
+    '    # Algumas instalações customizadas imprimem texto junto do número. Não',
+    '    # junta todos os dígitos (isso misturaria versão/data ao ID); extrai',
+    '    # somente um número completo no formato público do AnyDesk.',
+    '    if ($exe) {',
+    '      $saida = ((& $exe --get-id 2>&1) | Out-String)',
+    '      $achado = [regex]::Match($saida, \'(?<!\\d)\\d{6,16}(?!\\d)\')',
+    '      if ($achado.Success) { return $achado.Value }',
+    '    }',
+    '    # Fallback direto da máquina: o próprio AnyDesk persiste o identificador',
+    '    # público em system.conf/user.conf. Lemos só ad.anynet.id; nunca senha,',
+    '    # token ou a configuração inteira. Isso cobre o executável bloqueado,',
+    '    # que não abre em sessão SYSTEM ou que não aceita --get-id.',
+    '    $configs = @(',
+    '      (Join-Path $env:ProgramData "AnyDesk\\system.conf"),',
+    '      (Join-Path $env:ProgramData "AnyDesk\\user.conf"),',
+    '      (Join-Path $env:APPDATA "AnyDesk\\user.conf"),',
+    '      (Join-Path $env:LOCALAPPDATA "AnyDesk\\user.conf")',
+    '    )',
+    '    foreach ($cfg in @($configs | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique)) {',
+    '      try {',
+    '        $linha = Get-Content -LiteralPath $cfg -ErrorAction Stop | Where-Object { $_ -match \'^\\s*ad\\.anynet\\.id\\s*=\' } | Select-Object -First 1',
+    '        $achado = [regex]::Match([string]$linha, \'(?<!\\d)\\d{6,16}(?!\\d)\')',
+    '        if ($achado.Success) { return $achado.Value }',
+    '      } catch {}',
+    '    }',
     '  } catch { Escrever-Log \"Falha ao ler ID do AnyDesk: $($_.Exception.Message)\" }',
     '  return $null',
     '}',
