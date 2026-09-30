@@ -47,7 +47,10 @@
 // 124: nome da máquina ocupa proporcionalmente a placa nas artes enviadas.
 // 125: revisão própria reaplica o fundo configurado pelo NOC, inclusive sobre
 //      uma imagem antiga válida, sem reaplicar a política inteira.
-const VERSAO_VIGIA = 127;
+// 128: cartão do Suporte TI no canto inferior direito do modelo básico escuro.
+// 129: refino do cartão: branco translúcido e colunas sem sobreposição.
+// 130: ID do AnyDesk lido também dos arquivos locais quando --get-id falha.
+const VERSAO_VIGIA = 130;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -854,9 +857,31 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    $u = Get-ItemProperty \'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\',\'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*\' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like \'AnyDesk*\' }',
     '    foreach ($i in @($u)) { if ($i.InstallLocation) { [void]$candidatos.Add((Join-Path $i.InstallLocation \'AnyDesk.exe\')) }; if ($i.DisplayIcon) { $icone = ([string]$i.DisplayIcon -replace \'^"|",?\\d+$\', \'\'); if ($icone) { [void]$candidatos.Add($icone) } } }',
     '    $exe = @($candidatos | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique -First 1)[0]',
-    '    if (-not $exe) { return $null }',
-    '    $id = (((& $exe --get-id 2>&1) | Out-String).Trim() -replace \'\\D\', \'\')',
-    '    if ($id -match \'^\\d{6,16}$\') { return $id }',
+    '    # Algumas instalações customizadas imprimem texto junto do número. Não',
+    '    # junta todos os dígitos (isso misturaria versão/data ao ID); extrai',
+    '    # somente um número completo no formato público do AnyDesk.',
+    '    if ($exe) {',
+    '      $saida = ((& $exe --get-id 2>&1) | Out-String)',
+    '      $achado = [regex]::Match($saida, \'(?<!\\d)\\d{6,16}(?!\\d)\')',
+    '      if ($achado.Success) { return $achado.Value }',
+    '    }',
+    '    # Fallback direto da máquina: o próprio AnyDesk persiste o identificador',
+    '    # público em system.conf/user.conf. Lemos só ad.anynet.id; nunca senha,',
+    '    # token ou a configuração inteira. Isso cobre o executável bloqueado,',
+    '    # que não abre em sessão SYSTEM ou que não aceita --get-id.',
+    '    $configs = @(',
+    '      (Join-Path $env:ProgramData "AnyDesk\\system.conf"),',
+    '      (Join-Path $env:ProgramData "AnyDesk\\user.conf"),',
+    '      (Join-Path $env:APPDATA "AnyDesk\\user.conf"),',
+    '      (Join-Path $env:LOCALAPPDATA "AnyDesk\\user.conf")',
+    '    )',
+    '    foreach ($cfg in @($configs | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique)) {',
+    '      try {',
+    '        $linha = Get-Content -LiteralPath $cfg -ErrorAction Stop | Where-Object { $_ -match \'^\\s*ad\\.anynet\\.id\\s*=\' } | Select-Object -First 1',
+    '        $achado = [regex]::Match([string]$linha, \'(?<!\\d)\\d{6,16}(?!\\d)\')',
+    '        if ($achado.Success) { return $achado.Value }',
+    '      } catch {}',
+    '    }',
     '  } catch { Escrever-Log \"Falha ao ler ID do AnyDesk: $($_.Exception.Message)\" }',
     '  return $null',
     '}',
@@ -2148,6 +2173,41 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $br = New-Object System.Drawing.SolidBrush($cor)',
     '  try { $g.DrawString($texto, $fonte, $br, [single]($cx - $tam.Width / 2), [single]$y) } finally { $br.Dispose() }',
     '}',
+    // Cartão de contato presente nas artes oficiais. O modelo básico também é
+    // uma tela institucional: quando não há imagem enviada, ele precisa deixar
+    // visível como pedir suporte sem cobrir a identidade da máquina.
+    'function Desenhar-ContatoSuporte($g, $W, $H, $e) {',
+    '  $largura = [math]::Min(500 * $e, $W - (48 * $e)); $altura = 104 * $e',
+    // A margem de baixo deixa o cartão visível acima da barra de tarefas.
+    '  $x = $W - $largura - (34 * $e); $y = $H - $altura - (74 * $e)',
+    '  $cartao = Retangulo-RedondoCarimbo ([single]$x) ([single]$y) ([single]$largura) ([single]$altura) ([single](16 * $e))',
+    // No fundo preto, um branco discreto integra melhor do que repetir a cor
+    // azul de uma arte que pode não existir nesta unidade.
+    '  $brCartao = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(34, 255, 255, 255))',
+    '  try { $g.FillPath($brCartao, $cartao) } finally { $brCartao.Dispose(); $cartao.Dispose() }',
+    '  $borda = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(64, 255, 255, 255), [single][math]::Max(1, 1 * $e))',
+    '  $cartaoBorda = Retangulo-RedondoCarimbo ([single]$x) ([single]$y) ([single]$largura) ([single]$altura) ([single](16 * $e))',
+    '  try { $g.DrawPath($borda, $cartaoBorda) } finally { $borda.Dispose(); $cartaoBorda.Dispose() }',
+    '  $caneta = New-Object System.Drawing.Pen([System.Drawing.Color]::White, [single][math]::Max(2, 3 * $e))',
+    '  try {',
+    '    $caneta.StartCap = [System.Drawing.Drawing2D.LineCap]::Round; $caneta.EndCap = [System.Drawing.Drawing2D.LineCap]::Round',
+    '    $onda = @((New-Object System.Drawing.PointF([single]($x + 24 * $e), [single]($y + 59 * $e))), (New-Object System.Drawing.PointF([single]($x + 39 * $e), [single]($y + 59 * $e))), (New-Object System.Drawing.PointF([single]($x + 49 * $e), [single]($y + 40 * $e))), (New-Object System.Drawing.PointF([single]($x + 63 * $e), [single]($y + 75 * $e))), (New-Object System.Drawing.PointF([single]($x + 76 * $e), [single]($y + 56 * $e))), (New-Object System.Drawing.PointF([single]($x + 91 * $e), [single]($y + 56 * $e))))',
+    '    $g.DrawLines($caneta, [System.Drawing.PointF[]]$onda)',
+    '  } finally { $caneta.Dispose() }',
+    '  $divisor = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(105, 255, 255, 255))',
+    '  try { $g.FillRectangle($divisor, [single]($x + 250 * $e), [single]($y + 20 * $e), [single][math]::Max(1, 2 * $e), [single]($altura - 40 * $e)) } finally { $divisor.Dispose() }',
+    '  $fNome = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (28 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  $fInfo = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (14 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  $fTelefone = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (24 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  try {',
+    '    $brBranco = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)',
+    '    try {',
+    '      $g.DrawString("NoPulso", $fNome, $brBranco, [single]($x + 103 * $e), [single]($y + 37 * $e))',
+    '      $g.DrawString("SUPORTE TI · 24H", $fInfo, $brBranco, [single]($x + 274 * $e), [single]($y + 17 * $e))',
+    '      $g.DrawString("(81) 99514-8654", $fTelefone, $brBranco, [single]($x + 274 * $e), [single]($y + 45 * $e))',
+    '    } finally { $brBranco.Dispose() }',
+    '  } finally { $fNome.Dispose(); $fInfo.Dispose(); $fTelefone.Dispose() }',
+    '}',
     // Medidas no desenho de referencia (1920x1080, o das artes do grupo) e
     // escaladas: na horizontal pelo lado que limita, na vertical (Makeline)
     // pela largura - senao o bloco sairia minusculo no meio da tela em pe.
@@ -2164,6 +2224,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // maiores, com pouco espaco morto no cartao da marca. A composicao inteira
     // continua centralizada na tela, inclusive em monitor vertical.
     '  $alturaBloco = 245.0; if ($temCartao) { $alturaBloco += 480 }; if ($temGrupo) { $alturaBloco += 220 }',
+    // O cartão de suporte é desenhado no canto; a composição central não muda.
     '  $y = ($H - $alturaBloco * $e) / 2.0; $cx = $W / 2.0',
     '  $bmp = New-Object System.Drawing.Bitmap -ArgumentList $W, $H',
     '  try {',
@@ -2207,6 +2268,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      $espacada = ($linha.ToCharArray() | ForEach-Object { [string]$_ }) -join [string][char]0x200A',
     '      $fLinha = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (25 * $e) ([System.Drawing.FontStyle]::Regular)',
     '      try { Texto-Centralizado $g $espacada $fLinha ([System.Drawing.ColorTranslator]::FromHtml("#aab4bf")) $cx $y } finally { $fLinha.Dispose() }',
+    '      Desenhar-ContatoSuporte $g $W $H $e',
     '    } finally { $g.Dispose() }',
     '    $bmp.Save($saida, [System.Drawing.Imaging.ImageFormat]::Png)',
     '  } finally { $bmp.Dispose() }',

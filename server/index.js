@@ -4261,14 +4261,38 @@ function codigoEhFixo(codigo) {
   return !(c.secao === 'Monitor / Disputas (Adyen)' && c.grupo === 'Outras');
 }
 
-// nome canonico de um codigo de unidade, olhando os mapas fixos nesta ordem
-// (apelidos manuais > fechamento > entregas > ifood) - usado sempre que
-// alguem precisa MOSTRAR o nome de uma unidade a partir do codigo, pra nunca
-// depender do unidadeNome gravado num documento antigo (que pode ter sido
-// salvo errado, ex: entregasSync.js gravava o proprio codigo como nome)
-function nomeCanonicoUnidade(codigo, fallback) {
+// Nome original do código, antes de qualquer personalização feita pelo Master.
+// Os códigos vindos de Adyen/planilha continuam imutáveis; só o rótulo muda.
+function nomeBaseUnidade(codigo, fallback) {
   return UNIDADES_APELIDOS[codigo] || FECHAMENTO_UNIDADES_NOMES[codigo] || ENTREGAS_UNIDADES_NOMES[codigo]
     || ifoodClient.IFOOD_UNIDADES_NOMES[codigo] || fallback || codigo;
+}
+
+// Um mesmo ponto físico pode ter mais de um código (Adyen, fechamento e
+// entregas). Alterar o nome no código principal propaga para esses apelidos
+// equivalentes, sem jamais mudar a identidade gravada nos documentos.
+function nomeConfiguradoOuEquivalente(codigo) {
+  const direto = unidadesExtras.nomeConfigurado(codigo);
+  if (direto) return direto;
+  const base = nomeBaseUnidade(codigo);
+  const codigosConhecidos = new Set([
+    ...Object.keys(FECHAMENTO_UNIDADES_NOMES), ...Object.keys(ENTREGAS_UNIDADES_NOMES),
+    ...Object.keys(ifoodClient.IFOOD_UNIDADES_NOMES), ...Object.keys(UNIDADES_APELIDOS),
+  ]);
+  for (const outro of codigosConhecidos) {
+    if (outro !== codigo && nomeBaseUnidade(outro) === base) {
+      const nome = unidadesExtras.nomeConfigurado(outro);
+      if (nome) return nome;
+    }
+  }
+  return null;
+}
+
+// Nome canônico mostrado no sistema. Prioriza a configuração do Master e só
+// depois os mapas fixos, para históricos antigos passarem a exibir o novo nome
+// sem regravar milhares de documentos nem quebrar filtros e permissões.
+function nomeCanonicoUnidade(codigo, fallback) {
+  return nomeConfiguradoOuEquivalente(codigo) || nomeBaseUnidade(codigo, fallback);
 }
 
 // resolve um "IDPULSE" (codigo numerico da loja, como aparece na coluna
@@ -4311,7 +4335,10 @@ async function construirUnidadesMapaSemCache() {
   (await entregasLive.listAll()).forEach((e) => { if (e.unidade) mapa[e.unidade] = e.unidadeNome || mapa[e.unidade] || e.unidade; });
   // unidades cadastradas pelo Master em runtime (unidades.js) - loja nova ou
   // unidade administrativa que ainda nao existe em nenhuma lista fixa
-  Object.entries(await unidadesExtras.mapa().catch(() => ({}))).forEach(([codigo, nome]) => { mapa[codigo] = mapa[codigo] || nome; });
+  // Perfil também pode existir para uma unidade fixa: nesse caso o nome é a
+  // fonte de exibição escolhida pelo Master e deve sobrescrever o rótulo do
+  // mapa fixo, sem tocar no código que identifica os dados.
+  Object.entries(await unidadesExtras.mapa().catch(() => ({}))).forEach(([codigo, nome]) => { mapa[codigo] = nome; });
   // funde qualquer codigo ANTIGO (Entregas OU Monitor/Adyen) que ainda
   // apareça em alguma fonte (planilha ainda nao resincronizada por completo,
   // cache antigo em memoria, transacao Adyen antiga em cache/snapshot...) no
@@ -4932,6 +4959,43 @@ app.get('/api/loja-status/maquinas', requireSection('suporte'), async (req, res)
       discos: saude.discos.map((d) => ({ ...d, unidadeNome: mapa[d.codigo] || d.codigo })),
       reiniciar: saude.reiniciar.map((r) => ({ ...r, unidadeNome: mapa[r.codigo] || r.codigo })),
       redes: saude.redes.map((r) => ({ ...r, unidadeNome: mapa[r.codigo] || r.codigo })),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// NetWork-Private: inventário da malha privada. A rota é só de Master porque
+// revela endereços internos de VPN e será a base das futuras ações de entrada
+// e reparo do Tailscale. Nunca devolve chave de autenticação nem configuração
+// do cliente; o agente já envia somente o estado público da própria máquina.
+app.get('/api/loja-status/network-private', requireAnySection('network-private'), async (_req, res) => {
+  try {
+    const computadores = await lojaStatus.listar();
+    const maquinas = computadores.map((c) => ({
+      codigo: c.codigo,
+      posto: c.posto,
+      nome: c.nome || c.posto,
+      tipo: c.tipo || null,
+      online: !!c.online,
+      ultimoHeartbeatEm: c.ultimoHeartbeatEm || null,
+      ehServidor: !!c.ehServidor,
+      tailscale: c.tailscale || null,
+    }));
+    const comTailscale = maquinas.filter((m) => m.tailscale && m.tailscale.instalado);
+    res.json({
+      maquinas,
+      resumo: {
+        total: maquinas.length,
+        instalado: comTailscale.length,
+        conectado: comTailscale.filter((m) => m.tailscale.estado === 'Running').length,
+        aguardandoLogin: comTailscale.filter((m) => m.tailscale.estado === 'NeedsLogin').length,
+        semAgente: maquinas.filter((m) => !m.tailscale).length,
+      },
+      // A adesão automática será habilitada somente quando o Master cadastrar
+      // o OAuth restrito no ambiente do servidor. A tela não finge que uma
+      // máquina está autorizada só porque tem o aplicativo instalado.
+      automacaoDisponivel: false,
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -9391,6 +9455,15 @@ function podeVerFaturadoSaltiverso(req, unidade) {
   return !!(req.user && users.ehCargoGerente(req.user.cargo) && (req.permissions.unidades || []).includes(unidade));
 }
 
+// A trava é deliberadamente aplicada no servidor, antes de qualquer venda ou
+// recebimento. Assim não pode ser contornada por tela antiga, outra máquina ou
+// chamada direta à API.
+async function exigirDiaAnteriorFechadoSaltiverso(unidade) {
+  if (await unidadesExtras.apareceEm(unidade, 'parque')) {
+    await saltiversoFechamento.exigirDiaAnteriorFechado(unidade);
+  }
+}
+
 app.get('/api/inventario/unidades', requireSection('inventario'), (req, res) => {
   const unidades = req.isMaster
     ? Object.keys(INVENTARIO_UNIDADES_NOMES)
@@ -9863,6 +9936,7 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     if (!(await unidadesExtras.apareceEm(unidade, 'parque'))) return res.status(400).json({ error: 'Essa unidade não tem Parque habilitado.' });
+    await exigirDiaAnteriorFechadoSaltiverso(unidade);
     // credito de tempo guardado de um checkout antecipado anterior (ver
     // parque.checkout) - consome antes de criar, pra nao aplicar minutos
     // que na verdade nao estavam mais disponiveis
@@ -10138,6 +10212,7 @@ app.post('/api/parque/checkins/:id/adicionar-tempo', requireAnySection('parque',
     if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    await exigirDiaAnteriorFechadoSaltiverso(atual.unidade);
     const registro = await parque.adicionarTempo(req.params.id, {
       minutos: req.body.minutos,
       metodoPagamento: req.body.metodoPagamento,
@@ -10161,6 +10236,7 @@ app.post('/api/parque/checkins/:id/relancar', requireSection('parque-checkin'), 
     if (!req.isMaster && !(req.permissions.unidades || []).includes(origem.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    await exigirDiaAnteriorFechadoSaltiverso(origem.unidade);
     const registro = await parque.relancar(req.params.id, {
       tempoMinutos: req.body.tempoMinutos,
       metodoPagamento: req.body.metodoPagamento,
@@ -10524,6 +10600,7 @@ app.post('/api/festas', requireSection('festas'), async (req, res) => {
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    if (Number(sinal) > 0) await exigirDiaAnteriorFechadoSaltiverso(unidade);
     const registro = await festas.criar({
       unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, desconto, sinal, restante, observacao, referenciaVendaOriginal,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
@@ -10596,6 +10673,7 @@ app.post('/api/festas/:id/recebimentos', requireSection('festas'), async (req, r
     if (!podeReceberFesta(req, atual.unidade)) {
       return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin pode lançar recebimento.' });
     }
+    await exigirDiaAnteriorFechadoSaltiverso(atual.unidade);
     const registro = await festas.registrarRecebimento(req.params.id, {
       valor: req.body.valor, forma: req.body.forma, data: req.body.data,
       porId: req.user.id, porEmail: req.user.email,
@@ -11878,6 +11956,7 @@ app.post('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, re
   try {
     const { unidade, unidadeNome, itens, pagamentos } = req.body;
     if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    await exigirDiaAnteriorFechadoSaltiverso(unidade);
     const venda = await saltiversoVendas.criarVenda({
       unidade, unidadeNome, itens, pagamentos,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
@@ -12030,9 +12109,15 @@ app.post('/api/saltiverso/fechamento/caixa', requireSection('parque-loja'), asyn
 // aprovacao do Master
 app.post('/api/saltiverso/fechamento/caixa/:id/solicitar-alteracao', requireSection('parque-loja'), async (req, res) => {
   try {
+    const caixa = await saltiversoFechamento.getCaixa(req.params.id);
+    if (!caixa) return res.status(404).json({ error: 'Caixa não encontrado.' });
+    if (!podeUnidadeInventario(req, caixa.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const podeAlterarOutroCaixa = req.isMaster || req.isAdmin
+      || (users.ehCargoGerente(req.user?.cargo) && (req.permissions.unidades || []).includes(caixa.unidade));
     const pedido = await saltiversoFechamento.solicitarAlteracaoCaixa(req.params.id, {
       declarado: req.body.declarado, motivo: req.body.motivo,
       solicitadoPorId: req.user.id, solicitadoPorEmail: req.user.email,
+      podeAlterarOutroCaixa,
     });
     broadcast('saltiverso-caixa-alteracao', pedido, 'parque-loja');
     res.json(pedido);
@@ -12085,7 +12170,8 @@ app.put('/api/saltiverso/fechamento/:id', auth.requireMaster, async (req, res) =
 app.get('/api/saltiverso/fechamentos', requireSection('parque-loja'), async (req, res) => {
   const { unidade, dataInicio, dataFim } = req.query;
   if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-  res.json(await saltiversoFechamento.listFechamentos(unidade, dataInicio, dataFim));
+  const fechamentos = await saltiversoFechamento.listFechamentos(unidade, dataInicio, dataFim);
+  res.json(podeVerFaturadoSaltiverso(req, unidade) ? fechamentos : fechamentos.map(saltiversoFechamento.historicoParaOperador));
 });
 
 // ---------- Saltiverso Patteo: passaporte mensal (mensalistas) - reaproveita
@@ -18193,6 +18279,7 @@ function aquecerBoot(promessa, ms) {
   const aquecimento = (async () => {
     await tarefaDeBoot(() => store.init(), 'carregar histórico do Firestore');
     await tarefaDeBoot(() => auth.ensureMaster(), 'garantir usuário Master');
+    await tarefaDeBoot(() => unidadesExtras.listAll(), 'carregar nomes de exibição das unidades');
     await tarefaDeBoot(() => grupos.ensureGrupoSaltiverso(), 'garantir grupo do Saltiverso Patteo');
     await tarefaDeBoot(() => empresas.ensureEmpresasSeed(), 'garantir empresas MVPar/Arcfood');
   })();

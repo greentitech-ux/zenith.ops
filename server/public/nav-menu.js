@@ -71,6 +71,7 @@
       { id: 'nav-noc-incidentes', href: '/noc-incidentes', icone: '🚨', rotulo: 'Incidentes NOC', secoes: ['suporte'] },
       { id: 'nav-noc-rede', href: '/noc-rede', icone: '📈', rotulo: 'Análise de Rede', secoes: ['suporte'] },
       { id: 'nav-noc-maquinas', href: '/noc-maquinas', icone: '💽', rotulo: 'Saúde das Máquinas', secoes: ['suporte'] },
+      { id: 'nav-network-private', href: '/network-private', icone: '🔐', rotulo: 'NetWork-Private', secoes: ['network-private'] },
     ] },
     { grupo: 'Atendimento', itens: [
       { id: 'nav-beniboy', href: '/beniboy', icone: (window.beniboySVG ? window.beniboySVG(20) : '🐝'), rotulo: 'Central do Beniboy', secoes: ['suporte'] },

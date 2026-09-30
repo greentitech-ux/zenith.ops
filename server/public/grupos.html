@@ -950,8 +950,8 @@ const TIPOS_SOLICITACAO_LABEL = { estorno:'Estorno', 'ajuste-fechamento':'Ajuste
 let TODAS_UNIDADES = [];
 // so as que JA TEM perfil (colecao unidadesExtras) - pode ser tanto unidade
 // cadastrada em runtime (tem nome+codigo próprios) quanto uma unidade FIXA
-// que so ganhou perfil (nesse caso o nome aqui é so um espelho, quem manda
-// no nome de exibição da fixa continua sendo o mapa fixo de index.js)
+  // que só ganhou perfil. O nome do perfil é a fonte de exibição oficial:
+  // o código continua imutável, para não quebrar permissões e históricos.
 let UNIDADES_EXTRAS_LISTA = [];
 let UNIDADES_DUPLICADAS = [];
 async function carregarUnidadesExtras(){
@@ -1096,7 +1096,7 @@ function abrirEdicaoUnidadeExtra(codigo){
   if(!base && !perfil) return;
   EDITANDO_UNIDADE_CODIGO = codigo;
   const nome = (base && base.nome) || (perfil && perfil.nome) || codigo;
-  document.getElementById('unidade-perfil-title').textContent = 'Perfil da unidade · ' + nome;
+  document.getElementById('unidade-perfil-title').textContent = 'Perfil e nome da unidade · ' + nome;
   document.getElementById('up-nome').value = nome;
   document.getElementById('up-marca').innerHTML = '<option value="">— sem marca definida —</option>'
     + Object.entries(MARCAS_LABEL).map(([k,v])=>`<option value="${escapeHtml(k)}">${escapeHtml(v)}</option>`).join('');

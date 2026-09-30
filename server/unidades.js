@@ -64,10 +64,20 @@ const listaVaziaOuValida = (lista, validos) => sanitizarLista(lista, validos);
 
 async function listUncached() {
   const snap = await COLLECTION.orderBy('nome', 'asc').get();
-  return snap.docs.map((d) => d.data());
+  const lista = snap.docs.map((d) => d.data());
+  nomesEmMemoria = new Map(lista.map((u) => [u.codigo, u.nome]));
+  return lista;
 }
 const cache = createCache(listUncached, 5 * 60 * 1000);
 const listAll = cache.cached;
+
+// O código é a identidade imutável; este mapa é só o nome de exibição. Ele
+// deixa os caminhos síncronos do servidor (alertas, PDFs e NOC) respeitarem a
+// mesma troca feita pelo Master, sem regravar nem trocar códigos históricos.
+let nomesEmMemoria = new Map();
+function nomeConfigurado(codigo) {
+  return nomesEmMemoria.get(String(codigo)) || null;
+}
 
 // mapa {codigo: nome} pronto pra mesclar nos UNIDADES_NOMES das paginas e
 // no construirUnidadesMapa de index.js
@@ -157,6 +167,7 @@ async function criar({ codigo, nome, areas, tiposSolicitacao, porEmail }, codigo
     criadoEm: new Date().toISOString(),
   };
   await ref.set(registro);
+  nomesEmMemoria.set(registro.codigo, registro.nome);
   cache.invalidar();
   return registro;
 }
@@ -184,6 +195,7 @@ async function atualizar(id, { nome, areas, tiposSolicitacao }, nomesReservados)
   if (areas !== undefined) patch.areas = listaVaziaOuValida(areas, AREAS_VALIDAS);
   if (tiposSolicitacao !== undefined) patch.tiposSolicitacao = listaVaziaOuValida(tiposSolicitacao, TIPOS_SOLICITACAO_VALIDOS);
   await ref.update(patch);
+  nomesEmMemoria.set(snap.data().codigo, patch.nome);
   cache.invalidar();
   return { ...snap.data(), ...patch };
 }
@@ -222,7 +234,18 @@ async function upsertPerfil(codigo, { nome, areas, tiposSolicitacao, marca, porE
     criadoEm: (atual && atual.criadoEm) || agora,
     atualizadoEm: agora,
   };
+  // Cada renomeação fica auditável. Dados e permissões seguem usando o código,
+  // portanto mudar o rótulo não mistura unidades nem perde histórico.
+  if (atual && atual.nome !== nomeLimpo) {
+    registro.historicoNomes = [
+      ...(Array.isArray(atual.historicoNomes) ? atual.historicoNomes : []),
+      { de: atual.nome, para: nomeLimpo, em: agora, porEmail: porEmail || null },
+    ].slice(-20);
+  } else if (atual && Array.isArray(atual.historicoNomes)) {
+    registro.historicoNomes = atual.historicoNomes;
+  }
   await COLLECTION.doc(registro.id).set(registro);
+  nomesEmMemoria.set(codigoLimpo, nomeLimpo);
   cache.invalidar();
   return registro;
 }
@@ -299,6 +322,7 @@ async function remover(id, contarRegistros) {
     }
   }
   await COLLECTION.doc(id).delete();
+  nomesEmMemoria.delete(dados.codigo);
   cache.invalidar();
   return dados;
 }
@@ -308,5 +332,6 @@ module.exports = {
   listAll, mapa, criar, atualizar, remover, upsertPerfil,
   nomeNormalizado, agruparPorNome, diagnosticarNomesRepetidos,
   perfil, apareceEm, aceitaTipo, filtrarMapaPorArea, codigosRestritosDe,
+  nomeConfigurado,
   invalidar: () => cache.invalidar(),
 };

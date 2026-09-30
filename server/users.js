@@ -29,7 +29,7 @@ function validarPalavraRecuperacao(valor) {
   return palavra;
 }
 
-const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'kpis', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao', 'tarefas', 'estacao-salao', 'estacao-caixa', 'estacao-fechamento'];
+const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'kpis', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'network-private', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao', 'tarefas', 'estacao-salao', 'estacao-caixa', 'estacao-fechamento'];
 
 // a qual vertical de negocio (empresas.TIPOS_NEGOCIO_VALIDOS) cada secao
 // pertence - usado pra nao mostrar (no checklist de permissoes e no menu)
@@ -46,7 +46,7 @@ const SECTION_VERTICAIS = {
   'entregas-lancamento': ['alimentacao'], ifood: ['alimentacao'], inventario: ['alimentacao'],
   parque: ['alimentacao'], 'parque-checkin': ['alimentacao'], 'parque-loja': ['alimentacao'],
   festas: ['alimentacao'], 'abastecimento-carrinho': ['alimentacao'], 'abastecimento-loja': ['alimentacao'],
-  cofre: ['*'], solicitacoes: ['*'], tecnico: ['*'], suporte: ['*'], manutencao: ['*'],
+  cofre: ['*'], solicitacoes: ['*'], tecnico: ['*'], suporte: ['*'], 'network-private': ['*'], manutencao: ['*'],
   'ativos-ti': ['*'], 'central-solucoes': ['*'], rh: ['*'], formularios: ['*'], tarefas: ['*'],
   // Estação da Comida (rodízio com comanda por pessoa - ver estacaoComida.js)
   'estacao-salao': ['alimentacao'], 'estacao-caixa': ['alimentacao'], 'estacao-fechamento': ['alimentacao'],
@@ -70,8 +70,14 @@ const TIPOS_SOLICITACAO = ['estorno', 'ajuste-fechamento', 'compra', 'manutencao
 
 function sanitizePermissions(input) {
   const p = input || {};
+  const sections = Array.isArray(p.sections) ? p.sections.filter((s) => VALID_SECTIONS.includes(s)) : [];
+  // NetWork-Private é uma função de infraestrutura: quem a recebe precisa
+  // enxergar também o NOC que fornece o inventário e os alertas da máquina.
+  // A dependência é aplicada no servidor, não só no checkbox da tela, para
+  // não haver uma conta com a nova tela liberada mas sem o NOC funcional.
+  if (sections.includes('network-private') && !sections.includes('suporte')) sections.push('suporte');
   return {
-    sections: Array.isArray(p.sections) ? p.sections.filter((s) => VALID_SECTIONS.includes(s)) : [],
+    sections,
     unidades: Array.isArray(p.unidades) ? p.unidades.map(String) : [],
     vaultSubgroups: Array.isArray(p.vaultSubgroups) ? p.vaultSubgroups.map(String) : [],
     tiposSolicitacao: Array.isArray(p.tiposSolicitacao) ? p.tiposSolicitacao.filter((t) => TIPOS_SOLICITACAO.includes(t)) : [],
