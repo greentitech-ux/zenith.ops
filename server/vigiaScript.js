@@ -50,7 +50,9 @@
 // 128: cartão do Suporte TI no canto inferior direito do modelo básico escuro.
 // 129: refino do cartão: branco translúcido e colunas sem sobreposição.
 // 130: ID do AnyDesk lido também dos arquivos locais quando --get-id falha.
-const VERSAO_VIGIA = 130;
+// 131: invalida o cache de logo do modelo básico e recebe a revisão visual
+//      atualizada, inclusive o cartão de suporte no fundo escuro.
+const VERSAO_VIGIA = 131;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
