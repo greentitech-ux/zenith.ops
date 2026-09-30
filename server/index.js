@@ -4261,14 +4261,38 @@ function codigoEhFixo(codigo) {
   return !(c.secao === 'Monitor / Disputas (Adyen)' && c.grupo === 'Outras');
 }
 
-// nome canonico de um codigo de unidade, olhando os mapas fixos nesta ordem
-// (apelidos manuais > fechamento > entregas > ifood) - usado sempre que
-// alguem precisa MOSTRAR o nome de uma unidade a partir do codigo, pra nunca
-// depender do unidadeNome gravado num documento antigo (que pode ter sido
-// salvo errado, ex: entregasSync.js gravava o proprio codigo como nome)
-function nomeCanonicoUnidade(codigo, fallback) {
+// Nome original do código, antes de qualquer personalização feita pelo Master.
+// Os códigos vindos de Adyen/planilha continuam imutáveis; só o rótulo muda.
+function nomeBaseUnidade(codigo, fallback) {
   return UNIDADES_APELIDOS[codigo] || FECHAMENTO_UNIDADES_NOMES[codigo] || ENTREGAS_UNIDADES_NOMES[codigo]
     || ifoodClient.IFOOD_UNIDADES_NOMES[codigo] || fallback || codigo;
+}
+
+// Um mesmo ponto físico pode ter mais de um código (Adyen, fechamento e
+// entregas). Alterar o nome no código principal propaga para esses apelidos
+// equivalentes, sem jamais mudar a identidade gravada nos documentos.
+function nomeConfiguradoOuEquivalente(codigo) {
+  const direto = unidadesExtras.nomeConfigurado(codigo);
+  if (direto) return direto;
+  const base = nomeBaseUnidade(codigo);
+  const codigosConhecidos = new Set([
+    ...Object.keys(FECHAMENTO_UNIDADES_NOMES), ...Object.keys(ENTREGAS_UNIDADES_NOMES),
+    ...Object.keys(ifoodClient.IFOOD_UNIDADES_NOMES), ...Object.keys(UNIDADES_APELIDOS),
+  ]);
+  for (const outro of codigosConhecidos) {
+    if (outro !== codigo && nomeBaseUnidade(outro) === base) {
+      const nome = unidadesExtras.nomeConfigurado(outro);
+      if (nome) return nome;
+    }
+  }
+  return null;
+}
+
+// Nome canônico mostrado no sistema. Prioriza a configuração do Master e só
+// depois os mapas fixos, para históricos antigos passarem a exibir o novo nome
+// sem regravar milhares de documentos nem quebrar filtros e permissões.
+function nomeCanonicoUnidade(codigo, fallback) {
+  return nomeConfiguradoOuEquivalente(codigo) || nomeBaseUnidade(codigo, fallback);
 }
 
 // resolve um "IDPULSE" (codigo numerico da loja, como aparece na coluna
@@ -4311,7 +4335,10 @@ async function construirUnidadesMapaSemCache() {
   (await entregasLive.listAll()).forEach((e) => { if (e.unidade) mapa[e.unidade] = e.unidadeNome || mapa[e.unidade] || e.unidade; });
   // unidades cadastradas pelo Master em runtime (unidades.js) - loja nova ou
   // unidade administrativa que ainda nao existe em nenhuma lista fixa
-  Object.entries(await unidadesExtras.mapa().catch(() => ({}))).forEach(([codigo, nome]) => { mapa[codigo] = mapa[codigo] || nome; });
+  // Perfil também pode existir para uma unidade fixa: nesse caso o nome é a
+  // fonte de exibição escolhida pelo Master e deve sobrescrever o rótulo do
+  // mapa fixo, sem tocar no código que identifica os dados.
+  Object.entries(await unidadesExtras.mapa().catch(() => ({}))).forEach(([codigo, nome]) => { mapa[codigo] = nome; });
   // funde qualquer codigo ANTIGO (Entregas OU Monitor/Adyen) que ainda
   // apareça em alguma fonte (planilha ainda nao resincronizada por completo,
   // cache antigo em memoria, transacao Adyen antiga em cache/snapshot...) no
@@ -18215,6 +18242,7 @@ function aquecerBoot(promessa, ms) {
   const aquecimento = (async () => {
     await tarefaDeBoot(() => store.init(), 'carregar histórico do Firestore');
     await tarefaDeBoot(() => auth.ensureMaster(), 'garantir usuário Master');
+    await tarefaDeBoot(() => unidadesExtras.listAll(), 'carregar nomes de exibição das unidades');
     await tarefaDeBoot(() => grupos.ensureGrupoSaltiverso(), 'garantir grupo do Saltiverso Patteo');
     await tarefaDeBoot(() => empresas.ensureEmpresasSeed(), 'garantir empresas MVPar/Arcfood');
   })();
