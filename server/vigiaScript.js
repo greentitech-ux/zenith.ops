@@ -47,7 +47,8 @@
 // 124: nome da máquina ocupa proporcionalmente a placa nas artes enviadas.
 // 125: revisão própria reaplica o fundo configurado pelo NOC, inclusive sobre
 //      uma imagem antiga válida, sem reaplicar a política inteira.
-const VERSAO_VIGIA = 127;
+// 128: cartão do Suporte TI no canto inferior direito do modelo básico escuro.
+const VERSAO_VIGIA = 128;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2148,6 +2149,36 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $br = New-Object System.Drawing.SolidBrush($cor)',
     '  try { $g.DrawString($texto, $fonte, $br, [single]($cx - $tam.Width / 2), [single]$y) } finally { $br.Dispose() }',
     '}',
+    // Cartão de contato presente nas artes oficiais. O modelo básico também é
+    // uma tela institucional: quando não há imagem enviada, ele precisa deixar
+    // visível como pedir suporte sem cobrir a identidade da máquina.
+    'function Desenhar-ContatoSuporte($g, $W, $H, $e) {',
+    '  $largura = [math]::Min(470 * $e, $W - (48 * $e)); $altura = 104 * $e',
+    // A margem de baixo deixa o cartão visível acima da barra de tarefas.
+    '  $x = $W - $largura - (34 * $e); $y = $H - $altura - (74 * $e)',
+    '  $cartao = Retangulo-RedondoCarimbo ([single]$x) ([single]$y) ([single]$largura) ([single]$altura) ([single](16 * $e))',
+    '  $brCartao = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml("#0a527f"))',
+    '  try { $g.FillPath($brCartao, $cartao) } finally { $brCartao.Dispose(); $cartao.Dispose() }',
+    '  $caneta = New-Object System.Drawing.Pen([System.Drawing.Color]::White, [single][math]::Max(2, 3 * $e))',
+    '  try {',
+    '    $caneta.StartCap = [System.Drawing.Drawing2D.LineCap]::Round; $caneta.EndCap = [System.Drawing.Drawing2D.LineCap]::Round',
+    '    $onda = @((New-Object System.Drawing.PointF([single]($x + 27 * $e), [single]($y + 62 * $e))), (New-Object System.Drawing.PointF([single]($x + 43 * $e), [single]($y + 62 * $e))), (New-Object System.Drawing.PointF([single]($x + 53 * $e), [single]($y + 40 * $e))), (New-Object System.Drawing.PointF([single]($x + 68 * $e), [single]($y + 78 * $e))), (New-Object System.Drawing.PointF([single]($x + 82 * $e), [single]($y + 58 * $e))), (New-Object System.Drawing.PointF([single]($x + 108 * $e), [single]($y + 58 * $e))))',
+    '    $g.DrawLines($caneta, [System.Drawing.PointF[]]$onda)',
+    '  } finally { $caneta.Dispose() }',
+    '  $divisor = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(115, 214, 235, 248))',
+    '  try { $g.FillRectangle($divisor, [single]($x + 200 * $e), [single]($y + 20 * $e), [single][math]::Max(1, 2 * $e), [single]($altura - 40 * $e)) } finally { $divisor.Dispose() }',
+    '  $fNome = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (31 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  $fInfo = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (15 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  $fTelefone = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (28 * $e) ([System.Drawing.FontStyle]::Bold)',
+    '  try {',
+    '    $brBranco = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)',
+    '    try {',
+    '      $g.DrawString("NoPulso", $fNome, $brBranco, [single]($x + 118 * $e), [single]($y + 37 * $e))',
+    '      $g.DrawString("SUPORTE TI · 24H", $fInfo, $brBranco, [single]($x + 222 * $e), [single]($y + 17 * $e))',
+    '      $g.DrawString("(81) 99514-8654", $fTelefone, $brBranco, [single]($x + 222 * $e), [single]($y + 44 * $e))',
+    '    } finally { $brBranco.Dispose() }',
+    '  } finally { $fNome.Dispose(); $fInfo.Dispose(); $fTelefone.Dispose() }',
+    '}',
     // Medidas no desenho de referencia (1920x1080, o das artes do grupo) e
     // escaladas: na horizontal pelo lado que limita, na vertical (Makeline)
     // pela largura - senao o bloco sairia minusculo no meio da tela em pe.
@@ -2164,6 +2195,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // maiores, com pouco espaco morto no cartao da marca. A composicao inteira
     // continua centralizada na tela, inclusive em monitor vertical.
     '  $alturaBloco = 245.0; if ($temCartao) { $alturaBloco += 480 }; if ($temGrupo) { $alturaBloco += 220 }',
+    // O cartão de suporte é desenhado no canto; a composição central não muda.
     '  $y = ($H - $alturaBloco * $e) / 2.0; $cx = $W / 2.0',
     '  $bmp = New-Object System.Drawing.Bitmap -ArgumentList $W, $H',
     '  try {',
@@ -2207,6 +2239,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      $espacada = ($linha.ToCharArray() | ForEach-Object { [string]$_ }) -join [string][char]0x200A',
     '      $fLinha = Nova-FonteCarimbo @("Segoe UI Semibold","Segoe UI","Arial") (25 * $e) ([System.Drawing.FontStyle]::Regular)',
     '      try { Texto-Centralizado $g $espacada $fLinha ([System.Drawing.ColorTranslator]::FromHtml("#aab4bf")) $cx $y } finally { $fLinha.Dispose() }',
+    '      Desenhar-ContatoSuporte $g $W $H $e',
     '    } finally { $g.Dispose() }',
     '    $bmp.Save($saida, [System.Drawing.Imaging.ImageFormat]::Png)',
     '  } finally { $bmp.Dispose() }',

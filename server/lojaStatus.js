@@ -373,7 +373,9 @@ const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
 // continua tendo prioridade e substitui apenas o seu bloco.
 // Revisão visual do papel padrão. Ao mudar, o agente redesenha somente o
 // wallpaper básico, sem reaplicar as demais políticas da estação.
-const REVISAO_MODELO_BASICO = 3;
+// Revisão 4: inclui o cartão de contato do Suporte TI no canto inferior direito
+// do fallback escuro. Não afeta artes enviadas pelo Master.
+const REVISAO_MODELO_BASICO = 4;
 // Uma revisão visual não deve reexecutar USB, atalhos, barra e arquivamento.
 // O heartbeat leva esta chave separada: quando ela mudar, o agente troca só o
 // papel de parede, inclusive se o Windows ainda estiver com uma imagem antiga.
