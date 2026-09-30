@@ -13687,6 +13687,7 @@ $r | ConvertTo-Json -Depth 6 -Compress
         cfgOff0.papelDeParedeSemArte === false && !!cfgOff0.modeloBasico,
       'antes de qualquer upload, os logos oficiais padrão já são prometidos à máquina':
         cfgOn0.modeloBasico && cfgOn0.modeloBasico.logoMarca === true && cfgOn0.modeloBasico.logoGrupo === true
+        && cfgOn0.modeloBasico.logoMarcaVersao === '1' && cfgOn0.modeloBasico.logoGrupoVersao === '1'
         && logoGrupoAntes.status === 200,
       'o logo pede a senha do Master, só aceita marca/grupo que existem e só imagem':
         semSenha.status === 400 && tipoRuim.status === 400 && marcaRuim.status === 400 && naoImagem.status === 400
@@ -13702,6 +13703,8 @@ $r | ConvertTo-Json -Depth 6 -Compress
         cfgOn1.versaoModeloBasico === hbOn1.versaoModeloBasico,
       'a máquina baixa o logo DELA com o token; sem token é recusado':
         cfgOn1.modeloBasico.logoMarca === true && logoMaq.status === 200 && logoSemToken.status === 403,
+      'a configuração entrega a versão da logo para invalidar cache no agente':
+        /^\d{10,}$/.test(String(cfgOn1.modeloBasico.logoMarcaVersao || '')),
       'o Master vê o logo e a lista diz o que já subiu':
         logoMaster.status === 200
         && (listaJ.logosCarimbo && listaJ.logosCarimbo.marcas || []).some((m) => m.id === 'dominos' && m.temLogo === true)

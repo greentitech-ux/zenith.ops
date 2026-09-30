@@ -373,9 +373,9 @@ const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
 // continua tendo prioridade e substitui apenas o seu bloco.
 // Revisão visual do papel padrão. Ao mudar, o agente redesenha somente o
 // wallpaper básico, sem reaplicar as demais políticas da estação.
-// Revisão 5: contato em branco translúcido e com colunas proporcionais ao
-// fundo escuro. Não afeta artes enviadas pelo Master.
-const REVISAO_MODELO_BASICO = 5;
+// Revisão 6: força uma nova montagem dos fundos básicos já existentes após
+// a correção da atualização de logos. Não afeta artes enviadas pelo Master.
+const REVISAO_MODELO_BASICO = 6;
 // Uma revisão visual não deve reexecutar USB, atalhos, barra e arquivamento.
 // O heartbeat leva esta chave separada: quando ela mudar, o agente troca só o
 // papel de parede, inclusive se o Windows ainda estiver com uma imagem antiga.
@@ -2050,6 +2050,11 @@ async function configuracaoAgente(codigo, posto, token, { unidadeNome } = {}) {
       marcaRotulo: logos && logos.marca ? (unidades.MARCAS_LABEL[logos.marca] || logos.marca) : null,
       logoMarca: !!(logos && logos.logoMarca),
       logoGrupo: !!(logos && logos.logoGrupo),
+      // A URL do download é estável para proteger o token da máquina. A versão
+      // separada permite ao agente acrescentar um cache-buster quando o Master
+      // substituir o PNG, sem expor o caminho do Storage.
+      logoMarcaVersao: logos && logos.logoMarca ? String(logos.logoMarca.versao || '') : null,
+      logoGrupoVersao: logos && logos.logoGrupo ? String(logos.logoGrupo.versao || '') : null,
     },
   };
 }

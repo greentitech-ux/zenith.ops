@@ -2135,9 +2135,13 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // chamou desiste desta vez (tenta de novo na proxima): aplicar sem o logo
     // e se dar por aplicado deixaria o nome no lugar do logo ate a proxima
     // troca de arte.
-    'function Baixar-LogoCarimbo([string]$tipo) {',
+    'function Baixar-LogoCarimbo([string]$tipo, [string]$versao = "") {',
     '  $arq = Join-Path (Split-Path -Parent $PSCommandPath) "logo-carimbo-$tipo.img"',
-    '  try { Invoke-WebRequest -Uri "$UrlLogoCarimbo/$tipo" -Headers $CabecalhosAgente -OutFile $arq -TimeoutSec 20 -UseBasicParsing | Out-Null } catch { Escrever-Log "Papel de parede: nao baixou o logo ($tipo): $($_.Exception.Message)"; return $null }',
+    '  $uri = "$UrlLogoCarimbo/$tipo"',
+    // A rota identifica a máquina pelo token; `v` não é dado sensível. Ele
+    // impede que proxy/CDN entregue o PNG anterior depois de uma troca.
+    '  if ($versao) { $uri += "?v=$([uri]::EscapeDataString($versao))" }',
+    '  try { Invoke-WebRequest -Uri $uri -Headers $CabecalhosAgente -OutFile $arq -TimeoutSec 20 -UseBasicParsing | Out-Null } catch { Escrever-Log "Papel de parede: nao baixou o logo ($tipo): $($_.Exception.Message)"; return $null }',
     '  if (-not (Test-Path -LiteralPath $arq)) { return $null }',
     '  return $arq',
     '}',
@@ -2277,8 +2281,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     'function Novo-ModeloBasico($modelo) {',
     '  $saida = Caminho-ModeloBasico',
     '  $arqMarca = $null; $arqGrupo = $null',
-    '  if ($modelo -and $modelo.logoMarca) { $arqMarca = Baixar-LogoCarimbo "marca"; if (-not $arqMarca) { return $null } }',
-    '  if ($modelo -and $modelo.logoGrupo) { $arqGrupo = Baixar-LogoCarimbo "grupo"; if (-not $arqGrupo) { return $null } }',
+    '  if ($modelo -and $modelo.logoMarca) { $arqMarca = Baixar-LogoCarimbo "marca" "$($modelo.logoMarcaVersao)"; if (-not $arqMarca) { return $null } }',
+    '  if ($modelo -and $modelo.logoGrupo) { $arqGrupo = Baixar-LogoCarimbo "grupo" "$($modelo.logoGrupoVersao)"; if (-not $arqGrupo) { return $null } }',
     '  try { return (Desenhar-ModeloBasico $saida $modelo $arqMarca $arqGrupo) }',
     '  catch { Escrever-Log "Papel de parede: nao montei o modelo basico ($($_.Exception.Message))."; return $null }',
     '}',

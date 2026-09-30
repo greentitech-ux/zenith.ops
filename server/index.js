@@ -2455,6 +2455,10 @@ app.get('/api/loja-status/:codigo/computadores/:posto/logo-carimbo/:tipo', async
   try {
     const logo = await lojaStatus.logoCarimboDaMaquina(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null, req.params.tipo);
     if (!logo) return res.sendStatus(404);
+    // Logo substituída precisa chegar no próximo ciclo do agente; não deixe
+    // navegador, proxy ou CDN devolver a versão anterior da mesma rota.
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.set('Pragma', 'no-cache');
     // Os padrões são arquivos versionados junto do sistema, não itens do
     // Storage. Essa propriedade só vem do mapa interno em lojaStatus.js.
     if (logo.arquivoPublico) {
