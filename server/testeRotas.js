@@ -28015,6 +28015,70 @@ $r | ConvertTo-Json -Depth 4 -Compress
   if (!okPreparo) ruins += 1;
   console.log(`${okPreparo ? '✓' : '✗'} Preparo pelo Claude: schema por ferramenta, unidade por nome, estorno pelo número, formulário em rascunho, assinatura só pela digital do Master e envio ao Conecta registrado`);
 
+  // ---- ABASTECIMENTO DO CARRINHO: leitura pelo conector (30/09/2026) ----
+  // Relatório da madrugada do carrinho do aeroporto: quanto ENTRA (envio) e
+  // o descarte (remake) na janela 22:00->05:00, que CRUZA a meia-noite - o
+  // registro de 01:30 do dia 02 tem que cair na noite de 01. Não há venda
+  // nem valor no módulo: isso NÃO pode virar número inventado (§6).
+  let okAbastCarr = false;
+  try {
+    const cw = require(__dirname + '/coworkApi.js');
+    const ab = require(__dirname + '/abastecimentoCarrinho.js');
+    const masterAntesAb = process.env.NOPULSO_AGENT_MASTER;
+    process.env.NOPULSO_AGENT_MASTER = 'prep-master@teste.local';
+    // limpa o que outros blocos semearam, pra contagem determinística
+    for (const k of [...DOCS.keys()]) if (k.startsWith('abastecimentoCarrinho/')) DOCS.delete(k);
+    // horários em UTC: America/Sao_Paulo = UTC-3, então 22:00 local = 01:00Z
+    // do dia seguinte, e 01:30 local = 04:30Z do mesmo dia.
+    const semear = (id, tipo, iso, pizzas, extra = {}) => DOCS.set(`abastecimentoCarrinho/${id}`, {
+      id, tipo, origem: tipo === 'ENVIO' ? 'LOJA' : 'CARRINHO', pizzas: pizzas || {}, insumos: [], avarias: [],
+      remake: null, criadoEm: iso, operadorNome: 'Op Teste', ...extra,
+    });
+    // NOITE de 01/09: envio às 22:30 local (01/09) e às 01:30 local (02/09)
+    semear('e1', 'ENVIO', '2026-09-02T01:30:00Z', { calabresa: 10, pepperoni: 0, mussarela: 0 }); // 22:30 de 01/09
+    semear('e2', 'ENVIO', '2026-09-02T04:30:00Z', { calabresa: 0, pepperoni: 5, mussarela: 0 });  // 01:30 de 02/09 -> noite de 01
+    semear('r1', 'REMAKE', '2026-09-02T04:45:00Z', {}, { remake: { pizzas: { mussarela: 2 }, motivo: 'queimou' } }); // 01:45 -> noite de 01
+    // FORA da janela: 20:00 local (antes das 22h) e 07:00 local (depois das 05h)
+    semear('fora1', 'ENVIO', '2026-09-01T23:00:00Z', { calabresa: 99 }); // 20:00 de 01/09
+    semear('fora2', 'ENVIO', '2026-09-02T10:00:00Z', { calabresa: 88 }); // 07:00 de 02/09
+    // NOITE de 02/09: envio às 23:00 local
+    semear('e3', 'ENVIO', '2026-09-03T02:00:00Z', { calabresa: 3, pepperoni: 3, mussarela: 0 }); // 23:00 de 02/09
+    ab.invalidar();
+
+    const chamar = async (entrada) => (await cw.executar({ nome: 'listar_abastecimento_carrinho', entrada })).resultado;
+    const r = await chamar({ dataInicio: '2026-09-01', dataFim: '2026-09-30', horaInicio: '22:00', horaFim: '05:00' });
+    const soEnvio = await chamar({ dataInicio: '2026-09-01', dataFim: '2026-09-30', horaInicio: '22:00', horaFim: '05:00', tipo: 'envio' });
+    const noite1 = await chamar({ dataInicio: '2026-09-01', dataFim: '2026-09-01', horaInicio: '22:00', horaFim: '05:00' });
+    const porNoite = await chamar({ dataInicio: '2026-09-01', dataFim: '2026-09-30', horaInicio: '22:00', horaFim: '05:00', agrupar: 'dia' });
+    const tipoRuim = await (async () => { try { await chamar({ tipo: 'venda' }); return null; } catch (e) { return e.message; } })();
+
+    const conf = {
+      'janela 22h-05h cruza a meia-noite: 01:30 do dia 02 cai na noite de 01': (() => {
+        const e2 = r.registros.find((x) => x.observacao === null && x.hora === '01:30');
+        return !!e2 && e2.noiteOperacional === '2026-09-01';
+      })(),
+      'fica só o que está na janela (fora das 22h-05h não entra)': !r.registros.some((x) => x.totalPizzas === 99 || x.totalPizzas === 88),
+      'total de envio e de remake certos na janela do mês': r.totais.pizzasEnviadas === 21 && r.totais.remakes === 2,
+      'a noite de 01 junta o envio de 22:30 e o de 01:30 (10+5=15) mais o remake 2': (() => {
+        const n = porNoite.agrupamento.valores['2026-09-01'];
+        return n && n.ENVIO === 15 && n.REMAKE === 2;
+      })(),
+      'filtro por noite única traz só aquela noite': noite1.registros.every((x) => x.noiteOperacional === '2026-09-01') && noite1.totais.pizzasEnviadas === 15,
+      'tipo=envio traz só ENVIO': soEnvio.registros.every((x) => x.tipo === 'ENVIO') && !soEnvio.registros.some((x) => x.tipo === 'REMAKE'),
+      'remake carrega o motivo': r.registros.some((x) => x.tipo === 'REMAKE' && x.motivoRemake === 'queimou'),
+      '% de remake sobre envio calculado': r.totais.percentRemakeSobreEnvio === Math.round((2 / 21) * 1000) / 10,
+      'não inventa venda: tipo inválido é recusado com a lista, e o aviso diz que não há venda': /Valores aceitos/.test(tipoRuim || '') && /envio/.test(tipoRuim || '') && /não registra VENDA/i.test(r.aviso || ''),
+      'a ferramenta é de leitura (sem idempotencyKey)': (cw.ferramentasMcp().find((f) => f.name === 'listar_abastecimento_carrinho') || {}).annotations.readOnlyHint === true,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAbastCarr = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} [tot=${JSON.stringify(r.totais)} noite=${JSON.stringify(porNoite.agrupamento)} tipoRuim=${tipoRuim}]`);
+    process.env.NOPULSO_AGENT_MASTER = masterAntesAb;
+    if (masterAntesAb === undefined) delete process.env.NOPULSO_AGENT_MASTER;
+  } catch (e) { okAbastCarr = false; console.log('  erro: ' + e.message + ' ' + (e.stack || '').split('\n')[1]); }
+  if (!okAbastCarr) ruins += 1;
+  console.log(`${okAbastCarr ? '✓' : '✗'} Abastecimento do Carrinho: leitura por noite operacional (janela cruza a meia-noite), envio e remake, sem inventar venda`);
+
   // ------------------------------------------------------------------
   // TABLET E CELULAR NO PARQUE: O QUE O NAVEGADOR SABE DO APARELHO.
   //

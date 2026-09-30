@@ -1031,4 +1031,7 @@ module.exports = {
   TIPOS, SABORES, criar, remakesDoDia, sanitizarRemake, pizzasDoRemake, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, editarDataHoraDireto, getConfig, salvarConfig, salvarCapacidades, arquivarAntigos,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, buscarOperadorPorUsuario, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
+  // quem escreve por fora do módulo (teste, restauração de backup) derruba o
+  // cache de 5min, senão a leitura seguinte devolve o estado velho
+  invalidar: () => cache.invalidar(),
 };

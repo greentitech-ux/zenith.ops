@@ -21,6 +21,7 @@ const store = require('./store');
 const adyenDisputas = require('./adyenDisputas');
 const refunds = require('./refunds');
 const catalogo = require('./coworkCatalogo');
+const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const suporteChat = require('./suporteChat');
 
 // O index.js liga aqui o broadcast da tela: sem isso, o comentário ou o
@@ -65,6 +66,7 @@ const FERRAMENTAS = Object.freeze({
   registrar_envio_conecta: { descricao: 'Registra no NoPulso que o PDF ASSINADO foi enviado no portal do Conecta, com o número de protocolo que o portal deu. Use só depois de enviar de fato. Comenta no ticket de origem.', risco: 'baixo', obrigatorios: ['protocolo'] },
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
   consultar_noc: { descricao: 'Consulta o estado atual e compacto dos computadores monitorados.', risco: 'leitura', obrigatorios: [] },
+  listar_abastecimento_carrinho: { descricao: 'Lê o Abastecimento do Carrinho (Dom Car Aero Recife, abastecido pela Praça Aeroporto). Tipos REAIS: envio (produção que a loja mandou), remake (descarte por qualidade, com motivo), pedido (o que o carrinho pediu), contagem (com avarias). NÃO tem venda nem valor - venda sai do fechamento/PDV. Janela por hora que cruza a meia-noite (22:00→05:00): registro de 01:30 do dia 02 cai na noite de 01. dataInicio/dataFim = noite operacional. agrupar: nenhum, dia (noite), hora, produto (sabor), tipo. Sabores: calabresa, pepperoni, mussarela.', risco: 'leitura', obrigatorios: [] },
   pesquisar_emails: { descricao: 'Pesquisa a caixa corporativa autorizada usando a sintaxe de busca do Gmail.', risco: 'leitura', obrigatorios: [] },
   ler_email: { descricao: 'Lê uma mensagem específica encontrada pela pesquisa.', risco: 'leitura', obrigatorios: ['emailId'] },
   enviar_email: { descricao: 'Envia e-mail pela caixa corporativa autorizada.', risco: 'alto', obrigatorios: ['para', 'assunto', 'texto'], autorizar: true },
@@ -123,6 +125,10 @@ const PROPRIEDADES_COMUNS = {
   responsavelEmail: { type: 'string', description: 'E-mail ou username do responsável. Sem ele, a tarefa fica com o Master.' },
   formularioId: { type: 'string', description: 'Id interno do formulário (vem de criar_formulario/obter_formulario).' },
   gcom: { type: 'boolean', description: 'consultar_noc: true = só as máquinas marcadas "Possui GCOM" no cadastro; false = só as sem.' },
+  dataInicio: { type: 'string', description: 'AAAA-MM-DD (noite operacional inicial).' },
+  dataFim: { type: 'string', description: 'AAAA-MM-DD (noite operacional final).' },
+  horaFim: { type: 'string', description: 'HH:MM. Com horaFim <= horaInicio a janela cruza a meia-noite (ex.: 22:00→05:00).' },
+  agrupar: { type: 'string', enum: ['nenhum', 'dia', 'hora', 'produto', 'tipo'], description: 'listar_abastecimento_carrinho: como somar. nenhum = linha por registro.' },
   estornoId: { type: 'string', description: 'Id interno do estorno (vem de obter_estorno).' },
   protocolo: { type: 'string', description: 'Número do protocolo de suporte/Beniboy ou do portal Conecta, conforme a ferramenta.' },
   resumo: { type: 'string', description: 'Resumo interno objetivo do que foi resolvido no atendimento.' },
@@ -162,6 +168,7 @@ const PARAMETROS = Object.freeze({
   consultar_autorizacao: ['autorizacaoId'],
   preparar_reuniao: ['termo', 'unidade', 'limite'],
   consultar_noc: ['unidade', 'gcom'],
+  listar_abastecimento_carrinho: ['unidade', 'dataInicio', 'dataFim', 'horaInicio', 'horaFim', 'tipo', 'agrupar', 'limite'],
   pesquisar_emails: ['consulta', 'limite'],
   ler_email: ['emailId'],
   enviar_email: ['para', 'assunto', 'texto'],
@@ -1024,6 +1031,107 @@ async function registrarNaDisputa(nome, p, ator) {
   return `Disputa ${r.id} registrada como PERDIDA (aceita).`;
 }
 
+// ABASTECIMENTO DO CARRINHO (leitura, 30/09/2026). O módulo tem 4 tipos
+// REAIS: ENVIO (a loja manda pro carrinho = "entra"), REMAKE (descarte por
+// qualidade, com motivo), PEDIDO (o que o carrinho pediu), CONTAGEM (o que
+// foi contado no carrinho, com avarias). NÃO existe venda nem valor - o que
+// "sai" (vendido/consumido) não é lançado aqui; sai do fechamento/PDV, ou se
+// infere da contagem. É uma operação só (Dom Car Aero Recife), então não há
+// unidade por registro. Sabores: calabresa, pepperoni, mussarela.
+const TIPO_ABAST = { envio: 'ENVIO', remake: 'REMAKE', pedido: 'PEDIDO', contagem: 'CONTAGEM' };
+// hora/dia LOCAL. São Paulo e Recife estão os dois em UTC-3 em 2026 (nenhum
+// tem horário de verão), então o corte bate com o resto do módulo.
+function parteLocalAbast(iso) {
+  const s = new Date(iso).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+  const [data, hora] = s.split(' ');
+  return { data, hora: (hora || '00:00:00').slice(0, 5) };
+}
+function diaMenos1(data) {
+  const d = new Date(data + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+function pizzasDoRegistro(r) {
+  if (r.tipo === 'REMAKE') return abastecimentoCarrinho.pizzasDoRemake(r.remake);
+  return r.pizzas || {};
+}
+function totalPizzas(pz) { return abastecimentoCarrinho.SABORES.reduce((t, s) => t + (Number((pz || {})[s]) || 0), 0); }
+
+async function listarAbastecimentoCarrinho(p) {
+  const SABORES = abastecimentoCarrinho.SABORES;
+  const dataInicio = String(p.dataInicio || '').trim();
+  const dataFim = String(p.dataFim || '').trim();
+  const horaInicio = /^\d{2}:\d{2}$/.test(String(p.horaInicio || '')) ? p.horaInicio : null;
+  const horaFim = /^\d{2}:\d{2}$/.test(String(p.horaFim || '')) ? p.horaFim : null;
+  const cruzaMeiaNoite = horaInicio && horaFim && horaFim <= horaInicio;
+  const noJanela = (hora) => {
+    if (!horaInicio || !horaFim) return true;
+    return cruzaMeiaNoite ? (hora >= horaInicio || hora < horaFim) : (hora >= horaInicio && hora < horaFim);
+  };
+  // a que NOITE operacional o registro pertence: de madrugada (antes do
+  // horaFim, quando a janela cruza a meia-noite) conta como a noite anterior
+  const noiteDe = (data, hora) => (cruzaMeiaNoite && hora < horaFim ? diaMenos1(data) : data);
+
+  const tipoPedido = String(p.tipo || 'todos').toLowerCase();
+  const tiposAlvo = tipoPedido === 'todos' || !tipoPedido
+    ? Object.values(TIPO_ABAST)
+    : (TIPO_ABAST[tipoPedido] ? [TIPO_ABAST[tipoPedido]] : null);
+  if (!tiposAlvo) throw catalogo.erroComLista('Tipo de movimento', p.tipo, [...Object.keys(TIPO_ABAST), 'todos']);
+
+  const todos = await abastecimentoCarrinho.listAll();
+  const linhas = [];
+  for (const r of todos) {
+    if (!tiposAlvo.includes(r.tipo)) continue;
+    const { data, hora } = parteLocalAbast(r.criadoEm);
+    if (!noJanela(hora)) continue;
+    const noite = noiteDe(data, hora);
+    if (dataInicio && noite < dataInicio) continue;
+    if (dataFim && noite > dataFim) continue;
+    const pz = pizzasDoRegistro(r);
+    linhas.push({
+      dataHoraLocal: `${data} ${hora}`, noiteOperacional: noite, hora,
+      tipo: r.tipo, origem: r.origem || null,
+      pizzas: Object.fromEntries(SABORES.map((s) => [s, Number((pz || {})[s]) || 0])),
+      totalPizzas: totalPizzas(pz),
+      motivoRemake: r.tipo === 'REMAKE' ? ((r.remake && r.remake.motivo) || null) : null,
+      operador: r.operadorNome || r.criadoPorNome || r.criadoPorEmail || null,
+      observacao: r.observacao || null,
+    });
+  }
+  linhas.sort((a, b) => a.dataHoraLocal.localeCompare(b.dataHoraLocal));
+
+  // AGREGADOS que o relatório de escala usa
+  const soma = (arr) => arr.reduce((t, l) => t + l.totalPizzas, 0);
+  const porTipo = {}; for (const l of linhas) porTipo[l.tipo] = (porTipo[l.tipo] || 0) + l.totalPizzas;
+  const porHora = {}; for (const l of linhas) { porHora[l.hora] = porHora[l.hora] || {}; porHora[l.hora][l.tipo] = (porHora[l.hora][l.tipo] || 0) + l.totalPizzas; }
+  const porNoite = {}; for (const l of linhas) { porNoite[l.noiteOperacional] = porNoite[l.noiteOperacional] || {}; porNoite[l.noiteOperacional][l.tipo] = (porNoite[l.noiteOperacional][l.tipo] || 0) + l.totalPizzas; }
+  const noites = Object.keys(porNoite).length;
+  const enviado = soma(linhas.filter((l) => l.tipo === 'ENVIO'));
+  const remakes = soma(linhas.filter((l) => l.tipo === 'REMAKE'));
+
+  const agrupar = String(p.agrupar || 'nenhum').toLowerCase();
+  const limite = Math.min(2000, Math.max(1, Number(p.limite) || 1000));
+  let agrupado = null;
+  if (agrupar === 'dia') agrupado = porNoite;
+  else if (agrupar === 'hora') agrupado = porHora;
+  else if (agrupar === 'tipo') agrupado = porTipo;
+  else if (agrupar === 'produto') {
+    agrupado = {}; for (const s of SABORES) agrupado[s] = linhas.reduce((t, l) => t + (l.pizzas[s] || 0), 0);
+  }
+
+  return {
+    unidade: 'Dom Car Aero Recife (carrinho do aeroporto)',
+    periodo: { dataInicio: dataInicio || null, dataFim: dataFim || null, horaInicio: horaInicio || null, horaFim: horaFim || null, cruzaMeiaNoite },
+    // o que o módulo NÃO tem - pra ninguém montar relatório com número inventado (CLAUDE.md §6)
+    aviso: 'Este módulo registra o que ENTRA no carrinho (ENVIO) e o descarte (REMAKE); não registra VENDA nem valor. O que "sai" (vendido) não está aqui - sai do fechamento/PDV, ou se infere da contagem (enviado − sobra na CONTAGEM − remake), e só se a contagem foi feita.',
+    totais: { registros: linhas.length, noitesComRegistro: noites, pizzasEnviadas: enviado, remakes,
+      mediaEnviadaPorNoite: noites ? Math.round((enviado / noites) * 10) / 10 : 0,
+      percentRemakeSobreEnvio: enviado ? Math.round((remakes / enviado) * 1000) / 10 : null, porTipo },
+    agrupamento: agrupar === 'nenhum' ? null : { por: agrupar, valores: agrupado },
+    mostrando: Math.min(limite, linhas.length),
+    registros: linhas.slice(0, limite),
+  };
+}
+
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
   if (nome === 'listar_disputas') return listarDisputas(p);
@@ -1106,6 +1214,7 @@ async function despachar(nome, entrada, ator) {
     }));
     return { geradoEm: new Date().toISOString(), filtros: { termo: p.termo || null, unidade: p.unidade || null }, tarefas: tarefasCompactas, solicitacoes: solicitacoesCompactas, alertasNoc: noc };
   }
+  if (nome === 'listar_abastecimento_carrinho') return listarAbastecimentoCarrinho(p);
   if (nome === 'consultar_noc') {
     const unidade = String(p.unidade || '').trim().toLocaleLowerCase('pt-BR');
     // "Possui GCOM" é o checkbox do cadastro da máquina (temGcom)
