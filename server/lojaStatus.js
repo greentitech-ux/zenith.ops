@@ -376,7 +376,7 @@ const REVISAO_MODELO_BASICO = 3;
 // Uma revisão visual não deve reexecutar USB, atalhos, barra e arquivamento.
 // O heartbeat leva esta chave separada: quando ela mudar, o agente troca só o
 // papel de parede, inclusive se o Windows ainda estiver com uma imagem antiga.
-const REVISAO_FORCAR_PAPEL_DE_PAREDE = 1;
+const REVISAO_FORCAR_PAPEL_DE_PAREDE = 2;
 const LOGOS_CARIMBO_PADRAO = Object.freeze({
   marca: Object.freeze({
     dominos: Object.freeze({ arquivoPublico: 'branding/dominos-pizza.png', tipo: 'image/png', versao: 1 }),

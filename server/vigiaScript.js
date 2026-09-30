@@ -47,7 +47,7 @@
 // 124: nome da máquina ocupa proporcionalmente a placa nas artes enviadas.
 // 125: revisão própria reaplica o fundo configurado pelo NOC, inclusive sobre
 //      uma imagem antiga válida, sem reaplicar a política inteira.
-const VERSAO_VIGIA = 126;
+const VERSAO_VIGIA = 127;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2035,6 +2035,45 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  } catch { Escrever-Log "Papel de parede: nao carimbou ($($_.Exception.Message)) - aplicando a arte sem carimbo."; return $origem }',
     '}',
     '',
+    // No modo "Ajustar" do Windows a imagem inteira aparece, mas telas 4:3,
+    // quase quadradas ou ultrawide deixam faixas nas sobras. A cor dessas
+    // faixas vem da borda da própria arte, nunca de um azul/preto fixo.
+    'function Aplicar-CorDeFundoDaArte([string]$arquivo) {',
+    '  if (-not $arquivo -or -not (Test-Path -LiteralPath $arquivo)) { return }',
+    '  try {',
+    '    Add-Type -AssemblyName System.Drawing -ErrorAction Stop',
+    '    $img = [System.Drawing.Image]::FromFile($arquivo)',
+    '    try {',
+    '      $bmp = New-Object System.Drawing.Bitmap -ArgumentList $img',
+    '      try {',
+    '        # Quatro cantos, afastados da borda: reduz o risco de pegar ruído ou',
+    '        # uma linha fina da arte. A média funciona para fundos de cor chapada',
+    '        # e também deixa uma transição discreta em artes com leve gradiente.',
+    '        $m = [int][math]::Min(18, [math]::Max(1, [math]::Min($bmp.Width, $bmp.Height) / 8))',
+    '        $pontos = @(@($m,$m), @($bmp.Width-1-$m,$m), @($m,$bmp.Height-1-$m), @($bmp.Width-1-$m,$bmp.Height-1-$m))',
+    '        $r=0; $g=0; $b=0; $n=0',
+    '        foreach($pt in $pontos) { $p=$bmp.GetPixel([int]$pt[0],[int]$pt[1]); if($p.A -gt 0){$r+=$p.R;$g+=$p.G;$b+=$p.B;$n++} }',
+    '        if($n -gt 0) {',
+    '          $cor = "$([int]($r/$n)) $([int]($g/$n)) $([int]($b/$n))"',
+    '          Set-ItemProperty -Path "HKCU:\\Control Panel\\Colors" -Name Background -Value $cor -ErrorAction Stop',
+    '          Escrever-Log "Papel de parede: cor de preenchimento $cor extraída da arte."',
+    '        }',
+    '      } finally { $bmp.Dispose() }',
+    '    } finally { $img.Dispose() }',
+    '  } catch { Escrever-Log "Papel de parede: não consegui definir a cor das faixas ($($_.Exception.Message))." }',
+    '}',
+    'function Corrigir-CorDePreenchimentoAtual([bool]$papelAtivo) {',
+    '  if ($Servico -or -not $papelAtivo) { return }',
+    '  $marca = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-cor-v1.txt"',
+    '  try { if ((Test-Path -LiteralPath $marca) -and ([string](Get-Content -LiteralPath $marca -First 1)).Trim() -eq "1") { return } } catch {}',
+    '  $raiz = Split-Path -Parent $PSCommandPath',
+    '  $arte = Join-Path $raiz "papel-de-parede-nome.png"',
+    '  if (-not (Test-Path -LiteralPath $arte)) { $arte = Join-Path $raiz "papel-de-parede.jpg" }',
+    '  if (-not (Test-Path -LiteralPath $arte)) { return }',
+    '  Aplicar-CorDeFundoDaArte $arte',
+    '  try { Set-Content -Path $marca -Value "1" -Force -ErrorAction Stop } catch {}',
+    '}',
+    '',
     // SEM ARTE: O MODELO BASICO (pedido do Master, 23/09/2026).
     // Maquina sem arte ficava com a tela preta e ninguem sabia em que
     // computador estava - no AnyDesk, nas VMs, nos hosts. Aqui o agente monta
@@ -2375,6 +2414,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // PDV da foto. 6 (Ajustar/Fit) preserva toda a arte, logos e identificação.
     '      Set-ItemProperty -Path $chave -Name WallpaperStyle -Value "6" -ErrorAction Stop',
     '      Set-ItemProperty -Path $chave -Name TileWallpaper -Value "0" -ErrorAction Stop',
+    '      Aplicar-CorDeFundoDaArte $destino',
     '      Set-Content -Path $marca -Value (Get-Date).ToString() -Force -ErrorAction SilentlyContinue',
     '    } else {',
     '      $nossa = Test-Path $marca',
@@ -3017,6 +3057,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     // modelo basico antes do porteiro da politica: ele tem versao propria e
     // precisa rodar mesmo com a politica ja aplicada (quiosque so passa aqui)
     '    if (-not $Servico -and $null -ne $cfg.versaoModeloBasico -and "$($cfg.versaoModeloBasico)" -ne (Versao-ModeloBasicoAplicada)) { try { Aplicar-ModeloBasicoDaConfig $cfg "$($cfg.versaoModeloBasico)" } catch { Escrever-Log "Modelo basico nao sincronizou: $($_.Exception.Message)" } }',
+    // Revisão local do preenchimento: rodar uma vez no agente novo evita que
+    // uma cópia v126 tenha consumido antes a revisão remota do papel de parede.
+    '    if (-not $Servico) { try { Corrigir-CorDePreenchimentoAtual ([bool]$pol.papelDeParedeAtivo) } catch { Escrever-Log "Cor de preenchimento nao sincronizou: $($_.Exception.Message)" } }',
     '    if (Politica-EstaAplicada $versaoServidor) { return }',
     '    Marcar-Etapa "Politica: papel de parede"',
     '    $okPapel = Aplicar-PapelDeParede ([bool]$pol.papelDeParedeAtivo) ([bool]$cfg.papelDeParedeSemArte) $cfg.modeloBasico',
