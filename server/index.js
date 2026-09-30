@@ -2438,10 +2438,11 @@ app.get('/api/loja-status/:codigo/computadores/:posto/papel-de-parede', async (r
     await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null);
     const arte = await lojaStatus.papelDeParedeDe(req.params.codigo, req.params.posto);
     if (!arte || !arte.caminho) return res.sendStatus(404);
-    // arte DESTA maquina ja vem pronta (loja/codigo/logos): o agente NAO deve
-    // carimbar por cima, senao escreve duplicado. A arte do grupo/marca continua
-    // sendo carimbada (sem header). Ver Aplicar-PapelDeParede no vigiaScript.js.
-    if (arte.daMaquina) res.set('X-NOC-Carimbo', 'nao');
+    // Uma arte exclusiva não é necessariamente uma arte já identificada: ela
+    // pode ser apenas o fundo escolhido para aquela estação. Só pulamos o
+    // carimbo quando o cadastro declarar isso explicitamente; assim o agente
+    // escreve o nome da máquina também nas artes individuais com a faixa vazia.
+    if (arte.daMaquina && arte.jaCarimbada === true) res.set('X-NOC-Carimbo', 'nao');
     storage.streamArquivo(arte.caminho, arte.tipo || 'image/jpeg', res);
   } catch (err) {
     res.status(403).json({ error: err.message });

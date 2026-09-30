@@ -327,8 +327,9 @@ async function papelDeParedeDe(codigo, posto) {
       : massa === soMarca ? { ...massa, marca, rede: null }
         : { ...massa, marca: null, rede: null };
   if (daMaquina && (!massaComOrigem || momentoDaArte(daMaquina) > momentoDaArte(massaComOrigem))) {
-    // Arte exclusiva já vem pronta (loja/código/logos), portanto não recebe
-    // carimbo adicional. Ela só chega aqui quando foi salva após a massa.
+    // A arte exclusiva vence a arte em massa quando for mais recente. O agente
+    // ainda escreve o nome da máquina, salvo se o cadastro marcar que ela já
+    // veio carimbada.
     return { ...daMaquina, marca: null, rede: null, daMaquina: true };
   }
   return massaComOrigem;
@@ -376,7 +377,9 @@ const REVISAO_MODELO_BASICO = 3;
 // Uma revisão visual não deve reexecutar USB, atalhos, barra e arquivamento.
 // O heartbeat leva esta chave separada: quando ela mudar, o agente troca só o
 // papel de parede, inclusive se o Windows ainda estiver com uma imagem antiga.
-const REVISAO_FORCAR_PAPEL_DE_PAREDE = 2;
+// A revisão 3 reaplica somente o fundo: artes individuais antigas eram tratadas
+// como se já tivessem o nome desenhado e chegavam com a faixa vazia.
+const REVISAO_FORCAR_PAPEL_DE_PAREDE = 3;
 const LOGOS_CARIMBO_PADRAO = Object.freeze({
   marca: Object.freeze({
     dominos: Object.freeze({ arquivoPublico: 'branding/dominos-pizza.png', tipo: 'image/png', versao: 1 }),
