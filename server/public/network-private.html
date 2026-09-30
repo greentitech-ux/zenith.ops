@@ -30,7 +30,7 @@
   <section id="list" class="list"></section>
   <section class="security"><b>Segurança:</b> esta tela não mostra nem guarda chaves de autenticação. A instalação não é disparada por aqui enquanto o OAuth e as regras de acesso do Tailscale não forem configurados pelo Master.</section>
 </main>
-<div id="denied" class="hidden empty">A NetWork-Private é uma área exclusiva do Master.</div>
+<div id="denied" class="hidden empty">Você não possui a permissão NetWork-Private.</div>
 <script>
 let AUTH_TOKEN=localStorage.getItem('authToken')||null, DADOS=null, BUSCA='';
 if(!AUTH_TOKEN) location.href='/';

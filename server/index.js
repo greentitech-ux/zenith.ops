@@ -4969,7 +4969,7 @@ app.get('/api/loja-status/maquinas', requireSection('suporte'), async (req, res)
 // revela endereços internos de VPN e será a base das futuras ações de entrada
 // e reparo do Tailscale. Nunca devolve chave de autenticação nem configuração
 // do cliente; o agente já envia somente o estado público da própria máquina.
-app.get('/api/loja-status/network-private', auth.requireMaster, async (_req, res) => {
+app.get('/api/loja-status/network-private', requireAnySection('network-private'), async (_req, res) => {
   try {
     const computadores = await lojaStatus.listar();
     const maquinas = computadores.map((c) => ({
