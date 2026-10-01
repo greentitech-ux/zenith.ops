@@ -2934,14 +2934,9 @@ async function boot(){
   PODE_CATALOGO = IS_MASTER || !!ME.isAdmin || !!ME.podeCatalogoInsumos;
   SOU_OPERADOR_PONTA = !IS_MASTER && !ME.isAdmin;
 
-  // menu sempre visivel (politica do app) - so administracao continua restrita
-  ['nav-monitor','nav-lancamento','nav-fechamentos-arcfood','nav-fechamentos-gbe','nav-entregas','nav-entrega-lancamento','nav-cofre','nav-relatorios','nav-ifood','nav-parque','nav-mensalistas','nav-grupo-saltiverso','nav-solicitacoes','nav-historico','nav-tecnico','nav-manutencao','nav-inventario','nav-parque-checkin','nav-festas','nav-central-solucoes','nav-beniboy'].forEach(id=>{
-    const el = document.getElementById(id);
-    if(el) el.classList.remove('hidden');
-  });
-  // relatorios gerenciais moraram aqui ate virarem pagina propria
-  // (abastecimento-relatorios.html) - esta tela e a operacao, fica aberta
-  // o dia todo no tablet do carrinho/loja
+  // O menu lateral aplica as permissões centralmente em nav-menu.js. Esta
+  // página não pode reabrir links por conta própria: além de gerar atalhos
+  // indevidos, a lista envelhecia toda vez que um módulo mudava de seção.
 
   if(!TEM_PEDIDO && !TEM_ENVIO && !PODE_VER_CORRECAO){
     document.getElementById('sem-acesso').classList.remove('hidden');

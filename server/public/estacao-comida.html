@@ -12,6 +12,9 @@
 <style>
   .est-hub-intro{background:linear-gradient(135deg,#182317,#12161b 58%,#12161b);border:1px solid #456128;border-radius:14px;padding:17px;margin-bottom:14px;}
   .est-hub-intro h2{font-size:19px;margin:0 0 6px;}.est-hub-intro p{margin:0;color:var(--muted);font-size:13px;line-height:1.5;}
+  .est-hub-resumo{display:grid;grid-template-columns:repeat(auto-fit,minmax(142px,1fr));gap:9px;margin:0 0 14px;}
+  .est-hub-stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;min-height:74px;display:grid;align-content:center;gap:4px;}
+  .est-hub-stat span{color:var(--muted);font:10px var(--mono);letter-spacing:.07em;text-transform:uppercase;}.est-hub-stat b{font:700 18px var(--mono);line-height:1.1;}.est-hub-stat b.ok{color:var(--accent);}.est-hub-stat small{color:var(--muted);font:10px var(--mono);}
   .est-hub-grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:10px;}
   .est-hub-atalho{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-height:184px;text-decoration:none;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:13px;padding:16px;transition:border-color .15s ease,transform .15s ease;}
   .est-hub-atalho:hover{border-color:var(--accent);transform:translateY(-1px);}.est-hub-icone{font-size:28px;line-height:1;}.est-hub-atalho h2{font-size:16px;margin:2px 0 0;}.est-hub-atalho p{font-size:12px;color:var(--muted);line-height:1.45;margin:0;}.est-hub-ir{margin-top:auto;color:var(--accent);font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;}
@@ -22,7 +25,7 @@
 <header>
   <div style="display:flex;align-items:center;gap:10px;min-width:0;">
     <button type="button" class="hamburger-btn" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
-    <div style="min-width:0;"><div class="eyebrow">NoPulso · Estação da Comida</div><h1>Operação</h1></div>
+    <div style="min-width:0;"><div class="eyebrow">NoPulso · Estação da Comida</div><h1>Visão Operacional</h1></div>
   </div>
   <button class="back" onclick="logout()">🚪 Sair</button>
 </header>
@@ -34,13 +37,20 @@
 <main id="root" class="hidden">
   <section class="est-hub-intro">
     <div class="eyebrow" id="papel">Gestão da operação</div>
-    <h2>Escolha onde vai atuar</h2>
-    <p>Salão atende a mesa. Caixa recebe a conta. Fechamento geral confere todo o dia. Cada tela abre já na unidade escolhida.</p>
+    <h2>Visão da operação</h2>
+    <p>Veja o estado do dia antes de atuar. Salão atende mesas, Caixas recebem contas e o Fechamento confere o resultado consolidado.</p>
   </section>
 
   <div class="est-card">
-    <div class="est-barra" style="margin-bottom:0;"><label>Unidade<select id="unidade" onchange="atualizarLinks()"></select></label></div>
+    <div class="est-barra" style="margin-bottom:0;"><label>Unidade<select id="unidade" onchange="atualizarLinks(); atualizarPainel();"></select></label></div>
   </div>
+
+  <section class="est-hub-resumo" aria-label="Resumo operacional da unidade">
+    <div class="est-hub-stat"><span>Dia operacional</span><b id="stat-dia">—</b><small id="stat-turno">Carregando…</small></div>
+    <div class="est-hub-stat"><span>Caixas em uso</span><b id="stat-caixas">—</b><small>abertos agora</small></div>
+    <div class="est-hub-stat"><span>Pessoas no salão</span><b id="stat-pessoas">—</b><small id="stat-mesas">comandas abertas</small></div>
+    <div class="est-hub-stat"><span>Recebido hoje</span><b id="stat-total">—</b><small id="stat-comandas">pagamentos confirmados</small></div>
+  </section>
 
   <section class="est-hub-grade">
     <a class="est-hub-atalho" id="link-salao" href="/estacao-salao">
@@ -48,7 +58,7 @@
       <p>Abra comandas, consulte mesas, lance itens e acompanhe o salão em tempo real.</p><span class="est-hub-ir">Abrir Salão →</span>
     </a>
     <a class="est-hub-atalho" id="link-caixa" href="/estacao-caixa">
-      <span class="est-hub-icone">💳</span><h2>Caixa</h2>
+      <span class="est-hub-icone">💳</span><h2>Comandas e Caixas</h2>
       <p>Junte comandas, venda no balcão, registre as formas de pagamento e conclua a conta.</p><span class="est-hub-ir">Abrir Caixa →</span>
     </a>
     <a class="est-hub-atalho fechamento" id="link-fechamento" href="/estacao-fechamento">
@@ -72,6 +82,37 @@ function atualizarLinks(){
   const unidade = document.getElementById('unidade').value;
   ['salao','caixa','fechamento'].forEach((t)=>document.getElementById('link-'+t).href = `/estacao-${t}?unidade=${encodeURIComponent(unidade)}`);
 }
+  function moeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+  function texto(id, valor, classe=''){ const el=document.getElementById(id); if(!el) return; el.textContent=valor; el.className=classe; }
+  async function atualizarPainel(){
+    const unidade=document.getElementById('unidade').value;
+    if(!unidade) return;
+    try{
+      const q='?unidade='+encodeURIComponent(unidade);
+      const [operacao,salao,fechamento]=await Promise.all([
+        fetch('/api/estacao/operacao'+q).then(r=>r.ok?r.json():null),
+        fetch('/api/estacao/salao'+q).then(r=>r.ok?r.json():null),
+        fetch('/api/estacao/fechamento'+q).then(r=>r.ok?r.json():null),
+      ]);
+      if(operacao){
+        const aberto=operacao.status==='ABERTO';
+        const caixas=Object.values(operacao.caixas||{}).filter(c=>c.aberto).length;
+        texto('stat-dia',aberto?'ABERTO':operacao.status==='FECHADO'?'FECHADO':'NÃO ABERTO',aberto?'ok':'');
+        texto('stat-turno',operacao.turnoEstado==='NAO_ABERTO'?'Abra o dia antes de vender':String(operacao.turnoEstado||'—').replaceAll('_',' ').toLowerCase());
+        texto('stat-caixas',String(caixas),caixas?'ok':'');
+      }
+      if(salao){
+        texto('stat-pessoas',String(salao.pessoas||0),(salao.pessoas||0)?'ok':'');
+        texto('stat-mesas',`${(salao.mesas||[]).length} mesa(s) · ${salao.semMesa?.length||0} sem mesa`);
+      }
+      if(fechamento){
+        texto('stat-total',moeda(fechamento.total?.total),fechamento.total?.total?'ok':'');
+        texto('stat-comandas',`${fechamento.total?.pagamentos||0} pagamento(s) · ${fechamento.total?.comandasFechadas||0} comandas`);
+      }
+    }catch(e){
+      texto('stat-dia','indisponível'); texto('stat-turno','Atualize para consultar o resumo');
+    }
+  }
 async function boot(){
   const r = await fetch('/api/me');
   if(!r.ok){ logout(); return; }
@@ -85,6 +126,7 @@ async function boot(){
   const desejada = new URLSearchParams(location.search).get('unidade');
   if(desejada && unidades.some(u=>u.codigo===desejada)) select.value=desejada;
   atualizarLinks();
+  await atualizarPainel();
   document.getElementById('root').classList.remove('hidden');
 }
 boot();

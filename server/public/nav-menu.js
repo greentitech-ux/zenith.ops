@@ -36,7 +36,8 @@
       { id: 'nav-painel', href: '/painel', icone: '🏠', rotulo: 'Painel' },
       { id: 'nav-tarefas', href: '/tarefas', icone: '✅', rotulo: 'Meu Dia' },
     ] },
-    { grupo: 'Operação diária', itens: [
+    { grupo: 'Operação diária', subgrupos: [
+      { grupo: 'Fechamento', itens: [
       // /lancamento.html serve DUAS coisas: quem tem 'lancamento' cai no
       // painel de fechamento, quem so tem 'sangria' cai no de sangria/
       // deposito. Antes a propria pagina reescrevia o texto do link
@@ -45,8 +46,6 @@
       { id: 'nav-lancamento', href: '/lancamento', icone: '🧾', rotulo: 'Fechamento', secoes: ['lancamento', 'sangria'],
         alt: { quando: (me) => !temSecao(me, 'lancamento') && temSecao(me, 'sangria'), icone: '💰', rotulo: 'Sangria/Depósito' } },
       { id: 'nav-saidas-painel', href: '/saidas', icone: '📤', rotulo: 'Painel de Saídas', secoes: ['lancamento', 'sangria'] },
-      { id: 'nav-entrega-lancamento', href: '/entrega-lancamento', icone: '📦', rotulo: 'Lançar entrega', secoes: ['entregas-lancamento'] },
-      { id: 'nav-entregadores', href: '/entregadores', icone: '🛵', rotulo: 'Entregadores', secoes: ['entregas-lancamento'] },
       // pagina de Fechamentos e uma so (fechamentos.html), mas cada franquia
       // so quer ver o proprio numero sem lembrar de trocar um filtro toda
       // vez - por isso 2 itens de menu, cada um mandando pra ca com
@@ -54,43 +53,68 @@
       // quando ve o parametro, ver GRUPO_FIXO em fechamentos.html)
       { id: 'nav-fechamentos-arcfood', href: '/fechamentos?grupo=ARCFOOD', icone: '💰', rotulo: 'Fechamentos Arcfood', secoes: ['fechamentos'], redes: ['ARCFOOD'] },
       { id: 'nav-fechamentos-gbe', href: '/fechamentos?grupo=BRAVO', icone: '💰', rotulo: 'Fechamentos GBE', secoes: ['fechamentos'], redes: ['GBE'] },
+      { id: 'nav-vendas-recordes', href: '/vendas-recordes', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
+      ] },
+      { grupo: 'Delivery', itens: [
+      { id: 'nav-entrega-lancamento', href: '/entrega-lancamento', icone: '📦', rotulo: 'Lançar entrega', secoes: ['entregas-lancamento'] },
+      { id: 'nav-entregadores', href: '/entregadores', icone: '🛵', rotulo: 'Entregadores', secoes: ['entregas-lancamento'] },
+      { id: 'nav-entregas', href: '/entregas', icone: '📊', rotulo: 'Resumo de Entregas', secoes: ['entregas'] },
+      { id: 'nav-entregas-regras', href: '/entregas-regras', icone: '⚙️', rotulo: 'Regras de Entregas', master: true },
+      ] },
+    ], itens: [
       { id: 'nav-kpis-operacionais', href: '/kpis-operacionais', icone: "⏱️", rotulo: "KPI's operacionais", secoes: ['kpis'] },
       { id: 'nav-formularios', href: '/formularios', icone: '🖊️', rotulo: 'Formulários', secoes: ['formularios'] },
-      { id: 'nav-vendas-recordes', href: '/vendas-recordes', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
-      { id: 'nav-entregas', href: '/entregas', icone: '📊', rotulo: 'Resumo de Entregas', secoes: ['entregas'] },
       { id: 'nav-inventario', href: '/estoque', icone: '📦', rotulo: 'Estoque', secoes: ['inventario'] },
+    ] },
+    { grupo: 'Quiosque', itens: [
       { id: 'nav-abastecimento', href: '/abastecimento', icone: '🛒', rotulo: 'Abastec. Carrinho', secoes: ['abastecimento-carrinho', 'abastecimento-loja'] },
       { id: 'nav-abastecimento-relatorios', href: '/abastecimento-relatorios', icone: '📊', rotulo: 'Relatórios do Carrinho', master: true },
     ] },
-    { grupo: 'Monitoramento', itens: [
+    { grupo: 'Monitoramento', subgrupos: [
+      { grupo: 'Adyen', itens: [
       { id: 'nav-monitor', href: '/monitor', icone: '📈', rotulo: 'Monitor', secoes: ['monitor'] },
       { id: 'nav-relatorios', href: '/relatorios', icone: '📊', rotulo: 'Relatórios', secoes: ['disputas'] },
-      { id: 'nav-ifood', href: '/ifood', icone: '🍔', rotulo: 'iFood', secoes: ['ifood'] },
+      ] },
+      { grupo: 'NOC', itens: [
       // conectividade das lojas: e infra, encaixa melhor aqui do que em
       // Solicitacoes (onde estava) - mesmo publico do Beniboy
       { id: 'nav-loja-status', href: '/loja-status', icone: '📡', rotulo: 'NOC-NoPulso', secoes: ['suporte'] },
       { id: 'nav-noc-incidentes', href: '/noc-incidentes', icone: '🚨', rotulo: 'Incidentes NOC', secoes: ['suporte'] },
       { id: 'nav-noc-rede', href: '/noc-rede', icone: '📈', rotulo: 'Análise de Rede', secoes: ['suporte'] },
       { id: 'nav-noc-maquinas', href: '/noc-maquinas', icone: '💽', rotulo: 'Saúde das Máquinas', secoes: ['suporte'] },
+      ] },
+      { grupo: 'Infraestrutura', itens: [
       { id: 'nav-network-private', href: '/network-private', icone: '🔐', rotulo: 'NetWork-Private', secoes: ['network-private'] },
+      ] },
+    ] },
+    { grupo: 'Agregadores', itens: [
+      { id: 'nav-ifood', href: '/ifood', icone: '🍔', rotulo: 'iFood', secoes: ['ifood'] },
     ] },
     { grupo: 'Atendimento', itens: [
       { id: 'nav-beniboy', href: '/beniboy', icone: (window.beniboySVG ? window.beniboySVG(20) : '🐝'), rotulo: 'Central do Beniboy', secoes: ['suporte'] },
       { id: 'nav-dashboard-atendimentos', href: '/dashboard-atendimentos', icone: '📊', rotulo: 'Dashboard de Atendimentos', secoes: ['suporte'] },
       { id: 'nav-central-solucoes', href: '/central-solucoes', icone: '💬', rotulo: 'Central de Soluções', secoes: ['central-solucoes'] },
     ] },
-    { grupo: 'Solicitações', itens: [
+    { grupo: 'Gestão de Serviços', subgrupos: [
+      { grupo: 'Cadastro', itens: [
       { id: 'nav-fornecedores', href: '/fornecedores', icone: '🏢', rotulo: 'Fornecedores', gerenteOuSecoes: ['fornecedores', 'solicitacoes'] },
-      { id: 'nav-compras', href: '/compras', icone: '🛍️', rotulo: 'Acompanhar Compras', secoes: ['solicitacoes'] },
+      { id: 'nav-ativos-ti', href: '/ativos-ti', icone: '🖥️', rotulo: 'Ativos de TI', secoes: ['ativos-ti'] },
+      ] },
+      { grupo: 'Atendimento e solicitações', itens: [
       // resumo pessoal (por status/unidade + meus abertos/concluidos) que
       // antes vivia dentro do Historico - separado em pagina propria porque
       // misturado com o quadro do Historico ficava bagunçado
-      { id: 'nav-inicio-solicitacoes', href: '/central-inicio', icone: '📊', rotulo: 'Início', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
-      // o Historico tambem serve pra quem RECEBE card atribuido
-      { id: 'nav-historico', href: '/central-historico', icone: '📋', rotulo: 'Central de Solicitações', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
+      { id: 'nav-inicio-solicitacoes', href: '/central-inicio', icone: '📊', rotulo: 'Central de Solicitações', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
+      // A central é a porta de entrada. A fila/histórico continua disponível
+      // para não esconder solicitações antigas até as duas telas virarem uma
+      // única experiência com abas.
+      { id: 'nav-historico', href: '/central-historico', icone: '📋', rotulo: 'Fila e histórico', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
+      { id: 'nav-compras', href: '/compras', icone: '🛍️', rotulo: 'Acompanhar Compras', secoes: ['solicitacoes'] },
+      ] },
+      { grupo: 'Serviços técnicos', itens: [
       { id: 'nav-tecnico', href: '/tecnico', icone: '🔧', rotulo: 'Chamados TI', secoes: ['tecnico', 'suporte'] },
       { id: 'nav-manutencao', href: '/manutencao', icone: '🛠️', rotulo: 'Manutenção', secoes: ['manutencao'] },
-      { id: 'nav-ativos-ti', href: '/ativos-ti', icone: '🖥️', rotulo: 'Ativos de TI', secoes: ['ativos-ti'] },
+      ] },
     ] },
     // Q.A - a seção inteira é liberada pela TAG de cargo 'qa' (Master,
     // 23/09/2026: "só quem tem acesso a tag terá acesso a ela, pois é um
@@ -110,35 +134,52 @@
       // RH, Financeiro e Operações. Tag própria gerencia; unidade acompanha.
       { id: 'nav-treinamentos', href: '/qa-treinamento', icone: '🎓', rotulo: 'Treinamentos', tagsOuUnidade: ['treinamento'] },
     ] },
-    { grupo: 'Saltiverso', itens: [
-      { id: 'nav-parque-checkin', href: '/parque-checkin', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },
-      { id: 'nav-parque', href: '/parque', icone: '🎡', rotulo: 'Parque (painel)', secoes: ['parque'] },
+    { grupo: 'Saltiverso', subgrupos: [
+      { grupo: 'Operação do parque', itens: [
+      { id: 'nav-parque', href: '/parque', icone: '🎡', rotulo: 'Visão do Parque', secoes: ['parque'] },
+      { id: 'nav-parque-checkin', href: '/parque-checkin', icone: '🤸', rotulo: 'Entradas do Parque', secoes: ['parque-checkin'] },
       { id: 'nav-festas', href: '/festas', icone: '🎉', rotulo: 'Festas', secoes: ['festas'] },
       { id: 'nav-mensalistas', href: '/mensalistas', icone: '📅', rotulo: 'Mensalistas', secoes: ['parque'] },
-      { id: 'nav-saltiverso-vendas', href: '/saltiverso-vendas', icone: '🥤', rotulo: 'Bebidas & Meias', secoes: ['parque-loja'] },
+      { id: 'nav-saltiverso-vendas', href: '/saltiverso-vendas', icone: '🥤', rotulo: 'Quiosque', secoes: ['parque-loja'] },
+      ] },
+      { grupo: 'Financeiro', itens: [
       { id: 'nav-saltiverso-fechamento', href: '/saltiverso-fechamento', icone: '🧾', rotulo: 'Fechamento do balcão', secoes: ['parque-loja'] },
+      ] },
     ] },
-    { grupo: 'Estação da Comida', itens: [
-      { id: 'nav-estacao-comida', href: '/estacao-comida', icone: '🍴', rotulo: 'Visão da operação', gerenteOuSecoes: [] },
+    { grupo: 'Estação da Comida', subgrupos: [
+      { grupo: 'Gestão', itens: [
+      { id: 'nav-estacao-comida', href: '/estacao-comida', icone: '🍴', rotulo: 'Visão Operacional', gerenteOuSecoes: [] },
+      ] },
+      { grupo: 'Atendimento', itens: [
       { id: 'nav-estacao-salao', href: '/estacao-salao', icone: '🍽️', rotulo: 'Salão', secoes: ['estacao-salao'] },
-      { id: 'nav-estacao-caixa', href: '/estacao-caixa', icone: '💳', rotulo: 'Caixa', secoes: ['estacao-caixa'] },
+      ] },
+      { grupo: 'Caixas e comandas', itens: [
+      { id: 'nav-estacao-caixa', href: '/estacao-caixa', icone: '💳', rotulo: 'Comandas e Caixas', secoes: ['estacao-caixa'] },
+      ] },
+      { grupo: 'Financeiro', itens: [
       { id: 'nav-estacao-fechamento', href: '/estacao-fechamento', icone: '🧾', rotulo: 'Fechamento do dia', secoes: ['estacao-fechamento'] },
+      ] },
     ] },
     { grupo: 'BigBrother', itens: [
       { id: 'nav-rh', href: '/rh', icone: '🧑‍💼', rotulo: 'RH', secoes: ['rh'] },
     ] },
-    { grupo: 'Bonificação', itens: [
-      { id: 'nav-bonificacao', href: '/bonificacao', icone: '🏆', rotulo: 'Bonificação', secoes: ['bonificacao'] },
-    ] },
-    { grupo: 'Administração', itens: [
+    { grupo: 'Administração', subgrupos: [
+      { grupo: 'Pessoas e acessos', itens: [
       { id: 'nav-usuarios', href: '/usuarios', icone: '👤', rotulo: 'Usuários', master: true },
-      { id: 'nav-grupos', href: '/grupos', icone: '🏷️', rotulo: 'Grupos', master: true },
+      { id: 'nav-grupos', href: '/grupos', icone: '🏷️', rotulo: 'Grupos e unidades', master: true },
+      { id: 'nav-reset-senha', href: '/painel?resetSenha=1', icone: '🔑', rotulo: 'Reset de senha', admin: true },
+      ] },
+      { grupo: 'Segurança', itens: [
       { id: 'nav-cofre', href: '/cofre', icone: '🔐', rotulo: 'Cofre', secoes: ['cofre'] },
       { id: 'nav-central-alertas', href: '/central-alertas', icone: '🚨', rotulo: 'Central de Alertas', master: true },
-      { id: 'nav-entregas-regras', href: '/entregas-regras', icone: '⚙️', rotulo: 'Regras de Entregas', master: true },
-      { id: 'nav-email', href: '/email', icone: '✉️', rotulo: 'Email', master: true },
+      ] },
+      { grupo: 'Configurações do sistema', itens: [
+      { id: 'nav-email', href: '/email', icone: '✉️', rotulo: 'E-mail', master: true },
       { id: 'nav-login-custom', href: '/login-custom', icone: '🎨', rotulo: 'Tela de Login', master: true },
-      { id: 'nav-reset-senha', href: '/painel?resetSenha=1', icone: '🔑', rotulo: 'Reset senha', admin: true },
+      ] },
+      { grupo: 'Pessoas e incentivos', itens: [
+      { id: 'nav-bonificacao', href: '/bonificacao', icone: '🏆', rotulo: 'Bonificação', secoes: ['bonificacao'] },
+      ] },
     ] },
   ];
 
@@ -168,9 +209,13 @@
     '/mensalistas': 'nav-parque',
   };
 
+  function itensDaSecao(sec) {
+    return [...(sec.itens || []), ...((sec.subgrupos || []).flatMap((sub) => sub.itens || []))];
+  }
+
   function itemPorId(id) {
     for (const sec of MENU) {
-      const it = sec.itens.find((i) => i.id === id);
+      const it = itensDaSecao(sec).find((i) => i.id === id);
       if (it) return it;
     }
     return null;
@@ -254,6 +299,19 @@
       .nmz-grupo.fechado .nmz-seta{ transform:rotate(-90deg); }
       .nmz-wrap{ display:flex; flex-direction:column; gap:2px; overflow:hidden; }
       .nmz-wrap.hidden{ display:none!important; }
+      .nmz-subgrupo{
+        display:flex; align-items:center; justify-content:space-between; gap:8px;
+        margin:8px 4px 3px 9px; padding:8px 8px 5px;
+        border-bottom:1px solid color-mix(in srgb,var(--line,#232a33) 78%,transparent);
+        color:var(--muted,#7d8896); cursor:pointer; user-select:none;
+        font:700 9px var(--mono,monospace); text-transform:uppercase; letter-spacing:.09em;
+      }
+      .nmz-subgrupo:hover{ color:var(--text,#e7ecf1); }
+      .nmz-subgrupo .nmz-subseta{ font-size:9px; transition:transform .18s ease; opacity:.7; }
+      .nmz-subgrupo.fechado .nmz-subseta{ transform:rotate(-90deg); }
+      .nmz-subwrap{ display:flex; flex-direction:column; gap:2px; margin-left:13px; padding-left:5px;
+        border-left:1px solid color-mix(in srgb,var(--line,#232a33) 86%,transparent); overflow:hidden; }
+      .nmz-subwrap.hidden{ display:none!important; }
 
       #nav-drawer a.nmz-item, #nav-drawer button.nmz-item{
         display:flex; align-items:center; gap:10px; width:100%; box-sizing:border-box;
@@ -275,12 +333,14 @@
         content:""; position:absolute; left:0; top:6px; bottom:6px; width:3px;
         border-radius:0 3px 3px 0; background:var(--accent,#b8ff3c);
       }
-      #nav-drawer a.nmz-item.hidden, #nav-drawer .nmz-grupo.hidden{ display:none!important; }
+      #nav-drawer a.nmz-item.hidden, #nav-drawer .nmz-grupo.hidden,
+      #nav-drawer .nmz-subgrupo.hidden{ display:none!important; }
       /* Busca e permissão são estados diferentes. A busca não usa .hidden,
          pois o observador de segurança repõe essa classe após cada mudança
          de permissão e, antes, desfazia o resultado digitado pelo usuário. */
       #nav-drawer .nmz-item[data-filtro-oculto="1"],
-      #nav-drawer .nmz-grupo[data-filtro-oculto="1"]{ display:none!important; }
+      #nav-drawer .nmz-grupo[data-filtro-oculto="1"],
+      #nav-drawer .nmz-subgrupo[data-filtro-oculto="1"]{ display:none!important; }
 
       .nmz-rodape{
         flex:none; border-top:1px solid var(--line,#232a33); padding:8px;
@@ -333,12 +393,21 @@
       + `<span class="nmz-ico">${it.icone}</span><span class="nmz-rot">${esc(it.rotulo)}</span></a>`;
   }
 
+  function chaveSubgrupo(sec, sub) {
+    return `${sec.grupo}::${sub.grupo}`;
+  }
+
   function montar(nav) {
     const corpo = MENU.map((sec) => {
-      const itens = sec.itens.map(itemHtml).join('');
+      const itens = (sec.itens || []).map(itemHtml).join('');
       if (!sec.grupo) return `<div class="nmz-wrap" data-grupo="">${itens}</div>`;
+      const subgrupos = (sec.subgrupos || []).map((sub) => {
+        const chave = chaveSubgrupo(sec, sub);
+        return `<div class="nmz-subgrupo" data-subgrupo="${esc(chave)}"><span>${esc(sub.grupo)}</span><span class="nmz-subseta">▾</span></div>`
+          + `<div class="nmz-subwrap" data-subgrupo="${esc(chave)}">${(sub.itens || []).map(itemHtml).join('')}</div>`;
+      }).join('');
       return `<div class="nmz-grupo" data-grupo="${esc(sec.grupo)}"><span>${esc(sec.grupo)}</span><span class="nmz-seta">▾</span></div>`
-        + `<div class="nmz-wrap" data-grupo="${esc(sec.grupo)}">${itens}</div>`;
+        + `<div class="nmz-wrap" data-grupo="${esc(sec.grupo)}">${subgrupos}${itens}</div>`;
     }).join('');
 
     nav.innerHTML = `
@@ -379,9 +448,15 @@
       const bate = !termo || normalizar(el.textContent).includes(termo);
       el.dataset.filtroOculto = !permitido || !bate ? '1' : '';
     });
+    document.querySelectorAll('#nav-drawer .nmz-subgrupo').forEach((g) => {
+      const wrap = document.querySelector(`#nav-drawer .nmz-subwrap[data-subgrupo="${CSS.escape(g.dataset.subgrupo)}"]`);
+      const temItem = !!wrap && [...wrap.querySelectorAll('.nmz-item')].some((el) => !el.classList.contains('hidden') && el.dataset.filtroOculto !== '1');
+      g.dataset.filtroOculto = !temItem ? '1' : '';
+      if (termo && temItem) { g.classList.remove('fechado'); if (wrap) wrap.dataset.recolhido = ''; }
+    });
     document.querySelectorAll('#nav-drawer .nmz-grupo').forEach((g) => {
       const wrap = document.querySelector(`#nav-drawer .nmz-wrap[data-grupo="${CSS.escape(g.dataset.grupo)}"]`);
-      const temItem = !!wrap && [...wrap.children].some((el) => !el.classList.contains('hidden') && el.dataset.filtroOculto !== '1');
+      const temItem = !!wrap && [...wrap.querySelectorAll('.nmz-item')].some((el) => !el.classList.contains('hidden') && el.dataset.filtroOculto !== '1');
       g.dataset.filtroOculto = !temItem ? '1' : '';
       if (termo && temItem) { g.classList.remove('fechado'); if (wrap) wrap.dataset.recolhido = ''; }
     });
@@ -424,7 +499,7 @@
     let u;
     try { u = new URL(href, location.origin); } catch (e) { return 'página anterior'; }
     for (const sec of MENU) {
-      const item = sec.itens.find((it) => {
+      const item = itensDaSecao(sec).find((it) => {
         try { return new URL(it.href, location.origin).pathname === u.pathname; } catch (e) { return false; }
       });
       if (item) return item.rotulo;
@@ -521,7 +596,7 @@
   function aplicarRegras() {
     if (!ME) return;
     MENU.forEach((sec) => {
-      sec.itens.forEach((it) => {
+      itensDaSecao(sec).forEach((it) => {
         const el = document.getElementById(it.id);
         if (!el) return;
         const liberado = podeVer(it, ME);
@@ -536,12 +611,19 @@
         }
       });
     });
-    // grupo sem nenhum item visivel some junto (nao deixa titulo orfao).
+    // Subgrupo e grupo sem nenhum item visivel somem junto (nao deixam
+    // título órfão). A visibilidade dos wraps é decidida abaixo para juntar
+    // permissão e o estado recolhido sem um apagar o outro.
+    document.querySelectorAll('#nav-drawer .nmz-subgrupo').forEach((g) => {
+      const wrap = document.querySelector(`#nav-drawer .nmz-subwrap[data-subgrupo="${CSS.escape(g.dataset.subgrupo)}"]`);
+      const temVisivel = !!wrap && [...wrap.querySelectorAll('.nmz-item')].some((c) => !c.classList.contains('hidden'));
+      g.classList.toggle('hidden', !temVisivel);
+    });
     // A visibilidade do wrap em si fica por conta do sincronizarRecolhido,
     // que junta as duas condicoes (permissao + acordeao) num lugar so.
     document.querySelectorAll('#nav-drawer .nmz-grupo').forEach((g) => {
       const wrap = document.querySelector(`#nav-drawer .nmz-wrap[data-grupo="${CSS.escape(g.dataset.grupo)}"]`);
-      const temVisivel = !!wrap && [...wrap.children].some((c) => !c.classList.contains('hidden'));
+      const temVisivel = !!wrap && [...wrap.querySelectorAll('.nmz-item')].some((c) => !c.classList.contains('hidden'));
       g.classList.toggle('hidden', !temVisivel);
     });
     // a seta de voltar segue a MESMA regra do item no menu: sem acesso ao
@@ -661,6 +743,21 @@
         sincronizarRecolhido();
       });
     });
+    // Dentro de cada bloco principal, abre somente a subseção da página
+    // atual. Assim "Operação diária" continua curta no celular, mas o
+    // caminho (por exemplo Delivery > Entregadores) fica explícito.
+    document.querySelectorAll('#nav-drawer .nmz-subgrupo').forEach((g) => {
+      const wrap = document.querySelector(`#nav-drawer .nmz-subwrap[data-subgrupo="${CSS.escape(g.dataset.subgrupo)}"]`);
+      if (!wrap) return;
+      const temAtual = !!wrap.querySelector('a.nmz-item.active');
+      if (!temAtual) { g.classList.add('fechado'); wrap.dataset.recolhido = '1'; }
+      g.addEventListener('click', () => {
+        const abrir = g.classList.contains('fechado');
+        g.classList.toggle('fechado', !abrir);
+        wrap.dataset.recolhido = abrir ? '' : '1';
+        sincronizarRecolhido();
+      });
+    });
     sincronizarRecolhido();
   }
   // "recolhido" e separado de "hidden" (permissao) pra um nao apagar o
@@ -670,6 +767,11 @@
       if (!w.dataset.grupo) return;
       const g = document.querySelector(`#nav-drawer .nmz-grupo[data-grupo="${CSS.escape(w.dataset.grupo)}"]`);
       const semPermissao = g && g.classList.contains('hidden');
+      w.classList.toggle('hidden', semPermissao || w.dataset.recolhido === '1');
+    });
+    document.querySelectorAll('#nav-drawer .nmz-subwrap[data-subgrupo]').forEach((w) => {
+      const g = document.querySelector(`#nav-drawer .nmz-subgrupo[data-subgrupo="${CSS.escape(w.dataset.subgrupo)}"]`);
+      const semPermissao = g && (g.classList.contains('hidden') || g.dataset.filtroOculto === '1');
       w.classList.toggle('hidden', semPermissao || w.dataset.recolhido === '1');
     });
   }
