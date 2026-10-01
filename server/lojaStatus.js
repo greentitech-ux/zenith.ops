@@ -3417,6 +3417,43 @@ function comandoResetZebra(impressoras) {
   ].join('\n');
 }
 
+// Altera o IP na própria Zebra por ZPL; a porta TCP/IP do Windows não entra
+// neste comando. Bematech usa ESC/POS e não recebe estes bytes com segurança.
+async function comandoFixarIpZebra(codigo, macRecebido, ipNovoRecebido) {
+  const mac = String(macRecebido || '').trim().toLowerCase().replace(/-/g, ':');
+  const ipNovo = String(ipNovoRecebido || '').trim();
+  const cadastro = normalizarEntradaApelido(((await getApelidos())[codigo] || {})[mac]);
+  if (cadastro.tipo !== 'impressora' || cadastro.marca !== 'zebra') {
+    throw new Error('Este aparelho não está marcado como impressora Zebra. O NOC não envia comando de rede a Bematech ou equipamento sem marca confirmada.');
+  }
+  const atual = enderecoAtualDoMac([...(await garantirEspelho()).values()], codigo, mac);
+  if (!atual || !ipValido(atual.ip)) throw new Error('Não encontrei um IP atual para esta Zebra na última varredura. Aguarde o NOC ler a rede e tente de novo.');
+  if (!ipValido(ipNovo)) throw new Error('Informe um IPv4 válido para a Zebra.');
+  const partesAtual = String(atual.ip).split('.').map(Number);
+  const partesNovo = ipNovo.split('.').map(Number);
+  if (partesAtual.slice(0, 3).join('.') !== partesNovo.slice(0, 3).join('.') || partesNovo[3] < 1 || partesNovo[3] > 254) {
+    throw new Error(`Use um IP livre na mesma rede da Zebra: ${partesAtual.slice(0, 3).join('.')}.1 a ${partesAtual.slice(0, 3).join('.')}.254.`);
+  }
+  if (atual.ip === ipNovo) throw new Error(`A Zebra já está no IP ${ipNovo}.`);
+  const prefixo = partesAtual.slice(0, 3).join('.');
+  const comando = [
+    `$ipAtual = '${atual.ip}'`, `$ipNovo = '${ipNovo}'`, `$prefixo = '${prefixo}.'`,
+    '$cfg = @(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "IPEnabled = True" -ErrorAction Stop | Where-Object { @($_.IPAddress) | Where-Object { $_ -like ($prefixo + "*") } } | Select-Object -First 1)',
+    'if (-not $cfg) { throw "Não encontrei a interface da rede $prefixo no computador NOC." }',
+    '$mascara = @($cfg.IPSubnet | Where-Object { $_ -match "^\\d{1,3}(\\.\\d{1,3}){3}$" }) | Select-Object -First 1',
+    '$gateway = @($cfg.DefaultIPGateway | Where-Object { $_ -match "^\\d{1,3}(\\.\\d{1,3}){3}$" }) | Select-Object -First 1',
+    'if (-not $mascara -or -not $gateway) { throw "Não consegui identificar máscara/gateway da rede da loja." }',
+    '# ^ND2,P fixa o IPv4 Ethernet; ~JR reinicia a Zebra para aplicar.',
+    '$zpl = "^XA^ND2,P,$ipNovo,$mascara,$gateway,,Y,300,0,9100^XZ~JR"',
+    '$cli = New-Object System.Net.Sockets.TcpClient',
+    'try { $ar = $cli.BeginConnect($ipAtual, 9100, $null, $null); if (-not $ar.AsyncWaitHandle.WaitOne(5000)) { throw "A Zebra não respondeu em $ipAtual:9100." }; $cli.EndConnect($ar); $st = $cli.GetStream(); $bytes = [Text.Encoding]::ASCII.GetBytes($zpl); $st.Write($bytes, 0, $bytes.Length); $st.Flush() } finally { if ($cli) { try { $cli.Close() } catch {} } }',
+    '# A conexão antiga cai de propósito; espera a Zebra voltar no novo IP.',
+    '$voltou = $false; for ($i = 0; $i -lt 12 -and -not $voltou; $i++) { Start-Sleep -Seconds 5; $teste = New-Object System.Net.Sockets.TcpClient; try { $ar = $teste.BeginConnect($ipNovo, 9100, $null, $null); $voltou = $ar.AsyncWaitHandle.WaitOne(1500); if ($voltou) { $teste.EndConnect($ar) } } catch {} finally { try { $teste.Close() } catch {} } }',
+    'if ($voltou) { "ZEBRA IP ALTERADO · $ipAtual -> $ipNovo · porta 9100 respondeu. A porta do Windows não foi alterada." } else { "CONFIGURAÇÃO ENVIADA · $ipAtual -> $ipNovo. A Zebra reiniciou; confirme em até 2 min no novo IP. A porta do Windows não foi alterada." }',
+  ].join('\n');
+  return { ipAtual: atual.ip, ipNovo, mac, comando };
+}
+
 // janela de arrependimento: cancela um reinício que ainda está na contagem
 const COMANDO_ABORTAR_REINICIO = [
   'try { shutdown /a 2>$null } catch {}',
@@ -5159,7 +5196,7 @@ async function impressorasPraSondar(codigo) {
 module.exports = {
   avaliarRolloutVigia, versaoVigiaPara, resumoRolloutVigia, decidirRolloutVigia,
   substituirSegredos, SEGREDOS_PERMITIDOS,
-  impressorasPraSondar,
+  impressorasPraSondar, comandoFixarIpZebra,
   flushHeartbeatsPendentes,
   heartbeat, listar, listarResumo, detalhar, diagnosticoPapelDeParede, motivoDoPapel, VERSAO_MODELO_BASICO, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,

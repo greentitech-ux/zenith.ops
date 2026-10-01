@@ -17441,6 +17441,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
     }, tkZ);
     await ls.definirApelidoDispositivo('ZEBRATESTE', '00:07:4d:aa:bb:cc', { apelido: 'Zebra', tipo: 'impressora', monitorar: true, marca: 'zebra' });
     await ls.definirApelidoDispositivo('ZEBRATESTE', '00:07:4d:dd:ee:ff', { apelido: 'Bematech', tipo: 'impressora', monitorar: true, marca: 'bematech' });
+    const planoIpZebra = await ls.comandoFixarIpZebra('ZEBRATESTE', '00:07:4d:aa:bb:cc', '10.9.9.54');
+    let erroIpBema = '';
+    let erroOutraRede = '';
+    try { await ls.comandoFixarIpZebra('ZEBRATESTE', '00:07:4d:dd:ee:ff', '10.9.9.54'); } catch (e) { erroIpBema = e.message; }
+    try { await ls.comandoFixarIpZebra('ZEBRATESTE', '00:07:4d:aa:bb:cc', '10.9.8.54'); } catch (e) { erroOutraRede = e.message; }
 
     const enviouZ = await postarJson('/api/loja-status/manutencao/reiniciar', {
       alvos: [{ codigo: 'ZEBRATESTE', posto: srvZ.posto }], tarefa: 'zebra',
@@ -17477,6 +17482,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // IP e dado que o agente reportou: nunca entra cru numa string de
       // PowerShell, mesmo vindo do proprio servidor
       'IP inválido é descartado, não entra no comando': ipTorto === null,
+      'fixar IP envia ^ND permanente para a própria Zebra e a reinicia':
+        planoIpZebra.ipAtual === '10.9.9.20' && planoIpZebra.ipNovo === '10.9.9.54'
+        && /\^ND2,P,\$ipNovo,\$mascara,\$gateway/.test(planoIpZebra.comando) && /~JR/.test(planoIpZebra.comando),
+      'fixar IP não altera porta do Windows e só aceita a mesma LAN':
+        !/Set-PrinterPort|Win32_TCPIpPrinterPort/.test(planoIpZebra.comando) && /mesma rede/.test(erroOutraRede),
+      'Bematech é recusada antes de receber ZPL de Zebra': /Bematech/.test(erroIpBema),
 
       // --- A TRAVA ---
       'só a Zebra marcada entra; a Bematech fica de fora':

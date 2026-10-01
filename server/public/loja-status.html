@@ -2066,6 +2066,7 @@ function atualizarConteudoDetalhe(codigo, c){
         </div>
         <div class="disp-acoes">
           <button type="button" class="disp-editar" title="Fazer ping por este NOCZenith" aria-label="Fazer ping" onclick='event.stopPropagation();pingDispositivo(${JSON.stringify(codigo)},${JSON.stringify(c.posto)},${JSON.stringify(d.mac)},${JSON.stringify(d.ip)})'>◉</button>
+          ${d.marca === 'zebra' ? `<button type="button" class="disp-editar" title="Definir IP fixo na própria Zebra" aria-label="Definir IP da Zebra" onclick='event.stopPropagation();fixarIpZebra(${JSON.stringify(codigo)},${JSON.stringify(c.posto)},${JSON.stringify(d.mac)},${JSON.stringify(d.ip)})'>📍</button>` : ''}
           <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
             onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,medidorQuedas:!!d.medidorQuedas,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
         </div>
@@ -2137,6 +2138,23 @@ async function pingDispositivo(codigo, posto, mac, ip){
     if(!r.ok) throw new Error(d.error||'Não consegui enfileirar o ping.');
     alert(d.mensagem || 'Ping enfileirado.');
     await carregar();
+  }catch(e){ alert(e.message); }
+}
+async function fixarIpZebra(codigo, posto, mac, ipAtual){
+  const partes = String(ipAtual||'').split('.');
+  if(partes.length!==4){ alert('O NOC ainda não tem um IP atual para esta Zebra. Aguarde a próxima varredura.'); return; }
+  const final = prompt(`Novo final de IP para a Zebra\n\nAtual: ${ipAtual}\nDigite apenas o final desejado (ex.: 54).\nA porta do Windows NÃO será alterada.`, partes[3]);
+  if(final===null) return;
+  const ultimo = String(final).trim();
+  if(!/^\d{1,3}$/.test(ultimo) || Number(ultimo)<1 || Number(ultimo)>254){ alert('Digite apenas um número entre 1 e 254.'); return; }
+  const ipNovo = `${partes[0]}.${partes[1]}.${partes[2]}.${ultimo}`;
+  if(ipNovo===ipAtual){ alert('A Zebra já está nesse IP.'); return; }
+  if(!confirm(`Alterar o IP da PRÓPRIA Zebra?\n\n${ipAtual}  →  ${ipNovo}\n\nA Zebra reiniciará e ficará até ~2 minutos sem responder. A porta TCP/IP configurada no Windows não será mexida.`)) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/dispositivos/${encodeURIComponent(mac)}/fixar-ip-zebra`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip:ipNovo})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Não consegui enviar a configuração.');
+    alert(d.mensagem||`Configuração enviada para ${ipNovo}.`);
   }catch(e){ alert(e.message); }
 }
 let PING_DIAGNOSTICO = null;
@@ -2932,6 +2950,7 @@ function dispCardHtml(x){
     <div class="equip-tile-status ${status}">${escapeHtml(texto)}</div>
     ${zebra ? `<div>${zebra}</div>` : ''}
     ${x.ip ? `<div class="equip-tile-ip" title="Copiar IP" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(x.ip)}','IP')">🌐 ${escapeHtml(x.ip)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
+    ${x.marca === 'zebra' && x.ip ? `<button type="button" class="btn-mini" style="margin-top:7px;align-self:flex-start;" title="Muda o IP na própria Zebra; não altera a porta do Windows" onclick="event.stopPropagation();fixarIpZebra('${escapeJs(x.codigo)}','${escapeJs(x.hostPosto)}','${escapeJs(x.mac)}','${escapeJs(x.ip)}')">📍 Fixar IP da Zebra</button>` : ''}
     <div class="disp-card-mac" title="Copiar MAC" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(x.mac)}','MAC')">MAC ${escapeHtml(x.mac)} <span class="equip-tile-ip-copy">📋</span></div>
     ${ipMudou}
     ${x.hostNome ? `<div class="disp-card-host">visto por ${escapeHtml(x.hostNome)}</div>` : ''}

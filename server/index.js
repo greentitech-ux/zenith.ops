@@ -7490,6 +7490,21 @@ app.post('/api/loja-status/:codigo/computadores/:posto/dispositivos/:mac/ping', 
   }
 });
 
+// Muda o endereço na própria Zebra. MAC e IP atual são relidos do inventário;
+// a rota não altera a porta TCP/IP do Windows nem aceita Bematech.
+app.post('/api/loja-status/:codigo/computadores/:posto/dispositivos/:mac/fixar-ip-zebra', auth.requireMaster, async (req, res) => {
+  try {
+    const computador = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!computador || computador.tipo !== 'interno') return res.status(404).json({ error: 'Computador interno com NOCZenith não encontrado.' });
+    const plano = await lojaStatus.comandoFixarIpZebra(computador.codigo, req.params.mac, req.body && req.body.ip);
+    const registro = await lojaStatus.enfileirarComando(computador.codigo, computador.posto, plano.comando, { origem: 'noc-fixar-ip-zebra' });
+    console.log(`[NOC] ${req.user.email} pediu IP fixo da Zebra ${plano.mac}: ${plano.ipAtual} -> ${plano.ipNovo}`);
+    res.json({ ok: true, comandoId: registro.id, mensagem: `Configuração da Zebra enviada: ${plano.ipAtual} → ${plano.ipNovo}. Ela reinicia; a porta do Windows não será alterada.` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Diagnóstico manual de rede: o Master informa um IPv4 PRIVADO e o NOCZenith
 // da máquina escolhida faz somente ping. Não é um terminal remoto: IP público,
 // hostname, porta, PowerShell ou qualquer outro comando são recusados.
