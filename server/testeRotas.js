@@ -24641,6 +24641,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
   let okLimparFiltros = false;
   try {
     const tema = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    const kpis = require('fs').readFileSync(require('path').join(__dirname, 'public', 'kpis-operacionais.html'), 'utf8');
     // idsDoFim e' pura (so texto): da pra arrancar do arquivo e rodar aqui,
     // sem navegador. E' o miolo da descoberta do par.
     const fonte = (tema.match(/var FIM_DO_PAR = [\s\S]*?\n  \}\n/) || [''])[0];
@@ -24693,6 +24694,17 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // telas montam o filtro junto com os dados: plantar uma vez só não pega
       'acompanha o DOM (tela que monta o filtro depois do boot também ganha)':
         /new MutationObserver\(function \(\) \{[\s\S]{0,200}plantarLimparFiltros\(\);/.test(tema),
+      // KPI chama "Mês" de últimos 30 dias. O ajuste global para
+      // mês-calendário não pode converter esse filtro nem devolver a data
+      // antiga do rascunho depois de um preset.
+      'KPI mantém o período móvel e sincroniza as duas datas do preset':
+        /data-zenith-sem-mes="1"/.test(kpis)
+        && /function sincronizarPeriodo\(\)/.test(kpis)
+        && /sincronizarPeriodo\(\);\s*\n\s*render\(\);/.test(kpis)
+        && /painel\.dataset\.zenithSemMes === '1'/.test(tema),
+      'tela com limpeza própria não recebe um segundo botão automático':
+        /data-zenith-sem-limpar="1"/.test(kpis)
+        && /faixa\.matches && faixa\.matches\('\[data-zenith-sem-limpar\]'\)/.test(tema),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okLimparFiltros = !falhas.length;

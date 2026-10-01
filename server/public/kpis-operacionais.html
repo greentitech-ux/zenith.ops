@@ -128,7 +128,7 @@
 
 <div id="root" class="hidden">
 
-  <div class="filtros" aria-label="Filtros dos KPI's operacionais">
+  <div class="filtros" data-zenith-sem-mes="1" data-zenith-sem-limpar="1" aria-label="Filtros dos KPI's operacionais">
     <label class="filtro-campo filtro-grupo"><span>Grupo</span><select id="f-grupo" onchange="trocarGrupo()"></select></label>
     <label class="filtro-campo filtro-unidade"><span>Unidade</span><select id="f-unidade" onchange="render()"></select></label>
     <button type="button" class="preset" data-preset="semana" onclick="aplicarPreset('semana')">Semana</button>
@@ -141,7 +141,7 @@
       <option value="media">Sempre média</option>
       <option value="soma">Sempre soma</option>
     </select></label>
-    <button type="button" class="preset" onclick="limparFiltros()" title="Voltar para todas as unidades e o período de 30 dias">Limpar</button>
+    <button type="button" class="preset" onclick="limparFiltros()" title="Voltar para todas as unidades e o período padrão de 30 dias">✕ Limpar filtros</button>
   </div>
   <div class="escopo-calculo" id="escopo-calculo"></div>
 
@@ -717,6 +717,13 @@ function ligarHover(alvo, ctx){
 function maxDecimais(v){ return Number.isInteger(v) ? 0 : 1; }
 
 function render(){ renderEscopoCalculo(); renderPendenciasKpi(); renderMatriz(); renderOfensores(); renderTendencia(); }
+function sincronizarPeriodo(){
+  // Presets escrevem as datas por código (não disparam change). Sem avisar a
+  // proteção de rascunhos, um valor antigo salvo na sessão pode reaparecer ao
+  // redesenhar a tela e deixar "De" e "Até" fora de sincronia.
+  const campos = ['f-inicio','f-fim'].map(id => document.getElementById(id)).filter(Boolean);
+  if(window.zenithRascunhos?.sincronizar) window.zenithRascunhos.sincronizar(campos);
+}
 
 function marcarPresetManual(){
   PRESET = null;
@@ -732,6 +739,7 @@ function aplicarPreset(qual){
   else ini.setDate(hoje.getDate() - 89);
   document.getElementById('f-inicio').value = isoDe(ini);
   document.getElementById('f-fim').value = isoDe(hoje);
+  sincronizarPeriodo();
   render();
 }
 

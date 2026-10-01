@@ -1565,6 +1565,10 @@
   }
   function mesEstaAtivo(par) {
     var painel = painelDoPar(par), botao = botaoMes(painel);
+    // Algumas telas chamam o botão "Mês" de período móvel (por exemplo,
+    // últimos 30 dias), e não de mês-calendário. Nelas, transformar 15/10
+    // automaticamente em 01/10–31/10 altera silenciosamente o filtro.
+    if (painel && painel.dataset.zenithSemMes === '1') return false;
     return !!(painel && (painel.dataset.zenithMesAtivo === '1' || (botao && botao.classList.contains('active'))));
   }
   function isoDoMes(data) {
@@ -1590,6 +1594,7 @@
     PARES_PERIODO_MES.forEach(function (par) {
       var painel = painelDoPar(par);
       if (!painel || !painel.contains(botao)) return;
+      if (painel.dataset.zenithSemMes === '1') return;
       if (texto === 'mes' || texto === 'mês') painel.dataset.zenithMesAtivo = '1';
       else delete painel.dataset.zenithMesAtivo;
     });
@@ -2189,6 +2194,10 @@
       if (!fim) return;
       var faixa = faixaDeFiltros(inicio, fim);
       if (!faixa || vistos.indexOf(faixa) !== -1) return;
+      // Tela com limpeza própria conhece seus filtros auxiliares e seu
+      // padrão. Não recebe um segundo botão automático que recarregaria a
+      // página com uma semântica diferente.
+      if (faixa.matches && faixa.matches('[data-zenith-sem-limpar]')) return;
       if (faixa.querySelector('.zenith-limpar-filtros')) return;
       vistos.push(faixa);
       var apos = pontoDeInsercao(inicio, fim, faixa);
