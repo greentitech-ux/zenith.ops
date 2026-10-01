@@ -182,6 +182,12 @@
   .fech-sucesso-card h2{font-size:18px;margin:0 0 7px;color:var(--text);}
   .fech-sucesso-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.45;}
   .fech-sucesso-card button{width:100%;margin-top:20px;background:var(--accent);color:#0b0d10;border:0;border-radius:9px;padding:12px;font:700 14px var(--sans);cursor:pointer;}
+  .fech-pendencias-card{border-color:var(--warn);text-align:left;}
+  .fech-pendencias-cabecalho{display:flex;align-items:center;gap:11px;margin-bottom:10px;}
+  .fech-pendencias-cabecalho h2{margin:0;}
+  .fech-pendencias-icone{width:34px;height:34px;flex:0 0 34px;border-radius:50%;display:grid;place-items:center;background:var(--warn-dim);color:var(--warn);font-size:20px;font-weight:900;}
+  .fech-pendencias-lista{margin:14px 0 0;padding-left:20px;color:var(--text);font-size:13px;line-height:1.55;}
+  .fech-pendencias-lista li+li{margin-top:5px;}
   .sheet-wrap{position:relative;width:100%;max-width:640px;}
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
   .sheet h3{margin:0 0 4px;font-size:14px;}
@@ -274,7 +280,7 @@
 
 <div class="panel" id="painel-fechamento">
   <h2>Novo fechamento</h2>
-  <form id="form-lancar">
+  <form id="form-lancar" novalidate>
     <div class="fech-fluxo" aria-label="Etapas do fechamento">
       <div class="fech-fluxo-passos" role="tablist">
         <button type="button" class="fech-fluxo-passo active" data-fech-etapa-btn="1" onclick="irParaEtapaFechamento(1)"><b>1 · Base</b>Unidade e caixa</button>
@@ -434,6 +440,18 @@
     <h2 id="fechamento-sucesso-titulo">Fechamento realizado com sucesso</h2>
     <p id="fechamento-sucesso-detalhe"></p>
     <button type="button" id="fechamento-sucesso-continuar" onclick="fecharSucessoFechamento()">Continuar</button>
+  </div>
+</div>
+
+<div class="fech-sucesso-overlay hidden" id="fechamento-pendencias" role="alertdialog" aria-modal="true" aria-labelledby="fechamento-pendencias-titulo" onclick="if(event.target===this) fecharPendenciasFechamento()">
+  <div class="fech-sucesso-card fech-pendencias-card">
+    <div class="fech-pendencias-cabecalho">
+      <div class="fech-pendencias-icone" aria-hidden="true">!</div>
+      <h2 id="fechamento-pendencias-titulo">Complete antes de lançar</h2>
+    </div>
+    <p>O fechamento ainda não foi enviado. Preencha os itens abaixo para continuar:</p>
+    <ul class="fech-pendencias-lista" id="fechamento-pendencias-lista"></ul>
+    <button type="button" id="fechamento-pendencias-continuar" onclick="fecharPendenciasFechamento()">Voltar ao preenchimento</button>
   </div>
 </div>
 
@@ -838,6 +856,67 @@ function travaDoLancamento(faturamento, totalDeclarado, observacao){
     return `A diferença é de ${fmtMoney(dif)}, acima de ${fmtMoney(LIMITE_OBSERVACAO)} — escreva na Observação o que explica essa diferença antes de salvar.`;
   }
   return null;
+}
+
+function calcularCamposDoFechamento(){
+  const campos = {};
+  CAMPOS_NUMERICOS.forEach(c=>{
+    const el = document.getElementById('f-'+c);
+    campos[c] = el ? el.value : 0;
+  });
+  campos.adyen = MAQUINAS.reduce((s,m)=>s+num(m.valor),0);
+  campos.adyenPos = MAQUINAS_POS.reduce((s,m)=>s+num(m.valor),0);
+  campos.totalSaida = SAIDAS.reduce((s,x)=>s+num(x.valor),0);
+  const canais = defsExtrasAtual('canaisVendaExtras');
+  const formas = defsExtrasAtual('formasPagamentoExtras');
+  const kpis = defsExtrasAtual('kpisExtras');
+  campos.faturamento = somaExtrasComSinal('canal-extra-input', canais) + somaExtrasComSinal('forma-extra-input', formas, {soCruzado:true}) + somaKpisEm(kpis, 'faturamento');
+  campos.totalDeclarado = num(campos.adyen) + num(campos.adyenPos) + num(campos.entradaDinheiro) + somaExtrasComSinal('forma-extra-input', formas) + somaExtrasComSinal('canal-extra-input', canais, {soCruzado:true}) + somaKpisEm(kpis, 'totalDeclarado');
+  return campos;
+}
+
+function pendenciasObrigatoriasDoLancamento(){
+  const pendencias = [];
+  [
+    ['f-unidade', 'Selecione a unidade'],
+    ['f-data', 'Informe a data do fechamento'],
+    ['f-caixaFinal', 'Informe o caixa final'],
+  ].forEach(([id, texto])=>{
+    const campo = document.getElementById(id);
+    if(!campo || !String(campo.value || '').trim()) pendencias.push({texto, campo});
+  });
+  kpisPendentesNoFormulario().filter(k=>k.obrigatorio === true).forEach(k=>{
+    const campo = document.querySelector(`.kpi-extra-input[data-extra-campo="${CSS.escape(k.campo)}"], .kpi-extra-arquivo[data-extra-campo="${CSS.escape(k.campo)}"]`);
+    pendencias.push({texto:`KPI obrigatório: ${k.label}`, campo});
+  });
+  if(document.getElementById('f-unidade').value){
+    const campos = calcularCamposDoFechamento();
+    const impedimento = travaDoLancamento(campos.faturamento, campos.totalDeclarado, document.getElementById('f-observacao').value);
+    if(impedimento) pendencias.push({texto:impedimento, campo:null});
+  }
+  return pendencias;
+}
+
+let PRIMEIRO_CAMPO_PENDENTE = null;
+function mostrarPendenciasFechamento(pendencias){
+  const popup = document.getElementById('fechamento-pendencias');
+  const lista = document.getElementById('fechamento-pendencias-lista');
+  PRIMEIRO_CAMPO_PENDENTE = pendencias.find(p=>p.campo)?.campo || null;
+  lista.replaceChildren(...pendencias.map(({texto})=>{
+    const item = document.createElement('li');
+    item.textContent = texto;
+    return item;
+  }));
+  popup.classList.remove('hidden');
+  document.getElementById('fechamento-pendencias-continuar').focus();
+}
+function fecharPendenciasFechamento(){
+  document.getElementById('fechamento-pendencias').classList.add('hidden');
+  const campo = PRIMEIRO_CAMPO_PENDENTE;
+  if(!campo) return;
+  const etapa = campo.closest('[data-fech-etapa]')?.dataset.fechEtapa;
+  if(etapa) irParaEtapaFechamento(Number(etapa));
+  setTimeout(()=>{ campo.scrollIntoView({behavior:'smooth', block:'center'}); campo.focus(); }, 0);
 }
 document.getElementById('f-entradaDinheiro').addEventListener('input', atualizarResumo);
 
@@ -1903,6 +1982,7 @@ function fecharSucessoFechamento(){
 }
 document.addEventListener('keydown', (ev)=>{
   if(ev.key === 'Escape' && !document.getElementById('fechamento-sucesso').classList.contains('hidden')) fecharSucessoFechamento();
+  if(ev.key === 'Escape' && !document.getElementById('fechamento-pendencias').classList.contains('hidden')) fecharPendenciasFechamento();
 });
 
 // o formulario tem varios campos de texto/numero soltos (maquininhas,
@@ -1918,6 +1998,11 @@ document.getElementById('form-lancar').addEventListener('keydown', (ev)=>{
 
 document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
+  const pendenciasObrigatorias = pendenciasObrigatoriasDoLancamento();
+  if(pendenciasObrigatorias.length){
+    mostrarPendenciasFechamento(pendenciasObrigatorias);
+    return;
+  }
   // a pergunta da Maquininha POS vem ANTES da confirmação geral, e nomeia o
   // que está errado - "tem certeza?" genérico todo mundo confirma no
   // automático (ver avisosMaquininhaPos)
@@ -1927,11 +2012,6 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
     if(!confirm(`ATENÇÃO — MAQUININHA POS 01\n\n${avisosPos.map(a=>'• '+a.texto).join('\n\n')}\n\nEsse valor é DESCONTADO automaticamente do fechamento de amanhã. Se estiver no lugar errado, amanhã fecha com diferença.\n\nConfirma que ${fmtMoney(totalPos)} foi vendido DEPOIS da meia-noite?`)) return;
   }
   const kpisPendentes = kpisPendentesNoFormulario();
-  const kpisObrigatoriosPendentes = kpisPendentes.filter(k=>k.obrigatorio === true);
-  if(kpisObrigatoriosPendentes.length){
-    alert(`Preencha o(s) KPI(s) obrigatório(s) antes de lançar o fechamento: ${kpisObrigatoriosPendentes.map(k=>k.label).join(', ')}.`);
-    return;
-  }
   if(kpisPendentes.length && !confirm(`ATENÇÃO — KPI'S NÃO PREENCHIDOS\n\nFalta informar: ${kpisPendentes.map(k=>k.label).join(', ')}.\n\nO fechamento pode ser enviado, mas essa pendência ficará registrada e aparecerá no relatório da loja e da gestão. Deseja finalizar mesmo assim?`)) return;
   if(!confirm('Tem certeza que deseja finalizar esse fechamento? Confira os valores antes de continuar - depois de lançado, qualquer correção precisa passar por aprovação do Master.')) return;
   const btn = document.getElementById('btn-enviar');
@@ -1941,23 +2021,12 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
   try{
     const unidade = document.getElementById('f-unidade').value;
     const grupo = grupoDaUnidade(unidade);
-    const campos = {};
-    CAMPOS_NUMERICOS.forEach(c=>{
-      const el = document.getElementById('f-'+c);
-      campos[c] = el ? el.value : 0;
-    });
-    campos.adyen = MAQUINAS.reduce((s,m)=>s+num(m.valor),0);
-    campos.adyenPos = MAQUINAS_POS.reduce((s,m)=>s+num(m.valor),0);
-    campos.totalSaida = SAIDAS.reduce((s,x)=>s+num(x.valor),0);
+    const campos = calcularCamposDoFechamento();
     // Faturamento/Total declarado sao sempre recalculados no servidor (ver
     // fechamentosLive.js, que tambem aplica o desconto automatico da
     // Maquininha POS do dia anterior) - manda o mesmo valor mostrado na
     // tela so por completude do payload, nao por confiança nesse numero
-    const canaisDefsSubmit = defsExtrasAtual('canaisVendaExtras');
-    const formasDefsSubmit = defsExtrasAtual('formasPagamentoExtras');
     const kpisDefsSubmit = defsExtrasAtual('kpisExtras');
-    campos.faturamento = somaExtrasComSinal('canal-extra-input', canaisDefsSubmit) + somaExtrasComSinal('forma-extra-input', formasDefsSubmit, {soCruzado:true}) + somaKpisEm(kpisDefsSubmit, 'faturamento');
-    campos.totalDeclarado = num(campos.adyen) + num(campos.adyenPos) + num(campos.entradaDinheiro) + somaExtrasComSinal('forma-extra-input', formasDefsSubmit) + somaExtrasComSinal('canal-extra-input', canaisDefsSubmit, {soCruzado:true}) + somaKpisEm(kpisDefsSubmit, 'totalDeclarado');
 
     // trava ANTES de montar o envio: se for barrar, que barre sem subir foto
     // de KPI nem esperar a resposta do servidor
