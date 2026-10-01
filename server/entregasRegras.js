@@ -33,6 +33,7 @@ const DIAS_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
 const BASES_VALIDAS = new Set(['entrega', 'retorno', 'extra', 'foraDeArea', 'flat']);
 const DESTINOS_VALIDOS = new Set(['valor', 'coopRecebe']);
 const MOTIVOS_REMOCAO_CAMPO = ['atraso', 'saiu_antes', 'prejuizo', 'outro'];
+const MODELOS_LANCAMENTO_VALIDOS = new Set(['detalhado', 'total']);
 
 function num(v) {
   const n = Number(v);
@@ -101,6 +102,9 @@ function defaultRegra(unidade) {
   return {
     unidade,
     modo: 'plataforma',
+    // Campina informa a quantidade e o valor fechado da Moovey. Os demais
+    // continuam no formulário detalhado até que o Master escolha outro modelo.
+    modeloLancamento: unidade === 'Dominos Campina Grande' ? 'total' : 'detalhado',
     plataformaNome: '',
     camposValor: [],
     atualizadoEm: null,
@@ -117,7 +121,10 @@ const listAll = regrasCache.cached;
 
 async function getPara(unidade) {
   const doc = await COLLECTION.doc(unidade).get();
-  return doc.exists ? doc.data() : defaultRegra(unidade);
+  // Regras gravadas antes da criação do modelo "total" não possuem a nova
+  // chave. Mesclar com o padrão conserva a configuração antiga e faz Campina
+  // adotar o formulário correto sem exigir uma migração manual no Firestore.
+  return doc.exists ? { ...defaultRegra(unidade), ...doc.data() } : defaultRegra(unidade);
 }
 
 async function salvar(unidade, campos, atualizadoPorEmail) {
@@ -126,6 +133,7 @@ async function salvar(unidade, campos, atualizadoPorEmail) {
   const registro = {
     unidade,
     modo,
+    modeloLancamento: MODELOS_LANCAMENTO_VALIDOS.has(campos?.modeloLancamento) ? campos.modeloLancamento : (unidade === 'Dominos Campina Grande' ? 'total' : 'detalhado'),
     plataformaNome: String(campos?.plataformaNome || '').trim().slice(0, 40),
     camposValor: sanitizarCamposValor(campos?.camposValor),
     atualizadoEm: new Date().toISOString(),
@@ -192,6 +200,6 @@ function calcular(regra, { data, entrega, retorno, extra, foraDeArea, camposRemo
 
 module.exports = {
   listAll, getPara, salvar, calcular, defaultRegra,
-  DIAS_SEMANA, BASES_VALIDAS, DESTINOS_VALIDOS, MOTIVOS_REMOCAO_CAMPO,
+  DIAS_SEMANA, BASES_VALIDAS, DESTINOS_VALIDOS, MOTIVOS_REMOCAO_CAMPO, MODELOS_LANCAMENTO_VALIDOS,
   invalidar: () => regrasCache.invalidar(),
 };

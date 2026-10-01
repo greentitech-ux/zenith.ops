@@ -48,6 +48,7 @@ const reportUtil = require('./reportUtil');
 const sangrias = require('./sangrias');
 const saidasPainel = require('./saidasPainel');
 const entregasLive = require('./entregasLive');
+const entregadoresEntregas = require('./entregadoresEntregas');
 const entregasRegras = require('./entregasRegras');
 const backup = require('./backup');
 const relatorios = require('./relatorios');
@@ -4194,6 +4195,7 @@ const INVENTARIO_UNIDADES_NOMES = {
 // funcionando mesmo sem editar a coluna "Unidade" nela)
 const ENTREGAS_UNIDADES_NOMES = {
   'Dominos Bessa': 'Dom Bessa',
+  'Dominos Campina Grande': 'Dom Campina Grande',
   'Dominos Caruaru': 'Dom Caruaru',
   'Dominos Garanhuns': 'Dom Garanhuns',
 };
@@ -17788,7 +17790,7 @@ app.get('/api/chamados-manutencao/foto/:chamadoId/:campo/:index', requireSection
 // edicao, so o Master ve as diferencas na planilha em si). A aba "BDMotos"
 // fica de fora por enquanto (sem coluna Data preenchida - ver entregasSync.js).
 let entregasHistoricoData = [];
-let statusSincronizacaoEntregas = { ultimaEm: null, ultimoErro: null, sincronizando: false };
+let statusSincronizacaoEntregas = { ultimaEm: null, ultimoErro: null, sincronizando: false, fontes: [] };
 
 async function sincronizarPlanilhaEntregas({ completa = false } = {}) {
   if (statusSincronizacaoEntregas.sincronizando) return statusSincronizacaoEntregas;
@@ -17800,6 +17802,7 @@ async function sincronizarPlanilhaEntregas({ completa = false } = {}) {
       statusSincronizacaoEntregas.ultimaEm = new Date().toISOString();
       statusSincronizacaoEntregas.ultimoErro = null;
       statusSincronizacaoEntregas.linhasNovas = dados.linhasNovas ?? null;
+      statusSincronizacaoEntregas.fontes = dados.fontes || [];
       console.log(`Entregas: sincronizados ${dados.length} registros historicos da planilha do Google Sheets (${dados.linhasNovas ?? '?'} linha(s) nova(s) lida(s)).`);
     } else {
       statusSincronizacaoEntregas.ultimoErro = 'A sincronização rodou mas não retornou nenhuma linha - histórico continua com os dados anteriores.';
@@ -17834,7 +17837,7 @@ app.post('/api/entregas/sincronizar-planilha', auth.requireMaster, async (req, r
 app.get('/api/entregas/regras', requireAnySection('entregas', 'entregas-lancamento'), async (req, res) => {
   const todas = await entregasRegras.listAll();
   const porUnidade = {};
-  todas.forEach((r) => { porUnidade[r.unidade] = r; });
+  todas.forEach((r) => { porUnidade[r.unidade] = { ...entregasRegras.defaultRegra(r.unidade), ...r }; });
   const unidades = req.isMaster ? Object.keys({ ...ENTREGAS_UNIDADES_NOMES, ...porUnidade }) : (req.permissions.unidades || []);
   res.json(unidades.map((u) => porUnidade[u] || entregasRegras.defaultRegra(u)));
 });
@@ -17850,13 +17853,19 @@ app.put('/api/entregas/regras/:unidade', auth.requireMaster, async (req, res) =>
 
 app.post('/api/entregas/lancar', requireSection('entregas-lancamento'), upload.single('etiqueta'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, data, entregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos } = JSON.parse(req.body.payload || '{}');
+    const { unidade, unidadeNome, data, entregador, tipoEntregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos } = JSON.parse(req.body.payload || '{}');
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     if (!(await unidadesExtras.apareceEm(unidade, 'entregas'))) return res.status(400).json({ error: 'Essa unidade não tem Entregas habilitado.' });
+    const regra = await entregasRegras.getPara(unidade);
+    if (regra.modeloLancamento === 'total') {
+      const cadastrado = await entregadoresEntregas.encontrarAtivo(unidade, entregador);
+      if (!cadastrado) return res.status(400).json({ error: 'Escolha um entregador ativo da lista ou cadastre um novo antes de lançar.' });
+      if (tipoEntregador && cadastrado.tipo !== tipoEntregador) return res.status(400).json({ error: 'O tipo informado não corresponde ao entregador cadastrado.' });
+    }
     const registro = await entregasLive.create({
-      unidade, unidadeNome, data, entregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos,
+      unidade, unidadeNome, data, entregador, tipoEntregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos,
       etiquetaFile: req.file || null,
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,
@@ -17867,6 +17876,47 @@ app.post('/api/entregas/lancar', requireSection('entregas-lancamento'), upload.s
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// Cadastro de entregadores por unidade. Inclusão é imediata, auditada e sem
+// duplicar nome; exclusão é uma solicitação que só o Master aprova, para que
+// relatórios antigos nunca percam a referência do entregador.
+app.get('/api/entregas/entregadores', requireSection('entregas-lancamento'), async (req, res) => {
+  const unidade = String(req.query.unidade || '');
+  if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
+  if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  res.json(await entregadoresEntregas.listarAtivos(unidade));
+});
+
+app.post('/api/entregas/entregadores', requireSection('entregas-lancamento'), async (req, res) => {
+  try {
+    const { unidade, nome, tipo } = req.body || {};
+    if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!(await unidadesExtras.apareceEm(unidade, 'entregas'))) return res.status(400).json({ error: 'Essa unidade não tem Entregas habilitado.' });
+    const criado = await entregadoresEntregas.criar({ unidade, nome, tipo, porId: req.user.id, porEmail: req.user.email });
+    res.status(201).json(criado);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/entregas/entregadores/solicitar-exclusao', requireSection('entregas-lancamento'), async (req, res) => {
+  try {
+    const { unidade, entregador, motivo } = req.body || {};
+    if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const pedido = await entregadoresEntregas.solicitarExclusao({ unidade, entregador, motivo, solicitadoPorId: req.user.id, solicitadoPorEmail: req.user.email });
+    res.status(201).json(pedido);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/entregas/entregadores/solicitacoes', requireSection('entregas-lancamento'), async (req, res) => {
+  res.json(await entregadoresEntregas.listarSolicitacoes(req.isMaster ? {} : { solicitadoPorId: req.user.id }));
+});
+
+app.patch('/api/entregas/entregadores/solicitacoes/:id', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await entregadoresEntregas.decidirExclusao(req.params.id, req.body?.status, { decididoPorEmail: req.user.email, motivoDecisao: req.body?.motivoDecisao }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/entregas/meus', requireSection('entregas-lancamento'), async (req, res) => {

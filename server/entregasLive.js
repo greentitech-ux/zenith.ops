@@ -26,13 +26,24 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-async function create({ unidade, unidadeNome, data, entregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos, etiquetaFile, criadoPorId, criadoPorEmail }) {
+function numeroInteiroPositivo(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+function valorPositivo(v) {
+  const texto = String(v ?? '').trim().replace(',', '.');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(texto)) return null;
+  const n = Number(texto);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos, etiquetaFile, criadoPorId, criadoPorEmail }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new Error('Data inválida.');
   if (!entregador || !String(entregador).trim()) throw new Error('Nome do entregador é obrigatório.');
 
   const ref = COLLECTION.doc();
-  const registro = { id: ref.id, unidade, unidadeNome: unidadeNome || unidade, data, entregador: String(entregador).trim() };
+  const registro = { id: ref.id, unidade, unidadeNome: unidadeNome || unidade, data, entregador: String(entregador).trim(), tipoEntregador: String(tipoEntregador || '').trim() || null };
   CAMPOS_NUMERICOS.forEach((c) => { registro[c] = num(campos?.[c]); });
 
   // unidade com regra "fixo": o servidor calcula ajudaCusto/valor/coopRecebe
@@ -42,15 +53,27 @@ async function create({ unidade, unidadeNome, data, entregador, campos, obsRetor
   // (sem valor fixo, ex: paga o que a GAMI/NEXT informar) mantém os valores
   // digitados normalmente.
   const regra = await entregasRegras.getPara(unidade);
-  const camposValidosRemovidos = Array.isArray(camposRemovidos)
+  if (regra.modeloLancamento === 'total') {
+    const quantidade = numeroInteiroPositivo(campos?.entrega);
+    const valorTotal = valorPositivo(campos?.valor);
+    if (quantidade == null) throw new Error('Informe uma quantidade inteira de entregas maior que zero.');
+    if (valorTotal == null) throw new Error('Informe o valor total maior que zero.');
+    Object.assign(registro, {
+      entrega: quantidade, retorno: 0, extra: 0, bonus: 0, pos00hs: 0, foraDeArea: 0,
+      ajudaCusto: 0, valor: valorTotal, coopRecebe: 0, quantTotal: quantidade,
+      modeloLancamento: 'total', detalhesValor: [{ campo: 'valorTotal', label: 'Valor total informado', valor: valorTotal }],
+      camposRemovidos: [], motivoRemocaoCampos: null,
+    });
+  }
+  const camposValidosRemovidos = regra.modeloLancamento === 'total' ? [] : (Array.isArray(camposRemovidos)
     ? camposRemovidos.filter((c) => (regra.camposValor || []).some((r) => r.campo === c && r.removivelPelaLoja))
-    : [];
+    : []);
   registro.camposRemovidos = camposValidosRemovidos;
   registro.motivoRemocaoCampos = camposValidosRemovidos.length
     ? (entregasRegras.MOTIVOS_REMOCAO_CAMPO.includes(motivoRemocaoCampos) ? motivoRemocaoCampos : 'outro')
     : null;
-  registro.detalhesValor = [];
-  if (regra.modo === 'fixo') {
+  if (regra.modeloLancamento !== 'total') registro.detalhesValor = [];
+  if (regra.modo === 'fixo' && regra.modeloLancamento !== 'total') {
     const calculado = entregasRegras.calcular(regra, {
       data: registro.data, entrega: registro.entrega, retorno: registro.retorno, extra: registro.extra, foraDeArea: registro.foraDeArea,
       camposRemovidos: camposValidosRemovidos,
@@ -140,6 +163,13 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
   Object.entries(mudancas || {}).forEach(([campo, valor]) => {
     if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = num(valor);
   });
+  if (atual.modeloLancamento === 'total') {
+    const permitidos = new Set(['entrega', 'valor']);
+    Object.keys(camposValidos).forEach((campo) => { if (!permitidos.has(campo)) delete camposValidos[campo]; });
+    if ('entrega' in camposValidos && numeroInteiroPositivo(camposValidos.entrega) == null) throw new Error('Quantidade de entregas precisa ser um inteiro maior que zero.');
+    if ('valor' in camposValidos && valorPositivo(camposValidos.valor) == null) throw new Error('Valor total precisa ser maior que zero.');
+    if ('entrega' in camposValidos) camposValidos.quantTotal = camposValidos.entrega;
+  }
   if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para corrigir.');
 
   const ref = EDITS.doc();
@@ -181,6 +211,13 @@ async function editarDireto({ entregaId, mudancas, motivo, editadoPorEmail }) {
     if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = num(valor);
     else if (CAMPOS_TEXTO.includes(campo)) camposValidos[campo] = String(valor ?? '').slice(0, 500);
   });
+  if (atual.modeloLancamento === 'total') {
+    const permitidos = new Set(['entrega', 'valor']);
+    Object.keys(camposValidos).forEach((campo) => { if (!permitidos.has(campo)) delete camposValidos[campo]; });
+    if ('entrega' in camposValidos && numeroInteiroPositivo(camposValidos.entrega) == null) throw new Error('Quantidade de entregas precisa ser um inteiro maior que zero.');
+    if ('valor' in camposValidos && valorPositivo(camposValidos.valor) == null) throw new Error('Valor total precisa ser maior que zero.');
+    if ('entrega' in camposValidos) camposValidos.quantTotal = camposValidos.entrega;
+  }
   if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para alterar.');
 
   const valoresAnteriores = {};

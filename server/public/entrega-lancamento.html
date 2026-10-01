@@ -115,14 +115,34 @@
           <label>Data</label>
           <input type="date" id="f-data" required>
         </div>
-        <div>
+        <div id="wrap-entregador-padrao">
           <label>Entregador</label>
           <input type="text" id="f-entregador" placeholder="nome do motoboy" required>
+        </div>
+        <div id="wrap-entregador-campina" class="hidden">
+          <label>Entregador</label>
+          <select id="f-entregador-campina"><option value="">carregando entregadores…</option></select>
         </div>
       </div>
     </div>
 
-    <div class="secao">
+    <div class="secao hidden" id="gestao-entregadores-campina">
+      <div class="secao-titulo">Entregadores — Campina Grande</div>
+      <div class="grid2">
+        <div><label>Novo entregador</label><input type="text" id="f-novo-entregador" placeholder="nome do entregador"></div>
+        <div><label>Modalidade</label><select id="f-novo-tipo"><option value="MOOVERY_FIXO">MOOVERY FIXO</option><option value="MOOVERY_NUVEM">MOOVERY NUVEM</option></select></div>
+      </div>
+      <button type="button" class="link-btn" onclick="criarEntregadorCampina()">+ Cadastrar entregador</button>
+      <div class="grid2" style="margin-top:12px;">
+        <div><label>Solicitar exclusão</label><select id="f-excluir-entregador"><option value="">selecione o entregador</option></select></div>
+        <div><label>Motivo da solicitação</label><input type="text" id="f-motivo-exclusao" placeholder="ex: não trabalha mais na unidade"></div>
+      </div>
+      <button type="button" class="link-btn" onclick="solicitarExclusaoEntregador()">Solicitar exclusão</button>
+      <div id="lista-solicitacoes-entregadores" style="margin-top:10px;"></div>
+      <p class="muted" style="margin:8px 0 0;">A exclusão é solicitada aqui e só deixa de valer após aprovação do Master. Lançamentos antigos permanecem preservados.</p>
+    </div>
+
+    <div class="secao" id="campos-detalhados-entrega">
       <div class="secao-titulo">Entregas</div>
       <div class="grid2">
         <div><label>Entregas</label><input type="number" step="1" inputmode="numeric" id="f-entrega" value="0"></div>
@@ -142,7 +162,16 @@
       <input type="number" step="1" inputmode="numeric" id="f-foraDeArea" value="0">
     </div>
 
-    <div class="secao">
+    <div class="secao hidden" id="campos-total-campina">
+      <div class="secao-titulo">Resumo do entregador</div>
+      <div class="grid2">
+        <div><label>Quantidade de entregas</label><input type="number" min="1" step="1" inputmode="numeric" id="f-campina-quantidade" value=""></div>
+        <div><label>Valor total a pagar</label><input type="number" min="0.01" step="0.01" inputmode="decimal" id="f-campina-valor" value=""></div>
+      </div>
+      <div class="resumo"><div class="linha"><span>Conferência</span><b id="campina-conferencia">Informe quantidade e valor total.</b></div></div>
+    </div>
+
+    <div class="secao" id="secao-valores-detalhados">
       <div class="secao-titulo">Valores</div>
 
       <!-- unidade "plataforma" (sem tabela de valor fixo, ex: paga o que a
@@ -180,10 +209,12 @@
         </div>
       </div>
 
-      <label>Quantidade total</label>
-      <input type="number" step="1" inputmode="numeric" id="f-quantTotal" value="0">
-      <div class="resumo">
-        <div class="linha"><span>Sugestão (entregas + extra)</span><b id="resumo-sugestao">0</b></div>
+      <div id="wrap-quantidade-total">
+        <label>Quantidade total</label>
+        <input type="number" step="1" inputmode="numeric" id="f-quantTotal" value="0">
+        <div class="resumo">
+          <div class="linha"><span>Sugestão (entregas + extra)</span><b id="resumo-sugestao">0</b></div>
+        </div>
       </div>
     </div>
 
@@ -290,6 +321,7 @@ let EDICOES = [];
 let EDITANDO_ID = null;
 let EDITANDO_MASTER_ID = null;
 let REGRAS_POR_UNIDADE = {}; // unidade -> regra (ver entregasRegras.js) - decide se o form pede contagem (calcula sozinho) ou valor digitado
+let ENTREGADORES_CAMPINA = [];
 const MOTIVOS_REMOCAO_LABEL = { atraso:'Atraso', saiu_antes:'Saiu antes do fim do turno', prejuizo:'Gerou prejuízo', outro:'Outro' };
 
 function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -314,8 +346,18 @@ function atualizarSugestao(){
   const sugestao = num(document.getElementById('f-entrega').value) + num(document.getElementById('f-extra').value);
   document.getElementById('resumo-sugestao').textContent = sugestao;
 }
+function atualizarConferenciaCampina(){
+  const quantidade = num(document.getElementById('f-campina-quantidade').value);
+  const valor = num(document.getElementById('f-campina-valor').value);
+  document.getElementById('campina-conferencia').textContent = quantidade > 0 && valor > 0
+    ? `${quantidade} entrega(s) · ${fmtMoney(valor)} total`
+    : 'Informe quantidade e valor total.';
+}
 ['f-entrega','f-extra'].forEach(id=>{
   document.getElementById(id).addEventListener('input', atualizarSugestao);
+});
+['f-campina-quantidade','f-campina-valor'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', atualizarConferenciaCampina);
 });
 
 // ---------- regra de pagamento da unidade (ver entregas-regras.html) ----------
@@ -326,6 +368,7 @@ function regraAtual(){
   const unidade = document.getElementById('f-unidade').value;
   return REGRAS_POR_UNIDADE[unidade] || { modo:'plataforma' };
 }
+function ehModeloTotal(){ return regraAtual().modeloLancamento === 'total'; }
 const DIAS_SEMANA_JS = ['dom','seg','ter','qua','qui','sex','sab']; // Date.getDay() ja retorna 0=dom
 function diaSemanaDe(dataIso){
   if(!dataIso) return null;
@@ -333,9 +376,81 @@ function diaSemanaDe(dataIso){
 }
 function atualizarModoUnidade(){
   const fixo = regraAtual().modo === 'fixo';
-  document.getElementById('campos-manual').classList.toggle('hidden', fixo);
-  document.getElementById('campos-calculados').classList.toggle('hidden', !fixo);
+  const total = ehModeloTotal();
+  document.getElementById('campos-detalhados-entrega').classList.toggle('hidden', total);
+  document.getElementById('secao-valores-detalhados').classList.toggle('hidden', total);
+  document.getElementById('campos-total-campina').classList.toggle('hidden', !total);
+  document.getElementById('gestao-entregadores-campina').classList.toggle('hidden', !total);
+  document.getElementById('wrap-entregador-padrao').classList.toggle('hidden', total);
+  document.getElementById('wrap-entregador-campina').classList.toggle('hidden', !total);
+  document.getElementById('f-entregador').required = !total;
+  document.getElementById('f-entregador-campina').required = total;
+  document.getElementById('campos-manual').classList.toggle('hidden', fixo || total);
+  document.getElementById('campos-calculados').classList.toggle('hidden', !fixo || total);
   if(fixo){ renderCamposRemoviveis(); atualizarPreviewCalculado(); }
+  if(total) carregarEntregadoresCampina();
+}
+
+function entregadorSelecionado(){
+  return ENTREGADORES_CAMPINA.find(e=>e.nome===document.getElementById('f-entregador-campina').value) || null;
+}
+function renderEntregadoresCampina(){
+  const select = document.getElementById('f-entregador-campina');
+  const selectExclusao = document.getElementById('f-excluir-entregador');
+  const atual = select.value;
+  const opcoes = ENTREGADORES_CAMPINA.map(e=>
+    `<option value="${escapeHtml(e.nome)}">${escapeHtml(e.nome)} · ${escapeHtml(e.tipo==='MOOVERY_FIXO'?'MOOVERY FIXO':e.tipo==='MOOVERY_NUVEM'?'MOOVERY NUVEM':e.tipo)}</option>`
+  ).join('');
+  select.innerHTML = '<option value="">selecione o entregador</option>' + opcoes;
+  selectExclusao.innerHTML = '<option value="">selecione o entregador</option>' + opcoes;
+  if(ENTREGADORES_CAMPINA.some(e=>e.nome===atual)) select.value = atual;
+}
+async function carregarEntregadoresCampina(){
+  if(!ehModeloTotal()) return;
+  const unidade = document.getElementById('f-unidade').value;
+  try{
+    const [entregadores, solicitacoes] = await Promise.all([
+      fetch('/api/entregas/entregadores?unidade='+encodeURIComponent(unidade)).then(r=>r.json()),
+      fetch('/api/entregas/entregadores/solicitacoes').then(r=>r.json()),
+    ]);
+    ENTREGADORES_CAMPINA = Array.isArray(entregadores) ? entregadores : [];
+    renderEntregadoresCampina();
+    renderSolicitacoesEntregadores(Array.isArray(solicitacoes) ? solicitacoes.filter(s=>s.unidade===unidade) : []);
+  }catch(_){
+    document.getElementById('f-entregador-campina').innerHTML = '<option value="">não foi possível carregar</option>';
+  }
+}
+function renderSolicitacoesEntregadores(solicitacoes){
+  const pendentes = solicitacoes.filter(s=>s.status==='PENDENTE');
+  const el = document.getElementById('lista-solicitacoes-entregadores');
+  if(!pendentes.length){ el.innerHTML = ENTREGADORES_CAMPINA.length ? '' : '<p class="muted">Nenhum entregador ativo. Cadastre o primeiro acima.</p>'; return; }
+  el.innerHTML = pendentes.map(s=>`<div class="resumo" style="margin-top:7px;"><div class="linha"><span>Exclusão pendente: <b>${escapeHtml(s.entregador)}</b></span>${IS_MASTER?`<span><button type="button" class="link-btn" onclick="decidirSolicitacaoEntregador('${escapeHtml(s.id)}','APROVADO')">Aprovar</button> <button type="button" class="link-btn" onclick="decidirSolicitacaoEntregador('${escapeHtml(s.id)}','REJEITADO')">Recusar</button></span>`:'<b>aguardando Master</b>'}</div><small>${escapeHtml(s.motivo)}</small></div>`).join('');
+}
+async function criarEntregadorCampina(){
+  const nome = document.getElementById('f-novo-entregador').value;
+  const tipo = document.getElementById('f-novo-tipo').value;
+  try{
+    const res = await fetch('/api/entregas/entregadores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unidade:document.getElementById('f-unidade').value,nome,tipo})});
+    const data = await res.json(); if(!res.ok) throw new Error(data.error||'erro ao cadastrar');
+    document.getElementById('f-novo-entregador').value=''; await carregarEntregadoresCampina();
+    document.getElementById('f-entregador-campina').value=data.nome;
+  }catch(err){ alert(err.message); }
+}
+async function solicitarExclusaoEntregador(){
+  const entregador = document.getElementById('f-excluir-entregador').value;
+  const motivo = document.getElementById('f-motivo-exclusao').value;
+  try{
+    const res = await fetch('/api/entregas/entregadores/solicitar-exclusao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unidade:document.getElementById('f-unidade').value,entregador,motivo})});
+    const data = await res.json(); if(!res.ok) throw new Error(data.error||'erro ao solicitar exclusão');
+    document.getElementById('f-excluir-entregador').value=''; document.getElementById('f-motivo-exclusao').value='';
+    await carregarEntregadoresCampina();
+  }catch(err){ alert(err.message); }
+}
+async function decidirSolicitacaoEntregador(id,status){
+  if(!confirm(status==='APROVADO'?'Confirmar exclusão do entregador?':'Recusar esta solicitação?')) return;
+  const res = await fetch('/api/entregas/entregadores/solicitacoes/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  const data = await res.json(); if(!res.ok) return alert(data.error||'erro ao decidir');
+  await carregarEntregadoresCampina();
 }
 // checklist dinâmico - só os campos que o Master marcou como removíveis
 // pela loja aparecem aqui (varia por unidade, ver entregas-regras.html)
@@ -492,7 +607,8 @@ function abrirEditarMaster(id){
   document.getElementById('m-obsExtra').value = f.obsExtra || '';
   document.getElementById('m-observacao').value = f.observacao || '';
   document.getElementById('m-motivo').value = '';
-  document.getElementById('m-campos-numericos').innerHTML = CAMPOS_NUMERICOS.map(c=>
+  const camposMaster = f.modeloLancamento==='total' ? ['entrega','valor'] : CAMPOS_NUMERICOS;
+  document.getElementById('m-campos-numericos').innerHTML = camposMaster.map(c=>
     `<div><label>${NOMES_CAMPOS[c]}</label><input type="number" step="${CAMPOS_MONETARIOS.has(c)?'0.01':'1'}" inputmode="decimal" id="m-${c}" value="${num(f[c])}"></div>`
   ).join('');
   document.getElementById('msg-master').classList.add('hidden');
@@ -507,7 +623,9 @@ document.getElementById('form-master').addEventListener('submit', async (ev)=>{
   const f = MEUS.find(x=>x.id===EDITANDO_MASTER_ID);
   const mudancas = {};
   CAMPOS_NUMERICOS.forEach(c=>{
-    const v = num(document.getElementById('m-'+c).value);
+    const input = document.getElementById('m-'+c);
+    if(!input) return;
+    const v = num(input.value);
     if(v !== num(f[c])) mudancas[c] = v;
   });
   const entregador = document.getElementById('m-entregador').value;
@@ -538,6 +656,8 @@ function resetarForm(){
   document.getElementById('form-lancar').reset();
   document.getElementById('f-data').value = hojeBrasilia();
   CAMPOS_NUMERICOS.forEach(c=>{ const el = document.getElementById('f-'+c); if(el) el.value = 0; });
+  document.getElementById('f-campina-quantidade').value = '';
+  document.getElementById('f-campina-valor').value = '';
   document.getElementById('wrap-motivo-campos').classList.add('hidden');
   atualizarSugestao();
   atualizarModoUnidade();
@@ -566,12 +686,19 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
       const el = document.getElementById('f-'+c);
       campos[c] = el ? el.value : 0;
     });
+    const entregadorCampina = entregadorSelecionado();
+    if(ehModeloTotal()){
+      if(!entregadorCampina) throw new Error('Selecione um entregador ativo da lista.');
+      campos.entrega = document.getElementById('f-campina-quantidade').value;
+      campos.valor = document.getElementById('f-campina-valor').value;
+    }
     const camposRemovidos = camposRemovidosMarcados();
     const payload = {
       unidade,
       unidadeNome: UNIDADES_NOMES[unidade] || unidade,
       data: document.getElementById('f-data').value,
-      entregador: document.getElementById('f-entregador').value,
+      entregador: ehModeloTotal() ? entregadorCampina.nome : document.getElementById('f-entregador').value,
+      tipoEntregador: ehModeloTotal() ? entregadorCampina.tipo : null,
       campos,
       obsRetorno: document.getElementById('f-obsRetorno').value,
       obsExtra: document.getElementById('f-obsExtra').value,
