@@ -8023,7 +8023,7 @@ setTimeout(async () => {
       // do agente: sem isto, em producao o agente leva 401 e nunca reporta
       'rota está na lista pública do dashboard com senha': /ROTA_LOJA_ESTADO_AGENTE_RE\.test\(path\)/.test(fonteIndex)
         && /function rotaPublicaSemDashboard\([\s\S]*?ROTA_LOJA_ESTADO_AGENTE_RE\.test\(path\)[\s\S]*?\n\}/.test(fonteIndex),
-      'interno: o heartbeat passa pela MESMA regra (estado + recria + reporta), não chama Iniciar direto': scripts[0].includes('try { Aplicar-NoPulsoPrint ([bool]$resp.noPulsoPrint) ([bool]$resp.capturarAgora) }')
+      'interno: o heartbeat passa pela MESMA regra (estado + recria + reporta), não chama Iniciar direto': scripts[0].includes('try { Aplicar-NoPulsoPrint ([bool]$resp.noPulsoPrint) ([bool]$resp.capturarAgora) $resp.noPulsoPrintAtalho }')
         && !scripts[0].includes('if ($resp.noPulsoPrint) { Iniciar-NoPulsoPrint }') && scripts.every((s) => s.includes('function Aplicar-NoPulsoPrint') && s.includes('Aplicar-NoPulsoPrint ([bool]$configPrint.noPulsoPrint)')),
       'token errado é recusado': errado.status >= 400,
       'sem token é recusado (máquina tem segredo)': semToken.status >= 400,
@@ -22071,7 +22071,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'o pulso chega ao runspace como argumento': /param\(\$CaminhoAtivo, \$PastaBase, \$CaminhoLogPrint, \$CaminhoErro, \$Pulso(?:, [^)]*)?\)/.test(ps)
         && /AddArgument\(\$global:NoPulsoPrintEstado\)/.test(ps),
       'o estado compartilhado é sincronizado (outro runspace escreve nele)':
-        /\$global:NoPulsoPrintEstado = \[hashtable\]::Synchronized\(@\{ ultimoPulso = \$null; selecaoAbertaEm = \$null \}\)/.test(ps),
+        /\$global:NoPulsoPrintEstado = \[hashtable\]::Synchronized\(@\{ ultimoPulso = \$null; selecaoAbertaEm = \$null; atalhoId = \$atalhoConfigurado; atalho = \$rotuloAtalho \}\)/.test(ps),
       // 2) "pronto" deixa de ser só o estado do objeto
       '"pronto" agora exige pulso recente, não só runspace Running':
         /if \(\$st\.selecaoAbertaEm\) \{ return "selecao aberta ha /.test(ps)
@@ -22092,7 +22092,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'quando expira, o log diz que a janela abriu fora da vista': /a janela abriu fora da sua vista/.test(ps),
       // 4) o que separa "tecla não chegou" de "janela não apareceu"
       'o atalho detectado é registrado ANTES de abrir a janela':
-        /Log-Print "Ctrl\+Q detectado - abrindo a selecao\."[\s\S]{0,200}?\$Pulso\.selecaoAbertaEm = Get-Date/.test(ps),
+        /Log-Print "\$\(\$Pulso\.atalho\) detectado - abrindo a selecao\."[\s\S]{0,200}?\$Pulso\.selecaoAbertaEm = Get-Date/.test(ps),
+      'atalho é fechado em opções seguras e chega ao runspace':
+        ps.includes('$NoPulsoPrintAtalhoInicial = "ctrl_q"')
+        && psAt.includes('param($CaminhoAtivo, $PastaBase, $CaminhoLogPrint, $CaminhoErro, $Pulso, $CaminhoGatilho, $AtalhoConfigurado)')
+        && vgP.montarScriptVigia({ codigo: 'DOM_19706', posto: 'PC2', tipo: 'interno', agentToken: 'tok', noPulsoPrint: true, noPulsoPrintAtalho: 'ctrl_alt_p' }).includes('$NoPulsoPrintAtalhoInicial = "ctrl_alt_p"')
+        && !vgP.montarScriptVigia({ codigo: 'DOM_19706', posto: 'PC3', tipo: 'interno', agentToken: 'tok', noPulsoPrint: true, noPulsoPrintAtalho: 'texto-invalido' }).includes('texto-invalido'),
       // 5) borda de subida não depende mais do fim do laço
       'a borda de subida é resolvida antes do bloco (havia um continue que a pulava)':
         /\$disparar = \$atalho -and -not \$atalhoAnterior\r?\n\s*\$atalhoAnterior = \$atalho/.test(ps)

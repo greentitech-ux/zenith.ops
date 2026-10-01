@@ -61,6 +61,24 @@ const CONFIG_DOC = db.collection('lojaStatusConfig').doc('geral');
 // consultada a cada abertura do painel.
 const APELIDOS_DOC = db.collection('lojaStatusConfig').doc('apelidosRede');
 
+// O atalho do NoPulsoPrint e' uma escolha POR COMPUTADOR: Caixa, GCOM e
+// navegador podem reservar combinacoes diferentes. Nunca aceitamos texto de
+// tecla livre, porque este valor tambem entra no script PowerShell do agente.
+// A lista fechada evita conflito acidental e qualquer injecao no script.
+const ATALHOS_NOPULSO_PRINT = Object.freeze({
+  ctrl_q: 'Ctrl + Q',
+  ctrl_alt_p: 'Ctrl + Alt + P',
+  ctrl_alt_q: 'Ctrl + Alt + Q',
+  ctrl_shift_p: 'Ctrl + Shift + P',
+});
+const ATALHO_NOPULSO_PRINT_PADRAO = 'ctrl_q';
+function normalizarAtalhoNoPulsoPrint(valor) {
+  const chave = String(valor || '').trim();
+  return Object.prototype.hasOwnProperty.call(ATALHOS_NOPULSO_PRINT, chave)
+    ? chave
+    : ATALHO_NOPULSO_PRINT_PADRAO;
+}
+
 // config do NOC. Hoje so o toggle do PUSH de acesso remoto: DESLIGADO por
 // padrao (o alerta virava spam do proprio acesso remoto da equipe -
 // AnyDesk/TeamViewer/DWService que a TI usa; o evento continua sendo gravado
@@ -1424,6 +1442,7 @@ async function heartbeat(codigo, posto, info, token) {
     // Também vai no heartbeat para o agente interno aplicar a mudança sem
     // precisar baixar/reinstalar o NOCZenith.
     noPulsoPrint: !!(atual && atual.noPulsoPrint),
+    noPulsoPrintAtalho: normalizarAtalhoNoPulsoPrint(atual && atual.noPulsoPrintAtalho),
     capturarAgora,
     versaoAplicacao: versaoAplicacao(atual && atual.politicaVersao, arteDaMaquina),
     versaoModeloBasico,
@@ -2031,6 +2050,7 @@ async function configuracaoAgente(codigo, posto, token, { unidadeNome } = {}) {
   const logos = arte ? null : await logosDaUnidade(codigo).catch(() => null);
   return {
     noPulsoPrint: !!atual.noPulsoPrint,
+    noPulsoPrintAtalho: normalizarAtalhoNoPulsoPrint(atual.noPulsoPrintAtalho),
     capturarAgora,
     politica,
     politicaVersao: Number(atual.politicaVersao || 0),
@@ -2210,6 +2230,18 @@ async function noPulsoPrintDoComputador(codigo, posto) {
   return snap.exists && !!snap.data().noPulsoPrint;
 }
 
+// Usado ao montar o .ps1 baixado/atualizado. Uma leitura so entrega o toggle
+// e o atalho, evitando que uma maquina nova fique com Ctrl+Q so porque ainda
+// nao tinha o campo salvo antes desta funcionalidade existir.
+async function configuracaoNoPulsoPrintDoComputador(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  const atual = snap.exists ? snap.data() : {};
+  return {
+    habilitado: !!atual.noPulsoPrint,
+    atalho: normalizarAtalhoNoPulsoPrint(atual.noPulsoPrintAtalho),
+  };
+}
+
 // "Windows antigo" (Server 2012 R2 / 7 / 8): o agente desta maquina sai na
 // versao especifica (ver adaptarParaWindowsAntigo no vigiaScript.js). Lido
 // pela rota vigia.ps1 e pelo comando de instalacao - a autoatualizacao
@@ -2249,7 +2281,7 @@ async function nomeDoComputador(codigo, posto) {
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom, noPulsoPrintAtalho) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
@@ -2261,6 +2293,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
     ehServidor: !!ehServidor, temGcom: !!temGcom, ehVmPulse: !!ehVmPulse, ehHostVm: !!ehHostVm, ehVmGcom: !!ehVmGcom, medeQuedas: !!medeQuedas,
     // Captura local opt-in: o arquivo nunca passa pelo NoPulso nem pelo servidor.
     noPulsoPrint: !!noPulsoPrint,
+    noPulsoPrintAtalho: normalizarAtalhoNoPulsoPrint(noPulsoPrintAtalho),
     // Server 2012 R2 / 7 / 8: agente na versao especifica (ver vigiaScript.js)
     windowsAntigo: !!windowsAntigo,
     criadoEm: Date.now(),
@@ -2278,7 +2311,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom, noPulsoPrintAtalho) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -2300,6 +2333,7 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServido
     // ocorrências simultâneas em uma única queda da loja.
     medeQuedas: !!medeQuedas,
     noPulsoPrint: !!noPulsoPrint,
+    noPulsoPrintAtalho: normalizarAtalhoNoPulsoPrint(noPulsoPrintAtalho),
     windowsAntigo: !!windowsAntigo,
   };
   await COLLECTION.doc(id).update(registro);
@@ -5160,6 +5194,7 @@ module.exports = {
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, pedirInventarioAtalhos, registrarInventarioAtalhos, noPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, bloquearAppNoPulsoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, pedirInventarioAtalhos, registrarInventarioAtalhos, noPulsoPrintDoComputador, configuracaoNoPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, bloquearAppNoPulsoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
   BATERIA_BAIXA, BATERIA_CRITICA, sanitizarAparelho,
+  ATALHOS_NOPULSO_PRINT, ATALHO_NOPULSO_PRINT_PADRAO, normalizarAtalhoNoPulsoPrint,
 };

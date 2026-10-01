@@ -52,7 +52,8 @@
 // 130: ID do AnyDesk lido também dos arquivos locais quando --get-id falha.
 // 131: invalida o cache de logo do modelo básico e recebe a revisão visual
 //      atualizada, inclusive o cartão de suporte no fundo escuro.
-const VERSAO_VIGIA = 131;
+// 132: permite escolher um atalho seguro do NoPulsoPrint por computador.
+const VERSAO_VIGIA = 132;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -152,9 +153,13 @@ function adaptarParaWindowsAntigo(texto) {
   return out;
 }
 
-function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo, ehServidor, bloquearAppNoPulso, unidadeNome, maquinaNome }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPulsoPrintAtalho, windowsAntigo, ehServidor, bloquearAppNoPulso, unidadeNome, maquinaNome }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
+  // Campo vem do cadastro, mas a validação também é feita aqui: este valor
+  // entra no texto PowerShell que o agente baixa, então não pode ser livre.
+  const atalhosNoPulsoPrint = new Set(['ctrl_q', 'ctrl_alt_p', 'ctrl_alt_q', 'ctrl_shift_p']);
+  const noPulsoPrintAtalhoInicial = atalhosNoPulsoPrint.has(noPulsoPrintAtalho) ? noPulsoPrintAtalho : 'ctrl_q';
   // segredo desse computador (ver lojaStatus.js) - vai assado no script e
   // volta no cabecalho X-NOC-Token em todo request pro servidor, provando
   // que quem fala e a maquina certa. Sem ele, o backend nao entrega comando/
@@ -373,6 +378,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '$UrlInventarioAtalhos = "' + urlInventarioAtalhos + '"',
     '$UrlEstadoAgente = "' + urlEstadoAgente + '"',
     '$NoPulsoPrintAtivoInicial = $' + noPulsoPrintInicial,
+    '$NoPulsoPrintAtalhoInicial = "' + noPulsoPrintAtalhoInicial + '"',
     '',
     '# ---- log local (arquivo texto do lado do .ps1) - sem isso, todo erro',
     '# ficava mudo (-ErrorAction SilentlyContinue + catch {} em toda chamada de',
@@ -1425,16 +1431,18 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  }',
     '}',
     '',
-    '# ---- NoPulsoPrint: Ctrl+Q captura a tela LOCAL quando o Master habilita',
+    '# ---- NoPulsoPrint: atalho configurado por computador captura a tela LOCAL quando o Master habilita',
     '# este computador no cadastro. Não há upload, anexo nem envio por chat.',
-    'function Iniciar-NoPulsoPrint {',
+    'function Iniciar-NoPulsoPrint($atalhoConfigurado) {',
     '  if ($global:NoPulsoPrintPowerShell) { return }',
+    '  if (-not $atalhoConfigurado) { $atalhoConfigurado = $NoPulsoPrintAtalhoInicial }',
     '  # Hashtable sincronizada: o laco do print roda em OUTRO runspace, e e por',
     '  # aqui que ele conta que esta vivo. Sem isso o unico sinal era o estado do',
     '  # objeto PowerShell, que diz "Running" ate quando o laco esta preso no',
     '  # ShowDialog da selecao.',
-    '  $global:NoPulsoPrintEstado = [hashtable]::Synchronized(@{ ultimoPulso = $null; selecaoAbertaEm = $null })',
-    '  # contadores: quantos Ctrl+Q o laco viu e quantas capturas sairam. E o que',
+    '  $rotuloAtalho = switch ($atalhoConfigurado) { "ctrl_alt_p" { "Ctrl + Alt + P"; break } "ctrl_alt_q" { "Ctrl + Alt + Q"; break } "ctrl_shift_p" { "Ctrl + Shift + P"; break } default { "Ctrl + Q" } }',
+    '  $global:NoPulsoPrintEstado = [hashtable]::Synchronized(@{ ultimoPulso = $null; selecaoAbertaEm = $null; atalhoId = $atalhoConfigurado; atalho = $rotuloAtalho })',
+    '  # contadores: quantos atalhos o laco viu e quantas capturas sairam. E o que',
     '  # separa "a tecla nao chega" (vistos=0) de "chega e nao captura" (vistos>0,',
     '  # capturas=0, erro=...). Vao no NOC junto do estado.',
     '  $global:NoPulsoPrintEstado.ctrlq = 0; $global:NoPulsoPrintEstado.capturas = 0; $global:NoPulsoPrintEstado.erro = ""',
@@ -1445,7 +1453,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  $psPrint = [powershell]::Create()',
     '  $psPrint.Runspace = $rsPrint',
     '  [void]$psPrint.AddScript({',
-    '    param($CaminhoAtivo, $PastaBase, $CaminhoLogPrint, $CaminhoErro, $Pulso, $CaminhoGatilho)',
+    '    param($CaminhoAtivo, $PastaBase, $CaminhoLogPrint, $CaminhoErro, $Pulso, $CaminhoGatilho, $AtalhoConfigurado)',
     '    function Log-Print($m) { try { "$([DateTime]::Now.ToString(\'yyyy-MM-dd HH:mm:ss\')) - [print] $m" | Out-File -FilePath $CaminhoLogPrint -Append -Encoding UTF8 } catch {} }',
     '    try {',
     '      Add-Type -AssemblyName System.Windows.Forms',
@@ -1722,8 +1730,16 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '        try { if (Test-Path $CaminhoGatilho) { Remove-Item $CaminhoGatilho -Force -ErrorAction Stop; $gatilho = $true } } catch {}',
     '        if (-not $ativo -and -not $gatilho) { $atalhoAnterior = $false; Start-Sleep -Milliseconds 300; continue }',
     '        $ctrl = (([NoPulsoPrintTeclas]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0)',
+    '        $alt = (([NoPulsoPrintTeclas]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0)',
+    '        $shift = (([NoPulsoPrintTeclas]::GetAsyncKeyState(0x10) -band 0x8000) -ne 0)',
     '        $q = (([NoPulsoPrintTeclas]::GetAsyncKeyState(0x51) -band 0x8000) -ne 0)',
-    '        $atalho = $ctrl -and $q',
+    '        $p = (([NoPulsoPrintTeclas]::GetAsyncKeyState(0x50) -band 0x8000) -ne 0)',
+    '        $atalho = switch ($AtalhoConfigurado) {',
+    '          "ctrl_alt_p" { $ctrl -and $alt -and -not $shift -and $p; break }',
+    '          "ctrl_alt_q" { $ctrl -and $alt -and -not $shift -and $q; break }',
+    '          "ctrl_shift_p" { $ctrl -and $shift -and -not $alt -and $p; break }',
+    '          default { $ctrl -and -not $alt -and -not $shift -and $q }',
+    '        }',
     '        # a borda de subida e resolvida AQUI, nao no fim do laco: havia um',
     '        # continue no meio (selecao cancelada) que pulava a atualizacao e',
     '        # deixava o atalho rearmado enquanto as teclas seguissem pressionadas',
@@ -1733,7 +1749,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '        if ($disparar -or $gatilho) {',
     '          # registrado ANTES de abrir a janela: e isto que separa "a tecla',
     '          # nao chegou" de "a janela nao apareceu"',
-    '          if ($disparar) { Log-Print "Ctrl+Q detectado - abrindo a selecao." } else { Log-Print "Captura pedida pelo NOC - abrindo a selecao." }',
+    '          if ($disparar) { Log-Print "$($Pulso.atalho) detectado - abrindo a selecao." } else { Log-Print "Captura pedida pelo NOC - abrindo a selecao." }',
     '          try { $Pulso.selecaoAbertaEm = Get-Date } catch {}',
     '          try {',
     '            # Primeiro congela a tela e só então mostra a máscara de seleção.',
@@ -1851,7 +1867,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      Log-Print "NoPulsoPrint não iniciou: $($_.Exception.Message)"',
     '      try { $_.Exception.Message | Set-Content -Path $CaminhoErro -Force } catch {}',
     '    }',
-    '  }).AddArgument($CaminhoNoPulsoPrintAtivo).AddArgument($PastaNoPulsoPrint).AddArgument($CaminhoLog).AddArgument($CaminhoNoPulsoPrintErro).AddArgument($global:NoPulsoPrintEstado).AddArgument($CaminhoNoPulsoPrintGatilho)',
+    '  }).AddArgument($CaminhoNoPulsoPrintAtivo).AddArgument($PastaNoPulsoPrint).AddArgument($CaminhoLog).AddArgument($CaminhoNoPulsoPrintErro).AddArgument($global:NoPulsoPrintEstado).AddArgument($CaminhoNoPulsoPrintGatilho).AddArgument($atalhoConfigurado)',
     '  try { Remove-Item $CaminhoNoPulsoPrintErro -Force -ErrorAction SilentlyContinue } catch {}',
     '  [void]$psPrint.BeginInvoke()',
     '  $global:NoPulsoPrintPowerShell = $psPrint',
@@ -1860,10 +1876,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  # Estado-NoPulsoPrint). Antes o log dizia pronto aqui, o runspace morria',
     '  # um segundo depois e, como o $global ficava preenchido, nunca mais era',
     '  # recriado: Ctrl+Q morto pra sempre com o log jurando que estava pronto.',
-    '  Escrever-Log "NoPulsoPrint iniciando (Ctrl+Q quando habilitado)."',
+    '  Escrever-Log "NoPulsoPrint iniciando ($atalhoConfigurado quando habilitado)."',
     '}',
     '',
-    '# Em que pe esta o Ctrl+Q: "pronto", "falhou: <motivo>" ou "parado". Um',
+    '# Em que pe esta o atalho configurado: "pronto", "falhou: <motivo>" ou "parado". Um',
     '# runspace morto e descartado aqui pra Iniciar-NoPulsoPrint recriar na',
     '# proxima sincronizacao - e o motivo vai pro log e pro NOC.',
     'function Estado-NoPulsoPrint {',
@@ -1877,10 +1893,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '    # jurando "pronto". Agora so e pronto se o laco bateu pulso ha pouco.',
     '    $st = $global:NoPulsoPrintEstado',
     '    if (-not $st) { return "pronto" }',
-    '    # contadores vao junto de qualquer estado do laco: "pronto · ctrl+q',
-    '    # vistos=0" e "pronto · ctrl+q vistos=3 · capturas=0 · erro: ..." sao',
+    '    # contadores vao junto de qualquer estado do laco: "pronto · atalho',
+    '    # vistos=0" e "pronto · atalho vistos=3 · capturas=0 · erro: ..." sao',
     '    # diagnosticos diferentes (tecla nao chega / chega e falha)',
-    '    $resumo = "ctrl+q vistos=$($st.ctrlq) · capturas=$($st.capturas)"; if ($st.erro) { $resumo += " · $($st.erro)" }',
+    '    $resumo = "$($st.atalho) · atalhos vistos=$($st.ctrlq) · capturas=$($st.capturas)"; if ($st.erro) { $resumo += " · $($st.erro)" }',
     '    if ($st.selecaoAbertaEm) { return "selecao aberta ha $([int](((Get-Date) - $st.selecaoAbertaEm)).TotalSeconds)s · $resumo" }',
     '    if (-not $st.ultimoPulso) { return "iniciando" }',
     '    $paradoHa = [int](((Get-Date) - $st.ultimoPulso)).TotalSeconds',
@@ -1919,7 +1935,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '# dois caminhos: o Sincronizar-NoPulsoPrint (tipos que nao batem heartbeat',
     '# pelo agente) e o heartbeat do interno - antes o interno chamava Iniciar',
     '# direto num catch vazio, e um runspace morto ali nunca era visto.',
-    'function Aplicar-NoPulsoPrint($habilitado, $capturar) {',
+    'function Aplicar-NoPulsoPrint($habilitado, $capturar, $atalho) {',
+    '  $atalhoSeguro = switch ($atalho) { "ctrl_alt_p" { "ctrl_alt_p"; break } "ctrl_alt_q" { "ctrl_alt_q"; break } "ctrl_shift_p" { "ctrl_shift_p"; break } default { "ctrl_q" } }',
     '  if ($capturar) { try { "1" | Set-Content -Path $CaminhoNoPulsoPrintGatilho -Force; Escrever-Log "NOC pediu captura agora." } catch {} }',
     '  $valorPrint = if ($habilitado) { "1" } else { "0" }',
     '  $valorAnterior = try { (Get-Content $CaminhoNoPulsoPrintAtivo -First 1 -ErrorAction Stop).Trim() } catch { "" }',
@@ -1928,7 +1945,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  # NoPulsoPrint solta o global e o Iniciar logo abaixo recria',
     '  $estadoPrint = Estado-NoPulsoPrint',
     '  if ($habilitado) {',
-    '    Iniciar-NoPulsoPrint',
+    '    if ($global:NoPulsoPrintEstado -and $global:NoPulsoPrintEstado.atalhoId -ne $atalhoSeguro) { Encerrar-NoPulsoPrint; $estadoPrint = "reiniciando para trocar atalho" }',
+    '    Iniciar-NoPulsoPrint $atalhoSeguro',
     '    # da 1,5s pro runspace novo cair, se for cair: assim a queda no boot',
     '    # (Add-Type, System.Drawing...) e reportada nesta mesma volta',
     '    if ($estadoPrint -ne "pronto") { Start-Sleep -Milliseconds 1500; $estadoPrint = Estado-NoPulsoPrint }',
@@ -3186,7 +3204,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '  if ($Servico) { return }',
     '  try {',
     '    $configPrint = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10',
-    '    Aplicar-NoPulsoPrint ([bool]$configPrint.noPulsoPrint) ([bool]$configPrint.capturarAgora)',
+    '    Aplicar-NoPulsoPrint ([bool]$configPrint.noPulsoPrint) ([bool]$configPrint.capturarAgora) $configPrint.noPulsoPrintAtalho',
     '  } catch { Escrever-Log "Falha ao sincronizar NoPulsoPrint: $($_.Exception.Message)" }',
     '}',
     '',
@@ -3662,7 +3680,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, wind
     '      # O computador interno já recebe heartbeat pelo próprio agente; usa a',
     '      # resposta para aplicar a opção do print imediatamente, sem reinstalar.',
     '      if (-not $Servico -and $null -ne $resp.noPulsoPrint) {',
-    '        try { Aplicar-NoPulsoPrint ([bool]$resp.noPulsoPrint) ([bool]$resp.capturarAgora) } catch { Escrever-Log "NoPulsoPrint nao sincronizou: $($_.Exception.Message)" }',
+    '        try { Aplicar-NoPulsoPrint ([bool]$resp.noPulsoPrint) ([bool]$resp.capturarAgora) $resp.noPulsoPrintAtalho } catch { Escrever-Log "NoPulsoPrint nao sincronizou: $($_.Exception.Message)" }',
     '      }',
     // O DEFEITO QUE ISTO CONSERTA: este laco (o do tipo interno) chamava
     // Sincronizar-Politica UMA VEZ, ao subir, e nunca mais. Ligar o papel de
