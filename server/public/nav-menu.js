@@ -395,12 +395,9 @@
     return document.querySelector('.hamburger-btn, #btn-menu, #nav-toggle');
   }
 
-  // Retorno tem duas camadas, nesta ordem:
-  // 1. pai estrutural: uma tela de detalhe sempre volta para a tela que a
-  //    organiza (mapa VOLTAR acima), mesmo se chegou por link direto;
-  // 2. origem contextual: nas telas principais, como Meu Dia, volta para a
-  //    última página interna visitada. Isso evita colocar um "Voltar" falso
-  //    para fora do NoPulso ou para uma unidade que a pessoa não pode abrir.
+  // O atalho de retorno é sempre estrutural: só aparece nas telas que têm um
+  // pai declarado abaixo. A origem contextual fazia "Lançar entrega" vazar
+  // para telas sem relação, como Fechamento do Balcão do Saltiverso.
   const CHAVE_ORIGEM_VOLTA = 'nopulsoOrigemVolta';
   function origemInternaSegura(valor) {
     if (!valor) return null;
@@ -440,15 +437,14 @@
   let VOLTAR_EL = null;
   function montarVoltar() {
     const pai = itemPorId(VOLTAR[semHtml(location.pathname)]);
-    const origem = pai ? null : origemContextual();
-    if (!pai && !origem) return;
+    if (!pai) return;
     const btn = acharHamburguer();
     if (!btn || !btn.parentNode) return;
     const a = document.createElement('a');
-    const rotulo = pai ? pai.rotulo : rotuloDaOrigem(origem);
-    a.className = pai ? 'nmz-voltar hidden' : 'nmz-voltar';
+    const rotulo = pai.rotulo;
+    a.className = 'nmz-voltar hidden';
     a.id = 'nmz-voltar';
-    a.href = pai ? pai.href.replace(/\.html(?=\?|$)/, '') : origem;
+    a.href = pai.href.replace(/\.html(?=\?|$)/, '');
     a.title = 'Voltar para ' + rotulo;
     a.setAttribute('aria-label', 'Voltar para ' + rotulo);
     a.innerHTML = `<span class="nmz-vseta" aria-hidden="true">‹</span><span class="nmz-vrot">${esc(rotulo)}</span>`;
