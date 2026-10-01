@@ -2250,28 +2250,23 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
     const token = req.headers['x-noc-token'] || req.body.token || null;
     const ehSessao = req.body.sessao === true || req.body.sessao === 'true';
     const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe, token, ehSessao);
-    // push do acesso remoto e OPT-IN (default desligado): as ferramentas que a
-    // TI usa (AnyDesk/TeamViewer/DWService) mantem conexao 24h e enchiam o
-    // Master de alerta falso. O evento fica registrado no historico do
-    // computador de qualquer jeito; o push so sai se o Master ligar.
-    //
     // Desde 09/09/2026 o agente sabe separar SESSAO (alguem entrou, lido do
-    // log da propria ferramenta) de servico conectado - e so a sessao vira
-    // push. O batimento de nuvem, que era o que enchia o Master, nunca mais
-    // toca o celular dele, mesmo com o toggle ligado.
-    // ACESSO CONHECIDO NAO TOCA O CELULAR. O evento ja foi gravado acima, no
-    // historico da maquina - e continua la, com o nome de quem e. So o push
-    // e' poupado: alerta que dispara pela propria equipe vira ruido e faz o
-    // Master parar de olhar justamente o que importa.
+    // log da propria ferramenta) de servico conectado. Só sessão real vira
+    // push; o batimento de nuvem nunca apita o celular. Por isso o alerta é
+    // ligado por padrão e uma sessão conhecida também PRECISA avisar: a lista
+    // serve para identificar quem entrou, nunca para esconder um acesso.
     const conhecido = ehSessao
       ? lojaStatus.acessoConhecidoDe(req.body.detalhe, (await lojaStatus.getConfig()).acessosConhecidos)
       : null;
+    const detalheAlerta = conhecido
+      ? `${req.body.detalhe || 'conexão de acesso remoto'} · acesso identificado: ${conhecido.nome || conhecido.id}`
+      : req.body.detalhe;
     if (conhecido) {
-      console.log(`[NOC] acesso remoto conhecido (${conhecido.nome || conhecido.id}) em ${req.params.codigo}/${req.params.posto} - registrado sem push.`);
+      console.log(`[NOC] acesso remoto identificado (${conhecido.nome || conhecido.id}) em ${req.params.codigo}/${req.params.posto} - push enviado.`);
     }
-    if (ehSessao && !conhecido && await lojaStatus.pushAcessoRemotoAtivo()) {
+    if (ehSessao && await lojaStatus.pushAcessoRemotoAtivo()) {
       const mapa = await construirUnidadesMapa();
-      push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
+      push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, detalheAlerta)
         .catch((err) => console.error('Erro no push de acesso remoto:', err.message));
     }
     res.json({ ok: true });
@@ -7842,10 +7837,9 @@ app.put('/api/loja-status/config', auth.requireMaster, async (req, res) => {
   try {
     const patch = {};
     if (req.body.pushAcessoRemoto !== undefined) patch.pushAcessoRemoto = req.body.pushAcessoRemoto === true;
-    // lista de IDs de AnyDesk da equipe: acesso vindo deles nao toca o celular.
-    // Pede a senha do Master porque mexer nela SILENCIA alerta de seguranca -
-    // um ID a mais aqui e um acesso que deixa de avisar. So quando a lista vem
-    // no corpo: o toggle de push continua sem senha, como sempre foi.
+    // Lista de IDs da equipe apenas identifica a pessoa no alerta; nunca
+    // silencia a sessão. Continua protegida por senha do Master pois altera
+    // o contexto de um alerta de segurança. O toggle segue sem senha.
     if (req.body.acessosConhecidos !== undefined) {
       if (!(await exigirSenhaDoMaster(req, res))) return;
       patch.acessosConhecidos = lojaStatus.sanitizarAcessosConhecidos(req.body.acessosConhecidos);

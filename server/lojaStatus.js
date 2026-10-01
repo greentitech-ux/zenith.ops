@@ -498,7 +498,10 @@ function linhaDoCarimbo(marca, unidadeNome) {
 
 async function pushAcessoRemotoAtivo() {
   const c = await getConfig();
-  return c.pushAcessoRemoto === true; // default false
+  // O agente agora separa sessão real de simples serviço conectado. Portanto,
+  // uma instalação que ainda não escolheu esta opção deve avisar por padrão;
+  // só fica quieta quando o Master a desligou expressamente.
+  return c.pushAcessoRemoto !== false;
 }
 
 // mesma ideia do configCache: o painel lê isso a cada 30s e quase nunca muda.

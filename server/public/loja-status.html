@@ -766,13 +766,13 @@
   </div>
   <!-- papel de parede do parque: UMA imagem pra rede toda; cada computador
        decide se aplica, na política do card dele -->
-  <!-- ACESSOS REMOTOS CONHECIDOS: o ID do AnyDesk de QUEM ACESSA (o computador
-       da TI), nao o da loja. Vale pras 52 maquinas de uma vez. Silencia o
-       push, nunca o historico - ver acessoConhecidoDe no lojaStatus.js. -->
+  <!-- IDs REMOTOS CONHECIDOS: o ID do AnyDesk de QUEM ACESSA (o computador
+       da TI), nao o da loja. Vale pras 52 maquinas de uma vez e identifica
+       quem entrou no alerta; nunca silencia o push. -->
   <div data-recolher>
-  <div class="agente-titulo" data-recolher-titulo><h2>🔕 Acessos remotos conhecidos</h2></div>
+  <div class="agente-titulo" data-recolher-titulo><h2>🪪 IDs de acesso remoto conhecidos</h2></div>
   <div class="agente-sub">
-    O ID do AnyDesk de quem <b>acessa</b> — o seu computador, o do técnico — não o da loja. Cadastre uma vez e vale para todas as máquinas. Acesso vindo de um ID desta lista <b>não toca o celular</b>, mas continua no histórico da máquina, com o nome de quem é.
+    O ID do AnyDesk de quem <b>acessa</b> — o seu computador, o do técnico — não o da loja. Cadastre uma vez e vale para todas as máquinas. Toda sessão real <b>toca o celular</b>; esta lista só mostra no alerta quem foi identificado, e mantém o histórico da máquina.
   </div>
   <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
     <input id="ar-id" inputmode="numeric" maxlength="20" placeholder="ID do AnyDesk (só números)" style="flex:1 1 170px;min-width:0;">
@@ -5761,9 +5761,9 @@ async function boot(){
   setInterval(atualizarTickerCarga, 15000);
   document.addEventListener('visibilitychange', () => { if(!document.hidden) carregar(); });
 }
-// toggle do push de acesso remoto (Master). Default desligado - o evento fica
-// sempre no historico do computador; o push so vai pro celular se ligar.
-let PUSH_AR = false;
+// Toggle do push de acesso remoto (Master). Sessões reais alertam por padrão;
+// serviço conectado permanece apenas no histórico para não gerar ruído.
+let PUSH_AR = true;
 function pintarBtnPushAr(){
   const b = document.getElementById('btn-push-ar');
   b.textContent = PUSH_AR ? '🔔 Alerta acesso remoto: LIGADO' : '🔕 Alerta acesso remoto: desligado';
@@ -5772,10 +5772,10 @@ function pintarBtnPushAr(){
 async function carregarConfigPushAr(){
   try{
     const c = await fetch('/api/loja-status/config').then(r=>r.ok?r.json():{});
-    PUSH_AR = c.pushAcessoRemoto === true;
+    PUSH_AR = c.pushAcessoRemoto !== false;
     ACESSOS_CONHECIDOS = Array.isArray(c.acessosConhecidos) ? c.acessosConhecidos : [];
   }
-  catch(e){ PUSH_AR = false; ACESSOS_CONHECIDOS = []; }
+  catch(e){ PUSH_AR = true; ACESSOS_CONHECIDOS = []; }
   pintarBtnPushAr();
   pintarAcessosConhecidos();
 }
@@ -5783,7 +5783,7 @@ let ACESSOS_CONHECIDOS = [];
 function pintarAcessosConhecidos(){
   const el = document.getElementById('ar-lista');
   if(!el) return;
-  if(!ACESSOS_CONHECIDOS.length){ el.innerHTML = '<div class="sub">Nenhum ID cadastrado — todo acesso remoto alerta.</div>'; return; }
+  if(!ACESSOS_CONHECIDOS.length){ el.innerHTML = '<div class="sub">Nenhum ID cadastrado — toda sessão alerta sem identificação de origem.</div>'; return; }
   el.innerHTML = ACESSOS_CONHECIDOS.map((a)=>`<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;padding:7px 10px;margin-bottom:6px;background:var(--panel2);">
     <span style="font-family:var(--mono);font-weight:700;">${escapeHtml(a.id)}</span>
     <span class="sub" style="flex:1 1 auto;min-width:0;">${escapeHtml(a.nome||'sem nome')}</span>
@@ -5812,13 +5812,13 @@ async function adicionarAcessoConhecido(){
 }
 async function removerAcessoConhecido(id){
   const a = ACESSOS_CONHECIDOS.find(x=>x.id===id);
-  if(!confirm(`Tirar ${a&&a.nome?a.nome:id} da lista? Acessos vindos desse ID voltam a alertar no celular.`)) return;
+  if(!confirm(`Tirar ${a&&a.nome?a.nome:id} da lista? As sessões já alertam; elas só deixarão de mostrar este nome.`)) return;
   await salvarAcessosConhecidos(ACESSOS_CONHECIDOS.filter(x=>x.id!==id));
 }
 
 async function togglePushAcessoRemoto(){
   const novo = !PUSH_AR;
-  if(novo && !confirm('Ligar o alerta de acesso remoto no celular?\n\nComo a TI usa AnyDesk/TeamViewer/DWService (que ficam conectados o tempo todo), isso pode gerar bastante notificação. O evento continua no histórico do computador de qualquer jeito.')) return;
+  if(novo && !confirm('Ligar o alerta de acesso remoto no celular?\n\nSó uma sessão real gera aviso. Serviço conectado e batimentos de nuvem continuam apenas no histórico.')) return;
   try{
     const c = await fetch('/api/loja-status/config', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pushAcessoRemoto: novo }) }).then(r=>r.json());
     PUSH_AR = c.pushAcessoRemoto === true; pintarBtnPushAr();

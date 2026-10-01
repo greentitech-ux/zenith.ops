@@ -16333,10 +16333,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
   // ------------------------------------------------------------------
   // ACESSO REMOTO CONHECIDO. Pedido do Master: alerta que dispara pela propria
-  // equipe vira ruido e faz o Master parar de olhar o que importa. O ID do
-  // AnyDesk de QUEM ACESSA entra numa lista e aquele acesso deixa de tocar o
-  // celular - mas NUNCA sai do historico: a lista nao pode virar um jeito de
-  // entrar na loja sem deixar rastro.
+  // equipe aparece identificado no alerta. O ID do AnyDesk de QUEM ACESSA
+  // entra numa lista, mas NUNCA pode silenciar uma sessão real nem removê-la
+  // do histórico.
   let okAcessoConhecido = false;
   try {
     const ls = require(__dirname + '/lojaStatus.js');
@@ -16387,15 +16386,15 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'ID cadastrado nao casa quando e pedaco de um numero maior': !casa('AnyDesk · session 1234567890123 started'),
       'sem lista, nada e reconhecido': !ls.acessoConhecidoDe('incoming 123456789', []) && !ls.acessoConhecidoDe('incoming 123456789', null),
       // as quatro de baixo passam pela ROTA de verdade, nao pelo fonte
-      'na rota: acesso de ID cadastrado nao toca o celular': comportamento.soConhecido === 0,
-      'na rota: acesso de ID estranho continua tocando o celular': comportamento.comEstranho === 1,
-      'na rota: ID cadastrado dentro de um numero maior NAO silencia o alerta': comportamento.comNumeroMaior === 2,
+      'na rota: acesso de ID cadastrado também toca o celular': comportamento.soConhecido === 1,
+      'na rota: acesso de ID estranho continua tocando o celular': comportamento.comEstranho === 2,
+      'na rota: ID cadastrado dentro de um numero maior continua alertando': comportamento.comNumeroMaior === 3,
       'na rota: o acesso conhecido continua no historico da maquina, com o ID':
         eventosConhecido.length === 3 && eventosConhecido.some((e) => /123456789/.test(e.detalhe || '')),
-      // o push e poupado; o evento ja foi gravado ANTES, e continua la
-      'o push e poupado so quando o acesso e conhecido':
+      'um ID conhecido só identifica o push, nunca o bloqueia':
         /const conhecido = ehSessao[\s\S]{0,200}acessoConhecidoDe\(req\.body\.detalhe/.test(srcIndex)
-        && /if \(ehSessao && !conhecido && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIndex),
+        && /if \(ehSessao && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIndex)
+        && /acesso identificado:/.test(srcIndex),
       // a LINHA do registrarAcessoRemoto nao pode mencionar 'conhecido': filtrar
       // o historico transformaria a lista num jeito de entrar sem deixar rastro
       'o evento continua no historico (registrarAcessoRemoto roda antes e sem filtro)':
@@ -16405,20 +16404,20 @@ $r | ConvertTo-Json -Depth 4 -Compress
           const ini = srcIndex.lastIndexOf('\n', i) + 1;
           return !/conhecido/.test(srcIndex.slice(ini, srcIndex.indexOf('\n', i)));
         })(),
-      'mexer na lista pede a senha do Master (silenciar alerta e ato sensivel)':
+      'mexer na lista pede a senha do Master (identifica alerta sensível)':
         /if \(req\.body\.acessosConhecidos !== undefined\) \{\s*\n\s*if \(!\(await exigirSenhaDoMaster\(req, res\)\)\) return;/.test(srcIndex),
       'o toggle de push NAO passou a pedir senha':
         /if \(req\.body\.pushAcessoRemoto !== undefined\) patch\.pushAcessoRemoto = req\.body\.pushAcessoRemoto === true;/.test(srcIndex),
       'a tela tem onde cadastrar e diz que o histórico continua':
         /adicionarAcessoConhecido\(\)/.test(htmlAr) && /removerAcessoConhecido\(/.test(htmlAr)
-        && /não toca o celular/.test(htmlAr) && /continua no histórico/.test(htmlAr),
+        && /toca o celular/.test(htmlAr) && /histórico da máquina/.test(htmlAr),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAcessoConhecido = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (push=${JSON.stringify(comportamento)} eventos=${eventosConhecido.length})`);
   } catch (e) { okAcessoConhecido = false; console.log('  erro: ' + e.message); }
   if (!okAcessoConhecido) ruins += 1;
-  console.log(`${okAcessoConhecido ? '✓' : '✗'} NOC: ID de AnyDesk conhecido não toca o celular, mas continua no histórico`);
+  console.log(`${okAcessoConhecido ? '✓' : '✗'} NOC: ID de AnyDesk conhecido identifica e também alerta no celular`);
 
   // ------------------------------------------------------------------
   // SENHA DO ANYDESK EM MASSA. Pedido do Master (07/09/2026): "colocar uma
@@ -16842,10 +16841,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'a versão do vigia subiu, senão as 52 máquinas não baixam a versão nova': vg.VERSAO_VIGIA >= 23,
       'o script continua começando com # NOCZenith (a trava do download)': script.startsWith('# NOCZenith'),
       // o push: so sessao toca o celular do Master
-      // o !conhecido entrou depois (ID de AnyDesk da equipe nao toca o celular);
-      // o ehSessao continua fixado aqui, que e a garantia original
+      // o ID conhecido só identifica o alerta; ehSessao continua sendo a
+      // garantia de que serviço conectado nunca toca o celular
       'só a sessão vira push; o serviço conectado nunca mais toca o celular':
-        /if \(ehSessao && !conhecido && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
+        /if \(ehSessao && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
       // presa ao HTML inline e ao rótulo em texto, esta asserção quebrou quando
       // os eventos viraram cardEvento() - sem nenhum defeito real. O que
       // importa não é a marcação: é a sessão sair em VERMELHO e o serviço
