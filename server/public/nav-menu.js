@@ -46,6 +46,7 @@
         alt: { quando: (me) => !temSecao(me, 'lancamento') && temSecao(me, 'sangria'), icone: '💰', rotulo: 'Sangria/Depósito' } },
       { id: 'nav-saidas-painel', href: '/saidas', icone: '📤', rotulo: 'Painel de Saídas', secoes: ['lancamento', 'sangria'] },
       { id: 'nav-entrega-lancamento', href: '/entrega-lancamento', icone: '📦', rotulo: 'Lançar entrega', secoes: ['entregas-lancamento'] },
+      { id: 'nav-entregadores', href: '/entregadores', icone: '🛵', rotulo: 'Entregadores', secoes: ['entregas-lancamento'] },
       // pagina de Fechamentos e uma so (fechamentos.html), mas cada franquia
       // so quer ver o proprio numero sem lembrar de trocar um filtro toda
       // vez - por isso 2 itens de menu, cada um mandando pra ca com
@@ -56,7 +57,7 @@
       { id: 'nav-kpis-operacionais', href: '/kpis-operacionais', icone: "⏱️", rotulo: "KPI's operacionais", secoes: ['kpis'] },
       { id: 'nav-formularios', href: '/formularios', icone: '🖊️', rotulo: 'Formulários', secoes: ['formularios'] },
       { id: 'nav-vendas-recordes', href: '/vendas-recordes', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
-      { id: 'nav-entregas', href: '/entregas', icone: '🛵', rotulo: 'Entregas', secoes: ['entregas'] },
+      { id: 'nav-entregas', href: '/entregas', icone: '📊', rotulo: 'Resumo de Entregas', secoes: ['entregas'] },
       { id: 'nav-inventario', href: '/estoque', icone: '📦', rotulo: 'Estoque', secoes: ['inventario'] },
       { id: 'nav-abastecimento', href: '/abastecimento', icone: '🛒', rotulo: 'Abastec. Carrinho', secoes: ['abastecimento-carrinho', 'abastecimento-loja'] },
       { id: 'nav-abastecimento-relatorios', href: '/abastecimento-relatorios', icone: '📊', rotulo: 'Relatórios do Carrinho', master: true },

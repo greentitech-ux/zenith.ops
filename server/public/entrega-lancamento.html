@@ -92,6 +92,8 @@
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:6px;">
+    <a class="back" href="/entregadores">🛵 Entregadores</a>
+    <a class="back" href="/entregas">📊 Resumo</a>
     <button class="back" onclick="logout()">🚪 Sair</button>
   </div>
 </header>
@@ -127,22 +129,6 @@
           <select id="f-entregador-campina"><option value="">carregando entregadores…</option></select>
         </div>
       </div>
-    </div>
-
-    <div class="secao hidden" id="gestao-entregadores-campina">
-      <div class="secao-titulo">Entregadores — Campina Grande</div>
-      <div class="grid2">
-        <div><label>Novo entregador</label><input type="text" id="f-novo-entregador" placeholder="nome do entregador"></div>
-        <div><label>Modalidade</label><select id="f-novo-tipo"><option value="MOOVERY_FIXO">MOOVERY FIXO</option><option value="MOOVERY_NUVEM">MOOVERY NUVEM</option></select></div>
-      </div>
-      <button type="button" class="link-btn" onclick="criarEntregadorCampina()">+ Cadastrar entregador</button>
-      <div class="grid2" style="margin-top:12px;">
-        <div><label>Solicitar exclusão</label><select id="f-excluir-entregador"><option value="">selecione o entregador</option></select></div>
-        <div><label>Motivo da solicitação</label><input type="text" id="f-motivo-exclusao" placeholder="ex: não trabalha mais na unidade"></div>
-      </div>
-      <button type="button" class="link-btn" onclick="solicitarExclusaoEntregador()">Solicitar exclusão</button>
-      <div id="lista-solicitacoes-entregadores" style="margin-top:10px;"></div>
-      <p class="muted" style="margin:8px 0 0;">A exclusão é solicitada aqui e só deixa de valer após aprovação do Master. Lançamentos antigos permanecem preservados.</p>
     </div>
 
     <div class="secao" id="campos-detalhados-entrega">
@@ -383,7 +369,6 @@ function atualizarModoUnidade(){
   document.getElementById('campos-detalhados-entrega').classList.toggle('hidden', total);
   document.getElementById('secao-valores-detalhados').classList.toggle('hidden', total);
   document.getElementById('campos-total-campina').classList.toggle('hidden', !total);
-  document.getElementById('gestao-entregadores-campina').classList.toggle('hidden', !total);
   document.getElementById('wrap-entregador-padrao').classList.toggle('hidden', total);
   document.getElementById('wrap-entregador-campina').classList.toggle('hidden', !total);
   document.getElementById('f-entregador').required = !total;
@@ -403,61 +388,23 @@ function entregadorSelecionado(){
 }
 function renderEntregadoresCampina(){
   const select = document.getElementById('f-entregador-campina');
-  const selectExclusao = document.getElementById('f-excluir-entregador');
   const atual = select.value;
   const opcoes = ENTREGADORES_CAMPINA.map(e=>
     `<option value="${escapeHtml(e.nome)}">${escapeHtml(e.nome)} · ${escapeHtml(e.tipo==='MOOVERY_FIXO'?'MOOVERY FIXO':e.tipo==='MOOVERY_NUVEM'?'MOOVERY NUVEM':e.tipo)}</option>`
   ).join('');
   select.innerHTML = '<option value="">selecione o entregador</option>' + opcoes;
-  selectExclusao.innerHTML = '<option value="">selecione o entregador</option>' + opcoes;
   if(ENTREGADORES_CAMPINA.some(e=>e.nome===atual)) select.value = atual;
 }
 async function carregarEntregadoresCampina(){
   if(!ehModeloTotal()) return;
   const unidade = document.getElementById('f-unidade').value;
   try{
-    const [entregadores, solicitacoes] = await Promise.all([
-      fetch('/api/entregas/entregadores?unidade='+encodeURIComponent(unidade)).then(r=>r.json()),
-      fetch('/api/entregas/entregadores/solicitacoes').then(r=>r.json()),
-    ]);
+    const entregadores = await fetch('/api/entregas/entregadores?unidade='+encodeURIComponent(unidade)).then(r=>r.json());
     ENTREGADORES_CAMPINA = Array.isArray(entregadores) ? entregadores : [];
     renderEntregadoresCampina();
-    renderSolicitacoesEntregadores(Array.isArray(solicitacoes) ? solicitacoes.filter(s=>s.unidade===unidade) : []);
   }catch(_){
     document.getElementById('f-entregador-campina').innerHTML = '<option value="">não foi possível carregar</option>';
   }
-}
-function renderSolicitacoesEntregadores(solicitacoes){
-  const pendentes = solicitacoes.filter(s=>s.status==='PENDENTE');
-  const el = document.getElementById('lista-solicitacoes-entregadores');
-  if(!pendentes.length){ el.innerHTML = ENTREGADORES_CAMPINA.length ? '' : '<p class="muted">Nenhum entregador ativo. Cadastre o primeiro acima.</p>'; return; }
-  el.innerHTML = pendentes.map(s=>`<div class="resumo" style="margin-top:7px;"><div class="linha"><span>Exclusão pendente: <b>${escapeHtml(s.entregador)}</b></span>${IS_MASTER?`<span><button type="button" class="link-btn" onclick="decidirSolicitacaoEntregador('${escapeHtml(s.id)}','APROVADO')">Aprovar</button> <button type="button" class="link-btn" onclick="decidirSolicitacaoEntregador('${escapeHtml(s.id)}','REJEITADO')">Recusar</button></span>`:'<b>aguardando Master</b>'}</div><small>${escapeHtml(s.motivo)}</small></div>`).join('');
-}
-async function criarEntregadorCampina(){
-  const nome = document.getElementById('f-novo-entregador').value;
-  const tipo = document.getElementById('f-novo-tipo').value;
-  try{
-    const res = await fetch('/api/entregas/entregadores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unidade:document.getElementById('f-unidade').value,nome,tipo})});
-    const data = await res.json(); if(!res.ok) throw new Error(data.error||'erro ao cadastrar');
-    document.getElementById('f-novo-entregador').value=''; await carregarEntregadoresCampina();
-    document.getElementById('f-entregador-campina').value=data.nome;
-  }catch(err){ alert(err.message); }
-}
-async function solicitarExclusaoEntregador(){
-  const entregador = document.getElementById('f-excluir-entregador').value;
-  const motivo = document.getElementById('f-motivo-exclusao').value;
-  try{
-    const res = await fetch('/api/entregas/entregadores/solicitar-exclusao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unidade:document.getElementById('f-unidade').value,entregador,motivo})});
-    const data = await res.json(); if(!res.ok) throw new Error(data.error||'erro ao solicitar exclusão');
-    document.getElementById('f-excluir-entregador').value=''; document.getElementById('f-motivo-exclusao').value='';
-    await carregarEntregadoresCampina();
-  }catch(err){ alert(err.message); }
-}
-async function decidirSolicitacaoEntregador(id,status){
-  if(!confirm(status==='APROVADO'?'Confirmar exclusão do entregador?':'Recusar esta solicitação?')) return;
-  const res = await fetch('/api/entregas/entregadores/solicitacoes/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
-  const data = await res.json(); if(!res.ok) return alert(data.error||'erro ao decidir');
-  await carregarEntregadoresCampina();
 }
 // checklist dinâmico - só os campos que o Master marcou como removíveis
 // pela loja aparecem aqui (varia por unidade, ver entregas-regras.html)
@@ -776,7 +723,6 @@ boot();
 <script src="/notif-central.js"></script>
 <script src="/alarme-sync.js"></script>
 <script src="/suporte-chat.js"></script>
-<script src="/recolher.js"></script>
 <script src="/nav-menu.js"></script>
 </body>
 </html>

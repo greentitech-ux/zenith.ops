@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Entregas · NoPulso</title>
+<title>Resumo de Entregas · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -95,7 +95,7 @@
     <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
     <div style="min-width:0;">
       <div class="eyebrow">Entregas · Solutions Ti Tech</div>
-      <h1>Entregas (motoboys)</h1>
+      <h1>Resumo de Entregas</h1>
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
@@ -116,6 +116,7 @@
 <div id="root" class="hidden">
 
 <div class="panel">
+  <h2><div class="title-group"><span>Filtros do resumo</span></div></h2>
   <div class="controls">
     <div class="presets" id="presets"></div>
     <div class="daterange">
@@ -359,6 +360,7 @@ async function decidirEdicaoEntrega(id, status){
 
 function calcularPreset(tipo, refIso){
   const ref = new Date(refIso+'T00:00:00');
+  if(tipo==='hoje') return {inicio:refIso, fim:refIso};
   if(tipo==='ontem'){
     const ontem = new Date(ref); ontem.setDate(ontem.getDate()-1);
     return {inicio:isoLocal(ontem), fim:isoLocal(ontem)};
@@ -387,6 +389,7 @@ function calcularPreset(tipo, refIso){
 let presetAtivo = null;
 function setupPresets(){
   const presets = [
+    {lbl:'Hoje', tipo:'hoje'},
     {lbl:'Ontem', tipo:'ontem'},
     {lbl:'Semana', tipo:'semana'},
     {lbl:'Mês', tipo:'mes'},
