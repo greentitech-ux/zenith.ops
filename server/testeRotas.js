@@ -13225,6 +13225,16 @@ setTimeout(async () => {
           && /foreach \(\$item in \$guardados\) \{ try \{ Remove-Item/.test(fn)
           && !/limpeza cancelada/.test(fn);
       })(),
+      // Uma falha posterior (papel de parede, ZIP, ou a outra instância) não
+      // pode transformar um único backup em milhares de pastas por tentativa.
+      'perfil de estação compartilha trava, marcador e pasta de backup por versão': (() => {
+        const fn = corpoPs('Aplicar-PerfilEstacao');
+        return /Abrir-TravaPerfilEstacao \$chavePerfil/.test(fn)
+          && /Caminho-MarcaPerfilEstacao \$chavePerfil/.test(fn)
+          && /perfil-" \+ \$chavePerfil \+ "_" \+ \$env:COMPUTERNAME/.test(fn)
+          && !/Get-Date\)\.ToString\("yyyy-MM-dd_HHmmss"\) \+ "_" \+ \$env:COMPUTERNAME/.test(fn)
+          && /Aplicar-PerfilEstacao \$pol\.estacao \$versao/.test(corpoPs('Sincronizar-Politica'));
+      })(),
       // O ERRO QUE ISSO EVITA: com a regra de catálogo valendo pra pasta,
       // marcar "RDP Dominos" aprovaria a PASTA "Dominos Pizza" da Área de
       // Trabalho - que não tem nada a ver com o RDP e ninguém pediu pra manter.

@@ -53,7 +53,9 @@
 // 131: invalida o cache de logo do modelo básico e recebe a revisão visual
 //      atualizada, inclusive o cartão de suporte no fundo escuro.
 // 132: permite escolher um atalho seguro do NoPulsoPrint por computador.
-const VERSAO_VIGIA = 132;
+// 133: torna o backup da Área de Trabalho idempotente: uma política pendente
+//      não cria centenas de cópias quando a mesma limpeza precisa ser tentada.
+const VERSAO_VIGIA = 133;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2899,8 +2901,31 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  return $true',
     '}',
     '',
-    'function Aplicar-PerfilEstacao($estacao) {',
+    '# O mesmo perfil pode ser executado pela sessão do operador e pela cópia',
+    '# de boot. Esta chave deixa ambas convergirem no MESMO backup e marcador,',
+    '# em vez de gerar uma pasta nova a cada tentativa.',
+    'function Chave-PerfilEstacao([string]$versao) {',
+    '  try {',
+    '    $sha = New-Object System.Security.Cryptography.SHA256Managed',
+    '    try { $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($versao)); return (([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()).Substring(0, 20) } finally { $sha.Dispose() }',
+    '  } catch { return (($versao -replace "[^a-zA-Z0-9._-]", "_").Substring(0, [Math]::Min(60, $versao.Length))) }',
+    '}',
+    'function Caminho-MarcaPerfilEstacao([string]$chave) { return Join-Path (Split-Path -Parent $PSCommandPath) ("perfil-estacao-" + $chave + ".ok") }',
+    'function Abrir-TravaPerfilEstacao([string]$chave) {',
+    '  $arquivo = Join-Path (Split-Path -Parent $PSCommandPath) ("perfil-estacao-" + $chave + ".lock")',
+    '  try { return [System.IO.File]::Open($arquivo, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None) }',
+    '  catch { Escrever-Log "Perfil da estação: outra instância já está aplicando esta política; aguardando."; return $null }',
+    '}',
+    'function Aplicar-PerfilEstacao($estacao, [string]$versao) {',
     '  if (-not $estacao -or -not [bool]$estacao.ativa -or [string]$estacao.modo -ne "aplicar") { return $true }',
+    '  $chavePerfil = Chave-PerfilEstacao $versao',
+    '  $marcaPerfil = Caminho-MarcaPerfilEstacao $chavePerfil',
+    '  if (Test-Path -LiteralPath $marcaPerfil) { return $true }',
+    '  $travaPerfil = Abrir-TravaPerfilEstacao $chavePerfil',
+    '  if (-not $travaPerfil) { return $false }',
+    '  try {',
+    '  # Reconfere depois da trava: a outra instância pode ter terminado agora.',
+    '  if (Test-Path -LiteralPath $marcaPerfil) { return $true }',
     '  $perfilUsuario = Resolver-PerfilDoOperador',
     '  if (-not $perfilUsuario) { Escrever-Log "Perfil da estação: aguardando perfil de operador ativo."; return $false }',
     '  $permitidos = @($estacao.atalhosAprovados | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })',
@@ -2923,10 +2948,12 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '      if (-not (Atalho-EstaAprovado $item $permitidos)) { [void]$remover.Add($item) }',
     '    }',
     '  }',
-    '  if ($remover.Count -eq 0) { Escrever-Log "Perfil da estação: Área de Trabalho já está conforme a lista aprovada."; return $true }',
+    '  if ($remover.Count -eq 0) { Set-Content -LiteralPath $marcaPerfil -Value $versao -Encoding UTF8 -Force; Escrever-Log "Perfil da estação: Área de Trabalho já está conforme a lista aprovada."; return $true }',
     '  $unidadeBackup = if ($env:SystemDrive) { $env:SystemDrive } else { Split-Path -Qualifier $env:USERPROFILE }',
     '  $raiz = Join-Path $unidadeBackup "NoPulsoBackup\\Atalhos"',
-    '  $pasta = Join-Path $raiz ((Get-Date).ToString("yyyy-MM-dd_HHmmss") + "_" + $env:COMPUTERNAME)',
+    '  # Reutiliza a mesma pasta enquanto esta versão estiver pendente. Assim uma',
+    '  # falha de permissão não enche o disco com uma cópia por tentativa.',
+    '  $pasta = Join-Path $raiz ("perfil-" + $chavePerfil + "_" + $env:COMPUTERNAME)',
     '  try { New-Item -ItemType Directory -Path $pasta -Force -ErrorAction Stop | Out-Null } catch { Escrever-Log "Perfil da estação: backup não criado; nada foi removido ($($_.Exception.Message))."; return $false }',
     '  $manifesto = New-Object System.Collections.Generic.List[string]',
     '  # PASTA vai de MOVE, arquivo vai de COPY. Copiar pasta recursivamente pode',
@@ -2953,7 +2980,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  try { Set-Content -LiteralPath (Join-Path $pasta "manifesto.txt") -Value $manifesto -Encoding UTF8 -Force -ErrorAction Stop } catch {}',
     '  $script:AreaMudou = $true',
     '  Escrever-Log "Perfil da estação: $($manifesto.Count) linha(s) de manifesto - $($remover.Count) item(ns) fora da lista aprovada, guardados em $pasta."',
-    '  return (-not $falhouRemocao)',
+    '  if (-not $falhouRemocao) { Set-Content -LiteralPath $marcaPerfil -Value $versao -Encoding UTF8 -Force; return $true }',
+    '  return $false',
+    '  } finally { if ($travaPerfil) { $travaPerfil.Dispose() } }',
     '}',
     '',
     '# Arquivamento completo, porém reversível: move os dados do perfil ativo',
@@ -3159,7 +3188,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '    Marcar-Etapa "Politica: barra de tarefas"',
     '    $okBarra = Aplicar-BarraTarefas $pol.estacao',
     '    Marcar-Etapa "Politica: Area de Trabalho"',
-    '    $okEstacao = Aplicar-PerfilEstacao $pol.estacao',
+    '    $okEstacao = Aplicar-PerfilEstacao $pol.estacao $versao',
     '    Marcar-Etapa "Politica: arquivamento"',
     '    $okArquivo = Arquivar-DadosDaEstacao $pol.estacao $versao',
     '    Marcar-Etapa "Politica: lixeira e icones"',
