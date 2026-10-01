@@ -17838,7 +17838,17 @@ app.get('/api/entregas/regras', requireAnySection('entregas', 'entregas-lancamen
   const todas = await entregasRegras.listAll();
   const porUnidade = {};
   todas.forEach((r) => { porUnidade[r.unidade] = { ...entregasRegras.defaultRegra(r.unidade), ...r }; });
-  const unidades = req.isMaster ? Object.keys({ ...ENTREGAS_UNIDADES_NOMES, ...porUnidade }) : (req.permissions.unidades || []);
+  // A lista segue a mesma atribuição do Monitor: uma unidade cujo perfil
+  // existe e não tem "Entregas" marcado não pode nem aparecer no seletor,
+  // inclusive para Master. Sem isso a tela mostrava todo o parque por usar
+  // /api/meta/unidades como fonte.
+  const mapaExtras = await unidadesExtras.filtrarMapaPorArea(await unidadesExtras.mapa(), 'entregas').catch(() => ({}));
+  const restritas = new Set(await unidadesExtras.codigosRestritosDe('entregas').catch(() => []));
+  const candidatas = Object.keys({ ...ENTREGAS_UNIDADES_NOMES, ...mapaExtras, ...porUnidade })
+    .filter((unidade) => !restritas.has(unidade));
+  const unidades = req.isMaster
+    ? candidatas
+    : candidatas.filter((unidade) => (req.permissions.unidades || []).includes(unidade));
   res.json(unidades.map((u) => porUnidade[u] || entregasRegras.defaultRegra(u)));
 });
 

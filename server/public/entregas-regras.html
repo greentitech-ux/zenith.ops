@@ -55,6 +55,7 @@
   .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
   .badge.fixo{background:var(--ok-dim);color:var(--ok);}
   .badge.plataforma{background:var(--panel2);color:var(--muted);border:1px solid var(--line);}
+  .badge.total{background:rgba(92,200,255,.12);color:var(--accent2);border:1px solid rgba(92,200,255,.35);}
   .tags{display:flex;flex-wrap:wrap;gap:4px;max-width:360px;}
   .tag{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);white-space:nowrap;}
   .tag.removivel{border-color:var(--warn);color:var(--warn);}
@@ -91,6 +92,7 @@
   .modal-actions button{font-family:var(--sans);font-size:12.5px;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
   .modal-actions button.primary{border:none;background:var(--accent);color:#0b0d10;font-weight:600;}
   .err{color:var(--bad);font-size:11.5px;margin-top:10px;}
+  .modelo-aviso{margin:12px 0 0;padding:10px 12px;border:1px solid rgba(92,200,255,.35);border-radius:8px;background:rgba(92,200,255,.08);color:var(--text);font-size:12px;line-height:1.45;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -115,7 +117,7 @@
   </div>
 </header>
 
-<div class="sub-intro" style="margin:0 0 16px;">Cada unidade monta sua própria lista de campos de valor (Entrega, Retorno, Extra, Fora de Área, Encosta, Ajuda de Custo, Cooperativa, ou qualquer nome) - com taxa fixa ou variando por dia da semana, meta mínima com valor parcial, e opção de a loja remover aquele campo específico num lançamento (atraso, saiu antes, gerou prejuízo). Unidades sem regra ficam no modo "Plataforma" - a loja continua digitando o valor à mão (ex: pagamento definido pela GAMI/NEXT).</div>
+<div class="sub-intro" style="margin:0 0 16px;">A lista abaixo mostra somente as unidades marcadas com a atribuição <b>Entregas</b>. Cada uma pode usar valor fixo configurado por campo ou plataforma com valor informado pela loja. Campina Grande usa o modelo próprio de quantidade e valor total.</div>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
 <nav class="nav-drawer hidden" id="nav-drawer"></nav>
@@ -139,11 +141,13 @@
     <h3 id="regra-title">Editar regra</h3>
     <div class="sub" id="regra-sub"></div>
 
-    <label>Modo</label>
-    <div class="modo-radios">
+    <label id="label-modo">Modo</label>
+    <div id="editor-modo" class="modo-radios">
       <label><input type="radio" name="modo" value="plataforma" checked> Plataforma (sem valor fixo)</label>
       <label><input type="radio" name="modo" value="fixo"> Valor fixo (campos personalizados)</label>
     </div>
+
+    <div id="modelo-total-aviso" class="modelo-aviso hidden"><b>Modelo de Campina Grande</b><br>O lançamento registra somente entregador, quantidade de entregas e valor total. Não há taxa fixa, extra, retorno ou cooperativa neste modelo.</div>
 
     <div id="campos-plataforma">
       <label>Nome da plataforma (opcional, ex: GAMI, NEXT)</label>
@@ -191,7 +195,7 @@ let REGRAS = [];
 let EDITANDO_UNIDADE = null;
 
 function regraDaUnidade(codigo){
-  return REGRAS.find(r=>r.unidade===codigo) || { unidade: codigo, modo:'plataforma', plataformaNome:'', camposValor:[], atualizadoEm:null };
+  return REGRAS.find(r=>r.unidade===codigo) || { unidade: codigo, modo:'plataforma', modeloLancamento:'detalhado', plataformaNome:'', camposValor:[], atualizadoEm:null };
 }
 
 function renderRegras(){
@@ -199,13 +203,14 @@ function renderRegras(){
   document.getElementById('regras-body').innerHTML = unidadesEntregas.length ? unidadesEntregas.map(u=>{
     const r = regraDaUnidade(u.codigo);
     const fixo = r.modo==='fixo';
+    const total = r.modeloLancamento==='total';
     const tags = fixo
       ? (r.camposValor||[]).map(c=>`<span class="tag ${c.removivelPelaLoja?'removivel':''}" title="${c.destino==='coopRecebe'?'Cooperativa':'Valor a pagar'}${c.meta?' · tem meta':''}">${escapeHtml(c.label)}${c.base!=='flat'?' ('+escapeHtml(BASES.find(b=>b[0]===c.base)?.[1]||c.base)+')':''}</span>`).join('')
-      : `<span style="color:var(--muted);">${r.plataformaNome?escapeHtml(r.plataformaNome):'sem valor fixo'}</span>`;
+      : total ? '<span style="color:var(--accent2);">Quantidade + valor total</span>' : `<span style="color:var(--muted);">${r.plataformaNome?escapeHtml(r.plataformaNome):'sem valor fixo'}</span>`;
     return `
     <tr>
       <td><b>${escapeHtml(u.nome)}</b></td>
-      <td><span class="badge ${r.modo}">${fixo?'Valor fixo':'Plataforma'}</span></td>
+      <td><span class="badge ${total?'total':r.modo}">${total?'Total informado':fixo?'Valor fixo':'Plataforma'}</span></td>
       <td><div class="tags">${tags || '<span style="color:var(--muted);">nenhum campo ainda</span>'}</div></td>
       <td>${r.atualizadoEm ? new Date(r.atualizadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR}) : '<span style="color:var(--muted);">nunca configurada</span>'}</td>
       <td class="rowacts"><button type="button" onclick="abrirEdicao('${u.codigo}')">Editar</button></td>
@@ -307,9 +312,13 @@ function abrirEdicao(codigo){
   EDITANDO_UNIDADE = codigo;
   document.getElementById('regra-title').textContent = 'Regra de ' + (u?u.nome:codigo);
   document.getElementById('regra-sub').textContent = 'Vale a partir de agora - lançamentos já feitos não são recalculados.';
+  const total = r.modeloLancamento==='total';
+  document.getElementById('label-modo').classList.toggle('hidden', total);
+  document.getElementById('editor-modo').classList.toggle('hidden', total);
+  document.getElementById('modelo-total-aviso').classList.toggle('hidden', !total);
   document.querySelector(`input[name=modo][value="${r.modo}"]`).checked = true;
-  document.getElementById('campos-fixo').classList.toggle('hidden', r.modo!=='fixo');
-  document.getElementById('campos-plataforma').classList.toggle('hidden', r.modo==='fixo');
+  document.getElementById('campos-fixo').classList.toggle('hidden', total || r.modo!=='fixo');
+  document.getElementById('campos-plataforma').classList.toggle('hidden', total || r.modo==='fixo');
   document.getElementById('r-plataformaNome').value = r.plataformaNome || '';
   document.getElementById('lista-campos').innerHTML = '';
   (r.camposValor||[]).forEach(c=>adicionarCampo(c));
@@ -324,6 +333,7 @@ document.getElementById('regra-form').addEventListener('submit', async (e)=>{
   const errEl = document.getElementById('regra-err');
   const payload = {
     modo: document.querySelector('input[name=modo]:checked').value,
+    modeloLancamento: regraDaUnidade(EDITANDO_UNIDADE).modeloLancamento || 'detalhado',
     plataformaNome: document.getElementById('r-plataformaNome').value,
     camposValor: lerCamposValor(),
   };
@@ -337,11 +347,16 @@ document.getElementById('regra-form').addEventListener('submit', async (e)=>{
 });
 
 async function carregar(){
-  const [unidades, regras] = await Promise.all([
+  const [unidadesMeta, regras] = await Promise.all([
     fetch('/api/meta/unidades').then(r=>r.json()),
     fetch('/api/entregas/regras').then(r=>r.json()),
   ]);
-  UNIDADES = unidades;
+  // /api/entregas/regras já aplica a atribuição "Entregas"; o cadastro geral
+  // serve apenas para resolver o nome de exibição, não para criar opções.
+  UNIDADES = regras.map(r=>{
+    const meta = unidadesMeta.find(u=>u.codigo===r.unidade);
+    return { codigo:r.unidade, nome:meta?.nome || r.unidade, secao:'Entregas' };
+  });
   REGRAS = regras;
   renderRegras();
 }
