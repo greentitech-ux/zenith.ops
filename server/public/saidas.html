@@ -180,7 +180,9 @@
         <button type="button" class="preset-btn" id="btn-aplicar-filtros" style="padding:10px 14px;color:var(--accent);" onclick="aplicarFiltrosData()">Aplicar filtros</button>
       </div>
     </div>
-    <div class="presets" id="presets" style="margin-top:10px;"></div>
+    <!-- O período é controlado nesta tela: escolher Até não deve ser
+         interceptado pelo ajuste automático de mês do tema.js. -->
+    <div class="presets" id="presets" data-zenith-sem-mes="1" style="margin-top:10px;"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px;">
       <button type="button" class="link-btn" onclick="limparFiltros()">Limpar filtros</button>
       <span style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -379,6 +381,7 @@ function aplicarPreset(tipo){
     inicio.value = range.inicio;
     fim.value = range.fim;
   }
+  window.zenithRascunhos?.sincronizar([inicio, fim]);
   sincronizarPresetComDatas();
   renderTudo();
   carregar();
