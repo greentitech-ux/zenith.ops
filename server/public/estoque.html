@@ -433,7 +433,7 @@
     </div>
   </h2>
   <div class="toolbar" style="margin-top:10px;">
-    <div class="presets" id="d-presets"></div>
+    <div class="presets" id="d-presets" data-zenith-sem-mes="1"></div>
     <div class="daterange">
       <input type="date" id="d-inicio" onchange="limparPresetAtivo();carregarDiferencas();">
       <span class="sep">até</span>
@@ -468,7 +468,7 @@
     Cada dia contado vira uma coluna. Abaixo da contagem, o movimento do dia = contagem do dia anterior − contagem do dia: <b style="color:var(--ok);">▼ saiu</b> do estoque, <b style="color:var(--bad);">▲ entrou</b>. As duas últimas colunas somam cada ponta <b>separadamente</b> — nunca uma descontando a outra, porque um item que saiu 9 e entrou 11 não movimentou &minus;2, movimentou as duas coisas. É uma leitura só das contagens — não desconta recebimento (pra isso use a aba Diferenças).
   </div>
   <div class="toolbar" style="margin-top:6px;">
-    <div class="presets" id="h-presets"></div>
+    <div class="presets" id="h-presets" data-zenith-sem-mes="1"></div>
     <div class="daterange">
       <input type="date" id="h-inicio" onchange="limparPresetHist();carregarHistorico();">
       <span class="sep">até</span>

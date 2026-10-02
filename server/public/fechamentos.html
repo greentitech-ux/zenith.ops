@@ -343,7 +343,7 @@
 
 <div class="panel fech-filtro-global">
   <div class="controls">
-    <div class="presets" id="presets"></div>
+    <div class="presets" id="presets" data-zenith-sem-mes="1"></div>
     <div class="daterange">
       <input type="date" id="f-date-start" title="Data inicial">
       <span class="sep">até</span>
@@ -1464,7 +1464,10 @@ function setupPresets(){
   // calendário dispara os dois. Valor incompleto ('' enquanto digita) é
   // ignorado; o mesmo valor chegando duas vezes só desenha uma.
   let ultimoAplicado = '';
-  function aoMudarData(id){
+  function aoMudarData(id, evento){
+    // Um preset navega pelo bloco completo, mas só depois de confirmar.
+    // Não reescreve nem tira o foco do seletor enquanto o dia está sendo editado.
+    if(presetAtivo && evento.type === 'input') return;
     const campo = document.getElementById(id);
     const ref = campo.value;
     const outro = document.getElementById(id==='f-date-start' ? 'f-date-end' : 'f-date-start').value;
@@ -1499,7 +1502,7 @@ function setupPresets(){
     renderEspelhando();   // último clique manda (ver espelharPrincipalNaSecao)
   }
   ['f-date-start','f-date-end'].forEach(id=>{
-    ['input','change'].forEach(ev=>document.getElementById(id).addEventListener(ev, ()=>aoMudarData(id)));
+    ['input','change'].forEach(ev=>document.getElementById(id).addEventListener(ev, evento=>aoMudarData(id, evento)));
   });
 }
 // tira o foco de um campo de data antes de gravar valor nele por código: com o
@@ -1622,10 +1625,11 @@ function setupPresetsFech(){
   });
 
   ['fech-date-inicio','fech-date-fim'].forEach(id=>{
-    ['input','change'].forEach(ev=>document.getElementById(id).addEventListener(ev, ()=>{
+    ['input','change'].forEach(ev=>document.getElementById(id).addEventListener(ev, evento=>{
       // mesmo comportamento do filtro de cima: com um preset aceso, digitar
       // uma data navega bloco a bloco (mês a mês); sem preset, intervalo livre
       const aceso = cont.querySelector('.preset-btn.active');
+      if(aceso && evento.type === 'input') return;
       const ref = document.getElementById(id).value;
       if(aceso){
         const outro = document.getElementById(id==='fech-date-inicio' ? 'fech-date-fim' : 'fech-date-inicio').value;

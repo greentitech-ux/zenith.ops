@@ -20868,8 +20868,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // (2) digitando pelo teclado o Chrome não dispara 'change' até sair do
       //     campo: o filtro só reagia depois - agora escuta input E change
       'fechamento: os campos de data reagem a input E change (digitar pelo teclado já filtra)':
-        /\['input','change'\]\.forEach\(ev=>document\.getElementById\(id\)\.addEventListener\(ev, \(\)=>aoMudarData\(id\)\)\)/.test(fechHtml)
-        && /\['input','change'\]\.forEach\(ev=>document\.getElementById\(id\)\.addEventListener\(ev, \(\)=>\{/.test(fechHtml),
+        /\['input','change'\]\.forEach\(ev=>document\.getElementById\(id\)\.addEventListener\(ev, evento=>aoMudarData\(id, evento\)\)\)/.test(fechHtml)
+        && /\['input','change'\]\.forEach\(ev=>document\.getElementById\(id\)\.addEventListener\(ev, evento=>\{/.test(fechHtml)
+        && /if\(presetAtivo && evento\.type === 'input'\) return;/.test(fechHtml)
+        && /if\(aceso && evento\.type === 'input'\) return;/.test(fechHtml),
       // (3) campo de data focado não repinta valor gravado por código: o
       //     preset "não mudava as datas" na tela. Solta o foco antes de gravar.
       'fechamento: solta o foco do campo de data antes de gravar valor por código (preset e re-snap)':
@@ -21784,7 +21786,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'e-mail mascarado no titulo NAO vira caminho de busca': ids('carlos@lojas.com') === '',
       // sem isto o campo existe e nao filtra nada
       'noFiltro() chama passaBusca()': /function noFiltro\(t\)\{return passaSituacao\(t\)&&passaData\(t\)&&passaUnidade\(t\)&&passaTipo\(t\)&&passaBusca\(t\)\}/.test(html),
-      'o campo fica na mesma linha dos chips de periodo': /<div class="filtro-linha"><div class="presets" id="PRESETS"><\/div>[\s\S]{0,80}id="BUSCA"/.test(html),
+      'o campo fica na mesma linha dos chips de periodo': /<div class="filtro-linha"><div class="presets" id="PRESETS"[^>]*><\/div>[\s\S]{0,80}id="BUSCA"/.test(html),
       '"Limpar filtros" tambem zera a busca': /function limparFiltros\(\)\{[^\n]*\$\('F-BUSCA'\)\.value=''/.test(html),
       'o relatorio do filtro registra o que foi buscado': /p\.push\('busca "'\+b\+'"'\)/.test(html),
       'nenhum hex de acento cravado no campo novo': !/\.busca[^{]*\{[^}]*#b8ff3c/i.test(html),

@@ -114,7 +114,7 @@
 
 <div class="panel">
   <div class="controls">
-    <div class="presets" id="presets"></div>
+    <div class="presets" id="presets" data-zenith-sem-mes="1"></div>
     <div class="daterange">
       <input type="date" id="f-date-start" title="Data inicial">
       <span class="sep">até</span>
@@ -320,7 +320,9 @@ function setupPresets(refPadraoIso){
   aplicarPreset('mes', refPadraoIso, cont.children[1]);
 
   ['f-date-start','f-date-end'].forEach(id=>{
-    document.getElementById(id).addEventListener('input', ()=>{
+    // Só reenquadra o período depois de confirmar a data. Reescrever um
+    // input date durante a edição faz o navegador perder o dia escolhido.
+    document.getElementById(id).addEventListener('change', ()=>{
       if(presetAtivo){
         const refIso = document.getElementById(id).value;
         if(refIso){
