@@ -1107,6 +1107,14 @@ const PERSIST_MS = Number(process.env.LOJA_STATUS_PERSIST_MS) >= 0
   ? Number(process.env.LOJA_STATUS_PERSIST_MS)
   : 5 * 60 * 1000;
 const ultimaGravacaoEm = new Map(); // docId -> quando foi gravado de verdade
+// O espelho resolve a presenca sem custo dentro desta instancia, mas um
+// heartbeat pode cair numa instancia e a tela do NOC consultar outra. Neste
+// caso, deixar o carimbo so na memoria por 5min faz uma maquina viva parecer
+// offline apos os 90s do painel. Persistimos SOMENTE esse carimbo, no maximo
+// a cada 30s, para tornar a presenca compartilhada sem transformar toda a
+// telemetria (rede, disco, inventario) em escrita a cada batida.
+const PRESENCA_COMPARTILHADA_PERSIST_MS = 30 * 1000;
+const ultimaPresencaCompartilhadaEm = new Map(); // docId -> ultima escrita do carimbo global
 // Telemetria de RAM/Zebra pode chegar muito mais rápido do que uma mudança
 // real. A sonda continua rápida no computador; no Firestore gravamos o estado
 // novo na hora e, se nada mudou, só uma confirmação a cada 15 minutos.
@@ -1366,10 +1374,19 @@ async function heartbeat(codigo, posto, info, token) {
     || eventosNovos.length > 0;
   const desdeUltimaGravacao = Date.now() - (ultimaGravacaoEm.get(id) || 0);
   const precisaPersistir = mudouAlgoQueImporta || desdeUltimaGravacao >= PERSIST_MS;
+  const agora = patch.ultimoHeartbeatEm;
+  const precisaPersistirPresenca = (agora - (ultimaPresencaCompartilhadaEm.get(id) || 0)) >= PRESENCA_COMPARTILHADA_PERSIST_MS;
 
   if (precisaPersistir) {
     await ref.set(patch, { merge: true });
-    ultimaGravacaoEm.set(id, Date.now());
+    ultimaGravacaoEm.set(id, agora);
+    ultimaPresencaCompartilhadaEm.set(id, agora);
+  } else if (precisaPersistirPresenca) {
+    // So o timestamp precisa atravessar instancias do servidor nesta cadencia.
+    // O restante do patch continua no espelho e segue a gravacao economica de
+    // cinco minutos acima.
+    await ref.set({ ultimoHeartbeatEm: agora }, { merge: true });
+    ultimaPresencaCompartilhadaEm.set(id, agora);
   }
   // O heartbeat de propósito NÃO invalida o cache de listar() - fazer isso a
   // cada 25s por máquina multiplicaria as leituras à toa (ver o comentário
