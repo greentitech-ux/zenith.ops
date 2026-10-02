@@ -118,7 +118,8 @@ async function darSaida({ id, horaSaida, quantidades, observacao, unidadesPermit
       foraDeArea: 0,
       ajudaCusto: 0,
       valor: totalValor,
-      coopRecebe: 0,
+      coopRecebe: entregasRegras.calcularCoop(regra,totalEntregas),
+      regraCoop: entregasRegras.configuracaoCoop(regra),
       quantTotal: totalEntregas,
       detalhesValor: faixas.map((faixa) => ({
         campo: faixa.id, label: faixa.label, base: 'faixaKm', quantidade: faixa.quantidade,

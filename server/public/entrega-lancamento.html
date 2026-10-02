@@ -184,6 +184,10 @@
       <div class="resumo"><div class="linha"><span>Conferência</span><b id="campina-conferencia">Informe quantidade e valor total.</b></div></div>
     </div>
 
+    <div class="secao hidden" id="preview-coop-linha">
+      <div class="secao-titulo">COOP recebe (calculado)</div>
+      <div class="resumo"><div class="linha"><span id="coop-formula"></span><b id="preview-coopRecebe">R$ 0,00</b></div></div>
+    </div>
     <div class="secao" id="secao-valores-detalhados">
       <div class="secao-titulo">Valores</div>
 
@@ -195,8 +199,7 @@
           <div id="wrap-f-ajudaCusto"><label>Ajuda de custo</label><input type="number" step="0.01" inputmode="decimal" id="f-ajudaCusto" value="0"></div>
           <div><label>Valor a pagar</label><input type="number" step="0.01" inputmode="decimal" id="f-valor" value="0"></div>
         </div>
-        <div id="wrap-f-coopRecebe"><label>COOP recebe</label>
-        <input type="number" step="0.01" inputmode="decimal" id="f-coopRecebe" value="0"></div>
+        <div id="wrap-f-coopRecebe" class="hidden"><input type="number" id="f-coopRecebe" value="0" readonly></div>
       </div>
 
       <!-- unidade "fixo" (tem sua propria lista de campos de valor,
@@ -208,7 +211,6 @@
         <div class="resumo" id="preview-detalhes"></div>
         <div class="resumo" style="margin-top:8px;">
           <div class="linha"><span>Total a receber (calculado)</span><b id="preview-valor">R$ 0,00</b></div>
-          <div class="linha" id="preview-coop-linha"><span>COOP recebe (calculado)</span><b id="preview-coopRecebe">R$ 0,00</b></div>
         </div>
         <div id="wrap-campos-removiveis"></div>
         <div id="wrap-motivo-campos" class="hidden">
@@ -224,10 +226,8 @@
 
       <div id="wrap-quantidade-total">
         <label>Quantidade total</label>
-        <input type="number" step="1" inputmode="numeric" id="f-quantTotal" value="0">
-        <div class="resumo">
-          <div class="linha"><span>Sugestão (entregas + extra)</span><b id="resumo-sugestao">0</b></div>
-        </div>
+        <input type="number" step="1" inputmode="numeric" id="f-quantTotal" value="0" readonly>
+        <div class="sub">Entregas + Extra + Retorno (calculado automaticamente).</div>
       </div>
     </div>
 
@@ -270,6 +270,7 @@
           <div class="resumo">
             <div class="linha"><span>Entregas total</span><b id="km-total-entregas">0</b></div>
             <div class="linha"><span>Total a receber</span><b class="km-total" id="km-total-valor">R$ 0,00</b></div>
+            <div class="linha hidden" id="km-coop-linha"><span>COOP recebe</span><b id="km-coop-valor">R$ 0,00</b></div>
           </div>
           <label>Observação (opcional)</label>
           <textarea id="km-observacao" placeholder="detalhes do turno"></textarea>
@@ -395,8 +396,8 @@ function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&'
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
 function atualizarSugestao(){
-  const sugestao = num(document.getElementById('f-entrega').value) + num(document.getElementById('f-extra').value);
-  document.getElementById('resumo-sugestao').textContent = sugestao;
+  const total = ['entrega','extra','retorno'].reduce((s,c)=>s+Math.max(0,num(document.getElementById('f-'+c).value)),0);
+  document.getElementById('f-quantTotal').value=total;
 }
 function atualizarConferenciaCampina(){
   const quantidade = num(document.getElementById('f-campina-quantidade').value);
@@ -466,6 +467,7 @@ function atualizarModoUnidade(){
   const kmSelect = document.getElementById('km-entregador');
   kmSelect.innerHTML = '<option value="">selecione o entregador</option>' + nomesAtivos.map(nome=>`<option value="${escapeHtml(nome)}">${escapeHtml(nome)}</option>`).join('');
   renderPainelKm();
+  atualizarPreviewCalculado();
 }
 
 function entregadorSelecionado(){
@@ -508,8 +510,7 @@ function atualizarModoRecebedor(){
   document.getElementById('wrap-f-extra').classList.toggle('hidden', !!empresa);
   document.getElementById('wrap-quantidade-total').classList.toggle('hidden', !!empresa);
   document.getElementById('wrap-f-ajudaCusto').classList.toggle('hidden', !!empresa);
-  document.getElementById('wrap-f-coopRecebe').classList.toggle('hidden', !!empresa);
-  document.getElementById('preview-coop-linha').classList.toggle('hidden', !!empresa);
+  document.getElementById('wrap-f-coopRecebe').classList.add('hidden');
   document.getElementById('campos-manual').classList.toggle('hidden', calculado);
   document.getElementById('campos-calculados').classList.toggle('hidden', !calculado);
   if(entregadorFixo) renderCamposRemoviveis();
@@ -523,7 +524,7 @@ function atualizarModoRecebedor(){
 // pela loja aparecem aqui (varia por unidade, ver entregas-regras.html)
 function renderCamposRemoviveis(){
   const regra = regraAtual();
-  const removiveis = (regra.camposValor||[]).filter(c=>c.removivelPelaLoja);
+  const removiveis = (regra.camposValor||[]).filter(c=>c.removivelPelaLoja&&c.destino!=='coopRecebe');
   const wrap = document.getElementById('wrap-campos-removiveis');
   wrap.innerHTML = removiveis.map(c=>`
     <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-family:var(--sans);font-size:12.5px;color:var(--text);">
@@ -543,9 +544,17 @@ function camposRemovidosMarcados(){
 }
 // mesma conta de entregasRegras.js (calcular) - Extra/Retorno/Fora de área
 // e "flat" usam a taxa de cada campo (com dia da semana e meta, se tiverem);
-// COOP so soma os campos com destino coopRecebe (normalmente so Entrega)
+// COOP usa somente Entregas × a tarifa exclusiva configurada na unidade.
 function atualizarPreviewCalculado(){
   const regra = regraAtual();
+  atualizarSugestao();
+  const qtdCoop=Math.max(0,num(document.getElementById(ehModeloTotal()?'f-campina-quantidade':'f-entrega').value));
+  const coop=regra.regraCoop||{ativo:false,valorEntrega:0};
+  const totalCoop=coop.ativo?qtdCoop*num(coop.valorEntrega):0;
+  document.getElementById('preview-coop-linha').classList.toggle('hidden',!coop.ativo);
+  document.getElementById('preview-coopRecebe').textContent=fmtMoney(totalCoop);
+  document.getElementById('coop-formula').textContent=qtdCoop+' entregas × '+fmtMoney(coop.valorEntrega);
+  document.getElementById('f-coopRecebe').value=totalCoop.toFixed(2);
   const empresa = empresaSelecionada();
   const tipoSelecionado = document.getElementById('f-entregador-fixo').selectedOptions[0]?.dataset.tipo;
   if(empresa?.modo==='fixo'){
@@ -554,7 +563,6 @@ function atualizarPreviewCalculado(){
     const total = quantidade * taxa;
     document.getElementById('preview-detalhes').innerHTML = `<div class="linha"><span>${escapeHtml(empresa.nome)} · ${quantidade} × ${fmtMoney(taxa)}</span><b>${fmtMoney(total)}</b></div>`;
     document.getElementById('preview-valor').textContent = fmtMoney(total);
-    document.getElementById('preview-coopRecebe').textContent = fmtMoney(0);
     return;
   }
   if(regra.modo !== 'fixo' || tipoSelecionado!=='entregador') return;
@@ -568,8 +576,8 @@ function atualizarPreviewCalculado(){
   contagens.quantTotal = contagens.entrega + contagens.retorno + contagens.extra;
   const dia = diaSemanaDe(document.getElementById('f-data').value);
   const removidos = new Set(camposRemovidosMarcados());
-  let valor = 0, coopRecebe = 0;
-  const linhas = (regra.camposValor||[]).map(c=>{
+  let valor = 0;
+  const linhas = (regra.camposValor||[]).filter(c=>c.destino!=='coopRecebe').map(c=>{
     if(removidos.has(c.campo)) return {label:c.label, valor:0, removido:true, quantidade:0, taxa:0, base:c.base};
     let taxa = (dia && c.valoresPorDiaSemana && c.valoresPorDiaSemana[dia]!=null) ? num(c.valoresPorDiaSemana[dia]) : num(c.valorPadrao);
     if(c.meta){
@@ -578,19 +586,18 @@ function atualizarPreviewCalculado(){
     }
     const quantidade = c.base==='flat' ? null : (contagens[c.base]||0);
     const valorCampo = c.base==='flat' ? taxa : quantidade*taxa;
-    if(c.destino==='coopRecebe') coopRecebe += valorCampo; else valor += valorCampo;
+    valor += valorCampo;
     return {label:c.label, valor:valorCampo, removido:false, quantidade, taxa, base:c.base};
   });
   document.getElementById('preview-detalhes').innerHTML = linhas.map(l=>
     `<div class="linha"><span>${escapeHtml(l.label)}${l.removido?' (removido)':(l.base!=='flat'?` · ${l.quantidade} × ${fmtMoney(l.taxa)}`:'')}</span><b style="${l.removido?'color:var(--muted);text-decoration:line-through;':''}">${fmtMoney(l.valor)}</b></div>`
   ).join('') || '<div class="linha"><span style="color:var(--muted);">nenhum campo configurado ainda</span></div>';
   document.getElementById('preview-valor').textContent = fmtMoney(valor);
-  document.getElementById('preview-coopRecebe').textContent = fmtMoney(coopRecebe);
 }
 document.getElementById('f-unidade').addEventListener('change', atualizarModoUnidade);
 document.getElementById('f-entregador-fixo').addEventListener('change', atualizarModoRecebedor);
 document.getElementById('f-data').addEventListener('change', atualizarPreviewCalculado);
-['f-entrega','f-retorno','f-extra','f-pos00hs','f-foraDeArea'].forEach(id=>{
+['f-entrega','f-retorno','f-extra','f-pos00hs','f-foraDeArea','f-campina-quantidade'].forEach(id=>{
   document.getElementById(id).addEventListener('input', atualizarPreviewCalculado);
 });
 
@@ -674,6 +681,9 @@ function atualizarTotaisKm(){
   document.querySelectorAll('[data-km-faixa]').forEach(input=>{const qtd=Math.max(0,Math.trunc(num(input.value)));entregas+=qtd;valor+=qtd*num(input.dataset.kmValor);});
   document.getElementById('km-total-entregas').textContent=entregas;
   document.getElementById('km-total-valor').textContent=fmtMoney(valor);
+  const coop=regraAtual().regraCoop;
+  document.getElementById('km-coop-linha').classList.toggle('hidden',!coop?.ativo);
+  document.getElementById('km-coop-valor').textContent=fmtMoney(coop?.ativo?entregas*num(coop.valorEntrega):0);
 }
 document.getElementById('form-km-saida').addEventListener('submit',async(ev)=>{
   ev.preventDefault();
@@ -739,7 +749,7 @@ function abrirEdicao(id){
   EDITANDO_ID = id;
   const f = MEUS.find(x=>x.id===id);
   document.getElementById('edicao-info').textContent = `${f.entregador} · ${f.unidadeNome||f.unidade} · ${fmtData(f.data)} — depois de lançado, a correção precisa de aprovação do Master.`;
-  document.getElementById('e-campo').innerHTML = CAMPOS_NUMERICOS.map(c=>`<option value="${c}">${NOMES_CAMPOS[c]} (atual: ${fmtValorCampo(c,f[c])})</option>`).join('');
+  document.getElementById('e-campo').innerHTML = CAMPOS_NUMERICOS.filter(c=>!f.regraCoop||!['coopRecebe','quantTotal'].includes(c)).map(c=>`<option value="${c}">${NOMES_CAMPOS[c]} (atual: ${fmtValorCampo(c,f[c])})</option>`).join('');
   document.getElementById('e-valor').value = '';
   document.getElementById('e-motivo').value = '';
   document.getElementById('msg-edicao').classList.add('hidden');
@@ -785,7 +795,7 @@ function abrirEditarMaster(id){
   document.getElementById('m-obsExtra').value = f.obsExtra || '';
   document.getElementById('m-observacao').value = f.observacao || '';
   document.getElementById('m-motivo').value = '';
-  const camposMaster = f.modeloLancamento==='total' ? ['entrega','valor'] : CAMPOS_NUMERICOS;
+  const camposMaster = f.modeloLancamento==='total' ? ['entrega','valor'] : CAMPOS_NUMERICOS.filter(c=>!f.regraCoop||!['coopRecebe','quantTotal'].includes(c));
   document.getElementById('m-campos-numericos').innerHTML = camposMaster.map(c=>
     `<div><label>${NOMES_CAMPOS[c]}</label><input type="number" step="${CAMPOS_MONETARIOS.has(c)?'0.01':'1'}" inputmode="decimal" id="m-${c}" value="${num(f[c])}"></div>`
   ).join('');

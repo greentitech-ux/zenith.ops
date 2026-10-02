@@ -157,7 +157,7 @@
       <label><input type="radio" name="modo" value="fixo"> Usa tabela de entregadores fixos</label>
     </div>
 
-    <div id="modelo-total-aviso" class="modelo-aviso hidden"><b>Modelo de Campina Grande</b><br>O lançamento registra somente entregador, quantidade de entregas e valor total. Não há taxa fixa, extra, retorno ou cooperativa neste modelo.</div>
+    <div id="modelo-total-aviso" class="modelo-aviso hidden"><b>Modelo de Campina Grande</b><br>O lançamento registra entregador, quantidade de entregas e valor total. Não há taxa fixa, extra ou retorno. COOP recebe só aparece se ativado na configuração abaixo.</div>
 
     <input type="hidden" id="r-plataformaNome">
 
@@ -176,6 +176,14 @@
       <button type="button" class="btn-add-campo" onclick="adicionarEmpresa()">+ Adicionar empresa / plataforma</button>
     </div>
 
+    <div class="km-config">
+      <label class="campo-toggle"><input type="checkbox" id="r-coop-ativo"> Ativar COOP recebe nesta unidade</label>
+      <div id="r-coop-config" class="hidden">
+        <label>COOP recebe por entrega (R$)</label>
+        <input type="number" min="0.01" step="0.01" id="r-coop-valor" placeholder="ex.: 1,00">
+        <div class="field-help">Quantidade de Entregas × este valor. Não inclui Retorno, Extra, Fora de área ou Pós 00h e não altera o valor a pagar ao entregador.</div>
+      </div>
+    </div>
     <div class="km-config">
       <label class="campo-toggle"><input type="checkbox" id="r-km-ativo"> Ativar controle de entregadores pagos por faixa de KM</label>
       <div class="field-help">A loja dará entrada e saída no entregador. As quantidades por faixa só serão liberadas ao dar saída.</div>
@@ -210,7 +218,7 @@ function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{mini
 const FUSO_BR = 'America/Sao_Paulo';
 
 const BASES = [ ['entrega','Quantidade de Entregas (multiplica)'], ['retorno','Quantidade de Retornos (multiplica)'], ['extra','Quantidade de Extras (multiplica)'], ['pos00hs','Quantidade Pós 00h (multiplica)'], ['foraDeArea','Quantidade Fora de Área (multiplica)'], ['flat','Uma vez por lançamento (não multiplica)'] ];
-const DESTINOS = [ ['valor','Soma no Valor a pagar'], ['coopRecebe','Soma no repasse da Cooperativa'] ];
+const DESTINOS = [ ['valor','Soma no Valor a pagar'] ];
 const DIAS_SEMANA = [ ['dom','Dom'], ['seg','Seg'], ['ter','Ter'], ['qua','Qua'], ['qui','Qui'], ['sex','Sex'], ['sab','Sáb'] ];
 const FAIXAS_KM = [ ['ate49','Até 4,9 km'], ['ate59','Até 5,9 km'], ['ate69','Até 6,9 km'], ['ate79','Até 7,9 km'], ['ate89','Até 8,9 km'], ['ate99','Até 9,9 km'] ];
 
@@ -228,11 +236,12 @@ function renderRegras(){
     const r = regraDaUnidade(u.codigo);
     const fixo = r.modo==='fixo';
     const total = r.modeloLancamento==='total';
-    const tagsFixos = fixo ? (r.camposValor||[]).map(c=>`<span class="tag ${c.removivelPelaLoja?'removivel':''}" title="${c.destino==='coopRecebe'?'Cooperativa':'Valor a pagar'}${c.meta?' · tem meta':''}">${escapeHtml(c.label)}${c.base!=='flat'?' ('+escapeHtml(BASES.find(b=>b[0]===c.base)?.[1]||c.base)+')':''}</span>`).join('') : '';
+    const tagsFixos = fixo ? (r.camposValor||[]).filter(c=>c.destino!=='coopRecebe').map(c=>`<span class="tag ${c.removivelPelaLoja?'removivel':''}" title="Valor a pagar${c.meta?' · tem meta':''}">${escapeHtml(c.label)}${c.base!=='flat'?' ('+escapeHtml(BASES.find(b=>b[0]===c.base)?.[1]||c.base)+')':''}</span>`).join('') : '';
     const tagsEmpresas = (r.empresas||[]).map(empresa=>`<span class="tag" title="Empresa/plataforma">${escapeHtml(empresa.nome)} · ${empresa.modo==='fixo'?fmtMoney(empresa.valorEntrega)+'/entrega':'total manual'}</span>`).join('');
     const tagTotal = total ? '<span class="tag" style="color:var(--accent2);">Quantidade + valor total</span>' : '';
     const tagKm = r.regraKm?.ativo ? '<span class="tag" style="color:var(--accent);">Faixas de KM</span>' : '';
-    const tags = tagTotal + tagsFixos + tagsEmpresas + tagKm;
+    const tagCoop=r.regraCoop?.ativo?`<span class="tag">COOP recebe · ${fmtMoney(r.regraCoop.valorEntrega)}/entrega</span>`:'';
+    const tags = tagTotal + tagsFixos + tagsEmpresas + tagKm + tagCoop;
     return `
     <tr>
       <td><b>${escapeHtml(u.nome)}</b></td>
@@ -294,6 +303,10 @@ function renderRegraKm(regraKm){
 }
 document.getElementById('r-km-ativo').addEventListener('change', (e)=>{
   document.getElementById('r-km-faixas').classList.toggle('hidden', !e.target.checked);
+});
+document.getElementById('r-coop-ativo').addEventListener('change',e=>{
+  document.getElementById('r-coop-config').classList.toggle('hidden',!e.target.checked);
+  document.getElementById('r-coop-valor').required=e.target.checked;
 });
 function lerRegraKm(){
   return {
@@ -399,7 +412,11 @@ function abrirEdicao(codigo){
     ? (r.entregadoresFixos||[]).map(nome=>`<div style="padding:4px 0">• ${escapeHtml(nome)}</div>`).join('')
     : '<span style="color:var(--muted)">Nenhum entregador ativo cadastrado nesta unidade.</span>';
   document.getElementById('lista-campos').innerHTML = '';
-  (r.camposValor||[]).forEach(c=>adicionarCampo(c));
+  (r.camposValor||[]).filter(c=>c.destino!=='coopRecebe').forEach(c=>adicionarCampo(c));
+  document.getElementById('r-coop-ativo').checked=!!r.regraCoop?.ativo;
+  document.getElementById('r-coop-config').classList.toggle('hidden',!r.regraCoop?.ativo);
+  document.getElementById('r-coop-valor').value=r.regraCoop?.valorEntrega||'';
+  document.getElementById('r-coop-valor').required=!!r.regraCoop?.ativo;
   document.getElementById('lista-empresas').innerHTML = '';
   (r.empresas||[]).forEach(empresa=>adicionarEmpresa(empresa));
   renderRegraKm(r.regraKm);
@@ -419,6 +436,7 @@ document.getElementById('regra-form').addEventListener('submit', async (e)=>{
     entregadoresFixos: regraDaUnidade(EDITANDO_UNIDADE).entregadoresFixos || [],
     empresas: lerEmpresas(),
     regraKm: lerRegraKm(),
+    regraCoop: {ativo:document.getElementById('r-coop-ativo').checked,valorEntrega:document.getElementById('r-coop-valor').value},
     camposValor: lerCamposValor(),
   };
   try{

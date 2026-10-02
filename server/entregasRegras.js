@@ -10,10 +10,8 @@
 //   - aplicar sobre uma contagem do lançamento (Entrega/Retorno/Extra/Fora de
 //     Área) -> valor = contagem × taxa; ou ser "valor fixo por lançamento"
 //     (ex: Ajuda de Custo/Encosta, que não multiplicam por contagem nenhuma);
-//   - somar no "Valor a pagar" ao entregador, ou no "repasse da Cooperativa"
-//     (a Cooperativa normalmente só soma sobre Entrega, nunca sobre
-//     Retorno/Extra - mas quem decide isso é a taxa/base escolhida pelo
-//     Master pra cada campo, não algo fixo no código);
+//   - somar no "Valor a pagar" ao entregador. O repasse da Cooperativa usa
+//     uma configuração separada por unidade e multiplica somente Entregas;
 //   - ter uma taxa diferente por dia da semana (ex: R$20 seg-sex, R$30
 //     sáb/dom);
 //   - ter uma meta mínima numa contagem do lançamento - se não bater, usa um
@@ -46,6 +44,18 @@ const FAIXAS_KM = [
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+// Repasse independente: somente Entregas, nunca adicionais ou valor fixo.
+function configuracaoCoop(regra){
+  if(regra?.regraCoop!=null)return {ativo:regra.regraCoop.ativo===true,valorEntrega:Math.max(0,num(regra.regraCoop.valorEntrega))};
+  // Compatibilidade com o campo antigo explicitamente configurado por entrega.
+  const antigos=(regra?.camposValor||[]).filter(c=>c.destino==='coopRecebe'&&c.base==='entrega');
+  return {ativo:antigos.length>0,valorEntrega:antigos.reduce((s,c)=>s+Math.max(0,num(c.valorPadrao)),0)};
+}
+function calcularCoop(regra,entrega){
+  const c=configuracaoCoop(regra);
+  return c.ativo?+(Math.max(0,num(entrega))*c.valorEntrega).toFixed(2):0;
 }
 
 // mesmo slugify de grupos.js - vira um identificador estavel (campo) a
@@ -143,6 +153,7 @@ function normalizarRegra(regra) {
     entregadoresFixos: sanitizarEntregadoresFixos(regra.entregadoresFixos),
     empresas,
     regraKm: sanitizarRegraKm(regra.regraKm),
+    regraCoop: configuracaoCoop(regra),
     camposValor: (Array.isArray(regra.camposValor) ? regra.camposValor : []).map((campo) => ({
       ...campo,
       base: campo.base === 'flat' ? (baseCanonicaDoLabel(campo.label) || 'flat') : campo.base,
@@ -192,6 +203,7 @@ function defaultRegra(unidade) {
     entregadoresFixos: [],
     empresas: [],
     regraKm: sanitizarRegraKm(null),
+    regraCoop: {ativo:false,valorEntrega:0},
     camposValor: [],
     atualizadoEm: null,
     atualizadoPorEmail: null,
@@ -210,7 +222,7 @@ async function getPara(unidade) {
   // Regras gravadas antes da criação do modelo "total" não possuem a nova
   // chave. Mesclar com o padrão conserva a configuração antiga e faz Campina
   // adotar o formulário correto sem exigir uma migração manual no Firestore.
-  return doc.exists ? normalizarRegra({ ...defaultRegra(unidade), ...doc.data() }) : defaultRegra(unidade);
+  return doc.exists ? { ...defaultRegra(unidade), ...normalizarRegra(doc.data()) } : defaultRegra(unidade);
 }
 
 async function salvar(unidade, campos, atualizadoPorEmail) {
@@ -219,6 +231,8 @@ async function salvar(unidade, campos, atualizadoPorEmail) {
   const entregadoresFixos = sanitizarEntregadoresFixos(campos?.entregadoresFixos);
   const empresas = sanitizarEmpresas(campos?.empresas);
   const regraKm = sanitizarRegraKm(campos?.regraKm);
+  const regraCoop=configuracaoCoop(campos?.regraCoop!=null||campos?.camposValor?.some(c=>c.destino==='coopRecebe')?campos:await getPara(unidade));
+  if(regraCoop.ativo&&regraCoop.valorEntrega<=0)throw new Error('Informe um valor por entrega maior que zero para COOP recebe.');
   if (empresas.some((empresa) => empresa.modo === 'fixo' && empresa.valorEntrega <= 0)) {
     throw new Error('Informe um valor por entrega maior que zero para cada empresa de tarifa fixa.');
   }
@@ -237,6 +251,7 @@ async function salvar(unidade, campos, atualizadoPorEmail) {
     entregadoresFixos,
     empresas,
     regraKm,
+    regraCoop,
     camposValor: sanitizarCamposValor(campos?.camposValor),
     atualizadoEm: new Date().toISOString(),
     atualizadoPorEmail,
@@ -269,11 +284,12 @@ function calcular(regra, { data, entrega, retorno, extra, pos00hs, foraDeArea, c
   const removidos = new Set(Array.isArray(camposRemovidos) ? camposRemovidos : []);
 
   let valor = 0;
-  let coopRecebe = 0;
+  const coopRecebe = calcularCoop(regra,contagens.entrega);
   let ajudaCusto = 0; // soma dos campos "flat" que somam no Valor a pagar - alimenta a coluna legada
   const detalhes = [];
 
   (regra.camposValor || []).forEach((c) => {
+    if(c.destino==='coopRecebe')return; // substituído pela configuração exclusiva acima
     if (removidos.has(c.campo)) {
       detalhes.push({ campo: c.campo, label: c.label, valor: 0, removido: true });
       return;
@@ -286,12 +302,10 @@ function calcular(regra, { data, entrega, retorno, extra, pos00hs, foraDeArea, c
     const quantidade = c.base === 'flat' ? null : (contagens[c.base] || 0);
     const valorCampo = c.base === 'flat' ? taxa : quantidade * taxa;
     detalhes.push({ campo: c.campo, label: c.label, base: c.base, quantidade, taxa: +taxa.toFixed(2), valor: +valorCampo.toFixed(2) });
-    if (c.destino === 'coopRecebe') coopRecebe += valorCampo;
-    else {
-      valor += valorCampo;
-      if (c.base === 'flat') ajudaCusto += valorCampo;
-    }
+    valor += valorCampo;
+    if (c.base === 'flat') ajudaCusto += valorCampo;
   });
+  if(configuracaoCoop(regra).ativo)detalhes.push({campo:'coopRecebe',label:'COOP recebe',base:'entrega',quantidade:contagens.entrega,taxa:configuracaoCoop(regra).valorEntrega,valor:coopRecebe,destino:'coopRecebe'});
 
   return {
     valor: +valor.toFixed(2),
@@ -303,7 +317,7 @@ function calcular(regra, { data, entrega, retorno, extra, pos00hs, foraDeArea, c
 }
 
 module.exports = {
-  listAll, getPara, salvar, calcular, defaultRegra,
+  listAll, getPara, salvar, calcular, defaultRegra, configuracaoCoop, calcularCoop,
   DIAS_SEMANA, BASES_VALIDAS, DESTINOS_VALIDOS, MOTIVOS_REMOCAO_CAMPO, MODELOS_LANCAMENTO_VALIDOS, FAIXAS_KM,
   invalidar: () => regrasCache.invalidar(),
 };

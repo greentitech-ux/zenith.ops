@@ -37,6 +37,15 @@ function valorPositivo(v) {
   const n = Number(texto);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
+function completarDerivados(atual,mudancas){
+  if(!atual.regraCoop)return; // registros antigos permanecem intactos
+  delete mudancas.coopRecebe;delete mudancas.quantTotal;
+  if(['entrega','extra','retorno'].some(c=>c in mudancas)){
+    const novo={...atual,...mudancas};
+    mudancas.quantTotal=['entrega','extra','retorno'].reduce((s,c)=>s+Math.max(0,num(novo[c])),0);
+    mudancas.coopRecebe=entregasRegras.calcularCoop({regraCoop:atual.regraCoop},novo.entrega);
+  }
+}
 
 async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, tipoRecebedor, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos, etiquetaFile, criadoPorId, criadoPorEmail }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
@@ -127,6 +136,11 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
     registro.bonus = 0; // Bônus (Gami/NEXT) só existe em unidade "plataforma" - ver abaixo
   }
 
+  // O servidor sempre sobrescreve o repasse, inclusive no modo manual.
+  // Nunca confiar em COOP recebe/Quantidade total enviados pelo navegador.
+  registro.coopRecebe=entregasRegras.calcularCoop(regra,registro.entrega);
+  registro.quantTotal=Math.max(0,num(registro.entrega))+Math.max(0,num(registro.extra))+Math.max(0,num(registro.retorno));
+  registro.regraCoop=entregasRegras.configuracaoCoop(regra);
   registro.obsRetorno = obsRetorno || null;
   registro.obsExtra = obsExtra || null;
   registro.observacao = observacao || null;
@@ -211,6 +225,7 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
     if ('valor' in camposValidos && valorPositivo(camposValidos.valor) == null) throw new Error('Valor total precisa ser maior que zero.');
     if ('entrega' in camposValidos) camposValidos.quantTotal = camposValidos.entrega;
   }
+  completarDerivados(atual,camposValidos);
   if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para corrigir.');
 
   const ref = EDITS.doc();
@@ -259,6 +274,7 @@ async function editarDireto({ entregaId, mudancas, motivo, editadoPorEmail }) {
     if ('valor' in camposValidos && valorPositivo(camposValidos.valor) == null) throw new Error('Valor total precisa ser maior que zero.');
     if ('entrega' in camposValidos) camposValidos.quantTotal = camposValidos.entrega;
   }
+  completarDerivados(atual,camposValidos);
   if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para alterar.');
 
   const valoresAnteriores = {};
@@ -323,6 +339,7 @@ async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
     const entDoc = await entRef.get();
     if (entDoc.exists) {
       const atual = entDoc.data();
+      completarDerivados(atual,pedido.mudancas);
       const valoresAnteriores = {};
       Object.keys(pedido.mudancas).forEach((campo) => { valoresAnteriores[campo] = atual[campo]; });
       const historico = [...(atual.historico || []), {
