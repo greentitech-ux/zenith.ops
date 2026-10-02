@@ -170,11 +170,14 @@
       </div>
       <div>
         <label>De</label>
-        <input type="date" id="f-data-de" onchange="aoMudarFiltroData()">
+        <input type="date" id="f-data-de" oninput="aoMudarFiltroData()">
       </div>
       <div>
         <label>Até</label>
-        <input type="date" id="f-data-ate" onchange="aoMudarFiltroData()">
+        <input type="date" id="f-data-ate" oninput="aoMudarFiltroData()">
+      </div>
+      <div style="flex:0 0 auto;min-width:auto;">
+        <button type="button" class="preset-btn" style="padding:10px 14px;color:var(--accent);" onclick="aplicarFiltrosData()">Aplicar filtros</button>
       </div>
     </div>
     <div class="presets" id="presets" style="margin-top:10px;"></div>
@@ -357,6 +360,11 @@ function aplicarPreset(tipo){
   carregar();
 }
 function aoMudarFiltroData(){
+  presetAtivo = null;
+  document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
+  carregar();
+}
+function aplicarFiltrosData(){
   presetAtivo = null;
   document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
   carregar();
