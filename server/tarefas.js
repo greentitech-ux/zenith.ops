@@ -325,7 +325,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null, defesaChargeback = null, desbloqueioLogin = null }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null, defesaChargeback = null, desbloqueioLogin = null, autorizacao = null }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -385,6 +385,14 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
       unidades: Array.isArray(desbloqueioLogin.unidades) ? desbloqueioLogin.unidades.map(String).slice(0, 30) : [],
       bloqueadoEm: String(desbloqueioLogin.bloqueadoEm || '').slice(0, 80),
       tipo: desbloqueioLogin.tipo === 'reset-senha' ? 'reset-senha' : 'bloqueio',
+    } : null,
+    // A aprovação sensível também mora no Meu Dia. O id é a chave de ligação
+    // com qaAprovacoes.js; assim push perdido nunca deixa uma ação parada sem
+    // uma tarefa visível ao Master.
+    autorizacao: autorizacao && autorizacao.id ? {
+      id: String(autorizacao.id).slice(0, 120),
+      resumo: String(autorizacao.resumo || '').slice(0, 300),
+      origem: String(autorizacao.origem || '').slice(0, 40) || null,
     } : null,
     // Dados de triagem não são exibidos na descrição. Servem apenas para que
     // Master/Suporte decidam, depois, se o pedido merece virar uma solicitação.

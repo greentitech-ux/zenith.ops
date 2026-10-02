@@ -111,21 +111,29 @@ async function notifyQaAprovacaoPendente(resumo, criadoPorEmail, { id = null, or
     url: id ? `/autorizacoes?id=${encodeURIComponent(id)}` : '/autorizacoes',
   };
   await alertasCentral.registrar({ tipo: 'qa-aprovacao', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return { configurado: false, destinatarios: [], entregues: 0, falhas: 0 };
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
+  const destino = new Map();
+  let entregues = 0; let falhas = 0;
   for (const sub of subs) {
     if (!podeReceberAprovacaoQa(sub)) continue;
+    const chave = `${sub.meta?.userId || 'master-sem-id'}@${new URL(sub.endpoint).host}`;
+    const item = destino.get(chave) || { usuarioId: sub.meta?.userId || null, dispositivo: new URL(sub.endpoint).host, entregue: false, falhou: false };
     try {
       await webpush.sendNotification(sub, payload);
+      item.entregue = true; entregues += 1;
     } catch (err) {
+      item.falhou = true; falhas += 1;
       if (err.statusCode === 404 || err.statusCode === 410) {
         await removeSubscription(sub.endpoint);
       } else {
         console.error('Erro ao enviar push (aprovação QA):', err.message);
       }
     }
+    destino.set(chave, item);
   }
+  return { configurado: true, destinatarios: [...destino.values()], entregues, falhas };
 }
 
 // alerta critico do Beniboy (bot nao conseguiu resolver e chamou um

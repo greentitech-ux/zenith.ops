@@ -17,6 +17,7 @@
 // - o proprio bot chamou um atendente (botDesativado, via tool);
 // - a conversa passou do limite de respostas do bot (baixa interacao).
 const suporteChat = require('./suporteChat');
+const usuariosCowork = require('./usuariosCowork');
 const solicitacoes = require('./solicitacoes');
 const store = require('./store');
 const pedidoWatch = require('./pedidoWatch');
@@ -164,10 +165,10 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - Para uma Zebra confirmada, se não houver Zebra cadastrada/monitorada ou nenhum computador NOC disponível, registre o motivo e chame um atendente. Nunca invente que o reset foi enviado.
 
 ## O que você sabe do NoPulso
-- Problema para entrar: depois de receber o nome de usuário, SEMPRE use desbloquear_login para diagnosticar antes de concluir que é senha. A ferramenta diferencia bloqueio por tentativas, horário restrito, acesso desativado e conta já liberada. Só quando for bloqueio real ela destrava mantendo a MESMA senha; se for horário, ela aciona o Master para revisar a liberação sem mudar a senha. Se a própria pessoa disser que esqueceu ou quer trocar a senha, chame a ferramenta com pedirNovaSenha=true: isso cria uma tarefa direta para o Master, nunca um chamado de TI. Depois da aprovação, a senha temporária é 12345678 e a pessoa cria a nova senha no primeiro acesso.
+- Problema para entrar, desbloqueio ou nova senha é pedido de usuários: não acione o Master nem use desbloquear_login. Colete os dados e encaminhe ao Cowork/TI pelo fluxo de usuários.
 - Estorno: nem toda dúvida financeira ou consulta de pedido é estorno. Entenda primeiro o que a pessoa precisa. NUNCA envie link só porque soube a loja. Antes de qualquer link, peça nome do cliente e valor, consulte o pedido no Monitor por consultar_pedido e envie o status. O servidor inclui o resultado verificado na mensagem: não invente status. Se não puder consultar, não encontrar o pedido ou houver mais de um resultado, esclareça os dados ou use chamar_atendente; NÃO envie formulário. Só em uma resposta posterior ao status já enviado, se a pessoa pedir/confirmar estorno para esse mesmo pedido e loja, use gerar_link_estorno_cliente. Nunca escreva uma URL de estorno por conta própria, copie link antigo ou prometa aprovação. O formulário é uma solicitação avaliada pelo time, não um estorno executado.
 - Pausar item ou fechar a loja no iFood/99food: quem faz é o COWORK AGREGADOR, o robô que opera os painéis - não é com um atendente. Use bloquear_no_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item. Depois é só avisar que está sendo feito; a confirmação cai na conversa sozinha - nunca prometa prazo nem diga que já está feito antes da confirmação chegar.
-- Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
+- Pedidos de usuários (criar acesso, liberar tela/seção, trocar/adicionar unidade, desbloquear login, nova senha ou desativar acesso) vão SEMPRE para o Cowork/TI, nunca para o Master. Colete nome completo, e-mail se houver, unidade, cargo, usuário-espelho e telas necessárias. Depois use encaminhar_usuarios_cowork. A única resposta de confirmação é: "Vou encaminhar para o TI criar/ajustar o acesso. Você recebe a confirmação aqui." O Cowork só executa após autorização forte do Master; não diga isso ao solicitante como encaminhamento.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
 - Fechamento de caixa: lançado em Lançar fechamento; erro em fechamento já enviado se corrige pelo botão "Pedir correção" no Histórico da Central (só 1 correção pendente por lançamento).
 - Chamados de TI/Manutenção: nascem de tickets aprovados ou direto pelo time técnico; têm prioridade e prazo (SLA).
@@ -198,6 +199,16 @@ Hoje no Brasil é ${hojeBrasil()}. Quando a pessoa disser "hoje", use esta data 
 }
 
 const TOOLS_BASE = [
+  {
+    name: 'encaminhar_usuarios_cowork',
+    description: 'Encaminha pedido de usuário ao Cowork/TI e abre a solicitação de Suporte de TI etiquetada como usuarios. Use para criar/alterar/desbloquear acesso, senha, unidade ou tela. Só chame depois de ter todos os campos; email pode ficar vazio quando não existir.',
+    input_schema: { type: 'object', properties: {
+      acao: { type: 'string', description: 'Ex.: criar acesso, liberar tela, adicionar unidade, desbloquear login, nova senha ou desativar acesso.' },
+      nomeCompleto: { type: 'string' }, email: { type: 'string' }, unidade: { type: 'string' }, cargo: { type: 'string' },
+      usuarioEspelho: { type: 'string', description: 'Usuário de referência com permissões iguais; use “nenhum” se não houver.' },
+      telasNecessarias: { type: 'string', description: 'Telas/seções necessárias; use “nenhuma” se não se aplicar.' },
+    }, required: ['acao', 'nomeCompleto', 'unidade', 'cargo', 'usuarioEspelho', 'telasNecessarias'] },
+  },
   {
     name: 'criar_tarefa',
     description: 'Cria uma tarefa no Meu Dia para a própria pessoa logada. Use quando ela pedir explicitamente uma tarefa. Não cria ticket da Central. O responsável é sempre quem está falando; participantes só são adicionados se estiverem no mesmo escopo de acesso.',
@@ -396,7 +407,9 @@ function montarTools(logado) {
   // Ticket por numero contem dados operacionais. Visitante publico consulta
   // apenas o proprio protocolo; a busca por um numero arbitrario fica com o
   // time autenticado (Master/Admin/secao Suporte).
-  const tools = TOOLS_BASE.filter((tool) => tool.name !== 'consultar_ticket');
+  // Login, senha e permissões são sempre tratados como solicitação de
+  // usuários pelo Cowork; esta ferramenta antiga acionava Master direto.
+  const tools = TOOLS_BASE.filter((tool) => !['consultar_ticket', 'desbloquear_login'].includes(tool.name));
   if (logado && logado.ehTimeSuporte) tools.push(TOOLS_BASE.find((tool) => tool.name === 'consultar_ticket'));
   if (logado && (logado.isMaster || (logado.unidades || []).length)) tools.push(TOOL_CONSULTAR_PEDIDO);
   if (logado && logado.isMaster) tools.push(TOOL_EXECUTAR_ACAO_AGENTE);
@@ -522,8 +535,39 @@ async function criarTarefaDoChat(input, chat, resultado, unidadesPorCodigo) {
 }
 
 async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente, unidadesPorCodigo) {
+  if (nome === 'encaminhar_usuarios_cowork') {
+    const campos = ['acao', 'nomeCompleto', 'unidade', 'cargo', 'usuarioEspelho', 'telasNecessarias'];
+    const faltando = campos.filter((campo) => !String(input[campo] || '').trim());
+    if (faltando.length) return `Antes de encaminhar, falta: ${faltando.join(', ')}.`;
+    if (chat.encaminhadoCowork) return 'Este protocolo já foi encaminhado ao Cowork; não crie outra solicitação.';
+    const dono = chat.logado && chat.logado.id ? donoDoChat(chat, await users.list()) : null;
+    const acao = String(input.acao).trim(); const pessoa = String(input.nomeCompleto).trim(); const unidade = String(input.unidade).trim();
+    const observacao = [
+      `Protocolo: #${chat.numeroTicket}`, `Ação: ${acao}`, `Nome completo: ${pessoa}`,
+      `E-mail: ${String(input.email || '').trim() || 'não informado'}`, `Unidade: ${unidade}`,
+      `Cargo: ${String(input.cargo).trim()}`, `Usuário espelho: ${String(input.usuarioEspelho).trim()}`,
+      `Telas necessárias: ${String(input.telasNecessarias).trim()}`,
+    ].join('\n');
+    const registro = await solicitacoes.create({
+      tipo: 'suporte-ti', unidade, unidadeNome: unidade, titulo: `Usuários: ${acao} — ${pessoa} (${unidade})`, observacao, tags: ['usuarios'],
+      itens: [], anexos: [], ehOrcamento: false, prioridade: 'media', numeroTicket: chat.numeroTicket,
+      criadoPorId: dono ? dono.id : null, criadoPorEmail: dono ? (dono.email || dono.username) : `Beniboy · protocolo #${chat.numeroTicket}`,
+      direcionadoParaId: null, direcionadoParaEmail: null,
+    });
+    resultado.tickets.push(registro);
+    await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'solicitacao', ticketId: registro.id, numero: registro.numeroTicket });
+    await suporteChat.marcarEncaminhadoCowork(chat.id, registro.id);
+    usuariosCowork.avisar({ protocolo: chat.numeroTicket, solicitacaoId: registro.id }).catch((err) => console.error('[usuarios-cowork] falha no webhook:', err.message));
+    return `Solicitação de usuários criada (ticket #${registro.numeroTicket}). Responda exatamente: "Vou encaminhar para o TI criar/ajustar o acesso. Você recebe a confirmação aqui."`;
+  }
   if (nome === 'criar_tarefa') return criarTarefaDoChat(input, chat, resultado, unidadesPorCodigo || {});
   if (nome === 'criar_ticket') {
+    // Mesmo se o modelo escolher o criador genérico por engano, pedido de
+    // acesso não pode cair no roteamento comum nem chamar o Master.
+    const textoDoPedido = [input.titulo, input.descricao, input.tipo].filter(Boolean).join(' ');
+    if (/\busu[aá]rio\b|\bacesso\b|\bpermiss[aã]o\b|\bsenha\b|\bdesbloque|\blogin\b|\btela\b|\bse[cç][aã]o\b/i.test(textoDoPedido)) {
+      return 'Pedido de usuários: colete nome completo, e-mail se houver, unidade, cargo, usuário espelho e telas necessárias; depois use encaminhar_usuarios_cowork.';
+    }
     const tipo = TIPOS_TICKET.includes(input.tipo) ? input.tipo : null;
     if (!tipo) return 'Erro: tipo inválido.';
     if (tipo === 'acesso-pessoa') {
@@ -1027,6 +1071,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       });
       // até aqui o pedido do Beniboy ficava parado sem avisar ninguém
       require('./push').notifyQaAprovacaoPendente(resumo, `${chat.logado.username} (via Beniboy)`, { id: pedido.id, origem: 'beniboy' })
+        .then((entrega) => qaAprovacoes.registrarEntregaPush(pedido.id, entrega))
         .catch((e) => console.error('Falha ao avisar autorização do Beniboy:', e.message));
       return `Ação "${acao.nome}" preparada e enviada pra autorização do Master no celular (digital ou senha).`;
     }
@@ -1076,6 +1121,9 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
   try {
     const chat = await suporteChat.getOne(chatId);
     if (!chat || chat.status !== 'ABERTO') return null;
+    // O Cowork assumiu pelo próprio Beniboy: duas inteligências respondendo
+    // ao mesmo protocolo foi o incidente #12287. A partir daí só ele segue.
+    if ((chat.mensagens || []).some((m) => m.autorEmail === 'Cowork via Beniboy')) return null;
     if (chat.atendidoPorEmail || chat.botDesativado) return null; // humano assumiu / bot ja se despediu
     const msgs = chat.mensagens || [];
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder

@@ -13,8 +13,80 @@
 // contornar sozinho.
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
+const users = require('./users');
+const tarefas = require('./tarefas');
 
 const COLLECTION = db.collection('qaAprovacoes');
+
+function hojeBrasil() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+}
+
+async function masterDaAprovacao() {
+  const configurado = String(process.env.NOPULSO_AGENT_MASTER || '').trim();
+  if (configurado) {
+    const achado = await users.findByIdentifier(configurado);
+    if (achado && achado.active !== false && achado.role === 'master') return achado;
+  }
+  return (await users.list()).find((u) => u && u.active !== false && u.role === 'master') || null;
+}
+
+function descricaoDaTarefa(registro) {
+  const detalhes = (registro.detalhes || []).map((d) => `- ${d.rotulo}: ${d.valor}`).join('\n');
+  return [
+    `Autorização #${registro.id}. Origem: ${registro.origem || 'qa'}.`,
+    `Solicitado por: ${registro.criadoPorEmail || 'não informado'}.`,
+    registro.expiraEm ? `Vence em: ${registro.expiraEm}.` : '',
+    detalhes ? `Prévia da ação:\n${detalhes}` : '',
+    'Aprove ou recuse dentro desta tarefa. A confirmação forte (digital ou senha) continua obrigatória.',
+  ].filter(Boolean).join('\n\n');
+}
+
+function unidadeDaAutorizacao(registro) {
+  const detalhe = (registro.detalhes || []).find((d) => /unidade|loja/i.test(String(d.rotulo || '')));
+  return detalhe && String(detalhe.valor || '').trim() ? String(detalhe.valor).trim() : null;
+}
+
+// O push é só um atalho. A fonte persistente de toda aprovação é a tarefa de
+// Hoje do Master, criada junto com o pedido e recuperada para pendências antigas.
+async function garantirTarefa(registro) {
+  if (!registro || registro.status !== 'pendente') return registro;
+  if (registro.tarefaId) return registro;
+  const master = await masterDaAprovacao();
+  if (!master) return registro;
+  const tarefa = await tarefas.criar({
+    titulo: `Aprovar: ${registro.resumo}`.slice(0, 200),
+    descricao: descricaoDaTarefa(registro), dataInicio: hojeBrasil(), dataEntrega: hojeBrasil(),
+    unidade: unidadeDaAutorizacao(registro), unidadeNome: unidadeDaAutorizacao(registro), usuario: master, responsavel: master,
+    prioridade: 'alta', origem: 'autorizacao-master',
+    autorizacao: { id: registro.id, resumo: registro.resumo, origem: registro.origem },
+  });
+  await COLLECTION.doc(registro.id).update({ tarefaId: tarefa.id, tarefaNumero: tarefa.numeroTicket, tarefaCriadaEm: new Date().toISOString() });
+  cache.invalidar();
+  return { ...registro, tarefaId: tarefa.id, tarefaNumero: tarefa.numeroTicket };
+}
+
+async function garantirTarefasPendentes() {
+  const pendentes = await buscarPendentesNoBanco();
+  const resultado = [];
+  for (const pendente of pendentes) resultado.push(await garantirTarefa(pendente));
+  return resultado;
+}
+
+async function registrarEntregaPush(id, entrega) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const resumo = {
+    configurado: !!entrega?.configurado,
+    destinatarios: Array.isArray(entrega?.destinatarios) ? entrega.destinatarios.slice(0, 20) : [],
+    entregues: Number(entrega?.entregues || 0), falhas: Number(entrega?.falhas || 0),
+    em: new Date().toISOString(),
+  };
+  await ref.update({ pushEntrega: resumo });
+  cache.invalidar();
+  return { ...snap.data(), pushEntrega: resumo };
+}
 
 async function listUncached() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').limit(300).get();
@@ -100,7 +172,7 @@ async function criar({
   };
   await ref.set(registro);
   cache.invalidar();
-  return registro;
+  return garantirTarefa(registro);
 }
 
 // 'aprovado' (executor rodou com sucesso) | 'rejeitado' (Master recusou,
@@ -134,10 +206,22 @@ async function marcarDecidido(id, {
     }].slice(-12),
   };
   await ref.update(patch);
+  // A decisão fecha a pendência que nasceu no Meu Dia. Se ela já foi fechada
+  // por uma tentativa anterior, a rotina de tarefas é idempotente e preserva
+  // o histórico.
+  if ((status === 'aprovado' || status === 'rejeitado') && snap.data().tarefaId) {
+    const aprovador = decididoPorEmail ? await users.findByIdentifier(decididoPorEmail) : null;
+    const tarefa = await tarefas.getOne(snap.data().tarefaId);
+    if (aprovador && tarefa) {
+      const acesso = { usuario: aprovador, isMaster: aprovador.role === 'master', isAdmin: !!aprovador.isAdmin, unidades: aprovador.permissions?.unidades || [] };
+      if (status === 'aprovado') await tarefas.concluir(tarefa.id, { ...acesso, observacao: `Autorização ${id} aprovada.` }).catch(() => {});
+      else await tarefas.cancelar(tarefa.id, acesso, `Autorização recusada: ${motivoRejeicao || 'sem motivo informado.'}`).catch(() => {});
+    }
+  }
   cache.invalidar();
   return { ...snap.data(), ...patch };
 }
 
 module.exports = {
-  listar, listarPendentes, expirarPendentes, obter, criar, marcarDecidido,
+  listar, listarPendentes, expirarPendentes, obter, criar, marcarDecidido, garantirTarefa, garantirTarefasPendentes, registrarEntregaPush,
 };
