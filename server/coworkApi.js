@@ -41,6 +41,7 @@ const FERRAMENTAS = Object.freeze({
   listar_solicitacoes: { descricao: 'Lista solicitações da Central (compra, suporte de TI, manutenção, pagamento, nota...) por unidade, tipo, status (PENDENTE, APROVADO, REJEITADO, CONVERTIDO) e texto, da mais nova pra mais antiga.', risco: 'leitura', obrigatorios: [] },
   ler_chat_ticket: { descricao: 'Lê a conversa de uma solicitação da Central (a caixa "Escrever uma mensagem..." do ticket). Informe o numero, ou solicitacaoId.', risco: 'leitura', obrigatorios: [] },
   ler_chat_suporte: { descricao: 'Lê um protocolo do Beniboy/Suporte. Devolve conversa, notas internas, pendência, status e responsável. Informe o protocolo que a pessoa vê, ex.: 12113.', risco: 'leitura', obrigatorios: ['protocolo'] },
+  listar_chats_suporte: { descricao: 'Lista protocolos do Beniboy por status, tema, encaminhamento ao Cowork e data. Use na varredura de pedidos de usuários.', risco: 'leitura', obrigatorios: [] },
   listar_usuarios: { descricao: 'Lista acessos por cargo, unidade ou texto (nome, e-mail, username), incluindo seções, unidades, subgrupos do Cofre, tipos de solicitação e flags. Não traz senha nem segredo.', risco: 'leitura', obrigatorios: [] },
   ler_reuniao: { descricao: 'Lê uma reunião do Meu Dia: pauta, participantes, resumo, anotações (comentários), decisões e o TEXTO das transcrições anexadas (.txt, .vtt, .md, .docx). Informe tarefaId ou numero.', risco: 'leitura', obrigatorios: [] },
   // ---- defesa de chargeback (24/09/2026): a unidade responde no Meu Dia, o
@@ -55,7 +56,8 @@ const FERRAMENTAS = Object.freeze({
   aceitar_disputa_adyen: { descricao: 'Aceita o chargeback PELA API da Adyen (o valor fica com o banco) e marca o caso PERDIDA. Use quando a unidade decidiu aceitar ou não há como defender.', risco: 'alto', obrigatorios: ['disputaId'], autorizar: true },
   registrar_defesa_enviada: { descricao: 'Registra no NoPulso que a defesa FOI anexada e enviada na Adyen (status ENVIADA). Use só depois de enviar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
   registrar_disputa_aceita: { descricao: 'Registra no NoPulso que o chargeback foi ACEITO na Adyen, sem defesa (status PERDIDA). Use só depois de aceitar de fato, com a confirmação do Master na conversa.', risco: 'baixo', obrigatorios: ['disputaId'] },
-  consultar_autorizacao: { descricao: 'Consulta se o Master já autorizou (ou recusou) uma ação pedida antes, e o resultado dela.', risco: 'leitura', obrigatorios: ['autorizacaoId'] },
+  consultar_autorizacao: { descricao: 'Consulta autorização, tarefa de Hoje vinculada e resultado do último envio push.', risco: 'leitura', obrigatorios: ['autorizacaoId'] },
+  listar_autorizacoes_pendentes: { descricao: 'Lista ações aguardando o Master com autorização, tarefa vinculada, resumo e tempo de espera.', risco: 'leitura', obrigatorios: [] },
   // ---- preparo pelo Claude, assinatura do Master no celular (24/09/2026) ----
   listar_unidades: { descricao: 'Unidades com código, nome, apelidos aceitos, marca, empresa e o cadastro de formulário (rótulo, razão social, CNPJ). Toda ferramenta que pede unidade aceita código, nome ou apelido, sem diferenciar acento e maiúscula.', risco: 'leitura', obrigatorios: [] },
   listar_modelos_formulario: { descricao: 'Tipos de formulário (estorno, reembolso, avulso...), com os campos do cabeçalho, as colunas da tabela, quem assina, o que é obrigatório pra sair do rascunho e se o tipo só nasce de um ticket.', risco: 'leitura', obrigatorios: [] },
@@ -75,6 +77,7 @@ const FERRAMENTAS = Object.freeze({
   concluir_tarefa: { descricao: 'Marca uma tarefa como concluída.', risco: 'medio', obrigatorios: ['tarefaId'], autorizar: true },
   cancelar_tarefa: { descricao: 'Cancela uma tarefa.', risco: 'alto', obrigatorios: ['tarefaId', 'motivo'], autorizar: true },
   criar_solicitacao_ti: { descricao: 'Abre solicitação de Suporte de TI na Central.', risco: 'baixo', obrigatorios: ['unidade', 'titulo'] },
+  registrar_execucao_solicitacao: { descricao: 'Marca solicitação de TI aprovada como FINALIZADO e registra a nota de execução na Central.', risco: 'baixo', obrigatorios: ['solicitacaoId', 'observacao'] },
   criar_formulario: { descricao: 'Cria um formulário em RASCUNHO (nada é assinado nem enviado). numero = ticket de origem (ex.: o estorno 12029): o servidor copia campos e anexos do ticket e acha a unidade sozinho. Sem numero: tipo + unidade (código, nome ou apelido) + campos/linhas. modo=link gera o link pro solicitante preencher. Tipos e campos: listar_modelos_formulario.', risco: 'baixo', obrigatorios: ['tipo'] },
   criar_usuario: { descricao: 'Cria acesso copiando permissões de um usuário-modelo.', risco: 'alto', obrigatorios: ['modelo', 'email', 'username'], autorizar: true, devolveSegredo: true },
   desbloquear_usuario: { descricao: 'Desbloqueia um acesso existente sem trocar a senha.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true },
@@ -132,6 +135,10 @@ const PROPRIEDADES_COMUNS = {
   pagina: { type: 'number', description: 'listar_abastecimento_carrinho: página dos registros, começando em 1. Os totais sempre consideram todo o filtro.' },
   estornoId: { type: 'string', description: 'Id interno do estorno (vem de obter_estorno).' },
   protocolo: { type: 'string', description: 'Número do protocolo de suporte/Beniboy ou do portal Conecta, conforme a ferramenta.' },
+  tema: { type: 'string', description: 'Tema ou tag do chat, por exemplo usuarios.' },
+  encaminhadoCowork: { type: 'boolean', description: 'Filtra chats já encaminhados ao Cowork.' },
+  desde: { type: 'string', description: 'Data/hora ISO inicial para a busca.' },
+  execucaoStatus: { type: 'string', description: 'PENDENTE, EM_ANDAMENTO ou FINALIZADO.' },
   resumo: { type: 'string', description: 'Resumo interno objetivo do que foi resolvido no atendimento.' },
   restringirAposConclusao: { type: 'boolean', description: 'finalizar_chat_suporte: true para criação, senha ou outro caso de acesso. Após concluir, o solicitante não relê nem baixa o chat; só Master e Suporte veem.' },
   permissions: { type: 'object', description: 'ajustar_permissoes_usuario: informe apenas os campos a alterar: sections, unidades, vaultSubgroups e/ou tiposSolicitacao.' },
@@ -151,9 +158,10 @@ const PROPRIEDADES_COMUNS = {
 const PARAMETROS = Object.freeze({
   consultar_ticket: ['numero'],
   listar_tarefas: ['unidade', 'status', 'responsavel', 'termo', 'limite'],
-  listar_solicitacoes: ['unidade', 'tipo', 'status', 'termo', 'limite'],
+  listar_solicitacoes: ['unidade', 'tipo', 'status', 'termo', 'tema', 'execucaoStatus', 'limite'],
   ler_chat_ticket: ['numero', 'solicitacaoId'],
   ler_chat_suporte: ['protocolo'],
+  listar_chats_suporte: ['status', 'tema', 'encaminhadoCowork', 'desde', 'limite'],
   listar_usuarios: ['cargo', 'unidade', 'termo', 'incluirInativos', 'limite'],
   ler_reuniao: ['tarefaId', 'numero'],
   listar_disputas: ['status', 'unidade', 'somenteProntas', 'limite'],
@@ -167,6 +175,7 @@ const PARAMETROS = Object.freeze({
   registrar_defesa_enviada: ['disputaId', 'observacao'],
   registrar_disputa_aceita: ['disputaId', 'observacao'],
   consultar_autorizacao: ['autorizacaoId'],
+  listar_autorizacoes_pendentes: ['limite'],
   preparar_reuniao: ['termo', 'unidade', 'limite'],
   consultar_noc: ['unidade', 'gcom'],
   listar_abastecimento_carrinho: ['unidade', 'dataInicio', 'dataFim', 'horaInicio', 'horaFim', 'tipo', 'agrupar', 'limite', 'pagina'],
@@ -177,7 +186,8 @@ const PARAMETROS = Object.freeze({
   criar_reuniao: ['titulo', 'descricao', 'dataEntrega', 'horaInicio', 'duracaoMin', 'linkReuniao', 'unidade', 'unidadeNome'],
   concluir_tarefa: ['tarefaId', 'observacao'],
   cancelar_tarefa: ['tarefaId', 'motivo'],
-  criar_solicitacao_ti: ['unidade', 'unidadeNome', 'titulo', 'observacao', 'prioridade'],
+  criar_solicitacao_ti: ['unidade', 'unidadeNome', 'titulo', 'observacao', 'prioridade', 'tema'],
+  registrar_execucao_solicitacao: ['solicitacaoId', 'observacao'],
   criar_formulario: ['tipo', 'unidade', 'modo', 'campos', 'linhas', 'numero'],
   listar_unidades: ['termo'],
   listar_modelos_formulario: ['tipo'],
@@ -344,6 +354,7 @@ function solicitacaoCompacta(x) {
     unidade: x.unidadeNome || x.unidade || null, codigoUnidade: x.unidade || null,
     criadoPor: x.criadoPorEmail || null, criadoEm: x.criadoEm || null,
     direcionadoPara: x.direcionadoParaEmail || null, valorEstimado: x.valorEstimado ?? null,
+    tags: x.tags || [],
     observacao: x.observacao ? String(x.observacao).slice(0, 500) : null,
     itens: (x.itens || []).slice(0, 20),
   };
@@ -385,8 +396,21 @@ function chatSuporteCompacto(chat) {
     statusAtendimento: chat.statusAtendimento || null, nivel: chat.nivel || null,
     responsavel: chat.responsavel || chat.atendidoPorEmail || null,
     pendente: (chat.notasInternas || []).some((n) => n.situacao === 'PENDENTE'),
+    tema: chat.tema || null, encaminhadoCowork: !!chat.encaminhadoCowork,
     criadoEm: chat.criadoEm || null, atualizadoEm: chat.atualizadoEm || null,
   };
+}
+async function listarChatsSuporte(p) {
+  const status = String(p.status || '').trim().toUpperCase();
+  const tema = minusc(p.tema).trim();
+  const desde = p.desde ? Date.parse(p.desde) : null;
+  const limite = limiteDe(p.limite, 40, 100);
+  const chats = (await suporteChat.listAll()).filter((c) => (!status || String(c.status || '').toUpperCase() === status || String(c.statusAtendimento || '').toUpperCase() === status)
+    && (!tema || minusc(c.tema).includes(tema) || (tema === 'usuarios' && c.encaminhadoCowork))
+    && (p.encaminhadoCowork == null || !!c.encaminhadoCowork === p.encaminhadoCowork)
+    && (!desde || Date.parse(c.atualizadoEm || c.criadoEm || 0) >= desde))
+    .sort((a, b) => String(b.atualizadoEm || b.criadoEm || '').localeCompare(String(a.atualizadoEm || a.criadoEm || '')));
+  return { total: chats.length, mostrando: Math.min(limite, chats.length), chats: chats.slice(0, limite).map(chatSuporteCompacto) };
 }
 async function acharChatSuporte(protocolo) {
   const numero = numeroDoProtocolo(protocolo);
@@ -441,13 +465,38 @@ async function listarTarefas(p) {
 async function listarSolicitacoes(p) {
   const unidade = minusc(p.unidade).trim(); const termo = minusc(p.termo).trim();
   const tipo = minusc(p.tipo).trim(); const status = String(p.status || '').trim().toUpperCase();
+  const tema = minusc(p.tema).trim(); const execucaoStatus = String(p.execucaoStatus || '').trim().toUpperCase();
   const limite = limiteDe(p.limite, 40, 100);
   const filtradas = (await solicitacoes.listAll()).filter((x) => !x.teste
     && (!status || x.status === status) && (!tipo || minusc(x.tipo) === tipo)
+    && (!tema || (x.tags || []).map(minusc).includes(tema)) && (!execucaoStatus || x.execucaoStatus === execucaoStatus)
     && (!unidade || minusc(x.unidade).includes(unidade) || minusc(x.unidadeNome).includes(unidade))
     && contem([x.titulo, x.observacao, x.numeroTicket, x.unidadeNome, x.criadoPorEmail, x.tipo], termo))
     .sort((a, b) => String(b.criadoEm || '').localeCompare(String(a.criadoEm || '')));
   return { total: filtradas.length, mostrando: Math.min(limite, filtradas.length), solicitacoes: filtradas.slice(0, limite).map(solicitacaoCompacta) };
+}
+
+async function registrarExecucaoSolicitacao(p) {
+  const atual = await solicitacoes.getOne(String(p.solicitacaoId || ''));
+  if (!atual) throw new Error('Solicitação não encontrada.');
+  const registro = await solicitacoes.atualizarExecucao(atual.id, 'FINALIZADO', { porNome: 'Claude (Cowork)' });
+  await centralChat.addMessage({ tipo: atual.tipo, cardId: atual.id, autorId: null, autorEmail: 'Claude (Cowork)', autorUsername: 'Claude (Cowork)', texto: String(p.observacao).trim().slice(0, 1000) });
+  return { solicitacao: solicitacaoCompacta(registro), notaRegistrada: true };
+}
+
+async function listarAutorizacoesPendentes(p) {
+  const limite = limiteDe(p.limite, 40, 100);
+  const agora = Date.now();
+  const lista = await qaAprovacoes.listarPendentes();
+  const pessoas = new Map((await users.list()).map((u) => [u.id, u.email || u.username || u.nome || u.id]));
+  return {
+    total: lista.length,
+    autorizacoes: lista.sort((a, b) => String(a.criadoEm).localeCompare(String(b.criadoEm))).slice(0, limite).map((a) => ({
+      autorizacaoId: a.id, tarefaId: a.tarefaId || null, tarefaNumero: a.tarefaNumero || null,
+      resumo: a.resumo, origem: a.origem, aguardandoMinutos: Math.max(0, Math.round((agora - Date.parse(a.criadoEm || agora)) / 60000)),
+      push: a.pushEntrega ? { ...a.pushEntrega, destinatarios: (a.pushEntrega.destinatarios || []).map((d) => ({ ...d, usuario: pessoas.get(d.usuarioId) || d.usuarioId || null })) } : null,
+    })),
+  };
 }
 
 async function lerChatTicket(p) {
@@ -1198,6 +1247,7 @@ async function despachar(nome, entrada, ator) {
   if (nome === 'registrar_defesa_enviada' || nome === 'registrar_disputa_aceita') return registrarNaDisputa(nome, p, ator);
   if (nome === 'consultar_ticket') return consultarTicket(p.numero);
   if (nome === 'ler_chat_suporte') return lerChatSuporte(p.protocolo);
+  if (nome === 'listar_chats_suporte') return listarChatsSuporte(p);
   if (nome === 'responder_chat_suporte') return responderChatSuporte(p);
   if (nome === 'finalizar_chat_suporte') return finalizarChatSuporte(p);
   if (nome === 'listar_unidades') {
@@ -1212,6 +1262,7 @@ async function despachar(nome, entrada, ator) {
   if (nome === 'registrar_envio_conecta') return registrarEnvioConectaDoCowork(p);
   if (nome === 'listar_tarefas') return listarTarefas(p);
   if (nome === 'listar_solicitacoes') return listarSolicitacoes(p);
+  if (nome === 'registrar_execucao_solicitacao') return registrarExecucaoSolicitacao(p);
   if (nome === 'ler_chat_ticket') return lerChatTicket(p);
   if (nome === 'listar_usuarios') return listarUsuarios(p);
   if (nome === 'ajustar_permissoes_usuario') return ajustarPermissoesUsuario(p);
@@ -1222,12 +1273,17 @@ async function despachar(nome, entrada, ator) {
     // Beniboy não abre o conteúdo dele por aqui
     if (!a || a.origem !== 'cowork') throw new Error('Autorização não encontrada.');
     const vencida = a.status === 'pendente' && a.expiraEm && Date.parse(a.expiraEm) <= Date.now();
+    const pessoas = new Map((await users.list()).map((u) => [u.id, u.email || u.username || u.nome || u.id]));
+    const entrega = a.pushEntrega ? { ...a.pushEntrega, destinatarios: (a.pushEntrega.destinatarios || []).map((d) => ({ ...d, usuario: pessoas.get(d.usuarioId) || d.usuarioId || null })) } : null;
     return {
       autorizacaoId: a.id, status: vencida ? 'expirado' : a.status, resumo: a.resumo,
+      tarefaId: a.tarefaId || null, tarefaNumero: a.tarefaNumero || null,
+      push: entrega || { configurado: false, destinatarios: [], entregues: 0, falhas: 0 },
       decididoEm: a.decididoEm || null, motivoRecusa: a.motivoRejeicao || null,
       erro: a.erroExecucao || null, resultado: a.resultado || null,
     };
   }
+  if (nome === 'listar_autorizacoes_pendentes') return listarAutorizacoesPendentes(p);
   if (nome === 'pesquisar_emails') return googleGmail.pesquisar({ consulta: p.consulta, limite: p.limite });
   if (nome === 'ler_email') return googleGmail.ler(p.emailId);
   if (nome === 'enviar_email') return googleGmail.enviar({ para: p.para, assunto: p.assunto, texto: p.texto });
@@ -1336,6 +1392,7 @@ async function despachar(nome, entrada, ator) {
     const r = await solicitacoes.create({
       tipo: 'suporte-ti', unidade: p.unidade, unidadeNome: p.unidadeNome,
       titulo: p.titulo, observacao: p.observacao, prioridade: p.prioridade,
+      tags: p.tema ? [p.tema] : [],
       itens: [], anexos: [], ehOrcamento: false,
       criadoPorId: ator.id, criadoPorEmail: `${ator.email} via Claude/Cowork`,
       direcionadoParaId: null, direcionadoParaEmail: null,
@@ -1391,6 +1448,7 @@ async function executar({ nome, entrada, idempotencyKey }) {
         criadoPorId: ator.id, criadoPorEmail: 'Claude (Cowork)',
       });
       push.notifyQaAprovacaoPendente(resumo, 'Claude (Cowork)', { id: pedido.id, origem: 'cowork' })
+        .then((entrega) => qaAprovacoes.registrarEntregaPush(pedido.id, entrega))
         .catch((e) => console.error('Falha ao avisar autorização do Claude:', e.message));
       const resposta = { ok: true, requestId: auditoria.id, pendente: true, autorizacaoId: pedido.id,
         resultado: `Aguardando autorização do Master no celular (digital ou senha): ${resumo}. Consulte com consultar_autorizacao antes de dizer que foi feito.` };

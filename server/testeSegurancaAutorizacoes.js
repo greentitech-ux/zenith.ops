@@ -14,7 +14,7 @@ const db={collection:n=>({doc:(id=String(++sequencia))=>({id,
 function carregar(nome,sabotagem=false){
   const arquivo=path.join(__dirname,nome+'.js');const mod=new Module(arquivo,module);
   mod.filename=arquivo;mod.paths=module.paths;
-  mod.require=id=>id==='./firestore'?db:id==='./auth'?{emptyPermissions:()=>({sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]}),invalidarUsuario:()=>{}}:id==='bcryptjs'||id==='./sessions'?{}:require(id);
+  mod.require=id=>id==='./firestore'?db:id==='./users'?{list:async()=>[],findByIdentifier:async()=>null}:id==='./tarefas'?{}:id==='./auth'?{emptyPermissions:()=>({sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]}),invalidarUsuario:()=>{}}:id==='bcryptjs'||id==='./sessions'?{}:require(id);
   let fonte=fs.readFileSync(arquivo,'utf8');
   if(sabotagem)fonte=fonte.replace('a.execucaoId ||','false ||').replace("!['pendente','erro'].includes(a.status)",'false');
   mod._compile(fonte,arquivo);return mod.exports;
@@ -35,6 +35,7 @@ async function testar(sabotagem=false){
   const alterada=await criar(),antiga=a.revisao(alterada);
   docs.get('qaAprovacoes/'+alterada.id).payload.alvo='outro';
   await assert.rejects(a.reservarExecucao(alterada.id,antiga,'master'),/dados mudaram/);
+  await assert.rejects(a.marcarDecidido(alterada.id,{status:'rejeitado',revisaoEsperada:antiga}),/dados mudaram/);
   const vencida=await criar();docs.get('qaAprovacoes/'+vencida.id).expiraEm='2020-01-01';
   await assert.rejects(a.reservarExecucao(vencida.id,a.revisao(await a.obter(vencida.id)),'master'),/vencido/);
   const token=pk.emitirConfirmacao('master',{id:p.id,revisao:rev});

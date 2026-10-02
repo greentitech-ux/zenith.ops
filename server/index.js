@@ -6985,7 +6985,9 @@ async function desviarSeQaMaster(req, res, tipo, resumo, payload) {
   const pendente = await qaAprovacoes.criar({
     tipo, resumo, payload, criadoPorId: req.user.id, criadoPorEmail: req.user.email,
   });
-  push.notifyQaAprovacaoPendente(resumo, req.user.email, { id: pendente.id, origem: 'qa' }).catch((e) => console.error('Falha ao notificar aprovação QA pendente:', e.message));
+  push.notifyQaAprovacaoPendente(resumo, req.user.email, { id: pendente.id, origem: 'qa' })
+    .then((entrega) => qaAprovacoes.registrarEntregaPush(pendente.id, entrega))
+    .catch((e) => console.error('Falha ao notificar aprovação QA pendente:', e.message));
   res.status(202).json({ pendenteAprovacao: true, id: pendente.id, resumo });
   return true;
 }
@@ -7201,7 +7203,11 @@ app.post('/api/qa-aprovacoes/:id/rejeitar', requireMasterDeVerdade, async (req, 
   try {
     const pendente = await qaAprovacoes.obter(req.params.id);
     if (!pendente) return res.status(404).json({ error: 'Solicitação não encontrada.' });
-    const atualizado = await qaAprovacoes.marcarDecidido(req.params.id, { status: 'rejeitado', decididoPorEmail: req.user.email, motivoRejeicao: req.body.motivo || null });
+    const comprovante=String(req.body?.password||'');
+    const identidadeOk=comprovante.startsWith('digital.')?passkeys.consumirConfirmacaoAutorizacao(comprovante,req.user.id,req.params.id,req.body?.revisao):await auth.verifyPassword(req.user.id,comprovante);
+    if(!identidadeOk)return res.status(400).json({error:'Confirme este pedido com a digital ou sua senha.'});
+    if(!req.body?.revisao)return res.status(400).json({error:'Reabra o pedido antes de decidir.'});
+    const atualizado = await qaAprovacoes.marcarDecidido(req.params.id, { status: 'rejeitado', decididoPorEmail: req.user.email, motivoRejeicao: req.body.motivo || null,revisaoEsperada:req.body.revisao });
     res.json(atualizado);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -18678,6 +18684,17 @@ function aquecerBoot(promessa, ms) {
     setInterval(() => {
       expirarAutorizacoesPendentes().catch((err) => console.error('Erro ao expirar autorizações pendentes:', err.message));
     }, 60 * 1000);
+
+    // Push pode ser bloqueado no celular; a tarefa em Hoje é a fonte
+    // persistente da aprovação. Também recupera pedidos pendentes antigos.
+    const garantirTarefasDasAutorizacoesPendentes = async () => {
+      const pendentes = await qaAprovacoes.garantirTarefasPendentes();
+      if (pendentes.length) console.log(`[autorizacao] ${pendentes.length} aprovação(ões) pendente(s) conferida(s) no Meu Dia.`);
+    };
+    garantirTarefasDasAutorizacoesPendentes().catch((err) => console.error('Erro ao criar tarefas de aprovações pendentes:', err.message));
+    setInterval(() => {
+      garantirTarefasDasAutorizacoesPendentes().catch((err) => console.error('Erro ao criar tarefas de aprovações pendentes:', err.message));
+    }, 5 * 60 * 1000);
 
     // O Cowork pode concluir no painel enquanto o chat está temporariamente
     // indisponível. Reentrega só os avisos gravados como pendentes, sem repetir

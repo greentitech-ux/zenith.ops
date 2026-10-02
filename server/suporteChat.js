@@ -512,6 +512,14 @@ async function adicionarTicketVinculado(id, { tipo, ticketId, numero }) {
   return getOne(id);
 }
 
+async function marcarEncaminhadoCowork(id, solicitacaoId) {
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  await COLLECTION.doc(id).update({ tema: 'usuarios', encaminhadoCowork: true, solicitacaoCoworkId: solicitacaoId || null, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
 async function listAllUncached() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').get();
   return snap.docs.map((d) => d.data());
@@ -729,7 +737,7 @@ async function finalizarOciosos() {
 module.exports = {
   registrarPedidoVerificado,
   criar, getOne, getPublico, getComToken, atualizarLogado, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
-  atualizarStatusAtendimento, marcarDesbloqueio, restringirAposConclusao, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
+  atualizarStatusAtendimento, marcarDesbloqueio, restringirAposConclusao, adicionarTicketVinculado, marcarEncaminhadoCowork, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, marcarNotaTratada, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,
 };

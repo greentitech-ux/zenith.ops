@@ -1,6 +1,6 @@
 // Navegador real, API simulada: não usa dados nem executa ações de produção.
 const {chromium}=require('playwright');const http=require('http');const fs=require('fs');const path=require('path');const assert=require('assert/strict');
-let perfil={role:'master',qaMaster:false};let enviada=null;
+let perfil={role:'master',qaMaster:false};let enviada=null;let estado='pendente';
 const pedido={id:'teste',origem:'cowork',tipo:'cowork.executar',status:'pendente',resumo:'Ajustar permissões · Colaborador',revisao:'revisao-teste',criadoEm:new Date().toISOString(),detalhes:[{rotulo:'Acesso',valor:'colaborador@teste.local'},{rotulo:'Depois',valor:JSON.stringify({permissions:{sections:['tarefas'],unidades:['Loja A']},cargos:['operador']})}]};
 const raiz=path.join(__dirname,'public');
 const srv=http.createServer((req,res)=>{
@@ -10,8 +10,8 @@ const srv=http.createServer((req,res)=>{
   if(u.pathname==='/api/stream'){res.writeHead(200,{'content-type':'text/event-stream'});return;}
   if(u.pathname.startsWith('/api/qa-aprovacoes')){
     if(perfil.role!=='master'||perfil.qaMaster)return json({},403);
-    if(u.pathname.endsWith('/aprovar')){let b='';req.on('data',x=>b+=x);req.on('end',()=>{enviada=JSON.parse(b);json({...pedido,status:'aprovado'})});return;}
-    return json(u.pathname.endsWith('/resumo')?{pendentes:1}:[pedido]);
+    if(/\/(aprovar|rejeitar)$/.test(u.pathname)){let b='';req.on('data',x=>b+=x);req.on('end',()=>{enviada=JSON.parse(b);estado=u.pathname.endsWith('/aprovar')?'aprovado':'rejeitado';json({...pedido,status:estado})});return;}
+    return json(u.pathname.endsWith('/resumo')?{pendentes:1}:[{...pedido,status:estado}]);
   }
   if(u.pathname.startsWith('/api/'))return json(/\/(config|contexto|status|resumo|disponivel)$/.test(u.pathname)?{}:[]);
   let f=path.join(raiz,u.pathname);if(!path.extname(f))f+='.html';
@@ -26,9 +26,9 @@ const srv=http.createServer((req,res)=>{
   try{
     for(const width of [390,1280]){
       const ctx=await browser.newContext({viewport:{width,height:900}});await ctx.addInitScript(()=>localStorage.setItem('authToken','teste'));
-      const pg=await ctx.newPage();const erros=[];pg.on('pageerror',e=>erros.push(e.message));
+      const pg=await ctx.newPage();const erros=[];pg.on('pageerror',e=>erros.push(e.message));pg.on('dialog',d=>d.accept('Recusa de teste'));
       const url='http://127.0.0.1:'+srv.address().port;
-      perfil={role:'master',qaMaster:false};
+      perfil={role:'master',qaMaster:false};estado='pendente';
       await pg.goto(url+'/painel');await pg.locator('#atalho-autorizacoes').waitFor();
       await pg.waitForFunction(()=>document.querySelector('#atalho-autorizacoes')?.textContent.includes('1 pendente'));
       assert((await pg.locator('#nav-autorizacoes').getAttribute('class')).includes('hidden')===false);
@@ -44,6 +44,9 @@ const srv=http.createServer((req,res)=>{
       assert((await pg.locator('.detalhes').innerText()).includes('Unidades: Loja A'));
       await pg.locator('#inp-teste').fill('senha-simulada');await pg.getByRole('button',{name:'Autorizar com a senha',exact:true}).click();
       await pg.locator('.feito.ok').waitFor();assert.equal(enviada.revisao,pedido.revisao);
+      estado='pendente';await pg.goto(url+'/autorizacoes');await pg.locator('#inp-teste').fill('senha-simulada');
+      await pg.getByRole('button',{name:'Recusar',exact:true}).click();await pg.locator('.pedido.decidido .feito').waitFor();
+      assert.equal(enviada.revisao,pedido.revisao);assert.equal(enviada.password,'senha-simulada');assert.equal(enviada.motivo,'Recusa de teste');
       assert.deepEqual(erros,[]);await ctx.close();
     }
     console.log('✓ Interface celular/desktop: Master vê menu/contador/atalho, QA e usuário não; JSON recolhido e confirmação envia a revisão exibida');

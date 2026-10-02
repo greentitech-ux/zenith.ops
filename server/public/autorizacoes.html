@@ -285,12 +285,20 @@ async function autorizarSenha(id){
   try{await enviar(id,inp.value,revisao)}catch(x){inp.value='';erro(id,x.message)}finally{EM_CURSO.delete(id)}
 }
 async function recusar(id){
+  if(EM_CURSO.has(id))return;
+  const inp=$('#inp-'+id);
+  if(!DIGITAL&&!inp?.value){mostrarSenha(id);return erro(id,'Digite sua senha e clique novamente em Recusar.');}
   const motivo=prompt('Motivo da recusa (opcional - o Claude/Beniboy lê isso pra ajustar o pedido):');
   if(motivo===null)return;
-  const r=await fetch('/api/qa-aprovacoes/'+encodeURIComponent(id)+'/rejeitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({motivo})});
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok)return erro(id,d.error||'Não consegui recusar.');
-  await carregar();
+  const revisao=LISTA.find(a=>a.id===id)?.revisao;EM_CURSO.add(id);
+  try{
+    const password=inp?.value||(DIGITAL?(await window.nopulsoDigital.confirmarComDigital({autorizacaoId:id,revisao})).confirmacao:'');
+    const r=await fetch('/api/qa-aprovacoes/'+encodeURIComponent(id)+'/rejeitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({motivo,password,revisao})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||'Não consegui recusar.');
+    await carregar();
+  }catch(x){if(inp)inp.value='';mostrarSenha(id);erro(id,x.message||'Confirme com sua senha para recusar.');}
+  finally{EM_CURSO.delete(id)}
 }
 async function copiar(id){const t=(FEITOS.get(id)||{}).saida||'';try{await navigator.clipboard.writeText(t);alert('Copiado.')}catch(e){prompt('Copie:',t)}}
 

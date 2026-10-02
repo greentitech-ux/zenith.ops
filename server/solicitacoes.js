@@ -66,7 +66,7 @@ function sanitizarItens(lista) {
     .filter((item) => item.descricao);
 }
 
-async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos, ehOrcamento, fornecedor, vencimento, criadoPorId, criadoPorEmail, direcionadoParaId, direcionadoParaEmail, numeroTicket, convertidoDeTipo, convertidoDeId, fechamentoId, prioridade, teste, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista, origemTarefa }) {
+async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos, ehOrcamento, fornecedor, vencimento, criadoPorId, criadoPorEmail, direcionadoParaId, direcionadoParaEmail, numeroTicket, convertidoDeTipo, convertidoDeId, fechamentoId, prioridade, teste, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista, origemTarefa, tags }) {
   if (!TIPOS.includes(tipo)) throw new Error('Tipo de solicitação inválido.');
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!titulo || !String(titulo).trim()) throw new Error('Descreva o que está sendo pedido.');
@@ -125,6 +125,9 @@ async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, obser
     unidade,
     unidadeNome: unidadeNome || unidade,
     titulo: String(titulo).trim().slice(0, 200),
+    // Tags são operacionais, não uma troca de tipo: “usuários” continua sendo
+    // Suporte de TI, mas permite ao Cowork encontrar somente esta fila.
+    tags: [...new Set((Array.isArray(tags) ? tags : []).map((t) => String(t).trim().toLocaleLowerCase('pt-BR')).filter(Boolean))].slice(0, 12),
     valorEstimado: valorEstimado != null && valorEstimado !== '' ? Number(valorEstimado) || 0 : null,
     observacao: observacao || '',
     itens: tipo === 'compra' ? sanitizarItens(itens) : [], // [{ descricao, quantidade }]

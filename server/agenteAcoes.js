@@ -545,6 +545,13 @@ async function criarUsuarioCopiando(params) {
   const modelo = await usuarioPorIdentificador(p.modelo, 'Usuário-modelo');
   const senha = gerarSenhaAleatoria();
   const r = await users.criarCopiandoDe({ modeloId: modelo.id, email: p.email, username: p.username, senha });
+  // Regra operacional do Cowork: acesso novo sempre enxerga Meu Dia; Cofre
+  // não é herdado por conveniência, só permanece para gerente/assistente.
+  const permissoes = { ...(r.usuario.permissions || {}) };
+  permissoes.sections = [...new Set([...(permissoes.sections || []), 'tarefas'])];
+  const cargos = r.usuario.cargos || (r.usuario.cargo ? [r.usuario.cargo] : []);
+  if (!cargos.some((cargo) => users.ehCargoGerente(cargo))) permissoes.vaultSubgroups = [];
+  await users.updatePermissions(r.usuario.id, permissoes);
   return `Usuário criado: ${r.usuario.email} (username: ${r.usuario.username || '-'}), copiando as permissões de ${r.copiadoDe.username || r.copiadoDe.email}. Senha temporária: ${senha} (troca no primeiro login) - repasse por fora do app.`;
 }
 
