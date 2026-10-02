@@ -252,14 +252,17 @@
 .est-tabela tr:last-child td{border-bottom:0;}
 .est-tabela .zerado{color:var(--muted);}
 .est-pagamento-linha{margin-top:9px;}
-.est-pagamento-campos{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px,1fr) 42px;gap:8px;align-items:end;}
+.est-pagamento-campos{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 112px 42px;gap:8px;align-items:end;}
 .est-pagamento-campos label{margin:0;}
 .est-pagamento-remover{min-height:42px!important;padding:6px!important;font-size:16px;}
+.est-pagamento-confirmar{min-height:42px!important;padding:6px 9px!important;color:var(--ok);white-space:nowrap;}
+.est-pagamento-linha.confirmado{padding-left:8px;border-left:3px solid var(--ok);}
+.est-pagamento-linha.confirmado .pagamento-forma,.est-pagamento-linha.confirmado .pagamento-valor{color:var(--ok);}
 .est-divisao{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;margin:0 0 10px;font-size:12px;}
 .est-divisao b{font-family:var(--mono);color:var(--accent);}
 .est-divisao span{flex:1 1 180px;color:var(--muted);}
 .est-divisao .est-btn{min-height:34px;padding:6px 10px;}
-@media(max-width:420px){.est-pagamento-campos{grid-template-columns:1fr 1fr 38px;gap:6px;}.est-pagamento-campos label{font-size:10px;}.est-pagamento-campos input,.est-pagamento-campos select{padding-left:8px;padding-right:5px;}}
+@media(max-width:420px){.est-pagamento-campos{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 104px 38px;gap:6px;}.est-pagamento-campos label{font-size:10px;}.est-pagamento-campos input,.est-pagamento-campos select{padding-left:8px;padding-right:5px;}.est-pagamento-confirmar{font-size:12px;}}
 @media(max-width:560px){
   .est-tabela,.est-tabela tbody,.est-tabela tr,.est-tabela td{display:block;width:100%;}
   .est-tabela thead{display:none;}

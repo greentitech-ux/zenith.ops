@@ -26517,6 +26517,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && /function usarValoresDasComandas/.test(caixa) && /c\.totais\.total/.test(caixa)
         && /Usar valores das comandas/.test(caixa)
         && /saldo restante estiver zerado/.test(caixa),
+      'cada forma só abate o saldo depois de confirmada, e o caixa envia apenas as confirmadas':
+        /function confirmarPagamento/.test(caixa) && /✓ Confirmado/.test(caixa)
+        && /filter\(pagamentoConfirmado\)/.test(caixa)
+        && /Confirme cada valor para abatê-lo/.test(caixa)
+        && /remover este pagamento confirmado reabre o saldo/.test(caixa),
       'comandas juntas mostram valor individual e também a sugestão de divisão igual':
         /function resumoDivisaoIgual/.test(caixa) && /Valores reais acima/.test(caixa)
         && /Se decidirem dividir igualmente/.test(caixa)

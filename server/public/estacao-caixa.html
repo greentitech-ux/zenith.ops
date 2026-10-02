@@ -115,10 +115,10 @@
 
   <div class="est-card" id="card-pagamento" hidden>
     <h2>Recebimento</h2>
-    <div class="est-sub">Registre uma forma por vez. Se o primeiro valor for menor, o saldo fica aberto para a próxima forma. O caixa só fecha com o total exato.</div>
+    <div class="est-sub">Registre uma forma por vez e confirme cada valor. Só os valores confirmados abatem o saldo; o caixa só fecha com o total exato.</div>
     <div id="formas"></div>
     <div class="est-totais">
-      <div class="est-linha"><span>Registrado</span><b id="soma-pago">R$ 0,00</b></div>
+      <div class="est-linha"><span>Confirmado nesta cobrança</span><b id="soma-pago">R$ 0,00</b></div>
       <div class="est-linha"><span>Saldo restante</span><b id="falta">R$ 0,00</b></div>
     </div>
     <div class="est-acoes" style="margin-top:12px;">
@@ -567,22 +567,73 @@ function renderConta(){
 // ---------- recebimento ----------
 // Mesmo ciclo que o Saltiverso: cada forma fica em uma linha, a próxima só
 // aparece enquanto houver saldo, e o valor não pode ultrapassar a conta.
+function linhasPagamento(){ return [...document.querySelectorAll('#lista-pagamentos .est-pagamento-linha')]; }
+function pagamentoConfirmado(linha){ return linha.dataset.confirmado === 'true'; }
 function somaPagamentos(){
-  return [...document.querySelectorAll('#lista-pagamentos .pagamento-valor')]
-    .reduce((s, i) => s + Math.max(0, num(i.value)), 0);
+  return linhasPagamento().filter(pagamentoConfirmado)
+    .reduce((s, linha) => s + Math.max(0, num(linha.querySelector('.pagamento-valor').value)), 0);
+}
+function somaValoresInformados(ignorar = null){
+  return linhasPagamento().filter(linha => linha !== ignorar)
+    .reduce((s, linha) => s + Math.max(0, num(linha.querySelector('.pagamento-valor').value)), 0);
 }
 function limitarValorPagamento(input){
   const total = CONTA ? CONTA.total : 0;
-  const outros = somaPagamentos() - Math.max(0, num(input.value));
-  const maximo = Math.max(0, total - outros);
+  const maximo = Math.max(0, total - somaValoresInformados(input.closest('.est-pagamento-linha')));
   if(num(input.value) > maximo + 0.001) input.value = maximo > 0 ? maximo.toFixed(2) : '';
+}
+function alterarPagamento(input){
+  const linha = input.closest('.est-pagamento-linha');
+  if(pagamentoConfirmado(linha)) desconfirmarPagamento(linha);
+  if(input.classList.contains('pagamento-valor')) limitarValorPagamento(input);
+  atualizarResumoPagamento();
+}
+function confirmarPagamento(id){
+  const linha = document.getElementById(id);
+  if(!linha || pagamentoConfirmado(linha)) return;
+  const forma = linha.querySelector('.pagamento-forma').value;
+  const valor = Math.max(0, num(linha.querySelector('.pagamento-valor').value));
+  if(!forma || !valor){
+    document.getElementById('erro-receber').textContent = 'Escolha a forma e informe o valor antes de confirmar.';
+    return;
+  }
+  const restante = Math.max(0, (CONTA ? CONTA.total : 0) - somaPagamentos());
+  if(valor > restante + 0.001){
+    document.getElementById('erro-receber').textContent = `O valor confirmado não pode ultrapassar o saldo de ${fmtReal(restante)}.`;
+    return;
+  }
+  linha.dataset.confirmado = 'true';
+  linha.classList.add('confirmado');
+  linha.querySelector('.pagamento-forma').disabled = true;
+  linha.querySelector('.pagamento-valor').disabled = true;
+  const botao = linha.querySelector('.est-pagamento-confirmar');
+  botao.textContent = '✓ Confirmado';
+  botao.disabled = true;
+  document.getElementById('erro-receber').textContent = '';
+  atualizarResumoPagamento();
+}
+function desconfirmarPagamento(linha){
+  linha.dataset.confirmado = 'false';
+  linha.classList.remove('confirmado');
+  linha.querySelector('.pagamento-forma').disabled = false;
+  linha.querySelector('.pagamento-valor').disabled = false;
+  const botao = linha.querySelector('.est-pagamento-confirmar');
+  botao.textContent = '✓ Confirmar';
+  botao.disabled = false;
+}
+function removerPagamento(id){
+  const linha = document.getElementById(id);
+  if(!linha) return;
+  if(pagamentoConfirmado(linha) && !window.confirm('Remover este pagamento confirmado reabre o saldo desta cobrança. Continuar?')) return;
+  linha.remove();
+  atualizarResumoPagamento();
 }
 function atualizarResumoPagamento(){
   const total = CONTA ? CONTA.total : 0;
   const soma = somaPagamentos();
   const saldo = Math.max(0, Math.round((total - soma) * 100) / 100);
-  const semForma = [...document.querySelectorAll('#lista-pagamentos .est-pagamento-linha')]
-    .some(linha => num(linha.querySelector('.pagamento-valor').value) > 0 && !linha.querySelector('.pagamento-forma').value);
+  const pendentes = linhasPagamento().filter(linha => !pagamentoConfirmado(linha));
+  const semForma = pendentes.some(linha => num(linha.querySelector('.pagamento-valor').value) > 0 && !linha.querySelector('.pagamento-forma').value);
   document.getElementById('soma-pago').textContent = fmtReal(soma);
   const falta = document.getElementById('falta');
   falta.textContent = saldo > 0 ? fmtReal(saldo) : 'quitado';
@@ -590,23 +641,25 @@ function atualizarResumoPagamento(){
   const completo = !!CONTA && saldo <= 0.001 && !semForma;
   document.getElementById('btn-receber').disabled = !completo || !caixaAberto();
   const adicionar = document.getElementById('btn-add-pagamento');
-  if(adicionar) adicionar.hidden = completo;
+  if(adicionar) adicionar.hidden = completo || somaValoresInformados() >= total - 0.001;
   const resumo = document.getElementById('pagamento-resumo');
   if(resumo) resumo.textContent = completo
-    ? `✅ Pagamento completo · ${fmtReal(total)}`
+    ? `✅ Pagamento confirmado · ${fmtReal(total)}. Pronto para receber e fechar.`
     : semForma ? 'Escolha a forma de pagamento de cada valor informado.'
-      : `Falta registrar ${fmtReal(saldo)} de ${fmtReal(total)}.`;
+      : pendentes.length ? `Confirme cada valor para abatê-lo. Ainda faltam ${fmtReal(saldo)} de ${fmtReal(total)}.`
+        : `Falta confirmar ${fmtReal(saldo)} de ${fmtReal(total)}.`;
 }
 function adicionarPagamento(valor = '', referencia = ''){
-  if(!CONTA || somaPagamentos() >= CONTA.total - 0.001) return;
+  if(!CONTA || somaValoresInformados() >= CONTA.total - 0.001) return;
   PAGAMENTO_SEQ++;
   const id = `pagamento-${PAGAMENTO_SEQ}`;
   const linha = document.createElement('div');
   linha.className = 'est-pagamento-linha'; linha.id = id;
   linha.innerHTML = `<div class="est-pagamento-campos">
-    <label>Forma<select class="pagamento-forma" onchange="atualizarResumoPagamento()"><option value="">selecione...</option>${FORMAS.map(([forma, rotulo])=>`<option value="${forma}">${rotulo}</option>`).join('')}</select></label>
-    <label>${referencia ? `${esc(referencia)} · valor aplicado` : 'Valor aplicado'}<input class="pagamento-valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00" value="${valor === '' ? '' : Number(valor).toFixed(2)}" oninput="limitarValorPagamento(this);atualizarResumoPagamento()"></label>
-    <button type="button" class="est-btn perigo est-pagamento-remover" title="Remover forma" aria-label="Remover forma" onclick="document.getElementById('${id}').remove();atualizarResumoPagamento()">✕</button>
+    <label>Forma<select class="pagamento-forma" onchange="alterarPagamento(this)"><option value="">selecione...</option>${FORMAS.map(([forma, rotulo])=>`<option value="${forma}">${rotulo}</option>`).join('')}</select></label>
+    <label>${referencia ? `${esc(referencia)} · valor aplicado` : 'Valor aplicado'}<input class="pagamento-valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00" value="${valor === '' ? '' : Number(valor).toFixed(2)}" oninput="alterarPagamento(this)"></label>
+    <button type="button" class="est-btn est-pagamento-confirmar" title="Confirmar pagamento" onclick="confirmarPagamento('${id}')">✓ Confirmar</button>
+    <button type="button" class="est-btn perigo est-pagamento-remover" title="Remover forma" aria-label="Remover forma" onclick="removerPagamento('${id}')">✕</button>
   </div>`;
   document.getElementById('lista-pagamentos').appendChild(linha);
   atualizarResumoPagamento();
@@ -637,11 +690,11 @@ async function receber(){
   const erro = document.getElementById('erro-receber');
   erro.textContent = '';
   if(!caixaAberto()){ erro.textContent = `Abra o Caixa ${caixaAtual()} com o fundo antes de receber.`; return; }
-  const pagamentos = [...document.querySelectorAll('#lista-pagamentos .est-pagamento-linha')].map(linha => ({
+  const pagamentos = linhasPagamento().filter(pagamentoConfirmado).map(linha => ({
     forma: linha.querySelector('.pagamento-forma').value,
     valor: num(linha.querySelector('.pagamento-valor').value),
   })).filter(p => p.forma && p.valor > 0);
-  if(!pagamentos.length){ erro.textContent = 'Informe como foi pago.'; return; }
+  if(!pagamentos.length){ erro.textContent = 'Confirme ao menos uma forma de pagamento.'; return; }
   const soma = pagamentos.reduce((s, p) => s + p.valor, 0);
   if(Math.abs(soma - CONTA.total) > 0.01){ erro.textContent = 'O caixa só pode fechar quando o saldo restante estiver zerado.'; return; }
   document.getElementById('btn-receber').disabled = true;
