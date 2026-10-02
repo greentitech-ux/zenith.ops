@@ -170,11 +170,11 @@
       </div>
       <div>
         <label>De</label>
-        <input type="date" id="f-data-de" oninput="aoMudarFiltroData()">
+        <input type="date" id="f-data-de" onchange="aoMudarFiltroData()">
       </div>
       <div>
         <label>Até</label>
-        <input type="date" id="f-data-ate" oninput="aoMudarFiltroData()">
+        <input type="date" id="f-data-ate" onchange="aoMudarFiltroData()">
       </div>
       <div style="flex:0 0 auto;min-width:auto;">
         <button type="button" class="preset-btn" id="btn-aplicar-filtros" style="padding:10px 14px;color:var(--accent);" onclick="aplicarFiltrosData()">Aplicar filtros</button>
@@ -339,7 +339,6 @@ let PODE_CONFERIR = false;
 let ENTRADAS = [];
 let CAIXA = { total: 0, porUnidade: [] };
 let ITENS = []; // lista bruta do periodo (inicio/fim), sem filtro de loja/grupo - esses dois filtram em memoria (ver renderTudo)
-let presetAtivo = null;
 let CARREGAMENTO_SEQ = 0;
 let CARREGAMENTO_ABORT = null;
 
@@ -351,34 +350,48 @@ function setupPresets(){
     btn.addEventListener('click', ()=>aplicarPreset(btn.dataset.tipo));
   });
 }
+function presetCorrespondenteAsDatas(){
+  const inicio = document.getElementById('f-data-de').value;
+  const fim = document.getElementById('f-data-ate').value;
+  if(!inicio || !fim) return null;
+  const hoje = isoLocal(agoraBrasilia());
+  return ['ontem', '7dias', 'mes'].find(tipo=>{
+    const range = calcularPreset(tipo, hoje);
+    return inicio === range.inicio && fim === range.fim;
+  }) || null;
+}
+function sincronizarPresetComDatas(){
+  const tipoAtivo = presetCorrespondenteAsDatas();
+  document.querySelectorAll('#presets .preset-btn').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.tipo === tipoAtivo);
+  });
+  return tipoAtivo;
+}
 function aplicarPreset(tipo){
-  if(presetAtivo === tipo){
-    presetAtivo = null;
-    document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
-    document.getElementById('f-data-de').value = '';
-    document.getElementById('f-data-ate').value = '';
-    renderTudo();
-    carregar();
-    return;
-  }
-  presetAtivo = tipo;
-  document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
   const range = calcularPreset(tipo, isoLocal(agoraBrasilia()));
-  document.getElementById('f-data-de').value = range.inicio;
-  document.getElementById('f-data-ate').value = range.fim;
+  const inicio = document.getElementById('f-data-de');
+  const fim = document.getElementById('f-data-ate');
+  const jaEstaSelecionado = inicio.value === range.inicio && fim.value === range.fim;
+  if(jaEstaSelecionado){
+    inicio.value = '';
+    fim.value = '';
+  } else {
+    inicio.value = range.inicio;
+    fim.value = range.fim;
+  }
+  sincronizarPresetComDatas();
+  renderTudo();
   carregar();
 }
 function aoMudarFiltroData(){
-  presetAtivo = null;
-  document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
+  sincronizarPresetComDatas();
   // Aplica imediatamente sobre os dados que já estão na tela. A consulta
   // abaixo completa o resultado quando o período foi ampliado.
   renderTudo();
   carregar();
 }
 function aplicarFiltrosData(){
-  presetAtivo = null;
-  document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
+  sincronizarPresetComDatas();
   carregar();
 }
 // mudar o Grupo tem que atualizar o painel de Loja pro mesmo grupo (só as
