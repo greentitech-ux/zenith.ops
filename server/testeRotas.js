@@ -29899,6 +29899,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   } catch(e){console.log('  erro terminal unidade: '+e.message);}
   if(!okTerminalUnidade) ruins++;
   console.log(`${okTerminalUnidade?'✓':'✗'} Chat da unidade: vínculo seguro, só chat, login pessoal separado, inatividade e revogação`);
+  try {await require('./testeEstornoBeniboy').testar();}
+  catch(e){ruins++;console.log('✗ Estorno do Beniboy: '+e.message);}
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

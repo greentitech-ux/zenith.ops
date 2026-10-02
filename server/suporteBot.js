@@ -165,7 +165,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 
 ## O que você sabe do NoPulso
 - Problema para entrar: depois de receber o nome de usuário, SEMPRE use desbloquear_login para diagnosticar antes de concluir que é senha. A ferramenta diferencia bloqueio por tentativas, horário restrito, acesso desativado e conta já liberada. Só quando for bloqueio real ela destrava mantendo a MESMA senha; se for horário, ela aciona o Master para revisar a liberação sem mudar a senha. Se a própria pessoa disser que esqueceu ou quer trocar a senha, chame a ferramenta com pedirNovaSenha=true: isso cria uma tarefa direta para o Master, nunca um chamado de TI. Depois da aprovação, a senha temporária é 12345678 e a pessoa cria a nova senha no primeiro acesso.
-- Estorno: NÃO dá pra você abrir esse ticket direto (exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja foi a compra (pule essa pergunta se já souber pela "loja" do início da conversa) e use gerar_link_estorno_cliente. Se quem fala com você É o cliente (o mais comum), mande o link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo - não precisa de WhatsApp nem de mais ninguém no meio. Se for um funcionário pedindo em nome de um cliente que não está no chat, aí sim ele repassa o link pro cliente por onde for mais fácil (WhatsApp é uma opção, não a única).
+- Estorno: nem toda dúvida financeira ou consulta de pedido é estorno. Entenda primeiro o que a pessoa precisa. NUNCA envie link só porque soube a loja. Antes de qualquer link, peça nome do cliente e valor, consulte o pedido no Monitor por consultar_pedido e envie o status. O servidor inclui o resultado verificado na mensagem: não invente status. Se não puder consultar, não encontrar o pedido ou houver mais de um resultado, esclareça os dados ou use chamar_atendente; NÃO envie formulário. Só em uma resposta posterior ao status já enviado, se a pessoa pedir/confirmar estorno para esse mesmo pedido e loja, use gerar_link_estorno_cliente. Nunca escreva uma URL de estorno por conta própria, copie link antigo ou prometa aprovação. O formulário é uma solicitação avaliada pelo time, não um estorno executado.
 - Pausar item ou fechar a loja no iFood/99food: quem faz é o COWORK AGREGADOR, o robô que opera os painéis - não é com um atendente. Use bloquear_no_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item. Depois é só avisar que está sendo feito; a confirmação cai na conversa sozinha - nunca prometa prazo nem diga que já está feito antes da confirmação chegar.
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
@@ -289,7 +289,7 @@ const TOOLS_BASE = [
   },
   {
     name: 'gerar_link_estorno_cliente',
-    description: 'Gera o link público (sem login) pra preencher um pedido de estorno com foto do comprovante - o Master avalia depois. Use sempre que alguém (o próprio cliente final, ou um funcionário em nome dele) precisar pedir um estorno. Peça o nome da loja da compra ANTES de chamar (pule se já souber pelo contexto da conversa). Se a ferramenta devolver uma lista de lojas parecidas, pergunte qual delas é a certa e chame de novo com o nome exato.',
+    description: 'Gera link de solicitação de estorno SOMENTE se a pessoa pedir estorno e o pedido desta loja já tiver sido encontrado por nome e valor no Monitor, com o status enviado anteriormente no chat. Consultar status não significa pedir estorno. Sem pedido verificado, sem autorização para consultar ou com resultados ambíguos, não gere link: consulte primeiro ou chame atendente.',
     input_schema: {
       type: 'object',
       properties: {
@@ -380,6 +380,17 @@ const TOOL_RESETAR_IMPRESSORA = {
     required: [],
   },
 };
+
+function pediuEstornoNestaConversa(chat) {
+  const mensagens=chat.mensagens||[];
+  const indice=mensagens.findLastIndex(m=>m.de==='visitante');
+  if(indice<0) return false;
+  const texto=String(mensagens[indice].texto||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if(/\b(nao|sem)\b.{0,35}\b(estorno|reembolso)\b/.test(texto)) return false;
+  if(/\b(quero|preciso|solicito|solicitar|pedir|peco|fazer|abrir|envie|mande|manda|enviar|pedido de)\b.{0,60}\b(estorno|reembolso)\b/.test(texto) || /^(estorno|reembolso)[.!\s]*$/.test(texto)) return true;
+  const anterior=mensagens.slice(0,indice).findLast(m=>m.de==='suporte');
+  return /^(sim|quero|pode|pode enviar|por favor)[.!\s]*$/.test(texto) && /\b(estorno|reembolso)\b/i.test(anterior?.texto||'') && /\?/.test(anterior?.texto||'');
+}
 
 function montarTools(logado) {
   // Ticket por numero contem dados operacionais. Visitante publico consulta
@@ -795,6 +806,11 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     return 'Esse operador já bloqueou novamente. Não vou criar nem informar senha por aqui: o Master foi avisado para liberar a criação segura de uma nova senha.';
   }
   if (nome === 'gerar_link_estorno_cliente') {
+    const verificado=chat.pedidoVerificado;
+    if(!verificado?.statusEnviadoEm || !verificado?.mensagemEm || !(chat.mensagens||[]).some(m=>m.de==='suporte' && m.bot && m.em===verificado.mensagemEm)) return 'Não gere nem escreva um link de estorno. Primeiro consulte o pedido no Monitor pelo nome do cliente e valor e envie seu status. Sem acesso ao Monitor, chame um atendente para verificar.';
+    if(!pediuEstornoNestaConversa(chat)) return 'A pessoa não pediu estorno. Informe o status e entenda o que ela precisa; não ofereça formulário de estorno automaticamente.';
+    const atual=store.allOrders().find(o=>o.pedidoId===verificado.pedidoId && o.unidade===verificado.unidade);
+    if(!atual || atual.statusAtual!==verificado.status || atual.valor!==verificado.valor || String(atual.cliente||'')!==verificado.cliente) return 'O pedido mudou desde a verificação. Consulte novamente nome e valor e envie o status atualizado antes de gerar link de estorno.';
     if (!resolverUnidadePublica || !linkEstornoCliente) return 'Sem acesso a essa ferramenta agora - chame um atendente.';
     const termo = String(input.unidade || '').trim();
     if (!termo) return 'Peça o nome da loja onde o cliente fez o pedido.';
@@ -806,10 +822,18 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       const nomes = candidatas.slice(0, 8).map((u) => u.nome).join(', ');
       return `Achei mais de uma loja parecida com "${termo}": ${nomes}. Pergunte qual delas é a certa e chame essa ferramenta de novo com o nome exato.`;
     }
+    const codigos=resolverUnidadesPorIdPulse ? resolverUnidadesPorIdPulse(encontrada.codigo) : [encontrada.codigo];
+    if(encontrada.codigo!==verificado.unidade && !codigos.includes(verificado.unidade)) return 'A loja solicitada não corresponde ao pedido verificado. Não gere link para outra unidade.';
     const link = linkEstornoCliente(encontrada.codigo);
+    resultado.linkEstorno=link;
     return `Link gerado pra loja "${encontrada.nome}": ${link}\nSe quem está falando com você é o próprio cliente, mande esse link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo (dados do pedido + foto do comprovante), sem precisar de WhatsApp nem de mais ninguém. Se for um funcionário pedindo em nome de um cliente que não está aqui, ele repassa o link pro cliente por onde for mais fácil. De qualquer forma, um atendente humano confere e decide depois - não invente prazo nem promessa de aprovação.`;
   }
   if (nome === 'consultar_pedido') {
+    // Toda nova busca invalida o pedido anterior, mesmo se não achar nada.
+    await suporteChat.registrarPedidoVerificado(chat.id,null);
+    chat.pedidoVerificado=null;
+    resultado.consultaPedido=null;
+    resultado.linkEstorno=null;
     // Defesa em profundidade: nao basta a ferramenta ter sido apresentada ao
     // modelo. O servidor restringe a busca a unidade vinculada a sessao.
     if (!chat.logado || (!chat.logado.isMaster && !(chat.logado.unidades || []).length)) {
@@ -818,8 +842,9 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     const nomeCliente = String(input.nomeCliente || '').trim().toLowerCase();
     const valorTexto = String(input.valor || '').trim();
     if (!nomeCliente || !valorTexto) return 'Peça o nome do cliente e o valor do pedido.';
-    const valorNum = parseFloat(valorTexto.replace(/[^\d,.-]/g, '').replace(',', '.'));
-    if (Number.isNaN(valorNum)) return 'Peça o valor do pedido em reais, por exemplo R$ 45,90.';
+    const valorLimpo=valorTexto.replace(/[^\d,.-]/g,'');
+    const valorNum = Number(valorLimpo.includes(',') ? valorLimpo.replace(/\./g,'').replace(',','.') : valorLimpo);
+    if (!Number.isFinite(valorNum) || valorNum<=0) return 'Peça o valor do pedido em reais, por exemplo R$ 45,90.';
 
     const normalizarUnidade = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -881,6 +906,10 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       .sort((a, b) => String(b.ultimaAtualizacao || '').localeCompare(String(a.ultimaAtualizacao || '')))
       .slice(0, 5);
     if (!encontrados.length) return 'Nenhum pedido encontrado com esse nome e valor nas unidades permitidas. Confira nome, valor e loja; se necessário, ofereça chamar um atendente.';
+    if(encontrados.length===1 && encontrados[0].statusAtual){
+      const o=encontrados[0];
+      resultado.consultaPedido={pedidoId:o.pedidoId,unidade:o.unidade,cliente:String(o.cliente||''),valor:o.valor,status:o.statusAtual};
+    }
     // registra o "retrato" do status visto agora - se mudar depois, a pessoa
     // e avisada sozinha (SSE com o NoPulso aberto + push com fechado), sem
     // precisar voltar aqui perguntar de novo (ver pedidoWatch.js/index.js)
@@ -1091,7 +1120,14 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
     }
 
     if (resp.stop_reason === 'refusal') return null; // sem resposta - fica pro humano
-    const texto = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+    let texto = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+    // Nem uma URL escrita pelo modelo pode contornar a ferramenta e a ordem
+    // de verificação. Consulta atual só libera link num turno posterior.
+    if(/estorno(?:-|%2d)cliente/i.test(texto) && !resultado.linkEstorno) texto='Antes de enviar um link de estorno, precisamos localizar o pedido no Monitor pelo nome do cliente e valor e informar seu status. Se esta conversa não tiver acesso à consulta, um atendente precisa verificar.';
+    if(resultado.consultaPedido){
+      const p=resultado.consultaPedido;
+      texto=`Pedido ${p.pedidoId} · ${(unidadesPorCodigo||{})[p.unidade]||p.unidade} · Cliente: ${p.cliente} · ${Number(p.valor).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · Status no Monitor: ${p.status}.\n\n${texto}`;
+    }
     if (!texto) return null;
 
     // rede de seguranca: o texto diz que ja chamou humano mas a ferramenta
@@ -1104,6 +1140,10 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
     }
 
     let atualizado = await suporteChat.adicionarMensagem(chatId, { de: 'suporte', texto, bot: true });
+    if(resultado.consultaPedido){
+      const mensagem=(atualizado.mensagens||[]).at(-1);
+      await suporteChat.registrarPedidoVerificado(chatId,{...resultado.consultaPedido,statusEnviadoEm:new Date().toISOString(),mensagemEm:mensagem.em});
+    }
 
     // encerramento pedido pela tool encerrar_atendimento: so agora, DEPOIS da
     // despedida ja ter sido postada acima. Registra o resumo como nota interna

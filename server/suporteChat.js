@@ -181,6 +181,13 @@ async function atualizarLogado(id, logado) {
   return getOne(id);
 }
 
+// Evidência interna produzida pelo Monitor e ligada à mensagem realmente
+// entregue. Nunca aceita dados do visitante nem aparece na visão pública.
+async function registrarPedidoVerificado(id, pedidoVerificado) {
+  await COLLECTION.doc(id).update({ pedidoVerificado: pedidoVerificado || null });
+  chatsCache.invalidar();
+}
+
 // `bot: true` = mensagem do Beniboy (suporteBot.js): entra como 'suporte' na
 // conversa, mas NAO marca atendidoPorEmail - esse campo continua significando
 // "um humano assumiu" (e e o que faz o bot se calar)
@@ -720,6 +727,7 @@ async function finalizarOciosos() {
 }
 
 module.exports = {
+  registrarPedidoVerificado,
   criar, getOne, getPublico, getComToken, atualizarLogado, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, restringirAposConclusao, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, marcarNotaTratada, estatisticas,
