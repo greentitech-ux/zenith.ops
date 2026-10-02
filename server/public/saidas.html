@@ -337,6 +337,8 @@ let ENTRADAS = [];
 let CAIXA = { total: 0, porUnidade: [] };
 let ITENS = []; // lista bruta do periodo (inicio/fim), sem filtro de loja/grupo - esses dois filtram em memoria (ver renderTudo)
 let presetAtivo = 'mes';
+let CARREGAMENTO_SEQ = 0;
+let CARREGAMENTO_ABORT = null;
 
 function setupPresets(){
   const presets = [ {lbl:'Ontem', tipo:'ontem'}, {lbl:'7 dias', tipo:'7dias'}, {lbl:'Mês', tipo:'mes'} ];
@@ -465,6 +467,14 @@ async function atualizarTudo(btn){
 }
 
 async function carregar(){
+  // Ao escolher "De" e logo depois "Até", duas consultas eram disparadas.
+  // A primeira (mais ampla e lenta) podia terminar depois e sobrescrever o
+  // resultado mais novo, dando a impressão de que o filtro não funcionava.
+  // Cancela a anterior e, por segurança, só aplica a resposta mais recente.
+  const seq = ++CARREGAMENTO_SEQ;
+  if(CARREGAMENTO_ABORT) CARREGAMENTO_ABORT.abort();
+  const controller = new AbortController();
+  CARREGAMENTO_ABORT = controller;
   const inicio = document.getElementById('f-data-de').value;
   const fim = document.getElementById('f-data-ate').value;
   const params = new URLSearchParams();
@@ -472,14 +482,22 @@ async function carregar(){
   if(fim) params.set('fim', fim);
   // a rota passou a devolver {itens, entradas} - "entradas" so vem preenchido
   // pra Master/Admin (o gate e' no servidor, ver /api/saidas-painel)
-  const res = await fetch('/api/saidas-painel?'+params.toString());
-  if(!res.ok) throw new Error('HTTP '+res.status);
-  const resp = await res.json();
-  ITENS = resp.itens || [];
-  ENTRADAS = resp.entradas || [];
-  CAIXA = resp.caixa || { total: 0, porUnidade: [] };
-  renderUnidadePanel();
-  renderTudo();
+  try{
+    const res = await fetch('/api/saidas-painel?'+params.toString(), { signal:controller.signal });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const resp = await res.json();
+    if(seq !== CARREGAMENTO_SEQ) return;
+    ITENS = resp.itens || [];
+    ENTRADAS = resp.entradas || [];
+    CAIXA = resp.caixa || { total: 0, porUnidade: [] };
+    renderUnidadePanel();
+    renderTudo();
+  }catch(err){
+    if(err.name === 'AbortError' || seq !== CARREGAMENTO_SEQ) return;
+    throw err;
+  }finally{
+    if(seq === CARREGAMENTO_SEQ) CARREGAMENTO_ABORT = null;
+  }
 }
 
 // o periodo ja veio filtrado do servidor; grupo e unidade sao filtro de tela
