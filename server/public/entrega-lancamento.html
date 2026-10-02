@@ -72,6 +72,8 @@
   .link-btn{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);}
   .muted{font-size:11.5px;color:var(--muted);line-height:1.45;}
   .contexto-unidade{font-family:var(--mono);font-size:10.5px;color:var(--accent);margin:2px 0 0;}
+  .km-total{font-size:14px;color:var(--accent);font-weight:700;}
+  .km-faixas-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 10px;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
   .overlay.hidden{display:none!important;}
   .sheet-wrap{position:relative;width:100%;max-width:640px;}
@@ -105,6 +107,25 @@
 
 <div id="root" class="hidden">
 
+<div class="panel hidden" id="painel-km">
+  <h2>Entregadores por faixa de KM</h2>
+  <div class="sub" style="font-size:11px;color:var(--muted);margin-bottom:10px;">Unidade: <b id="km-unidade-label"></b></div>
+  <form id="form-km-entrada">
+    <div class="grid2">
+      <div><label>Data</label><input type="date" id="km-data" required></div>
+      <div><label>Hora da entrada</label><input type="time" id="km-hora-entrada" required></div>
+    </div>
+    <label>Nome do entregador</label>
+    <input type="text" id="km-entregador" placeholder="nome do motoboy" required>
+    <div class="msg hidden" id="msg-km-entrada"></div>
+    <button class="btn-primary" type="submit" style="margin-top:10px;">Dar entrada agora</button>
+  </form>
+  <div class="secao">
+    <div class="secao-titulo">Em turno agora</div>
+    <div id="lista-km-abertos"><div class="empty">nenhum entregador em turno</div></div>
+  </div>
+</div>
+
 <div class="panel">
   <h2 id="titulo-lancamento">Nova corrida / turno</h2>
   <p class="contexto-unidade hidden" id="contexto-unidade"></p>
@@ -123,6 +144,7 @@
         <div id="wrap-entregador-padrao">
           <label>Entregador</label>
           <input type="text" id="f-entregador" placeholder="nome do motoboy" required>
+          <select id="f-entregador-fixo" class="hidden"></select>
         </div>
         <div id="wrap-entregador-campina" class="hidden">
           <label>Entregador</label>
@@ -134,21 +156,23 @@
     <div class="secao" id="campos-detalhados-entrega">
       <div class="secao-titulo">Entregas</div>
       <div class="grid2">
-        <div><label>Entregas</label><input type="number" step="1" inputmode="numeric" id="f-entrega" value="0"></div>
-        <div><label>Extra</label><input type="number" step="1" inputmode="numeric" id="f-extra" value="0"></div>
+        <div><label>Entregas</label><input type="number" min="0" step="1" inputmode="numeric" id="f-entrega" value="0"></div>
+        <div id="wrap-f-extra"><label>Extra</label><input type="number" min="0" step="1" inputmode="numeric" id="f-extra" value="0"></div>
       </div>
+      <div id="campos-adicionais-entrega">
       <label>Obs. Extra (opcional)</label>
       <input type="text" id="f-obsExtra" placeholder="ex: distância, bairro">
 
       <div class="grid2">
-        <div><label>Retorno</label><input type="number" step="1" inputmode="numeric" id="f-retorno" value="0"></div>
-        <div><label>Pos 00hs</label><input type="number" step="1" inputmode="numeric" id="f-pos00hs" value="0"></div>
+        <div><label>Retorno</label><input type="number" min="0" step="1" inputmode="numeric" id="f-retorno" value="0"></div>
+        <div><label>Pós 00h</label><input type="number" min="0" step="1" inputmode="numeric" id="f-pos00hs" value="0"></div>
       </div>
       <label>Obs. Retorno (opcional)</label>
       <input type="text" id="f-obsRetorno" placeholder="motivo do retorno">
 
       <label>Fora de área</label>
-      <input type="number" step="1" inputmode="numeric" id="f-foraDeArea" value="0">
+      <input type="number" min="0" step="1" inputmode="numeric" id="f-foraDeArea" value="0">
+      </div>
     </div>
 
     <div class="secao hidden" id="campos-total-campina">
@@ -168,11 +192,11 @@
            sempre foi -->
       <div id="campos-manual">
         <div class="grid2">
-          <div><label>Ajuda de custo</label><input type="number" step="0.01" inputmode="decimal" id="f-ajudaCusto" value="0"></div>
+          <div id="wrap-f-ajudaCusto"><label>Ajuda de custo</label><input type="number" step="0.01" inputmode="decimal" id="f-ajudaCusto" value="0"></div>
           <div><label>Valor a pagar</label><input type="number" step="0.01" inputmode="decimal" id="f-valor" value="0"></div>
         </div>
-        <label>COOP recebe</label>
-        <input type="number" step="0.01" inputmode="decimal" id="f-coopRecebe" value="0">
+        <div id="wrap-f-coopRecebe"><label>COOP recebe</label>
+        <input type="number" step="0.01" inputmode="decimal" id="f-coopRecebe" value="0"></div>
       </div>
 
       <!-- unidade "fixo" (tem sua propria lista de campos de valor,
@@ -183,8 +207,8 @@
       <div id="campos-calculados" class="hidden">
         <div class="resumo" id="preview-detalhes"></div>
         <div class="resumo" style="margin-top:8px;">
-          <div class="linha"><span>Valor a pagar (calculado)</span><b id="preview-valor">R$ 0,00</b></div>
-          <div class="linha"><span>COOP recebe (calculado)</span><b id="preview-coopRecebe">R$ 0,00</b></div>
+          <div class="linha"><span>Total a receber (calculado)</span><b id="preview-valor">R$ 0,00</b></div>
+          <div class="linha" id="preview-coop-linha"><span>COOP recebe (calculado)</span><b id="preview-coopRecebe">R$ 0,00</b></div>
         </div>
         <div id="wrap-campos-removiveis"></div>
         <div id="wrap-motivo-campos" class="hidden">
@@ -227,6 +251,34 @@
   <div id="lista-lancamentos"><div class="empty">carregando...</div></div>
 </div>
 
+</div>
+
+<div class="overlay hidden" id="overlay-km-saida">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharSaidaKm()">✕</span>
+    <div class="sheet">
+      <h3>Dar saída · entregador por KM</h3>
+      <div class="sub" id="km-saida-info"></div>
+      <form id="form-km-saida">
+        <div id="km-etapa-hora">
+          <label>Hora da saída</label>
+          <input type="time" id="km-hora-saida" required>
+          <button class="btn-primary" type="button" onclick="liberarFaixasKm()">Confirmar horário e preencher entregas</button>
+        </div>
+        <div id="km-etapa-faixas" class="hidden">
+          <div class="km-faixas-grid" id="km-faixas-inputs"></div>
+          <div class="resumo">
+            <div class="linha"><span>Entregas total</span><b id="km-total-entregas">0</b></div>
+            <div class="linha"><span>Total a receber</span><b class="km-total" id="km-total-valor">R$ 0,00</b></div>
+          </div>
+          <label>Observação (opcional)</label>
+          <textarea id="km-observacao" placeholder="detalhes do turno"></textarea>
+          <div class="msg hidden" id="msg-km-saida"></div>
+          <button class="btn-primary" type="submit">Finalizar saída e lançamento</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="overlay-edicao">
@@ -311,6 +363,8 @@ let EDITANDO_ID = null;
 let EDITANDO_MASTER_ID = null;
 let REGRAS_POR_UNIDADE = {}; // unidade -> regra (ver entregasRegras.js) - decide se o form pede contagem (calcula sozinho) ou valor digitado
 let ENTREGADORES_CAMPINA = [];
+let TURNOS_KM = [];
+let TURNO_KM_SAIDA_ID = null;
 const MOTIVOS_REMOCAO_LABEL = { atraso:'Atraso', saiu_antes:'Saiu antes do fim do turno', prejuizo:'Gerou prejuízo', outro:'Outro' };
 
 function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -328,6 +382,15 @@ function agoraBrasilia(){
 }
 function isoLocalBR(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
+function dataFechamentoBrasilia(){
+  const agora = agoraBrasilia();
+  if(agora.getHours() < 12) agora.setDate(agora.getDate() - 1);
+  return isoLocalBR(agora);
+}
+function horaBrasilia(){
+  const agora = agoraBrasilia();
+  return `${String(agora.getHours()).padStart(2,'0')}:${String(agora.getMinutes()).padStart(2,'0')}`;
+}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
@@ -364,7 +427,8 @@ function diaSemanaDe(dataIso){
   return DIAS_SEMANA_JS[new Date(dataIso+'T00:00:00Z').getUTCDay()];
 }
 function atualizarModoUnidade(){
-  const fixo = regraAtual().modo === 'fixo';
+  const regra = regraAtual();
+  const fixo = regra.modo === 'fixo';
   const total = ehModeloTotal();
   document.getElementById('campos-detalhados-entrega').classList.toggle('hidden', total);
   document.getElementById('secao-valores-detalhados').classList.toggle('hidden', total);
@@ -379,8 +443,26 @@ function atualizarModoUnidade(){
   const contexto = document.getElementById('contexto-unidade');
   contexto.classList.toggle('hidden', !total);
   contexto.textContent = total ? 'Selecione o entregador, informe a quantidade e o valor total confirmado.' : '';
-  if(fixo){ renderCamposRemoviveis(); atualizarPreviewCalculado(); }
-  if(total) carregarEntregadoresCampina();
+  if(total){
+    carregarEntregadoresCampina();
+  }else{
+    const entregadoresFixos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
+    const empresas = Array.isArray(regra.empresas) ? regra.empresas : [];
+    const inputEntregador = document.getElementById('f-entregador');
+    const selectEntregador = document.getElementById('f-entregador-fixo');
+    const usarCadastro = entregadoresFixos.length > 0 || empresas.length > 0;
+    inputEntregador.classList.toggle('hidden', usarCadastro);
+    inputEntregador.required = !usarCadastro;
+    selectEntregador.classList.toggle('hidden', !usarCadastro);
+    selectEntregador.required = usarCadastro;
+    selectEntregador.innerHTML = usarCadastro ? [
+      '<option value="">selecione o entregador ou empresa</option>',
+      entregadoresFixos.length ? `<optgroup label="Entregadores fixos">${entregadoresFixos.map(nome=>`<option value="${escapeHtml(nome)}" data-tipo="entregador">${escapeHtml(nome)}</option>`).join('')}</optgroup>` : '',
+      empresas.length ? `<optgroup label="Empresas / plataformas">${empresas.map(empresa=>`<option value="${escapeHtml(empresa.nome)}" data-tipo="empresa">${escapeHtml(empresa.nome)}</option>`).join('')}</optgroup>` : '',
+    ].join('') : '';
+    atualizarModoRecebedor();
+  }
+  renderPainelKm();
 }
 
 function entregadorSelecionado(){
@@ -405,6 +487,34 @@ async function carregarEntregadoresCampina(){
   }catch(_){
     document.getElementById('f-entregador-campina').innerHTML = '<option value="">não foi possível carregar</option>';
   }
+}
+function empresaSelecionada(){
+  const select = document.getElementById('f-entregador-fixo');
+  const option = select.options[select.selectedIndex];
+  if(!option || option.dataset.tipo!=='empresa') return null;
+  const nome = option.value.toLocaleLowerCase('pt-BR');
+  return (regraAtual().empresas||[]).find(empresa=>empresa.nome.toLocaleLowerCase('pt-BR')===nome) || null;
+}
+function atualizarModoRecebedor(){
+  const regra = regraAtual();
+  const empresa = empresaSelecionada();
+  const tipoSelecionado = document.getElementById('f-entregador-fixo').selectedOptions[0]?.dataset.tipo;
+  const entregadorFixo = !empresa && tipoSelecionado==='entregador' && regra.modo==='fixo';
+  const calculado = entregadorFixo || empresa?.modo==='fixo';
+  document.getElementById('campos-adicionais-entrega').classList.toggle('hidden', !!empresa);
+  document.getElementById('wrap-f-extra').classList.toggle('hidden', !!empresa);
+  document.getElementById('wrap-quantidade-total').classList.toggle('hidden', !!empresa);
+  document.getElementById('wrap-f-ajudaCusto').classList.toggle('hidden', !!empresa);
+  document.getElementById('wrap-f-coopRecebe').classList.toggle('hidden', !!empresa);
+  document.getElementById('preview-coop-linha').classList.toggle('hidden', !!empresa);
+  document.getElementById('campos-manual').classList.toggle('hidden', calculado);
+  document.getElementById('campos-calculados').classList.toggle('hidden', !calculado);
+  if(entregadorFixo) renderCamposRemoviveis();
+  else {
+    document.getElementById('wrap-campos-removiveis').innerHTML = '';
+    document.getElementById('wrap-motivo-campos').classList.add('hidden');
+  }
+  atualizarPreviewCalculado();
 }
 // checklist dinâmico - só os campos que o Master marcou como removíveis
 // pela loja aparecem aqui (varia por unidade, ver entregas-regras.html)
@@ -433,11 +543,23 @@ function camposRemovidosMarcados(){
 // COOP so soma os campos com destino coopRecebe (normalmente so Entrega)
 function atualizarPreviewCalculado(){
   const regra = regraAtual();
-  if(regra.modo !== 'fixo') return;
+  const empresa = empresaSelecionada();
+  const tipoSelecionado = document.getElementById('f-entregador-fixo').selectedOptions[0]?.dataset.tipo;
+  if(empresa?.modo==='fixo'){
+    const quantidade = Math.max(0, num(document.getElementById('f-entrega').value));
+    const taxa = num(empresa.valorEntrega);
+    const total = quantidade * taxa;
+    document.getElementById('preview-detalhes').innerHTML = `<div class="linha"><span>${escapeHtml(empresa.nome)} · ${quantidade} × ${fmtMoney(taxa)}</span><b>${fmtMoney(total)}</b></div>`;
+    document.getElementById('preview-valor').textContent = fmtMoney(total);
+    document.getElementById('preview-coopRecebe').textContent = fmtMoney(0);
+    return;
+  }
+  if(regra.modo !== 'fixo' || tipoSelecionado!=='entregador') return;
   const contagens = {
     entrega: num(document.getElementById('f-entrega').value),
     retorno: num(document.getElementById('f-retorno').value),
     extra: num(document.getElementById('f-extra').value),
+    pos00hs: num(document.getElementById('f-pos00hs').value),
     foraDeArea: num(document.getElementById('f-foraDeArea').value),
   };
   contagens.quantTotal = contagens.entrega + contagens.retorno + contagens.extra;
@@ -445,36 +567,135 @@ function atualizarPreviewCalculado(){
   const removidos = new Set(camposRemovidosMarcados());
   let valor = 0, coopRecebe = 0;
   const linhas = (regra.camposValor||[]).map(c=>{
-    if(removidos.has(c.campo)) return {label:c.label, valor:0, removido:true};
+    if(removidos.has(c.campo)) return {label:c.label, valor:0, removido:true, quantidade:0, taxa:0, base:c.base};
     let taxa = (dia && c.valoresPorDiaSemana && c.valoresPorDiaSemana[dia]!=null) ? num(c.valoresPorDiaSemana[dia]) : num(c.valorPadrao);
     if(c.meta){
       const contagemMeta = contagens[c.meta.baseContagem] ?? 0;
       if(contagemMeta < num(c.meta.minimo)) taxa = num(c.meta.valorParcial);
     }
-    const valorCampo = c.base==='flat' ? taxa : (contagens[c.base]||0)*taxa;
+    const quantidade = c.base==='flat' ? null : (contagens[c.base]||0);
+    const valorCampo = c.base==='flat' ? taxa : quantidade*taxa;
     if(c.destino==='coopRecebe') coopRecebe += valorCampo; else valor += valorCampo;
-    return {label:c.label, valor:valorCampo, removido:false};
+    return {label:c.label, valor:valorCampo, removido:false, quantidade, taxa, base:c.base};
   });
   document.getElementById('preview-detalhes').innerHTML = linhas.map(l=>
-    `<div class="linha"><span>${escapeHtml(l.label)}${l.removido?' (removido)':''}</span><b style="${l.removido?'color:var(--muted);text-decoration:line-through;':''}">${fmtMoney(l.valor)}</b></div>`
+    `<div class="linha"><span>${escapeHtml(l.label)}${l.removido?' (removido)':(l.base!=='flat'?` · ${l.quantidade} × ${fmtMoney(l.taxa)}`:'')}</span><b style="${l.removido?'color:var(--muted);text-decoration:line-through;':''}">${fmtMoney(l.valor)}</b></div>`
   ).join('') || '<div class="linha"><span style="color:var(--muted);">nenhum campo configurado ainda</span></div>';
   document.getElementById('preview-valor').textContent = fmtMoney(valor);
   document.getElementById('preview-coopRecebe').textContent = fmtMoney(coopRecebe);
 }
 document.getElementById('f-unidade').addEventListener('change', atualizarModoUnidade);
+document.getElementById('f-entregador-fixo').addEventListener('change', atualizarModoRecebedor);
 document.getElementById('f-data').addEventListener('change', atualizarPreviewCalculado);
-['f-entrega','f-retorno','f-extra','f-foraDeArea'].forEach(id=>{
+['f-entrega','f-retorno','f-extra','f-pos00hs','f-foraDeArea'].forEach(id=>{
   document.getElementById(id).addEventListener('input', atualizarPreviewCalculado);
 });
 
+// Campos de quantidade começam visualmente em zero, mas o zero não é
+// prefixo: ao tocar/clicar, ele fica selecionado e o próximo dígito o
+// substitui (1, nunca 01). Funciona também nos campos KM criados depois.
+document.addEventListener('focusin', (ev)=>{
+  if(ev.target.matches('input[type=number]') && ev.target.value==='0') ev.target.select();
+});
+document.addEventListener('focusout', (ev)=>{
+  if(ev.target.matches('input[type=number]') && ev.target.value===''){
+    ev.target.value = '0';
+    ev.target.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+});
+
+// ---------- jornada dos entregadores pagos por faixa de KM ----------
+function regraKmAtual(){ return regraAtual().regraKm || {ativo:false,faixas:[]}; }
+function renderPainelKm(){
+  const regraKm = regraKmAtual();
+  const painel = document.getElementById('painel-km');
+  painel.classList.toggle('hidden', !regraKm.ativo);
+  if(!regraKm.ativo) return;
+  const unidade = document.getElementById('f-unidade').value;
+  document.getElementById('km-unidade-label').textContent = UNIDADES_NOMES[unidade] || unidade;
+  const abertos = TURNOS_KM.filter(turno=>turno.unidade===unidade && turno.status==='ABERTO');
+  document.getElementById('lista-km-abertos').innerHTML = abertos.length ? abertos.map(turno=>`
+    <div class="card">
+      <div class="linha1"><span>${escapeHtml(turno.entregador)}</span><span class="badge PENDENTE">em turno</span></div>
+      <div class="sub">${fmtData(turno.data)} · entrada ${escapeHtml(turno.horaEntrada)}</div>
+      <button type="button" class="btn-primary" style="margin-top:9px;" onclick="abrirSaidaKm('${turno.id}')">Dar saída</button>
+    </div>`).join('') : '<div class="empty">nenhum entregador em turno</div>';
+}
+document.getElementById('form-km-entrada').addEventListener('submit', async (ev)=>{
+  ev.preventDefault();
+  const msg = document.getElementById('msg-km-entrada');
+  const btn = ev.target.querySelector('button[type=submit]');
+  msg.classList.add('hidden'); btn.disabled = true;
+  try{
+    const unidade = document.getElementById('f-unidade').value;
+    const res = await fetch('/api/entregas/km/entrada',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        unidade, unidadeNome:UNIDADES_NOMES[unidade]||unidade,
+        data:document.getElementById('km-data').value,
+        entregador:document.getElementById('km-entregador').value,
+        horaEntrada:document.getElementById('km-hora-entrada').value,
+      }),
+    });
+    const data = await res.json(); if(!res.ok) throw new Error(data.error||'erro ao dar entrada');
+    document.getElementById('km-entregador').value='';
+    document.getElementById('km-hora-entrada').value=horaBrasilia();
+    msg.textContent='Entrada registrada.'; msg.className='msg ok';
+    await carregar();
+  }catch(err){msg.textContent=err.message;msg.className='msg err';}
+  finally{msg.classList.remove('hidden');btn.disabled=false;}
+});
+function abrirSaidaKm(id){
+  const turno = TURNOS_KM.find(item=>item.id===id);
+  if(!turno) return;
+  TURNO_KM_SAIDA_ID=id;
+  document.getElementById('km-saida-info').textContent=`${turno.entregador} · entrada ${turno.horaEntrada}`;
+  document.getElementById('km-hora-saida').value=horaBrasilia();
+  document.getElementById('km-etapa-hora').classList.remove('hidden');
+  document.getElementById('km-etapa-faixas').classList.add('hidden');
+  document.getElementById('km-observacao').value='';
+  document.getElementById('msg-km-saida').classList.add('hidden');
+  document.getElementById('overlay-km-saida').classList.remove('hidden');
+}
+function fecharSaidaKm(){document.getElementById('overlay-km-saida').classList.add('hidden');TURNO_KM_SAIDA_ID=null;}
+function liberarFaixasKm(){
+  if(!document.getElementById('km-hora-saida').value){document.getElementById('km-hora-saida').focus();return;}
+  document.getElementById('km-etapa-hora').classList.add('hidden');
+  document.getElementById('km-etapa-faixas').classList.remove('hidden');
+  document.getElementById('km-faixas-inputs').innerHTML=(regraKmAtual().faixas||[]).map(faixa=>`
+    <div><label>${escapeHtml(faixa.label)} · ${fmtMoney(faixa.valor)}</label><input type="number" min="0" step="1" inputmode="numeric" data-km-faixa="${escapeHtml(faixa.id)}" data-km-valor="${num(faixa.valor)}" value="0"></div>`).join('');
+  document.querySelectorAll('[data-km-faixa]').forEach(input=>input.addEventListener('input',atualizarTotaisKm));
+  atualizarTotaisKm();
+}
+function atualizarTotaisKm(){
+  let entregas=0,valor=0;
+  document.querySelectorAll('[data-km-faixa]').forEach(input=>{const qtd=Math.max(0,Math.trunc(num(input.value)));entregas+=qtd;valor+=qtd*num(input.dataset.kmValor);});
+  document.getElementById('km-total-entregas').textContent=entregas;
+  document.getElementById('km-total-valor').textContent=fmtMoney(valor);
+}
+document.getElementById('form-km-saida').addEventListener('submit',async(ev)=>{
+  ev.preventDefault();
+  const msg=document.getElementById('msg-km-saida');const btn=ev.target.querySelector('button[type=submit]');
+  msg.classList.add('hidden');btn.disabled=true;
+  try{
+    const quantidades={};document.querySelectorAll('[data-km-faixa]').forEach(input=>{quantidades[input.dataset.kmFaixa]=input.value;});
+    const res=await fetch(`/api/entregas/km/${TURNO_KM_SAIDA_ID}/saida`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({horaSaida:document.getElementById('km-hora-saida').value,quantidades,observacao:document.getElementById('km-observacao').value})});
+    const data=await res.json();if(!res.ok)throw new Error(data.error||'erro ao dar saída');
+    fecharSaidaKm();await carregar();
+  }catch(err){msg.textContent=err.message;msg.className='msg err';msg.classList.remove('hidden');}
+  finally{btn.disabled=false;}
+});
+
 async function carregar(){
-  const [meus, edicoes] = await Promise.all([
+  const [meus, edicoes, turnosKm] = await Promise.all([
     fetch('/api/entregas/meus').then(r=>r.json()),
     fetch('/api/entregas/edicoes').then(r=>r.json()),
+    fetch('/api/entregas/km/turnos').then(r=>r.json()),
   ]);
   MEUS = meus.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||'')).slice(0,30);
   EDICOES = edicoes;
+  TURNOS_KM = turnosKm;
   renderLista();
+  renderPainelKm();
 }
 
 function edicaoPendente(entregaId){
@@ -608,7 +829,7 @@ document.getElementById('form-master').addEventListener('submit', async (ev)=>{
 
 function resetarForm(){
   document.getElementById('form-lancar').reset();
-  document.getElementById('f-data').value = hojeBrasilia();
+  document.getElementById('f-data').value = dataFechamentoBrasilia();
   CAMPOS_NUMERICOS.forEach(c=>{ const el = document.getElementById('f-'+c); if(el) el.value = 0; });
   document.getElementById('f-campina-quantidade').value = '';
   document.getElementById('f-campina-valor').value = '';
@@ -647,12 +868,17 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
       campos.valor = document.getElementById('f-campina-valor').value;
     }
     const camposRemovidos = camposRemovidosMarcados();
+    const selectRecebedor = document.getElementById('f-entregador-fixo');
+    const optionRecebedor = selectRecebedor.options[selectRecebedor.selectedIndex];
     const payload = {
       unidade,
       unidadeNome: UNIDADES_NOMES[unidade] || unidade,
       data: document.getElementById('f-data').value,
-      entregador: ehModeloTotal() ? entregadorCampina.nome : document.getElementById('f-entregador').value,
+      entregador: ehModeloTotal() ? entregadorCampina.nome : (document.getElementById('f-entregador-fixo').classList.contains('hidden')
+        ? document.getElementById('f-entregador').value
+        : document.getElementById('f-entregador-fixo').value),
       tipoEntregador: ehModeloTotal() ? entregadorCampina.tipo : null,
+      tipoRecebedor: ehModeloTotal() ? null : (optionRecebedor?.dataset.tipo || null),
       campos,
       obsRetorno: document.getElementById('f-obsRetorno').value,
       obsExtra: document.getElementById('f-obsExtra').value,
@@ -703,15 +929,17 @@ async function boot(){
   // O backend já entrega somente as unidades cujo perfil tem a atribuição
   // "Entregas". A tela não usa mais o cadastro geral do parque como fonte.
   regras.forEach(r=>{ REGRAS_POR_UNIDADE[r.unidade] = r; });
-  const unidades = regras.map(r=>r.unidade);
+  const unidades = [...new Set(regras.map(r=>r.unidade))];
   const selUnidade = document.getElementById('f-unidade');
   selUnidade.innerHTML = unidades.length
     ? unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('')
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
-  document.getElementById('f-data').value = hojeBrasilia();
-  document.getElementById('f-data').max = hojeBrasilia();
+  document.getElementById('f-data').value = dataFechamentoBrasilia();
+  document.getElementById('f-data').max = dataFechamentoBrasilia();
+  document.getElementById('km-data').value = dataFechamentoBrasilia();
+  document.getElementById('km-data').max = dataFechamentoBrasilia();
+  document.getElementById('km-hora-entrada').value = horaBrasilia();
   atualizarSugestao();
-
   atualizarModoUnidade();
 
   document.getElementById('root').classList.remove('hidden');

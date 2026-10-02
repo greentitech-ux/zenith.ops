@@ -37,7 +37,7 @@ function valorPositivo(v) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos, etiquetaFile, criadoPorId, criadoPorEmail }) {
+async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, tipoRecebedor, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos, etiquetaFile, criadoPorId, criadoPorEmail }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new Error('Data inválida.');
   if (!entregador || !String(entregador).trim()) throw new Error('Nome do entregador é obrigatório.');
@@ -53,7 +53,28 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
   // (sem valor fixo, ex: paga o que a GAMI/NEXT informar) mantém os valores
   // digitados normalmente.
   const regra = await entregasRegras.getPara(unidade);
-  if (regra.modeloLancamento === 'total') {
+  const entregadoresFixos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
+  const empresas = Array.isArray(regra.empresas) ? regra.empresas : [];
+  const empresa = empresas.find((item) => item.nome.toLocaleLowerCase('pt-BR') === registro.entregador.toLocaleLowerCase('pt-BR'));
+  const ehEmpresa = tipoRecebedor === 'empresa' || !!empresa;
+  if (ehEmpresa) {
+    if (!empresa) throw new Error('Selecione uma empresa/plataforma cadastrada para essa unidade.');
+    const quantidade = numeroInteiroPositivo(campos?.entrega);
+    if (quantidade == null) throw new Error('Informe uma quantidade inteira de entregas maior que zero.');
+    const valorTotal = empresa.modo === 'fixo'
+      ? +(quantidade * empresa.valorEntrega).toFixed(2)
+      : valorPositivo(campos?.valor);
+    if (valorTotal == null) throw new Error('Informe o valor total maior que zero.');
+    Object.assign(registro, {
+      entregador: empresa.nome, tipoRecebedor: 'empresa', empresaModo: empresa.modo,
+      entrega: quantidade, retorno: 0, extra: 0, bonus: 0, pos00hs: 0, foraDeArea: 0,
+      ajudaCusto: 0, valor: valorTotal, coopRecebe: 0, quantTotal: quantidade,
+      detalhesValor: [{
+        campo: 'entrega', label: empresa.nome, base: 'entrega', quantidade,
+        taxa: empresa.modo === 'fixo' ? empresa.valorEntrega : null, valor: valorTotal,
+      }],
+    });
+  } else if (regra.modeloLancamento === 'total') {
     const quantidade = numeroInteiroPositivo(campos?.entrega);
     const valorTotal = valorPositivo(campos?.valor);
     if (quantidade == null) throw new Error('Informe uma quantidade inteira de entregas maior que zero.');
@@ -64,18 +85,23 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
       modeloLancamento: 'total', detalhesValor: [{ campo: 'valorTotal', label: 'Valor total informado', valor: valorTotal }],
       camposRemovidos: [], motivoRemocaoCampos: null,
     });
+  } else if (regra.modo === 'fixo' && entregadoresFixos.length) {
+    const nomeCadastrado = entregadoresFixos.find((nome) => nome.toLocaleLowerCase('pt-BR') === registro.entregador.toLocaleLowerCase('pt-BR'));
+    if (!nomeCadastrado) throw new Error('Selecione um entregador cadastrado para essa unidade.');
+    registro.entregador = nomeCadastrado;
+    registro.tipoRecebedor = 'entregador';
   }
-  const camposValidosRemovidos = regra.modeloLancamento === 'total' ? [] : (Array.isArray(camposRemovidos)
+  const camposValidosRemovidos = (ehEmpresa || regra.modeloLancamento === 'total') ? [] : (Array.isArray(camposRemovidos)
     ? camposRemovidos.filter((c) => (regra.camposValor || []).some((r) => r.campo === c && r.removivelPelaLoja))
     : []);
   registro.camposRemovidos = camposValidosRemovidos;
   registro.motivoRemocaoCampos = camposValidosRemovidos.length
     ? (entregasRegras.MOTIVOS_REMOCAO_CAMPO.includes(motivoRemocaoCampos) ? motivoRemocaoCampos : 'outro')
     : null;
-  if (regra.modeloLancamento !== 'total') registro.detalhesValor = [];
-  if (regra.modo === 'fixo' && regra.modeloLancamento !== 'total') {
+  if (!ehEmpresa && regra.modeloLancamento !== 'total') registro.detalhesValor = [];
+  if (!ehEmpresa && regra.modo === 'fixo' && regra.modeloLancamento !== 'total') {
     const calculado = entregasRegras.calcular(regra, {
-      data: registro.data, entrega: registro.entrega, retorno: registro.retorno, extra: registro.extra, foraDeArea: registro.foraDeArea,
+      data: registro.data, entrega: registro.entrega, retorno: registro.retorno, extra: registro.extra, pos00hs: registro.pos00hs, foraDeArea: registro.foraDeArea,
       camposRemovidos: camposValidosRemovidos,
     });
     registro.ajudaCusto = calculado.ajudaCusto;

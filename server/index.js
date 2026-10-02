@@ -50,6 +50,7 @@ const saidasPainel = require('./saidasPainel');
 const entregasLive = require('./entregasLive');
 const entregadoresEntregas = require('./entregadoresEntregas');
 const entregasRegras = require('./entregasRegras');
+const entregasKm = require('./entregasKm');
 const backup = require('./backup');
 const relatorios = require('./relatorios');
 const sheetsSync = require('./sheetsSync');
@@ -17870,21 +17871,64 @@ app.put('/api/entregas/regras/:unidade', auth.requireMaster, async (req, res) =>
   }
 });
 
+app.get('/api/entregas/km/turnos', requireSection('entregas-lancamento'), async (req, res) => {
+  const unidades = req.isMaster ? null : (req.permissions.unidades || []);
+  res.json(await entregasKm.listarPorUnidades(unidades));
+});
+
+app.post('/api/entregas/km/entrada', requireSection('entregas-lancamento'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, data, entregador, horaEntrada } = req.body || {};
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    if (!(await unidadesExtras.apareceEm(unidade, 'entregas'))) return res.status(400).json({ error: 'Essa unidade não tem Entregas habilitado.' });
+    const turno = await entregasKm.darEntrada({
+      unidade, unidadeNome, data, entregador, horaEntrada,
+      criadoPorId: req.user.id, criadoPorEmail: req.user.email,
+    });
+    broadcast('entrega-km-entrada', turno, 'entregas-lancamento');
+    res.json(turno);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/entregas/km/:id/saida', requireSection('entregas-lancamento'), async (req, res) => {
+  try {
+    const resultado = await entregasKm.darSaida({
+      id: req.params.id,
+      horaSaida: req.body?.horaSaida,
+      quantidades: req.body?.quantidades,
+      observacao: req.body?.observacao,
+      unidadesPermitidas: req.isMaster ? null : (req.permissions.unidades || []),
+      finalizadoPorId: req.user.id,
+      finalizadoPorEmail: req.user.email,
+    });
+    entregasLive.invalidar();
+    broadcast('entrega-km-saida', resultado.lancamento, 'entregas-lancamento');
+    broadcast('entrega-lancada', resultado.lancamento, 'entregas');
+    res.json(resultado);
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
 app.post('/api/entregas/lancar', requireSection('entregas-lancamento'), upload.single('etiqueta'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, data, entregador, tipoEntregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos } = JSON.parse(req.body.payload || '{}');
+    const { unidade, unidadeNome, data, entregador, tipoEntregador, tipoRecebedor, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos } = JSON.parse(req.body.payload || '{}');
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     if (!(await unidadesExtras.apareceEm(unidade, 'entregas'))) return res.status(400).json({ error: 'Essa unidade não tem Entregas habilitado.' });
     const regra = await entregasRegras.getPara(unidade);
-    if (regra.modeloLancamento === 'total') {
+    if (regra.modeloLancamento === 'total' && tipoRecebedor !== 'empresa') {
       const cadastrado = await entregadoresEntregas.encontrarAtivo(unidade, entregador);
       if (!cadastrado) return res.status(400).json({ error: 'Escolha um entregador ativo da lista ou cadastre um novo antes de lançar.' });
       if (tipoEntregador && cadastrado.tipo !== tipoEntregador) return res.status(400).json({ error: 'O tipo informado não corresponde ao entregador cadastrado.' });
     }
     const registro = await entregasLive.create({
-      unidade, unidadeNome, data, entregador, tipoEntregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos,
+      unidade, unidadeNome, data, entregador, tipoEntregador, tipoRecebedor, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos,
       etiquetaFile: req.file || null,
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,

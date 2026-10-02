@@ -30,10 +30,18 @@ const { createCache } = require('./liveCache');
 const COLLECTION = db.collection('entregasRegras');
 
 const DIAS_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
-const BASES_VALIDAS = new Set(['entrega', 'retorno', 'extra', 'foraDeArea', 'flat']);
+const BASES_VALIDAS = new Set(['entrega', 'retorno', 'extra', 'pos00hs', 'foraDeArea', 'flat']);
 const DESTINOS_VALIDOS = new Set(['valor', 'coopRecebe']);
 const MOTIVOS_REMOCAO_CAMPO = ['atraso', 'saiu_antes', 'prejuizo', 'outro'];
 const MODELOS_LANCAMENTO_VALIDOS = new Set(['detalhado', 'total']);
+const FAIXAS_KM = [
+  { id: 'ate49', label: 'Até 4,9 km', limiteKm: 4.9 },
+  { id: 'ate59', label: 'Até 5,9 km', limiteKm: 5.9 },
+  { id: 'ate69', label: 'Até 6,9 km', limiteKm: 6.9 },
+  { id: 'ate79', label: 'Até 7,9 km', limiteKm: 7.9 },
+  { id: 'ate89', label: 'Até 8,9 km', limiteKm: 8.9 },
+  { id: 'ate99', label: 'Até 9,9 km', limiteKm: 9.9 },
+];
 
 function num(v) {
   const n = Number(v);
@@ -66,8 +74,80 @@ function sanitizarValoresPorDiaSemana(obj) {
 
 function sanitizarMeta(m) {
   if (!m || !m.ativo) return null;
-  const baseContagem = ['entrega', 'retorno', 'extra', 'foraDeArea', 'quantTotal'].includes(m.baseContagem) ? m.baseContagem : 'entrega';
+  const baseContagem = ['entrega', 'retorno', 'extra', 'pos00hs', 'foraDeArea', 'quantTotal'].includes(m.baseContagem) ? m.baseContagem : 'entrega';
   return { baseContagem, minimo: num(m.minimo), valorParcial: num(m.valorParcial) };
+}
+
+function sanitizarEntregadoresFixos(lista) {
+  if (!Array.isArray(lista)) return [];
+  const usados = new Set();
+  return lista
+    .map((nome) => String(nome || '').trim().replace(/\s+/g, ' ').slice(0, 80))
+    .filter((nome) => {
+      if (!nome) return false;
+      const chave = nome.toLocaleLowerCase('pt-BR');
+      if (usados.has(chave)) return false;
+      usados.add(chave);
+      return true;
+    })
+    .slice(0, 100);
+}
+
+function sanitizarEmpresas(lista) {
+  if (!Array.isArray(lista)) return [];
+  const usados = new Set();
+  return lista.map((empresa) => {
+    const nome = String(empresa?.nome || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+    if (!nome) return null;
+    const chave = nome.toLocaleLowerCase('pt-BR');
+    if (usados.has(chave)) return null;
+    usados.add(chave);
+    const modo = empresa?.modo === 'fixo' ? 'fixo' : 'manual';
+    return { nome, modo, valorEntrega: modo === 'fixo' ? Math.max(0, num(empresa?.valorEntrega)) : 0 };
+  }).filter(Boolean).slice(0, 100);
+}
+
+function sanitizarRegraKm(regraKm) {
+  const valoresRecebidos = new Map((Array.isArray(regraKm?.faixas) ? regraKm.faixas : [])
+    .map((faixa) => [faixa?.id, Math.max(0, num(faixa?.valor))]));
+  return {
+    ativo: !!regraKm?.ativo,
+    faixas: FAIXAS_KM.map((faixa) => ({ ...faixa, valor: valoresRecebidos.get(faixa.id) || 0 })),
+  };
+}
+
+// As primeiras versões da tela deixavam "Valor fixo por lançamento" como
+// padrão. Assim, regras já cadastradas com os nomes canônicos abaixo (como a
+// de Garanhuns) podem ter sido salvas como flat mesmo sendo quantidades. A
+// leitura corrige esses três casos inequívocos sem mexer em campos realmente
+// fixos, como Ajuda de Custo/Encosta.
+function baseCanonicaDoLabel(label) {
+  const chave = String(label || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase();
+  if (chave === 'entrega' || chave === 'entregas') return 'entrega';
+  if (chave === 'pos00h' || chave === 'pos00hs') return 'pos00hs';
+  if (chave === 'foradearea') return 'foraDeArea';
+  return null;
+}
+
+function normalizarRegra(regra) {
+  if (!regra || typeof regra !== 'object') return regra;
+  let empresas = sanitizarEmpresas(regra.empresas);
+  if (!empresas.length && regra.plataformaNome) {
+    empresas = sanitizarEmpresas(String(regra.plataformaNome).split(/[,;]+/).map((nome) => ({ nome, modo: 'manual' })));
+  }
+  return {
+    ...regra,
+    entregadoresFixos: sanitizarEntregadoresFixos(regra.entregadoresFixos),
+    empresas,
+    regraKm: sanitizarRegraKm(regra.regraKm),
+    camposValor: (Array.isArray(regra.camposValor) ? regra.camposValor : []).map((campo) => ({
+      ...campo,
+      base: campo.base === 'flat' ? (baseCanonicaDoLabel(campo.label) || 'flat') : campo.base,
+    })),
+  };
 }
 
 function sanitizarCamposValor(lista) {
@@ -86,7 +166,10 @@ function sanitizarCamposValor(lista) {
       return {
         campo,
         label,
-        base: BASES_VALIDAS.has(c?.base) ? c.base : 'flat',
+        base: (() => {
+          const configurada = BASES_VALIDAS.has(c?.base) ? c.base : 'flat';
+          return configurada === 'flat' ? (baseCanonicaDoLabel(label) || 'flat') : configurada;
+        })(),
         destino: DESTINOS_VALIDOS.has(c?.destino) ? c.destino : 'valor',
         valorPadrao: num(c?.valorPadrao),
         valoresPorDiaSemana: sanitizarValoresPorDiaSemana(c?.valoresPorDiaSemana),
@@ -106,6 +189,9 @@ function defaultRegra(unidade) {
     // continuam no formulário detalhado até que o Master escolha outro modelo.
     modeloLancamento: unidade === 'Dominos Campina Grande' ? 'total' : 'detalhado',
     plataformaNome: '',
+    entregadoresFixos: [],
+    empresas: [],
+    regraKm: sanitizarRegraKm(null),
     camposValor: [],
     atualizadoEm: null,
     atualizadoPorEmail: null,
@@ -114,7 +200,7 @@ function defaultRegra(unidade) {
 
 async function listAllUncached() {
   const snap = await COLLECTION.get();
-  return snap.docs.map((d) => d.data());
+  return snap.docs.map((d) => normalizarRegra(d.data()));
 }
 const regrasCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = regrasCache.cached;
@@ -124,17 +210,33 @@ async function getPara(unidade) {
   // Regras gravadas antes da criação do modelo "total" não possuem a nova
   // chave. Mesclar com o padrão conserva a configuração antiga e faz Campina
   // adotar o formulário correto sem exigir uma migração manual no Firestore.
-  return doc.exists ? { ...defaultRegra(unidade), ...doc.data() } : defaultRegra(unidade);
+  return doc.exists ? normalizarRegra({ ...defaultRegra(unidade), ...doc.data() }) : defaultRegra(unidade);
 }
 
 async function salvar(unidade, campos, atualizadoPorEmail) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const modo = campos?.modo === 'fixo' ? 'fixo' : 'plataforma';
+  const entregadoresFixos = sanitizarEntregadoresFixos(campos?.entregadoresFixos);
+  const empresas = sanitizarEmpresas(campos?.empresas);
+  const regraKm = sanitizarRegraKm(campos?.regraKm);
+  if (empresas.some((empresa) => empresa.modo === 'fixo' && empresa.valorEntrega <= 0)) {
+    throw new Error('Informe um valor por entrega maior que zero para cada empresa de tarifa fixa.');
+  }
+  const nomesEntregadores = new Set(entregadoresFixos.map((nome) => nome.toLocaleLowerCase('pt-BR')));
+  if (empresas.some((empresa) => nomesEntregadores.has(empresa.nome.toLocaleLowerCase('pt-BR')))) {
+    throw new Error('O mesmo nome não pode ser cadastrado como entregador fixo e empresa/plataforma.');
+  }
+  if (regraKm.ativo && regraKm.faixas.some((faixa) => faixa.valor <= 0)) {
+    throw new Error('Informe um valor maior que zero para todas as faixas de KM.');
+  }
   const registro = {
     unidade,
     modo,
     modeloLancamento: MODELOS_LANCAMENTO_VALIDOS.has(campos?.modeloLancamento) ? campos.modeloLancamento : (unidade === 'Dominos Campina Grande' ? 'total' : 'detalhado'),
     plataformaNome: String(campos?.plataformaNome || '').trim().slice(0, 40),
+    entregadoresFixos,
+    empresas,
+    regraKm,
     camposValor: sanitizarCamposValor(campos?.camposValor),
     atualizadoEm: new Date().toISOString(),
     atualizadoPorEmail,
@@ -157,9 +259,10 @@ function diaSemanaDe(dataIso) {
 // 'fixo' - no modo "plataforma" os valores continuam vindo direto do
 // formulário. "camposRemovidos" é a lista de `campo` (slug) que a loja
 // marcou pra não pagar naquela corrida (ex: Encosta removida por atraso).
-function calcular(regra, { data, entrega, retorno, extra, foraDeArea, camposRemovidos }) {
+function calcular(regra, { data, entrega, retorno, extra, pos00hs, foraDeArea, camposRemovidos }) {
   const contagens = {
-    entrega: num(entrega), retorno: num(retorno), extra: num(extra), foraDeArea: num(foraDeArea),
+    entrega: Math.max(0, num(entrega)), retorno: Math.max(0, num(retorno)), extra: Math.max(0, num(extra)),
+    pos00hs: Math.max(0, num(pos00hs)), foraDeArea: Math.max(0, num(foraDeArea)),
   };
   contagens.quantTotal = contagens.entrega + contagens.retorno + contagens.extra;
   const dia = data ? diaSemanaDe(data) : null;
@@ -180,8 +283,9 @@ function calcular(regra, { data, entrega, retorno, extra, foraDeArea, camposRemo
       const contagemMeta = contagens[c.meta.baseContagem] ?? 0;
       if (contagemMeta < c.meta.minimo) taxa = c.meta.valorParcial;
     }
-    const valorCampo = c.base === 'flat' ? taxa : (contagens[c.base] || 0) * taxa;
-    detalhes.push({ campo: c.campo, label: c.label, valor: +valorCampo.toFixed(2) });
+    const quantidade = c.base === 'flat' ? null : (contagens[c.base] || 0);
+    const valorCampo = c.base === 'flat' ? taxa : quantidade * taxa;
+    detalhes.push({ campo: c.campo, label: c.label, base: c.base, quantidade, taxa: +taxa.toFixed(2), valor: +valorCampo.toFixed(2) });
     if (c.destino === 'coopRecebe') coopRecebe += valorCampo;
     else {
       valor += valorCampo;
@@ -200,6 +304,6 @@ function calcular(regra, { data, entrega, retorno, extra, foraDeArea, camposRemo
 
 module.exports = {
   listAll, getPara, salvar, calcular, defaultRegra,
-  DIAS_SEMANA, BASES_VALIDAS, DESTINOS_VALIDOS, MOTIVOS_REMOCAO_CAMPO, MODELOS_LANCAMENTO_VALIDOS,
+  DIAS_SEMANA, BASES_VALIDAS, DESTINOS_VALIDOS, MOTIVOS_REMOCAO_CAMPO, MODELOS_LANCAMENTO_VALIDOS, FAIXAS_KM,
   invalidar: () => regrasCache.invalidar(),
 };

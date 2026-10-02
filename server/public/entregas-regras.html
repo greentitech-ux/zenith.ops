@@ -68,7 +68,9 @@
   .modal .sub{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
   .modal label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;}
   .modal label:first-of-type{margin-top:0;}
-  .modal input,.modal select{width:100%;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;}
+  .modal input,.modal select,.modal textarea{width:100%;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;}
+  .modal textarea{min-height:86px;resize:vertical;font-family:var(--sans);}
+  .field-help{font-size:10.5px;color:var(--muted);margin-top:4px;line-height:1.4;}
   .modo-radios{display:flex;gap:14px;margin-top:6px;}
   .modo-radios label{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin:0;}
   .modo-radios input{width:auto;}
@@ -77,6 +79,14 @@
   .campo-card .linha-topo{display:flex;gap:8px;align-items:flex-start;}
   .campo-card .linha-topo input[data-f=label]{flex:1;}
   .campo-card .btn-remover-campo{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;width:34px;height:36px;font-size:15px;cursor:pointer;flex:none;}
+  .empresa-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;}
+  .empresa-card .linha-topo{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) 42px;gap:8px;align-items:end;}
+  .empresa-card .btn-remover-empresa{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;height:36px;font-size:15px;cursor:pointer;}
+  .empresa-card .valor-empresa.hidden{display:none;}
+  @media(max-width:560px){.empresa-card .linha-topo{grid-template-columns:1fr 42px}.empresa-card .linha-topo>div:nth-child(2){grid-column:1/3;grid-row:2}.empresa-card .btn-remover-empresa{grid-column:2;grid-row:1}}
+  .km-config{border-top:1px solid var(--line);margin-top:16px;padding-top:14px;}
+  .km-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;}
+  @media(max-width:560px){.km-grid{grid-template-columns:repeat(2,1fr)}}
   .campo-card .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 8px;margin-top:8px;}
   .campo-card .grid2 > div{margin-top:0;}
   .campo-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);margin-top:10px;}
@@ -117,7 +127,7 @@
   </div>
 </header>
 
-<div class="sub-intro" style="margin:0 0 16px;">A lista abaixo mostra somente as unidades marcadas com a atribuição <b>Entregas</b>. Cada uma pode usar valor fixo configurado por campo ou plataforma com valor informado pela loja. Campina Grande usa o modelo próprio de quantidade e valor total.</div>
+<div class="sub-intro" style="margin:0 0 16px;">A lista mostra somente unidades com a atribuição <b>Entregas</b>. Cada unidade pode cadastrar entregadores fixos, empresas/plataformas com tarifa automática ou total manual e o controle por faixa de KM. Campina Grande mantém também seu modelo próprio de quantidade e valor total.</div>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
 <nav class="nav-drawer hidden" id="nav-drawer"></nav>
@@ -141,22 +151,35 @@
     <h3 id="regra-title">Editar regra</h3>
     <div class="sub" id="regra-sub"></div>
 
-    <label id="label-modo">Modo</label>
+    <label id="label-modo">Entregadores próprios/fixos</label>
     <div id="editor-modo" class="modo-radios">
-      <label><input type="radio" name="modo" value="plataforma" checked> Plataforma (sem valor fixo)</label>
-      <label><input type="radio" name="modo" value="fixo"> Valor fixo (campos personalizados)</label>
+      <label><input type="radio" name="modo" value="plataforma" checked> Não usa tabela de entregadores fixos</label>
+      <label><input type="radio" name="modo" value="fixo"> Usa tabela de entregadores fixos</label>
     </div>
 
     <div id="modelo-total-aviso" class="modelo-aviso hidden"><b>Modelo de Campina Grande</b><br>O lançamento registra somente entregador, quantidade de entregas e valor total. Não há taxa fixa, extra, retorno ou cooperativa neste modelo.</div>
 
-    <div id="campos-plataforma">
-      <label>Nome da plataforma (opcional, ex: GAMI, NEXT)</label>
-      <input type="text" id="r-plataformaNome" placeholder="GAMI, NEXT...">
-    </div>
+    <input type="hidden" id="r-plataformaNome">
 
     <div id="campos-fixo" class="campos-fixo hidden">
+      <label>Entregadores fixos da unidade</label>
+      <textarea id="r-entregadoresFixos" placeholder="Um nome por linha&#10;Paulo F.&#10;Marcos Lima"></textarea>
+      <div class="field-help">No lançamento, a loja selecionará um destes nomes. Separe por linha ou vírgula.</div>
       <div id="lista-campos"></div>
       <button type="button" class="btn-add-campo" onclick="adicionarCampo()">+ Adicionar campo de valor</button>
+    </div>
+
+    <div class="campos-fixo">
+      <label style="color:var(--text);font-weight:700;">Empresas / plataformas</label>
+      <div class="field-help">Cadastre separadamente cada operação ou turno, por exemplo “Falcão Almoço” e “Falcão Janta”. A empresa pode ter valor fixo por entrega ou total informado no lançamento.</div>
+      <div id="lista-empresas"></div>
+      <button type="button" class="btn-add-campo" onclick="adicionarEmpresa()">+ Adicionar empresa / plataforma</button>
+    </div>
+
+    <div class="km-config">
+      <label class="campo-toggle"><input type="checkbox" id="r-km-ativo"> Ativar controle de entregadores pagos por faixa de KM</label>
+      <div class="field-help">A loja dará entrada e saída no entregador. As quantidades por faixa só serão liberadas ao dar saída.</div>
+      <div id="r-km-faixas" class="km-grid hidden"></div>
     </div>
 
     <p class="err hidden" id="regra-err"></p>
@@ -186,16 +209,17 @@ function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;
 function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 const FUSO_BR = 'America/Sao_Paulo';
 
-const BASES = [ ['entrega','Entrega'], ['retorno','Retorno'], ['extra','Extra'], ['foraDeArea','Fora de Área'], ['flat','Valor fixo por lançamento'] ];
+const BASES = [ ['entrega','Quantidade de Entregas (multiplica)'], ['retorno','Quantidade de Retornos (multiplica)'], ['extra','Quantidade de Extras (multiplica)'], ['pos00hs','Quantidade Pós 00h (multiplica)'], ['foraDeArea','Quantidade Fora de Área (multiplica)'], ['flat','Uma vez por lançamento (não multiplica)'] ];
 const DESTINOS = [ ['valor','Soma no Valor a pagar'], ['coopRecebe','Soma no repasse da Cooperativa'] ];
 const DIAS_SEMANA = [ ['dom','Dom'], ['seg','Seg'], ['ter','Ter'], ['qua','Qua'], ['qui','Qui'], ['sex','Sex'], ['sab','Sáb'] ];
+const FAIXAS_KM = [ ['ate49','Até 4,9 km'], ['ate59','Até 5,9 km'], ['ate69','Até 6,9 km'], ['ate79','Até 7,9 km'], ['ate89','Até 8,9 km'], ['ate99','Até 9,9 km'] ];
 
 let UNIDADES = [];
 let REGRAS = [];
 let EDITANDO_UNIDADE = null;
 
 function regraDaUnidade(codigo){
-  return REGRAS.find(r=>r.unidade===codigo) || { unidade: codigo, modo:'plataforma', modeloLancamento:'detalhado', plataformaNome:'', camposValor:[], atualizadoEm:null };
+  return REGRAS.find(r=>r.unidade===codigo) || { unidade: codigo, modo:'plataforma', modeloLancamento:'detalhado', plataformaNome:'', entregadoresFixos:[], empresas:[], regraKm:{ativo:false,faixas:[]}, camposValor:[], atualizadoEm:null };
 }
 
 function renderRegras(){
@@ -204,13 +228,15 @@ function renderRegras(){
     const r = regraDaUnidade(u.codigo);
     const fixo = r.modo==='fixo';
     const total = r.modeloLancamento==='total';
-    const tags = fixo
-      ? (r.camposValor||[]).map(c=>`<span class="tag ${c.removivelPelaLoja?'removivel':''}" title="${c.destino==='coopRecebe'?'Cooperativa':'Valor a pagar'}${c.meta?' · tem meta':''}">${escapeHtml(c.label)}${c.base!=='flat'?' ('+escapeHtml(BASES.find(b=>b[0]===c.base)?.[1]||c.base)+')':''}</span>`).join('')
-      : total ? '<span style="color:var(--accent2);">Quantidade + valor total</span>' : `<span style="color:var(--muted);">${r.plataformaNome?escapeHtml(r.plataformaNome):'sem valor fixo'}</span>`;
+    const tagsFixos = fixo ? (r.camposValor||[]).map(c=>`<span class="tag ${c.removivelPelaLoja?'removivel':''}" title="${c.destino==='coopRecebe'?'Cooperativa':'Valor a pagar'}${c.meta?' · tem meta':''}">${escapeHtml(c.label)}${c.base!=='flat'?' ('+escapeHtml(BASES.find(b=>b[0]===c.base)?.[1]||c.base)+')':''}</span>`).join('') : '';
+    const tagsEmpresas = (r.empresas||[]).map(empresa=>`<span class="tag" title="Empresa/plataforma">${escapeHtml(empresa.nome)} · ${empresa.modo==='fixo'?fmtMoney(empresa.valorEntrega)+'/entrega':'total manual'}</span>`).join('');
+    const tagTotal = total ? '<span class="tag" style="color:var(--accent2);">Quantidade + valor total</span>' : '';
+    const tagKm = r.regraKm?.ativo ? '<span class="tag" style="color:var(--accent);">Faixas de KM</span>' : '';
+    const tags = tagTotal + tagsFixos + tagsEmpresas + tagKm;
     return `
     <tr>
       <td><b>${escapeHtml(u.nome)}</b></td>
-      <td><span class="badge ${total?'total':r.modo}">${total?'Total informado':fixo?'Valor fixo':'Plataforma'}</span></td>
+      <td><span class="badge ${total?'total':r.modo}">${total?'Total informado':fixo?'Entregadores fixos':'Empresas/manual'}</span></td>
       <td><div class="tags">${tags || '<span style="color:var(--muted);">nenhum campo ainda</span>'}</div></td>
       <td>${r.atualizadoEm ? new Date(r.atualizadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR}) : '<span style="color:var(--muted);">nunca configurada</span>'}</td>
       <td class="rowacts"><button type="button" onclick="abrirEdicao('${u.codigo}')">Editar</button></td>
@@ -222,9 +248,59 @@ document.querySelectorAll('input[name=modo]').forEach(r=>{
   r.addEventListener('change', ()=>{
     const fixo = document.querySelector('input[name=modo]:checked').value==='fixo';
     document.getElementById('campos-fixo').classList.toggle('hidden', !fixo);
-    document.getElementById('campos-plataforma').classList.toggle('hidden', fixo);
   });
 });
+
+// ---------- empresas/plataformas (cada operação pode ter regra própria) ----------
+function empresaCardHtml(empresa){
+  empresa = empresa || {nome:'', modo:'fixo', valorEntrega:0};
+  const fixo = empresa.modo === 'fixo';
+  return `<div class="empresa-card">
+    <div class="linha-topo">
+      <div><label>Nome / operação</label><input type="text" data-e="nome" placeholder="ex: Falcão Almoço" value="${escapeHtml(empresa.nome||'')}" required></div>
+      <div><label>Como calcular</label><select data-e="modo">
+        <option value="fixo" ${fixo?'selected':''}>Quantidade × valor por entrega</option>
+        <option value="manual" ${!fixo?'selected':''}>Quantidade + total informado no lançamento</option>
+      </select></div>
+      <button type="button" class="btn-remover-empresa" title="Remover" onclick="this.closest('.empresa-card').remove()">✕</button>
+    </div>
+    <div class="valor-empresa ${fixo?'':'hidden'}" data-e-wrap="valor">
+      <label>Valor por entrega (R$)</label>
+      <input type="number" min="0" step="0.01" data-e="valorEntrega" value="${Number(empresa.valorEntrega)||0}">
+    </div>
+  </div>`;
+}
+function adicionarEmpresa(empresa){
+  document.getElementById('lista-empresas').insertAdjacentHTML('beforeend', empresaCardHtml(empresa));
+  const card = document.getElementById('lista-empresas').lastElementChild;
+  card.querySelector('[data-e=modo]').addEventListener('change', (e)=>{
+    card.querySelector('[data-e-wrap=valor]').classList.toggle('hidden', e.target.value!=='fixo');
+  });
+}
+function lerEmpresas(){
+  return [...document.querySelectorAll('#lista-empresas .empresa-card')].map(card=>({
+    nome: card.querySelector('[data-e=nome]').value.trim(),
+    modo: card.querySelector('[data-e=modo]').value,
+    valorEntrega: card.querySelector('[data-e=valorEntrega]').value,
+  })).filter(empresa=>empresa.nome);
+}
+
+function renderRegraKm(regraKm){
+  const porId = new Map((regraKm?.faixas||[]).map(faixa=>[faixa.id,faixa]));
+  document.getElementById('r-km-ativo').checked = !!regraKm?.ativo;
+  document.getElementById('r-km-faixas').classList.toggle('hidden', !regraKm?.ativo);
+  document.getElementById('r-km-faixas').innerHTML = FAIXAS_KM.map(([id,label])=>`
+    <div><label>${label} (R$)</label><input type="number" min="0" step="0.01" data-km-id="${id}" value="${Number(porId.get(id)?.valor)||0}"></div>`).join('');
+}
+document.getElementById('r-km-ativo').addEventListener('change', (e)=>{
+  document.getElementById('r-km-faixas').classList.toggle('hidden', !e.target.checked);
+});
+function lerRegraKm(){
+  return {
+    ativo: document.getElementById('r-km-ativo').checked,
+    faixas: [...document.querySelectorAll('[data-km-id]')].map(input=>({id:input.dataset.kmId,valor:input.value})),
+  };
+}
 
 // ---------- construtor de campos de valor (um "card" por campo) ----------
 function campoCardHtml(c){
@@ -318,10 +394,13 @@ function abrirEdicao(codigo){
   document.getElementById('modelo-total-aviso').classList.toggle('hidden', !total);
   document.querySelector(`input[name=modo][value="${r.modo}"]`).checked = true;
   document.getElementById('campos-fixo').classList.toggle('hidden', total || r.modo!=='fixo');
-  document.getElementById('campos-plataforma').classList.toggle('hidden', total || r.modo==='fixo');
   document.getElementById('r-plataformaNome').value = r.plataformaNome || '';
+  document.getElementById('r-entregadoresFixos').value = (r.entregadoresFixos||[]).join('\n');
   document.getElementById('lista-campos').innerHTML = '';
   (r.camposValor||[]).forEach(c=>adicionarCampo(c));
+  document.getElementById('lista-empresas').innerHTML = '';
+  (r.empresas||[]).forEach(empresa=>adicionarEmpresa(empresa));
+  renderRegraKm(r.regraKm);
   document.getElementById('regra-err').classList.add('hidden');
   regraOverlay.classList.add('show');
 }
@@ -335,6 +414,9 @@ document.getElementById('regra-form').addEventListener('submit', async (e)=>{
     modo: document.querySelector('input[name=modo]:checked').value,
     modeloLancamento: regraDaUnidade(EDITANDO_UNIDADE).modeloLancamento || 'detalhado',
     plataformaNome: document.getElementById('r-plataformaNome').value,
+    entregadoresFixos: document.getElementById('r-entregadoresFixos').value.split(/[\n,;]+/).map(n=>n.trim()).filter(Boolean),
+    empresas: lerEmpresas(),
+    regraKm: lerRegraKm(),
     camposValor: lerCamposValor(),
   };
   try{
