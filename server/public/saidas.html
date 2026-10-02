@@ -339,7 +339,7 @@ let PODE_CONFERIR = false;
 let ENTRADAS = [];
 let CAIXA = { total: 0, porUnidade: [] };
 let ITENS = []; // lista bruta do periodo (inicio/fim), sem filtro de loja/grupo - esses dois filtram em memoria (ver renderTudo)
-let presetAtivo = 'mes';
+let presetAtivo = null;
 let CARREGAMENTO_SEQ = 0;
 let CARREGAMENTO_ABORT = null;
 
@@ -352,6 +352,15 @@ function setupPresets(){
   });
 }
 function aplicarPreset(tipo){
+  if(presetAtivo === tipo){
+    presetAtivo = null;
+    document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
+    document.getElementById('f-data-de').value = '';
+    document.getElementById('f-data-ate').value = '';
+    renderTudo();
+    carregar();
+    return;
+  }
   presetAtivo = tipo;
   document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
   const range = calcularPreset(tipo, isoLocal(agoraBrasilia()));
