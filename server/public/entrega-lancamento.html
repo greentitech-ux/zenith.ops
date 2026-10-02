@@ -115,8 +115,8 @@
       <div><label>Data</label><input type="date" id="km-data" required></div>
       <div><label>Hora da entrada</label><input type="time" id="km-hora-entrada" required></div>
     </div>
-    <label>Nome do entregador</label>
-    <input type="text" id="km-entregador" placeholder="nome do motoboy" required>
+    <label>Entregador ativo</label>
+    <select id="km-entregador" required><option value="">selecione o entregador</option></select>
     <div class="msg hidden" id="msg-km-entrada"></div>
     <button class="btn-primary" type="submit" style="margin-top:10px;">Dar entrada agora</button>
   </form>
@@ -462,6 +462,9 @@ function atualizarModoUnidade(){
     ].join('') : '';
     atualizarModoRecebedor();
   }
+  const nomesAtivos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
+  const kmSelect = document.getElementById('km-entregador');
+  kmSelect.innerHTML = '<option value="">selecione o entregador</option>' + nomesAtivos.map(nome=>`<option value="${escapeHtml(nome)}">${escapeHtml(nome)}</option>`).join('');
   renderPainelKm();
 }
 

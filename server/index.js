@@ -17859,7 +17859,12 @@ app.get('/api/entregas/regras', requireAnySection('entregas', 'entregas-lancamen
   const unidades = req.isMaster
     ? candidatas
     : candidatas.filter((unidade) => (req.permissions.unidades || []).includes(unidade));
-  res.json(unidades.map((u) => porUnidade[u] || entregasRegras.defaultRegra(u)));
+  const regrasComEntregadoresAtivos = await Promise.all(unidades.map(async (u) => {
+    const regra = porUnidade[u] || entregasRegras.defaultRegra(u);
+    const ativos = await entregadoresEntregas.listarAtivos(u);
+    return { ...regra, entregadoresFixos: ativos.map((entregador) => entregador.nome) };
+  }));
+  res.json(regrasComEntregadoresAtivos);
 });
 
 app.put('/api/entregas/regras/:unidade', auth.requireMaster, async (req, res) => {
@@ -17948,17 +17953,29 @@ app.get('/api/entregas/entregadores', requireSection('entregas-lancamento'), asy
   const unidade = String(req.query.unidade || '');
   if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
   if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-  res.json(await entregadoresEntregas.listarAtivos(unidade));
+  res.json(req.query.todos === '1'
+    ? await entregadoresEntregas.listarTodos(unidade)
+    : await entregadoresEntregas.listarAtivos(unidade));
 });
 
 app.post('/api/entregas/entregadores', requireSection('entregas-lancamento'), async (req, res) => {
   try {
-    const { unidade, nome, tipo } = req.body || {};
+    const { unidade, nome, telefone, tipo } = req.body || {};
     if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     if (!(await unidadesExtras.apareceEm(unidade, 'entregas'))) return res.status(400).json({ error: 'Essa unidade não tem Entregas habilitado.' });
-    const criado = await entregadoresEntregas.criar({ unidade, nome, tipo, porId: req.user.id, porEmail: req.user.email });
+    const criado = await entregadoresEntregas.criar({ unidade, nome, telefone, tipo, porId: req.user.id, porEmail: req.user.email });
     res.status(201).json(criado);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.patch('/api/entregas/entregadores/:id/ativo', requireSection('entregas-lancamento'), async (req, res) => {
+  try {
+    const { unidade, ativo } = req.body || {};
+    if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
+    if (typeof ativo !== 'boolean') return res.status(400).json({ error: 'Informe se o entregador deve ficar ativo.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await entregadoresEntregas.definirAtivo({ unidade, id: req.params.id, ativo, porEmail: req.user.email }));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 

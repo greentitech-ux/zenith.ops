@@ -11,6 +11,7 @@ const db = require('./firestore');
 const storage = require('./storage');
 const { createCache } = require('./liveCache');
 const entregasRegras = require('./entregasRegras');
+const entregadoresEntregas = require('./entregadoresEntregas');
 
 const COLLECTION = db.collection('entregasLive');
 const EDITS = db.collection('entregaEdicoes');
@@ -57,6 +58,18 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
   const empresas = Array.isArray(regra.empresas) ? regra.empresas : [];
   const empresa = empresas.find((item) => item.nome.toLocaleLowerCase('pt-BR') === registro.entregador.toLocaleLowerCase('pt-BR'));
   const ehEmpresa = tipoRecebedor === 'empresa' || !!empresa;
+  let entregadorCadastrado = null;
+  let temCadastroDeEntregadores = false;
+  if (!ehEmpresa && regra.modeloLancamento !== 'total') {
+    const cadastrados = await entregadoresEntregas.listarTodos(unidade);
+    temCadastroDeEntregadores = cadastrados.length > 0;
+    entregadorCadastrado = cadastrados.find((item) => item.ativo !== false
+      && item.nome.toLocaleLowerCase('pt-BR') === registro.entregador.toLocaleLowerCase('pt-BR')) || null;
+    if (temCadastroDeEntregadores && !entregadorCadastrado) {
+      throw new Error('Selecione um entregador ativo cadastrado para essa unidade.');
+    }
+    if (entregadorCadastrado) registro.entregador = entregadorCadastrado.nome;
+  }
   if (ehEmpresa) {
     if (!empresa) throw new Error('Selecione uma empresa/plataforma cadastrada para essa unidade.');
     const quantidade = numeroInteiroPositivo(campos?.entrega);
@@ -85,10 +98,12 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
       modeloLancamento: 'total', detalhesValor: [{ campo: 'valorTotal', label: 'Valor total informado', valor: valorTotal }],
       camposRemovidos: [], motivoRemocaoCampos: null,
     });
-  } else if (regra.modo === 'fixo' && entregadoresFixos.length) {
-    const nomeCadastrado = entregadoresFixos.find((nome) => nome.toLocaleLowerCase('pt-BR') === registro.entregador.toLocaleLowerCase('pt-BR'));
-    if (!nomeCadastrado) throw new Error('Selecione um entregador cadastrado para essa unidade.');
-    registro.entregador = nomeCadastrado;
+  } else if (regra.modo === 'fixo') {
+    // Mantém compatibilidade com regras antigas até que os nomes digitados
+    // manualmente sejam cadastrados na nova tela de entregadores.
+    const nomeLegado = !temCadastroDeEntregadores && entregadoresFixos.find((nome) => nome.toLocaleLowerCase('pt-BR') === registro.entregador.toLocaleLowerCase('pt-BR'));
+    if (!entregadorCadastrado && !nomeLegado) throw new Error('Selecione um entregador ativo cadastrado para essa unidade.');
+    registro.entregador = entregadorCadastrado?.nome || nomeLegado;
     registro.tipoRecebedor = 'entregador';
   }
   const camposValidosRemovidos = (ehEmpresa || regra.modeloLancamento === 'total') ? [] : (Array.isArray(camposRemovidos)

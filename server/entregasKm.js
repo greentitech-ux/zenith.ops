@@ -3,6 +3,7 @@
 // definitivo em entregasLive, usando as tarifas atuais da regra da unidade.
 const db = require('./firestore');
 const entregasRegras = require('./entregasRegras');
+const entregadoresEntregas = require('./entregadoresEntregas');
 
 const TURNOS = db.collection('entregasTurnosKm');
 const ENTREGAS = db.collection('entregasLive');
@@ -34,11 +35,13 @@ async function darEntrada({ unidade, unidadeNome, data, entregador, horaEntrada,
 
   const regra = await entregasRegras.getPara(unidade);
   if (!regra.regraKm?.ativo) throw new Error('A regra por KM não está ativa nessa unidade.');
+  const cadastrado = await entregadoresEntregas.encontrarAtivo(unidade, nome);
+  if (!cadastrado) throw new Error('Selecione um entregador ativo cadastrado nesta unidade.');
 
   const abertos = await TURNOS.where('status', '==', 'ABERTO').get();
   const duplicado = abertos.docs.some((doc) => {
     const turno = doc.data();
-    return turno.unidade === unidade && turno.entregador.toLocaleLowerCase('pt-BR') === nome.toLocaleLowerCase('pt-BR');
+    return turno.unidade === unidade && turno.entregador.toLocaleLowerCase('pt-BR') === cadastrado.nome.toLocaleLowerCase('pt-BR');
   });
   if (duplicado) throw new Error('Esse entregador já possui uma entrada aberta nessa unidade.');
 
@@ -49,7 +52,7 @@ async function darEntrada({ unidade, unidadeNome, data, entregador, horaEntrada,
     unidade,
     unidadeNome: unidadeNome || unidade,
     data,
-    entregador: nome,
+    entregador: cadastrado.nome,
     horaEntrada,
     horaSaida: null,
     status: 'ABERTO',
