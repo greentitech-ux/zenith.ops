@@ -12351,6 +12351,7 @@ app.get('/api/sangrias/do-dia', requireAnySection('lancamento', 'sangria'), asyn
 // lancamento); "verificar" e mais restrito (Master ou Admin) - decisao
 // explicita do usuario, a propria loja nao confere a propria sangria ----------
 app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   const { unidades, grupo, inicio, fim } = req.query;
   // fechamentosData: snapshot em memória sincronizado da planilha ARCFOOD
   // (ver /api/fechamentos acima) - saidasPainel.listar so le fechamentosLive

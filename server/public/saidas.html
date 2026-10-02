@@ -177,7 +177,7 @@
         <input type="date" id="f-data-ate" oninput="aoMudarFiltroData()">
       </div>
       <div style="flex:0 0 auto;min-width:auto;">
-        <button type="button" class="preset-btn" style="padding:10px 14px;color:var(--accent);" onclick="aplicarFiltrosData()">Aplicar filtros</button>
+        <button type="button" class="preset-btn" id="btn-aplicar-filtros" style="padding:10px 14px;color:var(--accent);" onclick="aplicarFiltrosData()">Aplicar filtros</button>
       </div>
     </div>
     <div class="presets" id="presets" style="margin-top:10px;"></div>
@@ -362,6 +362,9 @@ function aplicarPreset(tipo){
 function aoMudarFiltroData(){
   presetAtivo = null;
   document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
+  // Aplica imediatamente sobre os dados que já estão na tela. A consulta
+  // abaixo completa o resultado quando o período foi ampliado.
+  renderTudo();
   carregar();
 }
 function aplicarFiltrosData(){
@@ -483,6 +486,8 @@ async function carregar(){
   if(CARREGAMENTO_ABORT) CARREGAMENTO_ABORT.abort();
   const controller = new AbortController();
   CARREGAMENTO_ABORT = controller;
+  const btnFiltro = document.getElementById('btn-aplicar-filtros');
+  if(btnFiltro){ btnFiltro.disabled = true; btnFiltro.textContent = 'Atualizando…'; }
   const inicio = document.getElementById('f-data-de').value;
   const fim = document.getElementById('f-data-ate').value;
   const params = new URLSearchParams();
@@ -491,7 +496,7 @@ async function carregar(){
   // a rota passou a devolver {itens, entradas} - "entradas" so vem preenchido
   // pra Master/Admin (o gate e' no servidor, ver /api/saidas-painel)
   try{
-    const res = await fetch('/api/saidas-painel?'+params.toString(), { signal:controller.signal });
+    const res = await fetch('/api/saidas-painel?'+params.toString(), { signal:controller.signal, cache:'no-store' });
     if(!res.ok) throw new Error('HTTP '+res.status);
     const resp = await res.json();
     if(seq !== CARREGAMENTO_SEQ) return;
@@ -502,15 +507,26 @@ async function carregar(){
     renderTudo();
   }catch(err){
     if(err.name === 'AbortError' || seq !== CARREGAMENTO_SEQ) return;
+    if(btnFiltro) btnFiltro.textContent = 'Erro — tentar novamente';
     throw err;
   }finally{
-    if(seq === CARREGAMENTO_SEQ) CARREGAMENTO_ABORT = null;
+    if(seq === CARREGAMENTO_SEQ){
+      CARREGAMENTO_ABORT = null;
+      if(btnFiltro && btnFiltro.textContent !== 'Erro — tentar novamente') btnFiltro.textContent = 'Aplicar filtros';
+      if(btnFiltro) btnFiltro.disabled = false;
+    }
   }
 }
 
 // o periodo ja veio filtrado do servidor; grupo e unidade sao filtro de tela
 function passaNoFiltro(it, grupo){
-  return (!grupo || it.grupo===grupo) && (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(it.unidade));
+  const inicio = document.getElementById('f-data-de').value;
+  const fim = document.getElementById('f-data-ate').value;
+  const data = it.data || '';
+  return (!grupo || it.grupo===grupo)
+    && (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(it.unidade))
+    && (!inicio || data >= inicio)
+    && (!fim || data <= fim);
 }
 function itensFiltrados(){
   const grupo = document.getElementById('f-grupo').value;
@@ -618,7 +634,9 @@ function renderTudo(){
     // loja quando filtrado" - antes o total era fixo porque Grupo/Loja
     // filtram em memória e nunca chegam ao servidor.
     const grupoSel = document.getElementById('f-grupo').value;
-    const caixaDoFiltro = (CAIXA.porUnidade || []).filter(u =>
+    const fimAtual = document.getElementById('f-data-ate').value || '';
+    const caixaCorrespondeAoPeriodo = String(CAIXA.ate || '') === fimAtual;
+    const caixaDoFiltro = (caixaCorrespondeAoPeriodo ? (CAIXA.porUnidade || []) : []).filter(u =>
       (!grupoSel || u.grupo === grupoSel) && (SEL_UNIDADE.size === 0 || SEL_UNIDADE.has(u.unidade)));
     // loja sem sangria lançada não tem janela nem base (ver dinheiroEmLoja):
     // fica fora da soma - contar o histórico inteiro como gaveta foi o que
