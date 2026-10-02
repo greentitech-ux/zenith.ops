@@ -6,7 +6,8 @@ function carregar(nome,mocks={},sabotar=false){
   const arquivo=path.join(__dirname,nome+'.js'),m=new Module(arquivo,module);m.filename=arquivo;m.paths=module.paths;
   m.require=k=>k==='./firestore'?db:k in mocks?mocks[k]:require(k);
   let fonte=fs.readFileSync(arquivo,'utf8');
-  if(sabotar)fonte=fonte.replace('calcularCoop(regra,registro.entrega)','calcularCoop(regra,registro.entrega+registro.extra+registro.retorno)');
+  if(sabotar==='observacoes')fonte=fonte.replace('  validarObservacoes(registro);','');
+  else if(sabotar)fonte=fonte.replace('calcularCoop(regra,registro.entrega)','calcularCoop(regra,registro.entrega+registro.extra+registro.retorno)');
   m._compile(fonte,arquivo);return m.exports;
 }
 async function teste(sabotar=false){
@@ -14,9 +15,12 @@ async function teste(sabotar=false){
   const entregadores={listarTodos:async()=>[],encontrarAtivo:async()=>({nome:'Pedro Silva'})};
   const live=carregar('entregasLive',{'./entregasRegras':regras,'./storage':{},'./entregadoresEntregas':entregadores},sabotar);
   const salvar=(unidade,valor,ativo=true,modo='plataforma',outros={})=>regras.salvar(unidade,{modo,regraCoop:{ativo,valorEntrega:valor},...outros},'master');
-  const criar=(unidade,campos={},outros={})=>live.create({unidade,data:'2026-10-02',entregador:'Pedro Silva',campos:{entrega:13,extra:4,retorno:3,pos00hs:6,foraDeArea:2,valor:100,coopRecebe:999,quantTotal:999,...campos},...outros});
+  const criar=(unidade,campos={},outros={})=>live.create({unidade,data:'2026-10-02',entregador:'Pedro Silva',obsExtra:'Distância',obsRetorno:'Cliente ausente',campos:{entrega:13,extra:4,retorno:3,pos00hs:6,foraDeArea:2,valor:100,coopRecebe:999,quantTotal:999,...campos},...outros});
   await salvar('Garanhuns',1,true,'fixo',{entregadoresFixos:['Pedro Silva'],camposValor:[{label:'Entrega',base:'entrega',valorPadrao:8},{label:'Pos 00h',base:'pos00hs',valorPadrao:.5},{label:'Fora de área',base:'foraDeArea',valorPadrao:2},{label:'Coop inválida',base:'extra',destino:'coopRecebe',valorPadrao:999}]});
   const a=await criar('Garanhuns');assert.equal(a.coopRecebe,13);assert.equal(a.quantTotal,20);assert.equal(a.valor,111,'O repasse não soma nem desconta do pagamento');
+  await assert.rejects(criar('Garanhuns',{}, {obsExtra:''}),/observação de Extra/);
+  await assert.rejects(criar('Garanhuns',{}, {obsRetorno:'   '}),/observação de Retorno/);
+  await criar('Garanhuns',{extra:0,retorno:0},{obsExtra:'',obsRetorno:''});
   await salvar('Outra',1.5);assert.equal((await criar('Outra')).coopRecebe,19.5);
   await salvar('Desativada',2,false);assert.equal((await criar('Desativada')).coopRecebe,0);
   assert.equal((await criar('Sem regra')).coopRecebe,0);
@@ -48,4 +52,4 @@ async function teste(sabotar=false){
   conferir();assert.equal(obter('preview-coop-linha').classList.oculto,false);assert.equal(obter('preview-coopRecebe').textContent,'19.50');
   regraTela.regraCoop.ativo=false;conferir();assert.equal(obter('preview-coop-linha').classList.oculto,true);assert.equal(obter('f-coopRecebe').value,'0.00');
 }
-(async()=>{await teste();console.log('✓ COOP só por entrega: ativo/inativo, tarifas por unidade, fixo/manual/empresa/total/KM, histórico, correção e quantidade total automática');let falhou=false;try{await teste(true)}catch(e){falhou=true}assert(falhou,'Sabotagem deve falhar');console.log('✓ Sabotagem detectada: incluir Extra/Retorno no COOP reprova o teste');})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{await teste();console.log('✓ COOP por entrega, quantidade total e observações obrigatórias de Extra/Retorno');await assert.rejects(teste(true));console.log('✓ Sabotagem detectada: incluir Extra/Retorno no COOP reprova o teste');await assert.rejects(teste('observacoes'));console.log('✓ Sabotagem detectada: aceitar Extra/Retorno sem observação reprova o teste');})().catch(e=>{console.error(e);process.exitCode=1});

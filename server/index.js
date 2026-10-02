@@ -18064,8 +18064,8 @@ app.patch('/api/entregas/entregadores/solicitacoes/:id', auth.requireMaster, asy
 });
 
 app.get('/api/entregas/meus', requireSection('entregas-lancamento'), async (req, res) => {
-  if (req.isMaster) return res.json(await entregasLive.listAll());
-  res.json(await entregasLive.listByUnidades(req.permissions.unidades || []));
+  if (req.isMaster) return res.json(await entregasLive.listarComHistorico());
+  res.json(await entregasLive.listByUnidades(req.permissions.unidades || [], true));
 });
 
 // dashboard de acompanhamento (secao separada - pode ser liberada sem dar
@@ -18213,7 +18213,7 @@ app.post('/api/entregas/:id/solicitar-edicao', requireSection('entregas-lancamen
   try {
     const atual = await entregasLive.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Lançamento não encontrado.' });
-    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
+    if ((!req.isMaster || req.isQaMaster) && !(req.permissions.unidades || []).includes(atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const pedido = await entregasLive.solicitarEdicao({
@@ -18231,7 +18231,7 @@ app.post('/api/entregas/:id/solicitar-edicao', requireSection('entregas-lancamen
 });
 
 // edicao direta - so o Master, sem fila de aprovacao (ainda fica no historico)
-app.patch('/api/entregas/:id/editar-direto', auth.requireMaster, async (req, res) => {
+app.patch('/api/entregas/:id/editar-direto', requireMasterDeVerdade, async (req, res) => {
   try {
     const registro = await entregasLive.editarDireto({
       entregaId: req.params.id,
@@ -18249,11 +18249,34 @@ app.patch('/api/entregas/:id/editar-direto', auth.requireMaster, async (req, res
 
 app.get('/api/entregas/edicoes', requireSection('entregas-lancamento'), async (req, res) => {
   const todas = await entregasLive.listarEdicoes();
-  if (req.isMaster) return res.json(todas);
+  if (req.isMaster && !req.isQaMaster) return res.json(todas);
   res.json(todas.filter((p) => p.solicitadoPorId === req.user.id));
 });
 
-app.patch('/api/entregas/edicoes/:id', auth.requireMaster, async (req, res) => {
+app.post('/api/entregas/:id/solicitar-acao', requireSection('entregas-lancamento'), async (req, res) => {
+  try {
+    const atual = await entregasLive.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Lançamento não encontrado.' });
+    if ((!req.isMaster || req.isQaMaster) && !(req.permissions.unidades || []).includes(atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const pedido = await entregasLive.solicitarAcao({ entregaId: req.params.id, tipoAcao: req.body.tipoAcao,
+      motivo: req.body.motivo, solicitadoPorId: req.user.id, solicitadoPorEmail: req.user.email });
+    broadcast('entrega-edicao-solicitada', pedido, 'entregas-lancamento');
+    broadcast('entrega-edicao-solicitada', pedido, 'entregas');
+    res.json(pedido);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.patch('/api/entregas/:id/acao-direta', requireMasterDeVerdade, async (req, res) => {
+  try {
+    const registro = await entregasLive.acaoDireta({ entregaId: req.params.id, tipoAcao: req.body.tipoAcao,
+      motivo: req.body.motivo, editadoPorEmail: req.user.email });
+    broadcast('entrega-editada-direto', registro, 'entregas-lancamento');
+    broadcast('entrega-editada-direto', registro, 'entregas');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.patch('/api/entregas/edicoes/:id', requireMasterDeVerdade, async (req, res) => {
   try {
     const pedido = await entregasLive.decidirEdicao(req.params.id, req.body.status, {
       decididoPorEmail: req.user.email,

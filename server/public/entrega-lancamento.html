@@ -50,6 +50,10 @@
   textarea{resize:vertical;min-height:56px;}
   input[type=file]{padding:8px 9px;font-size:12.5px;}
   .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
+  .totais-entrega{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:8px;align-items:end;}
+  .totais-entrega input{margin-bottom:0;}
+  .totais-entrega .resumo{height:44px;box-sizing:border-box;padding:0 12px;display:flex;align-items:center;}
+  .totais-entrega .linha{width:100%;}
   @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} }
   .resumo{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px;display:flex;flex-direction:column;gap:4px;}
   .resumo .linha{display:flex;justify-content:space-between;gap:8px;}
@@ -160,14 +164,14 @@
         <div id="wrap-f-extra"><label>Extra</label><input type="number" min="0" step="1" inputmode="numeric" id="f-extra" value="0"></div>
       </div>
       <div id="campos-adicionais-entrega">
-      <label>Obs. Extra (opcional)</label>
+      <label>Obs. Extra</label>
       <input type="text" id="f-obsExtra" placeholder="ex: distância, bairro">
 
       <div class="grid2">
         <div><label>Retorno</label><input type="number" min="0" step="1" inputmode="numeric" id="f-retorno" value="0"></div>
         <div><label>Pós 00h</label><input type="number" min="0" step="1" inputmode="numeric" id="f-pos00hs" value="0"></div>
       </div>
-      <label>Obs. Retorno (opcional)</label>
+      <label>Obs. Retorno</label>
       <input type="text" id="f-obsRetorno" placeholder="motivo do retorno">
 
       <label>Fora de área</label>
@@ -209,9 +213,6 @@
            entregador (ex: atrasou, saiu antes, gerou prejuízo) -->
       <div id="campos-calculados" class="hidden">
         <div class="resumo" id="preview-detalhes"></div>
-        <div class="resumo" style="margin-top:8px;">
-          <div class="linha"><span>Total a receber (calculado)</span><b id="preview-valor">R$ 0,00</b></div>
-        </div>
         <div id="wrap-campos-removiveis"></div>
         <div id="wrap-motivo-campos" class="hidden">
           <label>Motivo</label>
@@ -224,10 +225,15 @@
         </div>
       </div>
 
-      <div id="wrap-quantidade-total">
-        <label>Quantidade total</label>
-        <input type="number" step="1" inputmode="numeric" id="f-quantTotal" value="0" readonly>
-        <div class="sub">Entregas + Extra + Retorno (calculado automaticamente).</div>
+      <div class="totais-entrega">
+        <div id="wrap-quantidade-total">
+          <label>Quantidade Total</label>
+          <input type="number" step="1" inputmode="numeric" id="f-quantTotal" value="0" readonly>
+        </div>
+        <div id="wrap-total-receber" class="hidden">
+          <label>Total a receber</label>
+          <div class="resumo"><div class="linha"><b id="preview-valor">R$ 0,00</b></div></div>
+        </div>
       </div>
     </div>
 
@@ -292,6 +298,7 @@
       <label>Qual valor está errado e qual o valor correto?</label>
       <select id="e-campo"></select>
       <input type="number" step="0.01" id="e-valor" placeholder="valor correto" style="margin-top:8px;">
+      <div id="e-obs-wrap" class="hidden"><label id="e-obs-label">Observação</label><input type="text" id="e-obs"></div>
       <label>Motivo da correção</label>
       <textarea id="e-motivo" placeholder="explique o que aconteceu, o Master vai revisar antes de aprovar" required></textarea>
       <div class="msg hidden" id="msg-edicao"></div>
@@ -399,6 +406,15 @@ function atualizarSugestao(){
   const total = ['entrega','extra','retorno'].reduce((s,c)=>s+Math.max(0,num(document.getElementById('f-'+c).value)),0);
   document.getElementById('f-quantTotal').value=total;
 }
+function atualizarObrigatoriedadeObservacoes(){
+  const aplica=!ehModeloTotal() && !empresaSelecionada();
+  for(const [campo,obs] of [['extra','obsExtra'],['retorno','obsRetorno']]){
+    const input=document.getElementById('f-'+obs);
+    input.required=aplica && num(document.getElementById('f-'+campo).value)>0;
+    input.setCustomValidity(input.required && !input.value.trim() ? `Informe a observação de ${campo==='extra'?'Extra':'Retorno'}.` : '');
+  }
+}
+['extra','retorno','obsExtra','obsRetorno'].forEach(c=>document.getElementById('f-'+c).addEventListener('input',atualizarObrigatoriedadeObservacoes));
 function atualizarConferenciaCampina(){
   const quantidade = num(document.getElementById('f-campina-quantidade').value);
   const valor = num(document.getElementById('f-campina-valor').value);
@@ -440,6 +456,7 @@ function atualizarModoUnidade(){
   document.getElementById('f-entregador-campina').required = total;
   document.getElementById('campos-manual').classList.toggle('hidden', fixo || total);
   document.getElementById('campos-calculados').classList.toggle('hidden', !fixo || total);
+  document.getElementById('wrap-total-receber').classList.toggle('hidden', !fixo || total);
   document.getElementById('titulo-lancamento').textContent = total ? 'Lançamento de entregas · Campina Grande' : 'Nova corrida / turno';
   const contexto = document.getElementById('contexto-unidade');
   contexto.classList.toggle('hidden', !total);
@@ -468,6 +485,7 @@ function atualizarModoUnidade(){
   kmSelect.innerHTML = '<option value="">selecione o entregador</option>' + nomesAtivos.map(nome=>`<option value="${escapeHtml(nome)}">${escapeHtml(nome)}</option>`).join('');
   renderPainelKm();
   atualizarPreviewCalculado();
+  atualizarObrigatoriedadeObservacoes();
 }
 
 function entregadorSelecionado(){
@@ -513,6 +531,8 @@ function atualizarModoRecebedor(){
   document.getElementById('wrap-f-coopRecebe').classList.add('hidden');
   document.getElementById('campos-manual').classList.toggle('hidden', calculado);
   document.getElementById('campos-calculados').classList.toggle('hidden', !calculado);
+  document.getElementById('wrap-total-receber').classList.toggle('hidden', !calculado);
+  atualizarObrigatoriedadeObservacoes();
   if(entregadorFixo) renderCamposRemoviveis();
   else {
     document.getElementById('wrap-campos-removiveis').innerHTML = '';
@@ -728,8 +748,9 @@ function renderLista(){
     <div class="card">
       <div class="linha1">
         <span>${escapeHtml(f.entregador)} · ${escapeHtml(f.unidadeNome||f.unidade)} · ${fmtData(f.data)}</span>
-        ${pendente?'<span class="badge PENDENTE">correção pendente</span>':''}
-        ${decidida?`<span class="badge ${decidida.status}">${decidida.status==='APROVADO'?'correção aprovada':'correção rejeitada'}</span>`:''}
+        ${pendente?'<span class="badge PENDENTE">solicitação pendente</span>':''}
+        ${decidida?`<span class="badge ${decidida.status}">${decidida.status==='APROVADO'?'solicitação aprovada':'solicitação rejeitada'}</span>`:''}
+        ${['CANCELADO','EXCLUIDO'].includes(f.situacao)?`<span class="badge REJEITADO">${f.situacao==='CANCELADO'?'Cancelado':'Excluído'} · fora dos totais</span>`:''}
         ${(f.camposRemovidos&&f.camposRemovidos.length)?`<span class="badge REJEITADO" title="${escapeHtml(f.camposRemovidos.join(', '))}">Campo(s) removido(s) · ${escapeHtml(MOTIVOS_REMOCAO_LABEL[f.motivoRemocaoCampos]||'—')}</span>`:''}
       </div>
       <div class="sub">lançado em ${new Date(f.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR})}${f.etiquetaPath?' · <a href="/api/entregas/etiqueta/'+f.id+'?token='+encodeURIComponent(AUTH_TOKEN)+'" target="_blank" style="color:var(--accent);">📎 etiqueta</a>':''}</div>
@@ -738,13 +759,39 @@ function renderLista(){
         <span>Extra <b>${f.extra}</b></span>
         <span>Valor <b>${fmtMoney(f.valor)}</b></span>
       </div>
-      ${IS_MASTER
+      ${['CANCELADO','EXCLUIDO'].includes(f.situacao)?'':IS_MASTER
         ? '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEditarMaster(\''+f.id+'\')">✎ Editar (Master)</button>'
+          + '<button type="button" class="link-btn" style="margin:8px;" onclick="acaoEntrega(\''+f.id+'\',\'cancelar\')">Cancelar</button>'
+          + '<button type="button" class="link-btn" style="margin:8px;color:var(--bad);" onclick="acaoEntrega(\''+f.id+'\',\'excluir\')">Excluir</button>'
         : (pendente?'':'<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEdicao(\''+f.id+'\')">Pedir correção</button>')}
+      ${!IS_MASTER && !pendente && !['CANCELADO','EXCLUIDO'].includes(f.situacao)
+        ? `<button type="button" class="link-btn" style="margin:8px;" onclick="acaoEntrega('${f.id}','cancelar')">Pedir cancelamento</button><button type="button" class="link-btn" style="margin:8px;" onclick="acaoEntrega('${f.id}','excluir')">Pedir exclusão</button>` : ''}
     </div>`;
   }).join('');
 }
 
+const ACOES_EM_ANDAMENTO = new Set();
+async function acaoEntrega(id,tipoAcao){
+  if(ACOES_EM_ANDAMENTO.has(id)) return;
+  const f=MEUS.find(x=>x.id===id);
+  if(!f || ['CANCELADO','EXCLUIDO'].includes(f.situacao)) return;
+  const verbo=tipoAcao==='cancelar'?'cancelar':'excluir';
+  const motivo=prompt(`Motivo para ${IS_MASTER?'':'pedir para '}${verbo} o lançamento de ${f.entregador}:`);
+  if(motivo===null) return;
+  if(!motivo.trim()){ alert('Informe o motivo.'); return; }
+  if(IS_MASTER && !confirm(`Confirma ${verbo} este lançamento? Ele sairá dos totais, mas o histórico será preservado.`)) return;
+  ACOES_EM_ANDAMENTO.add(id);
+  try{
+    const r=await fetch(`/api/entregas/${encodeURIComponent(id)}/${IS_MASTER?'acao-direta':'solicitar-acao'}`,{
+      method:IS_MASTER?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipoAcao,motivo:motivo.trim()})
+    });
+    const resultado=await r.json();
+    if(!r.ok) throw new Error(resultado.error||'Não foi possível concluir a ação.');
+    await carregar();
+    if(!IS_MASTER) alert('Solicitação enviada para decisão do Master. O lançamento ainda não foi alterado.');
+  }catch(e){ alert(e.message); }
+  finally{ ACOES_EM_ANDAMENTO.delete(id); }
+}
 function abrirEdicao(id){
   EDITANDO_ID = id;
   const f = MEUS.find(x=>x.id===id);
@@ -753,9 +800,18 @@ function abrirEdicao(id){
   document.getElementById('e-valor').value = '';
   document.getElementById('e-motivo').value = '';
   document.getElementById('msg-edicao').classList.add('hidden');
+  atualizarObsCorrecao();
   document.getElementById('overlay-edicao').classList.remove('hidden');
 }
 function fecharEdicao(){ document.getElementById('overlay-edicao').classList.add('hidden'); EDITANDO_ID=null; }
+function atualizarObsCorrecao(){
+  const campo=document.getElementById('e-campo').value;
+  const obs=campo==='extra'?'obsExtra':campo==='retorno'?'obsRetorno':null;
+  document.getElementById('e-obs-wrap').classList.toggle('hidden',!obs);
+  document.getElementById('e-obs-label').textContent=campo==='extra'?'Obs. Extra':'Obs. Retorno';
+  document.getElementById('e-obs').value=obs?(MEUS.find(f=>f.id===EDITANDO_ID)?.[obs]||''):'';
+}
+document.getElementById('e-campo').addEventListener('change',atualizarObsCorrecao);
 
 document.getElementById('form-edicao').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
@@ -770,9 +826,11 @@ document.getElementById('form-edicao').addEventListener('submit', async (ev)=>{
   const textoOriginal = btnEnviar.textContent;
   btnEnviar.textContent = 'Enviando...';
   try{
+    const mudancas={ [campo]:valor };
+    if(['extra','retorno'].includes(campo)) mudancas[campo==='extra'?'obsExtra':'obsRetorno']=document.getElementById('e-obs').value;
     const res = await fetch(`/api/entregas/${EDITANDO_ID}/solicitar-edicao`, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ mudancas: { [campo]: valor }, motivo }),
+      body: JSON.stringify({ mudancas, motivo }),
     });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'erro ao enviar pedido');
@@ -862,6 +920,8 @@ document.getElementById('form-lancar').addEventListener('keydown', (ev)=>{
 
 document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
+  atualizarObrigatoriedadeObservacoes();
+  if(!ev.target.reportValidity()) return;
   if(!confirm('Tem certeza que deseja finalizar esse lançamento de entrega? Confira os valores antes de continuar - depois de lançado, qualquer correção precisa passar por aprovação do Master.')) return;
   const btn = document.getElementById('btn-enviar');
   const msg = document.getElementById('msg');
@@ -925,7 +985,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();
-  const isMaster = ME.role==='master';
+  const isMaster = ME.role==='master' && !ME.qaMaster;
   IS_MASTER = isMaster;
   const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','inventario'] : (ME.permissions?.sections||[]);
 

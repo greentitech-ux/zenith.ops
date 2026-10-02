@@ -26,6 +26,14 @@ function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+function validarObservacoes(registro, alteracoes = null) {
+  for (const [campo, obs, nome] of [['extra', 'obsExtra', 'Extra'], ['retorno', 'obsRetorno', 'Retorno']]) {
+    if (alteracoes && !(campo in alteracoes) && !(obs in alteracoes)) continue;
+    if (num(registro[campo]) > 0 && !String(registro[obs] || '').trim()) {
+      throw new Error(`Informe a observação de ${nome} quando a quantidade for maior que zero.`);
+    }
+  }
+}
 
 function numeroInteiroPositivo(v) {
   const n = Number(v);
@@ -143,6 +151,7 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
   registro.regraCoop=entregasRegras.configuracaoCoop(regra);
   registro.obsRetorno = obsRetorno || null;
   registro.obsExtra = obsExtra || null;
+  validarObservacoes(registro);
   registro.observacao = observacao || null;
   registro.etiquetaPath = null;
 
@@ -167,16 +176,18 @@ async function listAllUncached() {
   return snap.docs.map((d) => d.data());
 }
 const entregasCache = createCache(listAllUncached, 5 * 60 * 1000);
-const listAll = entregasCache.cached;
+const listarComHistorico = entregasCache.cached;
+const estaAtivo = (registro) => !['CANCELADO', 'EXCLUIDO'].includes(registro.situacao);
+async function listAll() { return (await listarComHistorico()).filter(estaAtivo); }
 
 
 // filtra EM MEMORIA sobre o cache compartilhado - a query direta por
 // unidade (where in) nao passava pelo cache e virava uma leitura completa
 // no Firestore a cada chamada (ver o estouro de leituras de 2026-08-09)
-async function listByUnidades(unidades) {
+async function listByUnidades(unidades, incluirInativos = false) {
   if (!unidades || !unidades.length) return [];
   const alvo = new Set(unidades);
-  return (await listAll()).filter((r) => alvo.has(r.unidade));
+  return (await (incluirInativos ? listarComHistorico() : listAll())).filter((r) => alvo.has(r.unidade));
 }
 
 async function getOne(id) {
@@ -200,6 +211,7 @@ function fmtValorEntrega(campo, valor) {
 }
 function montarResumoMudancasEntrega(pedido, atual) {
   return Object.entries(pedido.mudancas || {}).map(([campo, valor]) => {
+    if (['obsExtra', 'obsRetorno'].includes(campo)) return `${campo === 'obsExtra' ? 'Obs. Extra' : 'Obs. Retorno'}: ${atual[campo] || 'não tinha'} → ${valor || 'vazio'}`;
     const anterior = atual[campo] != null ? fmtValorEntrega(campo, atual[campo]) : 'não tinha';
     return `${NOMES_CAMPOS_ENTREGA[campo] || campo}: ${anterior} → ${fmtValorEntrega(campo, valor)}`;
   });
@@ -208,6 +220,7 @@ function montarResumoMudancasEntrega(pedido, atual) {
 async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, solicitadoPorEmail }) {
   const atual = await getOne(entregaId);
   if (!atual) throw new Error('Lançamento não encontrado.');
+  if (!estaAtivo(atual)) throw new Error('Lançamento cancelado ou excluído não pode ser corrigido.');
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
 
   // 1 correcao pendente por lançamento - mesmo racional do guard de
@@ -217,6 +230,7 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
   const camposValidos = {};
   Object.entries(mudancas || {}).forEach(([campo, valor]) => {
     if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = num(valor);
+    else if (['obsExtra', 'obsRetorno'].includes(campo)) camposValidos[campo] = String(valor || '').trim().slice(0, 500);
   });
   if (atual.modeloLancamento === 'total') {
     const permitidos = new Set(['entrega', 'valor']);
@@ -226,6 +240,7 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
     if ('entrega' in camposValidos) camposValidos.quantTotal = camposValidos.entrega;
   }
   completarDerivados(atual,camposValidos);
+  validarObservacoes({ ...atual, ...camposValidos }, camposValidos);
   if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para corrigir.');
 
   const ref = EDITS.doc();
@@ -262,6 +277,7 @@ const CAMPOS_TEXTO = ['entregador', 'obsRetorno', 'obsExtra', 'observacao'];
 async function editarDireto({ entregaId, mudancas, motivo, editadoPorEmail }) {
   const atual = await getOne(entregaId);
   if (!atual) throw new Error('Lançamento não encontrado.');
+  if (!estaAtivo(atual)) throw new Error('Lançamento cancelado ou excluído não pode ser editado.');
   const camposValidos = {};
   Object.entries(mudancas || {}).forEach(([campo, valor]) => {
     if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = num(valor);
@@ -277,21 +293,25 @@ async function editarDireto({ entregaId, mudancas, motivo, editadoPorEmail }) {
   completarDerivados(atual,camposValidos);
   if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para alterar.');
 
-  const valoresAnteriores = {};
-  Object.keys(camposValidos).forEach((campo) => { valoresAnteriores[campo] = atual[campo]; });
-
-  const historico = [...(atual.historico || []), {
-    em: new Date().toISOString(),
-    por: editadoPorEmail,
-    motivo: (motivo && String(motivo).trim()) || '(edição direta do Master)',
-    valoresAnteriores,
-    valoresNovos: camposValidos,
-  }];
-
   const ref = COLLECTION.doc(entregaId);
-  await ref.update({ ...camposValidos, historico, atualizadoEm: new Date().toISOString() });
+  const registro = await db.runTransaction(async (tx) => {
+    const doc = await tx.get(ref);
+    if (!doc.exists) throw new Error('Lançamento não encontrado.');
+    const recente = doc.data();
+    if (!estaAtivo(recente)) throw new Error('Lançamento cancelado ou excluído não pode ser editado.');
+    completarDerivados(recente, camposValidos);
+    validarObservacoes({ ...recente, ...camposValidos }, camposValidos);
+    const valoresAnteriores = {};
+    Object.keys(camposValidos).forEach(c => { valoresAnteriores[c] = recente[c]; });
+    const agora = new Date().toISOString();
+    const historico = [...(recente.historico || []), { em: agora, por: editadoPorEmail,
+      motivo: (motivo && String(motivo).trim()) || '(edição direta do Master)',
+      valoresAnteriores, valoresNovos: camposValidos }];
+    tx.update(ref, { ...camposValidos, historico, atualizadoEm: agora });
+    return { ...recente, ...camposValidos, historico };
+  });
   entregasCache.invalidar();
-  return { ...atual, ...camposValidos, historico };
+  return registro;
 }
 
 
@@ -318,46 +338,95 @@ async function listarEdicoesUncached() {
 const edicoesEntregaCache = createCache(listarEdicoesUncached, 5 * 60 * 1000);
 const listarEdicoes = edicoesEntregaCache.cached;
 
+function situacaoAcao(tipoAcao) {
+  if (tipoAcao === 'cancelar') return 'CANCELADO';
+  if (tipoAcao === 'excluir') return 'EXCLUIDO';
+  throw new Error('Ação inválida.');
+}
+function patchAcao(atual, tipoAcao, motivo, por, pedidoId = null) {
+  const situacao = situacaoAcao(tipoAcao);
+  if (!estaAtivo(atual)) throw new Error('Lançamento já cancelado ou excluído.');
+  const agora = new Date().toISOString();
+  return { situacao, atualizadoEm: agora, historico: [...(atual.historico || []), {
+    em: agora, por, motivo, tipoAcao, pedidoId,
+    valoresAnteriores: { situacao: atual.situacao || 'ATIVO' }, valoresNovos: { situacao },
+  }] };
+}
+async function solicitarAcao({ entregaId, tipoAcao, motivo, solicitadoPorId, solicitadoPorEmail }) {
+  situacaoAcao(tipoAcao);
+  motivo = String(motivo || '').trim();
+  if (!motivo) throw new Error('Descreva o motivo da solicitação.');
+  const entRef = COLLECTION.doc(entregaId), ref = EDITS.doc();
+  const pedido = await db.runTransaction(async (tx) => {
+    const doc = await tx.get(entRef);
+    if (!doc.exists) throw new Error('Lançamento não encontrado.');
+    const atual = doc.data();
+    if (!estaAtivo(atual)) throw new Error('Lançamento já cancelado ou excluído.');
+    const pendentes = await tx.get(EDITS.where('entregaId', '==', entregaId).where('status', '==', 'PENDENTE'));
+    if (!pendentes.empty) throw new Error('Já existe uma solicitação pendente para esse lançamento.');
+    const novo = { id: ref.id, entregaId, tipoAcao, unidade: atual.unidade, unidadeNome: atual.unidadeNome || atual.unidade,
+      data: atual.data, entregador: atual.entregador, mudancas: {},
+      resumoMudancas: [tipoAcao === 'cancelar' ? 'Cancelar lançamento e retirar dos totais.' : 'Excluir lançamento dos totais, preservando o histórico.'],
+      motivo, status: 'PENDENTE', solicitadoPorId, solicitadoPorEmail, criadoEm: new Date().toISOString(),
+      decididoPorEmail: null, decididoEm: null, motivoDecisao: null };
+    tx.set(ref, novo);
+    return novo;
+  });
+  edicoesEntregaCache.invalidar();
+  return pedido;
+}
+async function acaoDireta({ entregaId, tipoAcao, motivo, editadoPorEmail }) {
+  motivo = String(motivo || '').trim();
+  if (!motivo) throw new Error('Descreva o motivo da ação.');
+  const ref = COLLECTION.doc(entregaId);
+  const registro = await db.runTransaction(async (tx) => {
+    const doc = await tx.get(ref);
+    if (!doc.exists) throw new Error('Lançamento não encontrado.');
+    const atual = doc.data(), patch = patchAcao(atual, tipoAcao, motivo, editadoPorEmail);
+    tx.update(ref, patch);
+    return { ...atual, ...patch };
+  });
+  entregasCache.invalidar(); edicoesEntregaCache.invalidar();
+  return registro;
+}
 async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
   if (!['APROVADO', 'REJEITADO'].includes(status)) throw new Error('Status inválido.');
   const ref = EDITS.doc(id);
-  const doc = await ref.get();
-  if (!doc.exists) throw new Error('Pedido não encontrado.');
-  const pedido = doc.data();
-  if (pedido.status !== 'PENDENTE') throw new Error('Esse pedido já foi decidido.');
-
-  await ref.update({
-    status,
-    decididoPorEmail,
-    motivoDecisao: motivoDecisao || null,
-    decididoEm: new Date().toISOString(),
-  });
-  edicoesEntregaCache.invalidar();
-
-  if (status === 'APROVADO') {
-    const entRef = COLLECTION.doc(pedido.entregaId);
-    const entDoc = await entRef.get();
-    if (entDoc.exists) {
+  const resultado = await db.runTransaction(async (tx) => {
+    const doc = await tx.get(ref);
+    if (!doc.exists) throw new Error('Pedido não encontrado.');
+    const pedido = doc.data();
+    if (pedido.status !== 'PENDENTE') throw new Error('Esse pedido já foi decidido.');
+    if (status === 'APROVADO') {
+      const entRef = COLLECTION.doc(pedido.entregaId), entDoc = await tx.get(entRef);
+      if (!entDoc.exists) throw new Error('Lançamento não encontrado.');
       const atual = entDoc.data();
-      completarDerivados(atual,pedido.mudancas);
-      const valoresAnteriores = {};
-      Object.keys(pedido.mudancas).forEach((campo) => { valoresAnteriores[campo] = atual[campo]; });
-      const historico = [...(atual.historico || []), {
-        em: new Date().toISOString(),
-        por: decididoPorEmail,
-        motivo: pedido.motivo,
-        valoresAnteriores,
-        valoresNovos: pedido.mudancas,
-      }];
-      await entRef.update({ ...pedido.mudancas, historico, atualizadoEm: new Date().toISOString() });
-      entregasCache.invalidar();
+      if (!estaAtivo(atual)) throw new Error('Lançamento já cancelado ou excluído. Rejeite a solicitação.');
+      let patch;
+      if (pedido.tipoAcao) patch = patchAcao(atual, pedido.tipoAcao, pedido.motivo, decididoPorEmail, id);
+      else {
+        const mudancas = { ...pedido.mudancas };
+        completarDerivados(atual, mudancas);
+        validarObservacoes({ ...atual, ...mudancas }, mudancas);
+        const valoresAnteriores = {};
+        Object.keys(mudancas).forEach(c => { valoresAnteriores[c] = atual[c]; });
+        patch = { ...mudancas, atualizadoEm: new Date().toISOString(), historico: [...(atual.historico || []), {
+          em: new Date().toISOString(), por: decididoPorEmail, motivo: pedido.motivo, pedidoId: id,
+          valoresAnteriores, valoresNovos: mudancas,
+        }] };
+      }
+      tx.update(entRef, patch);
     }
-  }
-  return { ...pedido, status };
+    const decisao = { status, decididoPorEmail, motivoDecisao: motivoDecisao || null, decididoEm: new Date().toISOString() };
+    tx.update(ref, decisao);
+    return { ...pedido, ...decisao };
+  });
+  edicoesEntregaCache.invalidar(); entregasCache.invalidar();
+  return resultado;
 }
 
 
 module.exports = {
-  CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, decidirEdicao, editarDireto,
+  CAMPOS_NUMERICOS, create, listAll, listarComHistorico, listByUnidades, getOne, solicitarEdicao, solicitarAcao, acaoDireta, listarEdicoes, decidirEdicao, editarDireto,
   invalidar: () => { entregasCache.invalidar(); edicoesEntregaCache.invalidar(); },
 };

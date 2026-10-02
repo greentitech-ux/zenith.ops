@@ -139,7 +139,7 @@
 </div>
 
 <div class="panel hidden" id="edicoes-panel">
-  <h2><div class="title-group"><span>Pedidos de correção de entregas</span><span class="n" id="edicoes-count"></span></div></h2>
+  <h2><div class="title-group"><span>Solicitações de entregas</span><span class="n" id="edicoes-count"></span></div></h2>
   <div id="edicoes-lista" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px;"></div>
 </div>
 
@@ -335,25 +335,31 @@ async function carregarEdicoes(){
   document.getElementById('edicoes-lista').innerHTML = pendentes.map(p=>`
     <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;">
       <div style="font-size:12.5px;font-weight:600;">${escapeHtml(p.entregador)} · ${escapeHtml(p.unidadeNome||p.unidade)} · ${fmtData(p.data)}</div>
+      <div class="sub">${p.tipoAcao==='cancelar'?'Pedido de cancelamento':p.tipoAcao==='excluir'?'Pedido de exclusão':'Pedido de correção'}</div>
       <div class="sub" style="margin:2px 0 6px;">pedido por ${escapeHtml(p.solicitadoPorEmail)} em ${new Date(p.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR})}</div>
       <div style="font-size:12px;margin-bottom:6px;">${(p.resumoMudancas||[]).length
         ? `<div class="sub" style="margin-bottom:2px;">O que muda:</div>${p.resumoMudancas.map(l=>`<div>• ${escapeHtml(l)}</div>`).join('')}`
         : Object.entries(p.mudancas||{}).map(([campo,valor])=>`<div>${campo}: <b>${valor}</b></div>`).join('')}</div>
       <div style="font-size:12px;color:var(--text);margin-bottom:8px;white-space:pre-wrap;">Motivo: ${escapeHtml(p.motivo)}</div>
-      <div style="display:flex;gap:8px;">
+      ${IS_MASTER?`<div style="display:flex;gap:8px;">
         <button type="button" class="preset-btn" style="color:var(--ok);border-color:var(--ok-dim);" onclick="decidirEdicaoEntrega('${p.id}','APROVADO')">✓ Aprovar</button>
         <button type="button" class="preset-btn" style="color:var(--bad);border-color:var(--bad-dim);" onclick="decidirEdicaoEntrega('${p.id}','REJEITADO')">✕ Rejeitar</button>
-      </div>
+      </div>`:'<div class="sub">Aguardando decisão do Master.</div>'}
     </div>
   `).join('');
 }
 
 async function decidirEdicaoEntrega(id, status){
-  const pergunta = status==='APROVADO' ? 'Tem certeza que deseja aprovar essa correção? O valor será aplicado no lançamento.' : 'Tem certeza que deseja rejeitar essa correção?';
+  if(!IS_MASTER) return;
+  const pedido=EDICOES.find(p=>p.id===id);
+  if(!pedido) return;
+  const acao=pedido.tipoAcao==='cancelar'?'cancelamento':pedido.tipoAcao==='excluir'?'exclusão':'correção';
+  const pergunta = status==='APROVADO' ? `Aprovar este pedido de ${acao}? A ação será aplicada ao lançamento.` : `Rejeitar este pedido de ${acao}?`;
   if(!confirm(pergunta)) return;
   let motivoDecisao = '';
   if(status==='REJEITADO'){ motivoDecisao = prompt('Motivo da rejeição (opcional):') || ''; }
-  await fetch(`/api/entregas/edicoes/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status, motivoDecisao}) });
+  const resposta=await fetch(`/api/entregas/edicoes/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status, motivoDecisao}) });
+  if(!resposta.ok){ const erro=await resposta.json(); alert(erro.error||'Não foi possível decidir a solicitação.'); return; }
   await carregarEdicoes();
   await carregar();
 }
@@ -650,7 +656,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   const me = await res.json();
-  const isMaster = me.role==='master';
+  const isMaster = me.role==='master' && !me.qaMaster;
   IS_MASTER = isMaster;
   const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','inventario','parque','parque-checkin','festas'] : (me.permissions?.sections||[]);
   UNIDADES_PERMITIDAS = isMaster ? null : new Set(me.permissions?.unidades||[]);

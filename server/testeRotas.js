@@ -29909,6 +29909,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   console.log(`${okTerminalUnidade?'✓':'✗'} Chat da unidade: vínculo seguro, só chat, login pessoal separado, inatividade e revogação`);
   try {await require('./testeEstornoBeniboy').testar();}
   catch(e){ruins++;console.log('✗ Estorno do Beniboy: '+e.message);}
+  try {await require('./testeAcoesEntregas').testarHttp({DOCS,enviarJson,postarJson});}
+  catch(e){ruins++;console.log('✗ Permissões e ações de entregas: '+e.message);}
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
