@@ -187,12 +187,13 @@ async function login(identifier, password, contexto = {}) {
     userAgent: contexto.userAgent,
     ip: contexto.ip,
     duracaoMs: sessaoLonga ? DURACAO_SESSAO_LONGA_MS : undefined,
+    terminalUnidade: contexto.terminalUnidade,
   });
 
   const token = jwt.sign({ sub: doc.id, role: user.role, sid: sessao.id }, JWT_SECRET, {
     expiresIn: sessaoLonga ? JWT_EXPIRES_LONGO : JWT_EXPIRES_PADRAO,
   });
-  return { token, user: toPublicUser(doc.id, user) };
+  return { token, user: toPublicUser(doc.id, user), ...(contexto.terminalUnidade ? {terminalUnidade:contexto.terminalUnidade} : {}) };
 }
 
 // ENTRADA POR PASSKEY (digital/rosto do aparelho, ver passkeys.js).
@@ -222,11 +223,12 @@ async function loginComPasskey(userId, contexto = {}) {
     userAgent: contexto.userAgent,
     ip: contexto.ip,
     duracaoMs: sessaoLonga ? DURACAO_SESSAO_LONGA_MS : undefined,
+    terminalUnidade: contexto.terminalUnidade,
   });
   const token = jwt.sign({ sub: doc.id, role: user.role, sid: sessao.id }, JWT_SECRET, {
     expiresIn: sessaoLonga ? JWT_EXPIRES_LONGO : JWT_EXPIRES_PADRAO,
   });
-  return { token, user: toPublicUser(doc.id, user) };
+  return { token, user: toPublicUser(doc.id, user), ...(contexto.terminalUnidade ? {terminalUnidade:contexto.terminalUnidade} : {}) };
 }
 
 // reautenticacao (ex: confirmar a senha antes de solicitar um estorno) - nao

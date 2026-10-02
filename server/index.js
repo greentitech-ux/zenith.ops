@@ -123,6 +123,12 @@ const treinamentos = require('./treinamentos');
 const migracaoUnidades = require('./migracaoUnidades');
 const pedidoSemanal = require('./pedidoSemanal');
 const lojaStatus = require('./lojaStatus');
+const acessoUnidadeModulo=require('./acessoUnidade');
+const acessoUnidade=acessoUnidadeModulo.criarServico({
+  lerComputador:(codigo,posto)=>lojaStatus.acessoChatDoComputador(codigo,posto),
+  nomeUnidade:codigo=>nomeCanonicoUnidade(codigo,codigo),
+  segredo:process.env.JWT_SECRET,
+});
 const qaAprovacoes = require('./qaAprovacoes');
 const alertasCentral = require('./alertasCentral');
 const botIndicadores = require('./botIndicadores');
@@ -396,6 +402,8 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/estorno-cliente.html',
   '/solicitacao-publica.html',
   '/atendimento.html',
+  '/unidade.html', '/sessao-unidade.js', '/api/acesso-unidade/vinculo',
+  '/api/acesso-unidade/registrar', '/api/acesso-unidade/sessao',
   '/api/meta/unidades-publico',
   '/api/meta/endereco',
   '/api/defesa-arquivo',
@@ -692,6 +700,7 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
     if (!verificacao.verified) throw new Error('Não consegui confirmar a biometria.');
     await passkeys.registrarUso(credencial.credentialID, verificacao.authenticationInfo.newCounter);
     const result = await auth.loginComPasskey(credencial.userId, {
+      terminalUnidade: await acessoUnidade.contextoDoPedido(req),
       userAgent: req.headers['user-agent'],
       ip: req.headers['x-forwarded-for'] || req.ip,
     });
@@ -821,6 +830,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
   try {
     const result = await auth.login(req.body.identifier || req.body.email, req.body.password, {
+      terminalUnidade: await acessoUnidade.contextoDoPedido(req),
       userAgent: req.headers['user-agent'],
       ip: req.headers['x-forwarded-for'] || req.ip,
     });
@@ -1934,7 +1944,12 @@ async function usuarioLogadoDoHeader(req) {
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
   const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(token) : null;
-  if (!user) return null;
+  if (!user) {
+    const unidade=await acessoUnidade.contextoDoPedido(req);
+    return unidade ? {id:`unidade:${unidade.codigo}`,username:`Colaborador · ${unidade.nome}`,email:null,isMaster:false,
+      acessoUnidade:true,unidadeContexto:unidade.codigo,postoContexto:unidade.posto,
+      podeCriarTarefa:false,temMonitor:false,ehTimeSuporte:false,unidades:[]} : null;
+  }
   const isMaster = user.role === 'master';
   return {
     id: user.id,
@@ -1963,7 +1978,7 @@ async function usuarioLogadoDoHeader(req) {
 // pessoa; e a rotina em users.js só preenche campos vazios, sem substituir o
 // cadastro que o Master mantém.
 async function completarContatoAusenteDoChat(logado, chat, partes) {
-  if (!logado?.id || !chat || chat.logado?.id !== logado.id) return;
+  if (!logado?.id || logado.acessoUnidade || !chat || chat.logado?.id !== logado.id) return;
   try {
     await users.preencherContatoAusenteDoChat(logado.id, partes, { chatId: chat.id });
   } catch (err) {
@@ -2008,6 +2023,7 @@ async function alertarSegurancaChat(req, chat, motivo, detalheExtra) {
 app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
     const logado = await usuarioLogadoDoHeader(req);
+    const unidade=await acessoUnidade.contextoDoPedido(req);
     let anexo = null;
     if (req.file) {
       // MESMA validacao do anexo de mensagem (ver rota abaixo): tipo/tamanho
@@ -2024,8 +2040,8 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
     }
     const chat = await suporteChat.criar({
       nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto,
-      logado, lojaContexto: req.body.lojaContexto, unidadeContexto: req.body.unidadeContexto,
-      postoContexto: req.body.postoContexto, anexo,
+      logado, lojaContexto: unidade?.nome || req.body.lojaContexto, unidadeContexto: unidade?.codigo || req.body.unidadeContexto,
+      postoContexto: unidade?.posto || req.body.postoContexto, anexo,
     });
     await completarContatoAusenteDoChat(logado, chat, [req.body.contato, req.body.texto]);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
@@ -2537,7 +2553,8 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     // NOC, ex "DOM-CR-ATM01") pro carimbo do papel de parede (ver CARIMBO.md)
     const unidadeNome = nomeCanonicoUnidade(codigo);
     const maquinaNome = await lojaStatus.nomeDoComputador(codigo, posto);
-    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint: configuracaoPrint.habilitado, noPulsoPrintAtalho: configuracaoPrint.atalho, windowsAntigo, ehServidor, bloquearAppNoPulso, unidadeNome, maquinaNome });
+    const acessoChatUnidade = !!(await lojaStatus.acessoChatDoComputador(codigo,posto))?.acessoChatUnidade;
+    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint: configuracaoPrint.habilitado, noPulsoPrintAtalho: configuracaoPrint.atalho, windowsAntigo, ehServidor, bloquearAppNoPulso, unidadeNome, maquinaNome, acessoChatUnidade });
     res.type('text/plain').send(conteudo);
   } catch (err) {
     res.status(400).type('text/plain').send('# Erro ao gerar o script: ' + err.message);
@@ -3044,7 +3061,32 @@ app.post('/api/treinamentos-publico/:token/concluir', async (req, res) => {
 
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
+app.post('/api/acesso-unidade/vinculo', async (req,res)=>{
+  try {
+    const token=await acessoUnidade.emitirVinculo(req.body?.unidade,req.body?.posto,req.headers['x-noc-token']);
+    res.set('Cache-Control','no-store');
+    res.json({url:`${APP_BASE_URL}/unidade#vinculo=${token}`});
+  } catch(e){res.status(403).json({error:e.message});}
+});
+app.post('/api/acesso-unidade/registrar', async (req,res)=>{
+  try {
+    const token=await acessoUnidade.consumirVinculo(req.body?.vinculo);
+    res.cookie(acessoUnidadeModulo.COOKIE,token,{httpOnly:true,secure:APP_BASE_URL.startsWith('https:'),sameSite:'strict',path:'/',maxAge:acessoUnidadeModulo.DURACAO_COOKIE_MS});
+    res.set('Cache-Control','no-store'); res.json({ok:true});
+  } catch(e){res.status(403).json({error:e.message});}
+});
+app.get('/api/acesso-unidade/sessao', async (req,res)=>{
+  res.set('Cache-Control','no-store');
+  const unidade=await acessoUnidade.contextoDoPedido(req);
+  if(!unidade) return res.status(401).json({error:'Chat da unidade não habilitado neste computador.'});
+  res.json(unidade);
+});
 app.use('/api', auth.requireAuth);
+app.post('/api/auth/atividade',async(req,res)=>res.json({ok:await sessions.atividadeHumana(req.sid)}));
+app.post('/api/auth/sair',async(req,res)=>{
+  if(req.sid) await sessions.encerrar(req.sid);
+  res.json({ok:true});
+});
 
 // ---------- DEFESA DE CHARGEBACK (ver defesaChargeback.js) ----------
 async function gerarDefesaAoConcluir(tarefa, { notificarMasters = true } = {}) {
@@ -5107,7 +5149,7 @@ function urlComputador(codigo, posto, tipo) {
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
     if (!(await unidadesExtras.apareceEm(req.params.codigo, 'noc'))) return res.status(400).json({ error: 'Essa unidade não tem NOC habilitado.' });
-    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo, req.body.ehVmPulse, req.body.ehHostVm, req.body.ehVmGcom, req.body.noPulsoPrintAtalho);
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo, req.body.ehVmPulse, req.body.ehHostVm, req.body.ehVmGcom, req.body.noPulsoPrintAtalho, req.body.acessoChatUnidade);
     const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -5117,7 +5159,7 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo, req.body.ehVmPulse, req.body.ehHostVm, req.body.ehVmGcom, req.body.noPulsoPrintAtalho);
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint, req.body.windowsAntigo, req.body.ehVmPulse, req.body.ehHostVm, req.body.ehVmGcom, req.body.noPulsoPrintAtalho, req.body.acessoChatUnidade);
     const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {

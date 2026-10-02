@@ -11,8 +11,15 @@
   if (window.__zenithSuporteChat) return;
   window.__zenithSuporteChat = true;
 
-  const LS_ID = 'suporteChatId';
-  const LS_TOKEN = 'suporteChatToken';
+  // Neste terminal, cada identidade tem sua conversa. A conta da unidade
+  // nunca herda o chat privado do gerente que acabou de sair.
+  let escopoChat='';
+  try {
+    const u=JSON.parse(localStorage.getItem('nopulso.unidade')||'null'),t=localStorage.getItem('authToken');
+    if(u) escopoChat=t?':pessoal:'+JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sub:':unidade:'+u.codigo;
+  } catch {}
+  const LS_ID = 'suporteChatId'+escopoChat;
+  const LS_TOKEN = 'suporteChatToken'+escopoChat;
   let aberto = false;
   let pollTimer = null;
   let ultimoTotalMensagens = 0;
@@ -493,7 +500,7 @@
 
   async function dadosLogado() {
     const token = localStorage.getItem('authToken');
-    if (!token) return null;
+    if (!token) return window.__zenithUnidadeChat ? {nome:'Colaborador · '+window.__zenithUnidadeChat.nome,contato:'Computador: '+window.__zenithUnidadeChat.nomeComputador} : null;
     try {
       const r = await rawFetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
       if (!r.ok) return null;
@@ -928,7 +935,7 @@
       const ultima = msgs[msgs.length - 1];
       const aguarda = !!ultimaMsgVisitante(c);
       return `<button type="button" class="szc-input" style="text-align:left;cursor:pointer;${aguarda ? 'border-color:#ff5c5c;' : ''}" data-atend-chat="${esc(c.id)}">
-        <b style="font-size:12.5px;">${ultimaMensagemNovaDaLoja(c) ? '🔴 NOVA RESPOSTA · ' : (aguarda ? '🔴 ' : '')}${esc(c.nome)}${c.numeroTicket ? ' · #' + c.numeroTicket : ''}</b>
+        <b style="font-size:12.5px;">${ultimaMensagemNovaDaLoja(c) ? '🔴 NOVA RESPOSTA · ' : (aguarda ? '🔴 ' : '')}${esc(c.nome)}${c.logado?.acessoUnidade ? ' · Colaborador da unidade' : ''}${c.numeroTicket ? ' · #' + c.numeroTicket : ''}</b>
         <span style="display:block;font-size:11px;color:#7d8896;">${esc((ultima && ultima.texto || '').slice(0, 60))}</span>
       </button>`;
     }).join('') || '<div class="szc-fim">Nenhuma conversa aberta. 🎉</div>') +

@@ -55,7 +55,7 @@
 // 132: permite escolher um atalho seguro do NoPulsoPrint por computador.
 // 133: torna o backup da Área de Trabalho idempotente: uma política pendente
 //      não cria centenas de cópias quando a mesma limpeza precisa ser tentada.
-const VERSAO_VIGIA = 133;
+const VERSAO_VIGIA = 134;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -155,7 +155,7 @@ function adaptarParaWindowsAntigo(texto) {
   return out;
 }
 
-function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPulsoPrintAtalho, windowsAntigo, ehServidor, bloquearAppNoPulso, unidadeNome, maquinaNome }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPulsoPrintAtalho, windowsAntigo, ehServidor, bloquearAppNoPulso, unidadeNome, maquinaNome, acessoChatUnidade }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
   // Campo vem do cadastro, mas a validação também é feita aqui: este valor
@@ -169,6 +169,21 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
   // posto, que sao publicos, autorizavam tudo). O `|| ''` e so defensivo -
   // a rota vigia.ps1 sempre passa um token (garantirAgentToken)
   const tokenSeguro = String(agentToken || '').replace(/[^a-f0-9]/gi, '');
+  // Launcher local: autentica a máquina e só entrega ao navegador um vínculo
+  // descartável. O segredo nunca vai no atalho, na URL ou no histórico.
+  const literalPS=valor=>"'"+String(valor).replace(/'/g,"''")+"'";
+  const launcherUnidade=[
+    '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
+    'try {',
+    '  $r = Invoke-RestMethod -Uri '+literalPS(APP_BASE_URL+'/api/acesso-unidade/vinculo')+' -Method Post -Headers @{ "X-NOC-Token" = '+literalPS(tokenSeguro)+' } -ContentType "application/json" -Body '+literalPS(JSON.stringify({unidade:codigo,posto}))+' -TimeoutSec 15',
+    '  $url = [string]$r.url',
+    '  if (-not $url.StartsWith('+literalPS(APP_BASE_URL+'/unidade#vinculo=')+')) { throw "Endereco inesperado" }',
+    '  $navegadores = @("${env:ProgramFiles(x86)}\\Microsoft\\Edge\\Application\\msedge.exe", "$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe", "${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe", "$env:LOCALAPPDATA\\Google\\Chrome\\Application\\chrome.exe")',
+    '  $exe = $navegadores | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1',
+    '  if ($exe) { Start-Process -FilePath $exe -ArgumentList (\'--app="\' + $url + \'"\') } else { Start-Process $url }',
+    '} catch { Start-Process '+literalPS(APP_BASE_URL+'/unidade')+' }',
+  ].join('\r\n');
+  const launcherUnidadeB64=Buffer.from(launcherUnidade,'utf8').toString('base64');
   // codigo entra CRU em varias strings PowerShell de aspas duplas (titulo da
   // janela, log, corpo do heartbeat). Dentro de "..." o PowerShell interpola
   // $(...)/$var e trata " como fim da string - entao um codigo com esses
@@ -376,6 +391,37 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '# como essa maquina. O NOCZenith se atualiza sozinho carregando o token.',
     '$AgentToken = "' + tokenSeguro + '"',
     '$CabecalhosAgente = @{ "X-NOC-Token" = $AgentToken }',
+    '$AcessoChatUnidadeInicial = $' + (!!acessoChatUnidade),
+    'function Configurar-ChatUnidade($habilitado) {',
+    '  if ($Servico -or $NaoInstalarAppNoPulso) { return }',
+    '  $pasta = Join-Path $env:LOCALAPPDATA "NOCZenith"',
+    '  $arquivo = Join-Path $pasta "abrir-chat-unidade.ps1"',
+    '  $marca = Join-Path $pasta "chat-unidade-atalho.json"',
+    '  if (-not $habilitado) {',
+    '    if (Test-Path -LiteralPath $marca) {',
+    '      try { $m = Get-Content -LiteralPath $marca -Raw | ConvertFrom-Json; if (Test-Path -LiteralPath $m.backup) { Copy-Item -LiteralPath $m.backup -Destination $m.atalho -Force } else { $s = (New-Object -ComObject WScript.Shell).CreateShortcut($m.atalho); $s.TargetPath = "$env:WINDIR\\explorer.exe"; $s.Arguments = "' + APP_BASE_URL + '/"; $s.Save() }; Remove-Item -LiteralPath $marca -Force } catch { Escrever-Log "Chat da unidade: nao restaurou atalho" }',
+    '    }',
+    '    return',
+    '  }',
+    '  New-Item -ItemType Directory -Path $pasta -Force | Out-Null',
+    '  $conteudo = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("' + launcherUnidadeB64 + '"))',
+    '  if ((Test-Path -LiteralPath $arquivo) -and (Get-Content -LiteralPath $arquivo -Raw) -eq $conteudo -and (Test-Path -LiteralPath $marca)) { return }',
+    '  [IO.File]::WriteAllText($arquivo, $conteudo, (New-Object Text.UTF8Encoding($true)))',
+    '  # Segredo local: apenas o usuario atual, SYSTEM e Administradores.',
+    '  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
+    '  & icacls.exe $arquivo /inheritance:r /grant:r "*${sid}:(F)" "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" | Out-Null',
+    '  if ($LASTEXITCODE -ne 0) { throw "Nao protegeu o launcher da unidade" }',
+    '  $existentes = @(Get-Item "$env:USERPROFILE\\Desktop\\NoPulso*.lnk", "$env:PUBLIC\\Desktop\\NoPulso*.lnk" -ErrorAction SilentlyContinue)',
+    '  $atalho = if ($existentes.Count) { $existentes[0].FullName } else { Join-Path ([Environment]::GetFolderPath("Desktop")) "NoPulso.lnk" }',
+    '  $backup = Join-Path $pasta "atalho-nopulso-original.lnk"',
+    '  if (-not (Test-Path -LiteralPath $marca) -and (Test-Path -LiteralPath $atalho)) { Copy-Item -LiteralPath $atalho -Destination $backup -Force }',
+    '  $s = (New-Object -ComObject WScript.Shell).CreateShortcut($atalho)',
+    '  $s.TargetPath = "$env:WINDIR\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
+    '  $s.Arguments = \'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "\' + $arquivo + \'"\'',
+    '  $s.WindowStyle = 7; $s.Description = "NoPulso - chat da unidade"; $s.Save()',
+    '  @{ atalho=$atalho; backup=$backup } | ConvertTo-Json | Set-Content -LiteralPath $marca -Encoding UTF8',
+    '  Escrever-Log "Chat da unidade: atalho configurado sem senha"',
+    '}',
     '$UrlConfiguracaoAgente = "' + urlConfiguracaoAgente + '"',
     '$UrlInventarioAtalhos = "' + urlInventarioAtalhos + '"',
     '$UrlEstadoAgente = "' + urlEstadoAgente + '"',
@@ -3233,6 +3279,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  if ($Servico) { return }',
     '  try {',
     '    $configPrint = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10',
+    '    Configurar-ChatUnidade ([bool]$configPrint.acessoChatUnidade)',
     '    Aplicar-NoPulsoPrint ([bool]$configPrint.noPulsoPrint) ([bool]$configPrint.capturarAgora) $configPrint.noPulsoPrintAtalho',
     '  } catch { Escrever-Log "Falha ao sincronizar NoPulsoPrint: $($_.Exception.Message)" }',
     '}',
@@ -4050,6 +4097,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  }',
     '  if ($NaoInstalarAppNoPulso) { try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "App NoPulso automatico nao foi removido: $($_.Exception.Message)" } }',
     '  else { try { Instalar-AppNoPulso } catch { Escrever-Log "App NoPulso nao configurado: $($_.Exception.Message)" } }',
+    '  try { Configurar-ChatUnidade $AcessoChatUnidadeInicial } catch { Escrever-Log "Chat da unidade: nao configurou atalho" }',
     '  # reinstalacao com o agente ja rodando: encerra a copia antiga ANTES de',
     '  # subir a nova - o -MultipleInstances IgnoreNew da tarefa nao alcanca este',
     '  # Start-Process, e ficavam duas (ver Garantir-InstanciaUnica). A de boot',

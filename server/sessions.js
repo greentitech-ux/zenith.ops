@@ -18,7 +18,7 @@ const TOQUE_MIN_INTERVALO_MS = 60 * 1000; // nao regrava ultimaAtividadeEm a cad
 // duracaoMs opcional: usado pelos acessos com "sessaoLonga" (ver auth.js/
 // users.js) - conta compartilhada de loja/terminal que nao pode ficar
 // pedindo login de novo no meio do turno. Sem isso, cai no padrao de 8h.
-async function criar({ userId, userAgent, ip, duracaoMs }) {
+async function criar({ userId, userAgent, ip, duracaoMs, terminalUnidade }) {
   const agora = Date.now();
   const duracao = Number(duracaoMs) > 0 ? Number(duracaoMs) : DURACAO_MS;
 
@@ -38,6 +38,7 @@ async function criar({ userId, userAgent, ip, duracaoMs }) {
     criadoEm: new Date(agora).toISOString(),
     ultimaAtividadeEm: new Date(agora).toISOString(),
     expiraEm: agora + duracao,
+    ...(terminalUnidade ? { terminalUnidade, ultimaAtividadeHumanaEm: agora } : {}),
   };
   await doc.set(registro);
   sessionsCache.invalidar();
@@ -107,7 +108,21 @@ function estaOnline(sessao, agora = Date.now()) {
 async function existeEValida(sessionId) {
   if (!sessionId) return false;
   const sessao = await sessaoCache.cached(sessionId);
-  return !!sessao && sessao.expiraEm > Date.now();
+  return !!sessao && sessao.expiraEm > Date.now() && (!sessao.terminalUnidade
+    || Date.now() - Number(sessao.ultimaAtividadeHumanaEm || 0) < sessao.terminalUnidade.inatividadeMinutos * 60 * 1000);
+}
+
+// Polling e SSE não mantêm a sessão pessoal aberta no computador compartilhado.
+// Só o endpoint de atividade real atualiza este relógio; cache por sessão.
+async function atividadeHumana(sessionId) {
+  if(!await existeEValida(sessionId)) return false;
+  const sessao=await sessaoCache.cached(sessionId);
+  if(!sessao.terminalUnidade) return true;
+  const agora=Date.now(), anterior=Number(sessao.ultimaAtividadeHumanaEm || 0);
+  if(agora-anterior < 30*1000) return true;
+  await COLLECTION.doc(sessionId).update({ultimaAtividadeHumanaEm:agora});
+  sessao.ultimaAtividadeHumanaEm=agora;
+  return true;
 }
 
 async function listarDoUsuario(userId) {
@@ -203,6 +218,7 @@ function faxinaMemoria(agora = Date.now()) {
 setInterval(faxinaMemoria, FAXINA_INTERVALO_MS).unref();
 
 module.exports = {
+  atividadeHumana,
   criar, tocar, existeEValida, listarDoUsuario, resumoPorUsuario, encerrar, encerrarTodasDoUsuario, encerrarTodasDoUsuarioExceto,
   faxinaMemoria,
 };

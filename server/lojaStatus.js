@@ -37,7 +37,7 @@
 const crypto = require('crypto');
 const net = require('net');
 const db = require('./firestore');
-const { createCache } = require('./liveCache');
+const { createCache, createKeyedCache } = require('./liveCache');
 const redeDiagnostico = require('./redeDiagnostico');
 const nocMaquina = require('./nocMaquina');
 const impressoraStatus = require('./impressoraStatus');
@@ -2073,6 +2073,7 @@ async function configuracaoAgente(codigo, posto, token, { unidadeNome } = {}) {
     noPulsoPrintAtalho: normalizarAtalhoNoPulsoPrint(atual.noPulsoPrintAtalho),
     capturarAgora,
     politica,
+    acessoChatUnidade: !!atual.acessoChatUnidade,
     politicaVersao: Number(atual.politicaVersao || 0),
     versaoAplicacao: versaoAplicacao(atual.politicaVersao, arte),
     // papel de parede ligado e NENHUMA arte que sirva pra esta máquina (nem
@@ -2281,6 +2282,13 @@ async function ehServidorDoComputador(codigo, posto) {
 // O app NoPulso é para a estação de uso da loja. HOST e VMs têm função de
 // infraestrutura e não podem receber automaticamente PWA/atalho no Desktop.
 // A decisão vem somente das marcações explícitas da ficha, nunca do nome.
+const acessoChatCache=createKeyedCache(async id=>{
+  const doc=await COLLECTION.doc(id).get();
+  return doc.exists ? doc.data() : null;
+},15*1000);
+async function acessoChatDoComputador(codigo,posto){
+  return acessoChatCache.cached(docIdFor(codigo,posto));
+}
 async function bloquearAppNoPulsoDoComputador(codigo, posto) {
   const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
   if (!snap.exists) return false;
@@ -2301,13 +2309,14 @@ async function nomeDoComputador(codigo, posto) {
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom, noPulsoPrintAtalho) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom, noPulsoPrintAtalho, acessoChatUnidade) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
   const id = docIdFor(codigo, posto);
   const registro = {
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
+    acessoChatUnidade: !!acessoChatUnidade, chatUnidadeVersao: Date.now(),
     // Características operacionais declaradas no cadastro. Não inferimos pelo
     // nome: "Servidor" e "GCOM" precisam ser visíveis e confiáveis no NOC.
     ehServidor: !!ehServidor, temGcom: !!temGcom, ehVmPulse: !!ehVmPulse, ehHostVm: !!ehHostVm, ehVmGcom: !!ehVmGcom, medeQuedas: !!medeQuedas,
@@ -2325,13 +2334,14 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
     agentToken: gerarAgentToken(),
   };
   await COLLECTION.doc(id).set(registro);
+  acessoChatCache.invalidar(id);
   cache.invalidar();
   return semSegredo(registro);
 }
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom, noPulsoPrintAtalho) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo, ehVmPulse, ehHostVm, ehVmGcom, noPulsoPrintAtalho, acessoChatUnidade) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -2356,7 +2366,12 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServido
     noPulsoPrintAtalho: normalizarAtalhoNoPulsoPrint(noPulsoPrintAtalho),
     windowsAntigo: !!windowsAntigo,
   };
+  if(acessoChatUnidade !== undefined){
+    registro.acessoChatUnidade=!!acessoChatUnidade;
+    if(!!snap.data()?.acessoChatUnidade !== !!acessoChatUnidade) registro.chatUnidadeVersao=Date.now();
+  }
   await COLLECTION.doc(id).update(registro);
+  acessoChatCache.invalidar(id);
   cache.invalidar();
   return { codigo, posto, ...registro };
 }
@@ -2364,6 +2379,7 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServido
 async function removerComputador(codigo, posto) {
   const id = docIdFor(codigo, posto);
   await COLLECTION.doc(id).delete();
+  acessoChatCache.invalidar(id);
   cache.invalidar();
   return { codigo, posto };
 }
@@ -2388,6 +2404,8 @@ async function moverComputador(codigoAtual, posto, codigoNovo) {
   const registro = { ...atual, codigo: codigoNovo, posto };
   await COLLECTION.doc(idNovo).set(registro);
   await COLLECTION.doc(idAtual).delete();
+  acessoChatCache.invalidar(idAtual);
+  acessoChatCache.invalidar(idNovo);
   cache.invalidar();
   return semSegredo(registro);
 }
@@ -5211,6 +5229,7 @@ async function impressorasPraSondar(codigo) {
 }
 
 module.exports = {
+  acessoChatDoComputador,
   avaliarRolloutVigia, versaoVigiaPara, resumoRolloutVigia, decidirRolloutVigia,
   substituirSegredos, SEGREDOS_PERMITIDOS,
   impressorasPraSondar, comandoFixarIpZebra,

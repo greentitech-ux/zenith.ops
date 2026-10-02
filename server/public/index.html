@@ -251,6 +251,13 @@
 // pelo menu como qualquer outra secao - "/" nao mostra mais o dashboard
 // direto, senao nunca daria pra "sempre iniciar no Painel"
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+// Síncrono, inclusive quando o módulo compartilhado ainda está baixando.
+function registrarLoginNoTerminal(resultado){
+  if(resultado.terminalUnidade) localStorage.setItem('nopulso.unidade',JSON.stringify(resultado.terminalUnidade));
+  if(!localStorage.getItem('nopulso.unidade')) return;
+  const payload=JSON.parse(atob(resultado.token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+  localStorage.setItem('nopulso.unidade.atividade',JSON.stringify({sid:payload.sid,em:Date.now()}));
+}
 
 // tela inicial: acessos ABAIXO de Admin que tem o Abastecimento do Carrinho
 // (qualquer ponta) pousam SEMPRE no Abastecimento - e a tela de trabalho
@@ -288,6 +295,7 @@ document.getElementById('auth-form').addEventListener('submit', async (e)=>{
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || 'Não foi possível entrar.');
     localStorage.setItem('authToken', data.token);
+    registrarLoginNoTerminal(data);
     if(data.user && data.user.precisaTrocarSenha){
       mostrarTrocarSenha(data.token, senhaDigitada);
       return;
@@ -389,6 +397,7 @@ async function entrarComBiometria(){
     const d2 = await r2.json();
     if(!r2.ok) throw new Error(d2.error || 'Não consegui entrar com a biometria.');
     localStorage.setItem('authToken', d2.token);
+    registrarLoginNoTerminal(d2);
     location.href = paginaInicial(d2.user);
   }catch(err){
     // a pessoa cancelar o Face ID não é erro: ela só desistiu
