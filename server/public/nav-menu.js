@@ -172,6 +172,7 @@
       { grupo: 'Segurança', itens: [
       { id: 'nav-cofre', href: '/cofre', icone: '🔐', rotulo: 'Cofre', secoes: ['cofre'] },
       { id: 'nav-central-alertas', href: '/central-alertas', icone: '🚨', rotulo: 'Central de Alertas', master: true },
+      { id: 'nav-autorizacoes', href: '/autorizacoes', icone: '🔐', rotulo: 'Autorizações', masterDeVerdade: true },
       ] },
       { grupo: 'Configurações do sistema', itens: [
       { id: 'nav-email', href: '/email', icone: '✉️', rotulo: 'E-mail', master: true },
@@ -390,7 +391,7 @@
     // Assim ninguem ve por um instante um link que nao pode acessar.
     const rotaLimpa = it.href.replace(/\.html(?=\?|$)/, '');
     return `<a class="nmz-item hidden" id="${it.id}" href="${esc(rotaLimpa)}">`
-      + `<span class="nmz-ico">${it.icone}</span><span class="nmz-rot">${esc(it.rotulo)}</span></a>`;
+      + `<span class="nmz-ico">${it.icone}</span><span class="nmz-rot">${esc(it.rotulo)}</span>${it.id==='nav-autorizacoes'?'<span id="nmz-aut-conta" aria-label="Pendentes"></span>':''}</a>`;
   }
 
   function chaveSubgrupo(sec, sub) {
@@ -565,6 +566,7 @@
   function podeVer(it, me) {
     const isMaster = me.role === 'master';
     const isAdmin = isMaster || !!me.isAdmin;
+    if (it.masterDeVerdade) return isMaster && !me.qaMaster;
     if (it.master) return isMaster;
     if (it.admin) return isAdmin;
     if (!temVertical(me, it)) return false;
@@ -593,6 +595,34 @@
   }
 
   let ME = null;
+  function iniciarAutorizacoes(token){
+    if(ME.role!=='master'||ME.qaMaster)return;
+    let atalho=null;
+    if(semHtml(location.pathname)==='/painel'){
+      atalho=document.createElement('a');atalho.href='/autorizacoes';
+      atalho.id='atalho-autorizacoes';
+      atalho.style.cssText='display:block;margin:16px auto;padding:14px 18px;max-width:1100px;box-sizing:border-box;border:1px solid var(--accent);border-radius:12px;color:var(--text);background:var(--panel);text-decoration:none;';
+      atalho.textContent='🔐 Autorizações · carregando pendências…';
+      const main=document.querySelector('main');
+      if(main)main.prepend(atalho);else document.querySelector('header')?.after(atalho);
+    }
+    let carregando=false;
+    async function atualizar(){
+      if(carregando||document.hidden)return;carregando=true;
+      try{
+        const r=await fetch('/api/qa-aprovacoes/resumo',{headers:{Authorization:'Bearer '+token}});
+        if(!r.ok)throw new Error('Falha ao consultar');
+        const d=await r.json();const n=Number(d.pendentes);
+        if(!Number.isInteger(n)||n<0)throw new Error('Contagem indisponível');
+        const badge=document.getElementById('nmz-aut-conta');
+        if(badge){badge.textContent=n?'('+n+')':'';badge.setAttribute('aria-label',n+' pendentes');}
+        if(atalho)atalho.textContent='🔐 Autorizações · '+n+' pendente'+(n===1?'':'s')+' — revisar pedidos';
+      }catch(e){if(atalho)atalho.textContent='🔐 Autorizações · abrir para consultar pendências';}
+      finally{carregando=false;}
+    }
+    atualizar();setInterval(atualizar,60000);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)atualizar()});
+  }
   function aplicarRegras() {
     if (!ME) return;
     MENU.forEach((sec) => {
@@ -861,6 +891,7 @@
       .then((me) => {
         if (!me) return;
         ME = me;
+        iniciarAutorizacoes(token);
         aplicarRegras();
         sincronizarRecolhido();
         marcarAtivo();

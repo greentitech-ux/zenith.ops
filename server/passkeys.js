@@ -48,9 +48,9 @@ function limparVencidos() {
 }
 // `tipo` separa o desafio de ENTRAR do de CONFIRMAR uma ação: um não vale
 // na rota do outro
-function guardarDesafio(chave, desafio, userId, tipo = null) {
+function guardarDesafio(chave, desafio, userId, tipo = null, escopo = null) {
   limparVencidos();
-  desafios.set(chave, { desafio, userId: userId || null, tipo: tipo || null, expiraEm: Date.now() + VALIDADE_DESAFIO_MS });
+  desafios.set(chave, { desafio, userId: userId || null, tipo: tipo || null, escopo, expiraEm: Date.now() + VALIDADE_DESAFIO_MS });
 }
 // pega E CONSOME: um desafio serve pra uma tentativa só, senão a mesma
 // assinatura entraria duas vezes
@@ -85,11 +85,11 @@ const VALIDADE_CONFIRMACAO_MS = 3 * 60 * 1000;
 const PREFIXO_CONFIRMACAO = 'digital.';
 const confirmacoes = new Map(); // comprovante -> { userId, expiraEm }
 
-function emitirConfirmacao(userId) {
+function emitirConfirmacao(userId, escopo = null) {
   const agora = Date.now();
   for (const [k, v] of confirmacoes) if (v.expiraEm <= agora) confirmacoes.delete(k);
   const comprovante = PREFIXO_CONFIRMACAO + crypto.randomBytes(32).toString('base64url');
-  confirmacoes.set(comprovante, { userId: String(userId), expiraEm: agora + VALIDADE_CONFIRMACAO_MS });
+  confirmacoes.set(comprovante, { userId: String(userId), escopo, expiraEm: agora + VALIDADE_CONFIRMACAO_MS });
   return comprovante;
 }
 // o userId entra na conferência: comprovante de uma pessoa nunca confirma
@@ -100,7 +100,12 @@ function confirmacaoValida(comprovante, userId) {
   const c = confirmacoes.get(txt);
   if (!c) return false;
   if (c.expiraEm <= Date.now()) { confirmacoes.delete(txt); return false; }
-  return c.userId === String(userId || '');
+  return !c.escopo && c.userId === String(userId || '');
+}
+function consumirConfirmacaoAutorizacao(comprovante,userId,id,revisao){
+  const c=confirmacoes.get(String(comprovante||''));
+  if(!c || c.expiraEm<=Date.now() || c.userId!==String(userId) || c.escopo?.id!==id || c.escopo?.revisao!==revisao) return false;
+  confirmacoes.delete(comprovante);return true;
 }
 
 // O NOME que aparece na lista de aparelhos da pessoa. Vem do próprio
@@ -215,6 +220,7 @@ async function removerTodasDoUsuario(userId) {
 }
 
 module.exports = {
+  consumirConfirmacaoAutorizacao,
   VALIDADE_DESAFIO_MS, MAX_POR_USUARIO,
   VALIDADE_CONFIRMACAO_MS, PREFIXO_CONFIRMACAO,
   guardarDesafio, consumirDesafio, novaChaveDeSessao,

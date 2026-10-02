@@ -446,6 +446,28 @@ async function updatePermissions(id, permissions) {
   return toPublic(await ref.get());
 }
 
+// Compara e aplica o acesso revisado numa única transação, sem sobrescrever
+// uma alteração feita depois de o Master ter visto o pedido.
+async function aplicarPermissoesAutorizadas(id, antes, depois, campos){
+  const ordenar=v=>Array.isArray(v)?v.map(ordenar):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,ordenar(v[k])])):v;
+  const ref=usersRef.doc(id);
+  await db.runTransaction(async tx=>{
+    const snap=await tx.get(ref);if(!snap.exists)throw new Error('Acesso não encontrado.');
+    const u=toPublic(snap);
+    if(u.role==='master')throw new Error('O acesso Master não usa permissões.');
+    const atual={permissions:u.permissions||{sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]},cargos:u.cargos||(u.cargo?[u.cargo]:[])};
+    if(!antes||JSON.stringify(ordenar(atual))!==JSON.stringify(ordenar(antes)))throw new Error('O acesso mudou desde a revisão. Solicite uma nova autorização.');
+    const patch={};
+    if(campos.some(c=>c!=='cargos'))patch.permissions=sanitizePermissions(depois.permissions);
+    if(campos.includes('cargos')){
+      if(depois.cargos.some(c=>!CARGOS_VALIDOS.includes(c)))throw new Error('Tag inválida.');
+      patch.cargos=CARGOS_VALIDOS.filter(c=>depois.cargos.includes(c));patch.cargo=tagPrincipal(patch.cargos);
+    }
+    tx.update(ref,patch);
+  });
+  invalidarUsuario(id);usersCache.invalidar();
+}
+
 async function setActive(id, active) {
   const ref = usersRef.doc(id);
   const snap = await ref.get();
@@ -1114,7 +1136,7 @@ module.exports = {
   create,
   createQaMaster,
   updateQaUser,
-  updatePermissions,
+  updatePermissions, aplicarPermissoesAutorizadas,
   setActive,
   updateHorarioPermitido,
   updateIsAdmin,

@@ -82,6 +82,7 @@ function servidor() {
       // rotas que devolvem OBJETO (a tela le uma propriedade e quebra com []):
       // o formato minimo que cada tela precisa pra abrir vazia sem estourar
       const OBJETOS = {
+        '/api/qa-aprovacoes/resumo': { pendentes: 0 },
         '/api/bonificacao': { metricasColaboradores: [], colaboradores: [], itens: [] },
         // formatos copiados do que as rotas devolvem (comprasAcompanhamento.js e suporteChat.estatisticas)
         '/api/compras/acompanhamento': { etapas: [], linhas: [], resumo: { abertas: 0, travadas: 0, aprovadas: 0, compradas: 0, entregues: 0 }, hoje: new Date().toISOString().slice(0, 10) },

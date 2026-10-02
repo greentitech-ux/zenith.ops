@@ -12,6 +12,13 @@
 // exige requireMaster e barra quem é QA Master), ele não consegue
 // contornar sozinho.
 const db = require('./firestore');
+const crypto = require('crypto');
+function canonico(valor){
+  if(Array.isArray(valor)) return valor.map(canonico);
+  if(valor && typeof valor==='object') return Object.fromEntries(Object.keys(valor).sort().map(k=>[k,canonico(valor[k])]));
+  return valor;
+}
+function revisao(a){return crypto.createHash('sha256').update(JSON.stringify(canonico({tipo:a.tipo,payload:a.payload||{},resumo:a.resumo||'',detalhes:a.detalhes||[],expiraEm:a.expiraEm||null}))).digest('hex');}
 const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('qaAprovacoes');
@@ -30,19 +37,21 @@ async function buscarPendentesNoBanco() {
   // A fila de aprovação é pequena por natureza e precisa ser completa. Não
   // usamos cursor sem ordenação explícita: em alguns SDKs isso pode pular ou
   // repetir documentos quando a coleção muda entre páginas.
-  const snap = await COLLECTION.where('status', '==', 'pendente').get();
-  return snap.docs.map((d) => d.data());
+  const snaps = await Promise.all(['pendente','executando'].map(status=>COLLECTION.where('status', '==', status).get()));
+  return snaps.flatMap(snap=>snap.docs.map(d=>d.data()));
 }
+const filaCache = createCache(buscarPendentesNoBanco, 20000);
+function invalidar(){cache.invalidar();filaCache.invalidar();}
 
 async function listar() {
-  const [recentes, pendentes] = await Promise.all([listarRecentes(), buscarPendentesNoBanco()]);
+  const [recentes, pendentes] = await Promise.all([listarRecentes(), filaCache.cached()]);
   const porId = new Map(recentes.map((a) => [a.id, a]));
   pendentes.forEach((a) => porId.set(a.id, a));
   return [...porId.values()].sort((a, b) => String(b.criadoEm || '').localeCompare(String(a.criadoEm || '')));
 }
 
 async function listarPendentes() {
-  return buscarPendentesNoBanco();
+  return (await filaCache.cached()).filter(a=>a.status==='pendente');
 }
 
 // Expiração é uma decisão de servidor, não um efeito visual da tela. Assim
@@ -50,7 +59,7 @@ async function listarPendentes() {
 async function expirarPendentes() {
   const agora = Date.now();
   const pendentes = await buscarPendentesNoBanco();
-  const vencidas = pendentes.filter((a) => a.expiraEm && Date.parse(a.expiraEm) <= agora);
+  const vencidas = pendentes.filter((a) => a.status==='pendente' && a.expiraEm && Date.parse(a.expiraEm) <= agora);
   for (const a of vencidas) {
     await marcarDecidido(a.id, { status: 'expirado', decididoPorEmail: null });
   }
@@ -60,6 +69,22 @@ async function expirarPendentes() {
 async function obter(id) {
   const snap = await COLLECTION.doc(id).get();
   return snap.exists ? snap.data() : null;
+}
+
+// Reserva persistente, não um timer/lock local. Se o processo cair depois de
+// iniciar, NÃO libera outra execução: o Master precisa conferir o resultado.
+async function reservarExecucao(id, esperada, porEmail){
+  const ref=COLLECTION.doc(id);
+  const registro=await db.runTransaction(async tx=>{
+    const snap=await tx.get(ref);if(!snap.exists) throw new Error('Solicitação não encontrada.');
+    const a=snap.data();
+    if(a.execucaoId || !['pendente','erro'].includes(a.status) || a.erroDefinitivo) throw new Error('Esta ação já foi decidida ou iniciada. Não será executada novamente.');
+    if(!esperada || revisao(a)!==esperada) throw new Error('Os dados mudaram. Reabra o pedido e confira antes de autorizar.');
+    if(a.expiraEm && Date.parse(a.expiraEm)<=Date.now()) throw new Error('Pedido vencido. Solicite uma nova autorização.');
+    const patch={status:'executando',execucaoId:crypto.randomUUID(),execucaoIniciadaEm:new Date().toISOString(),decididoPorEmail:porEmail};
+    patch.historico=[...(a.historico||[]),{evento:'EXECUCAO_INICIADA',em:patch.execucaoIniciadaEm,porEmail:porEmail}].slice(-12);
+    tx.update(ref,patch);return {...a,...patch};
+  });invalidar();return registro;
 }
 
 // registra a ação parada - "payload" é o que o executor vai precisar pra
@@ -99,13 +124,13 @@ async function criar({
     historico: [{ evento: 'PEDIDO_CRIADO', em: new Date().toISOString(), porEmail: criadoPorEmail || null }],
   };
   await ref.set(registro);
-  cache.invalidar();
+  invalidar();
   return registro;
 }
 
-// 'aprovado' (executor rodou com sucesso) | 'rejeitado' (Master recusou,
-// nunca executa) | 'expirado' (passou do prazo, nunca executa) | 'erro' (Master aprovou mas o executor falhou - fica
-// visível pro Master decidir se tenta aprovar de novo ou rejeita)
+// 'executando' é a reserva persistente. 'aprovado' confirma sucesso;
+// 'rejeitado'/'expirado' não executam; 'erro' mantém o resultado da falha.
+// Uma execução iniciada não é repetida, mesmo que falhe ou o processo caia.
 // `resultado`: o que a ação devolveu, SEM segredo - é o que o Claude lê de
 // volta (consultar_autorizacao) pra seguir o atendimento
 // `erroDefinitivo`: a ação falhou por uma regra que repetir não muda (cancelar
@@ -113,11 +138,16 @@ async function criar({
 // fila oferecendo "autorizar de novo" pra sempre - caso real de 24/09, em que
 // o Master autorizou, falhou, e o cartão nunca tinha como sair da tela.
 async function marcarDecidido(id, {
-  status, decididoPorEmail, motivoRejeicao, erroExecucao, erroDefinitivo, resultado,
+  status, decididoPorEmail, motivoRejeicao, erroExecucao, erroDefinitivo, resultado, execucaoId,
 }) {
   const ref = COLLECTION.doc(id);
-  const snap = await ref.get();
+  const registro=await db.runTransaction(async tx=>{
+  const snap = await tx.get(ref);
   if (!snap.exists) throw new Error('Solicitação de aprovação não encontrada.');
+  const atual=snap.data();
+  if(status==='rejeitado' && !['pendente','erro'].includes(atual.status)) throw new Error('Esta ação já foi decidida ou está em execução.');
+  if(status==='expirado' && atual.status!=='pendente') throw new Error('Esta ação não está pendente.');
+  if(atual.execucaoId && (execucaoId!==atual.execucaoId || atual.status!=='executando')) throw new Error('Decisão não corresponde à execução reservada.');
   const patch = {
     status,
     ...(resultado !== undefined ? { resultado: String(resultado == null ? '' : resultado).slice(0, 1000) } : {}),
@@ -133,11 +163,14 @@ async function marcarDecidido(id, {
       ...(erroExecucao ? { erro: String(erroExecucao).slice(0, 300) } : {}),
     }].slice(-12),
   };
-  await ref.update(patch);
-  cache.invalidar();
+  tx.update(ref,patch);
   return { ...snap.data(), ...patch };
+  });
+  invalidar();
+  return registro;
 }
 
 module.exports = {
+  revisao, reservarExecucao,
   listar, listarPendentes, expirarPendentes, obter, criar, marcarDecidido,
 };

@@ -72,8 +72,8 @@
     return disponivelPromessa;
   }
 
-  async function confirmarComDigital(){
-    const r1 = await fetch('/api/auth/passkey/confirmar/inicio', { method:'POST', headers: cabecalhos(), body:'{}' });
+  async function confirmarComDigital(escopo=null){
+    const r1 = await fetch('/api/auth/passkey/confirmar/inicio', { method:'POST', headers: cabecalhos(), body:JSON.stringify(escopo||{}) });
     const d1 = await r1.json().catch(() => ({}));
     if(!r1.ok) throw new Error(d1.error || 'Não consegui começar. Use a senha.');
     const o = d1.opcoes;

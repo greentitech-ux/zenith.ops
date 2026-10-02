@@ -539,8 +539,8 @@ async function planejarAjustePermissoes(p) {
 }
 async function ajustarPermissoesUsuario(p) {
   const plano = await planejarAjustePermissoes(p);
-  if (plano.alterados.some((campo) => campo !== 'cargos')) await users.updatePermissions(plano.usuario.id, plano.depois.permissions);
-  if (plano.alterados.includes('cargos')) await users.updateCargos(plano.usuario.id, plano.depois.cargos);
+  if(p._usuarioAlvo!==plano.usuario.id)throw new Error('Alvo não corresponde ao pedido revisado. Solicite uma nova autorização.');
+  await users.aplicarPermissoesAutorizadas(plano.usuario.id,p._permissoesAntes,plano.depois,plano.alterados);
   return plano;
 }
 
@@ -1004,6 +1004,7 @@ async function registrarEnvioConectaDoCowork(p) {
 async function antesDeAjustarPermissoes(entrada) {
   const plano = await planejarAjustePermissoes(entrada);
   return {
+    entrada:{...entrada,_usuarioAlvo:plano.usuario.id,_permissoesAntes:plano.antes},
     resumo: `Ajustar permissões · ${plano.usuario.username || plano.usuario.email}`,
     detalhes: [
       { rotulo: 'Acesso', valor: plano.usuario.email },

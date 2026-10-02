@@ -743,6 +743,13 @@ app.get('/api/auth/passkey/confirmar/disponivel', auth.requireAuth, async (req, 
 
 app.post('/api/auth/passkey/confirmar/inicio', auth.requireAuth, async (req, res) => {
   try {
+    let escopo=null;
+    if(req.body?.autorizacaoId){
+      if(req.user.role!=='master' || req.isQaMaster) return res.status(403).json({error:'Só o Master autoriza.'});
+      const a=await qaAprovacoes.obter(String(req.body.autorizacaoId));
+      if(!a || req.body.revisao!==qaAprovacoes.revisao(a)) return res.status(409).json({error:'Pedido alterado. Reabra e confira.'});
+      escopo={id:a.id,revisao:qaAprovacoes.revisao(a)};
+    }
     const rpID = passkeys.rpIdDoPedido(req);
     if (!rpID) return res.status(400).json({ error: 'Não consegui identificar o endereço do app.' });
     const lista = credenciaisDesteEndereco(await passkeys.listarDoUsuario(req.user.id), rpID);
@@ -755,7 +762,7 @@ app.post('/api/auth/passkey/confirmar/inicio', auth.requireAuth, async (req, res
       userVerification: 'required',
     });
     const chave = passkeys.novaChaveDeSessao();
-    passkeys.guardarDesafio(chave, opcoes.challenge, req.user.id, 'confirmar');
+    passkeys.guardarDesafio(chave, opcoes.challenge, req.user.id, 'confirmar',escopo);
     res.json({ chave, opcoes });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -790,7 +797,7 @@ app.post('/api/auth/passkey/confirmar/fim', auth.requireAuth, async (req, res) =
     if (!verificacao.verified) throw new Error('Não consegui confirmar a digital.');
     await passkeys.registrarUso(credencial.credentialID, verificacao.authenticationInfo.newCounter);
     console.log(`[passkey] ${req.user.email} confirmou uma ação com a digital (${credencial.aparelho})`);
-    res.json({ confirmacao: passkeys.emitirConfirmacao(req.user.id), validadeMs: passkeys.VALIDADE_CONFIRMACAO_MS });
+    res.json({ confirmacao: passkeys.emitirConfirmacao(req.user.id,guardado.escopo), validadeMs: passkeys.VALIDADE_CONFIRMACAO_MS });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -6992,7 +6999,11 @@ function requireMasterDeVerdade(req, res, next) {
 }
 
 app.get('/api/qa-aprovacoes', requireMasterDeVerdade, async (req, res) => {
-  res.json(await qaAprovacoes.listar());
+  res.json((await qaAprovacoes.listar()).map(a=>({...a,revisao:qaAprovacoes.revisao(a),payload:undefined})));
+});
+app.get('/api/qa-aprovacoes/resumo', requireMasterDeVerdade, async (req, res) => {
+  const fila=await qaAprovacoes.listarPendentes();
+  res.json({pendentes:fila.filter(a=>!a.expiraEm||Date.parse(a.expiraEm)>Date.now()).length});
 });
 
 app.get('/api/qualidade/visitas/:id/selfie-inicio', auth.requireAuth, async (req, res) => {
@@ -7127,18 +7138,23 @@ app.post('/api/qa-aprovacoes/:id/aprovar', requireMasterDeVerdade, async (req, r
   if (aprovacoesEmCurso.has(id)) return res.status(409).json({ error: 'Essa autorização já está sendo executada.' });
   aprovacoesEmCurso.add(id);
   try {
-    const pendente = await qaAprovacoes.obter(id);
+    let pendente = await qaAprovacoes.obter(id);
     if (!pendente) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     if (pendente.status === 'aprovado') return res.status(400).json({ error: 'Essa ação já foi aprovada e executada.' });
     if (pendente.status === 'rejeitado') return res.status(400).json({ error: 'Essa ação já foi rejeitada.' });
     if (pendente.status === 'expirado') return res.status(400).json({ error: 'Esse pedido venceu. Peça de novo se ainda fizer sentido.' });
-    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const comprovante=String(req.body?.password||'');
+    const identidadeOk=comprovante.startsWith('digital.')
+      ? passkeys.consumirConfirmacaoAutorizacao(comprovante,req.user.id,id,req.body?.revisao)
+      : await auth.verifyPassword(req.user.id,comprovante);
+    if(!identidadeOk) return res.status(400).json({error:comprovante.startsWith('digital.')?'Confirmação inválida ou já utilizada. Confirme este pedido novamente.':'Senha incorreta.'});
     if (pendente.expiraEm && Date.parse(pendente.expiraEm) <= Date.now()) {
       await qaAprovacoes.marcarDecidido(id, { status: 'expirado', decididoPorEmail: req.user.email });
       return res.status(400).json({ error: 'Esse pedido venceu antes da autorização. Peça de novo se ainda fizer sentido.' });
     }
     const executor = EXECUTORES_QA[pendente.tipo];
     if (!executor) return res.status(500).json({ error: `Tipo de ação desconhecido: ${pendente.tipo}` });
+    pendente=await qaAprovacoes.reservarExecucao(id,req.body?.revisao,req.user.email);
     let saida;
     // quem aprovou, com o quê e de onde: a assinatura eletrônica de um
     // formulário (pedir_assinatura do Claude) sai daqui, nunca do pedido
@@ -7152,16 +7168,15 @@ app.post('/api/qa-aprovacoes/:id/aprovar', requireMasterDeVerdade, async (req, r
     try {
       saida = await executor(pendente.payload || {}, aprovacao);
     } catch (execErr) {
-      // `definitivo` = a regra que barrou não muda por repetir (cancelar uma
-      // tarefa já concluída, por exemplo). O cartão deixa de oferecer
-      // "autorizar de novo", que ia dar o mesmo erro pra sempre.
+      // Não repetir automaticamente: o executor pode ter feito parte da
+      // ação antes de falhar. A reserva persistente continua consumida.
       await qaAprovacoes.marcarDecidido(id, {
         status: 'erro', decididoPorEmail: req.user.email,
-        erroExecucao: execErr.message, erroDefinitivo: execErr.definitivo === true,
+        erroExecucao: execErr.message, erroDefinitivo: true, execucaoId:pendente.execucaoId,
       });
       return res.status(400).json({
         error: `Aprovado, mas a ação falhou ao executar: ${execErr.message}`,
-        definitivo: execErr.definitivo === true,
+        definitivo: true,
       });
     }
     // o que fica gravado (e o Claude lê) nunca leva senha temporária; a tela
@@ -7172,7 +7187,7 @@ app.post('/api/qa-aprovacoes/:id/aprovar', requireMasterDeVerdade, async (req, r
     // catálogo do Beniboy pode trazer senha temporária no texto: vai só pra
     // tela do Master
     const persistido = ehCowork ? saida.resultadoPersistido : undefined;
-    const atualizado = await qaAprovacoes.marcarDecidido(id, { status: 'aprovado', decididoPorEmail: req.user.email, resultado: persistido });
+    const atualizado = await qaAprovacoes.marcarDecidido(id, { status: 'aprovado', decididoPorEmail: req.user.email, resultado: persistido, execucaoId:pendente.execucaoId });
     console.log(`[autorizacao] ${req.user.email} autorizou ${pendente.tipo}: ${pendente.resumo}`);
     res.json({ ...atualizado, payload: undefined, resultadoParaMaster: paraMaster });
   } catch (err) {

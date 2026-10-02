@@ -27173,8 +27173,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const masterAntesA = process.env.NOPULSO_AGENT_MASTER;
     process.env.NOPULSO_AGENT_MASTER = 'aut-master@teste.local';
     const travado = (n) => !!(DOCS.get(`users/u-aut-alvo-${n}`) || {}).locked;
-    const aprovar = (id, senha, cab = cabM) => postarJson(`/api/qa-aprovacoes/${id}/aprovar`, senha === undefined ? {} : { password: senha }, cab);
-    let r1, r1b, cons1, cons2, semSenha, senhaErrada, deComum, comDigital, deNovo, vencida, dobro, segredo, consSeg, docSeg, deQa, travadoAntes, travadoAposNegadas;
+    const revisaoAut=id=>require('./qaAprovacoes').revisao(DOCS.get(`qaAprovacoes/${id}`));
+    const aprovar = (id, senha, cab = cabM) => postarJson(`/api/qa-aprovacoes/${id}/aprovar`, senha === undefined ? {} : { password: senha,revisao:revisaoAut(id) }, cab);
+    let r1, r1b, cons1, cons2, semSenha, senhaErrada, deComum, comDigital, deNovo, vencida, dobro, segredo, consSeg, docSeg, deQa, travadoAntes, travadoAposNegadas, digitalGenerica, revisaoErrada, resumoMaster, resumoComum;
     try {
       // 1) o Claude pede: NÃO roda, vira pedido
       r1 = await cw.executar({ nome: 'desbloquear_usuario', entrada: { usuario: 'autalvoa', confirmar: true }, idempotencyKey: 'aut-k1' });
@@ -27185,9 +27186,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
       semSenha = await aprovar(r1.autorizacaoId);
       senhaErrada = await aprovar(r1.autorizacaoId, 'errada');
       deComum = await aprovar(r1.autorizacaoId, 'SenhaDeTeste!2026', cabC);
+      digitalGenerica=await aprovar(r1.autorizacaoId,pkA.emitirConfirmacao('u-aut-master'));
+      revisaoErrada=await postarJson(`/api/qa-aprovacoes/${r1.autorizacaoId}/aprovar`,{password:'SenhaDeTeste!2026',revisao:'antiga'},cabM);
+      resumoMaster=await pedir('/api/qa-aprovacoes/resumo',cabM);
+      resumoComum=await pedir('/api/qa-aprovacoes/resumo',cabC);
       travadoAposNegadas = travado('a');
       // 3) com a DIGITAL do Master (o comprovante que a tela manda): roda
-      comDigital = await aprovar(r1.autorizacaoId, pkA.emitirConfirmacao('u-aut-master'));
+      comDigital = await aprovar(r1.autorizacaoId, pkA.emitirConfirmacao('u-aut-master',{id:r1.autorizacaoId,revisao:revisaoAut(r1.autorizacaoId)}));
       cons2 = (await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: r1.autorizacaoId } })).resultado;
       deNovo = await aprovar(r1.autorizacaoId, 'SenhaDeTeste!2026');
       // 4) pedido vencido não roda nem com a senha certa
@@ -27234,6 +27239,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'autorizar sem digital/senha não roda (400, não 401)': semSenha.status === 400 && /Senha incorreta/.test(semSenha.corpo) && travadoAposNegadas === true,
       'senha errada não autoriza': senhaErrada.status === 400 && /Senha incorreta/.test(senhaErrada.corpo),
       'quem não é Master não autoriza': deComum.status === 403,
+      'digital genérica e revisão antiga não executam':digitalGenerica.status===400&&revisaoErrada.status===400,
+      'contador só é exposto ao Master':resumoMaster.status===200&&resumoComum.status===403,
       'a digital do Master autoriza e a ação roda': comDigital.status === 200 && travado('a') === false,
       'autorizado não roda de novo': deNovo.status === 400,
       'pedido vencido não roda nem com a senha certa': vencida.r.status === 400 && vencida.status === 'expirado' && travado('b') === true,
@@ -27280,8 +27287,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
             .map((st) => coluna({ status: st }))).size === 5;
       })(),
       // o nome da coluna é a MESMA palavra do selo do cartão (CLAUDE.md §5)
-      'a coluna usa a palavra que o cartão já usava': /⚠️ Não rodou<\/span>/.test(htmlAut)
-        && /erro:'⚠️ Não rodou'/.test(htmlAut)
+      'a coluna descreve a falha sem garantir ausência de efeitos': /⚠️ Falha na execução<\/span>/.test(htmlAut)
+        && /erro:'⚠️ Falha na execução'/.test(htmlAut)
         && /expirado:'⌛ Venceu'/.test(htmlAut) && />Venceu<\/span>/.test(htmlAut)
         && /rejeitado:'❌ Recusado'/.test(htmlAut) && />Recusado<\/span>/.test(htmlAut),
       // as duas colunas que pedem AÇÃO vêm primeiro: no celular elas empilham,
@@ -27331,10 +27338,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // sem isto o pedido ficava PRESO na fila oferecendo "autorizar de novo"
       // pra sempre - o botão dava exatamente o mesmo erro, toda vez
       'falha que repetir não resolve sai da fila e para de oferecer o botão':
-        /erroDefinitivo: execErr\.definitivo === true/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8'))
+        /erroDefinitivo: true, execucaoId:pendente\.execucaoId/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8'))
         && /function definitivo\(a\)\{return a\.status==='erro'&&a\.erroDefinitivo===true\}/.test(htmlAut)
         && /function aberto\(a\)\{return \(a\.status==='pendente'\|\|\(a\.status==='erro'&&!definitivo\(a\)\)\)/.test(htmlAut)
-        && /Autorizar de novo daria o mesmo resultado/.test(htmlAut),
+        && /Confira o resultado antes de solicitar uma nova autorização/.test(htmlAut),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAutoriza = !falhas.length;
@@ -27996,7 +28003,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
     // Claude tentando rodar a assinatura sem a aprovação
     const semAprovacao = await tenta(() => cw.executarAutorizado({ nome: 'pedir_assinatura', entrada: { formularioId: criado.formularioId } }));
     // o Master aprova com a DIGITAL, pela rota de verdade
-    const aprovado = await postarJson(`/api/qa-aprovacoes/${pedido.autorizacaoId}/aprovar`, { password: pkP.emitirConfirmacao('u-prep-master') }, { ...cabP, 'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile' });
+    const revisaoP=require('./qaAprovacoes').revisao(DOCS.get(`qaAprovacoes/${pedido.autorizacaoId}`));
+    const aprovado = await postarJson(`/api/qa-aprovacoes/${pedido.autorizacaoId}/aprovar`, { password: pkP.emitirConfirmacao('u-prep-master',{id:pedido.autorizacaoId,revisao:revisaoP}),revisao:revisaoP }, { ...cabP, 'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile' });
     fm.invalidar();
     const assinado = await fm.getOne(criado.formularioId);
     const cons = (await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: pedido.autorizacaoId } })).resultado;

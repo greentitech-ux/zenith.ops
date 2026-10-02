@@ -101,7 +101,8 @@ window.fetch=(url,opcoes={})=>fetchOriginal(url,{...opcoes,headers:{...(opcoes.h
   <div id="agora"></div>
   <div class="colunas">
     <section class="coluna pendente"><div class="col-topo"><span class="col-nome">Pendente</span><span class="col-conta" id="c-pendente"></span></div><div id="col-pendente"><p class="muted">Carregando…</p></div></section>
-    <section class="coluna erro"><div class="col-topo"><span class="col-nome">⚠️ Não rodou</span><span class="col-conta" id="c-erro"></span></div><div id="col-erro"></div></section>
+    <section class="coluna"><div class="col-topo"><span class="col-nome">Em execução</span><span class="col-conta" id="c-executando"></span></div><div id="col-executando"></div></section>
+    <section class="coluna erro"><div class="col-topo"><span class="col-nome">⚠️ Falha na execução</span><span class="col-conta" id="c-erro"></span></div><div id="col-erro"></div></section>
     <section class="coluna"><div class="col-topo"><span class="col-nome">Autorizado</span><span class="col-conta" id="c-aprovado"></span></div><div id="col-aprovado"></div></section>
     <section class="coluna"><div class="col-topo"><span class="col-nome">Recusado</span><span class="col-conta" id="c-rejeitado"></span></div><div id="col-rejeitado"></div></section>
     <section class="coluna"><div class="col-topo"><span class="col-nome">Venceu</span><span class="col-conta" id="c-expirado"></span></div><div id="col-expirado"></div></section>
@@ -114,6 +115,7 @@ const ORIGEM={cowork:'🤖 Claude · Cowork',beniboy:'💬 Beniboy',qa:'🧪 QA 
 const FOCO=new URLSearchParams(location.search).get('id')||'';
 let LISTA=[];
 let DIGITAL=false;
+const EM_CURSO=new Set();
 const FEITOS=new Map(); // id -> resultado mostrado uma vez (senha temporária inclusive)
 let FILTRO_ORIGEM='';let FILTRO_BUSCA='';
 
@@ -128,9 +130,18 @@ function vencido(a){return a.status==='pendente'&&a.expiraEm&&Date.parse(a.expir
 function definitivo(a){return a.status==='erro'&&a.erroDefinitivo===true}
 function aberto(a){return (a.status==='pendente'||(a.status==='erro'&&!definitivo(a)))&&!vencido(a)}
 
+function detalhe(d){
+  let obj;try{obj=JSON.parse(d.valor)}catch(e){return `<div><dt>${esc(d.rotulo)}</dt><dd>${esc(d.valor)}</dd></div>`}
+  const limpar=v=>Array.isArray(v)?v.map(limpar):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,/senha|password|token|secret/i.test(k)?'[protegido]':limpar(x)])):v;
+  obj=limpar(obj);
+  const nomes={permissions:'Permissões',sections:'Seções',unidades:'Unidades',vaultSubgroups:'Áreas do cofre',tiposSolicitacao:'Tipos de solicitação',cargos:'Cargos'};
+  const legivel=(v)=>Array.isArray(v)?(v.map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(', ')||'Nenhum'):v&&typeof v==='object'?Object.entries(v).map(([k,x])=>(nomes[k]||k)+': '+legivel(x)).join('\n'):String(v??'');
+  return `<div><dt>${esc(d.rotulo)}</dt><dd>${esc(legivel(obj))}<details><summary>Detalhes técnicos</summary><pre class="saida">${esc(JSON.stringify(obj,null,2))}</pre></details></dd></div>`;
+}
+
 function cartao(a){
   const feito=FEITOS.get(a.id);
-  const det=(a.detalhes||[]).length?`<dl class="detalhes">${a.detalhes.map(d=>`<div><dt>${esc(d.rotulo)}</dt><dd>${esc(d.valor)}</dd></div>`).join('')}</dl>`:'';
+  const det=(a.detalhes||[]).length?`<dl class="detalhes">${a.detalhes.map(detalhe).join('')}</dl>`:'';
   const eventos=(a.historico&&a.historico.length?a.historico:[{evento:'PEDIDO_CRIADO',em:a.criadoEm,porEmail:a.criadoPorEmail},...(a.decididoEm?[{evento:a.status==='aprovado'?'AUTORIZADO_E_EXECUTADO':a.status==='rejeitado'?'RECUSADO':a.status==='erro'?'ERRO_NA_EXECUCAO':'VENCEU',em:a.decididoEm,porEmail:a.decididoPorEmail,motivo:a.motivoRejeicao,erro:a.erroExecucao}]:[])]);
   const tempo=`<div class="linha-tempo">${eventos.map(e=>`<div><b>${esc(String(e.evento||'').replaceAll('_',' '))}</b> · ${esc(quando(e.em))}${e.porEmail?' · '+esc(e.porEmail):''}${e.motivo?' — '+esc(e.motivo):''}${e.erro?' — '+esc(e.erro):''}</div>`).join('')}</div>`;
   const cabeca=`<span class="origem">${esc(ORIGEM[a.origem]||ORIGEM.qa)}</span><p class="resumo">${esc(a.resumo||a.tipo)}</p><div class="muted">${esc(a.criadoPorEmail||'')} · ${quando(a.criadoEm)}${aberto(a)?vence(a.expiraEm):''}</div>${det}${tempo}`;
@@ -138,9 +149,9 @@ function cartao(a){
     return `<article class="pedido" id="p-${esc(a.id)}">${cabeca}<div class="feito ok">✅ Autorizado e executado.</div>${feito.saida?`<pre class="saida">${esc(feito.saida)}</pre><button type="button" style="margin-top:8px" onclick="copiar('${esc(a.id)}')">Copiar resultado</button><div class="muted" style="margin-top:6px">Este resultado aparece só agora - não fica gravado.</div>`:''}</article>`;
   }
   if(!aberto(a)){
-    const rot={aprovado:'✅ Autorizado',rejeitado:'❌ Recusado',expirado:'⌛ Venceu',pendente:'⌛ Venceu',erro:'⚠️ Não rodou'}[a.status]||a.status;
+    const rot={aprovado:'✅ Autorizado',rejeitado:'❌ Recusado',expirado:'⌛ Venceu',pendente:'⌛ Venceu',erro:'⚠️ Falha na execução',executando:'Execução iniciada. Se não concluir, confira o resultado antes de solicitar outro pedido. Não será repetida automaticamente.'}[a.status]||a.status;
     // diz POR QUE não adianta tentar de novo, em vez de só sumir com o botão
-    const porque=definitivo(a)?`<br>${esc(a.erroExecucao||'')}<br><span class="muted">Autorizar de novo daria o mesmo resultado. Se ainda fizer sentido, peça de novo ao Claude.</span>`:'';
+    const porque=definitivo(a)?`<br>${esc(a.erroExecucao||'')}<br><span class="muted">Confira o resultado antes de solicitar uma nova autorização. Uma falha pode ter ocorrido após parte da ação.</span>`:'';
     return `<article class="pedido decidido">${cabeca}<div class="feito">${rot}${a.decididoPorEmail?' · '+esc(a.decididoPorEmail):''}${a.decididoEm?' · '+quando(a.decididoEm):''}${a.motivoRejeicao?'<br>Motivo: '+esc(a.motivoRejeicao):''}${porque}</div></article>`;
   }
   // digital PRIMEIRO; senha é a alternativa. Sem digital neste aparelho, a
@@ -188,6 +199,7 @@ function coluna(a){
   if(FEITOS.has(a.id))return 'agora';
   if(vencido(a))return 'expirado';
   if(a.status==='pendente')return 'pendente';
+  if(a.status==='executando')return 'executando';
   if(a.status==='erro')return 'erro';
   if(a.status==='aprovado')return 'aprovado';
   if(a.status==='expirado')return 'expirado';
@@ -204,6 +216,7 @@ function pintar(){
   const porDecisao=(x,y)=>Date.parse(y.decididoEm||y.criadoEm)-Date.parse(x.decididoEm||x.criadoEm);
   const pendentes=nas('pendente').sort(porNovo);
   const erros=nas('erro').sort(porNovo);
+  const executando=nas('executando').sort(porNovo);
   // teto nas colunas de desfecho: a lista do servidor já vem com 300, e a
   // tela não precisa virar histórico
   const aprovados=nas('aprovado').sort(porDecisao).slice(0,15);
@@ -214,11 +227,13 @@ function pintar(){
   const por=(el,lista,vazio)=>{$(el).innerHTML=lista.map(cartao).join('')||`<p class="col-vazia">${vazio}</p>`};
   por('#col-pendente',pendentes,'Nada esperando autorização agora.');
   por('#col-erro',erros,'Nenhuma falhou ao executar.');
+  por('#col-executando',executando,'Nenhuma execução em andamento.');
   por('#col-aprovado',aprovados,'Nenhuma autorizada ainda.');
   por('#col-rejeitado',rejeitados,'Nenhuma recusada.');
   por('#col-expirado',expirados,'Nenhuma venceu.');
   const conta=(el,n)=>{$(el).textContent=n?String(n):''};
   conta('#c-pendente',pendentes.length);conta('#c-erro',erros.length);
+  conta('#c-executando',executando.length);
   conta('#c-aprovado',aprovados.length);conta('#c-rejeitado',rejeitados.length);conta('#c-expirado',expirados.length);
   $('#filtro-resumo').textContent=(FILTRO_ORIGEM||FILTRO_BUSCA)?`${filtrada.length} de ${LISTA.length} autorização(ões) no filtro.`:`${LISTA.length} autorização(ões) no histórico.`;
 }
@@ -229,7 +244,7 @@ async function carregar(){
   const r=await fetch('/api/qa-aprovacoes');
   // o recado vai pra PRIMEIRA coluna, que e a que a pessoa le primeiro no
   // celular - e as outras duas ficam vazias em vez de mentir "nenhuma"
-  const recado=t=>{$('#col-pendente').innerHTML=`<p class="muted">${t}</p>`;['#col-erro','#col-aprovado','#col-rejeitado','#col-expirado'].forEach(k=>{$(k).innerHTML=''});};
+  const recado=t=>{$('#col-pendente').innerHTML=`<p class="muted">${t}</p>`;['#col-executando','#col-erro','#col-aprovado','#col-rejeitado','#col-expirado'].forEach(k=>{$(k).innerHTML=''});};
   if(r.status===403){recado('Só o Master autoriza estes pedidos.');return}
   if(!r.ok){recado('Não consegui carregar os pedidos.');return}
   LISTA=await r.json();
@@ -238,13 +253,13 @@ async function carregar(){
 }
 // Atualiza o painel enquanto fica aberto, sem apagar uma senha que o Master
 // esteja digitando para autorizar. O push continua abrindo a tela no pedido.
-setInterval(()=>{if(document.visibilityState==='visible'&&!document.activeElement?.matches('input[type="password"]'))carregar()},20000);
+setInterval(()=>{if(!EM_CURSO.size&&document.visibilityState==='visible'&&!document.activeElement?.matches('input[type="password"]'))carregar()},20000);
 
 function erro(id,msg){const el=$('#err-'+id);if(!el)return alert(msg);el.textContent=msg;el.classList.remove('hidden')}
 function mostrarSenha(id){$('#sen-'+id).classList.remove('hidden');$('#inp-'+id).focus()}
 
-async function enviar(id,comprovante){
-  const r=await fetch('/api/qa-aprovacoes/'+encodeURIComponent(id)+'/aprovar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:comprovante})});
+async function enviar(id,comprovante,revisao){
+  const r=await fetch('/api/qa-aprovacoes/'+encodeURIComponent(id)+'/aprovar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:comprovante,revisao})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(d.error||'Não consegui autorizar.');
   FEITOS.set(id,{saida:d.resultadoParaMaster||''});
@@ -252,18 +267,22 @@ async function enviar(id,comprovante){
   pintar();
 }
 async function autorizarDigital(id){
+  if(EM_CURSO.has(id))return;EM_CURSO.add(id);
+  const revisao=LISTA.find(a=>a.id===id)?.revisao;
   const b=$('#dig-'+id);b.disabled=true;b.textContent='Toque no sensor…';
-  try{const d=await window.nopulsoDigital.confirmarComDigital();await enviar(id,d.confirmacao)}
+  try{const d=await window.nopulsoDigital.confirmarComDigital({autorizacaoId:id,revisao});await enviar(id,d.confirmacao,revisao)}
   catch(x){
     b.disabled=false;b.textContent='👆 Autorizar com a digital';
     // cancelar o sensor não é erro: a pessoa só desistiu
     if(x&&(x.name==='NotAllowedError'||x.name==='AbortError'))return;
     erro(id,x.message||'Não consegui confirmar a digital. Use a senha.');
-  }
+  }finally{EM_CURSO.delete(id)}
 }
 async function autorizarSenha(id){
   const inp=$('#inp-'+id);if(!inp.value)return erro(id,'Digite sua senha.');
-  try{await enviar(id,inp.value)}catch(x){inp.value='';erro(id,x.message)}
+  if(EM_CURSO.has(id))return;EM_CURSO.add(id);
+  const revisao=LISTA.find(a=>a.id===id)?.revisao;
+  try{await enviar(id,inp.value,revisao)}catch(x){inp.value='';erro(id,x.message)}finally{EM_CURSO.delete(id)}
 }
 async function recusar(id){
   const motivo=prompt('Motivo da recusa (opcional - o Claude/Beniboy lê isso pra ajustar o pedido):');
@@ -281,7 +300,7 @@ async function copiar(id){const t=(FEITOS.get(id)||{}).saida||'';try{await navig
   try{DIGITAL=!!(window.nopulsoDigital&&await window.nopulsoDigital.disponivel())}catch(e){DIGITAL=false}
   await carregar();
   // voltou pro app (tocou no push com a tela já aberta): pedidos novos
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)carregar()});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!EM_CURSO.size)carregar()});
 })();
 </script>
 </body>
