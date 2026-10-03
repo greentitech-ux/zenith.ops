@@ -127,7 +127,7 @@
   </div>
 </header>
 
-<div class="sub-intro" style="margin:0 0 16px;">A lista mostra somente unidades com a atribuição <b>Entregas</b>. Cada unidade pode cadastrar entregadores fixos, empresas/plataformas com tarifa automática ou total manual e o controle por faixa de KM. Campina Grande mantém também seu modelo próprio de quantidade e valor total.</div>
+<div class="sub-intro" style="margin:0 0 16px;">A lista mostra somente unidades com a atribuição <b>Entregas</b>. Cada unidade pode cadastrar entregadores fixos, empresas/plataformas com tarifa automática ou total manual e o controle por faixa de KM.</div>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
 <nav class="nav-drawer hidden" id="nav-drawer"></nav>
@@ -156,8 +156,6 @@
       <label><input type="radio" name="modo" value="plataforma" checked> Não usa tabela de entregadores fixos</label>
       <label><input type="radio" name="modo" value="fixo"> Usa tabela de entregadores fixos</label>
     </div>
-
-    <div id="modelo-total-aviso" class="modelo-aviso hidden"><b>Modelo de Campina Grande</b><br>O lançamento registra entregador, quantidade de entregas e valor total. Não há taxa fixa, extra ou retorno. COOP recebe só aparece se ativado na configuração abaixo.</div>
 
     <input type="hidden" id="r-plataformaNome">
 
@@ -401,12 +399,10 @@ function abrirEdicao(codigo){
   EDITANDO_UNIDADE = codigo;
   document.getElementById('regra-title').textContent = 'Regra de ' + (u?u.nome:codigo);
   document.getElementById('regra-sub').textContent = 'Vale a partir de agora - lançamentos já feitos não são recalculados.';
-  const total = r.modeloLancamento==='total';
-  document.getElementById('label-modo').classList.toggle('hidden', total);
-  document.getElementById('editor-modo').classList.toggle('hidden', total);
-  document.getElementById('modelo-total-aviso').classList.toggle('hidden', !total);
+  document.getElementById('label-modo').classList.remove('hidden');
+  document.getElementById('editor-modo').classList.remove('hidden');
   document.querySelector(`input[name=modo][value="${r.modo}"]`).checked = true;
-  document.getElementById('campos-fixo').classList.toggle('hidden', total || r.modo!=='fixo');
+  document.getElementById('campos-fixo').classList.toggle('hidden', r.modo!=='fixo');
   document.getElementById('r-plataformaNome').value = r.plataformaNome || '';
   document.getElementById('r-entregadoresFixosLista').innerHTML = (r.entregadoresFixos||[]).length
     ? (r.entregadoresFixos||[]).map(nome=>`<div style="padding:4px 0">• ${escapeHtml(nome)}</div>`).join('')
@@ -431,7 +427,7 @@ document.getElementById('regra-form').addEventListener('submit', async (e)=>{
   const errEl = document.getElementById('regra-err');
   const payload = {
     modo: document.querySelector('input[name=modo]:checked').value,
-    modeloLancamento: regraDaUnidade(EDITANDO_UNIDADE).modeloLancamento || 'detalhado',
+    modeloLancamento: 'detalhado',
     plataformaNome: document.getElementById('r-plataformaNome').value,
     entregadoresFixos: regraDaUnidade(EDITANDO_UNIDADE).entregadoresFixos || [],
     empresas: lerEmpresas(),

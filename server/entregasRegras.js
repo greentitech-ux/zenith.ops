@@ -150,6 +150,9 @@ function normalizarRegra(regra) {
   }
   return {
     ...regra,
+    // Campina usa a configuração comum a partir de agora; o modelo dos
+    // lançamentos históricos permanece salvo no próprio lançamento.
+    modeloLancamento: regra.unidade === 'Dominos Campina Grande' ? 'detalhado' : (regra.modeloLancamento || 'detalhado'),
     entregadoresFixos: sanitizarEntregadoresFixos(regra.entregadoresFixos),
     empresas,
     regraKm: sanitizarRegraKm(regra.regraKm),
@@ -196,9 +199,7 @@ function defaultRegra(unidade) {
   return {
     unidade,
     modo: 'plataforma',
-    // Campina informa a quantidade e o valor fechado da Moovey. Os demais
-    // continuam no formulário detalhado até que o Master escolha outro modelo.
-    modeloLancamento: unidade === 'Dominos Campina Grande' ? 'total' : 'detalhado',
+    modeloLancamento: 'detalhado',
     plataformaNome: '',
     entregadoresFixos: [],
     empresas: [],
@@ -219,9 +220,7 @@ const listAll = regrasCache.cached;
 
 async function getPara(unidade) {
   const doc = await COLLECTION.doc(unidade).get();
-  // Regras gravadas antes da criação do modelo "total" não possuem a nova
-  // chave. Mesclar com o padrão conserva a configuração antiga e faz Campina
-  // adotar o formulário correto sem exigir uma migração manual no Firestore.
+  // Mesclar com o padrão conserva os campos das configurações antigas.
   return doc.exists ? { ...defaultRegra(unidade), ...normalizarRegra(doc.data()) } : defaultRegra(unidade);
 }
 
@@ -246,7 +245,7 @@ async function salvar(unidade, campos, atualizadoPorEmail) {
   const registro = {
     unidade,
     modo,
-    modeloLancamento: MODELOS_LANCAMENTO_VALIDOS.has(campos?.modeloLancamento) ? campos.modeloLancamento : (unidade === 'Dominos Campina Grande' ? 'total' : 'detalhado'),
+    modeloLancamento: unidade === 'Dominos Campina Grande' ? 'detalhado' : (MODELOS_LANCAMENTO_VALIDOS.has(campos?.modeloLancamento) ? campos.modeloLancamento : 'detalhado'),
     plataformaNome: String(campos?.plataformaNome || '').trim().slice(0, 40),
     entregadoresFixos,
     empresas,
