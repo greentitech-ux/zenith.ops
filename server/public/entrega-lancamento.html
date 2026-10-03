@@ -432,7 +432,7 @@ function filtrarOpcoesEntregador(inputId, selectId){
     opcao.hidden=indice>0 && !!busca && !textoParaBusca(opcao.textContent).includes(busca);
   });
   [...select.querySelectorAll('optgroup')].forEach(grupo=>{
-    grupo.hidden=[...grupo.options].every(opcao=>opcao.hidden);
+    grupo.hidden=[...grupo.querySelectorAll('option')].every(opcao=>opcao.hidden);
   });
 }
 function renderOpcoesRecebedor(){
@@ -442,7 +442,7 @@ function renderOpcoesRecebedor(){
   const grupos=[...select.querySelectorAll('optgroup')];
   let html='';
   grupos.forEach(grupo=>{
-    const opcoes=[...grupo.options].filter(opcao=>!busca || textoParaBusca(opcao.textContent).includes(busca));
+    const opcoes=[...grupo.querySelectorAll('option')].filter(opcao=>!busca || textoParaBusca(opcao.textContent).includes(busca));
     if(!opcoes.length) return;
     html+=`<div class="combo-grupo">${escapeHtml(grupo.label)}</div>`;
     html+=opcoes.map(opcao=>`<button type="button" role="option" data-indice="${opcao.index}">${escapeHtml(opcao.textContent)}</button>`).join('');
@@ -1087,7 +1087,7 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
       unidade,
       unidadeNome: UNIDADES_NOMES[unidade] || unidade,
       data: document.getElementById('f-data').value,
-      entregador: ehModeloTotal() ? entregadorCampina.nome : (document.getElementById('f-entregador').classList.contains('hidden')
+      entregador: ehModeloTotal() ? entregadorCampina.nome : (!document.getElementById('f-entregador').classList.contains('hidden')
         ? document.getElementById('f-entregador').value
         : document.getElementById('f-entregador-fixo').value),
       tipoEntregador: ehModeloTotal() ? entregadorCampina.tipo : null,
