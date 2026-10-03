@@ -114,8 +114,29 @@ function sanitizarEmpresas(lista) {
     usados.add(chave);
     const modo = empresa?.modo === 'fixo' ? 'fixo' : 'manual';
     const pagamentoEntregador = ['manual','unidade'].includes(empresa?.pagamentoEntregador) ? empresa.pagamentoEntregador : (modo === 'manual' ? 'manual' : 'unidade');
-    return { nome, modo, pagamentoEntregador, valorEntrega: modo === 'fixo' ? Math.max(0, num(empresa?.valorEntrega)) : 0 };
+    const camposManuais = sanitizarCamposManuais(empresa?.camposManuais);
+    return { nome, modo, pagamentoEntregador, camposManuais, garantidoAtivo: empresa?.garantidoAtivo !== false, valorEntrega: modo === 'fixo' ? Math.max(0, num(empresa?.valorEntrega)) : 0 };
   }).filter(Boolean).slice(0, 100);
+}
+
+function sanitizarCamposManuais(lista) {
+  if (!Array.isArray(lista)) return [];
+  if (lista.length > 20) throw new Error('Cadastre no máximo 20 campos manuais por empresa.');
+  const usados = new Set();
+  const nomes = new Set();
+  return lista.map(c => {
+    const label = String(c?.label || '').trim().slice(0, 40);
+    const campo = slugify(c?.campo || label);
+    const nome = slugify(label);
+    if (!label || !campo) throw new Error('Informe o nome do campo manual.');
+    if (usados.has(campo) || nomes.has(nome) || ['entrega','entregas','valorEntregas','garantido'].includes(campo) || ['entrega','entregas','valorEntregas','garantido'].includes(nome)) throw new Error('Nome de campo manual repetido ou reservado.');
+    usados.add(campo);
+    nomes.add(nome);
+    const quantidade = c.quantidade === true;
+    const valor = c.valor !== false;
+    if (!quantidade && !valor) throw new Error('O campo precisa de quantidade ou valor manual.');
+    return { campo, label, quantidade, valor, observacaoObrigatoria: c.observacaoObrigatoria === true };
+  });
 }
 
 function sanitizarRegraKm(regraKm) {

@@ -230,6 +230,7 @@
         <div id="wrap-f-coopRecebe" class="hidden"><input type="number" id="f-coopRecebe" value="0" readonly></div>
       </div>
 
+      <div id="f-campos-manuais" class="hidden"></div>
       <!-- unidade "fixo" (tem sua propria lista de campos de valor,
            configurada em Regras de Entregas) - o servidor calcula tudo a
            partir das contagens acima; aqui só mostramos a prévia (por
@@ -328,6 +329,7 @@
       <label>Qual campo está errado e qual a informação correta?</label>
       <select id="e-campo"></select>
       <input type="number" step="0.01" id="e-valor" placeholder="valor correto" style="margin-top:8px;">
+      <div id="e-campos-manuais" class="hidden"></div>
       <div id="e-obs-wrap" class="hidden"><label id="e-obs-label">Observação</label><input type="text" id="e-obs"></div>
       <label>Motivo da correção</label>
       <textarea id="e-motivo" placeholder="explique o que aconteceu, o Master vai revisar antes de aprovar" required></textarea>
@@ -350,6 +352,7 @@
         <div><label>Data</label><input type="date" id="m-data" required></div>
       </div>
       <div class="grid2" id="m-campos-numericos"></div>
+      <div id="m-campos-manuais"></div>
       <label>Obs. Retorno</label>
       <input type="text" id="m-obsRetorno">
       <label>Obs. Extra</label>
@@ -661,10 +664,17 @@ function atualizarModoRecebedor(){
   const regra = regraAtual();
   const empresa = empresaSelecionada();
   const tipoSelecionado = document.getElementById('f-entregador-fixo').selectedOptions[0]?.dataset.tipo;
-  const manual=pagamentoManualEntregador() || (empresa?.modo==='manual' && /^moovery(?:\s|$)/i.test(empresa.nome.trim()));
+  const cadastro=entregadorCadastroAtual();
+  const vinculada=empresa || (regra.empresas||[]).find(e=>e.nome.toLocaleLowerCase('pt-BR')===String(cadastro?.categoria||'').toLocaleLowerCase('pt-BR'));
+  const manual=pagamentoManualEntregador() || empresa?.modo==='manual';
   document.getElementById('label-f-valor').textContent=manual?'Valor Entregas':'Valor a pagar';
-  document.getElementById('wrap-f-garantido').classList.toggle('hidden', !manual);
-  if(!manual) document.getElementById('f-garantido').value='0';
+  document.getElementById('wrap-f-garantido').classList.toggle('hidden', !manual || vinculada?.garantidoAtivo===false);
+  if(!manual || vinculada?.garantidoAtivo===false) document.getElementById('f-garantido').value='0';
+  const listaManuais=document.getElementById('f-campos-manuais');
+  const config=manual?(vinculada?.camposManuais||[]):[];
+  const chave=JSON.stringify([document.getElementById('f-unidade').value,cadastro?.nome,empresa?.nome,config]);
+  if(listaManuais.dataset.chave!==chave){listaManuais.innerHTML=camposManuaisHtml(config);listaManuais.dataset.chave=chave;}
+  listaManuais.classList.toggle('hidden', !config.length);
   document.getElementById('f-valor').required=manual;
   const entregadorFixo = !empresa && !manual && tipoSelecionado==='entregador' && regra.modo==='fixo';
   const calculado = entregadorFixo || empresa?.modo==='fixo';
@@ -685,6 +695,27 @@ function atualizarModoRecebedor(){
   }
   atualizarPreviewCalculado();
 }
+function camposManuaisHtml(config,itens=[]){
+  return config.map(c=>{
+    const item=itens.find(i=>i.campo===c.campo)||{};
+    return `<div class="secao campo-manual" data-campo="${escapeHtml(c.campo)}" data-obs="${c.observacaoObrigatoria?'1':'0'}">
+      <div class="secao-titulo">${escapeHtml(c.label)}</div><div class="grid2">
+      ${c.quantidade?`<div><label>Quantidade ${escapeHtml(c.label)}</label><input type="number" min="0" step="1" data-manual="quantidade" value="${num(item.quantidade)}"></div>`:''}
+      ${c.valor?`<div><label>Valor ${escapeHtml(c.label)}</label><input type="number" min="0" step="0.01" data-manual="valor" value="${num(item.valor)}"></div>`:''}</div>
+      <label>Observação${c.observacaoObrigatoria?' (obrigatória quando preenchido)':' (opcional)'}</label><textarea data-manual="observacao" maxlength="1000">${escapeHtml(item.observacao||'')}</textarea></div>`;
+  }).join('');
+}
+function lerCamposManuais(container){
+  return [...document.getElementById(container).querySelectorAll('.campo-manual')].map(el=>({
+    campo:el.dataset.campo,quantidade:el.querySelector('[data-manual=quantidade]')?.value||0,
+    valor:el.querySelector('[data-manual=valor]')?.value||0,observacao:el.querySelector('[data-manual=observacao]').value,
+  }));
+}
+document.addEventListener('input',ev=>{
+  const card=ev.target.closest('.campo-manual');if(!card)return;
+  card.querySelector('[data-manual=observacao]').required=card.dataset.obs==='1' &&
+    (num(card.querySelector('[data-manual=quantidade]')?.value)>0 || num(card.querySelector('[data-manual=valor]')?.value)>0);
+});
 // checklist dinâmico - só os campos que o Master marcou como removíveis
 // pela loja aparecem aqui (varia por unidade, ver entregas-regras.html)
 function renderCamposRemoviveis(){
@@ -918,9 +949,10 @@ function renderLista(){
       <div class="sub">lançado em ${new Date(f.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR})}${f.etiquetaPath?' · <a href="/api/entregas/etiqueta/'+f.id+'?token='+encodeURIComponent(AUTH_TOKEN)+'" target="_blank" style="color:var(--accent);">📎 etiqueta</a>':''}</div>
       <div class="valores">
         <span>Entregas <b>${f.entrega}</b></span>
-        <span>Extra <b>${f.extra}</b></span>
-        <span>Valor <b>${fmtMoney(f.valor)}</b></span>
-        ${f.valorEntregas != null ? `<span>Valor Entregas <b>${fmtMoney(f.valorEntregas)}</b></span><span>Garantido <b>${fmtMoney(f.garantido)}</b></span>` : ''}
+        ${f.valorEntregas != null ? '' : `<span>Extra <b>${f.extra}</b></span>`}
+        <span>${f.valorEntregas != null ? 'Total' : 'Valor'} <b>${fmtMoney(f.valor)}</b></span>
+        ${f.valorEntregas != null ? `<span>Valor Entregas <b>${fmtMoney(f.valorEntregas)}</b></span>${f.configGarantidoAtivo===false?'':`<span>Garantido <b>${fmtMoney(f.garantido)}</b></span>`}` : ''}
+        ${(f.itensManuais||[]).map(c=>{const config=(f.configCamposManuais||[]).find(i=>i.campo===c.campo);return `<span>${escapeHtml(c.label)} <b>${config?.quantidade?c.quantidade:''}${config?.quantidade&&config?.valor?' · ':''}${config?.valor?fmtMoney(c.valor):''}</b>${c.observacao?' · '+escapeHtml(c.observacao):''}</span>`;}).join('')}
       </div>
       ${['CANCELADO','EXCLUIDO'].includes(f.situacao)?'':IS_MASTER
         ? '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEditarMaster(\''+f.id+'\')">✎ Editar (Master)</button>'
@@ -957,7 +989,7 @@ async function acaoEntrega(id,tipoAcao){
 }
 function camposCorrecaoEntrega(registro){
   const regra=REGRAS_POR_UNIDADE[registro.unidade] || {};
-  if(registro.valorEntregas != null) return ['entrega','valorEntregas','garantido'];
+  if(registro.valorEntregas != null) return ['entrega','valorEntregas',...(registro.configGarantidoAtivo===false?[]:['garantido'])];
   if(registro.modeloLancamento==='total' || regra.modeloLancamento==='total' || registro.tipoRecebedor==='empresa') return ['entrega','valor'];
   const configurados=Array.isArray(regra.camposValor) ? regra.camposValor : [];
   return CAMPOS_NUMERICOS.filter(campo=>{
@@ -975,6 +1007,7 @@ function abrirEdicao(id){
   const f = MEUS.find(x=>x.id===id);
   document.getElementById('edicao-info').textContent = `${f.entregador} · ${f.unidadeNome||f.unidade} · ${fmtData(f.data)} — depois de lançado, a correção precisa de aprovação do Master.`;
   document.getElementById('e-campo').innerHTML = ['data','entregador',...camposCorrecaoEntrega(f)].map(c=>`<option value="${c}">${c==='data'?'Data':c==='entregador'?'Entregador':NOMES_CAMPOS[c]} (atual: ${escapeHtml(c==='data'?fmtData(f.data):c==='entregador'?f.entregador:fmtValorCampo(c,f[c]))})</option>`).join('');
+  if(f.configCamposManuais?.length) document.getElementById('e-campo').insertAdjacentHTML('beforeend','<option value="itensManuais">Campos manuais (quantidades, valores e observações)</option>');
   document.getElementById('e-valor').value = '';
   document.getElementById('e-motivo').value = '';
   document.getElementById('msg-edicao').classList.add('hidden');
@@ -987,9 +1020,13 @@ function atualizarObsCorrecao(){
   const input=document.getElementById('e-valor');
   input.type=campo==='data'?'date':campo==='entregador'?'text':'number';
   input.step=CAMPOS_MONETARIOS.has(campo)?'0.01':'1';
-  input.required=true;
+  input.required=campo!=='itensManuais';
+  input.classList.toggle('hidden',campo==='itensManuais');
   input.placeholder=campo==='entregador'?'nome correto do entregador':'valor correto';
   const registro=MEUS.find(f=>f.id===EDITANDO_ID);
+  const extras=document.getElementById('e-campos-manuais');
+  extras.classList.toggle('hidden',campo!=='itensManuais');
+  extras.innerHTML=campo==='itensManuais'?camposManuaisHtml(registro.configCamposManuais,registro.itensManuais):'';
   input.value=['data','entregador'].includes(campo)?(registro?.[campo]||''):'';
   const obs=campo==='extra'?'obsExtra':campo==='retorno'?'obsRetorno':null;
   document.getElementById('e-obs-wrap').classList.toggle('hidden',!obs);
@@ -1011,7 +1048,7 @@ document.getElementById('form-edicao').addEventListener('submit', async (ev)=>{
   const textoOriginal = btnEnviar.textContent;
   btnEnviar.textContent = 'Enviando...';
   try{
-    const mudancas={ [campo]:valor };
+    const mudancas={ [campo]:campo==='itensManuais'?lerCamposManuais('e-campos-manuais'):valor };
     if(['extra','retorno'].includes(campo)) mudancas[campo==='extra'?'obsExtra':'obsRetorno']=document.getElementById('e-obs').value;
     const res = await fetch(`/api/entregas/${EDITANDO_ID}/solicitar-edicao`, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -1043,6 +1080,7 @@ function abrirEditarMaster(id){
   document.getElementById('m-campos-numericos').innerHTML = camposMaster.map(c=>
     `<div><label>${NOMES_CAMPOS[c]}</label><input type="number" step="${CAMPOS_MONETARIOS.has(c)?'0.01':'1'}" inputmode="decimal" id="m-${c}" value="${num(f[c])}"></div>`
   ).join('');
+  document.getElementById('m-campos-manuais').innerHTML=camposManuaisHtml(f.configCamposManuais||[],f.itensManuais);
   document.getElementById('msg-master').classList.add('hidden');
   document.getElementById('overlay-master').classList.remove('hidden');
 }
@@ -1054,6 +1092,11 @@ document.getElementById('form-master').addEventListener('submit', async (ev)=>{
   msg.classList.add('hidden');
   const f = MEUS.find(x=>x.id===EDITANDO_MASTER_ID);
   const mudancas = {};
+  if(f.configCamposManuais?.length){
+    const itens=lerCamposManuais('m-campos-manuais');
+    const valores=lista=>lista.map(i=>({campo:i.campo,quantidade:num(i.quantidade),valor:num(i.valor),observacao:i.observacao||''}));
+    if(JSON.stringify(valores(itens))!==JSON.stringify(valores(f.itensManuais||[]))) mudancas.itensManuais=itens;
+  }
   CAMPOS_NUMERICOS.forEach(c=>{
     const input = document.getElementById('m-'+c);
     if(!input) return;
@@ -1130,6 +1173,7 @@ document.getElementById('form-lancar').addEventListener('paste', ev=>{
 
 function resetarForm(){
   document.getElementById('form-lancar').reset();
+  document.getElementById('f-campos-manuais').dataset.chave='';
   atualizarComprovante();
   document.getElementById('f-data').value = dataFechamentoBrasilia();
   CAMPOS_NUMERICOS.forEach(c=>{ const el = document.getElementById('f-'+c); if(el) el.value = 0; });
@@ -1162,6 +1206,7 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
   try{
     const unidade = document.getElementById('f-unidade').value;
     const campos = {};
+    campos.itensManuais=lerCamposManuais('f-campos-manuais');
     CAMPOS_NUMERICOS.forEach(c=>{
       const el = document.getElementById('f-'+c);
       campos[c] = el ? el.value : 0;

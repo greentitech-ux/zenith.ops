@@ -279,7 +279,27 @@ function empresaCardHtml(empresa){
       <option value="unidade" ${(empresa.pagamentoEntregador||(!fixo?'manual':'unidade'))==='unidade'?'selected':''}>Usar tabela da unidade</option>
       <option value="manual" ${(empresa.pagamentoEntregador||(!fixo?'manual':'unidade'))==='manual'?'selected':''}>Quantidade de entregas + valor total manual</option>
     </select></div>
+    <div class="config-manual-empresa">
+      <p class="field-help">Campos para lançamento manual da empresa e dos entregadores vinculados. Entregas e Valor Entregas permanecem; os adicionais têm valores digitados, sem multiplicação automática.</p>
+      <label class="campo-toggle"><input type="checkbox" data-e="garantidoAtivo" ${empresa.garantidoAtivo!==false?'checked':''}> Mostrar Garantido</label>
+      <div data-e="camposManuais">${(empresa.camposManuais||[]).map(campoManualEmpresaHtml).join('')}</div>
+      <button type="button" class="btn-add-campo" onclick="adicionarCampoManualEmpresa(this)">+ Adicionar campo manual (Retorno, Extra…)</button>
+    </div>
   </div>`;
+}
+function campoManualEmpresaHtml(c={}){
+  return `<div class="campo-manual-empresa empresa-card" data-campo="${escapeHtml(c.campo||'')}">
+    <label>Nome do campo</label><input data-m="label" value="${escapeHtml(c.label||'')}" maxlength="40" placeholder="ex: Retorno" required>
+    <label class="campo-toggle"><input type="checkbox" data-m="quantidade" ${c.quantidade!==false?'checked':''}> Quantidade manual</label>
+    <label class="campo-toggle"><input type="checkbox" data-m="valor" ${c.valor!==false?'checked':''}> Valor manual</label>
+    <label class="campo-toggle"><input type="checkbox" data-m="observacaoObrigatoria" ${c.observacaoObrigatoria!==false?'checked':''}> Exigir observação quando houver quantidade ou valor</label>
+    <button type="button" class="btn-remover-empresa" onclick="this.closest('.campo-manual-empresa').remove()">Remover campo</button>
+  </div>`;
+}
+function adicionarCampoManualEmpresa(btn){
+  const lista=btn.closest('.config-manual-empresa').querySelector('[data-e=camposManuais]');
+  if(lista.children.length>=20){ alert('Limite de 20 campos por empresa.'); return; }
+  lista.insertAdjacentHTML('beforeend',campoManualEmpresaHtml());
 }
 function adicionarEmpresa(empresa){
   document.getElementById('lista-empresas').insertAdjacentHTML('beforeend', empresaCardHtml(empresa));
@@ -289,11 +309,18 @@ function adicionarEmpresa(empresa){
   });
 }
 function lerEmpresas(){
-  return [...document.querySelectorAll('#lista-empresas .empresa-card')].map(card=>({
+  return [...document.querySelectorAll('#lista-empresas > .empresa-card')].map(card=>({
     nome: card.querySelector('[data-e=nome]').value.trim(),
     modo: card.querySelector('[data-e=modo]').value,
     valorEntrega: card.querySelector('[data-e=valorEntrega]').value,
     pagamentoEntregador: card.querySelector('[data-e=pagamentoEntregador]').value,
+    garantidoAtivo: card.querySelector('[data-e=garantidoAtivo]').checked,
+    camposManuais: [...card.querySelectorAll('.campo-manual-empresa')].map(c=>({
+      campo:c.dataset.campo, label:c.querySelector('[data-m=label]').value.trim(),
+      quantidade:c.querySelector('[data-m=quantidade]').checked,
+      valor:c.querySelector('[data-m=valor]').checked,
+      observacaoObrigatoria:c.querySelector('[data-m=observacaoObrigatoria]').checked,
+    })),
   })).filter(empresa=>empresa.nome);
 }
 

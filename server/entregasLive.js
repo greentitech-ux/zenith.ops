@@ -95,13 +95,17 @@ function completarDerivados(atual,mudancas){
   if (atual.valorEntregas != null) {
     delete mudancas.valor; // total sempre deriva dos dois valores manuais
     const novo = { ...atual, ...mudancas };
+    if (atual.configGarantidoAtivo === false) { novo.garantido = 0; mudancas.garantido = 0; }
     for (const campo of ['valorEntregas', 'garantido']) {
       if (!Number.isFinite(Number(novo[campo] ?? 0)) || Number(novo[campo] ?? 0) < 0) throw new Error('Valores de entregas e garantido não podem ser negativos.');
     }
-    mudancas.valor = +(num(novo.valorEntregas) + num(novo.garantido)).toFixed(2);
+    const itens = validarItensManuais(atual.configCamposManuais || [], novo.itensManuais || []);
+    if (atual.configCamposManuais) mudancas.itensManuais = itens;
+    mudancas.valor = +(num(novo.valorEntregas) + num(novo.garantido) + itens.reduce((s,c)=>s+c.valor,0)).toFixed(2);
     mudancas.detalhesValor = [
       { campo: 'valorEntregas', label: 'Valor Entregas', valor: num(novo.valorEntregas) },
-      { campo: 'garantido', label: 'Garantido', valor: num(novo.garantido) },
+      ...(atual.configGarantidoAtivo === false ? [] : [{ campo: 'garantido', label: 'Garantido', valor: num(novo.garantido) }]),
+      ...itens.map(c=>({campo:c.campo,label:c.label,valor:c.valor,quantidade:c.quantidade,observacao:c.observacao})),
     ];
   } else {
     delete mudancas.valorEntregas;
@@ -114,6 +118,24 @@ function completarDerivados(atual,mudancas){
     mudancas.quantTotal=['entrega','extra','retorno'].reduce((s,c)=>s+Math.max(0,num(novo[c])),0);
     mudancas.coopRecebe=entregasRegras.calcularCoop({regraCoop:atual.regraCoop},novo.entrega);
   }
+}
+
+function validarItensManuais(config, recebidos) {
+  if (!Array.isArray(recebidos)) throw new Error('Campos manuais inválidos.');
+  const ids = new Set();
+  for (const item of recebidos) {
+    if (!config.some(c=>c.campo===item?.campo) || ids.has(item.campo)) throw new Error('Campo manual não configurado ou duplicado.');
+    ids.add(item.campo);
+  }
+  return config.map(c=>{
+    const recebido = recebidos.find(i=>i.campo===c.campo) || {};
+    const quantidade = c.quantidade ? Number(recebido.quantidade ?? 0) : 0;
+    if (!Number.isInteger(quantidade) || quantidade < 0) throw new Error(`Quantidade inválida em ${c.label}.`);
+    const valor = c.valor ? moedaManual(recebido.valor ?? 0) : 0;
+    const observacao = String(recebido.observacao || '').trim().slice(0,1000);
+    if (c.observacaoObrigatoria && (quantidade > 0 || valor > 0) && !observacao) throw new Error(`Informe a observação de ${c.label}.`);
+    return {campo:c.campo,label:c.label,quantidade,valor,observacao};
+  });
 }
 
 async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, tipoRecebedor, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos, etiquetaFile, criadoPorId, criadoPorEmail }) {
@@ -151,6 +173,8 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
     if (entregadorCadastrado) registro.entregador = entregadorCadastrado.nome;
   }
   const pagamentoManual = !!entregadorCadastrado && entregadoresEntregas.pagamentoConfigurado(entregadorCadastrado, regra) === 'manual';
+  const empresaVinculada = empresa || empresas.find(e=>nomeEntregadorNormalizado(e.nome)===nomeEntregadorNormalizado(entregadoresEntregas.categoriaNome(entregadorCadastrado || {})));
+  const configuraManual = pagamentoManual || (ehEmpresa && empresa?.modo === 'manual');
   if (entregadorCadastrado) {
     registro.tipoRecebedor = 'entregador';
     registro.tipoEntregador = entregadorCadastrado.tipo || 'OUTRO';
@@ -174,11 +198,10 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
         taxa: empresa.modo === 'fixo' ? empresa.valorEntrega : null, valor: valorTotal,
       }],
     });
-    if (empresa.modo === 'manual' && /^moovery(?:\s|$)/i.test(empresa.nome.trim())) {
+    if (configuraManual) {
       registro.modeloLancamento = 'total';
       registro.valorEntregas = valorTotal;
       registro.garantido = moedaManual(campos?.garantido ?? 0);
-      completarDerivados(registro, registro);
     }
   } else if (pagamentoManual || regra.modeloLancamento === 'total') {
     const quantidade = numeroInteiroPositivo(campos?.entrega);
@@ -197,7 +220,6 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
       registro.valorEntregas = valorTotal;
       registro.garantido = Number(garantidoTexto);
       if (!Number.isFinite(registro.garantido)) throw new Error('Garantido inválido.');
-      completarDerivados(registro, registro);
     }
   } else if (regra.modo === 'fixo') {
     // Mantém compatibilidade com regras antigas até que os nomes digitados
@@ -206,6 +228,13 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
     if (!entregadorCadastrado && !nomeLegado) throw new Error('Selecione um entregador ativo cadastrado para essa unidade.');
     registro.entregador = entregadorCadastrado?.nome || nomeLegado;
     registro.tipoRecebedor = 'entregador';
+  }
+  if (configuraManual) {
+    registro.configGarantidoAtivo = empresaVinculada?.garantidoAtivo !== false;
+    registro.configCamposManuais = empresaVinculada?.camposManuais || [];
+    registro.itensManuais = validarItensManuais(registro.configCamposManuais, campos?.itensManuais || []);
+    if (!registro.configGarantidoAtivo) registro.garantido = 0;
+    completarDerivados(registro, registro);
   }
   const camposValidosRemovidos = (ehEmpresa || pagamentoManual || regra.modeloLancamento === 'total') ? [] : (Array.isArray(camposRemovidos)
     ? camposRemovidos.filter((c) => (regra.camposValor || []).some((r) => r.campo === c && r.removivelPelaLoja))
@@ -317,6 +346,10 @@ function fmtValorEntrega(campo, valor) {
 }
 function montarResumoMudancasEntrega(pedido, atual) {
   return Object.entries(pedido.mudancas || {}).map(([campo, valor]) => {
+    if (campo === 'itensManuais') return valor.map(c=>{
+      const antes=(atual.itensManuais||[]).find(i=>i.campo===c.campo)||{};
+      return `${c.label}: quantidade ${num(antes.quantidade)} → ${c.quantidade}; valor ${fmtValorEntrega('valor',antes.valor)} → ${fmtValorEntrega('valor',c.valor)}; observação: ${c.observacao || 'vazia'}`;
+    }).join(' · ');
     if (['data', 'entregador', 'tipoEntregador'].includes(campo)) return `${campo === 'data' ? 'Data' : campo === 'entregador' ? 'Entregador' : 'Tipo do entregador'}: ${atual[campo] || 'não tinha'} → ${valor}`;
     if (['obsExtra', 'obsRetorno'].includes(campo)) return `${campo === 'obsExtra' ? 'Obs. Extra' : 'Obs. Retorno'}: ${atual[campo] || 'não tinha'} → ${valor || 'vazio'}`;
     const anterior = atual[campo] != null ? fmtValorEntrega(campo, atual[campo]) : 'não tinha';
@@ -336,11 +369,12 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
   if (!pendenteSnap.empty) throw new Error('Já existe uma correção pendente pra esse lançamento. Aguarde a decisão do Master antes de pedir outra.');
   const camposValidos = {};
   Object.entries(mudancas || {}).forEach(([campo, valor]) => {
-    if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = ['valorEntregas', 'garantido'].includes(campo) ? moedaManual(valor) : num(valor);
+    if (campo === 'itensManuais' && atual.configCamposManuais) camposValidos[campo] = validarItensManuais(atual.configCamposManuais, valor);
+    else if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = ['valorEntregas', 'garantido'].includes(campo) ? moedaManual(valor) : num(valor);
     else if (['data', 'entregador', 'obsExtra', 'obsRetorno'].includes(campo)) camposValidos[campo] = String(valor || '').trim().slice(0, 500);
   });
   if (atual.modeloLancamento === 'total') {
-    const permitidos = new Set(['entrega', ...(atual.valorEntregas != null ? ['valorEntregas', 'garantido'] : ['valor']), 'data', 'entregador']);
+    const permitidos = new Set(['entrega', ...(atual.valorEntregas != null ? ['valorEntregas', 'garantido', 'itensManuais'] : ['valor']), 'data', 'entregador']);
     Object.keys(camposValidos).forEach((campo) => { if (!permitidos.has(campo)) delete camposValidos[campo]; });
     if ('entrega' in camposValidos && numeroInteiroPositivo(camposValidos.entrega) == null) throw new Error('Quantidade de entregas precisa ser um inteiro maior que zero.');
     if ('valor' in camposValidos && valorPositivo(camposValidos.valor) == null) throw new Error('Valor total precisa ser maior que zero.');
@@ -388,11 +422,12 @@ async function editarDireto({ entregaId, mudancas, motivo, editadoPorEmail }) {
   if (!estaAtivo(atual)) throw new Error('Lançamento cancelado ou excluído não pode ser editado.');
   const camposValidos = {};
   Object.entries(mudancas || {}).forEach(([campo, valor]) => {
-    if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = ['valorEntregas', 'garantido'].includes(campo) ? moedaManual(valor) : num(valor);
+    if (campo === 'itensManuais' && atual.configCamposManuais) camposValidos[campo] = validarItensManuais(atual.configCamposManuais, valor);
+    else if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = ['valorEntregas', 'garantido'].includes(campo) ? moedaManual(valor) : num(valor);
     else if (CAMPOS_TEXTO.includes(campo)) camposValidos[campo] = String(valor ?? '').slice(0, 500);
   });
   if (atual.modeloLancamento === 'total') {
-    const permitidos = new Set(['entrega', ...(atual.valorEntregas != null ? ['valorEntregas', 'garantido'] : ['valor']), 'data', 'entregador']);
+    const permitidos = new Set(['entrega', ...(atual.valorEntregas != null ? ['valorEntregas', 'garantido', 'itensManuais'] : ['valor']), 'data', 'entregador']);
     Object.keys(camposValidos).forEach((campo) => { if (!permitidos.has(campo)) delete camposValidos[campo]; });
     if ('entrega' in camposValidos && numeroInteiroPositivo(camposValidos.entrega) == null) throw new Error('Quantidade de entregas precisa ser um inteiro maior que zero.');
     if ('valor' in camposValidos && valorPositivo(camposValidos.valor) == null) throw new Error('Valor total precisa ser maior que zero.');
