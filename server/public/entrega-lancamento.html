@@ -47,6 +47,12 @@
   label:first-child{margin-top:0;}
   input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .combo-entregador{position:relative;}
+  .combo-opcoes{position:absolute;z-index:30;top:calc(100% + 4px);left:0;right:0;max-height:294px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 14px 30px rgba(0,0,0,.42);padding:4px;}
+  .combo-opcoes button{display:block;width:100%;border:0;border-radius:6px;padding:9px 10px;background:transparent;color:var(--text);font:inherit;font-size:13px;text-align:left;cursor:pointer;}
+  .combo-opcoes button:hover,.combo-opcoes button:focus{background:rgba(184,255,60,.1);color:var(--accent);outline:none;}
+  .combo-grupo{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;padding:8px 10px 3px;}
+  .combo-vazio{padding:11px 10px;color:var(--muted);font-size:12px;}
   textarea{resize:vertical;min-height:56px;}
   input[type=file]{padding:8px 9px;font-size:12.5px;}
   .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
@@ -149,7 +155,10 @@
         <div id="wrap-entregador-padrao">
           <label>Entregador</label>
           <input type="text" id="f-entregador" placeholder="nome do motoboy" required>
-          <input type="search" id="f-entregador-filtro" class="hidden" placeholder="pesquise pelo nome do entregador ou empresa" autocomplete="off">
+          <div class="combo-entregador hidden" id="combo-f-entregador">
+            <input type="search" id="f-entregador-filtro" placeholder="pesquise pelo nome do entregador ou empresa" autocomplete="off">
+            <div class="combo-opcoes hidden" id="f-entregador-opcoes" role="listbox"></div>
+          </div>
           <select id="f-entregador-fixo" class="hidden"></select>
         </div>
         <div id="wrap-entregador-campina" class="hidden">
@@ -423,6 +432,46 @@ function filtrarOpcoesEntregador(inputId, selectId){
     grupo.hidden=[...grupo.options].every(opcao=>opcao.hidden);
   });
 }
+function renderOpcoesRecebedor(){
+  const busca=textoParaBusca(document.getElementById('f-entregador-filtro').value.trim());
+  const select=document.getElementById('f-entregador-fixo');
+  const lista=document.getElementById('f-entregador-opcoes');
+  const grupos=[...select.querySelectorAll('optgroup')];
+  let html='';
+  grupos.forEach(grupo=>{
+    const opcoes=[...grupo.options].filter(opcao=>!busca || textoParaBusca(opcao.textContent).includes(busca));
+    if(!opcoes.length) return;
+    html+=`<div class="combo-grupo">${escapeHtml(grupo.label)}</div>`;
+    html+=opcoes.map(opcao=>`<button type="button" role="option" data-indice="${opcao.index}">${escapeHtml(opcao.textContent)}</button>`).join('');
+  });
+  lista.innerHTML=html || '<div class="combo-vazio">Nenhum entregador ou empresa encontrado.</div>';
+}
+function abrirOpcoesRecebedor(){
+  if(document.getElementById('combo-f-entregador').classList.contains('hidden')) return;
+  renderOpcoesRecebedor();
+  document.getElementById('f-entregador-opcoes').classList.remove('hidden');
+}
+function fecharOpcoesRecebedor(){ document.getElementById('f-entregador-opcoes').classList.add('hidden'); }
+function selecionarRecebedor(indice){
+  const select=document.getElementById('f-entregador-fixo');
+  const opcao=select.options[Number(indice)];
+  if(!opcao) return;
+  select.selectedIndex=Number(indice);
+  const filtro=document.getElementById('f-entregador-filtro');
+  filtro.value=opcao.value;
+  filtro.setCustomValidity('');
+  fecharOpcoesRecebedor();
+  atualizarModoRecebedor();
+}
+function validarRecebedorPesquisado(){
+  const combo=document.getElementById('combo-f-entregador');
+  const filtro=document.getElementById('f-entregador-filtro');
+  const select=document.getElementById('f-entregador-fixo');
+  if(combo.classList.contains('hidden')) return true;
+  const valido=!!select.value && textoParaBusca(select.value)===textoParaBusca(filtro.value);
+  filtro.setCustomValidity(valido ? '' : 'Selecione um entregador ou empresa da lista.');
+  return valido;
+}
 
 function atualizarSugestao(){
   const total = ['entrega','extra','retorno'].reduce((s,c)=>s+Math.max(0,num(document.getElementById('f-'+c).value)),0);
@@ -519,21 +568,23 @@ function atualizarModoUnidade(){
     const entregadoresFixos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
     const empresas = Array.isArray(regra.empresas) ? regra.empresas : [];
     const inputEntregador = document.getElementById('f-entregador');
+    const comboEntregador = document.getElementById('combo-f-entregador');
     const filtroEntregador = document.getElementById('f-entregador-filtro');
     const selectEntregador = document.getElementById('f-entregador-fixo');
     const usarCadastro = entregadoresFixos.length > 0 || empresas.length > 0;
     inputEntregador.classList.toggle('hidden', usarCadastro);
     inputEntregador.required = !usarCadastro;
-    filtroEntregador.classList.toggle('hidden', !usarCadastro);
+    comboEntregador.classList.toggle('hidden', !usarCadastro);
+    filtroEntregador.required = usarCadastro;
     filtroEntregador.value = '';
-    selectEntregador.classList.toggle('hidden', !usarCadastro);
-    selectEntregador.required = usarCadastro;
+    selectEntregador.classList.add('hidden');
+    selectEntregador.required = false;
     selectEntregador.innerHTML = usarCadastro ? [
       '<option value="">selecione o entregador ou empresa</option>',
       entregadoresFixos.length ? `<optgroup label="Entregadores fixos">${entregadoresFixos.map(nome=>`<option value="${escapeHtml(nome)}" data-tipo="entregador">${escapeHtml(nome)}</option>`).join('')}</optgroup>` : '',
       empresas.length ? `<optgroup label="Empresas / plataformas">${empresas.map(empresa=>`<option value="${escapeHtml(empresa.nome)}" data-tipo="empresa">${escapeHtml(empresa.nome)}</option>`).join('')}</optgroup>` : '',
     ].join('') : '';
-    filtrarOpcoesEntregador('f-entregador-filtro','f-entregador-fixo');
+    renderOpcoesRecebedor();
     atualizarModoRecebedor();
   }
   const nomesAtivos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
@@ -674,8 +725,22 @@ function atualizarPreviewCalculado(){
   document.getElementById('preview-valor').textContent = fmtMoney(valor);
 }
 document.getElementById('f-unidade').addEventListener('change', atualizarModoUnidade);
-document.getElementById('f-entregador-fixo').addEventListener('change', atualizarModoRecebedor);
-[['f-entregador-filtro','f-entregador-fixo'],['f-entregador-campina-filtro','f-entregador-campina'],['km-entregador-filtro','km-entregador']].forEach(([inputId,selectId])=>{
+document.getElementById('f-entregador-filtro').addEventListener('focus', abrirOpcoesRecebedor);
+document.getElementById('f-entregador-filtro').addEventListener('click', abrirOpcoesRecebedor);
+document.getElementById('f-entregador-filtro').addEventListener('input', ()=>{
+  const filtro=document.getElementById('f-entregador-filtro');
+  const select=document.getElementById('f-entregador-fixo');
+  if(textoParaBusca(filtro.value)!==textoParaBusca(select.value)) select.value='';
+  filtro.setCustomValidity('');
+  abrirOpcoesRecebedor();
+});
+document.getElementById('f-entregador-filtro').addEventListener('blur', ()=>setTimeout(fecharOpcoesRecebedor,150));
+document.getElementById('f-entregador-opcoes').addEventListener('mousedown', ev=>ev.preventDefault());
+document.getElementById('f-entregador-opcoes').addEventListener('click', ev=>{
+  const botao=ev.target.closest('button[data-indice]');
+  if(botao) selecionarRecebedor(botao.dataset.indice);
+});
+[['f-entregador-campina-filtro','f-entregador-campina'],['km-entregador-filtro','km-entregador']].forEach(([inputId,selectId])=>{
   document.getElementById(inputId).addEventListener('input',()=>filtrarOpcoesEntregador(inputId,selectId));
 });
 document.getElementById('f-data').addEventListener('change', atualizarPreviewCalculado);
@@ -983,6 +1048,7 @@ document.getElementById('form-lancar').addEventListener('keydown', (ev)=>{
 document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
   atualizarObrigatoriedadeObservacoes();
+  validarRecebedorPesquisado();
   if(!ev.target.reportValidity()) return;
   if(!confirm('Tem certeza que deseja finalizar esse lançamento de entrega? Confira os valores antes de continuar - depois de lançado, qualquer correção precisa passar por aprovação do Master.')) return;
   const btn = document.getElementById('btn-enviar');
@@ -1009,7 +1075,7 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
       unidade,
       unidadeNome: UNIDADES_NOMES[unidade] || unidade,
       data: document.getElementById('f-data').value,
-      entregador: ehModeloTotal() ? entregadorCampina.nome : (document.getElementById('f-entregador-fixo').classList.contains('hidden')
+      entregador: ehModeloTotal() ? entregadorCampina.nome : (document.getElementById('f-entregador').classList.contains('hidden')
         ? document.getElementById('f-entregador').value
         : document.getElementById('f-entregador-fixo').value),
       tipoEntregador: ehModeloTotal() ? entregadorCampina.tipo : null,
