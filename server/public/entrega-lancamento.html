@@ -315,7 +315,7 @@
     <h3>Pedir correção</h3>
     <div class="sub" id="edicao-info"></div>
     <form id="form-edicao">
-      <label>Qual valor está errado e qual o valor correto?</label>
+      <label>Qual campo está errado e qual a informação correta?</label>
       <select id="e-campo"></select>
       <input type="number" step="0.01" id="e-valor" placeholder="valor correto" style="margin-top:8px;">
       <div id="e-obs-wrap" class="hidden"><label id="e-obs-label">Observação</label><input type="text" id="e-obs"></div>
@@ -337,6 +337,7 @@
     <form id="form-master">
       <div class="grid2">
         <div><label>Entregador</label><input type="text" id="m-entregador"></div>
+        <div><label>Data</label><input type="date" id="m-data" required></div>
       </div>
       <div class="grid2" id="m-campos-numericos"></div>
       <label>Obs. Retorno</label>
@@ -930,11 +931,24 @@ async function acaoEntrega(id,tipoAcao){
   }catch(e){ alert(e.message); }
   finally{ ACOES_EM_ANDAMENTO.delete(id); }
 }
+function camposCorrecaoEntrega(registro){
+  const regra=REGRAS_POR_UNIDADE[registro.unidade] || {};
+  if(registro.modeloLancamento==='total' || regra.modeloLancamento==='total' || registro.tipoRecebedor==='empresa') return ['entrega','valor'];
+  const configurados=Array.isArray(regra.camposValor) ? regra.camposValor : [];
+  return CAMPOS_NUMERICOS.filter(campo=>{
+    if(campo==='entrega' || campo==='valor') return true;
+    if(campo==='coopRecebe' || campo==='quantTotal') return false; // calculados pelo servidor
+    return configurados.some(config=>config.destino!=='coopRecebe' &&
+      (['retorno','extra','pos00hs','foraDeArea'].includes(campo)
+        ? config.base===campo
+        : config.campo===campo));
+  });
+}
 function abrirEdicao(id){
   EDITANDO_ID = id;
   const f = MEUS.find(x=>x.id===id);
   document.getElementById('edicao-info').textContent = `${f.entregador} · ${f.unidadeNome||f.unidade} · ${fmtData(f.data)} — depois de lançado, a correção precisa de aprovação do Master.`;
-  document.getElementById('e-campo').innerHTML = CAMPOS_NUMERICOS.filter(c=>!f.regraCoop||!['coopRecebe','quantTotal'].includes(c)).map(c=>`<option value="${c}">${NOMES_CAMPOS[c]} (atual: ${fmtValorCampo(c,f[c])})</option>`).join('');
+  document.getElementById('e-campo').innerHTML = ['data','entregador',...camposCorrecaoEntrega(f)].map(c=>`<option value="${c}">${c==='data'?'Data':c==='entregador'?'Entregador':NOMES_CAMPOS[c]} (atual: ${escapeHtml(c==='data'?fmtData(f.data):c==='entregador'?f.entregador:fmtValorCampo(c,f[c]))})</option>`).join('');
   document.getElementById('e-valor').value = '';
   document.getElementById('e-motivo').value = '';
   document.getElementById('msg-edicao').classList.add('hidden');
@@ -944,6 +958,13 @@ function abrirEdicao(id){
 function fecharEdicao(){ document.getElementById('overlay-edicao').classList.add('hidden'); EDITANDO_ID=null; }
 function atualizarObsCorrecao(){
   const campo=document.getElementById('e-campo').value;
+  const input=document.getElementById('e-valor');
+  input.type=campo==='data'?'date':campo==='entregador'?'text':'number';
+  input.step=CAMPOS_MONETARIOS.has(campo)?'0.01':'1';
+  input.required=true;
+  input.placeholder=campo==='entregador'?'nome correto do entregador':'valor correto';
+  const registro=MEUS.find(f=>f.id===EDITANDO_ID);
+  input.value=['data','entregador'].includes(campo)?(registro?.[campo]||''):'';
   const obs=campo==='extra'?'obsExtra':campo==='retorno'?'obsRetorno':null;
   document.getElementById('e-obs-wrap').classList.toggle('hidden',!obs);
   document.getElementById('e-obs-label').textContent=campo==='extra'?'Obs. Extra':'Obs. Retorno';
@@ -987,11 +1008,12 @@ function abrirEditarMaster(id){
   const f = MEUS.find(x=>x.id===id);
   document.getElementById('master-info').textContent = `${f.entregador} · ${f.unidadeNome||f.unidade} · ${fmtData(f.data)} — edição direta, aplicada na hora (fica registrada no histórico).`;
   document.getElementById('m-entregador').value = f.entregador || '';
+  document.getElementById('m-data').value = f.data || '';
   document.getElementById('m-obsRetorno').value = f.obsRetorno || '';
   document.getElementById('m-obsExtra').value = f.obsExtra || '';
   document.getElementById('m-observacao').value = f.observacao || '';
   document.getElementById('m-motivo').value = '';
-  const camposMaster = f.modeloLancamento==='total' ? ['entrega','valor'] : CAMPOS_NUMERICOS.filter(c=>!f.regraCoop||!['coopRecebe','quantTotal'].includes(c));
+  const camposMaster = camposCorrecaoEntrega(f);
   document.getElementById('m-campos-numericos').innerHTML = camposMaster.map(c=>
     `<div><label>${NOMES_CAMPOS[c]}</label><input type="number" step="${CAMPOS_MONETARIOS.has(c)?'0.01':'1'}" inputmode="decimal" id="m-${c}" value="${num(f[c])}"></div>`
   ).join('');
@@ -1014,6 +1036,8 @@ document.getElementById('form-master').addEventListener('submit', async (ev)=>{
   });
   const entregador = document.getElementById('m-entregador').value;
   if(entregador !== (f.entregador||'')) mudancas.entregador = entregador;
+  const dataCorreta=document.getElementById('m-data').value;
+  if(dataCorreta !== f.data) mudancas.data=dataCorreta;
   const obsRetorno = document.getElementById('m-obsRetorno').value;
   if(obsRetorno !== (f.obsRetorno||'')) mudancas.obsRetorno = obsRetorno;
   const obsExtra = document.getElementById('m-obsExtra').value;

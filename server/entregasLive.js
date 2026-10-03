@@ -22,6 +22,40 @@ function nomeEntregadorNormalizado(nome) {
   return String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR');
 }
+async function prepararIdentidadeCorrecao(atual, mudancas) {
+  if ('data' in mudancas) {
+    const data = String(mudancas.data || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || !Number.isFinite(Date.parse(data)) || new Date(data).toISOString().slice(0, 10) !== data) throw new Error('Data inválida.');
+    mudancas.data = data;
+  }
+  if ('entregador' in mudancas) {
+    const nome = String(mudancas.entregador || '').trim();
+    if (!nome) throw new Error('Nome do entregador é obrigatório.');
+    const regra = await entregasRegras.getPara(atual.unidade);
+    const cadastrados = atual.tipoRecebedor === 'empresa'
+      ? (regra.empresas || [])
+      : await entregadoresEntregas.listarTodos(atual.unidade);
+    const encontrado = cadastrados.find(item => item.ativo !== false && nomeEntregadorNormalizado(item.nome) === nomeEntregadorNormalizado(nome));
+    if (cadastrados.length && !encontrado) throw new Error('Selecione um entregador ou empresa ativo cadastrado nessa unidade.');
+    mudancas.entregador = encontrado?.nome || nome;
+    if (encontrado?.tipo && atual.tipoRecebedor !== 'empresa') mudancas.tipoEntregador = encontrado.tipo;
+  }
+}
+async function validarIdentidadeNaTransacao(tx, atual, mudancas) {
+  if (!('data' in mudancas) && !('entregador' in mudancas)) return;
+  const novo = { ...atual, ...mudancas };
+  if (novo.tipoRecebedor === 'empresa') return;
+  const chaveDia = createHash('sha256').update(JSON.stringify([novo.unidade, novo.data])).digest('hex');
+  const diaRef = DIAS.doc(chaveDia);
+  await tx.get(diaRef);
+  const existentes = await tx.get(COLLECTION.where('unidade', '==', novo.unidade).where('data', '==', novo.data));
+  if (existentes.docs.some(doc => {
+    const outro = doc.data();
+    return outro.id !== atual.id && estaAtivo(outro) && outro.tipoRecebedor !== 'empresa'
+      && nomeEntregadorNormalizado(outro.entregador) === nomeEntregadorNormalizado(novo.entregador);
+  })) throw new Error('Já existe um lançamento desse entregador na unidade e data escolhidas.');
+  tx.set(diaRef, { unidade: novo.unidade, data: novo.data, ultimoLancamentoId: atual.id, atualizadoEm: new Date().toISOString() });
+}
 
 
 const CAMPOS_NUMERICOS = [
@@ -240,6 +274,7 @@ function fmtValorEntrega(campo, valor) {
 }
 function montarResumoMudancasEntrega(pedido, atual) {
   return Object.entries(pedido.mudancas || {}).map(([campo, valor]) => {
+    if (['data', 'entregador', 'tipoEntregador'].includes(campo)) return `${campo === 'data' ? 'Data' : campo === 'entregador' ? 'Entregador' : 'Tipo do entregador'}: ${atual[campo] || 'não tinha'} → ${valor}`;
     if (['obsExtra', 'obsRetorno'].includes(campo)) return `${campo === 'obsExtra' ? 'Obs. Extra' : 'Obs. Retorno'}: ${atual[campo] || 'não tinha'} → ${valor || 'vazio'}`;
     const anterior = atual[campo] != null ? fmtValorEntrega(campo, atual[campo]) : 'não tinha';
     return `${NOMES_CAMPOS_ENTREGA[campo] || campo}: ${anterior} → ${fmtValorEntrega(campo, valor)}`;
@@ -259,15 +294,16 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
   const camposValidos = {};
   Object.entries(mudancas || {}).forEach(([campo, valor]) => {
     if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = num(valor);
-    else if (['obsExtra', 'obsRetorno'].includes(campo)) camposValidos[campo] = String(valor || '').trim().slice(0, 500);
+    else if (['data', 'entregador', 'obsExtra', 'obsRetorno'].includes(campo)) camposValidos[campo] = String(valor || '').trim().slice(0, 500);
   });
   if (atual.modeloLancamento === 'total') {
-    const permitidos = new Set(['entrega', 'valor']);
+    const permitidos = new Set(['entrega', 'valor', 'data', 'entregador']);
     Object.keys(camposValidos).forEach((campo) => { if (!permitidos.has(campo)) delete camposValidos[campo]; });
     if ('entrega' in camposValidos && numeroInteiroPositivo(camposValidos.entrega) == null) throw new Error('Quantidade de entregas precisa ser um inteiro maior que zero.');
     if ('valor' in camposValidos && valorPositivo(camposValidos.valor) == null) throw new Error('Valor total precisa ser maior que zero.');
     if ('entrega' in camposValidos) camposValidos.quantTotal = camposValidos.entrega;
   }
+  await prepararIdentidadeCorrecao(atual, camposValidos);
   completarDerivados(atual,camposValidos);
   validarObservacoes({ ...atual, ...camposValidos }, camposValidos);
   if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para corrigir.');
@@ -299,7 +335,7 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
 }
 
 // campos de texto (alem dos numericos) que o Master tambem pode corrigir direto
-const CAMPOS_TEXTO = ['entregador', 'obsRetorno', 'obsExtra', 'observacao'];
+const CAMPOS_TEXTO = ['data', 'entregador', 'obsRetorno', 'obsExtra', 'observacao'];
 
 // edicao direta: so o Master usa isso (o resto passa por solicitarEdicao +
 // decidirEdicao) - aplicada na hora, mas fica registrada no historico
@@ -313,12 +349,13 @@ async function editarDireto({ entregaId, mudancas, motivo, editadoPorEmail }) {
     else if (CAMPOS_TEXTO.includes(campo)) camposValidos[campo] = String(valor ?? '').slice(0, 500);
   });
   if (atual.modeloLancamento === 'total') {
-    const permitidos = new Set(['entrega', 'valor']);
+    const permitidos = new Set(['entrega', 'valor', 'data', 'entregador']);
     Object.keys(camposValidos).forEach((campo) => { if (!permitidos.has(campo)) delete camposValidos[campo]; });
     if ('entrega' in camposValidos && numeroInteiroPositivo(camposValidos.entrega) == null) throw new Error('Quantidade de entregas precisa ser um inteiro maior que zero.');
     if ('valor' in camposValidos && valorPositivo(camposValidos.valor) == null) throw new Error('Valor total precisa ser maior que zero.');
     if ('entrega' in camposValidos) camposValidos.quantTotal = camposValidos.entrega;
   }
+  await prepararIdentidadeCorrecao(atual, camposValidos);
   completarDerivados(atual,camposValidos);
   if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para alterar.');
 
@@ -328,6 +365,7 @@ async function editarDireto({ entregaId, mudancas, motivo, editadoPorEmail }) {
     if (!doc.exists) throw new Error('Lançamento não encontrado.');
     const recente = doc.data();
     if (!estaAtivo(recente)) throw new Error('Lançamento cancelado ou excluído não pode ser editado.');
+    await validarIdentidadeNaTransacao(tx, recente, camposValidos);
     completarDerivados(recente, camposValidos);
     validarObservacoes({ ...recente, ...camposValidos }, camposValidos);
     const valoresAnteriores = {};
@@ -435,6 +473,8 @@ async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
       if (pedido.tipoAcao) patch = patchAcao(atual, pedido.tipoAcao, pedido.motivo, decididoPorEmail, id);
       else {
         const mudancas = { ...pedido.mudancas };
+        await prepararIdentidadeCorrecao(atual, mudancas);
+        await validarIdentidadeNaTransacao(tx, atual, mudancas);
         completarDerivados(atual, mudancas);
         validarObservacoes({ ...atual, ...mudancas }, mudancas);
         const valoresAnteriores = {};
