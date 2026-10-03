@@ -174,6 +174,12 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
         taxa: empresa.modo === 'fixo' ? empresa.valorEntrega : null, valor: valorTotal,
       }],
     });
+    if (empresa.modo === 'manual' && /^moovery(?:\s|$)/i.test(empresa.nome.trim())) {
+      registro.modeloLancamento = 'total';
+      registro.valorEntregas = valorTotal;
+      registro.garantido = moedaManual(campos?.garantido ?? 0);
+      completarDerivados(registro, registro);
+    }
   } else if (pagamentoManual || regra.modeloLancamento === 'total') {
     const quantidade = numeroInteiroPositivo(campos?.entrega);
     const valorTotal = valorPositivo(campos?.valor);

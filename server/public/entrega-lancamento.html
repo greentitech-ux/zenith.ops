@@ -652,7 +652,7 @@ function atualizarModoRecebedor(){
   const regra = regraAtual();
   const empresa = empresaSelecionada();
   const tipoSelecionado = document.getElementById('f-entregador-fixo').selectedOptions[0]?.dataset.tipo;
-  const manual=pagamentoManualEntregador();
+  const manual=pagamentoManualEntregador() || (empresa?.modo==='manual' && /^moovery(?:\s|$)/i.test(empresa.nome.trim()));
   document.getElementById('label-f-valor').textContent=manual?'Valor Entregas':'Valor a pagar';
   document.getElementById('wrap-f-garantido').classList.toggle('hidden', !manual);
   if(!manual) document.getElementById('f-garantido').value='0';
