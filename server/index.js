@@ -17926,7 +17926,8 @@ app.get('/api/entregas/regras', requireAnySection('entregas', 'entregas-lancamen
   const regrasComEntregadoresAtivos = await Promise.all(unidades.map(async (u) => {
     const regra = porUnidade[u] || entregasRegras.defaultRegra(u);
     const ativos = await entregadoresEntregas.listarAtivos(u);
-    return { ...regra, entregadoresFixos: ativos.map((entregador) => entregador.nome) };
+    return { ...regra, entregadoresFixos: ativos.map((entregador) => entregador.nome),
+      entregadores: ativos.map(e => ({ nome: e.nome, tipo: e.tipo, categoria: entregadoresEntregas.categoriaNome(e), modoPagamento: entregadoresEntregas.modoPagamento(e) })) };
   }));
   res.json(regrasComEntregadoresAtivos);
 });
@@ -18024,12 +18025,22 @@ app.get('/api/entregas/entregadores', requireSection('entregas-lancamento'), asy
 
 app.post('/api/entregas/entregadores', requireSection('entregas-lancamento'), async (req, res) => {
   try {
-    const { unidade, nome, telefone, tipo } = req.body || {};
+    const { unidade, nome, telefone, tipo, categoria, modoPagamento } = req.body || {};
     if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     if (!(await unidadesExtras.apareceEm(unidade, 'entregas'))) return res.status(400).json({ error: 'Essa unidade não tem Entregas habilitado.' });
-    const criado = await entregadoresEntregas.criar({ unidade, nome, telefone, tipo, porId: req.user.id, porEmail: req.user.email });
+    const criado = await entregadoresEntregas.criar({ unidade, nome, telefone, tipo, categoria, modoPagamento, porId: req.user.id, porEmail: req.user.email });
     res.status(201).json(criado);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.patch('/api/entregas/entregadores/:id/cadastro', requireSection('entregas-lancamento'), async (req, res) => {
+  try {
+    const { unidade, telefone, categoria, modoPagamento } = req.body || {};
+    if (!unidade) return res.status(400).json({ error: 'Unidade é obrigatória.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!(await unidadesExtras.apareceEm(unidade, 'entregas'))) return res.status(400).json({ error: 'Essa unidade não tem Entregas habilitado.' });
+    res.json(await entregadoresEntregas.editarCadastro({ unidade, id: req.params.id, telefone, categoria, modoPagamento, porEmail: req.user.email }));
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 

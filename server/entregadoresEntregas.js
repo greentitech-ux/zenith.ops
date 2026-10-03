@@ -23,6 +23,13 @@ function chaveNome(nome) {
 }
 function idPara(unidade, nome) { return `${String(unidade)}__${chaveNome(nome)}`.slice(0, 140); }
 function tipoValido(tipo) { return TIPOS_VALIDOS.has(tipo) ? tipo : 'OUTRO'; }
+function categoriaNome(entregador) {
+  return texto(entregador.categoria) || (entregador.tipo === 'MOOVERY_FIXO' ? 'MOOVERY FIXO' : entregador.tipo === 'MOOVERY_NUVEM' ? 'MOOVERY NUVEM' : 'ENTREGADOR');
+}
+function modoPagamento(entregador) {
+  return ['manual', 'unidade'].includes(entregador.modoPagamento) ? entregador.modoPagamento
+    : (['MOOVERY_FIXO', 'MOOVERY_NUVEM'].includes(entregador.tipo) ? 'manual' : 'unidade');
+}
 
 async function listarBruto() {
   const snap = await COLLECTION.get();
@@ -65,7 +72,7 @@ function limparTelefone(telefone) {
   return digitos;
 }
 
-async function criar({ unidade, nome, telefone, tipo, porId, porEmail }) {
+async function criar({ unidade, nome, telefone, tipo, categoria, modoPagamento: pagamento, porId, porEmail }) {
   const nomeLimpo = texto(nome);
   if (!validarNomeCompleto(nomeLimpo)) throw new Error('Informe o nome e o sobrenome do entregador.');
   const telefoneLimpo = limparTelefone(telefone);
@@ -78,6 +85,8 @@ async function criar({ unidade, nome, telefone, tipo, porId, porEmail }) {
   const registro = {
     id, unidade, nome: nomeLimpo, telefone: telefoneLimpo || dadosExistentes.telefone || null,
     tipo: tipoValido(tipo), ativo: true, excluido: false,
+    categoria: texto(categoria) || categoriaNome({ tipo: tipoValido(tipo) }),
+    modoPagamento: ['manual','unidade'].includes(pagamento) ? pagamento : modoPagamento({ tipo: tipoValido(tipo) }),
     criadoEm: dadosExistentes.criadoEm || agora,
     criadoPorId: dadosExistentes.criadoPorId || porId,
     criadoPorEmail: dadosExistentes.criadoPorEmail || porEmail,
@@ -85,6 +94,18 @@ async function criar({ unidade, nome, telefone, tipo, porId, porEmail }) {
     atualizadoEm: agora, atualizadoPorEmail: porEmail,
   };
   await COLLECTION.doc(id).set(registro, { merge: true });
+  cache.invalidar();
+  return registro;
+}
+async function editarCadastro({ unidade, id, telefone, categoria, modoPagamento: pagamento, porEmail }) {
+  const encontrado = (await listarTodos(unidade)).find(item => item.id === id);
+  if (!encontrado) throw new Error('Entregador não encontrado nesta unidade.');
+  if (!texto(categoria)) throw new Error('Informe a categoria do entregador.');
+  if (!['manual','unidade'].includes(pagamento)) throw new Error('Forma de pagamento inválida.');
+  const idReal = String(id).startsWith('padrao:') ? idPara(unidade, encontrado.nome) : id;
+  const registro = { ...encontrado, id: idReal, categoria: texto(categoria), modoPagamento: pagamento,
+    telefone: limparTelefone(telefone), atualizadoEm: new Date().toISOString(), atualizadoPorEmail: porEmail };
+  await COLLECTION.doc(idReal).set(registro, { merge: true });
   cache.invalidar();
   return registro;
 }
@@ -153,4 +174,4 @@ async function decidirExclusao(id, status, { decididoPorEmail, motivoDecisao }) 
   return { ...pedido, status, decididoEm: agora, decididoPorEmail };
 }
 
-module.exports = { TIPOS_VALIDOS, listarTodos, listarAtivos, encontrarAtivo, criar, definirAtivo, solicitarExclusao, listarSolicitacoes, decidirExclusao, chaveNome, idPara, invalidar: () => cache.invalidar() };
+module.exports = { TIPOS_VALIDOS, listarTodos, listarAtivos, encontrarAtivo, criar, editarCadastro, categoriaNome, modoPagamento, definirAtivo, solicitarExclusao, listarSolicitacoes, decidirExclusao, chaveNome, idPara, invalidar: () => cache.invalidar() };

@@ -221,7 +221,7 @@
       <div id="campos-manual">
         <div class="grid2">
           <div id="wrap-f-ajudaCusto"><label>Ajuda de custo</label><input type="number" step="0.01" inputmode="decimal" id="f-ajudaCusto" value="0"></div>
-          <div><label>Valor a pagar</label><input type="number" step="0.01" inputmode="decimal" id="f-valor" value="0"></div>
+          <div><label id="label-f-valor">Valor a pagar</label><input type="number" step="0.01" inputmode="decimal" id="f-valor" value="0"></div>
         </div>
         <div id="wrap-f-coopRecebe" class="hidden"><input type="number" id="f-coopRecebe" value="0" readonly></div>
       </div>
@@ -512,6 +512,11 @@ function regraAtual(){
   return REGRAS_POR_UNIDADE[unidade] || { modo:'plataforma' };
 }
 function ehModeloTotal(){ return regraAtual().modeloLancamento === 'total'; }
+function entregadorCadastroAtual(){
+  const nome=document.getElementById('f-entregador-fixo').value;
+  return (regraAtual().entregadores||[]).find(e=>e.nome===nome) || null;
+}
+function pagamentoManualEntregador(){ return entregadorCadastroAtual()?.modoPagamento==='manual'; }
 function regraConfiguraBase(base){
   return (regraAtual().camposValor||[]).some(campo=>campo && campo.destino!=='coopRecebe' && campo.base===base);
 }
@@ -535,7 +540,7 @@ function ajustarLayoutCamposVisiveis(){
 function atualizarCamposConfigurados(){
   // Entregas é o único campo de contagem obrigatório. Os demais só aparecem
   // quando a regra da unidade possui uma faixa/taxa baseada neles.
-  const podeExibir=!ehModeloTotal() && !empresaSelecionada();
+  const podeExibir=!ehModeloTotal() && !empresaSelecionada() && !pagamentoManualEntregador();
   const extra=podeExibir && regraConfiguraBase('extra');
   const retorno=podeExibir && regraConfiguraBase('retorno');
   const pos00hs=podeExibir && regraConfiguraBase('pos00hs');
@@ -592,13 +597,13 @@ function atualizarModoUnidade(){
     selectEntregador.required = false;
     selectEntregador.innerHTML = usarCadastro ? [
       '<option value="">selecione o entregador ou empresa</option>',
-      entregadoresFixos.length ? `<optgroup label="Entregadores fixos">${entregadoresFixos.map(nome=>`<option value="${escapeHtml(nome)}" data-tipo="entregador">${escapeHtml(nome)}</option>`).join('')}</optgroup>` : '',
+      entregadoresFixos.length ? `<optgroup label="Entregadores">${entregadoresFixos.map(nome=>{const cadastro=(regra.entregadores||[]).find(e=>e.nome===nome);return `<option value="${escapeHtml(nome)}" data-tipo="entregador">${escapeHtml(nome)}${cadastro?.categoria?' · '+escapeHtml(cadastro.categoria):''}</option>`;}).join('')}</optgroup>` : '',
       empresas.length ? `<optgroup label="Empresas / plataformas">${empresas.map(empresa=>`<option value="${escapeHtml(empresa.nome)}" data-tipo="empresa">${escapeHtml(empresa.nome)}</option>`).join('')}</optgroup>` : '',
     ].join('') : '';
     renderOpcoesRecebedor();
     atualizarModoRecebedor();
   }
-  const nomesAtivos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
+  const nomesAtivos = (Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : []).filter(nome=>!(regra.entregadores||[]).some(e=>e.nome===nome && e.modoPagamento==='manual'));
   const kmSelect = document.getElementById('km-entregador');
   kmSelect.innerHTML = '<option value="">selecione o entregador</option>' + nomesAtivos.map(nome=>`<option value="${escapeHtml(nome)}">${escapeHtml(nome)}</option>`).join('');
   document.getElementById('km-entregador-filtro').value='';
@@ -644,11 +649,15 @@ function atualizarModoRecebedor(){
   const regra = regraAtual();
   const empresa = empresaSelecionada();
   const tipoSelecionado = document.getElementById('f-entregador-fixo').selectedOptions[0]?.dataset.tipo;
-  const entregadorFixo = !empresa && tipoSelecionado==='entregador' && regra.modo==='fixo';
+  const manual=pagamentoManualEntregador();
+  document.getElementById('label-f-valor').textContent=manual?'Valor total manual':'Valor a pagar';
+  document.getElementById('f-valor').required=manual;
+  const entregadorFixo = !empresa && !manual && tipoSelecionado==='entregador' && regra.modo==='fixo';
   const calculado = entregadorFixo || empresa?.modo==='fixo';
   atualizarCamposConfigurados();
-  document.getElementById('wrap-quantidade-total').classList.toggle('hidden', !!empresa);
-  document.getElementById('wrap-f-ajudaCusto').classList.toggle('hidden', !!empresa);
+  document.getElementById('wrap-quantidade-total').classList.toggle('hidden', !!empresa || manual);
+  document.getElementById('wrap-f-ajudaCusto').classList.toggle('hidden', !!empresa || manual);
+  if(manual) document.getElementById('f-ajudaCusto').value='0';
   document.getElementById('wrap-f-coopRecebe').classList.add('hidden');
   document.getElementById('campos-manual').classList.toggle('hidden', calculado);
   document.getElementById('campos-calculados').classList.toggle('hidden', !calculado);

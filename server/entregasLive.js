@@ -128,6 +128,13 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
     }
     if (entregadorCadastrado) registro.entregador = entregadorCadastrado.nome;
   }
+  const pagamentoManual = !!entregadorCadastrado && entregadoresEntregas.modoPagamento(entregadorCadastrado) === 'manual';
+  if (entregadorCadastrado) {
+    registro.tipoRecebedor = 'entregador';
+    registro.tipoEntregador = entregadorCadastrado.tipo || 'OUTRO';
+    registro.categoriaEntregador = entregadoresEntregas.categoriaNome(entregadorCadastrado);
+    registro.modoPagamento = entregadoresEntregas.modoPagamento(entregadorCadastrado);
+  }
   if (ehEmpresa) {
     if (!empresa) throw new Error('Selecione uma empresa/plataforma cadastrada para essa unidade.');
     const quantidade = numeroInteiroPositivo(campos?.entrega);
@@ -145,7 +152,7 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
         taxa: empresa.modo === 'fixo' ? empresa.valorEntrega : null, valor: valorTotal,
       }],
     });
-  } else if (regra.modeloLancamento === 'total') {
+  } else if (pagamentoManual || regra.modeloLancamento === 'total') {
     const quantidade = numeroInteiroPositivo(campos?.entrega);
     const valorTotal = valorPositivo(campos?.valor);
     if (quantidade == null) throw new Error('Informe uma quantidade inteira de entregas maior que zero.');
@@ -164,15 +171,15 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
     registro.entregador = entregadorCadastrado?.nome || nomeLegado;
     registro.tipoRecebedor = 'entregador';
   }
-  const camposValidosRemovidos = (ehEmpresa || regra.modeloLancamento === 'total') ? [] : (Array.isArray(camposRemovidos)
+  const camposValidosRemovidos = (ehEmpresa || pagamentoManual || regra.modeloLancamento === 'total') ? [] : (Array.isArray(camposRemovidos)
     ? camposRemovidos.filter((c) => (regra.camposValor || []).some((r) => r.campo === c && r.removivelPelaLoja))
     : []);
   registro.camposRemovidos = camposValidosRemovidos;
   registro.motivoRemocaoCampos = camposValidosRemovidos.length
     ? (entregasRegras.MOTIVOS_REMOCAO_CAMPO.includes(motivoRemocaoCampos) ? motivoRemocaoCampos : 'outro')
     : null;
-  if (!ehEmpresa && regra.modeloLancamento !== 'total') registro.detalhesValor = [];
-  if (!ehEmpresa && regra.modo === 'fixo' && regra.modeloLancamento !== 'total') {
+  if (!ehEmpresa && !pagamentoManual && regra.modeloLancamento !== 'total') registro.detalhesValor = [];
+  if (!ehEmpresa && !pagamentoManual && regra.modo === 'fixo' && regra.modeloLancamento !== 'total') {
     const calculado = entregasRegras.calcular(regra, {
       data: registro.data, entrega: registro.entrega, retorno: registro.retorno, extra: registro.extra, pos00hs: registro.pos00hs, foraDeArea: registro.foraDeArea,
       camposRemovidos: camposValidosRemovidos,
