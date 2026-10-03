@@ -164,18 +164,24 @@
         <div id="wrap-f-extra"><label>Extra</label><input type="number" min="0" step="1" inputmode="numeric" id="f-extra" value="0"></div>
       </div>
       <div id="campos-adicionais-entrega">
-      <label>Obs. Extra</label>
-      <input type="text" id="f-obsExtra" placeholder="ex: distância, bairro">
+      <div id="wrap-f-obsExtra">
+        <label>Obs. Extra</label>
+        <input type="text" id="f-obsExtra" placeholder="ex: distância, bairro">
+      </div>
 
       <div class="grid2">
-        <div><label>Retorno</label><input type="number" min="0" step="1" inputmode="numeric" id="f-retorno" value="0"></div>
-        <div><label>Pós 00h</label><input type="number" min="0" step="1" inputmode="numeric" id="f-pos00hs" value="0"></div>
+        <div id="wrap-f-retorno"><label>Retorno</label><input type="number" min="0" step="1" inputmode="numeric" id="f-retorno" value="0"></div>
+        <div id="wrap-f-pos00hs"><label>Pós 00h</label><input type="number" min="0" step="1" inputmode="numeric" id="f-pos00hs" value="0"></div>
       </div>
-      <label>Obs. Retorno</label>
-      <input type="text" id="f-obsRetorno" placeholder="motivo do retorno">
+      <div id="wrap-f-obsRetorno">
+        <label>Obs. Retorno</label>
+        <input type="text" id="f-obsRetorno" placeholder="motivo do retorno">
+      </div>
 
-      <label>Fora de área</label>
-      <input type="number" min="0" step="1" inputmode="numeric" id="f-foraDeArea" value="0">
+      <div id="wrap-f-foraDeArea">
+        <label>Fora de área</label>
+        <input type="number" min="0" step="1" inputmode="numeric" id="f-foraDeArea" value="0">
+      </div>
       </div>
     </div>
 
@@ -438,6 +444,36 @@ function regraAtual(){
   return REGRAS_POR_UNIDADE[unidade] || { modo:'plataforma' };
 }
 function ehModeloTotal(){ return regraAtual().modeloLancamento === 'total'; }
+function regraConfiguraBase(base){
+  return (regraAtual().camposValor||[]).some(campo=>campo && campo.destino!=='coopRecebe' && campo.base===base);
+}
+function mostrarCampoConfigurado(wrapperId, inputId, visivel){
+  const wrapper=document.getElementById(wrapperId);
+  const input=document.getElementById(inputId);
+  wrapper.classList.toggle('hidden', !visivel);
+  if(!visivel){
+    input.value=input.type==='number' ? '0' : '';
+    input.required=false;
+    input.setCustomValidity('');
+  }
+}
+function atualizarCamposConfigurados(){
+  // Entregas é o único campo de contagem obrigatório. Os demais só aparecem
+  // quando a regra da unidade possui uma faixa/taxa baseada neles.
+  const podeExibir=!ehModeloTotal() && !empresaSelecionada();
+  const extra=podeExibir && regraConfiguraBase('extra');
+  const retorno=podeExibir && regraConfiguraBase('retorno');
+  const pos00hs=podeExibir && regraConfiguraBase('pos00hs');
+  const foraDeArea=podeExibir && regraConfiguraBase('foraDeArea');
+  mostrarCampoConfigurado('wrap-f-extra','f-extra',extra);
+  mostrarCampoConfigurado('wrap-f-obsExtra','f-obsExtra',extra);
+  mostrarCampoConfigurado('wrap-f-retorno','f-retorno',retorno);
+  mostrarCampoConfigurado('wrap-f-pos00hs','f-pos00hs',pos00hs);
+  mostrarCampoConfigurado('wrap-f-obsRetorno','f-obsRetorno',retorno);
+  mostrarCampoConfigurado('wrap-f-foraDeArea','f-foraDeArea',foraDeArea);
+  document.getElementById('campos-adicionais-entrega').classList.toggle('hidden', !(extra||retorno||pos00hs||foraDeArea));
+  atualizarSugestao();
+}
 const DIAS_SEMANA_JS = ['dom','seg','ter','qua','qui','sex','sab']; // Date.getDay() ja retorna 0=dom
 function diaSemanaDe(dataIso){
   if(!dataIso) return null;
@@ -524,8 +560,7 @@ function atualizarModoRecebedor(){
   const tipoSelecionado = document.getElementById('f-entregador-fixo').selectedOptions[0]?.dataset.tipo;
   const entregadorFixo = !empresa && tipoSelecionado==='entregador' && regra.modo==='fixo';
   const calculado = entregadorFixo || empresa?.modo==='fixo';
-  document.getElementById('campos-adicionais-entrega').classList.toggle('hidden', !!empresa);
-  document.getElementById('wrap-f-extra').classList.toggle('hidden', !!empresa);
+  atualizarCamposConfigurados();
   document.getElementById('wrap-quantidade-total').classList.toggle('hidden', !!empresa);
   document.getElementById('wrap-f-ajudaCusto').classList.toggle('hidden', !!empresa);
   document.getElementById('wrap-f-coopRecebe').classList.add('hidden');
