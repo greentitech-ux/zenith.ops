@@ -174,6 +174,7 @@
       </div>
     </div>
 
+    <fieldset id="campos-apos-entregador" class="hidden" disabled style="border:0;padding:0;margin:0;min-width:0;">
     <div class="secao" id="campos-detalhados-entrega">
       <div class="secao-titulo">Entregas</div>
       <div class="grid2">
@@ -278,8 +279,9 @@
       <textarea id="f-observacao" placeholder="qualquer detalhe da corrida/turno"></textarea>
     </div>
 
-    <div class="msg hidden" id="msg"></div>
     <button class="btn-primary" type="submit" id="btn-enviar">Lançar entrega</button>
+    </fieldset>
+    <div class="msg hidden" id="msg"></div>
   </form>
 </div>
 
@@ -490,6 +492,20 @@ function validarRecebedorPesquisado(){
   filtro.setCustomValidity(valido ? '' : 'Selecione um entregador ou empresa da lista.');
   return valido;
 }
+function temRecebedorSelecionado(){
+  if(ehModeloTotal()) return !!entregadorSelecionado();
+  if(!document.getElementById('f-entregador').classList.contains('hidden')) return !!document.getElementById('f-entregador').value.trim();
+  const select=document.getElementById('f-entregador-fixo');
+  const filtro=document.getElementById('f-entregador-filtro');
+  return !!select.value && textoParaBusca(select.value)===textoParaBusca(filtro.value);
+}
+function atualizarCamposAposSelecao(){
+  const selecionado=temRecebedorSelecionado();
+  const campos=document.getElementById('campos-apos-entregador');
+  campos.classList.toggle('hidden', !selecionado);
+  campos.disabled=!selecionado;
+  return selecionado;
+}
 
 function atualizarSugestao(){
   const total = ['entrega','extra','retorno'].reduce((s,c)=>s+Math.max(0,num(document.getElementById('f-'+c).value)),0);
@@ -594,6 +610,8 @@ function atualizarModoUnidade(){
   contexto.classList.toggle('hidden', !total);
   contexto.textContent = total ? 'Selecione o entregador, informe a quantidade e o valor total confirmado.' : '';
   if(total){
+    ENTREGADORES_CAMPINA=[];
+    document.getElementById('f-entregador-campina').value='';
     carregarEntregadoresCampina();
   }else{
     const entregadoresFixos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
@@ -626,6 +644,7 @@ function atualizarModoUnidade(){
   renderPainelKm();
   atualizarPreviewCalculado();
   atualizarObrigatoriedadeObservacoes();
+  atualizarCamposAposSelecao();
 }
 
 function entregadorSelecionado(){
@@ -641,6 +660,7 @@ function renderEntregadoresCampina(){
   if(ENTREGADORES_CAMPINA.some(e=>e.nome===atual)) select.value = atual;
   document.getElementById('f-entregador-campina-filtro').value='';
   filtrarOpcoesEntregador('f-entregador-campina-filtro','f-entregador-campina');
+  atualizarCamposAposSelecao();
 }
 async function carregarEntregadoresCampina(){
   if(!ehModeloTotal()) return;
@@ -694,6 +714,7 @@ function atualizarModoRecebedor(){
     document.getElementById('wrap-motivo-campos').classList.add('hidden');
   }
   atualizarPreviewCalculado();
+  atualizarCamposAposSelecao();
 }
 function camposManuaisHtml(config,itens=[]){
   return config.map(c=>{
@@ -799,7 +820,11 @@ document.getElementById('f-entregador-filtro').addEventListener('input', ()=>{
   if(textoParaBusca(filtro.value)!==textoParaBusca(select.value)) select.value='';
   filtro.setCustomValidity('');
   abrirOpcoesRecebedor();
+  atualizarModoRecebedor();
 });
+document.getElementById('f-entregador').addEventListener('input', atualizarCamposAposSelecao);
+document.getElementById('f-entregador-campina').addEventListener('change', atualizarCamposAposSelecao);
+document.getElementById('f-entregador-fixo').addEventListener('change', atualizarModoRecebedor);
 document.getElementById('f-entregador-filtro').addEventListener('blur', ()=>setTimeout(fecharOpcoesRecebedor,150));
 document.getElementById('f-entregador-opcoes').addEventListener('mousedown', ev=>ev.preventDefault());
 document.getElementById('f-entregador-opcoes').addEventListener('click', ev=>{
@@ -1195,6 +1220,7 @@ document.getElementById('form-lancar').addEventListener('keydown', (ev)=>{
 
 document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
+  if(!atualizarCamposAposSelecao()) return;
   atualizarObrigatoriedadeObservacoes();
   validarRecebedorPesquisado();
   if(!ev.target.reportValidity()) return;
