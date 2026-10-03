@@ -597,7 +597,7 @@ function atualizarModoUnidade(){
     carregarEntregadoresCampina();
   }else{
     const entregadoresFixos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
-    const empresas = Array.isArray(regra.empresas) ? regra.empresas : [];
+    const empresas = regra.empresaDeliveryAtivo!==false && Array.isArray(regra.empresas) ? regra.empresas : [];
     const inputEntregador = document.getElementById('f-entregador');
     const comboEntregador = document.getElementById('combo-f-entregador');
     const filtroEntregador = document.getElementById('f-entregador-filtro');
@@ -699,7 +699,7 @@ function camposManuaisHtml(config,itens=[]){
   return config.map(c=>{
     const item=itens.find(i=>i.campo===c.campo)||{};
     return `<div class="secao campo-manual" data-campo="${escapeHtml(c.campo)}" data-obs="${c.observacaoObrigatoria?'1':'0'}">
-      <div class="secao-titulo">${escapeHtml(c.label)}</div><div class="grid2">
+      <div class="secao-titulo">${escapeHtml(c.label)}${c.valor && c.somarNoTotal===false?' · não soma ao total':''}</div><div class="grid2">
       ${c.quantidade?`<div><label>Quantidade ${escapeHtml(c.label)}</label><input type="number" min="0" step="1" data-manual="quantidade" value="${num(item.quantidade)}"></div>`:''}
       ${c.valor?`<div><label>Valor ${escapeHtml(c.label)}</label><input type="number" min="0" step="0.01" data-manual="valor" value="${num(item.valor)}"></div>`:''}</div>
       <label>Observação${c.observacaoObrigatoria?' (obrigatória quando preenchido)':' (opcional)'}</label><textarea data-manual="observacao" maxlength="1000">${escapeHtml(item.observacao||'')}</textarea></div>`;
@@ -952,7 +952,7 @@ function renderLista(){
         ${f.valorEntregas != null ? '' : `<span>Extra <b>${f.extra}</b></span>`}
         <span>${f.valorEntregas != null ? 'Total' : 'Valor'} <b>${fmtMoney(f.valor)}</b></span>
         ${f.valorEntregas != null ? `<span>Valor Entregas <b>${fmtMoney(f.valorEntregas)}</b></span>${f.configGarantidoAtivo===false?'':`<span>Garantido <b>${fmtMoney(f.garantido)}</b></span>`}` : ''}
-        ${(f.itensManuais||[]).map(c=>{const config=(f.configCamposManuais||[]).find(i=>i.campo===c.campo);return `<span>${escapeHtml(c.label)} <b>${config?.quantidade?c.quantidade:''}${config?.quantidade&&config?.valor?' · ':''}${config?.valor?fmtMoney(c.valor):''}</b>${c.observacao?' · '+escapeHtml(c.observacao):''}</span>`;}).join('')}
+        ${(f.itensManuais||[]).map(c=>{const config=(f.configCamposManuais||[]).find(i=>i.campo===c.campo);return `<span>${escapeHtml(c.label)} <b>${config?.quantidade?c.quantidade:''}${config?.quantidade&&config?.valor?' · ':''}${config?.valor?fmtMoney(c.valor):''}</b>${c.somarNoTotal===false?' (não soma ao total)':''}${c.observacao?' · '+escapeHtml(c.observacao):''}</span>`;}).join('')}
       </div>
       ${['CANCELADO','EXCLUIDO'].includes(f.situacao)?'':IS_MASTER
         ? '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEditarMaster(\''+f.id+'\')">✎ Editar (Master)</button>'

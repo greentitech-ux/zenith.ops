@@ -27169,12 +27169,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
     }
     const tkM = (await authA.login('aut-master@teste.local', 'SenhaDeTeste!2026')).token;
     const tkC = (await authA.login('aut-comum@teste.local', 'SenhaDeTeste!2026')).token;
-    const cabM = { Authorization: 'Bearer ' + tkM }; const cabC = { Authorization: 'Bearer ' + tkC };
+    const principalIdA = await require('./masterHierarquia').resolverId();
+    const cabM = { Authorization: 'Bearer ' + token }; const cabC = { Authorization: 'Bearer ' + tkC };
     const masterAntesA = process.env.NOPULSO_AGENT_MASTER;
-    process.env.NOPULSO_AGENT_MASTER = 'aut-master@teste.local';
+    process.env.NOPULSO_AGENT_MASTER = process.env.MASTER_EMAIL;
     const travado = (n) => !!(DOCS.get(`users/u-aut-alvo-${n}`) || {}).locked;
     const revisaoAut=id=>require('./qaAprovacoes').revisao(DOCS.get(`qaAprovacoes/${id}`));
-    const aprovar = (id, senha, cab = cabM) => postarJson(`/api/qa-aprovacoes/${id}/aprovar`, senha === undefined ? {} : { password: senha,revisao:revisaoAut(id) }, cab);
+    const aprovar = (id, senha, cab = cabM) => postarJson(`/api/qa-aprovacoes/${id}/aprovar`, senha === undefined ? {} : { password: senha === 'SenhaDeTeste!2026' && cab === cabM ? process.env.MASTER_PASSWORD : senha,revisao:revisaoAut(id) }, cab);
+    let deSubordinado;
     let r1, r1b, cons1, cons2, semSenha, senhaErrada, deComum, comDigital, deNovo, vencida, dobro, segredo, consSeg, docSeg, deQa, travadoAntes, travadoAposNegadas, digitalGenerica, revisaoErrada, resumoMaster, resumoComum;
     try {
       // 1) o Claude pede: NÃO roda, vira pedido
@@ -27186,13 +27188,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
       semSenha = await aprovar(r1.autorizacaoId);
       senhaErrada = await aprovar(r1.autorizacaoId, 'errada');
       deComum = await aprovar(r1.autorizacaoId, 'SenhaDeTeste!2026', cabC);
-      digitalGenerica=await aprovar(r1.autorizacaoId,pkA.emitirConfirmacao('u-aut-master'));
-      revisaoErrada=await postarJson(`/api/qa-aprovacoes/${r1.autorizacaoId}/aprovar`,{password:'SenhaDeTeste!2026',revisao:'antiga'},cabM);
+      deSubordinado = await aprovar(r1.autorizacaoId, 'SenhaDeTeste!2026', {Authorization:'Bearer '+tkM});
+      digitalGenerica=await aprovar(r1.autorizacaoId,pkA.emitirConfirmacao(principalIdA));
+      revisaoErrada=await postarJson(`/api/qa-aprovacoes/${r1.autorizacaoId}/aprovar`,{password:process.env.MASTER_PASSWORD,revisao:'antiga'},cabM);
       resumoMaster=await pedir('/api/qa-aprovacoes/resumo',cabM);
       resumoComum=await pedir('/api/qa-aprovacoes/resumo',cabC);
       travadoAposNegadas = travado('a');
       // 3) com a DIGITAL do Master (o comprovante que a tela manda): roda
-      comDigital = await aprovar(r1.autorizacaoId, pkA.emitirConfirmacao('u-aut-master',{id:r1.autorizacaoId,revisao:revisaoAut(r1.autorizacaoId)}));
+      comDigital = await aprovar(r1.autorizacaoId, pkA.emitirConfirmacao(principalIdA,{id:r1.autorizacaoId,revisao:revisaoAut(r1.autorizacaoId)}));
       cons2 = (await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: r1.autorizacaoId } })).resultado;
       deNovo = await aprovar(r1.autorizacaoId, 'SenhaDeTeste!2026');
       // 4) pedido vencido não roda nem com a senha certa
@@ -27239,6 +27242,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'autorizar sem digital/senha não roda (400, não 401)': semSenha.status === 400 && /Senha incorreta/.test(semSenha.corpo) && travadoAposNegadas === true,
       'senha errada não autoriza': senhaErrada.status === 400 && /Senha incorreta/.test(senhaErrada.corpo),
       'quem não é Master não autoriza': deComum.status === 403,
+      'Master subordinado não decide no lugar do principal': deSubordinado.status === 403,
       'digital genérica e revisão antiga não executam':digitalGenerica.status===400&&revisaoErrada.status===400,
       'contador só é exposto ao Master':resumoMaster.status===200&&resumoComum.status===403,
       'a digital do Master autoriza e a ação roda': comDigital.status === 200 && travado('a') === false,
@@ -27943,9 +27947,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const hashP = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
     DOCS.set('users/u-prep-master', { passwordHash: hashP, role: 'master', active: true, email: 'prep-master@teste.local', username: 'prepmaster', nome: 'Sidney Teste', createdAt: new Date().toISOString() });
     const tkP = (await authP.login('prep-master@teste.local', 'SenhaDeTeste!2026')).token;
-    const cabP = { Authorization: 'Bearer ' + tkP };
+    const principalIdP = await require('./masterHierarquia').resolverId();
+    const principalP = DOCS.get('users/'+principalIdP);
+    const cabP = { Authorization: 'Bearer ' + token };
     const masterAntesP = process.env.NOPULSO_AGENT_MASTER;
-    process.env.NOPULSO_AGENT_MASTER = 'prep-master@teste.local';
+    process.env.NOPULSO_AGENT_MASTER = process.env.MASTER_EMAIL;
     const tenta = async (fn) => { try { return { ok: true, v: await fn() } } catch (e) { return { ok: false, erro: e.message } } };
     const localDe = (url) => { const u = new URL(url); return u.pathname + u.search; };
     // o cadastro de formulário da loja do aeroporto (razão social/CNPJ)
@@ -28004,7 +28010,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const semAprovacao = await tenta(() => cw.executarAutorizado({ nome: 'pedir_assinatura', entrada: { formularioId: criado.formularioId } }));
     // o Master aprova com a DIGITAL, pela rota de verdade
     const revisaoP=require('./qaAprovacoes').revisao(DOCS.get(`qaAprovacoes/${pedido.autorizacaoId}`));
-    const aprovado = await postarJson(`/api/qa-aprovacoes/${pedido.autorizacaoId}/aprovar`, { password: pkP.emitirConfirmacao('u-prep-master',{id:pedido.autorizacaoId,revisao:revisaoP}),revisao:revisaoP }, { ...cabP, 'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile' });
+    const aprovado = await postarJson(`/api/qa-aprovacoes/${pedido.autorizacaoId}/aprovar`, { password: pkP.emitirConfirmacao(principalIdP,{id:pedido.autorizacaoId,revisao:revisaoP}),revisao:revisaoP }, { ...cabP, 'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile' });
     fm.invalidar();
     const assinado = await fm.getOne(criado.formularioId);
     const cons = (await cw.executar({ nome: 'consultar_autorizacao', entrada: { autorizacaoId: pedido.autorizacaoId } })).resultado;
@@ -28051,7 +28057,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'sem a aprovação do Master a assinatura não roda': !semAprovacao.ok,
       'aprovado com a digital: ASSINADO, eletrônico, pelo nome de quem aprovou': aprovado.status === 200 && assinado.status === 'ASSINADO'
         && assinado.assinaturas.responsavel.eletronica && assinado.assinaturas.responsavel.eletronica.metodo === 'digital'
-        && assinado.assinaturas.responsavel.nome === 'Sidney Teste' && /Celular/.test((assinado.assinaturas.responsavel.dispositivo || {}).rotulo || '')
+        && assinado.assinaturas.responsavel.nome === (principalP.nome || principalP.email) && /Celular/.test((assinado.assinaturas.responsavel.dispositivo || {}).rotulo || '')
         && assinado.assinaturas.responsavel.eletronica.hash === fm.hashDoConteudo(assinado),
       'consultar_autorizacao devolve o resultado com o PDF': cons.status === 'aprovado' && /ASSINADO/.test(cons.resultado || ''),
       'o PDF sai com o carimbo da assinatura eletrônica': pdf.status === 200 && /ASSINADO ELETRONICAMENTE/.test(txtPdf) && /digital/.test(txtPdf),

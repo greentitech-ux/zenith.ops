@@ -34,6 +34,7 @@ const pixRepetido = require('./pixRepetido');
 const storage = require('./storage');
 const auth = require('./auth');
 const users = require('./users');
+const masterHierarquia = require('./masterHierarquia');
 const sessions = require('./sessions');
 const vaultGroups = require('./vaultGroups');
 const vaultSubgroups = require('./vaultSubgroups');
@@ -3200,6 +3201,7 @@ app.get('/api/me', async (req, res) => {
     precisaTrocarSenha: !!req.user.precisaTrocarSenha,
     temPalavraRecuperacao: !!req.user.palavraRecuperacaoHash,
     isQaMaster: req.isQaMaster,
+    isMasterPrincipal: !!req.isMasterPrincipal,
     isQaUser: req.isQaUser,
     ehTimeSuporte: ehSuporte,
     verticaisDoUsuario,
@@ -6798,11 +6800,21 @@ app.delete('/api/refund-requests/:id', auth.requireMaster, async (req, res) => {
 // ---------- gestao de usuarios (so o Master) ----------
 // leitura tambem libera pro Admin, que precisa da lista de tecnicos pra
 // decidir solicitacoes de Suporte de TI; escrita continua so-Master
+// Guarda comum para todas as alterações de conta (inclusive senha/sessões).
+app.use('/api/users/:id', async (req, res, next) => {
+  try {
+    if (!['GET','HEAD','OPTIONS'].includes(req.method)) {
+      const alvo = await auth.getUserById(req.params.id);
+      await masterHierarquia.exigirGerenciaMaster(alvo, req.user);
+    }
+    next();
+  } catch (err) { res.status(403).json({error:err.message}); }
+});
 app.get('/api/users', auth.requireMasterOrAdmin, async (req, res) => {
-  const [lista, resumoSessoes] = await Promise.all([users.list(), sessions.resumoPorUsuario()]);
+  const [lista, resumoSessoes, principalId] = await Promise.all([users.list(), sessions.resumoPorUsuario(), masterHierarquia.resolverId()]);
   res.json(lista.map((u) => {
     const resumo = resumoSessoes[u.id];
-    return { ...u, sessoesAtivas: resumo?.locais || 0, online: !!resumo?.online, ultimaAtividadeEm: resumo?.ultimaAtividadeEm || null };
+    return { ...u, isMasterPrincipal: u.role==='master' && u.id===principalId, sessoesAtivas: resumo?.locais || 0, online: !!resumo?.online, ultimaAtividadeEm: resumo?.ultimaAtividadeEm || null };
   }));
 });
 
@@ -6941,7 +6953,7 @@ const EXECUTORES_QA = {
   },
   'usuarios.username': (p) => users.updateUsername(p.id, p.username),
   'usuarios.usernamesEmMassa': (p) => users.updateUsernamesEmMassa(p.itens),
-  'usuarios.excluir': (p) => users.remove(p.id),
+  'usuarios.excluir': (p, aprovacao) => users.remove(p.id, {id:aprovacao.usuarioId,role:'master'}),
   'grupos.criar': (p) => grupos.create(p),
   'rh.camposConfig': (p) => rhCamposConfig.salvar(p.camposManuais, { porEmail: 'aprovação QA' }),
   'grupos.editar': (p) => grupos.update(p.id, p.dados),
@@ -6981,7 +6993,7 @@ const EXECUTORES_QA = {
 // sequência); Master de verdade (ou qualquer outro papel que a rota já
 // permita) segue direto, devolve false e a rota continua normal
 async function desviarSeQaMaster(req, res, tipo, resumo, payload) {
-  if (!req.isQaMaster) return false;
+  if (!req.isQaMaster && !(req.isMaster && !req.isMasterPrincipal)) return false;
   const pendente = await qaAprovacoes.criar({
     tipo, resumo, payload, criadoPorId: req.user.id, criadoPorEmail: req.user.email,
   });
@@ -6997,6 +7009,7 @@ async function desviarSeQaMaster(req, res, tipo, resumo, payload) {
 function requireMasterDeVerdade(req, res, next) {
   if (!req.isMaster) return res.status(403).json({ error: 'Apenas o acesso Master pode fazer isso.' });
   if (req.isQaMaster) return res.status(403).json({ error: 'QA Master não pode aprovar/rejeitar essas solicitações - peça pra um Master de verdade revisar.' });
+  if (req.path.startsWith('/api/qa-aprovacoes') && !req.isMasterPrincipal) return res.status(403).json({ error: 'Esta decisão exige o Master principal.' });
   next();
 }
 
@@ -8004,6 +8017,7 @@ app.post('/api/users/criar-copiando', auth.requireMaster, async (req, res) => {
 // verdade cria (um QA Master tentando criar outro tambem cai na fila)
 app.post('/api/users/qa-master', auth.requireMaster, async (req, res) => {
   try {
+    if (!req.isMasterPrincipal) return res.status(403).json({error:'Somente o Master principal pode criar outra conta Master.'});
     if (await desviarSeQaMaster(req, res, 'usuarios.criarQaMaster', `Criar acesso QA Master: ${req.body?.email || ''}`, req.body)) return;
     res.json(await users.createQaMaster(req.body));
   } catch (err) {
@@ -8243,6 +8257,7 @@ app.put('/api/users/:id/username', auth.requireMaster, async (req, res) => {
 // planilha) e o backend aplica linha a linha, sem parar no primeiro erro
 app.post('/api/users/usernames-em-massa', auth.requireMaster, async (req, res) => {
   try {
+    if (!req.isMasterPrincipal) return res.status(403).json({error:'A edição em massa de logins exige o Master principal.'});
     if (await desviarSeQaMaster(req, res, 'usuarios.usernamesEmMassa', `Atualização em massa de usuários (${(req.body.itens || []).length} linha(s))`, { itens: req.body.itens })) return;
     res.json(await users.updateUsernamesEmMassa(req.body.itens));
   } catch (err) {
@@ -8253,7 +8268,7 @@ app.post('/api/users/usernames-em-massa', auth.requireMaster, async (req, res) =
 app.delete('/api/users/:id', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.excluir', `Excluir acesso ${req.params.id}`, { id: req.params.id })) return;
-    await users.remove(req.params.id);
+    await users.remove(req.params.id, req.user);
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -17925,7 +17940,10 @@ app.get('/api/entregas/regras', requireAnySection('entregas', 'entregas-lancamen
     : candidatas.filter((unidade) => (req.permissions.unidades || []).includes(unidade));
   const regrasComEntregadoresAtivos = await Promise.all(unidades.map(async (u) => {
     const regra = porUnidade[u] || entregasRegras.defaultRegra(u);
-    const ativos = await entregadoresEntregas.listarAtivos(u);
+    const cadastradosAtivos = await entregadoresEntregas.listarAtivos(u);
+    const ativos = regra.empresaDeliveryAtivo===false
+      ? cadastradosAtivos.filter(e=>entregadoresEntregas.pagamentoConfigurado(e,regra)!=='manual' && !(regra.empresas||[]).some(p=>p.nome===entregadoresEntregas.categoriaNome(e)))
+      : cadastradosAtivos;
     return { ...regra, entregadoresFixos: ativos.map((entregador) => entregador.nome),
       entregadores: ativos.map(e => ({ nome: e.nome, tipo: e.tipo, categoria: entregadoresEntregas.categoriaNome(e), modoPagamento: entregadoresEntregas.pagamentoConfigurado(e, regra) })) };
   }));

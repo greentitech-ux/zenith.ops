@@ -71,7 +71,7 @@
   .modal input,.modal select,.modal textarea{width:100%;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;}
   .modal textarea{min-height:86px;resize:vertical;font-family:var(--sans);}
   .field-help{font-size:10.5px;color:var(--muted);margin-top:4px;line-height:1.4;}
-  .modo-radios{display:flex;gap:14px;margin-top:6px;}
+  .modo-radios{display:flex;flex-wrap:wrap;gap:14px;margin-top:6px;}
   .modo-radios label{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin:0;}
   .modo-radios input{width:auto;}
   .campos-fixo{border-top:1px solid var(--line);margin-top:14px;padding-top:12px;}
@@ -151,10 +151,10 @@
     <h3 id="regra-title">Editar regra</h3>
     <div class="sub" id="regra-sub"></div>
 
-    <label id="label-modo">Entregadores próprios/fixos</label>
+    <label id="label-modo">Modalidades da unidade — pode marcar as duas</label>
     <div id="editor-modo" class="modo-radios">
-      <label><input type="radio" name="modo" value="plataforma" checked> Não usa tabela de entregadores fixos</label>
-      <label><input type="radio" name="modo" value="fixo"> Usa tabela de entregadores fixos</label>
+      <label><input type="checkbox" id="r-empresa-delivery" checked> Empresa Delivery</label>
+      <label><input type="checkbox" id="r-cooperativa-fixo"> Cooperativa Fixo</label>
     </div>
 
     <input type="hidden" id="r-plataformaNome">
@@ -167,7 +167,7 @@
       <button type="button" class="btn-add-campo" onclick="adicionarCampo()">+ Adicionar campo de valor</button>
     </div>
 
-    <div class="campos-fixo">
+    <div id="campos-empresa-delivery" class="campos-fixo">
       <label style="color:var(--text);font-weight:700;">Empresas / plataformas</label>
       <div class="field-help">Cadastre separadamente cada operação ou turno, por exemplo “Falcão Almoço” e “Falcão Janta”. A empresa pode ter valor fixo por entrega ou total informado no lançamento.</div>
       <div id="lista-empresas"></div>
@@ -235,7 +235,7 @@ function renderRegras(){
     const fixo = r.modo==='fixo';
     const total = r.modeloLancamento==='total';
     const tagsFixos = fixo ? (r.camposValor||[]).filter(c=>c.destino!=='coopRecebe').map(c=>`<span class="tag ${c.removivelPelaLoja?'removivel':''}" title="Valor a pagar${c.meta?' · tem meta':''}">${escapeHtml(c.label)}${c.base!=='flat'?' ('+escapeHtml(BASES.find(b=>b[0]===c.base)?.[1]||c.base)+')':''}</span>`).join('') : '';
-    const tagsEmpresas = (r.empresas||[]).map(empresa=>`<span class="tag" title="Empresa/plataforma">${escapeHtml(empresa.nome)} · ${empresa.modo==='fixo'?fmtMoney(empresa.valorEntrega)+'/entrega':'total manual'}</span>`).join('');
+    const tagsEmpresas = r.empresaDeliveryAtivo===false?'':(r.empresas||[]).map(empresa=>`<span class="tag" title="Empresa/plataforma">${escapeHtml(empresa.nome)} · ${empresa.modo==='fixo'?fmtMoney(empresa.valorEntrega)+'/entrega':'total manual'}</span>`).join('');
     const tagTotal = total ? '<span class="tag" style="color:var(--accent2);">Quantidade + valor total</span>' : '';
     const tagKm = r.regraKm?.ativo ? '<span class="tag" style="color:var(--accent);">Faixas de KM</span>' : '';
     const tagCoop=r.regraCoop?.ativo?`<span class="tag">COOP recebe · ${fmtMoney(r.regraCoop.valorEntrega)}/entrega</span>`:'';
@@ -243,7 +243,7 @@ function renderRegras(){
     return `
     <tr>
       <td><b>${escapeHtml(u.nome)}</b></td>
-      <td><span class="badge ${total?'total':r.modo}">${total?'Total informado':fixo?'Entregadores fixos':'Empresas/manual'}</span></td>
+      <td>${r.empresaDeliveryAtivo!==false?'<span class="badge plataforma">Empresa Delivery</span> ':''}${fixo?'<span class="badge fixo">Cooperativa Fixo</span>':''}</td>
       <td><div class="tags">${tags || '<span style="color:var(--muted);">nenhum campo ainda</span>'}</div></td>
       <td>${r.atualizadoEm ? new Date(r.atualizadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR}) : '<span style="color:var(--muted);">nunca configurada</span>'}</td>
       <td class="rowacts"><button type="button" onclick="abrirEdicao('${u.codigo}')">Editar</button></td>
@@ -251,12 +251,11 @@ function renderRegras(){
   }).join('') : `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:20px;">Nenhuma unidade de Entregas encontrada ainda.</td></tr>`;
 }
 
-document.querySelectorAll('input[name=modo]').forEach(r=>{
-  r.addEventListener('change', ()=>{
-    const fixo = document.querySelector('input[name=modo]:checked').value==='fixo';
-    document.getElementById('campos-fixo').classList.toggle('hidden', !fixo);
-  });
-});
+function atualizarModalidades(){
+  document.getElementById('campos-fixo').classList.toggle('hidden', !document.getElementById('r-cooperativa-fixo').checked);
+  document.getElementById('campos-empresa-delivery').classList.toggle('hidden', !document.getElementById('r-empresa-delivery').checked);
+}
+['r-empresa-delivery','r-cooperativa-fixo'].forEach(id=>document.getElementById(id).addEventListener('change',atualizarModalidades));
 
 // ---------- empresas/plataformas (cada operação pode ter regra própria) ----------
 function empresaCardHtml(empresa){
@@ -292,6 +291,7 @@ function campoManualEmpresaHtml(c={}){
     <label>Nome do campo</label><input data-m="label" value="${escapeHtml(c.label||'')}" maxlength="40" placeholder="ex: Retorno" required>
     <label class="campo-toggle"><input type="checkbox" data-m="quantidade" ${c.quantidade!==false?'checked':''}> Quantidade manual</label>
     <label class="campo-toggle"><input type="checkbox" data-m="valor" ${c.valor!==false?'checked':''}> Valor manual</label>
+    <label class="campo-toggle"><input type="checkbox" data-m="somarNoTotal" ${c.somarNoTotal!==false?'checked':''}> Somar ao valor total</label>
     <label class="campo-toggle"><input type="checkbox" data-m="observacaoObrigatoria" ${c.observacaoObrigatoria!==false?'checked':''}> Exigir observação quando houver quantidade ou valor</label>
     <button type="button" class="btn-remover-empresa" onclick="this.closest('.campo-manual-empresa').remove()">Remover campo</button>
   </div>`;
@@ -319,6 +319,7 @@ function lerEmpresas(){
       campo:c.dataset.campo, label:c.querySelector('[data-m=label]').value.trim(),
       quantidade:c.querySelector('[data-m=quantidade]').checked,
       valor:c.querySelector('[data-m=valor]').checked,
+      somarNoTotal:c.querySelector('[data-m=somarNoTotal]').checked,
       observacaoObrigatoria:c.querySelector('[data-m=observacaoObrigatoria]').checked,
     })),
   })).filter(empresa=>empresa.nome);
@@ -433,8 +434,9 @@ function abrirEdicao(codigo){
   document.getElementById('regra-sub').textContent = 'Vale a partir de agora - lançamentos já feitos não são recalculados.';
   document.getElementById('label-modo').classList.remove('hidden');
   document.getElementById('editor-modo').classList.remove('hidden');
-  document.querySelector(`input[name=modo][value="${r.modo}"]`).checked = true;
-  document.getElementById('campos-fixo').classList.toggle('hidden', r.modo!=='fixo');
+  document.getElementById('r-empresa-delivery').checked = r.empresaDeliveryAtivo!==false;
+  document.getElementById('r-cooperativa-fixo').checked = r.modo==='fixo';
+  atualizarModalidades();
   document.getElementById('r-plataformaNome').value = r.plataformaNome || '';
   document.getElementById('r-entregadoresFixosLista').innerHTML = (r.entregadoresFixos||[]).length
     ? (r.entregadoresFixos||[]).map(nome=>`<div style="padding:4px 0">• ${escapeHtml(nome)}</div>`).join('')
@@ -458,7 +460,8 @@ document.getElementById('regra-form').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const errEl = document.getElementById('regra-err');
   const payload = {
-    modo: document.querySelector('input[name=modo]:checked').value,
+    modo: document.getElementById('r-cooperativa-fixo').checked ? 'fixo' : 'plataforma',
+    empresaDeliveryAtivo: document.getElementById('r-empresa-delivery').checked,
     modeloLancamento: 'detalhado',
     plataformaNome: document.getElementById('r-plataformaNome').value,
     entregadoresFixos: regraDaUnidade(EDITANDO_UNIDADE).entregadoresFixos || [],

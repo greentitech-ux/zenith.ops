@@ -564,6 +564,7 @@ let VAULT_SUBGROUPS = [];
 let USERS = [];
 let EDITING_USER = null;
 let ME_IS_QA_MASTER = false;
+let ME_IS_MASTER_PRINCIPAL = false;
 let QA_APROVACOES = [];
 
 // ---------- categorias de permissão em acordeão (Seções/Unidades/Cofre/
@@ -844,7 +845,8 @@ async function boot(){
   // QA Master não pode aprovar/rejeitar a própria fila (ver requireMasterDeVerdade
   // em index.js) - o botão só faz sentido pra um Master de verdade
   ME_IS_QA_MASTER = !!me.isQaMaster;
-  if(!ME_IS_QA_MASTER){
+  ME_IS_MASTER_PRINCIPAL = !!me.isMasterPrincipal;
+  if(ME_IS_MASTER_PRINCIPAL){
     document.getElementById('btn-qa-aprovacoes').classList.remove('hidden');
     carregarAprovacoesQa();
   }
@@ -1209,6 +1211,7 @@ function renderUsers(){
       ? { cor:'bad', texto:'bloqueado' }
       : (u.active ? { cor:'ok', texto:'ativo' } : { cor:'off', texto:'desativado' });
     const tags = [`<span class="badge ${u.role}">${u.role}</span>`];
+    if(u.role==='master') tags.push(`<span class="badge master">${u.isMasterPrincipal?'Master principal':'Master subordinado'}</span>`);
     if (u.qaMaster) tags.push(`<span class="badge qa" title="Master de teste - 100% do acesso, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) ficam paradas esperando um Master de verdade aprovar">🧪 QA Master</span>`);
     if (u.qaUser) tags.push(`<span class="badge qa" title="Sempre vê/cria todos os tipos de solicitação na Central; tudo que criar sai marcado TESTE">🧪 QA User</span>`);
     // TODAS as tags da pessoa, não só a principal: com uma tag só na tela, o
@@ -1307,13 +1310,19 @@ function abrirAcoes(id){
   if(!u) return;
   document.getElementById('acoes-titulo').textContent = u.email;
   if(u.role==='master'){
+    if(!ME_IS_MASTER_PRINCIPAL){
+      document.getElementById('acoes-lista').innerHTML='<div class="master-nota">Esta conta Master só pode ser gerenciada pelo Master principal. Você pode alterar sua própria senha no fluxo de troca de senha.</div>';
+      document.getElementById('acoes-overlay').classList.add('show');
+      return;
+    }
     document.getElementById('acoes-lista').innerHTML = `
-      <div class="master-nota">Conta Master: edição de identificação e segurança. O escopo global não pode ser limitado, desativado ou excluído por esta tela.</div>
+      <div class="master-nota">${u.isMasterPrincipal?'Master principal: nível mais alto. Esta conta não pode ser excluída.':'Master subordinado: esta conta pode ser excluída apenas pelo Master principal. As ações sensíveis dependem da aprovação dele.'}</div>
       <button type="button" onclick="fecharAcoes();abrirSessoes('${u.id}')">📍 Ver sessões e locais conectados</button>
        <button type="button" onclick="fecharAcoes();editarPerfil('${u.id}')">👤 Dados do perfil</button>
       <button type="button" onclick="fecharAcoes();editarPerfilVisual('${u.id}')">🎨 Personalização visual</button>
       <button type="button" onclick="fecharAcoes();resetarSenha('${u.id}')">🔒 Redefinir senha</button>
-      <button type="button" onclick="fecharAcoes();alternarSessaoLongaMaster('${u.id}', ${!u.sessaoLonga})">${u.sessaoLonga?'🔓 Desativar sessão de 30 dias':'🔒 Manter conectado por 30 dias'}</button>`;
+      <button type="button" onclick="fecharAcoes();alternarSessaoLongaMaster('${u.id}', ${!u.sessaoLonga})">${u.sessaoLonga?'🔓 Desativar sessão de 30 dias':'🔒 Manter conectado por 30 dias'}</button>
+      ${u.isMasterPrincipal?'':`<button type="button" class="danger" onclick="fecharAcoes();excluirUsuario('${u.id}')">🗑️ Excluir acesso Master</button>`}`;
     document.getElementById('acoes-overlay').classList.add('show');
     return;
   }
@@ -1749,8 +1758,10 @@ async function aplicarUsernamesEmMassa(){
 }
 
 async function excluirUsuario(id, email){
+  email=email || USERS.find(u=>u.id===id)?.email || id;
   if(!confirm(`Excluir o acesso de ${email}?`)) return;
   const res = await fetch('/api/users/'+id, {method:'DELETE'});
+  if(!res.ok && res.status!==202){const d=await res.json().catch(()=>({}));alert(d.error || 'Não foi possível excluir o acesso.');return;}
   avisarSePendenteQa(res);
   await carregarUsuarios();
 }

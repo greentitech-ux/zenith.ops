@@ -12,6 +12,7 @@ const db = require('./firestore');
 const { createKeyedCache } = require('./liveCache');
 const sessions = require('./sessions');
 const empresas = require('./empresas');
+const masterHierarquia = require('./masterHierarquia');
 
 const JWT_SECRET = process.env.JWT_SECRET || '';
 if (!JWT_SECRET) {
@@ -126,7 +127,7 @@ function mensagemHorarioPermitido(cfg) {
 // travar o Master fora caso o env var mude por engano).
 async function ensureMaster() {
   const existing = await usersRef.where('role', '==', 'master').limit(1).get();
-  if (!existing.empty) return;
+  if (!existing.empty) { await masterHierarquia.resolverId(); return; }
 
   const email = (process.env.MASTER_EMAIL || '').trim().toLowerCase();
   const password = process.env.MASTER_PASSWORD || '';
@@ -145,6 +146,7 @@ async function ensureMaster() {
     createdAt: new Date().toISOString(),
   });
   console.log(`Usuario Master criado: ${email}`);
+  await masterHierarquia.resolverId();
 }
 
 // aceita tanto o email quanto o "usuario" (username curto) como
@@ -338,12 +340,10 @@ function ehTokenDeApiDoMaster(token) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 async function masterDoToken() {
-  const email = (process.env.MASTER_EMAIL || '').trim().toLowerCase();
-  const snap = email
-    ? await usersRef.where('email', '==', email).limit(1).get()
-    : await usersRef.where('role', '==', 'master').limit(1).get();
-  if (snap.empty) return null;
-  const doc = snap.docs[0];
+  const id = await masterHierarquia.resolverId();
+  if (!id) return null;
+  const doc = await usersRef.doc(id).get();
+  if (!doc.exists || doc.data().role !== 'master' || doc.data().qaMaster) return null;
   return { id: doc.id, ...doc.data() };
 }
 
@@ -400,6 +400,7 @@ async function aplicarUsuarioNoReq(req, user, sid) {
       req.user = user;
       req.sid = sid;
       req.isMaster = user.role === 'master';
+      req.isMasterPrincipal = await masterHierarquia.ehPrincipal(user);
       req.isAdmin = !!user.isAdmin;
       // QA Master: mesmo req.isMaster=true de um Master de verdade (100% de
       // acesso, nenhuma checagem existente muda) - so essa flag extra, que

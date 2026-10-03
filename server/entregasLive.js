@@ -101,11 +101,11 @@ function completarDerivados(atual,mudancas){
     }
     const itens = validarItensManuais(atual.configCamposManuais || [], novo.itensManuais || []);
     if (atual.configCamposManuais) mudancas.itensManuais = itens;
-    mudancas.valor = +(num(novo.valorEntregas) + num(novo.garantido) + itens.reduce((s,c)=>s+c.valor,0)).toFixed(2);
+    mudancas.valor = +(num(novo.valorEntregas) + num(novo.garantido) + itens.reduce((s,c)=>s+(c.somarNoTotal ? c.valor : 0),0)).toFixed(2);
     mudancas.detalhesValor = [
       { campo: 'valorEntregas', label: 'Valor Entregas', valor: num(novo.valorEntregas) },
       ...(atual.configGarantidoAtivo === false ? [] : [{ campo: 'garantido', label: 'Garantido', valor: num(novo.garantido) }]),
-      ...itens.map(c=>({campo:c.campo,label:c.label,valor:c.valor,quantidade:c.quantidade,observacao:c.observacao})),
+      ...itens.map(c=>({campo:c.campo,label:c.label,valor:c.valor,quantidade:c.quantidade,observacao:c.observacao,somarNoTotal:c.somarNoTotal})),
     ];
   } else {
     delete mudancas.valorEntregas;
@@ -134,7 +134,7 @@ function validarItensManuais(config, recebidos) {
     const valor = c.valor ? moedaManual(recebido.valor ?? 0) : 0;
     const observacao = String(recebido.observacao || '').trim().slice(0,1000);
     if (c.observacaoObrigatoria && (quantidade > 0 || valor > 0) && !observacao) throw new Error(`Informe a observação de ${c.label}.`);
-    return {campo:c.campo,label:c.label,quantidade,valor,observacao};
+    return {campo:c.campo,label:c.label,quantidade,valor,observacao,somarNoTotal:c.somarNoTotal !== false};
   });
 }
 
@@ -174,6 +174,7 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
   }
   const pagamentoManual = !!entregadorCadastrado && entregadoresEntregas.pagamentoConfigurado(entregadorCadastrado, regra) === 'manual';
   const empresaVinculada = empresa || empresas.find(e=>nomeEntregadorNormalizado(e.nome)===nomeEntregadorNormalizado(entregadoresEntregas.categoriaNome(entregadorCadastrado || {})));
+  if (regra.empresaDeliveryAtivo === false && (ehEmpresa || empresaVinculada || pagamentoManual)) throw new Error('Empresa Delivery está desativada nesta unidade.');
   const configuraManual = pagamentoManual || (ehEmpresa && empresa?.modo === 'manual');
   if (entregadorCadastrado) {
     registro.tipoRecebedor = 'entregador';

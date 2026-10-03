@@ -10,6 +10,7 @@ const db = require('./firestore');
 const { emptyPermissions, invalidarUsuario } = require('./auth');
 const { createCache } = require('./liveCache');
 const sessions = require('./sessions');
+const masterHierarquia = require('./masterHierarquia');
 
 const usersRef = db.collection('users');
 const recuperacoesSenhaRef = db.collection('recuperacoes_senha');
@@ -954,17 +955,28 @@ async function concluirRecuperacaoSenha(token, novaSenha) {
   return { ok: true, usuario };
 }
 
-async function remove(id) {
+async function remove(id, ator = null) {
   const ref = usersRef.doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) return;
-  if (snap.data().role === 'master') throw new Error('O acesso Master não pode ser excluído.');
-  await ref.delete();
+  const principalId = await masterHierarquia.resolverId();
+  const principal = await masterHierarquia.ehPrincipal(ator);
+  await db.runTransaction(async tx=>{
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    if (id === principalId) throw new Error('O Master principal não pode ser excluído.');
+    if (id === ator?.id) throw new Error('Você não pode excluir seu próprio acesso.');
+    if (snap.data().role === 'master' && !principal) throw new Error('Somente o Master principal pode excluir uma conta Master subordinada.');
+    tx.set(db.collection('usuariosExcluidos').doc(id), {
+      usuarioId:id,email:snap.data().email,role:snap.data().role,
+      excluidoPorId:ator?.id || null,excluidoEm:new Date().toISOString(),
+    });
+    tx.delete(ref);
+  });
   // as passkeys do acesso vão junto: credencial órfã é um aparelho que
   // continua tentando entrar por uma conta que não existe mais. Desativar é
   // diferente - lá a trava do login já barra (ver loginComPasskey), e apagar
   // obrigaria a recadastrar o celular ao reativar.
   await require('./passkeys').removerTodasDoUsuario(id).catch(() => {});
+  await sessions.encerrarTodasDoUsuario(id);
   invalidarUsuario(id);
   usersCache.invalidar();
 }

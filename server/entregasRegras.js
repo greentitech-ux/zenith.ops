@@ -135,7 +135,7 @@ function sanitizarCamposManuais(lista) {
     const quantidade = c.quantidade === true;
     const valor = c.valor !== false;
     if (!quantidade && !valor) throw new Error('O campo precisa de quantidade ou valor manual.');
-    return { campo, label, quantidade, valor, observacaoObrigatoria: c.observacaoObrigatoria === true };
+    return { campo, label, quantidade, valor, somarNoTotal: c.somarNoTotal !== false, observacaoObrigatoria: c.observacaoObrigatoria === true };
   });
 }
 
@@ -172,6 +172,7 @@ function normalizarRegra(regra) {
   }
   return {
     ...regra,
+    empresaDeliveryAtivo: regra.empresaDeliveryAtivo !== false,
     // Campina usa a configuração comum a partir de agora; o modelo dos
     // lançamentos históricos permanece salvo no próprio lançamento.
     modeloLancamento: regra.unidade === 'Dominos Campina Grande' ? 'detalhado' : (regra.modeloLancamento || 'detalhado'),
@@ -221,6 +222,7 @@ function defaultRegra(unidade) {
   return {
     unidade,
     modo: 'plataforma',
+    empresaDeliveryAtivo: true,
     modeloLancamento: 'detalhado',
     plataformaNome: '',
     entregadoresFixos: [],
@@ -249,6 +251,8 @@ async function getPara(unidade) {
 async function salvar(unidade, campos, atualizadoPorEmail) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const modo = campos?.modo === 'fixo' ? 'fixo' : 'plataforma';
+  const empresaDeliveryAtivo = campos?.empresaDeliveryAtivo !== false;
+  if (!empresaDeliveryAtivo && modo !== 'fixo') throw new Error('Selecione Empresa Delivery, Cooperativa Fixo ou ambas.');
   const entregadoresFixos = sanitizarEntregadoresFixos(campos?.entregadoresFixos);
   const empresas = sanitizarEmpresas(campos?.empresas);
   const regraKm = sanitizarRegraKm(campos?.regraKm);
@@ -267,6 +271,7 @@ async function salvar(unidade, campos, atualizadoPorEmail) {
   const registro = {
     unidade,
     modo,
+    empresaDeliveryAtivo,
     modeloLancamento: unidade === 'Dominos Campina Grande' ? 'detalhado' : (MODELOS_LANCAMENTO_VALIDOS.has(campos?.modeloLancamento) ? campos.modeloLancamento : 'detalhado'),
     plataformaNome: String(campos?.plataformaNome || '').trim().slice(0, 40),
     entregadoresFixos,
