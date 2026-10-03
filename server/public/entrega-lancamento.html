@@ -55,6 +55,9 @@
   .combo-vazio{padding:11px 10px;color:var(--muted);font-size:12px;}
   textarea{resize:vertical;min-height:56px;}
   input[type=file]{padding:8px 9px;font-size:12.5px;}
+  .comprovante-colar{border:1px dashed var(--line);border-radius:8px;padding:12px;margin-top:8px;cursor:pointer;color:var(--muted);font-size:12px;}
+  .comprovante-colar:focus{outline:2px solid var(--accent);outline-offset:2px;}
+  .comprovante-preview{display:block;max-width:100%;max-height:180px;object-fit:contain;margin-top:10px;}
   .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
   .grid2.campo-unico,.totais-entrega.campo-unico{grid-template-columns:1fr;}
   .totais-entrega{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:8px;align-items:start;}
@@ -261,6 +264,12 @@
     <div class="secao">
       <div class="secao-titulo">Etiqueta / comprovante (opcional)</div>
       <input type="file" id="f-etiqueta" accept="image/*" capture="environment">
+      <div id="comprovante-colar" class="comprovante-colar" tabindex="0" role="group" aria-label="Colar print do comprovante">Clique aqui e cole o print com Ctrl+V.</div>
+      <div id="comprovante-anexado" class="hidden">
+        <div id="comprovante-status" class="sub" role="status" aria-live="polite"></div>
+        <img id="comprovante-preview" class="comprovante-preview" alt="Prévia do comprovante anexado">
+        <button type="button" id="comprovante-remover" class="link-btn">Remover comprovante</button>
+      </div>
     </div>
 
     <div class="secao">
@@ -1077,8 +1086,51 @@ document.getElementById('form-master').addEventListener('submit', async (ev)=>{
   }
 });
 
+let comprovantePreviewUrl = null;
+function atualizarComprovante(){
+  const arquivo = document.getElementById('f-etiqueta').files[0];
+  const preview = document.getElementById('comprovante-preview');
+  if(comprovantePreviewUrl) URL.revokeObjectURL(comprovantePreviewUrl);
+  comprovantePreviewUrl = null;
+  preview.removeAttribute('src');
+  document.getElementById('comprovante-anexado').classList.toggle('hidden', !arquivo);
+  if(!arquivo) return;
+  document.getElementById('comprovante-status').textContent = 'Comprovante anexado: '+arquivo.name;
+  if(/^image\//.test(arquivo.type)){
+    comprovantePreviewUrl = URL.createObjectURL(arquivo);
+    preview.src = comprovantePreviewUrl;
+  }
+}
+document.getElementById('f-etiqueta').addEventListener('change', atualizarComprovante);
+document.getElementById('comprovante-colar').addEventListener('click', ev=>ev.currentTarget.focus());
+document.getElementById('comprovante-remover').addEventListener('click', ()=>{
+  const campo = document.getElementById('f-etiqueta');
+  campo.value = '';
+  window.zenithRascunhos?.limparAnexoEnviado(campo);
+  campo.dispatchEvent(new Event('change', {bubbles:true}));
+});
+document.getElementById('form-lancar').addEventListener('paste', ev=>{
+  let imagens = Array.from(ev.clipboardData?.files || []).filter(f=>/^image\//.test(f.type));
+  if(!imagens.length) imagens = Array.from(ev.clipboardData?.items || [])
+    .filter(item=>item.kind==='file' && /^image\//.test(item.type))
+    .map(item=>item.getAsFile()).filter(Boolean);
+  if(!imagens.length) return; // texto continua sendo colado normalmente
+  ev.preventDefault();
+  const campo = document.getElementById('f-etiqueta');
+  if(campo.files.length && !confirm('Substituir o comprovante já anexado por este print?')) return;
+  try{
+    const transferencia = new DataTransfer();
+    transferencia.items.add(imagens[0]);
+    campo.files = transferencia.files;
+    campo.dispatchEvent(new Event('change', {bubbles:true}));
+  }catch(err){
+    alert('Este navegador não permite colar o print. Salve a imagem e use Escolher arquivo.');
+  }
+});
+
 function resetarForm(){
   document.getElementById('form-lancar').reset();
+  atualizarComprovante();
   document.getElementById('f-data').value = dataFechamentoBrasilia();
   CAMPOS_NUMERICOS.forEach(c=>{ const el = document.getElementById('f-'+c); if(el) el.value = 0; });
   document.getElementById('f-campina-quantidade').value = '';
