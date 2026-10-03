@@ -57,12 +57,11 @@
   input[type=file]{padding:8px 9px;font-size:12.5px;}
   .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
   .grid2.campo-unico,.totais-entrega.campo-unico{grid-template-columns:1fr;}
-  .totais-entrega{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:8px;align-items:end;}
-  .totais-entrega input{margin-bottom:0;}
-  .totais-entrega .resumo{height:44px;box-sizing:border-box;padding:0 12px;display:flex;align-items:center;}
-  .totais-entrega .linha{width:100%;}
-  .totais-entrega #wrap-total-receber{text-align:center;}
-  .totais-entrega #wrap-total-receber .linha{justify-content:center;}
+  .totais-entrega{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:8px;align-items:start;}
+  .totais-entrega label{margin:0 0 4px;text-align:left;}
+  .totais-entrega input,.totais-entrega .resumo{height:44px;margin:0;padding:0 11px;font-size:14px;text-align:left;}
+  .totais-entrega .resumo{display:flex;flex-direction:row;align-items:center;}
+  .totais-entrega .resumo .linha{width:100%;justify-content:flex-start;align-items:center;}
   @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} .grid2.campo-unico{grid-template-columns:1fr;} }
   .resumo{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px;display:flex;flex-direction:column;gap:4px;}
   .resumo .linha{display:flex;justify-content:space-between;gap:8px;}
