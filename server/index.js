@@ -17927,7 +17927,7 @@ app.get('/api/entregas/regras', requireAnySection('entregas', 'entregas-lancamen
     const regra = porUnidade[u] || entregasRegras.defaultRegra(u);
     const ativos = await entregadoresEntregas.listarAtivos(u);
     return { ...regra, entregadoresFixos: ativos.map((entregador) => entregador.nome),
-      entregadores: ativos.map(e => ({ nome: e.nome, tipo: e.tipo, categoria: entregadoresEntregas.categoriaNome(e), modoPagamento: entregadoresEntregas.modoPagamento(e) })) };
+      entregadores: ativos.map(e => ({ nome: e.nome, tipo: e.tipo, categoria: entregadoresEntregas.categoriaNome(e), modoPagamento: entregadoresEntregas.pagamentoConfigurado(e, regra) })) };
   }));
   res.json(regrasComEntregadoresAtivos);
 });

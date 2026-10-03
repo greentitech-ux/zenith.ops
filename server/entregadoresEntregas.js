@@ -3,6 +3,7 @@
 // antigos com o nome que existia no dia.
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
+const entregasRegras = require('./entregasRegras');
 
 const COLLECTION = db.collection('entregadoresEntregas');
 const SOLICITACOES = db.collection('entregadoresEntregasSolicitacoes');
@@ -29,6 +30,18 @@ function categoriaNome(entregador) {
 function modoPagamento(entregador) {
   return ['manual', 'unidade'].includes(entregador.modoPagamento) ? entregador.modoPagamento
     : (['MOOVERY_FIXO', 'MOOVERY_NUVEM'].includes(entregador.tipo) ? 'manual' : 'unidade');
+}
+function pagamentoConfigurado(entregador, regra) {
+  const empresa = (regra.empresas || []).find(e => chaveNome(e.nome) === chaveNome(categoriaNome(entregador)));
+  return empresa ? (empresa.pagamentoEntregador || (empresa.modo === 'manual' ? 'manual' : 'unidade')) : modoPagamento(entregador);
+}
+async function validarCategoria(unidade, categoria) {
+  const nome = texto(categoria) || 'ENTREGADOR';
+  if (nome.toLocaleUpperCase('pt-BR') === 'ENTREGADOR') return { categoria: 'ENTREGADOR', modoPagamento: 'unidade' };
+  const regra = await entregasRegras.getPara(unidade);
+  const empresa = (regra.empresas || []).find(e => chaveNome(e.nome) === chaveNome(nome));
+  if (!empresa) throw new Error('Selecione uma empresa prestadora cadastrada pelo Master nas Regras de Entregas desta unidade.');
+  return { categoria: empresa.nome, modoPagamento: empresa.pagamentoEntregador || (empresa.modo === 'manual' ? 'manual' : 'unidade') };
 }
 
 async function listarBruto() {
@@ -76,6 +89,7 @@ async function criar({ unidade, nome, telefone, tipo, categoria, modoPagamento: 
   const nomeLimpo = texto(nome);
   if (!validarNomeCompleto(nomeLimpo)) throw new Error('Informe o nome e o sobrenome do entregador.');
   const telefoneLimpo = limparTelefone(telefone);
+  const vinculo = await validarCategoria(unidade, categoria);
   const id = idPara(unidade, nomeLimpo);
   if (!id || id.endsWith('__')) throw new Error('Nome do entregador inválido.');
   const existente = await COLLECTION.doc(id).get();
@@ -85,8 +99,7 @@ async function criar({ unidade, nome, telefone, tipo, categoria, modoPagamento: 
   const registro = {
     id, unidade, nome: nomeLimpo, telefone: telefoneLimpo || dadosExistentes.telefone || null,
     tipo: tipoValido(tipo), ativo: true, excluido: false,
-    categoria: texto(categoria) || categoriaNome({ tipo: tipoValido(tipo) }),
-    modoPagamento: ['manual','unidade'].includes(pagamento) ? pagamento : modoPagamento({ tipo: tipoValido(tipo) }),
+    ...vinculo,
     criadoEm: dadosExistentes.criadoEm || agora,
     criadoPorId: dadosExistentes.criadoPorId || porId,
     criadoPorEmail: dadosExistentes.criadoPorEmail || porEmail,
@@ -100,10 +113,9 @@ async function criar({ unidade, nome, telefone, tipo, categoria, modoPagamento: 
 async function editarCadastro({ unidade, id, telefone, categoria, modoPagamento: pagamento, porEmail }) {
   const encontrado = (await listarTodos(unidade)).find(item => item.id === id);
   if (!encontrado) throw new Error('Entregador não encontrado nesta unidade.');
-  if (!texto(categoria)) throw new Error('Informe a categoria do entregador.');
-  if (!['manual','unidade'].includes(pagamento)) throw new Error('Forma de pagamento inválida.');
+  const vinculo = await validarCategoria(unidade, categoria);
   const idReal = String(id).startsWith('padrao:') ? idPara(unidade, encontrado.nome) : id;
-  const registro = { ...encontrado, id: idReal, categoria: texto(categoria), modoPagamento: pagamento,
+  const registro = { ...encontrado, id: idReal, ...vinculo,
     telefone: limparTelefone(telefone), atualizadoEm: new Date().toISOString(), atualizadoPorEmail: porEmail };
   await COLLECTION.doc(idReal).set(registro, { merge: true });
   cache.invalidar();
@@ -174,4 +186,4 @@ async function decidirExclusao(id, status, { decididoPorEmail, motivoDecisao }) 
   return { ...pedido, status, decididoEm: agora, decididoPorEmail };
 }
 
-module.exports = { TIPOS_VALIDOS, listarTodos, listarAtivos, encontrarAtivo, criar, editarCadastro, categoriaNome, modoPagamento, definirAtivo, solicitarExclusao, listarSolicitacoes, decidirExclusao, chaveNome, idPara, invalidar: () => cache.invalidar() };
+module.exports = { TIPOS_VALIDOS, listarTodos, listarAtivos, encontrarAtivo, criar, editarCadastro, categoriaNome, modoPagamento, pagamentoConfigurado, definirAtivo, solicitarExclusao, listarSolicitacoes, decidirExclusao, chaveNome, idPara, invalidar: () => cache.invalidar() };

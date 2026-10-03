@@ -128,12 +128,12 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
     }
     if (entregadorCadastrado) registro.entregador = entregadorCadastrado.nome;
   }
-  const pagamentoManual = !!entregadorCadastrado && entregadoresEntregas.modoPagamento(entregadorCadastrado) === 'manual';
+  const pagamentoManual = !!entregadorCadastrado && entregadoresEntregas.pagamentoConfigurado(entregadorCadastrado, regra) === 'manual';
   if (entregadorCadastrado) {
     registro.tipoRecebedor = 'entregador';
     registro.tipoEntregador = entregadorCadastrado.tipo || 'OUTRO';
     registro.categoriaEntregador = entregadoresEntregas.categoriaNome(entregadorCadastrado);
-    registro.modoPagamento = entregadoresEntregas.modoPagamento(entregadorCadastrado);
+    registro.modoPagamento = entregadoresEntregas.pagamentoConfigurado(entregadorCadastrado, regra);
   }
   if (ehEmpresa) {
     if (!empresa) throw new Error('Selecione uma empresa/plataforma cadastrada para essa unidade.');

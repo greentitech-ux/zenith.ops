@@ -113,7 +113,8 @@ function sanitizarEmpresas(lista) {
     if (usados.has(chave)) return null;
     usados.add(chave);
     const modo = empresa?.modo === 'fixo' ? 'fixo' : 'manual';
-    return { nome, modo, valorEntrega: modo === 'fixo' ? Math.max(0, num(empresa?.valorEntrega)) : 0 };
+    const pagamentoEntregador = ['manual','unidade'].includes(empresa?.pagamentoEntregador) ? empresa.pagamentoEntregador : (modo === 'manual' ? 'manual' : 'unidade');
+    return { nome, modo, pagamentoEntregador, valorEntrega: modo === 'fixo' ? Math.max(0, num(empresa?.valorEntrega)) : 0 };
   }).filter(Boolean).slice(0, 100);
 }
 
