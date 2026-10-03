@@ -3907,6 +3907,32 @@ function proximoDaFila(fila, concluido) {
   return fila.find((id) => id !== String(concluido || '')) || null;
 }
 
+// Reserva atômica: não colocar ações de energia atrás de comandos demorados,
+// nem aceitar dois cliques concorrentes enquanto o primeiro está na fila.
+async function enfileirarVm(codigo, posto, nome, acao, solicitadoPor) {
+  const ref = COLLECTION.doc(docIdFor(codigo, posto));
+  const comandoRef = COMANDOS_COLLECTION.doc();
+  const registro = await db.runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new Error('Host não encontrado.');
+    const host = snap.data();
+    if (filaDeComandos(host).length) throw new Error('O host já tem comando na fila. Aguarde o resultado antes de controlar uma VM.');
+    const plano = require('./hypervControle').preparar(host, nome, acao);
+    const item = {
+      id: comandoRef.id, codigo, posto, comando: plano.comando, comandoEntrega: null,
+      nomeComputador: host.nome || posto, unidadeCodigo: codigo,
+      origem: plano.origem, vmNome: nome, solicitadoPor, requerAdmin: true,
+      acaoId: null, aprovacaoId: null, status: 'pendente', criadoEm: new Date().toISOString(),
+      entregueEm: null, executadoEm: null, resultado: null, erro: null,
+    };
+    tx.set(comandoRef, item);
+    tx.update(ref, { comandosFilaIds: [comandoRef.id], comandoPendenteId: comandoRef.id });
+    return item;
+  });
+  cache.invalidar();
+  return registro;
+}
+
 async function enfileirarComando(codigo, posto, comando, opcoes) {
   const id = docIdFor(codigo, posto);
   const ref = COLLECTION.doc(id);
@@ -5251,7 +5277,7 @@ module.exports = {
   // falso e ser levado a sério, inclusive pra ENVELHECER a última batida,
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
-  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, cancelarComandoPendente, listarComandosPendentes, marcarComandoTravado,
+  enfileirarVm, enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos, detalharComando, cancelarComandoPendente, listarComandosPendentes, marcarComandoTravado,
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
   planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
   horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,

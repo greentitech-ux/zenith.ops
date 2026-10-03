@@ -1959,7 +1959,11 @@ function atualizarConteudoDetalhe(codigo, c){
       const ok = v.estado === 'Executando';
       const cvm = ok ? 'var(--ok)' : 'var(--bad)';
       const ico = ok ? '🟢' : '🔴';
-      return `<span style="font-size:11px;">${ico} ${escapeHtml(v.nome)} — <b style="color:${cvm};">${escapeHtml(v.estado)}</b></span>`;
+      const botoes = IS_MASTER_VM ? ['ligar','desligar','reiniciar'].map(acao => {
+        const permitido = acao === 'ligar' ? v.estado === 'Desligada' : v.estado === 'Executando';
+        return `<button type="button" class="btn-ghost" style="padding:6px 10px;" data-codigo="${escapeHtml(c.codigo)}" data-posto="${escapeHtml(c.posto)}" data-vm="${escapeHtml(v.nome)}" data-acao="${acao}" onclick="controlarVmHost(this)" ${permitido ? '' : 'disabled'}>${{ligar:'▶ Ligar',desligar:'⏻ Desligar',reiniciar:'↻ Reiniciar'}[acao]}</button>`;
+      }).join('') : '';
+      return `<div style="padding:8px 0;overflow-wrap:anywhere;">${ico} ${escapeHtml(v.nome)} — <b style="color:${cvm};">${escapeHtml(v.estado)}</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">${botoes}</div></div>`;
     }).join('<br>');
     const caidas = c.vms.filter(v=>v.estado!=='Executando').length;
     const corVm = caidas ? 'var(--bad)' : 'var(--ok)';
@@ -4775,6 +4779,28 @@ function atualizarVerPapelDeParede(){
 // parede e salvar política. Devolve a senha digitada, ou null se cancelar.
 // A verificação de verdade é no servidor (exigirSenhaDoMaster) - aqui é só a
 // coleta, mascarada. Reinício/reset já pedem senha no próprio modal.
+async function controlarVmHost(botao){
+  const {codigo,posto,vm,acao} = botao.dataset;
+  if(!IS_MASTER_VM || botao.disabled) return;
+  const verbo = {ligar:'Ligar',desligar:'Desligar',reiniciar:'Reiniciar'}[acao];
+  if(!verbo || !confirm(`${verbo} somente a VM “${vm}” pelo host ${posto}?\n\nO host e as outras VMs não serão reiniciados. Desligar/reiniciar interrompe os serviços desta VM. Se o desligamento normal falhar, não haverá corte de energia nem reinício forçado.`)) return;
+  const password = await pedirSenhaMaster(`${verbo} a VM ${vm}`);
+  if(password===null) return;
+  botao.disabled = true;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vms/acao`, {
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:vm,acao,password})
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Não foi possível enviar a ação.');
+    alert(d.mensagem);
+    await buscarDetalheComp(codigo,posto);
+    atualizarDetalheSeAberto();
+    carregarComandosRecentes();
+  }catch(e){ alert(e.message); }
+  finally{ botao.disabled = false; }
+}
+
 function pedirSenhaMaster(acaoTexto){
   return new Promise((resolve)=>{
     const ov = document.getElementById('senha-overlay');
@@ -5741,11 +5767,13 @@ async function rejeitarAgenteQa(id){
 }
 
 let IS_MASTER = false;
+let IS_MASTER_VM = false;
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   const me = await res.json();
   IS_MASTER = me.role === 'master';
+  IS_MASTER_VM = IS_MASTER && !me.qaMaster;
   if(!me.ehTimeSuporte){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;

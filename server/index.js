@@ -7403,6 +7403,18 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
   }
 });
 
+// Energia de uma VM pelo agente do HOST, nunca por agente dentro da VM.
+app.post('/api/loja-status/:codigo/computadores/:posto/vms/acao', requireMasterDeVerdade, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const registro = await lojaStatus.enfileirarVm(req.params.codigo, req.params.posto,
+      req.body?.nome, req.body?.acao, req.user.email);
+    console.log(`[NOC] ${req.user.email} solicitou ${registro.origem} em ${registro.codigo}/${registro.posto} (${registro.id})`);
+    res.json({ ok: true, comandoId: registro.id,
+      mensagem: 'Pedido na fila do agente elevado do host. Aguarde o resultado no último comando; isto ainda não confirma a mudança de estado da VM.' });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 // ---------- PROGRAMAS REMOTOS ----------
 // Instalação e remoção são deliberadamente mais restritas do que as demais
 // ações do NOC: não existe campo de comando livre. Instalar aceita apenas o ID
