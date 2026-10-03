@@ -55,13 +55,14 @@ main{max-width:640px;margin:0 auto}
 #agora:not(:empty){margin-bottom:18px}
 .muted{color:var(--muted,#7d8896);font-size:13px;line-height:1.45}
 h2{font-size:12px;font-family:var(--mono,monospace);letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#7d8896);margin:22px 0 10px;font-weight:600}
-.pedido{background:var(--panel,#12161b);border:1px solid var(--line,#232a33);border-radius:13px;padding:15px;margin-bottom:12px}
+.lista-cartoes{display:grid;gap:10px;max-height:590px;overflow-y:auto;padding:1px 5px 1px 1px;overscroll-behavior:contain}.lista-cartoes::-webkit-scrollbar{width:7px}.lista-cartoes::-webkit-scrollbar-thumb{background:var(--line,#27313b);border-radius:9px}
+.pedido{background:var(--panel,#12161b);border:1px solid var(--line,#232a33);border-radius:13px;padding:13px;min-width:0}
 .pedido.foco{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-.origem{display:inline-block;font:11px var(--mono,monospace);padding:3px 8px;border-radius:20px;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);color:var(--accent2,#5cc8ff);margin-bottom:8px}
-.resumo{font-size:16px;font-weight:700;line-height:1.35;margin:0 0 4px;overflow-wrap:anywhere}
-.detalhes{margin:10px 0 0;padding:10px 12px;background:var(--panel2,#181d24);border-radius:9px;display:grid;gap:6px}
-.detalhes div{display:grid;grid-template-columns:minmax(90px,34%) 1fr;gap:8px;font-size:13px}
-.detalhes dt{color:var(--muted,#7d8896);font:12px var(--mono,monospace)}
+.origem{display:inline-block;font:11px var(--mono,monospace);padding:3px 8px;border-radius:20px;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);color:var(--accent2,#5cc8ff);margin-bottom:7px}
+.resumo{font-size:16px;font-weight:700;line-height:1.3;margin:0 0 4px;overflow-wrap:anywhere}.pedido-meta{font-size:12.5px}
+.pedido-detalhes{margin-top:10px;border-top:1px solid var(--line,#232a33);padding-top:9px}.pedido-detalhes summary{cursor:pointer;color:var(--accent2,#5cc8ff);font:12px var(--mono,monospace);list-style:none}.pedido-detalhes summary::-webkit-details-marker{display:none}.pedido-detalhes summary::before{content:'▸ ';font-size:14px}.pedido-detalhes[open] summary::before{content:'▾ '}
+.detalhes{margin:9px 0 0;padding:10px 12px;background:var(--panel2,#181d24);border-radius:9px;display:grid;gap:9px}
+.detalhes div{display:grid;gap:3px;font-size:13px;min-width:0}.detalhes dt{color:var(--muted,#7d8896);font:12px var(--mono,monospace)}
 .detalhes dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .erro{color:var(--bad,#ff5c5c);font-size:13px;margin-top:8px}
 .acoes{display:grid;gap:8px;margin-top:14px}
@@ -73,7 +74,7 @@ button:disabled{opacity:.6;cursor:default}
 .senha{display:grid;gap:8px}
 .senha input{width:100%;padding:12px;background:var(--panel2,#181d24);color:var(--text,#e7ecf1);border:1px solid var(--line,#232a33);border-radius:10px;font:15px var(--sans,system-ui,sans-serif)}
 .senha input:focus{outline:none;border-color:var(--accent)}
-.feito{margin-top:10px;font-size:13.5px}
+.feito{margin-top:10px;font-size:13.5px}.decisao-rodape{margin-top:10px;padding-top:9px;border-top:1px solid var(--line,#232a33);font-size:12.5px;color:var(--ok,#3ddc97)}.decisao-rodape.recusado{color:var(--bad,#ff6b6b)}.decisao-rodape.vencido{color:var(--warn,#ffbd59)}
 .feito.ok{color:var(--ok,#3ddc97)}
 pre.saida{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);border-radius:9px;padding:10px;font:12px var(--mono,monospace);margin:8px 0 0;max-height:260px;overflow:auto}
 .decidido{opacity:.75}
@@ -120,6 +121,7 @@ const FEITOS=new Map(); // id -> resultado mostrado uma vez (senha temporária i
 let FILTRO_ORIGEM='';let FILTRO_BUSCA='';
 
 function quando(iso){if(!iso)return '';const m=Math.round((Date.now()-Date.parse(iso))/60000);if(m<1)return 'agora';if(m<60)return 'há '+m+' min';const h=Math.round(m/60);if(h<48)return 'há '+h+'h';return new Date(iso).toLocaleDateString('pt-BR')}
+function dataCurta(iso){if(!iso)return '';return new Intl.DateTimeFormat('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(iso))}
 function vence(iso){if(!iso)return '';const m=Math.round((Date.parse(iso)-Date.now())/60000);if(m<=0)return ' · venceu';if(m<60)return ' · vence em '+m+' min';return ' · vence em '+Math.round(m/60)+'h'}
 function vencido(a){return a.status==='pendente'&&a.expiraEm&&Date.parse(a.expiraEm)<=Date.now()}
 // ERRO DEFINITIVO NÃO ESTÁ ABERTO. `erro` normal volta pra mão do Master
@@ -144,7 +146,7 @@ function cartao(a){
   const det=(a.detalhes||[]).length?`<dl class="detalhes">${a.detalhes.map(detalhe).join('')}</dl>`:'';
   const eventos=(a.historico&&a.historico.length?a.historico:[{evento:'PEDIDO_CRIADO',em:a.criadoEm,porEmail:a.criadoPorEmail},...(a.decididoEm?[{evento:a.status==='aprovado'?'AUTORIZADO_E_EXECUTADO':a.status==='rejeitado'?'RECUSADO':a.status==='erro'?'ERRO_NA_EXECUCAO':'VENCEU',em:a.decididoEm,porEmail:a.decididoPorEmail,motivo:a.motivoRejeicao,erro:a.erroExecucao}]:[])]);
   const tempo=`<div class="linha-tempo">${eventos.map(e=>`<div><b>${esc(String(e.evento||'').replaceAll('_',' '))}</b> · ${esc(quando(e.em))}${e.porEmail?' · '+esc(e.porEmail):''}${e.motivo?' — '+esc(e.motivo):''}${e.erro?' — '+esc(e.erro):''}</div>`).join('')}</div>`;
-  const cabeca=`<span class="origem">${esc(ORIGEM[a.origem]||ORIGEM.qa)}</span><p class="resumo">${esc(a.resumo||a.tipo)}</p><div class="muted">${esc(a.criadoPorEmail||'')} · ${quando(a.criadoEm)}${aberto(a)?vence(a.expiraEm):''}</div>${det}${tempo}`;
+  const cabeca=`<span class="origem">${esc(ORIGEM[a.origem]||ORIGEM.qa)}</span><p class="resumo">${esc(a.resumo||a.tipo)}</p><div class="muted pedido-meta">${esc(a.criadoPorEmail||'')} · ${dataCurta(a.criadoEm)}${aberto(a)?vence(a.expiraEm):''}</div><details class="pedido-detalhes"><summary>Tarefa, motivo e histórico</summary>${det||'<p class="muted">Sem detalhes adicionais.</p>'}${tempo}</details>`;
   if(feito){
     return `<article class="pedido" id="p-${esc(a.id)}">${cabeca}<div class="feito ok">✅ Autorizado e executado.</div>${feito.saida?`<pre class="saida">${esc(feito.saida)}</pre><button type="button" style="margin-top:8px" onclick="copiar('${esc(a.id)}')">Copiar resultado</button><div class="muted" style="margin-top:6px">Este resultado aparece só agora - não fica gravado.</div>`:''}</article>`;
   }
@@ -152,7 +154,9 @@ function cartao(a){
     const rot={aprovado:'✅ Autorizado',rejeitado:'❌ Recusado',expirado:'⌛ Venceu',pendente:'⌛ Venceu',erro:'⚠️ Falha na execução',executando:'Execução iniciada. Se não concluir, confira o resultado antes de solicitar outro pedido. Não será repetida automaticamente.'}[a.status]||a.status;
     // diz POR QUE não adianta tentar de novo, em vez de só sumir com o botão
     const porque=definitivo(a)?`<br>${esc(a.erroExecucao||'')}<br><span class="muted">Confira o resultado antes de solicitar uma nova autorização. Uma falha pode ter ocorrido após parte da ação.</span>`:'';
-    return `<article class="pedido decidido">${cabeca}<div class="feito">${rot}${a.decididoPorEmail?' · '+esc(a.decididoPorEmail):''}${a.decididoEm?' · '+quando(a.decididoEm):''}${a.motivoRejeicao?'<br>Motivo: '+esc(a.motivoRejeicao):''}${porque}</div></article>`;
+    const classeRodape=a.status==='rejeitado'?'recusado':(a.status==='expirado'||a.status==='pendente'?'vencido':'');
+    const por=a.decididoPorEmail?` por <b>${esc(a.decididoPorEmail)}</b>`:'';
+    return `<article class="pedido decidido">${cabeca}<div class="decisao-rodape ${classeRodape}">${rot}${por}${a.decididoEm?' · '+quando(a.decididoEm):''}${a.motivoRejeicao?' · '+esc(a.motivoRejeicao):''}${porque}</div></article>`;
   }
   // digital PRIMEIRO; senha é a alternativa. Sem digital neste aparelho, a
   // senha aparece direto (não dá pra esconder a única saída)
@@ -217,14 +221,14 @@ function pintar(){
   const pendentes=nas('pendente').sort(porNovo);
   const erros=nas('erro').sort(porNovo);
   const executando=nas('executando').sort(porNovo);
-  // teto nas colunas de desfecho: a lista do servidor já vem com 300, e a
-  // tela não precisa virar histórico
-  const aprovados=nas('aprovado').sort(porDecisao).slice(0,15);
-  const rejeitados=nas('rejeitado').sort(porDecisao).slice(0,15);
-  const expirados=nas('expirado').sort(porDecisao).slice(0,15);
+  // O histórico permanece acessível, mas cada coluna mostra a altura de
+  // aproximadamente cinco cartões compactos e passa a rolar internamente.
+  const aprovados=nas('aprovado').sort(porDecisao);
+  const rejeitados=nas('rejeitado').sort(porDecisao);
+  const expirados=nas('expirado').sort(porDecisao);
 
   $('#agora').innerHTML=agora.map(cartao).join('');
-  const por=(el,lista,vazio)=>{$(el).innerHTML=lista.map(cartao).join('')||`<p class="col-vazia">${vazio}</p>`};
+  const por=(el,lista,vazio)=>{$(el).innerHTML=lista.length?`<div class="lista-cartoes">${lista.map(cartao).join('')}</div>`:`<p class="col-vazia">${vazio}</p>`};
   por('#col-pendente',pendentes,'Nada esperando autorização agora.');
   por('#col-erro',erros,'Nenhuma falhou ao executar.');
   por('#col-executando',executando,'Nenhuma execução em andamento.');
