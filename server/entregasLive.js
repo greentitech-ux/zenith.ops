@@ -8,6 +8,7 @@
 // que só é aplicado quando o Master aprova; o valor anterior sempre fica
 // guardado no histórico do próprio lançamento.
 const db = require('./firestore');
+const { createHash } = require('crypto');
 const storage = require('./storage');
 const { createCache } = require('./liveCache');
 const entregasRegras = require('./entregasRegras');
@@ -15,6 +16,12 @@ const entregadoresEntregas = require('./entregadoresEntregas');
 
 const COLLECTION = db.collection('entregasLive');
 const EDITS = db.collection('entregaEdicoes');
+const DIAS = db.collection('entregaDias');
+
+function nomeEntregadorNormalizado(nome) {
+  return String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR');
+}
 
 
 const CAMPOS_NUMERICOS = [
@@ -166,7 +173,29 @@ async function create({ unidade, unidadeNome, data, entregador, tipoEntregador, 
   registro.atualizadoEm = agora;
   registro.historico = [];
 
-  await ref.set(registro);
+  if (ehEmpresa) {
+    await ref.set(registro);
+  } else {
+    // A trava por unidade/data serializa lançamentos concorrentes. A consulta
+    // também encontra registros antigos, criados antes desta validação.
+    const chaveDia = createHash('sha256').update(JSON.stringify([unidade, data])).digest('hex');
+    const diaRef = DIAS.doc(chaveDia);
+    await db.runTransaction(async (tx) => {
+      await tx.get(diaRef);
+      const existentes = await tx.get(COLLECTION.where('unidade', '==', unidade).where('data', '==', data));
+      const nome = nomeEntregadorNormalizado(registro.entregador);
+      const duplicado = existentes.docs.some((doc) => {
+        const anterior = doc.data();
+        return estaAtivo(anterior) && anterior.tipoRecebedor !== 'empresa'
+          && nomeEntregadorNormalizado(anterior.entregador) === nome;
+      });
+      if (duplicado) {
+        throw new Error(`Já existe um lançamento de ${registro.entregador} nesta unidade em ${data.split('-').reverse().join('/')}. Para corrigir, solicite a edição do lançamento existente.`);
+      }
+      tx.set(diaRef, { unidade, data, ultimoLancamentoId: ref.id, atualizadoEm: agora });
+      tx.set(ref, registro);
+    });
+  }
   entregasCache.invalidar();
   return registro;
 }
