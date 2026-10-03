@@ -120,6 +120,7 @@
       <div><label>Hora da entrada</label><input type="time" id="km-hora-entrada" required></div>
     </div>
     <label>Entregador ativo</label>
+    <input type="search" id="km-entregador-filtro" placeholder="pesquise pelo nome do entregador" autocomplete="off">
     <select id="km-entregador" required><option value="">selecione o entregador</option></select>
     <div class="msg hidden" id="msg-km-entrada"></div>
     <button class="btn-primary" type="submit" style="margin-top:10px;">Dar entrada agora</button>
@@ -148,10 +149,12 @@
         <div id="wrap-entregador-padrao">
           <label>Entregador</label>
           <input type="text" id="f-entregador" placeholder="nome do motoboy" required>
+          <input type="search" id="f-entregador-filtro" class="hidden" placeholder="pesquise pelo nome do entregador ou empresa" autocomplete="off">
           <select id="f-entregador-fixo" class="hidden"></select>
         </div>
         <div id="wrap-entregador-campina" class="hidden">
           <label>Entregador</label>
+          <input type="search" id="f-entregador-campina-filtro" placeholder="pesquise pelo nome do entregador" autocomplete="off">
           <select id="f-entregador-campina"><option value="">carregando entregadores…</option></select>
         </div>
       </div>
@@ -407,6 +410,19 @@ function horaBrasilia(){
 }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function textoParaBusca(valor){
+  return String(valor||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR');
+}
+function filtrarOpcoesEntregador(inputId, selectId){
+  const busca=textoParaBusca(document.getElementById(inputId).value.trim());
+  const select=document.getElementById(selectId);
+  [...select.options].forEach((opcao, indice)=>{
+    opcao.hidden=indice>0 && !!busca && !textoParaBusca(opcao.textContent).includes(busca);
+  });
+  [...select.querySelectorAll('optgroup')].forEach(grupo=>{
+    grupo.hidden=[...grupo.options].every(opcao=>opcao.hidden);
+  });
+}
 
 function atualizarSugestao(){
   const total = ['entrega','extra','retorno'].reduce((s,c)=>s+Math.max(0,num(document.getElementById('f-'+c).value)),0);
@@ -503,10 +519,13 @@ function atualizarModoUnidade(){
     const entregadoresFixos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
     const empresas = Array.isArray(regra.empresas) ? regra.empresas : [];
     const inputEntregador = document.getElementById('f-entregador');
+    const filtroEntregador = document.getElementById('f-entregador-filtro');
     const selectEntregador = document.getElementById('f-entregador-fixo');
     const usarCadastro = entregadoresFixos.length > 0 || empresas.length > 0;
     inputEntregador.classList.toggle('hidden', usarCadastro);
     inputEntregador.required = !usarCadastro;
+    filtroEntregador.classList.toggle('hidden', !usarCadastro);
+    filtroEntregador.value = '';
     selectEntregador.classList.toggle('hidden', !usarCadastro);
     selectEntregador.required = usarCadastro;
     selectEntregador.innerHTML = usarCadastro ? [
@@ -514,11 +533,14 @@ function atualizarModoUnidade(){
       entregadoresFixos.length ? `<optgroup label="Entregadores fixos">${entregadoresFixos.map(nome=>`<option value="${escapeHtml(nome)}" data-tipo="entregador">${escapeHtml(nome)}</option>`).join('')}</optgroup>` : '',
       empresas.length ? `<optgroup label="Empresas / plataformas">${empresas.map(empresa=>`<option value="${escapeHtml(empresa.nome)}" data-tipo="empresa">${escapeHtml(empresa.nome)}</option>`).join('')}</optgroup>` : '',
     ].join('') : '';
+    filtrarOpcoesEntregador('f-entregador-filtro','f-entregador-fixo');
     atualizarModoRecebedor();
   }
   const nomesAtivos = Array.isArray(regra.entregadoresFixos) ? regra.entregadoresFixos : [];
   const kmSelect = document.getElementById('km-entregador');
   kmSelect.innerHTML = '<option value="">selecione o entregador</option>' + nomesAtivos.map(nome=>`<option value="${escapeHtml(nome)}">${escapeHtml(nome)}</option>`).join('');
+  document.getElementById('km-entregador-filtro').value='';
+  filtrarOpcoesEntregador('km-entregador-filtro','km-entregador');
   renderPainelKm();
   atualizarPreviewCalculado();
   atualizarObrigatoriedadeObservacoes();
@@ -535,6 +557,8 @@ function renderEntregadoresCampina(){
   ).join('');
   select.innerHTML = '<option value="">selecione o entregador</option>' + opcoes;
   if(ENTREGADORES_CAMPINA.some(e=>e.nome===atual)) select.value = atual;
+  document.getElementById('f-entregador-campina-filtro').value='';
+  filtrarOpcoesEntregador('f-entregador-campina-filtro','f-entregador-campina');
 }
 async function carregarEntregadoresCampina(){
   if(!ehModeloTotal()) return;
@@ -651,6 +675,9 @@ function atualizarPreviewCalculado(){
 }
 document.getElementById('f-unidade').addEventListener('change', atualizarModoUnidade);
 document.getElementById('f-entregador-fixo').addEventListener('change', atualizarModoRecebedor);
+[['f-entregador-filtro','f-entregador-fixo'],['f-entregador-campina-filtro','f-entregador-campina'],['km-entregador-filtro','km-entregador']].forEach(([inputId,selectId])=>{
+  document.getElementById(inputId).addEventListener('input',()=>filtrarOpcoesEntregador(inputId,selectId));
+});
 document.getElementById('f-data').addEventListener('change', atualizarPreviewCalculado);
 ['f-entrega','f-retorno','f-extra','f-pos00hs','f-foraDeArea','f-campina-quantidade'].forEach(id=>{
   document.getElementById(id).addEventListener('input', atualizarPreviewCalculado);
