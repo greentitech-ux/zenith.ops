@@ -41,10 +41,11 @@
   .empty{padding:24px;text-align:center;color:var(--muted);font-size:13px;}
   .sub{color:var(--muted);font-size:12px;margin-top:4px;font-family:var(--mono);}
 
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px;}
+  .kpis{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:12px;margin-bottom:20px;}
   .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
   .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono);}
-  .kpi .val{font-family:var(--mono);font-size:24px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;}
+  .kpi .val{font-family:var(--mono);font-size:clamp(18px,1.6vw,24px);font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+  @media(max-width:1199px){.kpis{grid-template-columns:repeat(4,minmax(0,1fr));}}
   .kpi .val.ok{color:var(--ok);} .kpi .val.bad{color:var(--bad);} .kpi .val.warn{color:var(--warn);}
 
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:16px;}
@@ -85,6 +86,33 @@
   .ontem-card .qtd{font-family:var(--mono);font-size:20px;font-weight:600;margin-top:4px;color:var(--ok);}
   .ontem-card.falta{border-color:var(--bad-dim);}
   .ontem-card.falta .qtd{font-size:12.5px;color:var(--bad);font-weight:500;}
+  .ontem-card{text-align:center;flex-basis:200px;}
+  .ontem-card .qtd{font-size:16px;}
+  .ontem-card .nome{font-weight:600;color:var(--text);min-height:30px;}
+  .controls input,.controls select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:7px 10px;max-width:100%;min-width:0;}
+  .controls label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted);}
+  .filtros-local .presets{flex-basis:100%;}
+  .panel-filtros{overflow:visible;}
+  .filtro-vinculo{font-size:11px;color:var(--muted);flex-basis:100%;}
+  .filtro-unidades{position:relative;color:var(--text);font-size:12px;}
+  .filtro-unidades summary{cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:8px 10px;background:var(--panel2);}
+  .filtro-unidades>div{position:absolute;top:100%;left:0;z-index:30;background:var(--panel2);padding:10px;border:1px solid var(--line);border-radius:8px;max-height:260px;overflow:auto;width:min(290px,calc(100vw - 48px));}
+  .filtro-unidades label{flex-direction:row;justify-content:space-between;align-items:center;padding:7px 0;gap:12px;color:var(--text);}
+  .filtro-unidades input{accent-color:var(--accent);}
+  .comparativo-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:16px;}
+  .comparativo-card{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--panel2);}
+  .comparativo-card .lbl{font-family:var(--mono);color:var(--muted);font-size:11px;text-transform:uppercase;}
+  .comparativo-card strong{display:block;font-family:var(--mono);font-size:24px;margin:8px 0;overflow-wrap:anywhere;}
+  .variacao{font-family:var(--mono);font-size:12px;margin-top:10px;color:var(--accent2);}
+  #grafico-entregas{padding:8px 16px;overflow-x:auto;}
+  #grafico-entregas svg{width:100%;min-width:650px;display:block;}
+  .grafico-grade{stroke:var(--line);stroke-width:1;}
+  .grafico-eixo{fill:var(--muted);font-size:11px;font-family:var(--mono);}
+  .grafico-barra{fill:var(--accent);}
+  .grafico-anterior{stroke:var(--accent2);stroke-width:2;stroke-dasharray:5 4;}
+  .grafico-ponto{fill:var(--accent2);}
+  .grafico-legenda{padding:0 16px 16px;color:var(--muted);font-size:12px;line-height:1.7;}
+  @media(max-width:640px){.comparativo-grid{grid-template-columns:1fr;}.kpis{grid-template-columns:repeat(2,minmax(0,1fr));}.kpi .val{font-size:20px;overflow-wrap:anywhere;}.controls .daterange{flex-wrap:wrap;}.controls>label{flex:1 1 140px;}.panel h2{flex-wrap:wrap;}}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -128,10 +156,27 @@
       <button type="button" class="multiselect-btn" id="ms-unidade-btn">Todas as unidades</button>
       <div class="multiselect-panel" id="ms-unidade-panel"></div>
     </div>
+    <label>Nome<input type="search" id="f-nome" placeholder="Pesquisar entregador ou empresa"></label>
+    <label>Dia da semana<select id="f-dia-semana"><option value="">Todos os dias da semana</option></select></label>
+    <span class="filtro-vinculo">Alterar este filtro sincroniza todas as seções. Depois, cada seção pode usar seu próprio período.</span>
   </div>
 </div>
 
 <div class="kpis" id="kpis"></div>
+
+<div class="panel panel-filtros" id="painel-evolucao">
+  <h2><div class="title-group"><span>Evolução das entregas</span></div></h2>
+  <div class="controls filtros-local" id="filtros-grafico"></div>
+  <div class="controls">
+    <label>Indicador<select id="grafico-metrica"><option value="entrega">Entregas</option><option value="valor">Valor pago</option><option value="tm">Ticket médio</option></select></label>
+    <label>Comparar com<select id="grafico-comparar"><option value="anterior">Período anterior · mesma duração</option><option value="semana">Semana anterior · 7 dias antes</option><option value="mes">Mês anterior · mesmo recorte</option><option value="ano">Ano anterior · mesmo recorte</option></select></label>
+    <span class="sub" id="grafico-periodo"></span>
+  </div>
+  <div class="comparativo-grid" id="comparativo-entregas"></div>
+  <div id="grafico-entregas"></div>
+  <div class="grafico-legenda"><span style="color:var(--accent)">■ Atual</span> · <span style="color:var(--accent2)">┄ Anterior</span><br>Comparação por posição no intervalo; o filtro de dia da semana vale para os dois períodos. Sem lançamento não significa operação zerada. Períodos com hoje ainda são parciais. Semanas iniciam no domingo.</div>
+  <details style="padding:0 16px 16px;"><summary>Consultar os números do gráfico</summary><div class="tablewrap" id="grafico-detalhes"></div></details>
+</div>
 
 <div class="panel">
   <h2><div class="title-group"><span id="ontem-titulo">Lançamento de ontem (D-1)</span><span class="n" id="ontem-count"></span></div></h2>
@@ -151,9 +196,10 @@
       <button type="button" class="preset-btn" onclick="baixarRelatorioEntregas('entregadores','pdf')">📄 PDF</button>
     </div>
   </h2>
+  <div class="controls filtros-local" id="filtros-entregadores"></div>
   <div class="tablewrap" style="max-height:none;overflow-x:auto;overflow-y:visible;">
     <table>
-      <thead><tr><th>Unidade</th><th>Nome</th><th>Quant.</th><th>Valor</th><th>TM</th><th>A.C / Encosta</th><th>Entrega</th><th>Retorno</th><th>Extra</th><th>Fora de Área</th><th>Valor Gami</th><th>COOP recebe</th></tr></thead>
+      <thead><tr><th>Unidade</th><th>Nome</th><th>Quant.</th><th>Valor</th><th>TM</th><th>Garantido / Encosta</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Fora de Área</th><th>Valor Gami</th><th>COOP recebe</th></tr></thead>
       <tbody id="entregadores-body"></tbody>
     </table>
   </div>
@@ -167,9 +213,10 @@
       <button type="button" class="preset-btn" onclick="baixarRelatorioEntregas('unidades','pdf')">📄 PDF</button>
     </div>
   </h2>
+  <div class="controls filtros-local" id="filtros-unidades"></div>
   <div class="tablewrap" style="max-height:none;overflow-x:auto;overflow-y:visible;">
     <table>
-      <thead><tr><th>Unid.</th><th>Corridas</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Fora área</th><th>Bônus</th><th>Valor pago</th><th>TM</th><th>A.C / Encosta</th><th>COOP recebe</th></tr></thead>
+      <thead><tr><th>Unid.</th><th>Lançamentos</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Fora área</th><th>Bônus</th><th>Valor pago</th><th>TM</th><th>Garantido / Encosta</th><th>COOP recebe</th></tr></thead>
       <tbody id="unidades-body"></tbody>
     </table>
   </div>
@@ -183,9 +230,10 @@
       <button type="button" class="preset-btn" onclick="baixarRelatorioEntregas('lancamentos','pdf')">📄 PDF</button>
     </div>
   </h2>
+  <div class="controls filtros-local" id="filtros-lancamentos"></div>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Data</th><th>Unid.</th><th>Entregador</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Pos 00hs</th><th>Fora área</th><th>Bônus</th><th>Valor</th><th>A.C / Encosta</th><th>COOP</th><th>Qtd. total</th><th>Etiqueta</th><th>Observação</th></tr></thead>
+      <thead><tr><th>Data</th><th>Unid.</th><th>Entregador</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Pos 00hs</th><th>Fora área</th><th>Bônus</th><th>Valor</th><th>Garantido / Encosta</th><th>COOP</th><th>Qtd. total</th><th>Etiqueta</th><th>Observação</th></tr></thead>
       <tbody id="lancamentos-body"></tbody>
     </table>
   </div>
@@ -193,6 +241,8 @@
 
 </div><!-- /#root -->
 
+<script src="/entregas-analise.js"></script>
+<script src="/entregas-painel.js"></script>
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -298,13 +348,15 @@ async function sincronizarPlanilha(){
 // relatorio (CSV/PDF) de uma das 3 tabelas de Entregas - usa o mesmo filtro
 // de periodo/unidades ativo na tela no momento
 function baixarRelatorioEntregas(tabela, formato){
-  const inicio = document.getElementById('f-date-start').value;
-  const fim = document.getElementById('f-date-end').value;
-  const unidades = [...SEL_UNIDADE].join(',');
+  const filtro=FILTROS_SECOES[tabela]||filtroResumo();
+  const {inicio,fim}=filtro;
+  const unidades = filtro.unidades.join(',');
   const params = new URLSearchParams({ token: AUTH_TOKEN });
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   if(unidades) params.set('unidades', unidades);
+  if(filtro.nome) params.set('nome',filtro.nome);
+  if(filtro.dia!=='') params.set('diaSemana',filtro.dia);
   verRelatorio(`/api/entregas/relatorio-${tabela}.${formato}?${params.toString()}`, `Entregas · ${tabela} · ${formato.toUpperCase()}`);
 }
 
@@ -313,7 +365,8 @@ async function carregar(){
     fetch('/api/entregas').then(r=>r.json()),
     IS_MASTER ? fetch('/api/meta/unidades').then(r=>r.json()).catch(()=>[]) : Promise.resolve([]),
   ]);
-  DATA = dados;
+  if(!Array.isArray(dados)) throw new Error('Não foi possível carregar as entregas.');
+  DATA = dados.map(ANALISE.normalizar);
   unidadesMeta.forEach(u=>{ UNIDADES_NOMES[u.codigo] = u.nome; });
   await carregarStatusSincronizacao();
   const datas = DATA.map(d=>d.data).filter(Boolean).sort();
@@ -322,8 +375,13 @@ async function carregar(){
     ? `${DATA.length} lançamentos · ${fmtData(datas[0])} → ${fmtData(datas[datas.length-1])}${SYNC_INFO_SUFIXO}`
     : `nenhuma entrega lançada ainda${SYNC_INFO_SUFIXO}`;
   elHeaderInfo.title = SYNC_INFO_TITLE;
-  setupPresets();
-  setupMultiselect();
+  if(!FILTROS_INICIADOS){
+    setupPresets();
+    setupMultiselect();
+    iniciarFiltrosSecoes();
+    FILTROS_INICIADOS=true;
+    document.querySelectorAll('.filtros-local').forEach(c=>c.closest('.panel').classList.add('panel-filtros'));
+  }else atualizarOpcoesResumo();
   render();
 }
 
@@ -365,26 +423,7 @@ async function decidirEdicaoEntrega(id, status){
 }
 
 function calcularPreset(tipo, refIso){
-  const ref = new Date(refIso+'T00:00:00');
-  if(tipo==='hoje') return {inicio:refIso, fim:refIso};
-  if(tipo==='ontem'){
-    const ontem = new Date(ref); ontem.setDate(ontem.getDate()-1);
-    return {inicio:isoLocal(ontem), fim:isoLocal(ontem)};
-  }
-  if(tipo==='semana'){
-    const dow = ref.getDay();
-    const inicio = new Date(ref); inicio.setDate(ref.getDate()-dow);
-    const fim = new Date(inicio); fim.setDate(inicio.getDate()+6);
-    return {inicio:isoLocal(inicio), fim:isoLocal(fim)};
-  }
-  if(tipo==='mes'){
-    const inicio = new Date(ref.getFullYear(), ref.getMonth(), 1);
-    const fim = new Date(ref.getFullYear(), ref.getMonth()+1, 0);
-    return {inicio:isoLocal(inicio), fim:isoLocal(fim)};
-  }
-  const inicio = new Date(ref.getFullYear(), ref.getMonth()-2, 1);
-  const fim = new Date(ref.getFullYear(), ref.getMonth()+1, 0);
-  return {inicio:isoLocal(inicio), fim:isoLocal(fim)};
+  return ANALISE.periodo(tipo,refIso);
 }
 
 // mesmo padrao de server/public/fechamentos.html: por padrao nenhum preset
@@ -400,6 +439,8 @@ function setupPresets(){
     {lbl:'Semana', tipo:'semana'},
     {lbl:'Mês', tipo:'mes'},
     {lbl:'Trimestre', tipo:'trimestre'},
+    {lbl:'30 dias', tipo:'30dias'},
+    {lbl:'Ano', tipo:'ano'},
   ];
   const cont = document.getElementById('presets');
   cont.innerHTML = presets.map(p=>`<button type="button" class="preset-btn" data-tipo="${p.tipo}">${p.lbl}</button>`).join('');
@@ -411,7 +452,7 @@ function setupPresets(){
     const range = calcularPreset(tipo, refIso);
     document.getElementById('f-date-start').value = range.inicio;
     document.getElementById('f-date-end').value = range.fim;
-    render();
+    aplicarFiltroResumo();
   }
 
   cont.querySelectorAll('.preset-btn').forEach(btn=>{
@@ -432,7 +473,7 @@ function setupPresets(){
     document.getElementById(id).addEventListener('input', ()=>{
       presetAtivo = null;
       cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
-      render();
+      aplicarFiltroResumo();
     });
   });
 }
@@ -455,11 +496,11 @@ function setupMultiselect(){
       <label class="all-option"><span>Todas as unidades</span><input type="checkbox" data-all ${SEL_UNIDADE.size===0?'checked':''}></label>
       ${codigos.map(c=>`<label><span>${escapeHtml(UNIDADES_NOMES[c]||c)}</span><input type="checkbox" value="${escapeHtml(c)}" ${SEL_UNIDADE.has(c)?'checked':''}></label>`).join('')}
     `;
-    panel.querySelector('[data-all]').addEventListener('change', ()=>{ SEL_UNIDADE.clear(); renderPanel(); render(); });
+    panel.querySelector('[data-all]').addEventListener('change', ()=>{ SEL_UNIDADE.clear(); renderPanel(); aplicarFiltroResumo(); });
     panel.querySelectorAll('input[type=checkbox]:not([data-all])').forEach(cb=>{
       cb.addEventListener('change', ()=>{
         if(cb.checked) SEL_UNIDADE.add(cb.value); else SEL_UNIDADE.delete(cb.value);
-        renderPanel(); render();
+        renderPanel(); aplicarFiltroResumo();
       });
     });
     btn.textContent = SEL_UNIDADE.size===0 ? 'Todas as unidades'
@@ -478,57 +519,50 @@ function setupMultiselect(){
   const reposicionar = (e)=>{ if(panel.classList.contains('open') && !(e && e.target && panel.contains(e.target))) posicionar(); };
   window.addEventListener('scroll', reposicionar, true);
   window.addEventListener('resize', reposicionar);
+  atualizarOpcoesResumo=renderPanel;
   renderPanel();
 }
 
 function filtrar(){
-  const start = document.getElementById('f-date-start').value;
-  const end = document.getElementById('f-date-end').value;
-  return DATA.filter(d=>
-    (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(d.unidade)) &&
-    (!start || (d.data||'') >= start) &&
-    (!end || (d.data||'') <= end)
-  );
+  return ANALISE.filtrar(DATA,filtroResumo());
 }
 
 function renderKpis(rows){
   const soma = (list,campo) => +list.reduce((s,d)=>s+(d[campo]||0),0).toFixed(2);
-  const entregadores = new Set(rows.map(r=>r.entregador)).size;
+  const entregadores = ANALISE.somar(rows).ativos;
   const totalEntregas = soma(rows,'entrega');
   const totalValor = soma(rows,'valor');
   const ticketMedio = totalEntregas ? totalValor/totalEntregas : 0;
   const kpis = [
     {lbl:'Entregadores ativos', val:entregadores, cls:''},
-    {lbl:'Entregas', val:totalEntregas.toFixed(0), cls:'ok'},
-    {lbl:'Extra', val:soma(rows,'extra').toFixed(0), cls:''},
     {lbl:'Valor pago', val:fmtMoney(totalValor), cls:'ok'},
-    {lbl:'Retorno', val:soma(rows,'retorno').toFixed(0), cls:''},
-    {lbl:'Fora de área', val:soma(rows,'foraDeArea').toFixed(0), cls:''},
+    {lbl:'Entregas', val:totalEntregas.toFixed(0), cls:'ok'},
     {lbl:'Ticket médio (TM)', val:fmtMoney(ticketMedio), cls:''},
+    {lbl:'Garantido / Encosta', val:fmtMoney(soma(rows,'ajudaCusto')), cls:''},
+    {lbl:'Fora de área', val:soma(rows,'foraDeArea').toFixed(0), cls:''},
+    {lbl:'Retorno', val:soma(rows,'retorno').toFixed(0), cls:''},
+    {lbl:'Extra', val:soma(rows,'extra').toFixed(0), cls:''},
   ];
   document.getElementById('kpis').innerHTML = kpis.map(k=>
     `<div class="kpi"><div class="lbl">${k.lbl}</div><div class="val ${k.cls}">${k.val}</div></div>`
   ).join('');
 }
 
-// visao fixa de "ontem" (D-1), independente do filtro de periodo ativo -
-// mostra pra cada unidade do roster (nao so as que tem dado) se ela ja
-// lancou as entregas de ontem, pra loja/gestor identificar rapido quem
-// ainda nao mandou o fechamento das motos
-function renderOntemPanel(){
+// Começa em ontem. Ao usar o filtro do Resumo, título e cards seguem o recorte.
+function renderOntemPanel(rows){
   const ontem = agoraBrasilia(); ontem.setDate(ontem.getDate()-1);
   const ontemIso = isoLocal(ontem);
-  document.getElementById('ontem-titulo').textContent = `Lançamento de Ontem · ${fmtData(ontemIso)}`;
+  const filtro=filtroResumo();
+  document.getElementById('ontem-titulo').textContent = filtro.inicio===ontemIso&&filtro.fim===ontemIso?`Lançamentos de Ontem · ${fmtData(ontemIso)}`:`Lançamentos · ${fmtData(filtro.inicio)} → ${fmtData(filtro.fim)}`;
 
   const porUnidadeOntem = {};
-  DATA.forEach(d=>{
-    if(d.data !== ontemIso) return;
+  rows.forEach(d=>{
     const c = (porUnidadeOntem[d.unidade] ||= {entrega:0, valor:0});
     c.entrega += d.entrega||0;
     c.valor += d.valor||0;
   });
 
-  const roster = codigosDisponiveis().sort((a,b)=>(UNIDADES_NOMES[a]||a).localeCompare(UNIDADES_NOMES[b]||b,'pt-BR'));
+  const roster = codigosDisponiveis().filter(c=>(!SEL_UNIDADE.size||SEL_UNIDADE.has(c))&&(!filtro.nome||porUnidadeOntem[c])).sort((a,b)=>(UNIDADES_NOMES[a]||a).localeCompare(UNIDADES_NOMES[b]||b,'pt-BR'));
   const lancaram = roster.filter(c=>porUnidadeOntem[c]);
   const faltam = roster.length - lancaram.length;
   document.getElementById('ontem-count').textContent = faltam === 0
@@ -540,8 +574,9 @@ function renderOntemPanel(){
     return `
       <div class="ontem-card ${dado?'':'falta'}">
         <div class="nome">${escapeHtml(UNIDADES_NOMES[c]||c)}</div>
-        <div class="qtd">${dado ? `${dado.entrega} entregas` : 'Não lançou'}</div>
-        ${dado ? `<div class="sub" style="margin-top:2px;">${fmtMoney(dado.valor)}</div>` : ''}
+        ${dado?'<div class="sub">Entregas</div>':''}
+        <div class="qtd">${dado ? `${dado.entrega} · ${fmtMoney(dado.valor)}` : 'Não lançou'}</div>
+        ${dado ? `<div class="sub">TM ${dado.entrega?fmtMoney(dado.valor/dado.entrega):'—'}</div>` : ''}
       </div>`;
   }).join('') : '<div class="empty">Nenhuma unidade liberada.</div>';
 }
@@ -560,10 +595,9 @@ function renderEntregadoresTable(rows){
     c.valor += r.valor||0;
     c.coopRecebe += r.coopRecebe||0;
   });
-  // Quant. = quantidade real de corridas do entregador, somando entrega com
-  // extra/retorno (que tambem sao corridas extras, nao so a entrega em si)
+  // A normalização já entrega a quantidade total; nunca somar adicionais de novo.
   const linhas = Object.values(porEntregador)
-    .map(c=>({...c, quant: c.entrega+c.extra+c.retorno}))
+    .map(c=>({...c, quant: c.entrega}))
     .sort((a,b)=>b.valor-a.valor);
   document.getElementById('entregadores-count').textContent = linhas.length;
   document.getElementById('entregadores-body').innerHTML = linhas.length ? linhas.map(c=>`
@@ -601,7 +635,8 @@ function renderUnidadesTable(rows){
     c.coopRecebe += r.coopRecebe||0;
   });
   const vazio = {corridas:0, entrega:0, retorno:0, extra:0, foraDeArea:0, bonus:0, ajudaCusto:0, valor:0, coopRecebe:0};
-  const roster = codigosDisponiveis();
+  const filtro=FILTROS_SECOES.unidades||filtroResumo();
+  const roster = codigosDisponiveis().filter(c=>(!filtro.unidades.length||filtro.unidades.includes(c))&&(!filtro.nome||porUnidade[c]));
   const linhas = roster.map(u=>[u, porUnidade[u]||vazio]).sort((a,b)=>b[1].valor-a[1].valor);
   document.getElementById('unidades-count').textContent = linhas.length;
   document.getElementById('unidades-body').innerHTML = linhas.length ? linhas.map(([u,c])=>`
@@ -646,10 +681,11 @@ function renderTabela(rows){
 function render(){
   const rows = filtrar();
   renderKpis(rows);
-  renderOntemPanel();
-  renderEntregadoresTable(rows);
-  renderUnidadesTable(rows);
-  renderTabela(rows);
+  renderOntemPanel(rows);
+  renderEntregadoresTable(linhasSecao('entregadores'));
+  renderUnidadesTable(linhasSecao('unidades'));
+  renderTabela(linhasSecao('lancamentos'));
+  renderGraficoEntregas();
 }
 
 async function boot(){

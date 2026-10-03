@@ -18108,20 +18108,16 @@ app.get('/api/entregas', requireSection('entregas'), async (req, res) => {
 // Por unidade, Lançamentos - mesmos 3 paineis de entregas.html, com os
 // mesmos filtros de periodo/unidades ativos na tela ----------
 function filtrarEntregasPeriodo(lista, req) {
-  const { inicio, fim, unidades } = req.query;
-  const unidadesSet = unidades ? new Set(String(unidades).split(',').filter(Boolean)) : null;
-  return lista.filter((d) =>
-    (!unidadesSet || unidadesSet.has(d.unidade)) &&
-    (!inicio || (d.data || '') >= inicio) &&
-    (!fim || (d.data || '') <= fim)
-  );
+  const { inicio, fim, unidades, nome, diaSemana } = req.query;
+  return require('./public/entregas-analise').filtrar(lista,{inicio,fim,unidades:unidades?String(unidades).split(',').filter(Boolean):[],nome,dia:diaSemana});
 }
 function unidadeNomeEntrega(d) { return d.unidade ? nomeCanonicoUnidade(d.unidade, d.unidadeNome) : (d.unidadeNome || '—'); }
 
 function prepararEntregasPorEntregador(rows) {
+  rows=rows.map(require('./public/entregas-analise').normalizar);
   const colunas = [
     { key: 'unidade', label: 'Unidade' }, { key: 'entregador', label: 'Nome' }, { key: 'quant', label: 'Quant.' },
-    { key: 'valor', label: 'Valor' }, { key: 'ajudaCusto', label: 'Ajuda de Custo' }, { key: 'entrega', label: 'Entrega' },
+    { key: 'valor', label: 'Valor' }, { key: 'ajudaCusto', label: 'Garantido / Encosta' }, { key: 'entrega', label: 'Entregas' },
     { key: 'retorno', label: 'Retorno' }, { key: 'extra', label: 'Extra' }, { key: 'bonus', label: 'Valor Gami' },
     { key: 'foraDeArea', label: 'Fora de Área' }, { key: 'coopRecebe', label: 'COOP recebe' }, { key: 'tm', label: 'TM' },
   ];
@@ -18133,7 +18129,7 @@ function prepararEntregasPorEntregador(rows) {
     c.ajudaCusto += r.ajudaCusto || 0; c.bonus += r.bonus || 0; c.valor += r.valor || 0; c.coopRecebe += r.coopRecebe || 0;
   });
   const linhas = Object.values(porEntregador).sort((a, b) => b.valor - a.valor).map((c) => ({
-    unidade: c.unidade, entregador: c.entregador, quant: c.entrega + c.extra + c.retorno,
+    unidade: c.unidade, entregador: c.entregador, quant: c.entrega,
     valor: reportUtil.fmtMoneyBR(c.valor), ajudaCusto: reportUtil.fmtMoneyBR(c.ajudaCusto),
     entrega: c.entrega, retorno: c.retorno, extra: c.extra, bonus: reportUtil.fmtMoneyBR(c.bonus),
     foraDeArea: c.foraDeArea, coopRecebe: reportUtil.fmtMoneyBR(c.coopRecebe),
@@ -18143,10 +18139,11 @@ function prepararEntregasPorEntregador(rows) {
 }
 
 function prepararEntregasPorUnidade(rows) {
+  rows=rows.map(require('./public/entregas-analise').normalizar);
   const colunas = [
     { key: 'unidade', label: 'Unid.' }, { key: 'corridas', label: 'Corridas' }, { key: 'entrega', label: 'Entregas' },
     { key: 'retorno', label: 'Retorno' }, { key: 'extra', label: 'Extra' }, { key: 'foraDeArea', label: 'Fora área' },
-    { key: 'bonus', label: 'Bônus' }, { key: 'ajudaCusto', label: 'Ajuda custo' },
+    { key: 'bonus', label: 'Bônus' }, { key: 'ajudaCusto', label: 'Garantido / Encosta' },
     { key: 'valor', label: 'Valor pago' }, { key: 'coopRecebe', label: 'COOP recebe' }, { key: 'tm', label: 'TM' },
   ];
   const porUnidade = {};
@@ -18168,11 +18165,12 @@ function prepararEntregasPorUnidade(rows) {
 const MOTIVOS_REMOCAO_CAMPO_LABEL = { atraso: 'Atraso', saiu_antes: 'Saiu antes do fim do turno', prejuizo: 'Gerou prejuízo', outro: 'Outro' };
 
 function prepararEntregasLancamentos(rows) {
+  rows=rows.map(require('./public/entregas-analise').normalizar);
   const colunas = [
     { key: 'data', label: 'Data' }, { key: 'unidade', label: 'Unid.' }, { key: 'entregador', label: 'Entregador' },
     { key: 'entrega', label: 'Entregas' }, { key: 'retorno', label: 'Retorno' }, { key: 'extra', label: 'Extra' },
     { key: 'pos00hs', label: 'Pos 00hs' }, { key: 'foraDeArea', label: 'Fora área' }, { key: 'bonus', label: 'Bônus' },
-    { key: 'ajudaCusto', label: 'Ajuda custo' }, { key: 'camposRemovidos', label: 'Campos removidos' },
+    { key: 'ajudaCusto', label: 'Garantido / Encosta' }, { key: 'camposRemovidos', label: 'Campos removidos' },
     { key: 'valor', label: 'Valor' }, { key: 'coopRecebe', label: 'COOP' },
     { key: 'quantTotal', label: 'Qtd. total' }, { key: 'observacao', label: 'Observação' },
   ];
