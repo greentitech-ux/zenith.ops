@@ -56,11 +56,14 @@
   textarea{resize:vertical;min-height:56px;}
   input[type=file]{padding:8px 9px;font-size:12.5px;}
   .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
+  .grid2.campo-unico,.totais-entrega.campo-unico{grid-template-columns:1fr;}
   .totais-entrega{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:8px;align-items:end;}
   .totais-entrega input{margin-bottom:0;}
   .totais-entrega .resumo{height:44px;box-sizing:border-box;padding:0 12px;display:flex;align-items:center;}
   .totais-entrega .linha{width:100%;}
-  @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} }
+  .totais-entrega #wrap-total-receber{text-align:center;}
+  .totais-entrega #wrap-total-receber .linha{justify-content:center;}
+  @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} .grid2.campo-unico{grid-template-columns:1fr;} }
   .resumo{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px;display:flex;flex-direction:column;gap:4px;}
   .resumo .linha{display:flex;justify-content:space-between;gap:8px;}
   .resumo b{font-variant-numeric:tabular-nums;}
@@ -522,6 +525,13 @@ function mostrarCampoConfigurado(wrapperId, inputId, visivel){
     input.setCustomValidity('');
   }
 }
+function ajustarLayoutCamposVisiveis(){
+  const gradeEntregas=document.querySelector('#campos-detalhados-entrega > .grid2');
+  const totais=document.querySelector('.totais-entrega');
+  const visiveis=elemento=>[...elemento.children].filter(filho=>!filho.classList.contains('hidden')).length;
+  gradeEntregas.classList.toggle('campo-unico', visiveis(gradeEntregas)<=1);
+  totais.classList.toggle('campo-unico', visiveis(totais)<=1);
+}
 function atualizarCamposConfigurados(){
   // Entregas é o único campo de contagem obrigatório. Os demais só aparecem
   // quando a regra da unidade possui uma faixa/taxa baseada neles.
@@ -537,6 +547,7 @@ function atualizarCamposConfigurados(){
   mostrarCampoConfigurado('wrap-f-obsRetorno','f-obsRetorno',retorno);
   mostrarCampoConfigurado('wrap-f-foraDeArea','f-foraDeArea',foraDeArea);
   document.getElementById('campos-adicionais-entrega').classList.toggle('hidden', !(extra||retorno||pos00hs||foraDeArea));
+  ajustarLayoutCamposVisiveis();
   atualizarSugestao();
 }
 const DIAS_SEMANA_JS = ['dom','seg','ter','qua','qui','sex','sab']; // Date.getDay() ja retorna 0=dom
@@ -642,6 +653,7 @@ function atualizarModoRecebedor(){
   document.getElementById('campos-manual').classList.toggle('hidden', calculado);
   document.getElementById('campos-calculados').classList.toggle('hidden', !calculado);
   document.getElementById('wrap-total-receber').classList.toggle('hidden', !calculado);
+  ajustarLayoutCamposVisiveis();
   atualizarObrigatoriedadeObservacoes();
   if(entregadorFixo) renderCamposRemoviveis();
   else {
