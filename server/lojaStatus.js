@@ -917,6 +917,7 @@ let espelhoEm = 0;
 // o ultimoHeartbeatEm rebobinava ate 5min e a varredura anunciava queda de
 // uma maquina que nunca parou.
 const CAMPOS_DO_HEARTBEAT = [
+  'agenteAndroidVersao',
   'ultimoHeartbeatEm', 'ip', 'userAgent', 'abertoDesde',
   'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
   // boot e link: só o heartbeat escreve. Preservar importa mais aqui que
@@ -1185,6 +1186,9 @@ async function heartbeat(codigo, posto, info, token) {
   // nao atualizou o NOCZenith, entao nao manda token) sumir do painel. Ja o
   // comando e a thread de chat (dados sensiveis) so saem com token valido.
   const patch = {
+    // Só a batida autenticada do APK pode habilitar o validador Android.
+    ...(atual?.agentToken && tokensBatem(token, atual.agentToken) && Number.isSafeInteger(dados.agenteAndroidVersao) && dados.agenteAndroidVersao >= 3 && dados.agenteAndroidVersao <= 100000
+      ? { agenteAndroidVersao: dados.agenteAndroidVersao } : {}),
     codigo,
     posto: posto || 'principal',
     nome: (atual && atual.nome) || null,

@@ -22,7 +22,7 @@
 // novo for publicado, e tem que casar com o versionCode do
 // android/app/build.gradle.kts. Sem subir, nenhum tablet fica sabendo que
 // existe versao nova.
-const VERSAO_AGENTE_ANDROID = 2;
+const VERSAO_AGENTE_ANDROID = 3;
 
 // A publicação assinada e imutável vem do workflow deste repositório.
 // AGENTE_ANDROID_URL pode substituir a origem; vazio explícito desabilita.

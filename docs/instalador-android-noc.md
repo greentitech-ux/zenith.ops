@@ -55,6 +55,28 @@ o navegador abrir o aplicativo; não pesquisa o esquema no Google/IA.
 Não salva credenciais de inscrição no localStorage nem no histórico de URL
 HTTP. O cadastro usa o token individual existente desse computador.
 
+## Login restrito no Android (APK v3)
+
+A v2 só monitora. A v3 também inicia o validador em `127.0.0.1:17841`,
+mesmo protocolo/HMAC do Windows, origem HTTPS oficial, Host exato,
+preflight CORS e rede privada, entradas limitadas e timeout de 2,5s.
+Não abre serviço na LAN e não devolve o segredo. O servidor só reconhece
+`agenteAndroidVersao >= 3` recebido em heartbeat com token válido, na mesma
+escrita/cache já usados pelo monitoramento. Não há polling novo no Render.
+Prova única de 60s e cookie HttpOnly vinculado a IP/navegador continuam
+inalterados, assim como as unidades autorizadas do usuário.
+
+Para corrigir um tablet com v2: fazer o deploy do servidor, instalar o APK
+v3 por cima da v2, abrir o agente e aguardar a primeira batida. A assinatura
+permanente preserva a inscrição. Se ainda não inscrito, inscrever pelo NOC.
+No navegador, permitir comunicação com a rede local se solicitado e tentar
+login novamente. APK sem inscrição, token errado e unidade não autorizada
+continuam bloqueados; Windows Antigo continua sem validação de acesso.
+
+O serviço pode ser encerrado pelo Android/usuário: abrir o agente inscrito
+inicia novamente. Sem permissão de rede local no navegador a validação
+falha, não há bypass para liberar o usuário fora das unidades autorizadas.
+
 ## Verificação
 
 `node testeInstaladorAndroid.js`: permissões, sabotagem, download binário,

@@ -58,6 +58,7 @@ class ServicoAgente : Service() {
   private var handler: Handler? = null
   private var rodando = false
   private var ultimaChecagemVersao = 0L
+  private val validador = ValidadorLocal(identidade = { ValidadorLocal.Dados(Identidade.base(this), Identidade.unidade(this), Identidade.posto(this), Identidade.token(this)) })
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -65,6 +66,7 @@ class ServicoAgente : Service() {
     super.onCreate()
     criarCanal()
     startForeground(ID_NOTIFICACAO, montarNotificacao("iniciando..."))
+    validador.iniciar()
     val t = HandlerThread("batida-nopulso").also { it.start() }
     thread = t
     handler = Handler(t.looper)
@@ -83,6 +85,7 @@ class ServicoAgente : Service() {
   private val laco = object : Runnable {
     override fun run() {
       if (!rodando) return
+      validador.iniciar() // Recupera a porta se uma tentativa anterior falhou.
       val resposta = try {
         Batida.bater(applicationContext)
       } catch (e: Exception) {
@@ -146,6 +149,7 @@ class ServicoAgente : Service() {
 
   override fun onDestroy() {
     rodando = false
+    validador.parar()
     handler?.removeCallbacksAndMessages(null)
     thread?.quitSafely()
     super.onDestroy()

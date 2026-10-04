@@ -14,7 +14,7 @@ function criarServico({ lerComputador, segredo, agora = Date.now }) {
   const prova = c => hash(c.agentToken);
   async function computador(codigo, posto) {
     const c = await lerComputador(codigo, posto);
-    return c?.agentToken && !c.windowsAntigo && Number(c.agenteVersao) > 0 ? c : null;
+    return c?.agentToken && !c.windowsAntigo && (Number(c.agenteVersao) > 0 || Number(c.agenteAndroidVersao) >= 3) ? c : null;
   }
   async function emitir(codigo, posto, token, req) {
     const c = await computador(codigo, posto);

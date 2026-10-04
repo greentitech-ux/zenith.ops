@@ -63,6 +63,7 @@ class TelaPrincipal : android.app.Activity() {
 
     pedirPermissaoDeNotificacao()
     tratarLink(intent)
+    if (Identidade.inscrito(this)) ServicoAgente.ligar(this)
     mostrarEstado()
   }
 

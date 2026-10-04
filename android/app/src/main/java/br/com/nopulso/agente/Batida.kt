@@ -34,6 +34,7 @@ object Batida {
     if (unidade.isBlank()) return Resposta(false, null)
 
     val corpo = JSONObject()
+      .put("agenteAndroidVersao", BuildConfig.VERSION_CODE)
       .put("unidade", unidade)
       .put("userAgent", Telemetria.userAgent())
       .put("abertoDesde", abertoDesde)
