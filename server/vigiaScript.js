@@ -55,7 +55,7 @@
 // 132: permite escolher um atalho seguro do NoPulsoPrint por computador.
 // 133: torna o backup da Área de Trabalho idempotente: uma política pendente
 //      não cria centenas de cópias quando a mesma limpeza precisa ser tentada.
-const VERSAO_VIGIA = 134;
+const VERSAO_VIGIA = 135;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -1282,6 +1282,22 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '    }',
     '    return ,$lista',
     '  } catch { Escrever-Log "Falha ao ler VMs: $($_.Exception.Message)"; return $null }',
+    '}',
+    '',
+    '# O SYSTEM precisa inventariar Hyper-V mesmo cedendo a vez ao login.',
+    '# Consulta local no máximo a cada 5min; sem Hyper-V não envia nada.',
+    '$script:UltimaSondagemVMsHost = $null',
+    'function Sondar-VMsHost {',
+    '  if (-not $Servico -or -not (Sou-Admin)) { return }',
+    '  $agoraVm = [DateTime]::UtcNow',
+    '  if ($script:UltimaSondagemVMsHost -and ($agoraVm - $script:UltimaSondagemVMsHost).TotalSeconds -lt 300) { return }',
+    '  $script:UltimaSondagemVMsHost = $agoraVm',
+    '  try {',
+    '    $vmsHost = Medir-VMs',
+    '    if ($null -eq $vmsHost) { return }',
+    '    $corpoVm = @{ vms = @($vmsHost) } | ConvertTo-Json -Depth 5',
+    '    Invoke-RestMethod -Uri $UrlTelemetria -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpoVm -TimeoutSec 15 -ErrorAction Stop | Out-Null',
+    '  } catch { Escrever-Log "Sondagem de VMs pelo SYSTEM falhou: $($_.Exception.Message)" }',
     '}',
     '',
     'function Enviar-Telemetria($disco, $ram, $dispositivos, $impressoras, $vms) {',
@@ -3288,7 +3304,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
 
   // Cede a vez entre as instancias de boot e de login - mesmo trecho nos
   // dois tipos de loop, no TOPO de cada volta. A de boot em espera continua
-  // acordando a cada tick, so nao faz nada (nem heartbeat, nem comando).
+  // acordando a cada tick: só sonda comandos elevados e inventário Hyper-V.
   const linhasCedencia = [
     '    Pulso-Tick',
     '    Bater-Ponto',
@@ -3297,8 +3313,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '      if (-not $EmEsperaServico) { Escrever-Log "Instancia de login ativa - a de boot fica em espera."; $EmEsperaServico = $true }',
     '      # mesmo cedendo a vez, a instancia SYSTEM (a unica elevada) sonda se',
     '      # ha comando que exige admin - instalar/desinstalar nao espera a loja',
-    '      # fechar. So comando-admin; o resto continua com a instancia de login.',
-    '      if ($Servico) { Sondar-ComandoAdmin }',
+    '      # fechar. Tambem inventaria Hyper-V a cada 5min; o resto fica com o login.',
+    '      if ($Servico) { Sondar-ComandoAdmin; Sondar-VMsHost }',
     '      Start-Sleep -Seconds $IntervaloSegundos',
     '      continue',
     '    }',

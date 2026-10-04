@@ -7247,7 +7247,7 @@ setTimeout(async () => {
         /\$corpo\.souAdmin = \(Sou-Admin\)/.test(srcVG)
         && /function Sondar-ComandoAdmin \{/.test(srcVG)
         && /soComandoAdmin = \$true/.test(srcVG)
-        && /if \(\$Servico\) \{ Sondar-ComandoAdmin \}/.test(srcVG)
+        && /if \(\$Servico\) \{ Sondar-ComandoAdmin; Sondar-VMsHost \}/.test(srcVG)
         && /function Executar-ComandoPendente\(\$cmd\) \{/.test(srcVG),
       'VERSAO_VIGIA subiu (senão nenhuma das 52 máquinas ganha a elevação)':
         require('/home/user/adyen-monitor/server/vigiaScript.js').VERSAO_VIGIA >= 65,
@@ -13175,7 +13175,7 @@ setTimeout(async () => {
         if (!fn) return false;
         return /if \(\$resp -and \$null -ne \$resp\.versaoAplicacao[^\n]*Politica-EstaAplicada[^\n]*\) \{ Sincronizar-Politica \}/.test(fn)
           // tem que ser a instância de boot, e SÓ quando ela está cedendo
-          && /if \(\$Servico\) \{ Sondar-ComandoAdmin \}/.test(psPp);
+          && /if \(\$Servico\) \{ Sondar-ComandoAdmin; Sondar-VMsHost \}/.test(psPp);
       })(),
       // a sondagem JÁ fazia esse heartbeat de 90 em 90s: a política pega
       // carona nele. Uma requisição nova por volta do laço seriam ~52 por
