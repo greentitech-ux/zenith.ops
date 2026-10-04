@@ -8114,8 +8114,8 @@ setTimeout(async () => {
       'há um botão ↶ Desfazer na barra, com a mesma ação do Ctrl+Z, e os dois redesenham a superfície (Invalidate($true))': scripts.every((s) =>
         s.includes('$btDesfazer = Botao-Print ([char]0x21B6) 30 "Desfazer a ultima marca (Ctrl+Z)"')
         && s.includes('$btDesfazer.Add_Click({ param($b, $e) $j = $b.Parent.Parent; if ($j.Tag.marcas.Count -gt 0) { $j.Tag.marcas.RemoveAt($j.Tag.marcas.Count-1) }; $j.Invalidate($true); $j.Tag.ocioso = 0 })')
-        && s.includes('AddRange(@($btSeta,$btLinha,$btCaixa,$btDesfazer,$fio1,')
-        && s.includes('foreach ($bt in @($btSeta, $btLinha, $btCaixa, $btDesfazer)) { $bt.Font = $FonteForma }')),
+        && s.includes('AddRange(@($btSeta,$btLinha,$btCaixa,$btDesfoque,$btDesfazer,$fio1,')
+        && s.includes('foreach ($bt in @($btSeta, $btLinha, $btCaixa, $btDesfoque, $btDesfazer)) { $bt.Font = $FonteForma }')),
       'o runspace do print arma a guarda de exceção do WinForms ANTES de qualquer janela (adeus diálogo "pipeline foi interrompido")': scripts.every((s) => {
         const iGuarda = s.indexOf('[System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)');
         const iPrint = s.indexOf('function Selecionar-AreaPrint($tela, $captura) {');
@@ -21909,7 +21909,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       // deu lugar ao X, e os botoes passaram a nascer do helper Botao-Print
       'a barra tem as 3 ferramentas, Copiar, Salvar e o X': /\$copiar = Botao-Print \$\(if \(\$TemIcones\)/.test(psI)
         && /\$salvar = Botao-Print \$\(if \(\$TemIcones\)/.test(psI) && /\$fechar = Botao-Print \$\(if \(\$TemIcones\) \{ \[char\]0xE711 \} else \{ "X" \}\) 30/.test(psI)
-        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btDesfazer,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(psI)
+        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btDesfoque,\$btDesfazer,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(psI)
         && !/\$cancelar/.test(psI),
       'Copiar NÃO grava arquivo; só Salvar grava': copiaSemGravar,
       'sem arquivo não entra lista de arquivo na área de transferência': dropListGuardada,
@@ -21917,7 +21917,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && /Keys\]::Enter[\s\S]{0,120}?\$s\.Tag\.acao="salvar"/.test(psI),
       'a seleção devolve a área, a ação E as marcas': /return @\{ area = \$resultado; acao = \$acaoPrint; marcas = \$marcasPrint \}/.test(psI),
       'a tela de instruções cita as alças, as marcas e o desfazer': /alças redimensionam/.test(psI)
-        && /Seta\/Linha\/Caixa marcam por cima/.test(psI) && /Ctrl\+Z desfaz/.test(psI) && /Ctrl\+C só copia/.test(psI),
+        && /Seta\/Linha\/Caixa\/Desfocar/.test(psI) && /Ctrl\+Z desfaz/.test(psI) && /Ctrl\+C só copia/.test(psI),
       'vale nos DOIS tipos de máquina, não só no interno': /\$copiar = Botao-Print \$\(if \(\$TemIcones\)/.test(psA) && alcas(psA).total === 8,
       'o script baixado continua começando com # NOCZenith (trava contra arquivo quebrado)': psI.startsWith('# NOCZenith'),
     };
@@ -22467,7 +22467,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'arrastar atualiza a marca em curso': /if \(\$s\.Tag\.marcaAtual\) \{ \$s\.Tag\.marcaAtual\.x2 = \$e\.X; \$s\.Tag\.marcaAtual\.y2 = \$e\.Y; \$s\.Invalidate\(\); return \}/.test(psI),
       'soltar o botão grava a marca na lista': /if \(\$s\.Tag\.marcaAtual\) \{ \[void\]\$s\.Tag\.marcas\.Add\(\$s\.Tag\.marcaAtual\); \$s\.Tag\.marcaAtual = \$null;/.test(psI),
       'a prévia desenha o que já foi marcado e a marca em curso':
-        /Desenhar-Marcas \$e\.Graphics \$s\.Tag\.marcas 0 0; if \(\$s\.Tag\.marcaAtual\) \{ Desenhar-Marcas \$e\.Graphics @\(\$s\.Tag\.marcaAtual\) 0 0 \}/.test(psI),
+        /Desenhar-Marcas \$e\.Graphics \$s\.Tag\.marcas 0 0 \$s\.Tag\.captura; if \(\$s\.Tag\.marcaAtual\) \{ Desenhar-Marcas \$e\.Graphics @\(\$s\.Tag\.marcaAtual\) 0 0 \$s\.Tag\.captura \}/.test(psI),
       'Ctrl+Z desfaz a última marca': /Keys\]::Z\)\{\$e\.SuppressKeyPress=\$true;if\(\$s\.Tag\.marcas\.Count -gt 0\)\{\$s\.Tag\.marcas\.RemoveAt\(\$s\.Tag\.marcas\.Count-1\)\};\$s\.Invalidate\(\$true\);return\}/.test(psI),
       'clicar na ferramenta ATIVA volta para a seleção (senão não dá pra reajustar a área)':
         /if \(\$janela\.Tag\.ferramenta -eq \$qual\) \{ \$janela\.Tag\.ferramenta = "selecao" \}/.test(psI),
@@ -23225,7 +23225,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     const conf = {
       'a barra existe e é montada de uma vez só': barra.length > 1500
-        && /\$acoes\.Controls\.AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btDesfazer,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(ps),
+        && /\$acoes\.Controls\.AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btDesfoque,\$btDesfazer,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(ps),
       'botão plano, sem borda e sem o cinza do Windows':
         /\$b\.FlatStyle = \[System\.Windows\.Forms\.FlatStyle\]::Flat/.test(barra)
         && /\$b\.FlatAppearance\.BorderSize = 0/.test(barra)
