@@ -16,6 +16,8 @@ O agente v137 cria o atalho **NoPulso - acesso NOC** na instalação e na atuali
 
 Em cada computador, abra o atalho e clique em **Continuar para o NoPulso**. Use o mesmo navegador para entrar. A configuração individual está em **Usuários → Permissões/tags → Somente computadores com NOC**. QA Master não pode alterar essa política.
 
+Desde a v138, HOSTs Hyper-V, servidores cadastrados e computadores com instalação do app bloqueada **não recebem esse ícone**. O agente remove somente o atalho exato `NoPulso - acesso NOC.lnk` da área de trabalho do usuário e da área de trabalho pública. O launcher protegido permanece em `%LOCALAPPDATA%\NOCZenith\abrir-acesso-noc.ps1`, para validação manual quando necessária. O HOST Hyper-V também é reconhecido pelo serviço local `vmms`, sem depender do nome do computador ou da marcação no cadastro. Não altera as VMs nem o monitoramento.
+
 ## Como funciona e limites
 
 O launcher local autentica com a chave do agente, recebendo um vínculo de uso único, válido por dois minutos. O navegador troca esse vínculo por um cookie HttpOnly, SameSite Strict e Secure no domínio HTTPS. A chave permanente do agente não é entregue ao navegador.

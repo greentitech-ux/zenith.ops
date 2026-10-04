@@ -57,7 +57,8 @@
 //      não cria centenas de cópias quando a mesma limpeza precisa ser tentada.
 // 136: ferramenta de desfoque em mosaico no NoPulsoPrint, na prévia e no PNG.
 // 137: atalho local para vincular navegador ao computador NOC sem expor token.
-const VERSAO_VIGIA = 137;
+// 138: nunca cria atalho de acesso NOC em HOST/servidor; remove o da v137.
+const VERSAO_VIGIA = 138;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -405,6 +406,17 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '$CabecalhosAgente = @{ "X-NOC-Token" = $AgentToken }',
     '$AcessoChatUnidadeInicial = $' + (!!acessoChatUnidade),
     'function Configurar-AcessoNoc {',
+    '  # Cadastro e deteccao local: HOST Hyper-V nao depende de um nome ou flag correta.',
+    '  $semIcone = $EhServidor -or $NaoInstalarAppNoPulso -or (Test-Path -LiteralPath "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\vmms")',
+    '  if ($semIcone) {',
+    '    foreach ($area in @([Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("CommonDesktopDirectory"))) {',
+    '      if ([string]::IsNullOrWhiteSpace($area)) { continue }',
+    '      $raiz = [IO.Path]::GetFullPath($area)',
+    '      $antigo = [IO.Path]::GetFullPath((Join-Path $raiz "NoPulso - acesso NOC.lnk"))',
+    '      if ([IO.Path]::GetDirectoryName($antigo) -ine $raiz.TrimEnd([IO.Path]::DirectorySeparatorChar)) { throw "Atalho NOC fora da area de trabalho" }',
+    '      if (Test-Path -LiteralPath $antigo) { try { Remove-Item -LiteralPath $antigo -Force -ErrorAction Stop; Escrever-Log "Acesso NOC: atalho removido do HOST/servidor" } catch { Escrever-Log "Acesso NOC: nao removeu atalho do HOST ($($_.Exception.Message))" } }',
+    '    }',
+    '  }',
     '  if ($Servico) { return }',
     '  $pasta = Join-Path $env:LOCALAPPDATA "NOCZenith"',
     '  $arquivo = Join-Path $pasta "abrir-acesso-noc.ps1"',
@@ -415,6 +427,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  & icacls.exe $arquivo /inheritance:r /grant:r "*${sid}:(F)" "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" | Out-Null',
     '  if ($LASTEXITCODE -ne 0) { throw "Nao protegeu o launcher NOC" }',
     '  [IO.File]::WriteAllText($arquivo, $conteudo, (New-Object Text.UTF8Encoding($true)))',
+    '  if ($semIcone) { return } # Launcher local continua disponivel, mas sem icone no HOST.',
     '  $atalho = Join-Path ([Environment]::GetFolderPath("Desktop")) "NoPulso - acesso NOC.lnk"',
     '  $s = (New-Object -ComObject WScript.Shell).CreateShortcut($atalho)',
     '  $s.TargetPath = "$env:WINDIR\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
