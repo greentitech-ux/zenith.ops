@@ -8,6 +8,10 @@ const { chromium } = require('playwright');
 const raiz = path.join(__dirname, 'public');
 const html = fs.readFileSync(path.join(raiz, 'beniboy.html'), 'utf8');
 for (const s of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) new vm.Script(s[1]);
+new vm.Script(fs.readFileSync(path.join(raiz,'beniboy-app.js'),'utf8'));
+const manifesto=JSON.parse(fs.readFileSync(path.join(raiz,'manifest-beniboy.json'),'utf8'));
+assert.equal(manifesto.start_url,'/beniboy');
+assert.equal(JSON.parse(fs.readFileSync(path.join(raiz,'manifest.json'),'utf8')).start_url,'/','app principal mantém sua entrada');
 const agora = new Date().toISOString();
 const me = { id:'suporte-teste', nome:'Suporte teste', username:'Suporte teste', email:'suporte@teste.invalid', role:'master', permissions:{sections:['suporte','network-private']} };
 function conversas() {
@@ -49,7 +53,33 @@ function conversas() {
       await page.goto('https://nopulso.teste/beniboy');
       await page.locator('.fila-card').first().waitFor();
       assert.equal(await page.locator('.fila-card').count(),2,'padrão não mistura encerradas à fila');
+      assert.equal(await page.locator('.fila-protocolo').count(),2,'protocolo visível na fila');
+      await page.getByRole('button',{name:'App / Atalho',exact:true}).click();
+      const baixar=page.waitForEvent('download');
+      await page.getByRole('button',{name:'Baixar atalho Windows',exact:true}).click();
+      const atalho=await baixar;
+      assert.equal(atalho.suggestedFilename(),'Central Beniboy.zip');
+      const zipAtalho=fs.readFileSync(await atalho.path());
+      assert.equal(zipAtalho.readUInt32LE(0),0x04034b50);
+      const inicioAtalho=30+zipAtalho.readUInt16LE(26);
+      assert.equal(zipAtalho.subarray(30,inicioAtalho).toString(),'Central Beniboy.url');
+      const conteudoAtalho=zipAtalho.subarray(inicioAtalho,inicioAtalho+zipAtalho.readUInt32LE(18)).toString();
+      assert.equal(conteudoAtalho,'[InternetShortcut]\r\nURL=https://nopulso.teste/beniboy\r\n','atalho não transporta sessão');
+      await page.evaluate(()=>fecharAppBeniboy());
+      await page.getByRole('button',{name:'Claro / Escuro',exact:true}).click();
+      assert.equal(await page.locator('html').getAttribute('data-tema'),tema==='claro'?'escuro':'claro');
+      await page.getByRole('button',{name:'Claro / Escuro',exact:true}).click();
+      await page.getByRole('button',{name:'Aumentar fonte',exact:true}).click();
+      assert.ok(await page.evaluate(()=>Number(localStorage.getItem('zenithFonte'))>100));
+      await page.getByRole('button',{name:'Diminuir fonte',exact:true}).click();
       await page.locator('[data-id="chat-a"].fila-card').click();
+      await page.getByRole('button',{name:'Responder a esta mensagem',exact:true}).first().click();
+      assert.equal(await page.locator('#d-citacao-chat-a').isVisible(),true);
+      await page.locator('#d-texto-chat-a').fill('Linha 1');
+      await page.locator('#d-texto-chat-a').press('Shift+Enter');
+      await page.locator('#d-texto-chat-a').press('2');
+      assert.equal(await page.locator('#d-texto-chat-a').inputValue(),'Linha 1\n2');
+      assert.equal(envios,0,'Shift+Enter não envia');
       await page.locator('#d-texto-chat-a').fill('Rascunho da Ana');
       if(largura<=760) await page.getByRole('button',{name:'← Fila',exact:true}).click();
       await page.locator('[data-id="chat-b"].fila-card').click();
@@ -57,7 +87,9 @@ function conversas() {
       assert.equal(await page.locator('#d-texto-chat-a').inputValue(),'Rascunho da Ana','trocar de conversa preserva texto');
       await page.evaluate(()=>carregarLista());
       assert.equal(await page.locator('#d-texto-chat-a').inputValue(),'Rascunho da Ana','atualização preserva texto');
+      assert.ok(await page.locator('#d-citacao-chat-a').innerText().then(s=>s.includes('Preciso de ajuda')),'citação acompanha rascunho e atualização');
       assert.equal(await page.locator('.painel-conversa:visible').count(),1,'somente conversa ativa visível');
+      await page.screenshot({path:path.join(destino,`central-beniboy-citacao-${largura}-${tema}.png`),fullPage:true});
       await page.getByRole('button',{name:'Dados da conversa',exact:true}).click();
       assert.equal(await page.locator('#contexto-corpo').innerText().then(s=>s.includes('ana@teste.invalid')),true);
       assert.equal(await page.locator('#contexto-corpo').innerText().then(s=>s.includes('nota(s) do Beniboy')),true);
@@ -65,6 +97,8 @@ function conversas() {
       await page.getByRole('button',{name:'Enviar',exact:true}).click();
       await page.waitForFunction(()=>document.getElementById('d-texto-chat-a')?.value==='');
       assert.equal(envios,1);
+      assert.match(itens[0].mensagens.at(-1).texto,/Respondendo a Ana Atendimento:\n> Preciso de ajuda/,'citação chega ao servidor como texto');
+      assert.equal(await page.locator('#d-citacao-chat-a').isVisible(),false,'envio limpa citação');
       assert.equal(await page.locator('.painel-conversa:visible').innerText().then(s=>s.includes('Rascunho da Ana')),true);
       // O arquivo selecionado também acompanha a aba, não só o texto.
       await page.locator('#d-anexo-chat-a').setInputFiles({name:'print-teste.png',mimeType:'image/png',buffer:Buffer.from('print-de-teste')});
@@ -101,9 +135,23 @@ function conversas() {
       assert.equal(await page.locator('.fila-card').count(),2,'erro não apaga fila');
       negar=false;await page.evaluate(()=>carregarLista());
       assert.equal(await page.locator('#central-erro').isVisible(),false);
+      await page.getByRole('button',{name:'Responder a esta mensagem',exact:true}).first().click();
+      await page.getByRole('button',{name:'Cancelar resposta citada',exact:true}).click();
+      assert.equal(await page.locator('#d-citacao-chat-a').isVisible(),false);
+      // Sabotagem: o teste da citação deve detectar sua perda numa atualização.
+      await page.evaluate(()=>{citarMensagem('chat-a',0);CITACOES_PAINEL_CHAT.clear();mostrarCitacao('chat-a');});
+      const citacaoSabotada=await page.locator('#d-citacao-chat-a').isVisible();
+      assert.throws(()=>assert.equal(citacaoSabotada,true),'teste detecta perda de citação');
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'sem rolagem horizontal');
       const enviar=await page.getByRole('button',{name:'Enviar',exact:true}).boundingBox();
       assert.ok(enviar && enviar.y+enviar.height<=900,'resposta sempre dentro da tela');
+      await page.evaluate(()=>{for(let i=0;i<5;i++) aparenciaCentral('mais');});
+      await page.waitForFunction(()=>Number(localStorage.getItem('zenithFonte'))===150);
+      const ampliado=await page.getByRole('button',{name:'Enviar',exact:true}).boundingBox();
+      await page.screenshot({path:path.join(destino,`central-beniboy-ampliado-${largura}.png`),fullPage:true});
+      assert.ok(ampliado && ampliado.y+ampliado.height<=901,`fonte ampliada mantém Enviar acessível (${largura}: ${JSON.stringify(ampliado)})`);
+      await page.evaluate(()=>{for(let i=0;i<5;i++) aparenciaCentral('menos');});
+      await page.waitForFunction(()=>Number(localStorage.getItem('zenithFonte'))===100);
       assert.deepEqual(erros,[]);
       await page.screenshot({path:path.join(destino,`central-beniboy-${largura}-${tema}.png`),fullPage:true});
       // A mesma página não pode mostrar conversas para quem não tem a seção.

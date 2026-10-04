@@ -6,8 +6,9 @@
 <title>Central do Beniboy · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/beniboy-192.png">
+<link rel="manifest" href="/manifest-beniboy.json">
+<script src="/beniboy-app.js" defer></script>
 <meta name="theme-color" content="#0b0d10">
 <style>
   :root{
@@ -188,6 +189,45 @@
     .central-mesa.ver-contexto .central-fila,.central-mesa.ver-contexto .central-conversas{display:none;}
     .painel-conversa{padding:10px;} h1{font-size:16px;} .eyebrow{font-size:8px;}
   }
+  /* Referência de atendimento: identidade, protocolo e resposta sempre à mão. */
+  .fila-card{border-left:4px solid var(--fila-cor,var(--line));border-radius:16px;padding:12px;background:var(--bg);}
+  .fila-identidade{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .chat-avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;width:42px;height:42px;border:1px solid var(--line);border-radius:14px;background:var(--panel2);color:var(--accent);font-size:18px;font-weight:700;}
+  .fila-identidade .fila-hora{margin-left:auto;align-self:flex-start;font-size:10px;color:var(--muted);}
+  .fila-status{color:var(--fila-cor,var(--muted));background:var(--panel2);border-radius:20px;padding:3px 8px;font-weight:700;}
+  .fila-protocolo{font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:3px 8px;}
+  .painel-topo{padding-bottom:12px;border-bottom:1px solid var(--line);align-items:center;}
+  .painel-topo .chat-identidade{display:flex;gap:10px;align-items:center;flex:1;}
+  .painel-conversa h3{font-size:16px;white-space:normal;overflow-wrap:anywhere;}
+  .msg-item{position:relative;border-radius:16px;padding:12px 14px;max-width:82%;margin:4px 30px 4px 0;}
+  .msg-item.msg-eu{margin:4px 0 4px 30px;background:var(--ok-dim);border-color:var(--line);}
+  .msg-item .m-cab,.msg-item.msg-eu .m-cab{flex-direction:column;align-items:flex-start;gap:3px;}
+  .msg-item .m-cab span:first-child{font-weight:700;color:var(--accent);}
+  .msg-item .m-cab span:last-child{font-size:10px;}
+  .msg-responder{position:absolute;right:-30px;top:50%;transform:translateY(-50%);width:28px;height:36px;border:0;border-radius:12px;background:var(--panel2);color:var(--muted);cursor:pointer;font-size:18px;}
+  .msg-eu .msg-responder{right:auto;left:-30px;}
+  .msg-responder:hover,.msg-responder:focus-visible{color:var(--accent);outline:1px solid var(--accent);}
+  .chat-compositor{flex:none;padding:10px;border:1px solid var(--line);border-radius:20px;background:var(--bg);}
+  .chat-compositor:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--panel2);}
+  .chat-compositor-linha{display:flex;align-items:center;gap:8px;}
+  .chat-compositor textarea{flex:1;min-width:0;resize:none;border:0;background:transparent;padding:8px 2px;max-height:120px;line-height:1.5;}
+  .chat-compositor .foto-btn{flex:none;padding:10px;border:1px solid var(--line);border-radius:12px;cursor:pointer;}
+  .chat-compositor .btn-primary{flex:none;min-height:44px;padding:10px 12px;}
+  .chat-ajuda{flex:none;font-size:10px;color:var(--muted);margin-top:6px;}
+  .chat-citacao{display:flex;align-items:center;gap:10px;border-left:3px solid var(--accent);padding:6px 10px;margin-bottom:8px;font-size:12px;}
+  .chat-citacao strong{color:var(--accent);display:block;}
+  .chat-citacao span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .chat-citacao .btn-ghost{margin-left:auto;}
+  .central-aparencia{display:flex;gap:6px;}
+  @media(max-width:760px){
+    .painel-conversa .d-acoes{flex-wrap:nowrap;overflow-x:auto;flex:none;padding-bottom:4px;}
+    .painel-conversa .d-acoes>*{flex:none;}
+    body.central-compacta .header-top{flex-wrap:nowrap;}
+    body.central-compacta .header-nav .btn-notif:not(.btn-sair),body.central-compacta .header-nav .nav-divider{display:none;}
+    body.central-compacta .central-barra>div:first-child,body.central-compacta #central-atendente{display:none;}
+    body.central-compacta:has(.central-mesa.com-conversa) .central-barra>button:first-of-type{display:none;}
+  }
+  @media(max-width:760px){.central-barra{gap:6px;}.central-barra h2{font-size:12px;}.central-aparencia .btn-ghost{padding:8px;}.msg-item{max-width:86%;}.painel-topo .sub{font-size:10px;}.painel-conversa .painel-msgs{min-height:40px;}.chat-compositor textarea{font-size:16px;}.chat-ajuda{font-size:9px;}}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -221,6 +261,12 @@
   <div class="central-barra">
     <div><h2>Central de atendimento <span id="total-count"></span></h2><div class="sub">Chat, anexos e acompanhamento em um só lugar · N1 Beniboy · N2 Suporte · N3 Master</div></div>
     <span id="central-atendente"></span>
+    <div class="central-aparencia" aria-label="Aparência do chat">
+      <button class="btn-ghost" aria-label="Diminuir fonte" onclick="aparenciaCentral('menos')">A−</button>
+      <button class="btn-ghost" aria-label="Aumentar fonte" onclick="aparenciaCentral('mais')">A+</button>
+      <button class="btn-ghost" onclick="aparenciaCentral('tema')">Claro / Escuro</button>
+    </div>
+    <button class="btn-ghost" onclick="abrirAppBeniboy()">App / Atalho</button>
     <button class="btn-ghost" onclick="toggleContexto()" aria-controls="central-contexto">Dados da conversa</button>
   </div>
   <div id="central-erro" class="hidden" role="alert"></div>
@@ -248,6 +294,20 @@
       <h2>Dados da conversa</h2><div id="contexto-corpo" class="sub">Selecione uma conversa para ver o contexto.</div>
     </aside>
     </div>
+</div>
+
+<div class="overlay hidden" id="overlay-app-beniboy" role="dialog" aria-modal="true" aria-labelledby="beniboy-app-titulo">
+  <div class="sheet-wrap" style="max-width:460px;">
+    <div class="sheet">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><h3 id="beniboy-app-titulo">Central Beniboy no seu aparelho</h3><button class="btn-ghost" onclick="fecharAppBeniboy()" aria-label="Fechar instalação">×</button></div>
+      <p class="sub">Ícone próprio, mesmo login e mesmas permissões do NoPulso. Instalação opcional — nada será instalado automaticamente nas máquinas da unidade.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <button class="btn-primary" onclick="instalarAppBeniboy()">Instalar app</button>
+        <button class="btn-ghost" onclick="baixarAtalhoBeniboy()">Baixar atalho Windows</button>
+      </div>
+      <p id="beniboy-app-aviso" role="status" style="font-size:13px;line-height:1.6;margin-bottom:0;"></p>
+    </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="overlay-acao">
@@ -284,7 +344,7 @@
 
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
-if(!AUTH_TOKEN){ location.href = '/'; }
+if(!AUTH_TOKEN){ location.replace('/?app=beniboy'); }
 
 const _rawFetch = window.fetch.bind(window);
 window.fetch = (url, opts = {}) => {
@@ -293,7 +353,7 @@ window.fetch = (url, opts = {}) => {
   }
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
-function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function logout(){ localStorage.removeItem('authToken'); location.href = '/?app=beniboy'; }
 function abrirMenu(){}
 function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -415,10 +475,12 @@ function cardHtml(chat){
   const tickets = chat.ticketsVinculados || [];
   const ultimoTicket = tickets[tickets.length-1];
   const coluna=COLUNAS.find(c=>c.key===statusDe(chat));
-  return `<button type="button" class="kcard fila-card ${CONVERSA_ATIVA===chat.id?'selecionado':''}" data-id="${escapeHtml(chat.id)}" aria-pressed="${CONVERSA_ATIVA===chat.id}" onclick="abrirDetalhePorId(this.dataset.id)">
+  return `<button type="button" class="kcard fila-card ${CONVERSA_ATIVA===chat.id?'selecionado':''}" style="--fila-cor:${coluna?.cor||'var(--muted)'}" data-id="${escapeHtml(chat.id)}" aria-pressed="${CONVERSA_ATIVA===chat.id}" onclick="abrirDetalhePorId(this.dataset.id)">
+    <div class="fila-identidade"><span class="chat-avatar" aria-hidden="true">${escapeHtml(Array.from(chat.nome||'Visitante')[0].toUpperCase())}</span><div><div class="kcard-nome">${escapeHtml(chat.responsavel?.nome||chat.nome||'Visitante')}</div><div class="kcard-prev">${chat.responsavel?'Suporte':'Solicitante'}</div></div><time class="fila-hora" title="${escapeHtml(fmtDataHora(chat.atualizadoEm))}">${escapeHtml(horaMsg(chat.atualizadoEm))}</time></div>
     <div class="kcard-top">
       <span class="nivel-badge nivel-${nivel}">N${nivel}</span>
       <span class="fila-status">${coluna?coluna.label:escapeHtml(statusDe(chat))}</span>
+      ${chat.numeroTicket?`<span class="fila-protocolo">#${escapeHtml(chat.numeroTicket)}</span>`:''}
       ${chat.desbloqueio ? '<span class="tag-desbloqueio">🔓 Desbloqueio</span>' : ''}
       ${ultimoTicket ? `<span class="tag-ticket">🎫 #${escapeHtml(ultimoTicket.numero)}${tickets.length>1?` +${tickets.length-1}`:''}</span>` : ''}
     </div>
@@ -764,6 +826,7 @@ function painelHtml(chat){
   const msgs = (chat.mensagens||[]).map((m,i)=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'Beniboy':'Suporte'), eu: m.de!=='visitante', texto: m.texto, em: m.em, anexo: m.anexo||null, indice: i }));
   const msgsHtml = msgs.length ? msgs.map(m=>`
       <div class="msg-item ${m.eu?'msg-eu':'msg-vis'}">
+        ${chat.status!=='FINALIZADO'?`<button type="button" class="msg-responder" data-chat="${escapeHtml(chat.id)}" data-indice="${m.indice}" aria-label="Responder a esta mensagem" onclick="citarMensagem(this.dataset.chat,Number(this.dataset.indice))">↶</button>`:''}
         <div class="m-cab"><span>${escapeHtml(m.de)}</span><span title="${escapeHtml(fmtDataHora(m.em))}">${escapeHtml(horaMsg(m.em))}</span></div>
         <div class="m-texto">${escapeHtml(m.texto)}</div>
         ${anexoHtml(chat.id, m)}
@@ -781,11 +844,13 @@ function painelHtml(chat){
 
   return `<div class="painel-conversa" data-painel-id="${idAttr}">
     <div class="painel-topo">
-      <div style="min-width:0;">
-        <h3>${escapeHtml(chat.nome || 'Visitante')}</h3>
-        <div class="sub">${protocoloHtml?protocoloHtml+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}${chat.responsavel?' · 🙋 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||''):''}</div>
+      <div class="chat-identidade">
+        <span class="chat-avatar" aria-hidden="true">${escapeHtml(Array.from(chat.nome||'Visitante')[0].toUpperCase())}</span><div style="min-width:0;">
+        <h3>${escapeHtml(chat.lojaContexto || chat.nome || 'Visitante')}</h3>
+        <div class="sub">${escapeHtml(chat.nome||'Visitante')}</div>
+        <div class="sub">${protocoloHtml?protocoloHtml+' · ':''}N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}</div>
       </div>
-      <span class="zenith-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
+      </div><span class="zenith-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
     </div>
     ${tickets.length ? `<div class="d-tickets">🎫 Tickets dessa conversa: ${tickets.map(t=>{
       // chamado-ti abre no técnico, o resto (solicitacao) na Central -
@@ -814,11 +879,14 @@ function painelHtml(chat){
     ${finalizado
       ? '<div class="empty" style="padding:14px 0 0;">Conversa finalizada — mova pra uma coluna aberta se precisar reabrir.</div>'
       : `<div id="d-previa-${idAttr}"></div>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <input type="text" id="d-texto-${idAttr}" placeholder="Escrever uma resposta... (Ctrl+V cola print)" style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta('${idAttr}');}">
+        <div class="chat-compositor">
+          <div id="d-citacao-${idAttr}" class="chat-citacao hidden"></div>
+          <div class="chat-compositor-linha">
           <label class="foto-btn" title="Anexar print, foto ou PDF" style="cursor:pointer;flex:none;"><span id="d-anexo-icone-${idAttr}">📎</span><input type="file" id="d-anexo-${idAttr}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden onchange="registrarAnexoResposta('${idAttr}', this)"></label>
+          <textarea rows="2" id="d-texto-${idAttr}" aria-label="Escrever uma mensagem" placeholder="Escreva uma mensagem" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();enviarResposta('${idAttr}');}"></textarea>
           <button type="button" class="btn-primary" onclick="enviarResposta('${idAttr}')">Enviar</button>
-        </div>`}
+          </div>
+        </div><div class="chat-ajuda">Cole uma imagem aqui. Enter envia · Shift+Enter quebra linha. A resposta citada é enviada como texto.</div>`}
   </div>`;
 }
 
@@ -851,6 +919,32 @@ function anexoHtml(chatId, m){
 const RASCUNHOS_PAINEL_CHAT = new Map();
 const ROLAGEM_PAINEL_CHAT = new Map();
 const ENVIOS_PAINEL_CHAT = new Set();
+const CITACOES_PAINEL_CHAT = new Map();
+
+// Reutiliza os controles do tema compartilhado sem mudar outras telas.
+function aparenciaCentral(acao){
+  const seletor=acao==='tema'?`[data-tema-btn="${document.documentElement.dataset.tema==='claro'?'escuro':'claro'}"]`:`#ztema-fonte-${acao}`;
+  document.querySelector(seletor)?.click();
+}
+function ajustarAlturaCentral(){
+  const zoom=Number(document.documentElement.style.zoom)||1;
+  document.body.style.height=`${100/zoom}dvh`;
+  document.body.classList.toggle('central-compacta',zoom>1.2);
+}
+new MutationObserver(ajustarAlturaCentral).observe(document.documentElement,{attributes:true,attributeFilter:['style']});
+ajustarAlturaCentral();
+function mostrarCitacao(id){
+  const el=document.getElementById(`d-citacao-${id}`),c=CITACOES_PAINEL_CHAT.get(id);
+  if(!el) return;
+  el.classList.toggle('hidden',!c);
+  el.innerHTML=c?`<div><strong>${escapeHtml(c.nome)}</strong><span>${escapeHtml(c.texto)}</span></div><button type="button" class="btn-ghost" data-chat="${escapeHtml(id)}" aria-label="Cancelar resposta citada" onclick="CITACOES_PAINEL_CHAT.delete(this.dataset.chat);mostrarCitacao(this.dataset.chat)">×</button>`:'';
+}
+function citarMensagem(id,indice){
+  const chat=ITENS.find(c=>c.id===id),m=chat?.mensagens?.[indice];
+  if(!m||chat.status==='FINALIZADO'||ENVIOS_PAINEL_CHAT.has(id)) return;
+  CITACOES_PAINEL_CHAT.set(id,{nome:m.de==='visitante'?(chat.nome||'Visitante'):(m.bot?'Beniboy':'Suporte'),texto:String(m.texto||m.anexo?.nome||'Anexo').slice(0,500)});
+  mostrarCitacao(id);document.getElementById(`d-texto-${id}`)?.focus();
+}
 
 function guardarEstadoPaineis(){
   PAINEIS_ABERTOS.forEach(id=>{
@@ -886,6 +980,8 @@ function registrarAnexoResposta(id, campo){
 }
 
 function limparRascunhoResposta(id){
+  CITACOES_PAINEL_CHAT.delete(id);
+  mostrarCitacao(id);
   const campo = document.getElementById(`d-texto-${id}`);
   window.zenithRascunhos?.limparCampoEnviado(campo);
   // o print que ACABOU de ser enviado não pode continuar pendurado no input:
@@ -899,6 +995,7 @@ function limparRascunhoResposta(id){
 
 function restaurarEstadoPaineis(){
   PAINEIS_ABERTOS.forEach(id=>{
+    mostrarCitacao(id);
     const estado = RASCUNHOS_PAINEL_CHAT.get(id);
     const input = document.getElementById(`d-texto-${id}`);
     if(estado && input){
@@ -970,11 +1067,13 @@ async function enviarResposta(id){
   if(ENVIOS_PAINEL_CHAT.has(id)) return;
   const input = document.getElementById(`d-texto-${id}`);
   if(!input) return;
-  const texto = input.value.trim();
+  const resposta = input.value.trim();
   // com print colado da pra mandar so a imagem: o print E a mensagem
   const arquivo = (document.getElementById(`d-anexo-${id}`)||{}).files?.[0]
     || (RASCUNHOS_PAINEL_CHAT.get(id) || {}).arquivo || null;
-  if(!texto && !arquivo) return;
+  if(!resposta && !arquivo) return;
+  const citacao=CITACOES_PAINEL_CHAT.get(id);
+  const texto=citacao?`Respondendo a ${citacao.nome}:\n${citacao.texto.split('\n').map(l=>'> '+l).join('\n')}\n\n${resposta}`:resposta;
   ENVIOS_PAINEL_CHAT.add(id);
   input.disabled = true;
   try{

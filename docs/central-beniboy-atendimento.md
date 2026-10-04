@@ -19,7 +19,31 @@ O login e as permissões continuam os mesmos: Master, Admin ou seção Suporte.
 As ações de assumir, transferir N1/N2/N3, resolver, encerrar sem solução,
 reabrir, gerar tarefa, anexar/colar print e baixar PDF foram preservadas.
 O visitante continua no chat atual, informando nome e telefone/e-mail.
-Não há outro cadastro, novo atalho de Windows ou nova coleção de mensagens.
+Não há outro cadastro ou nova coleção de mensagens. Nenhum atalho é instalado
+automaticamente nos computadores das unidades.
+
+## Layout inspirado no atendimento GCOM
+
+Cards com avatar, horário, faixa de status e protocolo; unidade em destaque
+no cabeçalho; balões distintos para solicitante e suporte; caixa fixa de
+mensagem e controles A−, A+ e Claro/Escuro ligados às preferências do NoPulso.
+Enter envia, Shift+Enter quebra linha. A seta ao lado da mensagem seleciona
+uma citação que acompanha o rascunho ao trocar de aba ou atualizar a lista.
+A citação é enviada como texto, limitada a 500 caracteres, pelo endpoint
+existente — não é um vínculo novo entre mensagens no banco. O × cancela.
+Não foi adicionado botão de gravação de áudio sem implementação real.
+
+## App / Atalho
+
+O botão abre opções de instalação web (PWA), conforme suporte do navegador,
+ou download opcional do atalho Windows em ZIP. Extraia o `.url` e mova-o para
+a Área de Trabalho. O arquivo não contém token ou senha. A instalação web
+abre uma janela própria; o atalho abre o navegador padrão. Nenhum é APK/EXE.
+O manifesto principal permanece com entrada `/`; o da Central usa `/beniboy`.
+O login iniciado pelo app volta à Central apenas para quem tem acesso.
+
+O subdomínio `atendimento.nopulso.com.br` ainda depende de configuração
+de DNS/Render; esta entrega não o publica nem altera o domínio do NoPulso.
 
 ## Atualização e custo
 
@@ -36,9 +60,10 @@ inventado de disponibilidade/online do atendente.
 
 `server/testeCentralBeniboyVisual.js`: Chromium, interface real e APIs
 simuladas, desktop 1440, tablet 1024 (Claro) e celular 390.
-Verifica filtros, abas, envio, rascunhos, contexto, erros de rede,
+Verifica filtros, abas, envio, rascunhos, contexto, erros de rede, citação,
+quebra de linha, tema, fonte, manifesto e conteúdo do atalho sem sessão,
 botão Enviar visível e ausência de overflow. Sabotagem remove o estado do
-rascunho e confirma que a asserção reprova a perda de texto.
+rascunho/citação e confirma que as asserções reprovam a perda de estado.
 
 Capturas em `docs/varredura/central-beniboy-*.png` (artefatos locais ignorados).
 Nenhuma conversa ou mensagem foi criada em produção durante os testes.

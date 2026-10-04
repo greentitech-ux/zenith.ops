@@ -23680,10 +23680,20 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const html = fs.readFileSync(__dirname + '/public/index.html', 'utf8');
     const idx = fs.readFileSync(__dirname + '/index.js', 'utf8');
     const nav = fs.readFileSync(__dirname + '/public/nav-menu.js', 'utf8');
-    const fn = new Function(`${(html.match(/function paginaInicial\(me\)\{[\s\S]*?\n\}/) || [''])[0]}; return paginaInicial;`)();
+    const fonteEntrada=(html.match(/function paginaInicial\(me\)\{[\s\S]*?\n\}/) || [''])[0];
+    const entradaComBusca=busca=>new Function('location',`${fonteEntrada}; return paginaInicial;`)({search:busca});
+    const fn=entradaComBusca('');
+    const entradaBeniboy=entradaComBusca('?app=beniboy');
 
     const conf = {
       'Master cai no Meu Dia': fn({ role: 'master', permissions: { sections: [] } }) === '/tarefas',
+      'app dedicado volta à Central só para quem pode atender':
+        entradaBeniboy({role:'master'})==='/beniboy'
+        && entradaBeniboy({role:'user',permissions:{sections:['suporte']}})==='/beniboy'
+        && entradaBeniboy({role:'user',permissions:{sections:[]}})==='/tarefas'
+        && entradaBeniboy(null)==='/tarefas',
+      'destino do app não aceita URL externa':
+        entradaComBusca('?app=https://externo.invalid')({role:'master'})==='/tarefas',
       'quem tem cargo também (loja, técnico, suporte, manutenção)':
         ['loja', 'tecnico', 'suporte', 'manutencao']
           .every((cargo) => fn({ role: 'user', cargo, permissions: { sections: [] } }) === '/tarefas'),

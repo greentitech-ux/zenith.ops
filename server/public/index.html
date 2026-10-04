@@ -264,6 +264,8 @@ function registrarLoginNoTerminal(resultado){
 // Chamados TI, Manutencao -> Manutencao); sem tag (ou Master/Admin), Painel
 function paginaInicial(me){
   const secoes = (me && me.permissions && me.permissions.sections) || [];
+  // Destino fechado, não uma URL recebida do cliente: mantém o login e evita redirect externo.
+  if(new URLSearchParams(location.search).get('app')==='beniboy' && (me?.role==='master' || me?.isAdmin || secoes.includes('suporte'))) return '/beniboy';
   const abaixoDeAdmin = me && me.role !== 'master' && !me.isAdmin;
   if(abaixoDeAdmin && (secoes.includes('abastecimento-carrinho') || secoes.includes('abastecimento-loja'))) return '/abastecimento';
   return '/tarefas';
