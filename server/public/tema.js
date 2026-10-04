@@ -2014,7 +2014,7 @@
       //
       // `aoMudar` recebe os dados do último evento. Devolve uma função que
       // desliga, pra tela que precise parar de ouvir.
-      function zenithAoVivo(eventos, aoMudar) {
+      function zenithAoVivo(eventos, aoMudar, opcoes) {
         var lista = [].concat(eventos || []).filter(Boolean);
         if (!lista.length || typeof aoMudar !== 'function') return function () {};
         var es = conectar();
@@ -2025,6 +2025,8 @@
           if (!assinante.vivo) return;
           var d = null;
           try { d = ev && ev.data ? JSON.parse(ev.data) : null; } catch (e) { d = null; }
+          // Avisos não redesenham formulário nem podem perder logins em rajadas.
+          if (opcoes && opcoes.imediato) { try { aoMudar(d); } catch(e) {} return; }
           assinante.ultimo = d;
           assinante.pendente = true;
           agendar();
@@ -2036,6 +2038,14 @@
         };
       }
       window.zenithAoVivo = zenithAoVivo;
+      try {
+        var tkAvisos=localStorage.getItem('authToken') || '';
+        var parteAvisos=tkAvisos.split('.')[1] || '';
+        var papelAvisos=JSON.parse(atob(parteAvisos.replace(/-/g,'+').replace(/_/g,'/'))).role;
+        if(papelAvisos==='master') {
+          var jsAvisos=document.createElement('script');jsAvisos.src='/login-avisos.js';document.head.appendChild(jsAvisos);
+        }
+      } catch(e) { /* Sem sessão Master não abre conexão para este aviso. */ }
       // a tela que precisa decidir sozinha (a ficha aberta do Meu Dia) usa o
       // mesmo critério de "está digitando" em vez de escrever o dela
       window.zenithDigitando = digitando;

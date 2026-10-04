@@ -29978,6 +29978,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
     a.equal((await pedirNocReal('/api/me',{}, {authorization:'Bearer '+loginNoc.dados.token,cookie:cookie.split(';')[0]},'GET')).status,403);
     console.log('✓ NOC por HTTP real: validação local automática, unidade autorizada, revogação, cookie seguro e prova de uso único.');
   } catch(e) { ruins++;console.log('✗ NOC por HTTP real: '+e.message); }
+  try {require('./testeAvisosLogin').testar();await require('./testeAvisosLogin').testarHttp({DOCS,token,pedir,postarJson,http});}
+  catch(e){ruins++;console.log('✗ Aviso de entrada para o Master: '+e.message);}
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

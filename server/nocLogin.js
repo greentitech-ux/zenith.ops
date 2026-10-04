@@ -85,6 +85,7 @@ async function exigir(usuario, req) {
     e.code = 'UNIDADE_NOC_NAO_AUTORIZADA';
     throw e;
   }
+  req.computadorNocValidado = maquina; // Metadado do servidor, não recebido do formulário.
 }
 async function unidadePermitida(usuario, codigo) {
   if (usuario.role === 'master') return true; // O Master secundário continua exigindo máquina NOC.

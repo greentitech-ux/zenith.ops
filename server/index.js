@@ -395,6 +395,7 @@ function senhasIguais(a, b) {
 // recebia texto puro em vez de JSON, quebrando o fetch().json() com um erro
 // cru na tela ("Unexpected token 'A'...")
 const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
+  '/login-avisos.js',
   '/noc-validacao.js', '/api/noc-login/desafio', '/api/noc-login/automatico',
   '/noc-login.html', '/noc-login.js', '/api/noc-login/vinculo', '/api/noc-login/registrar',
   '/webhooks/adyen',
@@ -706,6 +707,7 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
     LOGIN_FALHAS.delete(chaveTentativa);
     console.log(`[passkey] entrada por biometria: ${result.user.email} (${credencial.aparelho})`);
     res.json(result);
+    notificarEntradaUsuario(result.user,req,'biometria');
   } catch (err) {
     if (['COMPUTADOR_NOC_OBRIGATORIO','UNIDADE_NOC_NAO_AUTORIZADA'].includes(err.code)) return res.status(403).json({error:err.message,code:err.code});
     const atual = LOGIN_FALHAS.get(chaveTentativa);
@@ -843,6 +845,7 @@ app.post('/api/auth/login', async (req, res) => {
     });
     LOGIN_FALHAS.delete(chave);
     res.json(result);
+    notificarEntradaUsuario(result.user,req,'senha');
   } catch (err) {
     if (['COMPUTADOR_NOC_OBRIGATORIO','UNIDADE_NOC_NAO_AUTORIZADA'].includes(err.code)) return res.status(403).json({ error: err.message, code: err.code });
     const atual = LOGIN_FALHAS.get(chave);
@@ -3276,6 +3279,13 @@ function requireAnySection(...sections) {
 // pela permissao de unidade), entao incluir `unidade` faria o filtro abaixo
 // descartar o evento pra quem tem permissions.unidades vazio/diferente
 const sseClients = new Set();
+function notificarEntradaUsuario(usuario,req,metodo) {
+  try {
+    const computador=req.computadorNocValidado;
+    require('./avisosLogin').avisarEntrada(sseClients,usuario,{metodo,computador,
+      nomeUnidade:computador ? nomeCanonicoUnidade(computador.codigo,computador.codigo) : null});
+  } catch(e) { console.error('[login] Falha no aviso ao Master:',e.message); }
+}
 nocLogin.alteracoes.on('politica', userId => {
   for (const client of sseClients) if (client.userId === userId) {
     sseClients.delete(client);
@@ -3337,6 +3347,7 @@ app.get('/api/stream', (req, res) => {
     res,
     userId: req.user.id,
     isMaster: req.isMaster,
+    isMasterPrincipal: req.isMasterPrincipal === true,
     sections: req.isMaster ? null : new Set(req.permissions.sections || []),
     unidades: req.isMaster ? null : new Set(req.permissions.unidades || []),
   };
