@@ -2362,6 +2362,8 @@ app.get('/api/loja-status/agente-android/versao', (req, res) => {
   res.json({ versao: agenteAndroid.VERSAO_AGENTE_ANDROID, url: agenteAndroid.urlDoApk() });
 });
 
+app.get('/api/loja-status/agente-android/baixar', auth.requireAuth, agenteAndroid.baixarInstalador);
+
 // Resgate para agentes derrubados por uma versao invalida. E publico porque
 // o conteudo e totalmente generico: a identidade/token continua somente na
 // copia local da propria maquina. O script valida origem, parser, versao e
@@ -3203,6 +3205,8 @@ app.get('/api/me', async (req, res) => {
     podeCatalogoInsumos: req.podeCatalogoInsumos,
     podeCadastrarOperadores: req.podeCadastrarOperadores,
     podeNoPulsoPrint: req.isMaster || !!req.podeNoPulsoPrint,
+    podeBaixarAgenteAndroid: agenteAndroid.podeBaixarInstalador(req),
+    agenteAndroidDisponivel: !!agenteAndroid.urlDoApk(),
     podePedirCorrecaoFechamento: req.isMaster || req.isAdmin || !!req.podePedirCorrecaoFechamento,
     podeRhTodasUnidades: req.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: req.podeRhCadastrarEfetivado,

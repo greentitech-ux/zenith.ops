@@ -29980,6 +29980,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   } catch(e) { ruins++;console.log('✗ NOC por HTTP real: '+e.message); }
   try {require('./testeAvisosLogin').testar();await require('./testeAvisosLogin').testarHttp({DOCS,token,pedir,postarJson,http});}
   catch(e){ruins++;console.log('✗ Aviso de entrada para o Master: '+e.message);}
+  try {await require('./testeInstaladorAndroid').testar();await require('./testeInstaladorAndroid').testarHttp({DOCS,token,pedir});}
+  catch(e){ruins++;console.log('✗ Instalador Android: '+e.message);}
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -2504,11 +2504,14 @@ function pintarManutencaoProgramas(corpo){
         <p>Baixa o script individualizado para uso sem área de transferência ou por suporte local.</p>
         <button type="button" class="btn-ghost" onclick="baixarVigia('${codigo}','${posto}','${tipo}')">Baixar script</button>
       </article>
-      <article class="prog-manut-card">
+      ${PODE_BAIXAR_ANDROID ? `<article class="prog-manut-card">
         <h4>📱 Inscrever tablet ou celular</h4>
-        <p>Para aparelho Android, no lugar do comando do Windows: o link abaixo inscreve o agente e ele passa a reportar mesmo com o NoPulso fechado.</p>
+        <p>1. Baixe e instale o APK neste tablet (Android 7 ou superior). 2. Volte aqui e toque em Inscrever este tablet. O atalho do site NoPulso não substitui o agente.</p>
+        <button type="button" class="btn-primary" onclick="baixarAgenteAndroid(this)" ${ANDROID_DISPONIVEL ? '' : 'disabled'}>Baixar agente Android (APK)</button>
+        ${ANDROID_DISPONIVEL ? '' : '<p>Instalador assinado ainda não disponível. O Master precisa configurar a publicação do APK.</p>'}
+        <button type="button" class="btn-ghost" onclick="inscreverEsteTablet('${codigo}','${posto}','${tipo}')">Inscrever este tablet</button>
         <button type="button" class="btn-ghost" onclick="copiarLinkAndroid('${codigo}','${posto}','${tipo}')">Copiar link de inscrição</button>
-      </article>
+      </article>` : ''}
       ${acoesInternas}
     </div>`;
 }
@@ -4385,6 +4388,47 @@ async function copiarLinkAndroid(codigo, posto, tipo){
   }
 }
 
+async function baixarAgenteAndroid(botao){
+  if(!PODE_BAIXAR_ANDROID) return;
+  botao.disabled = true;
+  botao.textContent = 'Baixando APK…';
+  try{
+    const resposta = await fetch('/api/loja-status/agente-android/baixar');
+    if(!resposta.ok){
+      const dados = await resposta.json().catch(()=>({}));
+      throw new Error(dados.error || 'Não foi possível baixar o instalador.');
+    }
+    const arquivo = await resposta.blob();
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement('a');
+    link.href = url; link.download = 'nopulso-agente.apk';
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 60000);
+    alert('Abra o APK em Downloads e instale o NoPulso Agente. Se o Android pedir, permita a instalação por este navegador. Depois volte aqui e toque em Inscrever este tablet.');
+  }catch(e){ alert(e.message); }
+  finally{ botao.disabled = !ANDROID_DISPONIVEL; botao.textContent = 'Baixar agente Android (APK)'; }
+}
+
+async function inscreverEsteTablet(codigo, posto, tipo){
+  if(!PODE_BAIXAR_ANDROID) return;
+  // O usuário toca no link real após o fetch: preserva o gesto exigido pelo
+  // navegador para abrir aplicativos externos, sem virar pesquisa no Google.
+  try{
+    const resposta = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
+    if(!resposta.ok) throw new Error('Não foi possível gerar a inscrição.');
+    const dados = await resposta.json();
+    const url = new URL(dados.linkAndroid);
+    if(url.protocol !== 'nopulso:' || url.hostname !== 'inscrever') throw new Error('Link de inscrição inválido.');
+    const anterior = document.getElementById('android-abrir-agente');
+    if(anterior) anterior.remove();
+    const link = document.createElement('a');
+    link.id = 'android-abrir-agente'; link.className = 'btn-primary';
+    link.href = dados.linkAndroid; link.textContent = 'Abrir NoPulso Agente e confirmar inscrição';
+    document.getElementById('prog-corpo').prepend(link);
+    link.focus();
+  }catch(e){ alert(e.message); }
+}
+
 async function baixarVigia(codigo, posto, tipo){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`);
@@ -5757,11 +5801,15 @@ async function rejeitarAgenteQa(id){
 }
 
 let IS_MASTER = false;
+let PODE_BAIXAR_ANDROID = false;
+let ANDROID_DISPONIVEL = false;
 let IS_MASTER_VM = false;
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   const me = await res.json();
+  PODE_BAIXAR_ANDROID = me.podeBaixarAgenteAndroid === true;
+  ANDROID_DISPONIVEL = me.agenteAndroidDisponivel === true;
   IS_MASTER = me.role === 'master';
   IS_MASTER_VM = IS_MASTER && !me.qaMaster;
   if(!me.ehTimeSuporte){

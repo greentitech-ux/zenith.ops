@@ -19,6 +19,9 @@ on:
       - 'android/**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   compilar:
     runs-on: ubuntu-latest
@@ -34,9 +37,7 @@ jobs:
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # Sem o secret da chave sai um APK de DEBUG: instala num aparelho pra
-      # experimentar, mas nao serve pra rede de lojas - cada build teria uma
-      # chave diferente, e ai uma versao nao atualiza sobre a outra.
+      # Distribuição exige chave permanente. Nunca publicar APK debug.
       - name: Preparar a chave de assinatura
         env:
           CHAVE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -46,8 +47,8 @@ jobs:
             echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/chave.jks" >> "$GITHUB_ENV"
             echo "Chave encontrada: o APK sai assinado para distribuicao."
           else
-            echo "Sem ANDROID_KEYSTORE_BASE64: o APK sai com chave de debug,"
-            echo "so para teste em um aparelho. Nao distribua este arquivo."
+            echo "Chave permanente ausente: publicação bloqueada."
+            exit 1
           fi
 
       - name: Compilar
@@ -64,3 +65,19 @@ jobs:
           name: nopulso-agente
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      - name: Publicar instalador assinado
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          codigo=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' android/app/build.gradle.kts)
+          tag="agente-android-v${codigo}"
+          cp android/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/nopulso-agente.apk"
+          # Imutável: não trocar o APK sob uma versão já publicada.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Versão já publicada; instalador preservado."
+          else
+            gh release create "$tag" "$RUNNER_TEMP/nopulso-agente.apk" --target "$GITHUB_SHA" --title "NoPulso Agente Android v${codigo}" --notes "Instalador Android assinado com chave permanente. Inscrição individual pelo NOC." --latest=false
+          fi
