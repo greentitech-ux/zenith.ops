@@ -12,7 +12,7 @@ for (const tipo of ['interno','atendimento','abastecimento']) {
   assert.match(ps,/\$NaoInstalarAppNoPulso = \$true/);
   assert.doesNotMatch(ps,/function Reabrir-Monitor/, 'Windows antigo não depende de navegador para heartbeat');
   assert.match(ps,/Iniciar-VigiaDeTravamento \$UrlHeartbeat/);
-  const nomes = ['Iniciar-NoPulsoPrint','Vigiar-TelaVazia','Forcar-PapelDeParedeDaConfig','Aplicar-PapelDeParede','Sincronizar-Politica','Iniciar-JanelaChat'];
+  const nomes = ['Iniciar-ValidadorLocalNoc','Iniciar-NoPulsoPrint','Vigiar-TelaVazia','Forcar-PapelDeParedeDaConfig','Aplicar-PapelDeParede','Sincronizar-Politica','Iniciar-JanelaChat'];
   const prefixos = nomes.map(nome => {
     const inicio = ps.indexOf('function '+nome);
     assert.ok(inicio >= 0,nome);
@@ -29,7 +29,8 @@ for (const tipo of ['interno','atendimento','abastecimento']) {
   const sabotagem = executar(prefixos.map(p=>p.replace('if ($WindowsAntigo)', 'if ($false)')));
   assert.notEqual(sabotagem.status,0,'Remover as guardas deve reprovar');
   assert.match(ps,/function Aplicar-NoPulsoPrint[^\n]+\n\s+if \(\$WindowsAntigo\) \{ \$habilitado = \$false; \$capturar = \$false \}/);
-  assert.match(ps,/function Configurar-ChatUnidade[^\n]+\n\s+if \(\$WindowsAntigo\)/);
+  assert.match(ps,/\$WindowsAntigo -or \$NaoInstalarAppNoPulso -or \$EhServidor/);
+  assert.doesNotMatch(ps,/launcher da unidade|atalho configurado sem senha/);
   assert.match(montarComandoInstalacao({...config,ehServidor:true}), /-WindowStyle Hidden/);
   console.log(`✓ Windows antigo ${tipo}: sem interface automática, heartbeat próprio, instalador oculto e sabotagem detectada.`);
 }

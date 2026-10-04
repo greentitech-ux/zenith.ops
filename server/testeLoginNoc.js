@@ -57,6 +57,7 @@ async function middleware(token, pedido) {
     const verificarHost = texto => {
       const codigo = `
 $ErrorActionPreference='Stop'
+$WindowsAntigo=$${windowsAntigo}
 $env:LOCALAPPDATA='C:\\NocTeste\\Local'
 function Test-Path {param($LiteralPath) if($LiteralPath.StartsWith('HKLM:')){return $global:hyperv}; return $true}
 function Remove-Item {param($LiteralPath,[switch]$Force,$ErrorAction)
@@ -72,7 +73,7 @@ foreach($c in @(@($true,$false,$false,$false),@($false,$true,$false,$false),@($f
  Configurar-AcessoNoc
  $esperados=2
  if($global:removidos -ne $esperados){throw 'Nao removeu somente os icones esperados'}
- if($Servico -and $global:gravacoes -ne 0){throw 'SYSTEM nao cria launcher de usuario'}
+ if(($Servico -or $WindowsAntigo) -and $global:gravacoes -ne 0){throw 'SYSTEM e Windows antigo nao criam launcher de usuario'}
 }
 Write-Output 'HOST OK'
 `;
@@ -108,7 +109,7 @@ Write-Output 'OK'
   }
   const passwordHash = await bcrypt.hash('SenhaTeste123', 4);
   for (const [id, dados] of [['sem-tag', {}], ['tag-restrito', { cargo: 'operador' }], ['liberado', { cargo: 'tecnico', somenteNoc: false }], ['sem-tag-desmarcado', { somenteNoc: false }], ['principal', { role: 'master' }], ['outro-master', { role: 'master' }]]) {
-    usuarios.set(id, { username: id, passwordHash, role: 'user', active: true, permissions: { sections: [], unidades: [] }, ...dados });
+    usuarios.set(id, { username: id, passwordHash, role: 'user', active: true, permissions: { sections: [], unidades: ['LOJA'] }, ...dados });
   }
   const servico = noc.servico();
   await assert.rejects(() => servico.emitir('LOJA', 'PC', 'errado', req()));
@@ -133,9 +134,22 @@ Write-Output 'OK'
     assert.equal((await auth.usuarioOpcionalDoToken(entrada.token, confiavel)).id, id);
   }
   for (const id of ['liberado', 'principal']) assert.ok((await auth.login(id, 'SenhaTeste123', { pedido: req() })).token);
+  const junius = usuarios.get('tag-restrito');
+  junius.permissions.unidades = ['SALTIVERSO_PATTEO'];
+  const unidadeErrada = e => e.code === 'UNIDADE_NOC_NAO_AUTORIZADA';
+  await assert.rejects(() => auth.login('tag-restrito','SenhaTeste123',{pedido:confiavel}), unidadeErrada);
+  await assert.rejects(() => auth.loginComPasskey('tag-restrito',{pedido:confiavel}), unidadeErrada);
+  junius.permissions.unidades = ['LOJA'];
+  assert.ok((await auth.login('tag-restrito','SenhaTeste123',{pedido:confiavel})).token);
+  junius.isAdmin=true;junius.permissions.unidades=[];
+  await assert.rejects(() => auth.login('tag-restrito','SenhaTeste123',{pedido:confiavel}), unidadeErrada);
+  junius.permissions.unidades=['LOJA'];
   assert.equal(noc.somenteNoc({ somenteNoc: false, cargos: ['inventada'] }, tagsDe({ cargos: ['inventada'] })), true);
   computador.agentToken = 'revogado';
   assert.equal(await servico.validarPedido(confiavel), null);
+  computador={agentToken:'segredo-agente-do-teste',agenteVersao:141,windowsAntigo:true};
+  assert.equal(await servico.validarPedido(confiavel),null,'Windows antigo é só monitoramento, não libera acesso NoPulso');
+  await assert.rejects(()=>servico.emitir('LOJA','PC',computador.agentToken,req()));
   computador = null;
   assert.equal(await servico.validarPedido(confiavel), null);
   let tempo = 0;

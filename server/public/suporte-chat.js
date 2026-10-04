@@ -500,7 +500,7 @@
 
   async function dadosLogado() {
     const token = localStorage.getItem('authToken');
-    if (!token) return window.__zenithUnidadeChat ? {nome:'Colaborador · '+window.__zenithUnidadeChat.nome,contato:'Computador: '+window.__zenithUnidadeChat.nomeComputador} : null;
+    if (!token) return null; // Visitante informa seu nome e telefone/e-mail no formulário normal.
     try {
       const r = await rawFetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
       if (!r.ok) return null;

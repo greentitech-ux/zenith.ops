@@ -1,32 +1,5 @@
 <!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Chat da unidade · NoPulso</title>
-<script src="/tema.js"></script>
-<style>
-:root{--bg:#0b0d10;--panel:#12161b;--text:#e7ecf1;--muted:#7d8896;--line:#232a33;--accent:#b8ff3c}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Archivo,sans-serif}main{max-width:680px;margin:24px auto;padding:20px}section{border:1px solid var(--line);background:var(--panel);padding:24px;border-radius:18px}h1{font-size:26px;margin:10px 0}p{line-height:1.6;color:var(--muted)}a,button{display:inline-block;border:0;border-radius:9px;padding:12px 16px;background:var(--accent);color:#0b0d10;text-decoration:none;font-weight:700;cursor:pointer}.marca{color:var(--accent);letter-spacing:2px;font-size:12px}.acoes{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
-#chat-conteudo{margin-top:20px}#chat-conteudo .szc-panel{position:relative;right:auto;bottom:auto;width:100%;max-width:100%;max-height:680px;box-shadow:none}.szc-btn{display:none!important}
-</style></head><body><main><section><div class="marca">NOPULSO · CHAT DA UNIDADE</div><h1 id="nome">Identificando a unidade…</h1><p id="estado">Este acesso é exclusivo para conversar com o suporte.</p><div class="acoes"><button id="chat" type="button" hidden>Abrir chat</button><a href="/?pessoal=1">Entrar com meu usuário</a></div></section><div id="chat-conteudo"></div></main>
-<script>
-(async function(){
-  const nome=document.getElementById('nome'),estado=document.getElementById('estado');
-  try{
-    const vinculo=new URLSearchParams(location.hash.slice(1)).get('vinculo');
-    if(vinculo){
-      history.replaceState(null,'','/unidade');
-      const r=await fetch('/api/acesso-unidade/registrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vinculo})});
-      if(!r.ok) throw new Error('Vínculo vencido. Abra novamente pelo atalho NoPulso.');
-    }
-    const r=await fetch('/api/acesso-unidade/sessao',{cache:'no-store'});
-    if(!r.ok) throw new Error('Este computador não está habilitado. Marque “Chat da unidade sem senha” no NOC e abra o atalho NoPulso atualizado.');
-    const u=await r.json();
-    localStorage.setItem('nopulso.unidade',JSON.stringify(u));
-    if(localStorage.getItem('authToken')){location.replace('/?pessoal=1');return;}
-    nome.textContent=u.nome;
-    estado.textContent='Colaborador da unidade · '+u.nomeComputador+'. Para acessar seus painéis, entre com seu usuário. Após '+u.inatividadeMinutos+' minutos sem atividade, o acesso pessoal será encerrado e este chat voltará a aparecer.';
-    window.__zenithUnidadeChat=u;window.__zenithLojaContexto=u.nome;window.__zenithLojaCodigoContexto=u.codigo;window.__zenithPostoContexto=u.posto;window.__zenithAbrirChatAuto=true;
-    const s=document.createElement('script');s.src='/suporte-chat.js';s.onload=()=>{const painel=document.querySelector('.szc-panel');if(painel) document.getElementById('chat-conteudo').appendChild(painel);};document.head.appendChild(s);
-    const b=document.getElementById('chat');b.hidden=false;b.onclick=()=>{if(document.querySelector('.szc-panel')?.classList.contains('szc-hidden')) document.querySelector('.szc-btn')?.click();};
-  }catch(e){nome.textContent='Chat da unidade indisponível';estado.textContent=e.message;}
-})();
-</script></body></html>
+<title>NoPulso</title><script src="/tema.js"></script>
+<meta http-equiv="refresh" content="0;url=/">
+</head><body><a href="/">Abrir NoPulso</a><script>location.replace("/");</script></body></html>

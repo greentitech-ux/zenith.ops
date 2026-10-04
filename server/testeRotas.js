@@ -228,9 +228,19 @@ const auth = require('/home/user/adyen-monitor/server/auth.js');
 const cryptoNoc = require('crypto');
 const jwtNoc = require('jsonwebtoken');
 const nocLoginTeste = require('./nocLogin');
+// A máquina sintética dos cenários antigos representa a unidade autorizada de
+// cada fixture. Não muda permissões de dados; os testes NOC reais abaixo usam
+// computadores reais do Firestore falso e passam pela regra de unidade intacta.
+const exigirNocOriginalTeste = nocLoginTeste.exigir;
+nocLoginTeste.exigir = (usuario,req) => {
+  const valor = String(req.headers?.cookie || '').split(';').map(s=>s.trim()).find(s=>s.startsWith(nocLoginTeste.COOKIE+'='));
+  let sintetica=false;
+  try { sintetica=jwtNoc.verify(valor?.slice(nocLoginTeste.COOKIE.length+1),process.env.JWT_SECRET,{audience:'login-noc'}).codigo==='NOC_TESTE'; } catch {}
+  return exigirNocOriginalTeste(sintetica ? {...usuario,empresaId:null,permissions:{...usuario.permissions,unidades:[...(usuario.permissions?.unidades||[]),'NOC_TESTE']}} : usuario,req);
+};
 const lojaStatusTeste = require('./lojaStatus');
 const computadorNocOriginal = lojaStatusTeste.computadorParaLoginNoc;
-lojaStatusTeste.computadorParaLoginNoc = async (codigo, posto) => codigo === 'NOC_TESTE' && posto === 'NAVEGADOR'
+lojaStatusTeste.computadorParaLoginNoc = async (codigo, posto) => ['NOC_TESTE','NOC_HTTP_REAL'].includes(codigo) && posto === 'NAVEGADOR'
   ? { agentToken: 'agente-apenas-do-teste', agenteVersao: 137 }
   : computadorNocOriginal(codigo, posto);
 function pedidoNocTeste(pedido = {}) {
@@ -29901,50 +29911,30 @@ $r | ConvertTo-Json -Depth 4 -Compress
   if (!okFestaFuso) ruins += 1;
   console.log(`${okFestaFuso ? '✓' : '✗'} Saltiverso: festa vendida à noite fica no dia dela (o fuso jogava tudo depois das 21h pro dia seguinte)`);
 
-  // Terminal da unidade: vínculo não é conta pessoal nem passe livre de API.
+  // Portal retirado: cookie legado não identifica o visitante nem altera o login.
   let okTerminalUnidade=false;
   try {
-    const ls=require('./lojaStatus'),jwtTU=require('jsonwebtoken');
-    const pc=await ls.cadastrarComputador('TESTE_CHAT_UNIDADE','PC da unidade','interno',false,false,false,false,false,false,false,false,'ctrl_q',true);
-    const agente=await ls.tokenDoComputador(pc.codigo,pc.posto);
-    const v=await postarJson('/api/acesso-unidade/vinculo',{unidade:pc.codigo,posto:pc.posto},{'X-NOC-Token':agente});
-    const grant=new URL(JSON.parse(v.corpo).url).hash.split('=')[1];
-    const registro=await new Promise((resolve,reject)=>{
-      const corpo=JSON.stringify({vinculo:grant});
-      const req=http.request({host:'127.0.0.1',port:8899,path:'/api/acesso-unidade/registrar',method:'POST',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(corpo)}},res=>{res.resume();res.on('end',()=>resolve({status:res.statusCode,headers:res.headers}));});
-      req.on('error',reject);req.end(corpo);
-    });
-    const cookie=registro.headers['set-cookie'][0].split(';')[0];
-    const replay=await postarJson('/api/acesso-unidade/registrar',{vinculo:grant});
+    const cookie='nopulsoUnidade=legado';
+    const v=await postarJson('/api/acesso-unidade/vinculo',{});
+    const registro=await postarJson('/api/acesso-unidade/registrar',{vinculo:'legado'});
     const sessao=await pedir('/api/acesso-unidade/sessao',{Cookie:cookie});
-    const negado=await pedir('/api/me',{Cookie:cookie});
-    const negadoBearer=await pedir('/api/me',{Authorization:'Bearer '+cookie.split('=')[1]});
-    const chat=await postarJson('/api/suporte-chat/iniciar',{nome:'Ana',contato:'Unidade',texto:'Preciso de suporte',lojaContexto:'FORJADA',unidadeContexto:'FORJADA',postoContexto:'FORJADO'},{Cookie:cookie});
-    const chatId=JSON.parse(chat.corpo).id;
-    const conversa=await require('./suporteChat').getOne(chatId);
+    const chat=await postarJson('/api/suporte-chat/iniciar',{nome:'Ana',contato:'ana@teste.local',texto:'Preciso de suporte'},{Cookie:cookie});
+    const conversa=await require('./suporteChat').getOne(JSON.parse(chat.corpo).id);
     DOCS.set('users/u-terminal-chat',{username:'operadorchat',email:'operadorchat@teste.local',passwordHash:require('bcryptjs').hashSync('SenhaTerminal!2026',4),active:true,role:'user',permissions:{sections:[],unidades:[]}});
     const login=await postarJson('/api/auth/login',{identifier:'operadorchat@teste.local',password:'SenhaTerminal!2026'},{Cookie:cookie});
-    const tkTU=JSON.parse(login.corpo).token, sidTU=jwtTU.verify(tkTU,process.env.JWT_SECRET).sid;
-    const sTU=DOCS.get('sessions/'+sidTU);
-    sTU.ultimaAtividadeHumanaEm=Date.now()-6*60000;
-    require('./sessions').faxinaMemoria();
-    const expirada=await pedir('/api/me',{Authorization:'Bearer '+tkTU});
-    await ls.editarComputador(pc.codigo,pc.posto,'PC da unidade','interno',false,false,false,false,false,false,false,false,false,'ctrl_q',false);
-    const desligada=await pedir('/api/acesso-unidade/sessao',{Cookie:cookie});
+    const resposta=JSON.parse(login.corpo);
+    const sid=require('jsonwebtoken').verify(resposta.token,process.env.JWT_SECRET).sid;
+    const s=DOCS.get('sessions/'+sid);
     const conf={
-      'vínculo e cookie seguros':v.status===200 && registro.status===200 && /HttpOnly/i.test(registro.headers['set-cookie'][0]),
-      'vínculo não pode ser reutilizado':replay.status===403,
-      'unidade reconhecida sem senha':sessao.status===200 && JSON.parse(sessao.corpo).codigo===pc.codigo,
-      'cookie não libera painéis nem vira bearer':negado.status===401 && negadoBearer.status===401,
-      'chat identificado como colaborador, unidade não é forjada':chat.status===200 && conversa.logado.acessoUnidade && conversa.unidadeContexto===pc.codigo && conversa.postoContexto===pc.posto,
-      'login pessoal vinculado e vencido por inatividade':login.status===200 && sTU.terminalUnidade.codigo===pc.codigo && expirada.status===401,
-      'desmarcar a tag revoga o acesso':desligada.status===401,
+      'portal antigo desativado':v.status===410 && registro.status===410 && sessao.status===410,
+      'suporte preserva nome e contato':chat.status===200 && conversa.nome==='Ana' && conversa.contato==='ana@teste.local' && !conversa.logado,
+      'login normal sem identidade da unidade':login.status===200 && !s.terminalUnidade && !resposta.terminalUnidade,
     };
     const falhas=Object.entries(conf).filter(([,v])=>!v).map(([n])=>n);
     okTerminalUnidade=!falhas.length;if(falhas.length) console.log('  falhou em: '+falhas.join(' · '));
-  } catch(e){console.log('  erro terminal unidade: '+e.message);}
+  } catch(e){console.log('  erro acesso normal: '+e.message);}
   if(!okTerminalUnidade) ruins++;
-  console.log(`${okTerminalUnidade?'✓':'✗'} Chat da unidade: vínculo seguro, só chat, login pessoal separado, inatividade e revogação`);
+  console.log(`${okTerminalUnidade?'✓':'✗'} Acesso normal: portal retirado, suporte com nome/contato e login pessoal preservado`);
   try {await require('./testeEstornoBeniboy').testar();}
   catch(e){ruins++;console.log('✗ Estorno do Beniboy: '+e.message);}
   try {await require('./testeAcoesEntregas').testarHttp({DOCS,enviarJson,postarJson});}
@@ -29958,7 +29948,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       }); r.on('error', reject); r.end(texto);
     });
     const a = require('assert/strict');
-    const cadastro = {unidade:'NOC_TESTE',posto:'NAVEGADOR'};
+    const cadastro = {unidade:'NOC_HTTP_REAL',posto:'NAVEGADOR'};
     a.equal((await pedirNocReal('/api/noc-login/vinculo',cadastro,{'X-NOC-Token':'errado'})).status,403);
     const emitido = await pedirNocReal('/api/noc-login/vinculo',cadastro,{'X-NOC-Token':'agente-apenas-do-teste'});
     a.equal(emitido.status,200);
@@ -29968,14 +29958,25 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const cookie = registrado.headers['set-cookie'][0];
     a.match(cookie,/HttpOnly/); a.match(cookie,/SameSite=Strict/);
     a.equal((await pedirNocReal('/api/noc-login/registrar',{vinculo})).status,403);
-    DOCS.set('users/noc-http-restrito',{username:'noc-http-restrito',passwordHash:require('bcryptjs').hashSync('SenhaNoc!2026',4),role:'user',active:true,permissions:{sections:[],unidades:[]},somenteNoc:false});
+    DOCS.set('users/noc-http-restrito',{username:'noc-http-restrito',passwordHash:require('bcryptjs').hashSync('SenhaNoc!2026',4),role:'user',active:true,permissions:{sections:[],unidades:['NOC_HTTP_REAL']},somenteNoc:false});
     const corpo = {identifier:'noc-http-restrito',password:'SenhaNoc!2026'};
     a.equal((await pedirNocReal('/api/auth/login',corpo)).status,403,'Sem função permanece NOC mesmo desmarcado');
     const loginNoc = await pedirNocReal('/api/auth/login',corpo,{cookie:cookie.split(';')[0]});
     a.equal(loginNoc.status,200);
     a.equal((await pedirNocReal('/api/me',{}, {authorization:'Bearer '+loginNoc.dados.token},'GET')).status,403);
     a.equal((await pedirNocReal('/api/me',{}, {authorization:'Bearer '+loginNoc.dados.token,cookie:cookie.split(';')[0]},'GET')).status,200);
-    console.log('✓ NOC por HTTP real: agente autenticado, cookie seguro, uso único, login e sessão sem bypass.');
+    const desafioLocal = (await pedirNocReal('/api/noc-login/desafio',{})).dados.desafio;
+    const assinaturaLocal = cryptoNoc.createHmac('sha256','agente-apenas-do-teste').update('noc-local\n'+new URL(process.env.APP_BASE_URL || 'https://www.nopulso.com.br').origin+'\n'+desafioLocal).digest('hex');
+    const provaLocal={desafio:desafioLocal,codigo:cadastro.unidade,posto:cadastro.posto,assinatura:assinaturaLocal};
+    a.equal((await pedirNocReal('/api/noc-login/automatico',{...provaLocal,assinatura:'0'.repeat(64)})).status,403);
+    a.equal((await pedirNocReal('/api/noc-login/automatico',provaLocal)).status,200);
+    a.equal((await pedirNocReal('/api/noc-login/automatico',provaLocal)).status,403);
+    DOCS.get('users/noc-http-restrito').permissions.unidades=['OUTRA'];
+    auth.invalidarUsuario('noc-http-restrito');
+    const errado=await pedirNocReal('/api/auth/login',corpo,{cookie:cookie.split(';')[0]});
+    a.equal(errado.status,403);a.equal(errado.dados.code,'UNIDADE_NOC_NAO_AUTORIZADA');
+    a.equal((await pedirNocReal('/api/me',{}, {authorization:'Bearer '+loginNoc.dados.token,cookie:cookie.split(';')[0]},'GET')).status,403);
+    console.log('✓ NOC por HTTP real: validação local automática, unidade autorizada, revogação, cookie seguro e prova de uso único.');
   } catch(e) { ruins++;console.log('✗ NOC por HTTP real: '+e.message); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

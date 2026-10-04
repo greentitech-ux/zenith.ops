@@ -103,6 +103,7 @@
 </style>
 <script src="/tema.js"></script>
 <script src="/aparelho.js"></script>
+<script src="/noc-validacao.js"></script>
 </head>
 <body>
 
@@ -253,10 +254,8 @@
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 // Síncrono, inclusive quando o módulo compartilhado ainda está baixando.
 function registrarLoginNoTerminal(resultado){
-  if(resultado.terminalUnidade) localStorage.setItem('nopulso.unidade',JSON.stringify(resultado.terminalUnidade));
-  if(!localStorage.getItem('nopulso.unidade')) return;
-  const payload=JSON.parse(atob(resultado.token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
-  localStorage.setItem('nopulso.unidade.atividade',JSON.stringify({sid:payload.sid,em:Date.now()}));
+  localStorage.removeItem('nopulso.unidade');
+  localStorage.removeItem('nopulso.unidade.atividade');
 }
 
 // tela inicial: acessos ABAIXO de Admin que tem o Abastecimento do Carrinho
@@ -273,7 +272,10 @@ function paginaInicial(me){
 async function boot(){
   if(!AUTH_TOKEN) return;
   try{
-    const res = await fetch('/api/me', { headers: { Authorization: 'Bearer '+AUTH_TOKEN } });
+    let res = await fetch('/api/me', { headers: { Authorization: 'Bearer '+AUTH_TOKEN } });
+    if(res.status===403 && (await res.clone().json()).code==='COMPUTADOR_NOC_OBRIGATORIO' && await validarMaquinaNoc()) {
+      res = await fetch('/api/me', { headers: { Authorization: 'Bearer '+AUTH_TOKEN } });
+    }
     if(!res.ok){ localStorage.removeItem('authToken'); return; }
     const me = await res.json();
     location.href = paginaInicial(me);
@@ -288,11 +290,16 @@ document.getElementById('auth-form').addEventListener('submit', async (e)=>{
   btn.disabled = true; btn.textContent = 'Entrando...';
   const senhaDigitada = document.getElementById('auth-password').value;
   try{
-    const res = await fetch('/api/auth/login', {
+    const pedidoLogin = {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ identifier: document.getElementById('auth-email').value, password: senhaDigitada }),
-    });
-    const data = await res.json();
+    };
+    let res = await fetch('/api/auth/login', pedidoLogin);
+    let data = await res.json();
+    if(data.code==='COMPUTADOR_NOC_OBRIGATORIO' && await validarMaquinaNoc()) {
+      res = await fetch('/api/auth/login', pedidoLogin);
+      data = await res.json();
+    }
     if(!res.ok) throw new Error(data.error || 'Não foi possível entrar.');
     localStorage.setItem('authToken', data.token);
     registrarLoginNoTerminal(data);
@@ -385,6 +392,7 @@ async function entrarComBiometria(){
   erroEl.classList.add('hidden');
   btn.disabled = true;
   try{
+    await validarMaquinaNoc();
     const r1 = await fetch('/api/auth/passkey/login/inicio', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
     const d1 = await r1.json();
     if(!r1.ok) throw new Error(d1.error || 'Não consegui começar.');

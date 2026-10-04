@@ -444,6 +444,7 @@ async function updatePermissions(id, permissions) {
   await ref.update({ permissions: sanitizePermissions(permissions) });
   invalidarUsuario(id);
   usersCache.invalidar();
+  require('./nocLogin').alteracoes.emit('politica', id);
   return toPublic(await ref.get());
 }
 
@@ -467,6 +468,7 @@ async function aplicarPermissoesAutorizadas(id, antes, depois, campos){
     tx.update(ref,patch);
   });
   invalidarUsuario(id);usersCache.invalidar();
+  require('./nocLogin').alteracoes.emit('politica', id);
 }
 
 async function setActive(id, active) {
@@ -519,6 +521,7 @@ async function updateEmpresa(id, empresaId) {
   await ref.update({ empresaId: empresaId ? String(empresaId) : null });
   invalidarUsuario(id);
   usersCache.invalidar();
+  require('./nocLogin').alteracoes.emit('politica', id);
   return toPublic(await ref.get());
 }
 

@@ -126,11 +126,6 @@ const pedidoSemanal = require('./pedidoSemanal');
 const lojaStatus = require('./lojaStatus');
 const acessoUnidadeModulo=require('./acessoUnidade');
 const nocLogin = require('./nocLogin');
-const acessoUnidade=acessoUnidadeModulo.criarServico({
-  lerComputador:(codigo,posto)=>lojaStatus.acessoChatDoComputador(codigo,posto),
-  nomeUnidade:codigo=>nomeCanonicoUnidade(codigo,codigo),
-  segredo:process.env.JWT_SECRET,
-});
 const qaAprovacoes = require('./qaAprovacoes');
 const alertasCentral = require('./alertasCentral');
 const botIndicadores = require('./botIndicadores');
@@ -400,6 +395,7 @@ function senhasIguais(a, b) {
 // recebia texto puro em vez de JSON, quebrando o fetch().json() com um erro
 // cru na tela ("Unexpected token 'A'...")
 const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
+  '/noc-validacao.js', '/api/noc-login/desafio', '/api/noc-login/automatico',
   '/noc-login.html', '/noc-login.js', '/api/noc-login/vinculo', '/api/noc-login/registrar',
   '/webhooks/adyen',
   '/estorno-cliente.html',
@@ -704,7 +700,6 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
     await passkeys.registrarUso(credencial.credentialID, verificacao.authenticationInfo.newCounter);
     const result = await auth.loginComPasskey(credencial.userId, {
       pedido: req,
-      terminalUnidade: await acessoUnidade.contextoDoPedido(req),
       userAgent: req.headers['user-agent'],
       ip: req.headers['x-forwarded-for'] || req.ip,
     });
@@ -712,6 +707,7 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
     console.log(`[passkey] entrada por biometria: ${result.user.email} (${credencial.aparelho})`);
     res.json(result);
   } catch (err) {
+    if (['COMPUTADOR_NOC_OBRIGATORIO','UNIDADE_NOC_NAO_AUTORIZADA'].includes(err.code)) return res.status(403).json({error:err.message,code:err.code});
     const atual = LOGIN_FALHAS.get(chaveTentativa);
     if (!atual || Date.now() - atual.desdeMs >= LOGIN_JANELA_MS) LOGIN_FALHAS.set(chaveTentativa, { count: 1, desdeMs: Date.now() });
     else atual.count += 1;
@@ -842,14 +838,13 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const result = await auth.login(req.body.identifier || req.body.email, req.body.password, {
       pedido: req,
-      terminalUnidade: await acessoUnidade.contextoDoPedido(req),
       userAgent: req.headers['user-agent'],
       ip: req.headers['x-forwarded-for'] || req.ip,
     });
     LOGIN_FALHAS.delete(chave);
     res.json(result);
   } catch (err) {
-    if (err.code === 'COMPUTADOR_NOC_OBRIGATORIO') return res.status(403).json({ error: err.message, code: err.code });
+    if (['COMPUTADOR_NOC_OBRIGATORIO','UNIDADE_NOC_NAO_AUTORIZADA'].includes(err.code)) return res.status(403).json({ error: err.message, code: err.code });
     const atual = LOGIN_FALHAS.get(chave);
     if (!atual || Date.now() - atual.desdeMs >= LOGIN_JANELA_MS) LOGIN_FALHAS.set(chave, { count: 1, desdeMs: Date.now() });
     else atual.count += 1;
@@ -1957,12 +1952,7 @@ async function usuarioLogadoDoHeader(req) {
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
   const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(token, req) : null;
-  if (!user) {
-    const unidade=await acessoUnidade.contextoDoPedido(req);
-    return unidade ? {id:`unidade:${unidade.codigo}`,username:`Colaborador · ${unidade.nome}`,email:null,isMaster:false,
-      acessoUnidade:true,unidadeContexto:unidade.codigo,postoContexto:unidade.posto,
-      podeCriarTarefa:false,temMonitor:false,ehTimeSuporte:false,unidades:[]} : null;
-  }
+  if (!user) return null; // Suporte público pede nome e contato, sem identidade automática da unidade.
   const isMaster = user.role === 'master';
   return {
     id: user.id,
@@ -2036,7 +2026,7 @@ async function alertarSegurancaChat(req, chat, motivo, detalheExtra) {
 app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
     const logado = await usuarioLogadoDoHeader(req);
-    const unidade=await acessoUnidade.contextoDoPedido(req);
+    const unidade=null; // Cookies do antigo portal não representam o colaborador.
     let anexo = null;
     if (req.file) {
       // MESMA validacao do anexo de mensagem (ver rota abaixo): tipo/tamanho
@@ -3074,25 +3064,23 @@ app.post('/api/treinamentos-publico/:token/concluir', async (req, res) => {
 
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
-app.post('/api/acesso-unidade/vinculo', async (req,res)=>{
-  try {
-    const token=await acessoUnidade.emitirVinculo(req.body?.unidade,req.body?.posto,req.headers['x-noc-token']);
-    res.set('Cache-Control','no-store');
-    res.json({url:`${APP_BASE_URL}/unidade#vinculo=${token}`});
-  } catch(e){res.status(403).json({error:e.message});}
-});
-app.post('/api/acesso-unidade/registrar', async (req,res)=>{
-  try {
-    const token=await acessoUnidade.consumirVinculo(req.body?.vinculo);
-    res.cookie(acessoUnidadeModulo.COOKIE,token,{httpOnly:true,secure:APP_BASE_URL.startsWith('https:'),sameSite:'strict',path:'/',maxAge:acessoUnidadeModulo.DURACAO_COOKIE_MS});
-    res.set('Cache-Control','no-store'); res.json({ok:true});
-  } catch(e){res.status(403).json({error:e.message});}
-});
-app.get('/api/acesso-unidade/sessao', async (req,res)=>{
+app.use('/api/acesso-unidade', (_req,res)=>{
+  res.clearCookie(acessoUnidadeModulo.COOKIE,{path:'/'});
   res.set('Cache-Control','no-store');
-  const unidade=await acessoUnidade.contextoDoPedido(req);
-  if(!unidade) return res.status(401).json({error:'Chat da unidade não habilitado neste computador.'});
-  res.json(unidade);
+  res.status(410).json({error:'Use o acesso normal do NoPulso. O suporte solicita nome e telefone ou e-mail.'});
+});
+app.post('/api/noc-login/desafio', (req,res)=>{
+  res.set('Cache-Control','no-store');
+  try { res.json({desafio:nocLogin.servico().desafio(req)}); }
+  catch(e) { res.status(429).json({error:e.message}); }
+});
+app.post('/api/noc-login/automatico', async (req,res)=>{
+  res.set('Cache-Control','no-store');
+  try {
+    const token=await nocLogin.servico().automatico(req.body || {},req,new URL(APP_BASE_URL).origin);
+    res.cookie(nocLogin.COOKIE,token,{httpOnly:true,secure:APP_BASE_URL.startsWith('https:'),sameSite:'strict',path:'/',maxAge:nocLogin.DURACAO_MS});
+    res.json({ok:true});
+  } catch(e) { res.status(403).json({error:'Não foi possível confirmar o agente NOC deste computador.'}); }
 });
 app.post('/api/noc-login/vinculo', async (req, res) => {
   try {

@@ -14,21 +14,11 @@
 (function () {
   if (window.__zenithTema) return;
   window.__zenithTema = true;
-  // Antes de as páginas copiarem authToken: terminal compartilhado nunca
-  // reabre uma conta pessoal cujo relógio humano já venceu.
+  // Retira só marcadores do portal de unidade descontinuado. O login normal fica intacto.
   try {
-    var unidadeTerminal=JSON.parse(localStorage.getItem('nopulso.unidade')||'null');
-    var tokenTerminal=localStorage.getItem('authToken');
-    var atividadeTerminal=JSON.parse(localStorage.getItem('nopulso.unidade.atividade')||'null');
-    if(unidadeTerminal && tokenTerminal) {
-      var sidTerminal=JSON.parse(atob(tokenTerminal.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sid;
-      if(!atividadeTerminal || atividadeTerminal.sid!==sidTerminal || Date.now()-atividadeTerminal.em >= (unidadeTerminal.inatividadeMinutos||5)*60000) {
-        localStorage.removeItem('authToken');sessionStorage.clear();location.replace('/unidade');
-      }
-    }
-    var sessaoUnidadeScript=document.createElement('script');
-    sessaoUnidadeScript.src='/sessao-unidade.js';sessaoUnidadeScript.defer=true;document.head.appendChild(sessaoUnidadeScript);
-  } catch(e) { /* marcador local ausente/corrompido não concede acesso */ }
+    localStorage.removeItem('nopulso.unidade');
+    localStorage.removeItem('nopulso.unidade.atividade');
+  } catch(e) { /* armazenamento indisponível não muda o acesso */ }
 
   // ---- fontes da marca (NoPulso) ----
   // Nao ha build no projeto: em vez de repetir o <link> nas 53 paginas, o
