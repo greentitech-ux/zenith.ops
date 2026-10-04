@@ -35,6 +35,11 @@ a origem; vazio explícito desabilita o botão. APK de debug antigo não deve
 ser usado nas lojas e, se instalado, precisa ser desinstalado antes da v2.
 O deploy do servidor sozinho não cria nem publica o APK: esperar o workflow.
 
+Publicação v2 confirmada no workflow `37218501985`; todas as etapas passaram.
+Download verificado: 1.579.448 bytes. O certificado no bloco de assinatura
+APK v2 corresponde ao fingerprint da chave permanente acima.
+SHA-256 do APK: `dc5fc118b69ddd25414336bbd146eec35d11b2248ee6741cd3e0cf2c73c8b534`.
+
 O botão e a rota NoPulso são restritos. O binário genérico, sem token nem
 identidade de unidade, fica em Release público deste repositório público;
 essa restrição NÃO torna o arquivo secreto nem impede sua cópia fora do
@@ -55,3 +60,6 @@ HTTP. O cadastro usa o token individual existente desse computador.
 `node testeInstaladorAndroid.js`: permissões, sabotagem, download binário,
 HTML rejeitado, URL insegura, ausência de publicação e credencial não
 encaminhada à origem. `testeRotas.js` também testa as rotas HTTP reais.
+Teste visual em 390/1280 px: sem overflow, botão oculto para não autorizados,
+publicação ausente desabilitada, inscrição com link real. Suíte completa
+permanece com 64 falhas anteriores; os novos testes passaram.
