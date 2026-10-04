@@ -92,7 +92,11 @@ class ServicoAgente : Service() {
         Batida.Resposta(false, null)
       }
       atualizarNotificacao(resposta.ok)
-      talvezChecarVersao()
+      try {
+        val atualizacao = resposta.corpo?.optJSONObject("atualizacaoAndroid")
+        if (atualizacao != null) Atualizacao.receber(applicationContext, atualizacao)
+        else talvezChecarVersao() // Compatibilidade com servidor anterior.
+      } catch (_: Exception) { /* aviso nunca interrompe monitoramento/login */ }
       handler?.postDelayed(this, INTERVALO_MS)
     }
   }

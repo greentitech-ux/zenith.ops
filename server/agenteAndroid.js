@@ -22,7 +22,7 @@
 // novo for publicado, e tem que casar com o versionCode do
 // android/app/build.gradle.kts. Sem subir, nenhum tablet fica sabendo que
 // existe versao nova.
-const VERSAO_AGENTE_ANDROID = 3;
+const VERSAO_AGENTE_ANDROID = 4;
 
 // A publicação assinada e imutável vem do workflow deste repositório.
 // AGENTE_ANDROID_URL pode substituir a origem; vazio explícito desabilita.
@@ -35,6 +35,32 @@ function urlDoApk() {
     return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
   } catch (_) { return ''; }
 }
+
+// Não anunciar APK inexistente. Uma confirmação HEAD por origem/boot;
+// falhas esperam 30s e chamadas concorrentes compartilham a mesma consulta.
+// Sem Firestore; publicação confirmada fica em memória até mudar a origem.
+function criarAnuncio({ consultar = (...args) => fetch(...args), agora = Date.now } = {}) {
+  let origem = '', confirmado = false, tentarEm = 0, emCurso;
+  return async function anuncio(url = urlDoApk()) {
+    if (url !== origem) { origem = url; confirmado = false; tentarEm = 0; emCurso = undefined; }
+    if (!url) return { versao: 0, url: '' };
+    if (!confirmado && agora() >= tentarEm) {
+      if (!emCurso) {
+        const alvo = url;
+        emCurso = (async () => {
+          try {
+            const r = await consultar(alvo, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(5000) });
+            if (origem === alvo) confirmado = r.ok && Number(r.headers.get('content-length')) > 0;
+          } catch (_) { /* não avisar quando a publicação não foi confirmada */ }
+          finally { if (origem === alvo) { tentarEm = agora() + 30000; emCurso = undefined; } }
+        })();
+      }
+      await emCurso;
+    }
+    return confirmado && origem === url ? { versao: VERSAO_AGENTE_ANDROID, url } : { versao: 0, url: '' };
+  };
+}
+const metadadosAtualizacao = criarAnuncio();
 
 // NOC é a permissão existente network-private. Admin não ganha este acesso.
 function podeBaixarInstalador(req) {
@@ -111,4 +137,4 @@ function montarLinkInscricao({ codigo, posto, agentToken, base }) {
   return `nopulso://inscrever?${q.toString()}`;
 }
 
-module.exports = { VERSAO_AGENTE_ANDROID, urlDoApk, montarLinkInscricao, podeBaixarInstalador, baixarInstalador };
+module.exports = { VERSAO_AGENTE_ANDROID, urlDoApk, montarLinkInscricao, podeBaixarInstalador, baixarInstalador, criarAnuncio, metadadosAtualizacao };

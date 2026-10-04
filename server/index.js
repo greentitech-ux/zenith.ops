@@ -2183,7 +2183,9 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // política. O agente a recebe pelo heartbeat e então busca a configuração
     // completa para devolver o inventário, mesmo que o Master ainda não tenha
     // salvo nenhum perfil de estação.
-    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, noPulsoPrintAtalho, capturarAgora, versaoAplicacao, versaoModeloBasico, versaoForcarPapelDeParede, inventarioAtalhosPendenteEm });
+    const atualizacaoAndroid = /^NoPulsoAgente\//.test(String(req.body.userAgent || ''))
+      ? await agenteAndroid.metadadosAtualizacao() : undefined;
+    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, noPulsoPrintAtalho, capturarAgora, versaoAplicacao, versaoModeloBasico, versaoForcarPapelDeParede, inventarioAtalhosPendenteEm, atualizacaoAndroid });
     // BATERIA DO TABLET (ver public/aparelho.js). Sai uma vez por descarga -
     // o aparelho voltando a carregar rearma o aviso. Vai pro mesmo público
     // do NOC (Master/Suporte), nunca pra loja.
@@ -2358,9 +2360,10 @@ app.post('/api/loja-status/rollout-vigia', auth.requireAuth, auth.requireMaster,
 // mesmo motivo da do vigia: quem pergunta e' o aparelho, que nao tem sessao
 // de usuario. Nao devolve nada sobre a loja - so o numero da versao e de onde
 // baixar.
-app.get('/api/loja-status/agente-android/versao', (req, res) => {
+app.get('/api/loja-status/agente-android/versao', async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ versao: agenteAndroid.VERSAO_AGENTE_ANDROID, url: agenteAndroid.urlDoApk() });
+  const publicado = await agenteAndroid.metadadosAtualizacao();
+  res.json({ versao: agenteAndroid.VERSAO_AGENTE_ANDROID, url: publicado.url });
 });
 
 app.get('/api/loja-status/agente-android/baixar', auth.requireAuth, agenteAndroid.baixarInstalador);

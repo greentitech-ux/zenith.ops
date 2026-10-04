@@ -1,12 +1,14 @@
 package br.com.nopulso.agente
 
 import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import org.json.JSONObject
 
 /**
  * EXISTE VERSAO NOVA?
@@ -27,18 +29,32 @@ import android.os.Build
  * card do computador. Menos um lugar pra divergir.
  */
 object Atualizacao {
-  private const val CANAL = "nopulso_agente"
+  private const val CANAL = "nopulso_atualizacoes"
   private const val ID_NOTIFICACAO = 2
 
   fun checar(ctx: Context) {
     val resposta = Batida.pegarJson(
       Identidade.base(ctx) + "/api/loja-status/agente-android/versao"
     ) ?: return
+    receber(ctx, resposta)
+  }
+
+  fun receber(ctx: Context, resposta: JSONObject) {
+    val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     val disponivel = resposta.optInt("versao", 0)
-    if (disponivel <= BuildConfig.VERSION_CODE) return
+    if (disponivel > 0 && disponivel <= BuildConfig.VERSION_CODE) nm.cancel(ID_NOTIFICACAO)
+    val prefs = ctx.getSharedPreferences("nopulso_atualizacoes", Context.MODE_PRIVATE)
+    val avisada = prefs.getInt("versao_avisada", 0)
     val url = resposta.optString("url", "")
-    if (url.isBlank()) return
+    if (!RegraAtualizacao.deveAvisar(BuildConfig.VERSION_CODE, disponivel, avisada, url)) return
+    // Não marcar como avisado se o Android ainda bloqueia as notificações.
+    if (!nm.areNotificationsEnabled()) return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      nm.createNotificationChannel(NotificationChannel(CANAL, "Atualizações NoPulso", NotificationManager.IMPORTANCE_DEFAULT))
+      if (nm.getNotificationChannel(CANAL)?.importance == NotificationManager.IMPORTANCE_NONE) return
+    }
     avisar(ctx, disponivel, url)
+    prefs.edit().putInt("versao_avisada", disponivel).apply()
   }
 
   private fun avisar(ctx: Context, versao: Int, url: String) {

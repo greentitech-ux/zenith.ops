@@ -79,6 +79,26 @@ falha, não há bypass para liberar o usuário fora das unidades autorizadas.
 
 ## Verificação
 
+### Aviso rápido de atualização (APK v4)
+
+A v4 lê `atualizacaoAndroid` na resposta do heartbeat existente (25s).
+Notifica uma vez por versão, guardando a versão avisada em SharedPreferences.
+Não marca como avisada se as notificações do app/canal estiverem bloqueadas.
+Canal Atualizações NoPulso separado do monitoramento silencioso; tocar abre
+download HTTPS. Android ainda exige confirmação para instalar. APKs antigos
+mantêm verificação de 6h: instalar v4 uma primeira vez para obter o novo fluxo.
+
+O servidor só envia esse campo ao userAgent NoPulsoAgente. Confirma publicação
+por HEAD (timeout 5s), com uma chamada compartilhada por URL/boot, sem Firestore.
+Publicação imutável confirmada fica em memória; falha aguarda 30s antes de nova
+tentativa. Não baixar APK inteiro para verificar, não fazer polling por tablet.
+Publicar o APK antes de fazer o deploy do servidor. Após a liberação no servidor,
+tablets v4 conectados avisam na próxima batida; offline recebem quando voltam.
+Não existe instalação silenciosa ou push externo pago nesta implementação.
+
+`testeAvisoAtualizacaoAndroid.js` verifica cache/publicação/HTTP e sabotagem;
+`RegraAtualizacaoTest.kt` verifica nova versão, duplicatas e URL insegura no JVM.
+
 `node testeInstaladorAndroid.js`: permissões, sabotagem, download binário,
 HTML rejeitado, URL insegura, ausência de publicação e credencial não
 encaminhada à origem. `testeRotas.js` também testa as rotas HTTP reais.

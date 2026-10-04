@@ -17,8 +17,8 @@ android {
     // versionCode e o numero que o proprio app compara com o servidor pra
     // saber que existe versao nova (ver VERSAO_AGENTE_ANDROID no servidor).
     // Sobe JUNTO com ela, sempre - senao ninguem migra.
-    versionCode = 3
-    versionName = "3"
+    versionCode = 4
+    versionName = "4"
   }
 
   compileOptions {

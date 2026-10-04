@@ -427,6 +427,10 @@ setTimeout(async () => {
     try {await require('./testeLoginAndroid').testar();await require('./testeLoginAndroid').testarHttp({DOCS,postarJson,pedir,http});process.exit(0);}
     catch(e){console.error(e);process.exit(1);}
   }
+  if(process.env.TESTE_AVISO_ANDROID === '1') {
+    try {await require('./testeAvisoAtualizacaoAndroid').testar();await require('./testeAvisoAtualizacaoAndroid').testarHttp({postarJson});process.exit(0);}
+    catch(e){console.error(e);process.exit(1);}
+  }
 
   // semeia uma CONTAGEM pra sugestao ter base (e o caso do usuario:
   // "tem uma contagem, por que nao tem pre-envio?")
@@ -29988,6 +29992,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e){ruins++;console.log('✗ Instalador Android: '+e.message);}
   try {await require('./testeLoginAndroid').testar();await require('./testeLoginAndroid').testarHttp({DOCS,postarJson,pedir,http});}
   catch(e){ruins++;console.log('✗ Login Android: '+e.message);}
+  try {await require('./testeAvisoAtualizacaoAndroid').testar();await require('./testeAvisoAtualizacaoAndroid').testarHttp({postarJson});}
+  catch(e){ruins++;console.log('✗ Aviso de atualização Android: '+e.message);}
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
