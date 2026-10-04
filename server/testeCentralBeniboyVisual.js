@@ -1,0 +1,118 @@
+'use strict';
+// Interface real, APIs simuladas: não cria conversas nem envia dados a produção.
+const assert = require('assert/strict');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const { chromium } = require('playwright');
+const raiz = path.join(__dirname, 'public');
+const html = fs.readFileSync(path.join(raiz, 'beniboy.html'), 'utf8');
+for (const s of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) new vm.Script(s[1]);
+const agora = new Date().toISOString();
+const me = { id:'suporte-teste', nome:'Suporte teste', username:'Suporte teste', email:'suporte@teste.invalid', role:'master', permissions:{sections:['suporte','network-private']} };
+function conversas() {
+  return [
+    { id:'chat-a', nome:'Ana Atendimento', contato:'ana@teste.invalid', assunto:'Computador/Sistema', lojaContexto:'Unidade Norte', numeroTicket:101, status:'ABERTO', statusAtendimento:'PENDENTE', atualizadoEm:agora, mensagens:[{de:'visitante',texto:'Preciso de ajuda com o computador.',em:agora}], notasInternas:[{situacao:'PENDENTE',resumo:'Conferir impressora',em:agora}], ticketsVinculados:[] },
+    { id:'chat-b', nome:'Bruno Operação', contato:'bruno@teste.invalid', assunto:'Acesso/Senha', lojaContexto:'Unidade Sul', numeroTicket:102, status:'ABERTO', statusAtendimento:'EM_ATENDIMENTO', responsavel:{id:me.id,email:me.email,nome:me.nome}, atualizadoEm:agora, mensagens:[{de:'visitante',texto:'Meu acesso não entrou.',em:agora}] },
+    { id:'chat-c', nome:'Carlos Histórico', contato:'carlos@teste.invalid', assunto:'Suporte geral', lojaContexto:'Unidade Norte', numeroTicket:103, status:'FINALIZADO', statusAtendimento:'RESOLVIDO', atualizadoEm:agora, mensagens:[{de:'suporte',texto:'Resolvido.',em:agora}] },
+  ];
+}
+(async()=>{
+  const navegador=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,headless:true});
+  const destino=path.join(__dirname,'../docs/varredura');
+  fs.mkdirSync(destino,{recursive:true});
+  try {
+    for(const [largura,tema] of [[1440,'escuro'],[1024,'claro'],[390,'escuro']]) {
+      const page=await navegador.newPage({viewport:{width:largura,height:900}});
+      const erros=[];page.on('pageerror',e=>erros.push(e.message));
+      let itens=conversas(), envios=0, negar=false;
+      await page.addInitScript(({tema})=>{ localStorage.setItem('authToken','teste');localStorage.setItem('zenithTema',tema); },{tema});
+      await page.route('**/*',async route=>{
+        const u=new URL(route.request().url());
+        if(u.pathname.startsWith('/api/')) {
+          let dados=[];
+          if(u.pathname==='/api/me') dados=me;
+          if(u.pathname==='/api/stream') return route.fulfill({contentType:'text/event-stream',body:': teste\n\n'});
+          if(u.pathname==='/api/suporte-chats') return route.fulfill({status:negar?503:200,json:negar?{error:'teste'}:itens});
+          if(u.pathname.endsWith('/responder')) {
+            envios++;
+            const id=u.pathname.split('/')[3],texto=route.request().postDataJSON().texto;
+            itens.find(c=>c.id===id).mensagens.push({de:'suporte',texto,em:agora});dados={ok:true};
+          }
+          return route.fulfill({json:dados});
+        }
+        const relativo=u.pathname==='/beniboy'?'beniboy.html':u.pathname.slice(1);
+        const arquivo=path.resolve(raiz,relativo);
+        if(!arquivo.startsWith(raiz+path.sep)||!fs.existsSync(arquivo)||!fs.statSync(arquivo).isFile()) return route.fulfill({status:404,body:''});
+        return route.fulfill({path:arquivo});
+      });
+      await page.goto('https://nopulso.teste/beniboy');
+      await page.locator('.fila-card').first().waitFor();
+      assert.equal(await page.locator('.fila-card').count(),2,'padrão não mistura encerradas à fila');
+      await page.locator('[data-id="chat-a"].fila-card').click();
+      await page.locator('#d-texto-chat-a').fill('Rascunho da Ana');
+      if(largura<=760) await page.getByRole('button',{name:'← Fila',exact:true}).click();
+      await page.locator('[data-id="chat-b"].fila-card').click();
+      await page.getByRole('button',{name:'Ana Atendimento',exact:true}).click();
+      assert.equal(await page.locator('#d-texto-chat-a').inputValue(),'Rascunho da Ana','trocar de conversa preserva texto');
+      await page.evaluate(()=>carregarLista());
+      assert.equal(await page.locator('#d-texto-chat-a').inputValue(),'Rascunho da Ana','atualização preserva texto');
+      assert.equal(await page.locator('.painel-conversa:visible').count(),1,'somente conversa ativa visível');
+      await page.getByRole('button',{name:'Dados da conversa',exact:true}).click();
+      assert.equal(await page.locator('#contexto-corpo').innerText().then(s=>s.includes('ana@teste.invalid')),true);
+      assert.equal(await page.locator('#contexto-corpo').innerText().then(s=>s.includes('nota(s) do Beniboy')),true);
+      await page.getByRole('button',{name:'Dados da conversa',exact:true}).click();
+      await page.getByRole('button',{name:'Enviar',exact:true}).click();
+      await page.waitForFunction(()=>document.getElementById('d-texto-chat-a')?.value==='');
+      assert.equal(envios,1);
+      assert.equal(await page.locator('.painel-conversa:visible').innerText().then(s=>s.includes('Rascunho da Ana')),true);
+      // O arquivo selecionado também acompanha a aba, não só o texto.
+      await page.locator('#d-anexo-chat-a').setInputFiles({name:'print-teste.png',mimeType:'image/png',buffer:Buffer.from('print-de-teste')});
+      await page.getByRole('button',{name:'Bruno Operação',exact:true}).click();
+      await page.getByRole('button',{name:'Ana Atendimento',exact:true}).click();
+      assert.equal(await page.evaluate(()=>RASCUNHOS_PAINEL_CHAT.get('chat-a')?.arquivo?.name),'print-teste.png');
+      await page.evaluate(()=>limparRascunhoResposta('chat-a'));
+      if(largura<=760) await page.getByRole('button',{name:'← Fila',exact:true}).click();
+      await page.getByRole('button',{name:'Meus atendimentos',exact:true}).click();
+      assert.equal(await page.locator('.fila-card').count(),1);
+      assert.equal(await page.locator('.fila-card').getAttribute('data-id'),'chat-b');
+      await page.getByRole('button',{name:'Meus atendimentos',exact:true}).click();
+      await page.getByLabel('Status das conversas').selectOption('TODAS');
+      assert.equal(await page.locator('.fila-card').count(),3);
+      await page.getByLabel('Unidade das conversas').selectOption('Unidade Norte');
+      assert.equal(await page.locator('.fila-card').count(),2);
+      await page.getByLabel('Buscar conversas').fill('103');
+      assert.equal(await page.locator('.fila-card').getAttribute('data-id'),'chat-c');
+      await page.getByLabel('Buscar conversas').fill('');
+      await page.getByLabel('Unidade das conversas').selectOption('');
+      await page.getByLabel('Status das conversas').selectOption('ABERTAS');
+      await page.locator('[data-id="chat-a"].fila-card').click();
+      // Sabotagem: retirar o estado de rascunhos precisa reprovar a mesma regra.
+      await page.locator('#d-texto-chat-a').fill('Resposta protegida');
+      await page.evaluate(()=>{
+        guardarEstadoPaineis();
+        document.getElementById('d-texto-chat-a').value='';
+        RASCUNHOS_PAINEL_CHAT.clear();restaurarEstadoPaineis();
+      });
+      const sabotado=await page.locator('#d-texto-chat-a').inputValue();
+      assert.throws(()=>assert.equal(sabotado,'Resposta protegida'),'teste detecta perda de rascunho');
+      negar=true;await page.evaluate(()=>carregarLista());
+      assert.equal(await page.locator('#central-erro').isVisible(),true);
+      assert.equal(await page.locator('.fila-card').count(),2,'erro não apaga fila');
+      negar=false;await page.evaluate(()=>carregarLista());
+      assert.equal(await page.locator('#central-erro').isVisible(),false);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'sem rolagem horizontal');
+      const enviar=await page.getByRole('button',{name:'Enviar',exact:true}).boundingBox();
+      assert.ok(enviar && enviar.y+enviar.height<=900,'resposta sempre dentro da tela');
+      assert.deepEqual(erros,[]);
+      await page.screenshot({path:path.join(destino,`central-beniboy-${largura}-${tema}.png`),fullPage:true});
+      // A mesma página não pode mostrar conversas para quem não tem a seção.
+      await page.route('**/api/me',route=>route.fulfill({json:{id:'sem-acesso',role:'user',permissions:{sections:[]}}}));
+      await page.reload();
+      await page.locator('#sem-acesso').waitFor({state:'visible'});
+      assert.equal(await page.locator('#root').isVisible(),false);
+      await page.close();
+    }
+    console.log('✓ Central Beniboy: desktop/tablet/celular, filtros, abas, rascunhos, envio, contexto, rede e sabotagem.');
+  } finally {await navegador.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

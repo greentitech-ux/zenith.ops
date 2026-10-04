@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Central do Beniboy · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
@@ -136,6 +136,58 @@
   .painel-conversa h3{margin:0 0 4px;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .painel-conversa .sub{font-size:11px;color:var(--muted);font-family:var(--mono);}
   @media(max-width:640px){ .painel-conversa{width:300px;} }
+  /* Central dedicada: fila, conversa e contexto têm rolagens independentes. */
+  body{padding:0;height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
+  header{position:relative;margin:0;padding:12px 20px;flex:none;}
+  #root{flex:1;min-height:0;display:flex;flex-direction:column;}
+  .central-barra{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .central-barra .sub{color:var(--muted);font-size:12px;}
+  #central-erro{padding:8px 20px;color:var(--bad);font-size:12px;}
+  .central-mesa{flex:1;min-height:0;display:grid;grid-template-columns:300px minmax(0,1fr) 270px;}
+  .central-fila{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:var(--panel);}
+  .central-filtros{padding:12px;display:grid;gap:8px;border-bottom:1px solid var(--line);}
+  .central-filtros input,.central-filtros select{font-size:12px;padding:9px;}
+  .central-filtros .chip{text-align:left;}
+  .central-fila #kanban-wrap{overflow-y:auto;padding:8px;flex:1;min-height:0;}
+  .fila-card{width:100%;text-align:left;cursor:pointer;margin-bottom:6px;font-family:inherit;color:var(--text);}
+  .fila-card.selecionado{border-color:var(--accent);box-shadow:inset 3px 0 var(--accent);}
+  .fila-status{font-size:10px;color:var(--muted);margin-left:auto;}
+  .central-conversas{display:flex;flex-direction:column;min-height:0;}
+  #conversas-abas{display:flex;gap:6px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid var(--line);flex:none;min-height:54px;}
+  .conversa-aba{display:flex;align-items:center;gap:4px;flex:none;border:1px solid var(--line);border-radius:8px;background:var(--panel);}
+  .conversa-aba.ativa{border-color:var(--accent);}
+  .conversa-aba button{background:none;border:none;color:var(--muted);padding:8px;cursor:pointer;font-family:inherit;}
+  .conversa-aba.ativa button:first-child{color:var(--accent);}
+  .conversa-aba button:first-child{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .paineis-outer{margin:0;flex:1;min-height:0;display:flex;flex-direction:column;}
+  .paineis-wrap,.paineis{height:100%;min-height:0;min-width:0;overflow:hidden;display:block;padding:0;}
+  .painel-conversa{width:100%;height:100%;max-height:none;border:0;border-radius:0;padding:16px;min-height:0;}
+  .painel-conversa .painel-msgs{flex:1;min-height:80px;max-height:none!important;padding:12px 0;}
+  .painel-conversa .sub{line-height:1.6;overflow-wrap:anywhere;}
+  .msg-item{font-size:14px;overflow-wrap:anywhere;}
+  .central-contexto{border-left:1px solid var(--line);padding:16px;overflow-y:auto;background:var(--panel);}
+  .central-contexto h2{margin-bottom:16px;}
+  .contexto-campo{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere;}
+  .contexto-campo small{display:block;color:var(--muted);margin-bottom:5px;font-size:11px;}
+  .contexto-campo strong{font-size:13px;}
+  .central-contexto .d-tickets,.central-contexto .d-alerta-seguranca{margin-top:12px;overflow-wrap:anywhere;}
+  #central-vazio{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;color:var(--muted);gap:12px;}
+  #central-vazio strong{font-size:20px;color:var(--text);}
+  .central-mobile-voltar{display:none;}
+  #central-atendente{font-size:12px;color:var(--muted);}
+  /* Nesta tela o atendimento já ocupa a mesa: o balão flutuante não cobre Enviar. */
+  .szc-btn,.szc-panel{display:none!important;}
+  @media(max-width:1150px){.central-mesa{grid-template-columns:270px minmax(0,1fr);} .central-contexto{display:none;} .central-mesa.ver-contexto{grid-template-columns:270px minmax(0,1fr) 240px;} .central-mesa.ver-contexto .central-contexto{display:block;}}
+  @media(max-width:760px){
+    header{padding:10px 12px;} .header-nav{margin-top:0;} #bb-marca{display:none!important;}
+    .central-barra{padding:8px 12px;gap:6px;} .central-barra .sub{display:none;}
+    .central-mesa,.central-mesa.ver-contexto{display:flex;flex-direction:column;}
+    .central-fila{flex:1;border:0;} .central-conversas{display:none;flex:1;}
+    .central-mesa.com-conversa .central-fila{display:none;} .central-mesa.com-conversa .central-conversas{display:flex;}
+    .central-mobile-voltar{display:inline-block;} .central-mesa.ver-contexto .central-contexto{display:block;flex:1;border:0;}
+    .central-mesa.ver-contexto .central-fila,.central-mesa.ver-contexto .central-conversas{display:none;}
+    .painel-conversa{padding:10px;} h1{font-size:16px;} .eyebrow{font-size:8px;}
+  }
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -151,6 +203,7 @@
       </div>
     </div>
     <div class="header-nav">
+      <a class="btn-notif" href="/beniboy" target="_blank" rel="noopener" aria-label="Abrir central em outra aba" title="Abrir central em outra aba">↗</a>
       <button class="btn-notif" onclick="abrirMensagemDireta()" title="Mandar mensagem direta pra alguém">💬</button>
       <button class="btn-notif" onclick="carregarLista()" title="Atualizar">🔄</button>
       <div class="nav-divider"></div>
@@ -165,27 +218,36 @@
 <div id="sem-acesso" class="empty hidden">Você não tem acesso à Central do Beniboy. Fale com o administrador (Master).</div>
 
 <div id="root" class="hidden">
-  <div class="panel">
-    <h2>Setor de atendimento do Beniboy <span class="sub" id="total-count" style="font-family:var(--mono);color:var(--muted);font-size:11px;font-weight:400;"></span></h2>
-    <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:10px;">Toda conversa do chat de suporte (💬 balãozinho / Beniboy) passa por aqui. Arraste um card pra outra coluna pra mover, ou abra e use "Mover para" — o mesmo vale pra quem responde do celular. N1 = Beniboy sozinho, N2 = agente do time de Suporte, N3 = Master.</div>
-    <div class="filtros">
-      <input type="text" id="f-busca" placeholder="Buscar por nome, contato, assunto..." oninput="renderKanban()">
-      <button type="button" class="chip" id="chip-desbloqueio" onclick="toggleFiltroDesbloqueio()">🔓 Só desbloqueios</button>
-    </div>
+  <div class="central-barra">
+    <div><h2>Central de atendimento <span id="total-count"></span></h2><div class="sub">Chat, anexos e acompanhamento em um só lugar · N1 Beniboy · N2 Suporte · N3 Master</div></div>
+    <span id="central-atendente"></span>
+    <button class="btn-ghost" onclick="toggleContexto()" aria-controls="central-contexto">Dados da conversa</button>
   </div>
-  <div class="kanban-wrap">
-    <div class="kanban" id="kanban-wrap"></div>
-  </div>
-
-  <div class="paineis-outer hidden" id="paineis-outer">
-    <div class="paineis-cab">
-      <span class="paineis-titulo">💬 Conversas abertas<span class="paineis-count" id="paineis-count"></span></span>
-      <button type="button" class="btn-ghost" onclick="fecharTodosPaineis()">Fechar todas</button>
+  <div id="central-erro" class="hidden" role="alert"></div>
+  <div class="central-mesa" id="central-mesa">
+    <aside class="central-fila" aria-label="Fila de atendimento">
+      <div class="central-filtros">
+        <input type="search" id="f-busca" aria-label="Buscar conversas" placeholder="Nome, contato, assunto ou protocolo" oninput="renderKanban()">
+        <select id="f-status" aria-label="Status das conversas" onchange="renderKanban()"><option value="ABERTAS">Conversas abertas</option><option value="TODAS">Todas as conversas</option></select>
+        <select id="f-unidade" aria-label="Unidade das conversas" onchange="renderKanban()"><option value="">Todas as unidades</option></select>
+        <button type="button" class="chip" id="chip-minhas" onclick="toggleMinhas()" aria-pressed="false">Meus atendimentos</button>
+        <button type="button" class="chip" id="chip-desbloqueio" onclick="toggleFiltroDesbloqueio()" aria-pressed="false">🔓 Só desbloqueios</button>
+      </div>
+      <div id="kanban-wrap"></div>
+    </aside>
+    <main class="central-conversas" aria-label="Conversa em atendimento">
+      <div style="padding:6px 12px;"><button class="btn-ghost central-mobile-voltar" onclick="voltarFila()">← Fila</button></div>
+      <div id="conversas-abas" aria-label="Conversas abertas"></div>
+      <div id="central-vazio"><span id="central-avatar"></span><strong>Seu espaço de atendimento</strong><span>Selecione uma conversa na fila para acompanhar e responder.</span></div>
+      <div class="paineis-outer hidden" id="paineis-outer">
+        <span id="paineis-count" class="hidden"></span>
+        <div class="paineis-wrap"><div class="paineis" id="paineis-wrap"></div></div>
+      </div>
+    </main>
+    <aside class="central-contexto" id="central-contexto" aria-label="Dados da conversa">
+      <h2>Dados da conversa</h2><div id="contexto-corpo" class="sub">Selecione uma conversa para ver o contexto.</div>
+    </aside>
     </div>
-    <div class="paineis-wrap">
-      <div class="paineis" id="paineis-wrap"></div>
-    </div>
-  </div>
 </div>
 
 <div class="overlay hidden" id="overlay-acao">
@@ -261,6 +323,7 @@ function tempoRelativo(iso){
 
 let ME = null, IS_MASTER = false, IS_ADMIN = false;
 let ITENS = [];
+let CONVERSA_ATIVA = null, FILTRO_MINHAS = false;
 let FILTRO_DESBLOQUEIO = false;
 let PAINEIS_ABERTOS = []; // ids das conversas abertas agora, na ordem em que foram abertas - mais de uma ao mesmo tempo, ver renderPaineis()
 let DRAG_ID = null;
@@ -305,38 +368,45 @@ function ultimaMsg(chat){
 
 function passaFiltro(chat){
   if(FILTRO_DESBLOQUEIO && !chat.desbloqueio) return false;
+  if(FILTRO_MINHAS && chat.responsavel?.id!==ME?.id && (!ME?.email || chat.responsavel?.email!==ME.email)) return false;
+  const status = document.getElementById('f-status').value;
+  if(status==='ABERTAS' && ['RESOLVIDO','SEM_SOLUCAO'].includes(statusDe(chat))) return false;
+  if(status!=='ABERTAS' && status!=='TODAS' && statusDe(chat)!==status) return false;
+  const unidade = document.getElementById('f-unidade').value;
+  if(unidade && chat.lojaContexto!==unidade) return false;
   const q = (document.getElementById('f-busca').value||'').trim().toLowerCase();
   if(!q) return true;
-  const alvo = [chat.nome, chat.contato, chat.assunto, chat.lojaContexto].filter(Boolean).join(' ').toLowerCase();
+  const alvo = [chat.nome, chat.contato, chat.assunto, chat.lojaContexto, chat.numeroTicket].filter(Boolean).join(' ').toLowerCase();
   return alvo.includes(q);
 }
 
 function toggleFiltroDesbloqueio(){
   FILTRO_DESBLOQUEIO = !FILTRO_DESBLOQUEIO;
   document.getElementById('chip-desbloqueio').classList.toggle('ativo', FILTRO_DESBLOQUEIO);
+  document.getElementById('chip-desbloqueio').setAttribute('aria-pressed', String(FILTRO_DESBLOQUEIO));
   renderKanban();
+}
+function toggleMinhas(){
+  FILTRO_MINHAS = !FILTRO_MINHAS;
+  document.getElementById('chip-minhas').classList.toggle('ativo', FILTRO_MINHAS);
+  document.getElementById('chip-minhas').setAttribute('aria-pressed', String(FILTRO_MINHAS));
+  renderKanban();
+}
+function toggleContexto(){document.getElementById('central-mesa').classList.toggle('ver-contexto');}
+function voltarFila(){document.getElementById('central-mesa').classList.remove('com-conversa','ver-contexto');}
+function montarFiltroUnidades(){
+  const sel=document.getElementById('f-unidade'), anterior=sel.value;
+  const unidades=[...new Set(ITENS.map(c=>c.lojaContexto).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  sel.innerHTML='<option value="">Todas as unidades</option>'+unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+  if(unidades.includes(anterior)) sel.value=anterior;
 }
 
 function renderKanban(){
   const visiveis = ITENS.filter(passaFiltro);
   document.getElementById('total-count').textContent = ITENS.length ? `· ${visiveis.length} de ${ITENS.length} conversa(s)` : '';
-  const porColuna = new Map(COLUNAS.map(c=>[c.key, []]));
-  visiveis.forEach(chat=>{ (porColuna.get(statusDe(chat))||porColuna.get('PENDENTE')).push(chat); });
-  porColuna.forEach(lista=>lista.sort((a,b)=>(b.atualizadoEm||'').localeCompare(a.atualizadoEm||'')));
-
   const wrap = document.getElementById('kanban-wrap');
-  wrap.innerHTML = COLUNAS.map(col=>{
-    const lista = porColuna.get(col.key) || [];
-    return `<div class="kcol" style="--col-cor:${col.cor};" data-status="${col.key}" ondragover="onColDragOver(event)" ondragleave="onColDragLeave(event)" ondrop="onColDrop(event,'${col.key}')">
-      <div class="kcol-head">
-        <span class="kcol-titulo">${col.icone} ${col.label}</span>
-        <span class="kcol-count">${lista.length}</span>
-      </div>
-      <div class="kcol-corpo">
-        ${lista.length ? lista.map(chat=>cardHtml(chat)).join('') : '<div class="kcol-vazio">Nenhuma conversa aqui.</div>'}
-      </div>
-    </div>`;
-  }).join('');
+  visiveis.sort((a,b)=>(b.atualizadoEm||'').localeCompare(a.atualizadoEm||''));
+  wrap.innerHTML = visiveis.length ? visiveis.map(cardHtml).join('') : '<div class="empty">Nenhuma conversa neste filtro.</div>';
 }
 
 function cardHtml(chat){
@@ -344,20 +414,23 @@ function cardHtml(chat){
   const um = ultimaMsg(chat);
   const tickets = chat.ticketsVinculados || [];
   const ultimoTicket = tickets[tickets.length-1];
-  return `<div class="kcard" draggable="true" data-id="${chat.id}" ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" onclick="abrirDetalhePorId('${chat.id}')">
+  const coluna=COLUNAS.find(c=>c.key===statusDe(chat));
+  return `<button type="button" class="kcard fila-card ${CONVERSA_ATIVA===chat.id?'selecionado':''}" data-id="${escapeHtml(chat.id)}" aria-pressed="${CONVERSA_ATIVA===chat.id}" onclick="abrirDetalhePorId(this.dataset.id)">
     <div class="kcard-top">
       <span class="nivel-badge nivel-${nivel}">N${nivel}</span>
+      <span class="fila-status">${coluna?coluna.label:escapeHtml(statusDe(chat))}</span>
       ${chat.desbloqueio ? '<span class="tag-desbloqueio">🔓 Desbloqueio</span>' : ''}
       ${ultimoTicket ? `<span class="tag-ticket">🎫 #${escapeHtml(ultimoTicket.numero)}${tickets.length>1?` +${tickets.length-1}`:''}</span>` : ''}
     </div>
     <div class="kcard-nome">${escapeHtml(chat.nome||'Visitante')}${chat.numeroTicket ? ` <span style="font-weight:400;opacity:.65;">· #${escapeHtml(chat.numeroTicket)}</span>` : ''}</div>
     <div class="kcard-assunto">${escapeHtml(chat.assunto || 'Suporte geral')}</div>
+    <div class="kcard-prev">${escapeHtml(chat.lojaContexto||'Unidade não informada')}</div>
     <div class="kcard-prev">${um ? escapeHtml(um.de)+': '+escapeHtml(um.texto||'(sem texto)') : 'Sem mensagens.'}</div>
     <div class="kcard-meta">
       <span>${chat.responsavel ? '👤 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||'') : (nivel===1 ? (window.beniboySVG ? window.beniboySVG(20)+' Beniboy' : 'Beniboy') : '—')}</span>
       <span>${tempoRelativo(chat.atualizadoEm)}</span>
     </div>
-  </div>`;
+  </button>`;
 }
 
 // ---------- drag and drop ----------
@@ -614,24 +687,23 @@ function abrirDetalhePorId(id){
   const chat = ITENS.find(c=>c.id===id);
   if(!chat) return;
   if(!PAINEIS_ABERTOS.includes(id)) PAINEIS_ABERTOS.push(id);
+  guardarEstadoPaineis();
+  CONVERSA_ATIVA=id;
   renderPaineis();
-  // rola so a FAIXA horizontal de paineis pra trazer o novo painel a vista -
-  // scrollIntoView() rola a pagina inteira (todos os ancestrais roláveis),
-  // o que empurrava o kanban pra fora da tela quando o painel nasce la
-  // embaixo, fora do viewport. Mexendo direto no scrollLeft da faixa isso
-  // nao acontece: so a faixa de conversas se move, o resto da pagina fica
-  // parado.
-  requestAnimationFrame(()=>{
-    const wrap = document.getElementById('paineis-wrap');
-    const el = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"]`);
-    if(wrap && el) wrap.scrollLeft = el.offsetLeft + el.offsetWidth - wrap.clientWidth;
-  });
+  renderKanban();
 }
 function fecharPainel(id){
+  guardarEstadoPaineis();
+  const rascunho=RASCUNHOS_PAINEL_CHAT.get(id);
+  if((rascunho?.texto || rascunho?.arquivo) && !confirm('Fechar esta conversa e descartar a resposta ainda não enviada?')) return;
+  RASCUNHOS_PAINEL_CHAT.delete(id); ROLAGEM_PAINEL_CHAT.delete(id);
+  limparRascunhoResposta(id);
   PAINEIS_ABERTOS = PAINEIS_ABERTOS.filter(x=>x!==id);
+  if(CONVERSA_ATIVA===id) CONVERSA_ATIVA=PAINEIS_ABERTOS.at(-1)||null;
   renderPaineis();
+  renderKanban();
 }
-function fecharTodosPaineis(){ PAINEIS_ABERTOS = []; renderPaineis(); }
+function fecharTodosPaineis(){ [...PAINEIS_ABERTOS].forEach(fecharPainel); }
 
 function painelHtml(chat){
   const statusAtual = statusDe(chat);
@@ -778,6 +850,7 @@ function anexoHtml(chatId, m){
 // quem esta atendendo (nem mandar quem leu algo antigo de volta para o fim).
 const RASCUNHOS_PAINEL_CHAT = new Map();
 const ROLAGEM_PAINEL_CHAT = new Map();
+const ENVIOS_PAINEL_CHAT = new Set();
 
 function guardarEstadoPaineis(){
   PAINEIS_ABERTOS.forEach(id=>{
@@ -797,7 +870,7 @@ function guardarEstadoPaineis(){
       else RASCUNHOS_PAINEL_CHAT.delete(id);
     }
     const mensagens = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"] .painel-msgs`);
-    if(mensagens){
+    if(mensagens && mensagens.clientHeight){
       const distanciaDoFim = mensagens.scrollHeight - mensagens.scrollTop - mensagens.clientHeight;
       ROLAGEM_PAINEL_CHAT.set(id, { noFim: distanciaDoFim < 24, topo: mensagens.scrollTop });
     }
@@ -830,9 +903,10 @@ function restaurarEstadoPaineis(){
     const input = document.getElementById(`d-texto-${id}`);
     if(estado && input){
       input.value = estado.texto || '';
+      input.disabled = ENVIOS_PAINEL_CHAT.has(id);
       const inicio = Math.min(Number.isInteger(estado.inicio) ? estado.inicio : input.value.length, input.value.length);
       const fim = Math.min(Number.isInteger(estado.fim) ? estado.fim : inicio, input.value.length);
-      if(estado.focado){
+      if(estado.focado && id===CONVERSA_ATIVA){
         input.focus();
         try { input.setSelectionRange(inicio, fim); } catch(e) { /* campo pode estar desabilitado */ }
       }
@@ -854,12 +928,32 @@ function renderPaineis(){
   guardarEstadoPaineis();
   // remove da lista qualquer conversa que sumiu (filtro, etc.)
   PAINEIS_ABERTOS = PAINEIS_ABERTOS.filter(id=>ITENS.some(c=>c.id===id));
+  if(!PAINEIS_ABERTOS.includes(CONVERSA_ATIVA)) CONVERSA_ATIVA=PAINEIS_ABERTOS.at(-1)||null;
   const outer = document.getElementById('paineis-outer');
   const wrap = document.getElementById('paineis-wrap');
   outer.classList.toggle('hidden', !PAINEIS_ABERTOS.length);
   document.getElementById('paineis-count').textContent = PAINEIS_ABERTOS.length ? ` · ${PAINEIS_ABERTOS.length}` : '';
+  document.getElementById('central-vazio').classList.toggle('hidden',!!CONVERSA_ATIVA);
+  document.getElementById('central-mesa').classList.toggle('com-conversa',!!CONVERSA_ATIVA);
+  const abas=document.getElementById('conversas-abas');
+  abas.innerHTML=PAINEIS_ABERTOS.map(id=>{
+    const chat=ITENS.find(c=>c.id===id);
+    return `<div class="conversa-aba ${id===CONVERSA_ATIVA?'ativa':''}" data-id="${escapeHtml(id)}"><button type="button" aria-pressed="${id===CONVERSA_ATIVA}" onclick="abrirDetalhePorId(this.parentElement.dataset.id)">${escapeHtml(chat.nome||'Visitante')}</button><button type="button" aria-label="Fechar conversa de ${escapeHtml(chat.nome||'Visitante')}" onclick="fecharPainel(this.parentElement.dataset.id)">×</button></div>`;
+  }).join('');
+  const contexto=document.getElementById('contexto-corpo');
+  contexto.innerHTML='Selecione uma conversa para ver o contexto.';
   if(!PAINEIS_ABERTOS.length){ wrap.innerHTML = ''; return; }
   wrap.innerHTML = PAINEIS_ABERTOS.map(id=>painelHtml(ITENS.find(c=>c.id===id))).join('');
+  wrap.querySelectorAll('.painel-conversa').forEach(p=>p.classList.toggle('hidden',p.dataset.painelId!==CONVERSA_ATIVA));
+  const selecionada=ITENS.find(c=>c.id===CONVERSA_ATIVA);
+  const campo=(nome,valor)=>`<div class="contexto-campo"><small>${nome}</small><strong>${escapeHtml(valor||'Não informado')}</strong></div>`;
+  contexto.innerHTML=campo('Solicitante',selecionada.nome)+campo('Contato',selecionada.contato)
+    +campo('Unidade',selecionada.lojaContexto)+campo('Assunto',selecionada.assunto)
+    +campo('Responsável',selecionada.responsavel?.nome||selecionada.responsavel?.email||'Beniboy / sem responsável humano')
+    +campo('Protocolo',selecionada.numeroTicket)+campo('Última atualização',fmtDataHora(selecionada.atualizadoEm));
+  // Reaproveita os controles existentes: nenhuma nova rota de dados ou permissão.
+  const painel=wrap.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(CONVERSA_ATIVA)}"]`);
+  painel.querySelectorAll(':scope > .d-tickets, :scope > .d-alerta-seguranca').forEach(el=>contexto.appendChild(el));
   // Ctrl+V cola o print na resposta - um por painel aberto. O innerHTML acima
   // recria os campos, entao religar aqui e o certo (o helper do tema.js
   // marca o campo pra nao ligar duas vezes no mesmo elemento)
@@ -873,6 +967,7 @@ function renderPaineis(){
 }
 
 async function enviarResposta(id){
+  if(ENVIOS_PAINEL_CHAT.has(id)) return;
   const input = document.getElementById(`d-texto-${id}`);
   if(!input) return;
   const texto = input.value.trim();
@@ -880,6 +975,7 @@ async function enviarResposta(id){
   const arquivo = (document.getElementById(`d-anexo-${id}`)||{}).files?.[0]
     || (RASCUNHOS_PAINEL_CHAT.get(id) || {}).arquivo || null;
   if(!texto && !arquivo) return;
+  ENVIOS_PAINEL_CHAT.add(id);
   input.disabled = true;
   try{
     // multipart so quando ha anexo - sem arquivo o corpo segue JSON, que e o
@@ -899,6 +995,10 @@ async function enviarResposta(id){
     alert(err.message);
     const el = document.getElementById(`d-texto-${id}`);
     if(el) el.disabled = false;
+  }finally{
+    ENVIOS_PAINEL_CHAT.delete(id);
+    const el=document.getElementById(`d-texto-${id}`);
+    if(el) el.disabled=false;
   }
 }
 
@@ -936,12 +1036,28 @@ async function baixarPdfConversa(id){
   }catch(e){ alert('Erro ao gerar o PDF.'); }
 }
 
+let CARREGAMENTO_LISTA=null;
 async function carregarLista(){
+  if(CARREGAMENTO_LISTA) return CARREGAMENTO_LISTA;
+  CARREGAMENTO_LISTA=atualizarLista();
+  try{return await CARREGAMENTO_LISTA;}finally{CARREGAMENTO_LISTA=null;}
+}
+async function atualizarLista(){
   try{
-    ITENS = await fetch('/api/suporte-chats').then(r=>r.json());
+    const resp=await fetch('/api/suporte-chats');
+    if(!resp.ok) throw new Error('Não foi possível atualizar a fila.');
+    const lista=await resp.json();
+    if(!Array.isArray(lista)) throw new Error('Resposta da fila inválida.');
+    ITENS = lista;
+    document.getElementById('central-erro').classList.add('hidden');
+    montarFiltroUnidades();
     renderKanban();
     renderPaineis();
-  }catch(e){ /* rede fora - mantem lista anterior */ }
+  }catch(e){
+    const erro=document.getElementById('central-erro');
+    erro.textContent='Não foi possível atualizar o atendimento. A lista anterior foi mantida. Use Atualizar para tentar novamente.';
+    erro.classList.remove('hidden');
+  }
 }
 // carregado uma vez (não muda tão rápido quanto a lista de conversas) - só
 // pra alimentar o atalho "Ir para o NOC" no painel de cada conversa
@@ -986,23 +1102,7 @@ function unidadeComAcessoRemoto(nomeLoja){
 
 
 function conectarStream(){
-  try{
-    const es = new EventSource('/api/stream?token='+encodeURIComponent(AUTH_TOKEN));
-    es.addEventListener('suporte-chat', ()=>{
-      carregarLista();
-    });
-    // pausar item / fechar loja no agregador (ver chamar_coordenador_agregador
-    // em suporteBot.js): o pedido ja esta na conversa como nota interna - so
-    // traz a lista na hora, sem esperar o poll de 60s
-    // O NOME ESTAVA ERRADO ate 24/09: a tela ouvia `beniboy-agregador`, que o
-    // servidor NUNCA mandou - ele manda `agregador-pedido` (3 pontos no
-    // index.js). Ou seja, este trecho existia e nao fazia nada: a lista so
-    // vinha no poll de 60s, justamente no painel que existe pra avisar na
-    // hora que a loja pausou item ou fechou.
-    es.addEventListener('agregador-pedido', ()=>{
-      carregarLista();
-    });
-  }catch(e){ /* sem SSE, so atualiza no reload/poll */ }
+  window.zenithAoVivo && zenithAoVivo(['suporte-chat','agregador-pedido'], ()=>carregarLista());
 }
 
 async function boot(){
@@ -1017,6 +1117,9 @@ async function boot(){
     return;
   }
   document.getElementById('root').classList.remove('hidden');
+  document.getElementById('central-atendente').textContent='Atendente: '+(ME.username||ME.nome||ME.email||'Suporte');
+  document.getElementById('central-avatar').innerHTML=window.beniboySVG?window.beniboySVG(64):'';
+  document.getElementById('f-status').insertAdjacentHTML('beforeend',COLUNAS.map(c=>`<option value="${c.key}">${c.label}</option>`).join(''));
   await carregarLista();
   carregarNoc();
   conectarStream();
