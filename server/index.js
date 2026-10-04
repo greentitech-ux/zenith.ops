@@ -2183,8 +2183,13 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // política. O agente a recebe pelo heartbeat e então busca a configuração
     // completa para devolver o inventário, mesmo que o Master ainda não tenha
     // salvo nenhum perfil de estação.
-    const atualizacaoAndroid = /^NoPulsoAgente\//.test(String(req.body.userAgent || ''))
-      ? await agenteAndroid.metadadosAtualizacao() : undefined;
+    const apk = /^NoPulsoAgente\/(\d+)/.exec(String(req.body.userAgent || ''));
+    // Tablet já atualizado não precisa receber o endereço inteiro a cada 25s.
+    const atualizacaoAndroid = apk
+      ? Number(apk[1]) < agenteAndroid.VERSAO_AGENTE_ANDROID
+        ? await agenteAndroid.metadadosAtualizacao()
+        : { versao: agenteAndroid.VERSAO_AGENTE_ANDROID }
+      : undefined;
     res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, noPulsoPrintAtalho, capturarAgora, versaoAplicacao, versaoModeloBasico, versaoForcarPapelDeParede, inventarioAtalhosPendenteEm, atualizacaoAndroid });
     // BATERIA DO TABLET (ver public/aparelho.js). Sai uma vez por descarga -
     // o aparelho voltando a carregar rearma o aviso. Vai pro mesmo público

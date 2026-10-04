@@ -26,9 +26,11 @@ async function testarHttp({postarJson}) {
   let chamadas=0;
   agente.metadadosAtualizacao=async()=>{chamadas++;return {versao:agente.VERSAO_AGENTE_ANDROID,url:'https://arquivos.example/agente.apk'};};
   try {
-    const android=await postarJson('/api/loja-status/heartbeat',{unidade:'AVISO_APK_TESTE',posto:'TABLET',userAgent:'NoPulsoAgente/4 (Linux; Android 14)'});
+    const android=await postarJson('/api/loja-status/heartbeat',{unidade:'AVISO_APK_TESTE',posto:'TABLET',userAgent:'NoPulsoAgente/3 (Linux; Android 14)'});
     assert.equal(android.status,200);
     assert.equal(JSON.parse(android.corpo).atualizacaoAndroid.versao,agente.VERSAO_AGENTE_ANDROID);
+    const atual=await postarJson('/api/loja-status/heartbeat',{unidade:'AVISO_APK_TESTE',posto:'TABLET',userAgent:`NoPulsoAgente/${agente.VERSAO_AGENTE_ANDROID} (Linux; Android 14)`});
+    assert.deepEqual(JSON.parse(atual.corpo).atualizacaoAndroid,{versao:agente.VERSAO_AGENTE_ANDROID},'Sem repetir URL longa quando tablet já está atualizado');
     const pc=await postarJson('/api/loja-status/heartbeat',{unidade:'AVISO_APK_TESTE',posto:'PC',userAgent:'NOCZenith/141'});
     assert.equal(pc.status,200);assert.equal(JSON.parse(pc.corpo).atualizacaoAndroid,undefined);
     assert.equal(chamadas,1,'Windows não precisa receber ou consultar versão Android');

@@ -88,7 +88,10 @@ Canal Atualizações NoPulso separado do monitoramento silencioso; tocar abre
 download HTTPS. Android ainda exige confirmação para instalar. APKs antigos
 mantêm verificação de 6h: instalar v4 uma primeira vez para obter o novo fluxo.
 
-O servidor só envia esse campo ao userAgent NoPulsoAgente. Confirma publicação
+O servidor só envia esse campo ao userAgent NoPulsoAgente. Verifica publicação
+somente se houver versão mais nova; tablet atualizado recebe apenas o número,
+sem repetir URL longa ou consultar origem de download a cada batida.
+Confirma publicação
 por HEAD (timeout 5s), com uma chamada compartilhada por URL/boot, sem Firestore.
 Publicação imutável confirmada fica em memória; falha aguarda 30s antes de nova
 tentativa. Não baixar APK inteiro para verificar, não fazer polling por tablet.
