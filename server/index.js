@@ -125,6 +125,7 @@ const migracaoUnidades = require('./migracaoUnidades');
 const pedidoSemanal = require('./pedidoSemanal');
 const lojaStatus = require('./lojaStatus');
 const acessoUnidadeModulo=require('./acessoUnidade');
+const nocLogin = require('./nocLogin');
 const acessoUnidade=acessoUnidadeModulo.criarServico({
   lerComputador:(codigo,posto)=>lojaStatus.acessoChatDoComputador(codigo,posto),
   nomeUnidade:codigo=>nomeCanonicoUnidade(codigo,codigo),
@@ -399,6 +400,7 @@ function senhasIguais(a, b) {
 // recebia texto puro em vez de JSON, quebrando o fetch().json() com um erro
 // cru na tela ("Unexpected token 'A'...")
 const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
+  '/noc-login.html', '/noc-login.js', '/api/noc-login/vinculo', '/api/noc-login/registrar',
   '/webhooks/adyen',
   '/estorno-cliente.html',
   '/solicitacao-publica.html',
@@ -701,6 +703,7 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
     if (!verificacao.verified) throw new Error('Não consegui confirmar a biometria.');
     await passkeys.registrarUso(credencial.credentialID, verificacao.authenticationInfo.newCounter);
     const result = await auth.loginComPasskey(credencial.userId, {
+      pedido: req,
       terminalUnidade: await acessoUnidade.contextoDoPedido(req),
       userAgent: req.headers['user-agent'],
       ip: req.headers['x-forwarded-for'] || req.ip,
@@ -838,6 +841,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
   try {
     const result = await auth.login(req.body.identifier || req.body.email, req.body.password, {
+      pedido: req,
       terminalUnidade: await acessoUnidade.contextoDoPedido(req),
       userAgent: req.headers['user-agent'],
       ip: req.headers['x-forwarded-for'] || req.ip,
@@ -845,6 +849,7 @@ app.post('/api/auth/login', async (req, res) => {
     LOGIN_FALHAS.delete(chave);
     res.json(result);
   } catch (err) {
+    if (err.code === 'COMPUTADOR_NOC_OBRIGATORIO') return res.status(403).json({ error: err.message, code: err.code });
     const atual = LOGIN_FALHAS.get(chave);
     if (!atual || Date.now() - atual.desdeMs >= LOGIN_JANELA_MS) LOGIN_FALHAS.set(chave, { count: 1, desdeMs: Date.now() });
     else atual.count += 1;
@@ -1951,7 +1956,7 @@ app.get('/api/formularios-publico/:id/anexo/:indice', async (req, res) => {
 async function usuarioLogadoDoHeader(req) {
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
-  const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(token) : null;
+  const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(token, req) : null;
   if (!user) {
     const unidade=await acessoUnidade.contextoDoPedido(req);
     return unidade ? {id:`unidade:${unidade.codigo}`,username:`Colaborador · ${unidade.nome}`,email:null,isMaster:false,
@@ -2545,7 +2550,7 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     } else {
       // sessao de Master/Suporte (download manual pela loja-status.html)
       const [scheme, bearer] = String(req.headers.authorization || '').split(' ');
-      const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(bearer) : null;
+      const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(bearer, req) : null;
       const secoes = (user && user.permissions && user.permissions.sections) || [];
       liberado = !!user && (user.role === 'master' || user.isAdmin || secoes.includes('suporte'));
     }
@@ -3089,6 +3094,20 @@ app.get('/api/acesso-unidade/sessao', async (req,res)=>{
   if(!unidade) return res.status(401).json({error:'Chat da unidade não habilitado neste computador.'});
   res.json(unidade);
 });
+app.post('/api/noc-login/vinculo', async (req, res) => {
+  try {
+    const vinculo = await nocLogin.servico().emitir(req.body?.unidade, req.body?.posto, req.headers['x-noc-token'], req);
+    res.set('Cache-Control', 'no-store');
+    res.json({ url: `${APP_BASE_URL}/noc-login#vinculo=${vinculo}` });
+  } catch (e) { res.status(403).json({ error: e.message }); }
+});
+app.post('/api/noc-login/registrar', async (req, res) => {
+  try {
+    const token = await nocLogin.servico().consumir(req.body?.vinculo, req);
+    res.cookie(nocLogin.COOKIE, token, { httpOnly: true, secure: APP_BASE_URL.startsWith('https:'), sameSite: 'strict', path: '/', maxAge: nocLogin.DURACAO_MS });
+    res.set('Cache-Control', 'no-store'); res.json({ ok: true });
+  } catch (e) { res.status(403).json({ error: e.message }); }
+});
 app.use('/api', auth.requireAuth);
 app.post('/api/auth/atividade',async(req,res)=>res.json({ok:await sessions.atividadeHumana(req.sid)}));
 app.post('/api/auth/sair',async(req,res)=>{
@@ -3269,6 +3288,12 @@ function requireAnySection(...sections) {
 // pela permissao de unidade), entao incluir `unidade` faria o filtro abaixo
 // descartar o evento pra quem tem permissions.unidades vazio/diferente
 const sseClients = new Set();
+nocLogin.alteracoes.on('politica', userId => {
+  for (const client of sseClients) if (client.userId === userId) {
+    sseClients.delete(client);
+    client.res.end(); // A reconexão passa pela política atual, inclusive remoção de tags.
+  }
+});
 function broadcast(event, data, section) {
   // A LEITURA esconde registro de unidade restrita a area Monitor; o push ao
   // vivo nao escondia. Dava exatamente isto: o pedido aparecia na hora e SUMIA
@@ -3328,7 +3353,16 @@ app.get('/api/stream', (req, res) => {
     unidades: req.isMaster ? null : new Set(req.permissions.unidades || []),
   };
   sseClients.add(client);
-  req.on('close', () => sseClients.delete(client));
+  let vencimentoNoc;
+  if (!req.isMasterPrincipal && nocLogin.somenteNoc(req.user, users.tagsDe(req.user))) {
+    nocLogin.servico().validarPedido(req).then(prova => {
+      if (!prova) { sseClients.delete(client); res.end(); return; }
+      if (res.destroyed) return;
+      vencimentoNoc = setTimeout(() => { sseClients.delete(client); res.end(); }, Math.max(0, prova.expiraEm - Date.now()));
+      vencimentoNoc.unref();
+    }).catch(() => { sseClients.delete(client); res.end(); });
+  }
+  req.on('close', () => { clearTimeout(vencimentoNoc); sseClients.delete(client); });
 });
 
 // ---------- validacao de assinatura HMAC da Adyen ----------
@@ -8126,6 +8160,12 @@ app.put('/api/users/:id/sessao-longa', auth.requireMaster, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+app.put('/api/users/:id/somente-noc', requireMasterDeVerdade, async (req, res) => {
+  try {
+    if (typeof req.body.somenteNoc !== 'boolean') return res.status(400).json({ error: 'Informe a restrição NOC.' });
+    res.json(await users.updateSomenteNoc(req.params.id, req.body.somenteNoc, req.user));
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // tag "cadastrar Operadores" do Abastecimento: quem tem ve o botao 👥 e

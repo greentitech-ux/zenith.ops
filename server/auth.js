@@ -180,6 +180,7 @@ async function login(identifier, password, contexto = {}) {
   }
 
   if (user.failedAttempts) await doc.ref.update({ failedAttempts: 0 });
+  await require('./nocLogin').exigir({ id: doc.id, ...user }, contexto.pedido || {});
 
   // uma sessao por login - deixa saber "quantos locais" estao logados com
   // esse usuario e permite o Master encerrar um especifico (ver sessions.js)
@@ -214,6 +215,7 @@ async function loginComPasskey(userId, contexto = {}) {
   const doc = await usersRef.doc(String(userId || '')).get();
   if (!doc.exists) throw new Error('Acesso não encontrado.');
   const user = doc.data();
+  await require('./nocLogin').exigir({ id: doc.id, ...user }, contexto.pedido || {});
   if (user.active === false) throw new Error('Este acesso foi desativado.');
   if (user.locked) throw new Error('Acesso bloqueado após tentativas de senha erradas. Fale com o Master.');
   if (user.role !== 'master' && !dentroDoHorarioPermitido(user.horarioPermitido)) {
@@ -293,12 +295,13 @@ function invalidarUsuario(id) {
 // PUBLICAS que enxergam "mais" quando quem esta do outro lado por acaso
 // esta logado (ex: chat de suporte oferecendo consulta de pedido pra quem
 // tem conta), sem exigir login pra usar a rota em si
-async function usuarioOpcionalDoToken(token) {
+async function usuarioOpcionalDoToken(token, pedido = {}) {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     const user = await getUserById(payload.sub);
     if (!user || user.active === false) return null;
+    await require('./nocLogin').exigir(user, pedido);
     if (payload.sid && !(await sessions.existeEValida(payload.sid))) return null;
     return user;
   } catch (err) {
@@ -382,6 +385,8 @@ function requireAuth(req, res, next) {
     .then(async ([user, sessaoValida]) => {
       if (!user || user.active === false) return res.status(401).json({ error: 'Acesso inválido ou desativado.' });
       if (!sessaoValida) return res.status(401).json({ error: 'Sessão encerrada, faça login novamente.' });
+      try { await require('./nocLogin').exigir(user, req); }
+      catch (e) { return res.status(403).json({ error: e.message, code: e.code }); }
       if (user.role !== 'master' && !dentroDoHorarioPermitido(user.horarioPermitido)) {
         return res.status(401).json({ error: mensagemHorarioPermitido(user.horarioPermitido) });
       }

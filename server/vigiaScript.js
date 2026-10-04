@@ -56,7 +56,8 @@
 // 133: torna o backup da Área de Trabalho idempotente: uma política pendente
 //      não cria centenas de cópias quando a mesma limpeza precisa ser tentada.
 // 136: ferramenta de desfoque em mosaico no NoPulsoPrint, na prévia e no PNG.
-const VERSAO_VIGIA = 136;
+// 137: atalho local para vincular navegador ao computador NOC sem expor token.
+const VERSAO_VIGIA = 137;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -185,6 +186,16 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '} catch { Start-Process '+literalPS(APP_BASE_URL+'/unidade')+' }',
   ].join('\r\n');
   const launcherUnidadeB64=Buffer.from(launcherUnidade,'utf8').toString('base64');
+  const launcherNoc = [
+    '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
+    'try {',
+    '  $r = Invoke-RestMethod -Uri '+literalPS(APP_BASE_URL+'/api/noc-login/vinculo')+' -Method Post -Headers @{ "X-NOC-Token" = '+literalPS(tokenSeguro)+' } -ContentType "application/json" -Body '+literalPS(JSON.stringify({unidade:codigo,posto}))+' -TimeoutSec 15',
+    '  $url = [string]$r.url',
+    '  if (-not $url.StartsWith('+literalPS(APP_BASE_URL+'/noc-login#vinculo=')+')) { throw "Endereco inesperado" }',
+    '  Start-Process -FilePath "$env:WINDIR\\explorer.exe" -ArgumentList $url',
+    '} catch { Start-Process -FilePath "$env:WINDIR\\explorer.exe" -ArgumentList '+literalPS(APP_BASE_URL+'/noc-login')+' }',
+  ].join('\r\n');
+  const launcherNocB64 = Buffer.from(launcherNoc, 'utf8').toString('base64');
   // codigo entra CRU em varias strings PowerShell de aspas duplas (titulo da
   // janela, log, corpo do heartbeat). Dentro de "..." o PowerShell interpola
   // $(...)/$var e trata " como fim da string - entao um codigo com esses
@@ -393,6 +404,23 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '$AgentToken = "' + tokenSeguro + '"',
     '$CabecalhosAgente = @{ "X-NOC-Token" = $AgentToken }',
     '$AcessoChatUnidadeInicial = $' + (!!acessoChatUnidade),
+    'function Configurar-AcessoNoc {',
+    '  if ($Servico) { return }',
+    '  $pasta = Join-Path $env:LOCALAPPDATA "NOCZenith"',
+    '  $arquivo = Join-Path $pasta "abrir-acesso-noc.ps1"',
+    '  $conteudo = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("' + launcherNocB64 + '"))',
+    '  if (-not (Test-Path -LiteralPath $pasta)) { New-Item -ItemType Directory -Path $pasta -Force | Out-Null }',
+    '  if (-not (Test-Path -LiteralPath $arquivo)) { New-Item -ItemType File -Path $arquivo -Force | Out-Null }',
+    '  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
+    '  & icacls.exe $arquivo /inheritance:r /grant:r "*${sid}:(F)" "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" | Out-Null',
+    '  if ($LASTEXITCODE -ne 0) { throw "Nao protegeu o launcher NOC" }',
+    '  [IO.File]::WriteAllText($arquivo, $conteudo, (New-Object Text.UTF8Encoding($true)))',
+    '  $atalho = Join-Path ([Environment]::GetFolderPath("Desktop")) "NoPulso - acesso NOC.lnk"',
+    '  $s = (New-Object -ComObject WScript.Shell).CreateShortcut($atalho)',
+    '  $s.TargetPath = "$env:WINDIR\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
+    '  $s.Arguments = \'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "\' + $arquivo + \'"\'',
+    '  $s.WindowStyle = 7; $s.Description = "Validar navegador neste computador NOC"; $s.Save()',
+    '}',
     'function Configurar-ChatUnidade($habilitado) {',
     '  if ($Servico -or $NaoInstalarAppNoPulso) { return }',
     '  $pasta = Join-Path $env:LOCALAPPDATA "NOCZenith"',
@@ -3686,6 +3714,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '    $marcaApp = Join-Path $env:LOCALAPPDATA ("NOCZenith\\app-nopulso-v" + $VersaoScript + ".ok")',
     '    if (-not (Test-Path $marcaApp)) { try { Instalar-AppNoPulso; Set-Content -Path $marcaApp -Value (Get-Date).ToString() } catch { Escrever-Log "Instalar-AppNoPulso falhou: $($_.Exception.Message)" } }',
     '  }',
+    '  try { Configurar-AcessoNoc } catch { Escrever-Log "Acesso NOC: nao configurou atalho ($($_.Exception.Message))" }',
     '  Escrever-Log "NOCZenith iniciado (interno$(if ($Servico) { ", instancia de boot" })) - versao $VersaoScript - ' + codigoTextoPS + '/' + posto + ' - rodando como $env:USERNAME, operador no console: $(Usuario-DoConsole)"',
     // ANTES da politica de subida: e ela que empacava no MENU.BOARD
     '  Iniciar-VigiaDeTravamento $UrlHeartbeat "' + codigoTextoPS + '" "' + posto + '"',
@@ -3958,6 +3987,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '    $marcaApp = Join-Path $env:LOCALAPPDATA ("NOCZenith\\app-nopulso-v" + $VersaoScript + ".ok")',
     '    if (-not (Test-Path $marcaApp)) { try { Instalar-AppNoPulso; Set-Content -Path $marcaApp -Value (Get-Date).ToString() } catch { Escrever-Log "Instalar-AppNoPulso falhou: $($_.Exception.Message)" } }',
     '  }',
+    '  try { Configurar-AcessoNoc } catch { Escrever-Log "Acesso NOC: nao configurou atalho ($($_.Exception.Message))" }',
     '  Escrever-Log "NOCZenith iniciado (' + tipo + '$(if ($Servico) { ", instancia de boot" })) - versao $VersaoScript - ' + codigoTextoPS + '/' + posto + '"',
     '  Reportar-IpLocal',
     '  Garantir-GatilhoDeRepeticao',
@@ -4140,6 +4170,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  if ($NaoInstalarAppNoPulso) { try { Remover-AppAutomaticoNoPulso } catch { Escrever-Log "App NoPulso automatico nao foi removido: $($_.Exception.Message)" } }',
     '  else { try { Instalar-AppNoPulso } catch { Escrever-Log "App NoPulso nao configurado: $($_.Exception.Message)" } }',
     '  try { Configurar-ChatUnidade $AcessoChatUnidadeInicial } catch { Escrever-Log "Chat da unidade: nao configurou atalho" }',
+    '  try { Configurar-AcessoNoc } catch { Escrever-Log "Acesso NOC: nao configurou atalho ($($_.Exception.Message))" }',
     '  # reinstalacao com o agente ja rodando: encerra a copia antiga ANTES de',
     '  # subir a nova - o -MultipleInstances IgnoreNew da tarefa nao alcanca este',
     '  # Start-Process, e ficavam duas (ver Garantir-InstanciaUnica). A de boot',

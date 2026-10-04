@@ -611,6 +611,20 @@ async function updateSessaoLonga(id, valor) {
   usersCache.invalidar();
   return toPublic(await ref.get());
 }
+async function updateSomenteNoc(id, valor, ator) {
+  const ref = usersRef.doc(id), snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  const alvo = { id, ...snap.data() };
+  await masterHierarquia.exigirGerenciaMaster(alvo, ator);
+  if (await masterHierarquia.ehPrincipal(alvo)) throw new Error('O Master principal mantém o acesso de recuperação.');
+  // Sem função, permanece restrito mesmo se o checkbox for desmarcado.
+  // A liberação explícita só produz efeito depois que houver cargo válido.
+  await ref.update({ somenteNoc: !!valor, nocPoliticaAlteradaPor: ator.id, nocPoliticaAlteradaEm: new Date().toISOString() });
+  invalidarUsuario(id); usersCache.invalidar();
+  require('./nocLogin').alteracoes.emit('politica', id);
+  console.log(`[usuarios] política NOC: ${id}, somenteNoc=${!!valor}, Master=${ator.id}`);
+  return toPublic(await ref.get());
+}
 
 // mesma ideia do Catalogo do Estoque, so que pro cadastro de INSUMOS do
 // Abastecimento do Carrinho (Dom Aeroporto): quem tem a permissao adiciona/
@@ -810,6 +824,7 @@ async function updateCargos(id, cargos) {
   await ref.update({ cargos: limpas, cargo: tagPrincipal(limpas) });
   invalidarUsuario(id);
   usersCache.invalidar();
+  require('./nocLogin').alteracoes.emit('politica', id);
   return toPublic(await ref.get());
 }
 // a forma antiga (uma tag só) continua valendo: é o que a rota
@@ -1011,6 +1026,8 @@ function toPublic(doc) {
     podeBonifVerValorTotal: data.role === 'master' ? null : !!data.podeBonifVerValorTotal,
     podeBonifVerColaboradores: data.role === 'master' ? null : !!data.podeBonifVerColaboradores,
     sessaoLonga: !!data.sessaoLonga,
+    somenteNoc: data.somenteNoc !== false,
+    restritoNocEfetivo: require('./nocLogin').somenteNoc(data, tagsDe(data)),
     cargo: data.role === 'master' ? null : data.cargo || null,
     // o conjunto inteiro; `cargo` acima continua sendo a principal (tagsDe)
     cargos: data.role === 'master' ? [] : tagsDe(data),
@@ -1151,6 +1168,7 @@ module.exports = {
   updatePermissions, aplicarPermissoesAutorizadas,
   setActive,
   updateHorarioPermitido,
+  updateSomenteNoc,
   updateIsAdmin,
   updateEmpresa,
   listarPorEmpresa,

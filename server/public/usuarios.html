@@ -786,6 +786,7 @@ function tagsFieldsetHtml(prefixo, tags){
       <label title="Sem esta tag, quem tem a seção Bonificação vê só o próprio card - com ela, vê faturamento/pool/taxas por trás da conta"><input type="checkbox" id="${prefixo}-tag-bonif-valor-total" ${tags.podeBonifVerValorTotal?'checked':''}><span>🏆 Bonificação: ver valor total</span></label>
       <label title="Sem esta tag, a equipe aparece só como agregado (quantidade + total) - com ela, aparece nome a nome"><input type="checkbox" id="${prefixo}-tag-bonif-colaboradores" ${tags.podeBonifVerColaboradores?'checked':''}><span>🏆 Bonificação: ver colaboradores</span></label>
       <label><input type="checkbox" id="${prefixo}-tag-sessao-longa" ${tags.sessaoLonga?'checked':''}><span>🔒 Manter sempre conectado (30 dias — login de loja/terminal)</span></label>
+      <label title="Sem tag de função o acesso permanece somente NOC, mesmo desmarcado. Desmarque apenas para autorizar outros dispositivos após atribuir uma função. QA Master não altera esta política."><input type="checkbox" id="${prefixo}-tag-somente-noc" ${tags.somenteNoc!==false?'checked':''} ${ME_IS_QA_MASTER?'disabled':''}><span>🖥️ Somente computadores com NOC (padrão)</span></label>
       <label title="Sempre vê/cria todos os tipos de solicitação na Central, e tudo que criar sai marcado TESTE"><input type="checkbox" id="${prefixo}-tag-qa-user" ${tags.qaUser?'checked':''}><span>🧪 QA User (testes na Central, marca TESTE)</span></label>
     </div>`;
 }
@@ -804,6 +805,7 @@ function lerTagsForm(prefixo){
     podeBonifVerValorTotal: document.getElementById(prefixo+'-tag-bonif-valor-total').checked,
     podeBonifVerColaboradores: document.getElementById(prefixo+'-tag-bonif-colaboradores').checked,
     sessaoLonga: document.getElementById(prefixo+'-tag-sessao-longa').checked,
+    somenteNoc: document.getElementById(prefixo+'-tag-somente-noc').checked,
     qaUser: document.getElementById(prefixo+'-tag-qa-user').checked,
   };
 }
@@ -826,6 +828,7 @@ async function salvarTagsUsuario(id, tags){
     fetch('/api/users/'+id+'/bonif-ver-valor-total', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeBonifVerValorTotal: tags.podeBonifVerValorTotal})}),
     fetch('/api/users/'+id+'/bonif-ver-colaboradores', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeBonifVerColaboradores: tags.podeBonifVerColaboradores})}),
     fetch('/api/users/'+id+'/sessao-longa', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sessaoLonga: tags.sessaoLonga})}),
+    ME_IS_QA_MASTER ? Promise.resolve({ok:true}) : fetch('/api/users/'+id+'/somente-noc', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({somenteNoc: tags.somenteNoc})}),
     fetch('/api/users/'+id+'/qa-user', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({qaUser: tags.qaUser})}),
   ]);
   let algumPendente = false;
@@ -1236,6 +1239,7 @@ function renderUsers(){
     if (u.podeBonifVerValorTotal) tags.push(`<span class="badge catalogo" title="Vê faturamento/pool/taxas por trás da conta de Bonificação">🏆 bonif. valor total</span>`);
     if (u.podeBonifVerColaboradores) tags.push(`<span class="badge catalogo" title="Vê os colaboradores da Bonificação nome a nome, não só o agregado">🏆 bonif. colaboradores</span>`);
     if (u.sessaoLonga) tags.push(`<span class="badge catalogo" title="Sessão dura 30 dias em vez de 8h (login de loja/terminal)">🔒 sempre conectado</span>`);
+    if (u.role!=='master' && u.restritoNocEfetivo) tags.push(`<span class="badge catalogo" title="Login permitido apenas em navegador validado pelo agente NOC">🖥️ somente NOC</span>`);
     if (horario && horario.ativo) tags.push(`<span class="badge horario" title="Acesso liberado só nesse intervalo, todo dia">🕐 ${horario.inicio}–${horario.fim}</span>`);
     tags.push(`<span class="badge ${u.online?'on':'off'}" style="cursor:pointer;" onclick="abrirSessoes('${u.id}')" title="${u.ultimaAtividadeEm ? 'Última atividade: '+formatarRelativo(u.ultimaAtividadeEm) : 'Nunca fez login'} - clique pra ver os locais">${u.online?'🟢':'⚪'} ${u.sessoesAtivas} ${u.sessoesAtivas===1?'local':'locais'}</span>`);
     const detalhe = isMaster
@@ -1617,7 +1621,7 @@ function editarPermissoes(id){
   const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
   // Passe TODOS os campos que o formulário pode salvar. Antes dois flags não
   // eram carregados e, ao salvar sem mexer neles, o modal os desligava.
-  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, cargos: u.cargos||(u.cargo?[u.cargo]:[]), empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeNoPulsoPrint: !!u.podeNoPulsoPrint, podePedirCorrecaoFechamento: !!u.podePedirCorrecaoFechamento, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, sessaoLonga: !!u.sessaoLonga, qaUser: !!u.qaUser });
+  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, cargos: u.cargos||(u.cargo?[u.cargo]:[]), empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeNoPulsoPrint: !!u.podeNoPulsoPrint, podePedirCorrecaoFechamento: !!u.podePedirCorrecaoFechamento, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, somenteNoc: u.somenteNoc!==false, sessaoLonga: !!u.sessaoLonga, qaUser: !!u.qaUser });
   document.getElementById('perm-err').classList.add('hidden');
   permOverlay.classList.add('show');
 }

@@ -2289,6 +2289,10 @@ const acessoChatCache=createKeyedCache(async id=>{
 async function acessoChatDoComputador(codigo,posto){
   return acessoChatCache.cached(docIdFor(codigo,posto));
 }
+async function computadorParaLoginNoc(codigo, posto) {
+  const memoria = await garantirEspelho();
+  return memoria.get(docIdFor(codigo, posto)) || null;
+}
 async function bloquearAppNoPulsoDoComputador(codigo, posto) {
   const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
   if (!snap.exists) return false;
@@ -5296,6 +5300,7 @@ module.exports = {
   sanitizarPolitica, sanitizarEstacao, definirPolitica, definirPerfilEstacao, papelDeParedeDe, versaoAplicacao, chaveArte, momentoDaArte, maisRecenteEntreArtes, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
+  computadorParaLoginNoc,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, pedirInventarioAtalhos, registrarInventarioAtalhos, noPulsoPrintDoComputador, configuracaoNoPulsoPrintDoComputador, windowsAntigoDoComputador, ehServidorDoComputador, bloquearAppNoPulsoDoComputador, nomeDoComputador, reportarEstadoAgente, pedirCaptura,
   BATERIA_BAIXA, BATERIA_CRITICA, sanitizarAparelho,
   ATALHOS_NOPULSO_PRINT, ATALHO_NOPULSO_PRINT_PADRAO, normalizarAtalhoNoPulsoPrint,

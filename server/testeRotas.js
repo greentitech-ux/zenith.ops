@@ -223,6 +223,38 @@ require('/home/user/adyen-monitor/server/index.js');
 // ---- exercita as rotas novas com um Master de mentira ----
 const http = require('http');
 const auth = require('/home/user/adyen-monitor/server/auth.js');
+// Os cenários antigos rodam em navegador de computador NOC. A prova passa
+// pelo verificador real; não se desliga a política para fazer a suíte passar.
+const cryptoNoc = require('crypto');
+const jwtNoc = require('jsonwebtoken');
+const nocLoginTeste = require('./nocLogin');
+const lojaStatusTeste = require('./lojaStatus');
+const computadorNocOriginal = lojaStatusTeste.computadorParaLoginNoc;
+lojaStatusTeste.computadorParaLoginNoc = async (codigo, posto) => codigo === 'NOC_TESTE' && posto === 'NAVEGADOR'
+  ? { agentToken: 'agente-apenas-do-teste', agenteVersao: 137 }
+  : computadorNocOriginal(codigo, posto);
+function pedidoNocTeste(pedido = {}) {
+  const headers = Object.fromEntries(Object.entries(pedido.headers || {}).map(([k,v]) => [k.toLowerCase(),v]));
+  const ip = String(headers['x-forwarded-for'] || pedido.ip || '127.0.0.1').split(',')[0].trim();
+  headers['x-forwarded-for'] = ip;
+  const hash = v => cryptoNoc.createHash('sha256').update(String(v || '')).digest('hex');
+  if ((!Object.hasOwn(headers, 'cookie') || headers.cookie) && !String(headers.cookie || '').includes(nocLoginTeste.COOKIE + '=')) headers.cookie = (headers.cookie ? headers.cookie + '; ' : '') + nocLoginTeste.COOKIE + '=' + jwtNoc.sign({
+    tipo: 'computador-noc', codigo: 'NOC_TESTE', posto: 'NAVEGADOR',
+    prova: hash('agente-apenas-do-teste'), ip: hash(ip), navegador: hash(headers['user-agent']),
+  }, process.env.JWT_SECRET, { audience: 'login-noc', expiresIn: '1h' });
+  return { ...pedido, ip, headers };
+}
+const loginOriginalNocTeste = auth.login;
+auth.login = (email, senha, contexto = {}) => loginOriginalNocTeste(email, senha, { ...contexto, pedido: contexto.pedido === undefined ? pedidoNocTeste() : contexto.pedido });
+const passkeyOriginalNocTeste = auth.loginComPasskey;
+auth.loginComPasskey = (id, contexto = {}) => passkeyOriginalNocTeste(id, { ...contexto, pedido: contexto.pedido === undefined ? pedidoNocTeste() : contexto.pedido });
+const opcionalOriginalNocTeste = auth.usuarioOpcionalDoToken;
+auth.usuarioOpcionalDoToken = (token, pedido) => opcionalOriginalNocTeste(token, pedido === undefined ? pedidoNocTeste() : pedido);
+const requestOriginalNocTeste = http.request;
+http.request = function(opcoes, ...resto) {
+  if (opcoes && typeof opcoes === 'object' && opcoes.port === 8899) opcoes = { ...opcoes, headers: pedidoNocTeste(opcoes).headers };
+  return requestOriginalNocTeste.call(this, opcoes, ...resto);
+};
 const store = require('/home/user/adyen-monitor/server/store.js');
 const parque = require('/home/user/adyen-monitor/server/parque.js');
 const sheetsSync = require('/home/user/adyen-monitor/server/sheetsSync.js');
@@ -29917,6 +29949,34 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e){ruins++;console.log('✗ Estorno do Beniboy: '+e.message);}
   try {await require('./testeAcoesEntregas').testarHttp({DOCS,enviarJson,postarJson});}
   catch(e){ruins++;console.log('✗ Permissões e ações de entregas: '+e.message);}
+  try {
+    const pedirNocReal = (rota, corpo, headers = {}, method = 'POST') => new Promise((resolve, reject) => {
+      const texto = JSON.stringify(corpo || {});
+      const r = requestOriginalNocTeste({ host:'127.0.0.1', port:8899, path:rota, method,
+        headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(texto),'x-forwarded-for':'203.0.113.77','user-agent':'NOC HTTP TESTE',...headers} }, res => {
+        let resposta=''; res.on('data', c => resposta += c); res.on('end', () => resolve({status:res.statusCode, headers:res.headers, dados:JSON.parse(resposta)}));
+      }); r.on('error', reject); r.end(texto);
+    });
+    const a = require('assert/strict');
+    const cadastro = {unidade:'NOC_TESTE',posto:'NAVEGADOR'};
+    a.equal((await pedirNocReal('/api/noc-login/vinculo',cadastro,{'X-NOC-Token':'errado'})).status,403);
+    const emitido = await pedirNocReal('/api/noc-login/vinculo',cadastro,{'X-NOC-Token':'agente-apenas-do-teste'});
+    a.equal(emitido.status,200);
+    const vinculo = new URL(emitido.dados.url).hash.split('=')[1];
+    const registrado = await pedirNocReal('/api/noc-login/registrar',{vinculo});
+    a.equal(registrado.status,200);
+    const cookie = registrado.headers['set-cookie'][0];
+    a.match(cookie,/HttpOnly/); a.match(cookie,/SameSite=Strict/);
+    a.equal((await pedirNocReal('/api/noc-login/registrar',{vinculo})).status,403);
+    DOCS.set('users/noc-http-restrito',{username:'noc-http-restrito',passwordHash:require('bcryptjs').hashSync('SenhaNoc!2026',4),role:'user',active:true,permissions:{sections:[],unidades:[]},somenteNoc:false});
+    const corpo = {identifier:'noc-http-restrito',password:'SenhaNoc!2026'};
+    a.equal((await pedirNocReal('/api/auth/login',corpo)).status,403,'Sem função permanece NOC mesmo desmarcado');
+    const loginNoc = await pedirNocReal('/api/auth/login',corpo,{cookie:cookie.split(';')[0]});
+    a.equal(loginNoc.status,200);
+    a.equal((await pedirNocReal('/api/me',{}, {authorization:'Bearer '+loginNoc.dados.token},'GET')).status,403);
+    a.equal((await pedirNocReal('/api/me',{}, {authorization:'Bearer '+loginNoc.dados.token,cookie:cookie.split(';')[0]},'GET')).status,200);
+    console.log('✓ NOC por HTTP real: agente autenticado, cookie seguro, uso único, login e sessão sem bypass.');
+  } catch(e) { ruins++;console.log('✗ NOC por HTTP real: '+e.message); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
