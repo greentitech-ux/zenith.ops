@@ -423,6 +423,10 @@ setTimeout(async () => {
     token = r && r.token;
   } catch (e) { console.log('login falhou: ' + e.message); }
   console.log(token ? 'token obtido ✓' : 'SEM TOKEN - as rotas vao devolver 401');
+  if(process.env.TESTE_LOGIN_ANDROID === '1') {
+    try {await require('./testeLoginAndroid').testar();await require('./testeLoginAndroid').testarHttp({DOCS,postarJson,pedir,http});process.exit(0);}
+    catch(e){console.error(e);process.exit(1);}
+  }
 
   // semeia uma CONTAGEM pra sugestao ter base (e o caso do usuario:
   // "tem uma contagem, por que nao tem pre-envio?")

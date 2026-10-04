@@ -38,13 +38,12 @@ async function testarHttp({DOCS,postarJson,pedir,http}) {
   // HTTP direto: não usar o wrapper que sintetiza prova NOC para os outros testes.
   async function enviar(url,dados,cookie) {
     return new Promise((resolve,reject)=>{
-      const corpo=JSON.stringify(dados);const headers={'Content-Type':'application/json','Content-Length':Buffer.byteLength(corpo),'User-Agent':'Chrome Android teste'};
-      if(cookie) headers.Cookie=cookie;
+      const corpo=JSON.stringify(dados);const headers={'Content-Type':'application/json','Content-Length':Buffer.byteLength(corpo),'User-Agent':'Chrome Android teste',cookie:cookie || ''};
       const r=http.request({host:'127.0.0.1',port:8899,path:url,method:'POST',headers},res=>{let b='';res.on('data',d=>b+=d);res.on('end',()=>resolve({status:res.statusCode,dados:JSON.parse(b),headers:res.headers}));});r.on('error',reject);r.end(corpo);
     });
   }
   const login={identifier:usuario,password:'SenhaAndroid!2026'};
-  assert.equal((await enviar('/api/auth/login',login)).status,403);
+  assert.equal((await enviar('/api/auth/login',login)).status,403,'Login Android sem cookie deve negar');
   const desafio=(await enviar('/api/noc-login/desafio',{})).dados.desafio;
   const origem=new URL(process.env.APP_BASE_URL || 'https://www.nopulso.com.br').origin;
   const assinatura=crypto.createHmac('sha256',segredo).update('noc-local\n'+origem+'\n'+desafio).digest('hex');
@@ -54,7 +53,7 @@ async function testarHttp({DOCS,postarJson,pedir,http}) {
   assert.equal((await enviar('/api/auth/login',login,cookie)).status,200);
   DOCS.get('users/'+usuario).permissions.unidades=['OUTRA'];require('./auth').invalidarUsuario(usuario);
   const fora=await enviar('/api/auth/login',login,cookie);
-  assert.equal(fora.status,403);assert.equal(fora.dados.code,'UNIDADE_NOC_NAO_AUTORIZADA');
+  assert.equal(fora.status,403,'Login Android em unidade revogada deve negar');assert.equal(fora.dados.code,'UNIDADE_NOC_NAO_AUTORIZADA');
   console.log('✓ Android HTTP real: heartbeat falso não habilita; token habilita; navegador validado entra só na unidade permitida.');
 }
 module.exports={testar,testarHttp};
