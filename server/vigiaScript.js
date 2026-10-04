@@ -58,7 +58,8 @@
 // 136: ferramenta de desfoque em mosaico no NoPulsoPrint, na prévia e no PNG.
 // 137: atalho local para vincular navegador ao computador NOC sem expor token.
 // 138: nunca cria atalho de acesso NOC em HOST/servidor; remove o da v137.
-const VERSAO_VIGIA = 138;
+// 139: Windows antigo opera sem app, ícones, chat, print ou navegador automático.
+const VERSAO_VIGIA = 139;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -159,7 +160,8 @@ function adaptarParaWindowsAntigo(texto) {
 }
 
 function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPulsoPrintAtalho, windowsAntigo, ehServidor, bloquearAppNoPulso, unidadeNome, maquinaNome, acessoChatUnidade }) {
-  const ehInterno = tipo === 'interno';
+  // Sem navegador nas máquinas antigas: o agente assume o heartbeat também no atendimento.
+  const ehInterno = tipo === 'interno' || !!windowsAntigo;
   const noPulsoPrintInicial = !!noPulsoPrint;
   // Campo vem do cadastro, mas a validação também é feita aqui: este valor
   // entra no texto PowerShell que o agente baixa, então não pode ser livre.
@@ -296,7 +298,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     // Esta característica vem do cadastro da máquina no NOC. Não inferimos pelo
     // nome: servidor, HOST e VMs não recebem o PWA/atalho automaticamente.
     '$EhServidor = $' + (!!ehServidor),
-    '$NaoInstalarAppNoPulso = $' + (!!bloquearAppNoPulso),
+    '$WindowsAntigo = $' + (!!windowsAntigo),
+    '$NaoInstalarAppNoPulso = $' + (!!bloquearAppNoPulso || !!windowsAntigo),
     '',
     '# ---- o APP "NoPulso" na maquina (pedido do Master, 12/09/2026) ----',
     '# Do jeito que ele faz na mao: abre o site no Chrome e "Instalar app" - vira',
@@ -406,15 +409,15 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '$CabecalhosAgente = @{ "X-NOC-Token" = $AgentToken }',
     '$AcessoChatUnidadeInicial = $' + (!!acessoChatUnidade),
     'function Configurar-AcessoNoc {',
-    '  # Cadastro e deteccao local: HOST Hyper-V nao depende de um nome ou flag correta.',
-    '  $semIcone = $EhServidor -or $NaoInstalarAppNoPulso -or (Test-Path -LiteralPath "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\vmms")',
+    '  # Validador interno em todas as unidades: nunca criar icone de acesso NOC.',
+    '  $semIcone = $true',
     '  if ($semIcone) {',
     '    foreach ($area in @([Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("CommonDesktopDirectory"))) {',
     '      if ([string]::IsNullOrWhiteSpace($area)) { continue }',
     '      $raiz = [IO.Path]::GetFullPath($area)',
     '      $antigo = [IO.Path]::GetFullPath((Join-Path $raiz "NoPulso - acesso NOC.lnk"))',
     '      if ([IO.Path]::GetDirectoryName($antigo) -ine $raiz.TrimEnd([IO.Path]::DirectorySeparatorChar)) { throw "Atalho NOC fora da area de trabalho" }',
-    '      if (Test-Path -LiteralPath $antigo) { try { Remove-Item -LiteralPath $antigo -Force -ErrorAction Stop; Escrever-Log "Acesso NOC: atalho removido do HOST/servidor" } catch { Escrever-Log "Acesso NOC: nao removeu atalho do HOST ($($_.Exception.Message))" } }',
+    '      if (Test-Path -LiteralPath $antigo) { try { Remove-Item -LiteralPath $antigo -Force -ErrorAction Stop; Escrever-Log "Acesso NOC: atalho exposto removido" } catch { Escrever-Log "Acesso NOC: nao removeu atalho ($($_.Exception.Message))" } }',
     '    }',
     '  }',
     '  if ($Servico) { return }',
@@ -427,14 +430,22 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  & icacls.exe $arquivo /inheritance:r /grant:r "*${sid}:(F)" "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" | Out-Null',
     '  if ($LASTEXITCODE -ne 0) { throw "Nao protegeu o launcher NOC" }',
     '  [IO.File]::WriteAllText($arquivo, $conteudo, (New-Object Text.UTF8Encoding($true)))',
-    '  if ($semIcone) { return } # Launcher local continua disponivel, mas sem icone no HOST.',
-    '  $atalho = Join-Path ([Environment]::GetFolderPath("Desktop")) "NoPulso - acesso NOC.lnk"',
-    '  $s = (New-Object -ComObject WScript.Shell).CreateShortcut($atalho)',
-    '  $s.TargetPath = "$env:WINDIR\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
-    '  $s.Arguments = \'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "\' + $arquivo + \'"\'',
-    '  $s.WindowStyle = 7; $s.Description = "Validar navegador neste computador NOC"; $s.Save()',
     '}',
     'function Configurar-ChatUnidade($habilitado) {',
+    '  if ($WindowsAntigo) {',
+    '    # Remove so o atalho registrado pelo nosso launcher, nunca icones de outros programas.',
+    '    $marcaChat = Join-Path $env:LOCALAPPDATA "NOCZenith\\chat-unidade-atalho.json"',
+    '    if (Test-Path -LiteralPath $marcaChat) { try {',
+    '      $m = Get-Content -LiteralPath $marcaChat -Raw | ConvertFrom-Json',
+    '      $alvo = [IO.Path]::GetFullPath([string]$m.atalho)',
+    '      $areas = @([Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("CommonDesktopDirectory")) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd([IO.Path]::DirectorySeparatorChar) }',
+    '      if ($areas -contains [IO.Path]::GetDirectoryName($alvo) -and [IO.Path]::GetFileName($alvo) -like "NoPulso*.lnk" -and (Test-Path -LiteralPath $alvo)) {',
+    '        $s = (New-Object -ComObject WScript.Shell).CreateShortcut($alvo)',
+    '        if ($s.Arguments -like "*abrir-chat-unidade.ps1*") { Remove-Item -LiteralPath $alvo -Force -ErrorAction Stop; Escrever-Log "Windows antigo: atalho de chat removido" }',
+    '      }',
+    '    } catch { Escrever-Log "Windows antigo: nao limpou atalho de chat ($($_.Exception.Message))" } }',
+    '    return',
+    '  }',
     '  if ($Servico -or $NaoInstalarAppNoPulso) { return }',
     '  $pasta = Join-Path $env:LOCALAPPDATA "NOCZenith"',
     '  $arquivo = Join-Path $pasta "abrir-chat-unidade.ps1"',
@@ -1540,6 +1551,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '# ---- NoPulsoPrint: atalho configurado por computador captura a tela LOCAL quando o Master habilita',
     '# este computador no cadastro. Não há upload, anexo nem envio por chat.',
     'function Iniciar-NoPulsoPrint($atalhoConfigurado) {',
+    '  if ($WindowsAntigo) { return }',
     '  if ($global:NoPulsoPrintPowerShell) { return }',
     '  if (-not $atalhoConfigurado) { $atalhoConfigurado = $NoPulsoPrintAtalhoInicial }',
     '  # Hashtable sincronizada: o laco do print roda em OUTRO runspace, e e por',
@@ -2067,6 +2079,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '# pelo agente) e o heartbeat do interno - antes o interno chamava Iniciar',
     '# direto num catch vazio, e um runspace morto ali nunca era visto.',
     'function Aplicar-NoPulsoPrint($habilitado, $capturar, $atalho) {',
+    '  if ($WindowsAntigo) { $habilitado = $false; $capturar = $false }',
     '  $atalhoSeguro = switch ($atalho) { "ctrl_alt_p" { "ctrl_alt_p"; break } "ctrl_alt_q" { "ctrl_alt_q"; break } "ctrl_shift_p" { "ctrl_shift_p"; break } default { "ctrl_q" } }',
     '  if ($capturar) { try { "1" | Set-Content -Path $CaminhoNoPulsoPrintGatilho -Force; Escrever-Log "NOC pediu captura agora." } catch {} }',
     '  $valorPrint = if ($habilitado) { "1" } else { "0" }',
@@ -2474,6 +2487,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     // proxima batida monta (1 leitura, so quando a tela esta vazia de fato).
     '$script:TelaConferidaEm = $null',
     'function Vigiar-TelaVazia {',
+    '  if ($WindowsAntigo) { return }',
     '  if ($Servico) { return }   # SYSTEM nao tem area de trabalho',
     '  if ($script:TelaConferidaEm -and ((Get-Date) - $script:TelaConferidaEm).TotalMinutes -lt 10) { return }',
     '  $script:TelaConferidaEm = Get-Date',
@@ -2555,6 +2569,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  try { return ([string](Get-Content -LiteralPath $arq -First 1)).Trim() } catch { return "" }',
     '}',
     'function Forcar-PapelDeParedeDaConfig([string]$versao) {',
+    '  if ($WindowsAntigo) { return }',
     '  if ($Servico) { return }',
     '  try { $cfg = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 20 }',
     '  catch { Escrever-Log "Papel de parede: nao busquei a revisao forcada ($($_.Exception.Message))."; return }',
@@ -2566,6 +2581,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '}',
     '',
     'function Aplicar-PapelDeParede($ligado, $semArte = $false, $modelo = $null) {',
+    '  if ($WindowsAntigo) { return $true }',
     '  if ($Servico) { return }   # SYSTEM nao tem area de trabalho',
     '  $bruto = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede.jpg"',
     '  $destino = Join-Path (Split-Path -Parent $PSCommandPath) "papel-de-parede-nome.png"',
@@ -3282,6 +3298,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '}',
     '',
     'function Sincronizar-Politica {',
+    '  if ($WindowsAntigo) { return } # Nao altera a area de trabalho na operacao antiga.',
     '  try {',
     '    Marcar-Etapa "Politica: lendo configuracao"',
     '    $cfg = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10',
@@ -3447,6 +3464,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '$global:FilaChatSaida = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))',
     '',
     'function Iniciar-JanelaChat {',
+    '  if ($WindowsAntigo) { return }',
     '  $rs = [runspacefactory]::CreateRunspace()',
     '  $rs.ApartmentState = "STA"',
     '  $rs.ThreadOptions = "ReuseThread"',
@@ -3964,6 +3982,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '$TicksParaVMs = 15',
     '',
     'function Reabrir-Monitor {',
+    '  if ($WindowsAntigo) { return }',
     '  $candidatos = @(',
     '    "$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe",',
     '    "${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe",',
@@ -4263,7 +4282,8 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
   // existem la) e o comando chegava com -OutFile/-Path/& vazios (erro real da
   // loja). Assim cola e roda igual no PowerShell, no CMD ou no Executar.
   const b64 = Buffer.from(script, 'utf16le').toString('base64');
-  const comandoDireto = `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}`;
+  const janelaInstalador = windowsAntigo ? ' -WindowStyle Hidden' : '';
+  const comandoDireto = `powershell -NoProfile${janelaInstalador} -ExecutionPolicy Bypass -EncodedCommand ${b64}`;
 
   // Estacoes e PDVs precisam sempre da tarefa _Boot como SYSTEM: ela e' quem
   // mantem o monitoramento e os comandos administrativos depois de reiniciar.
@@ -4279,7 +4299,7 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
 
   const elevador = [
     "$ErrorActionPreference='Stop';",
-    `try { $p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}' -PassThru -Wait -ErrorAction Stop; exit [int]$p.ExitCode }`,
+    `try { $p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList '-NoProfile${janelaInstalador} -ExecutionPolicy Bypass -EncodedCommand ${b64}' -PassThru -Wait -ErrorAction Stop; exit [int]$p.ExitCode }`,
     "catch { [Console]::Error.WriteLine('Instalacao NOCZenith nao foi autorizada no UAC. Nenhuma alteracao foi feita.'); exit 1 }",
   // "try { } catch { }" e' uma unica instrucao no PowerShell: nao pode haver
   // ponto e virgula entre a chave e o catch, ou o parser acusa MissingCatch.

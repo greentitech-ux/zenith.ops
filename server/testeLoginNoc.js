@@ -47,8 +47,8 @@ async function middleware(token, pedido) {
     const loop = ps.slice(ps.indexOf('function Rodar-Loop {'),ps.indexOf('if ($Loop) {'));
     assert.match(loop,/try \{ Configurar-AcessoNoc \}/, 'Auto-update também deve criar o atalho, sem reinstalação manual');
     assert.ok(funcao.indexOf('icacls.exe') < funcao.indexOf('WriteAllText'), 'Proteger arquivo antes de gravar segredo');
-    assert.match(funcao,/\$semIcone = \$EhServidor -or \$NaoInstalarAppNoPulso -or \(Test-Path[^\n]+vmms/);
-    assert.ok(funcao.indexOf('if ($semIcone) { return }') < funcao.indexOf('.CreateShortcut('), 'HOST não recebe ícone');
+    assert.match(funcao,/\$semIcone = \$true/);
+    assert.doesNotMatch(funcao,/CreateShortcut/, 'Nenhuma unidade recebe ícone de validação');
     const funcaoSemDisco = funcao
       .replaceAll('[Environment]::GetFolderPath("Desktop")', "'C:\\NocTeste\\Desktop'")
       .replaceAll('[Environment]::GetFolderPath("CommonDesktopDirectory")', "'C:\\NocTeste\\PublicDesktop'")
@@ -70,7 +70,7 @@ ${texto}
 foreach($c in @(@($true,$false,$false,$false),@($false,$true,$false,$false),@($false,$false,$true,$false),@($true,$false,$false,$true),@($false,$false,$false,$true))){
  $EhServidor=$c[0];$NaoInstalarAppNoPulso=$c[1];$global:hyperv=$c[2];$Servico=$c[3];$global:removidos=0;$global:gravacoes=0
  Configurar-AcessoNoc
- $esperados=0;if($c[0] -or $c[1] -or $c[2]){$esperados=2}
+ $esperados=2
  if($global:removidos -ne $esperados){throw 'Nao removeu somente os icones esperados'}
  if($Servico -and $global:gravacoes -ne 0){throw 'SYSTEM nao cria launcher de usuario'}
 }
@@ -80,7 +80,7 @@ Write-Output 'HOST OK'
     };
     const host = verificarHost(funcaoSemDisco);
     assert.equal(host.status,0,host.stderr);assert.match(host.stdout,/HOST OK/);
-    const sabotado = verificarHost(funcaoSemDisco.replace('if ($semIcone) { return }', 'if ($false) { return }'));
+    const sabotado = verificarHost(funcaoSemDisco.replace('if ($semIcone) {', 'if ($false) {'));
     assert.notEqual(sabotado.status,0,'Sabotagem deve detectar tentativa de criar ícone no HOST');
     const b64 = funcao.match(/FromBase64String\("([^"]+)"\)/)[1];
     const launcher = Buffer.from(b64,'base64').toString('utf8');

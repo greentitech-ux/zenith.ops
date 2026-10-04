@@ -29,7 +29,7 @@ function criarServico({ lerComputador, segredo, agora = Date.now }) {
     const k = hash(vinculo), p = pendentes.get(k);
     pendentes.delete(k); // Uso único, inclusive com pedidos concorrentes.
     const c = p && await computador(p.codigo, p.posto);
-    if (!p || p.expira <= agora() || !c || prova(c) !== p.prova || p.ip !== hash(ipDoPedido(req))) throw new Error('Validação vencida. Abra novamente o atalho NoPulso - acesso NOC.');
+    if (!p || p.expira <= agora() || !c || prova(c) !== p.prova || p.ip !== hash(ipDoPedido(req))) throw new Error('Validação vencida. Solicite ao TI uma nova validação deste navegador.');
     return jwt.sign({ tipo: 'computador-noc', codigo: p.codigo, posto: p.posto, prova: p.prova, ip: p.ip, navegador: hash(req.headers?.['user-agent']) }, segredo, { audience: 'login-noc', expiresIn: '24h' });
   }
   async function validarPedido(req) {
@@ -56,7 +56,7 @@ async function exigir(usuario, req) {
   if (await require('./masterHierarquia').ehPrincipal(usuario)) return;
   const tags = require('./users').tagsDe(usuario);
   if (somenteNoc(usuario, tags) && !await servico().validarPedido(req)) {
-    const e = new Error('Este acesso só pode ser usado em computador validado pelo NOC. Abra o atalho "NoPulso - acesso NOC" na máquina com o agente instalado.');
+    const e = new Error('Este acesso só pode ser usado em computador validado pelo NOC. Solicite ao TI a validação deste navegador na máquina com o agente instalado.');
     e.code = 'COMPUTADOR_NOC_OBRIGATORIO';
     throw e;
   }
