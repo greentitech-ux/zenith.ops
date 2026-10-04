@@ -10,6 +10,18 @@
 (function () {
   if (window.__zenithSuporteChat) return;
   window.__zenithSuporteChat = true;
+  // Carregado só quando houver conversa. Não muda o poll nem consulta o banco.
+  let digitandoPronto;
+  function ligarDigitando(chave, input, chat, lado) {
+    if (!chat.digitacaoToken || !input) { window.nopulsoDigitando?.parar(chave); return; }
+    if (!digitandoPronto) digitandoPronto = window.nopulsoDigitando ? Promise.resolve(window.nopulsoDigitando) : new Promise(resolve => {
+      let script = document.querySelector('script[src="/chat-digitando.js"]');
+      if (!script) { script = document.createElement('script'); script.src='/chat-digitando.js'; document.head.appendChild(script); }
+      script.addEventListener('load',()=>resolve(window.nopulsoDigitando),{once:true});
+      script.addEventListener('error',()=>resolve(null),{once:true});
+    });
+    digitandoPronto.then(d=>d?.conectar({chave,input,id:chat.id,token:chat.digitacaoToken,lado}));
+  }
 
   // Neste terminal, cada identidade tem sua conversa. A conta da unidade
   // nunca herda o chat privado do gerente que acabou de sair.
@@ -424,6 +436,7 @@
     return id && token ? { id, token } : null;
   }
   function limparChatSalvo() {
+    window.nopulsoDigitando?.parar('widget-visitante');
     localStorage.removeItem(LS_ID);
     localStorage.removeItem(LS_TOKEN);
   }
@@ -619,6 +632,7 @@
   }
 
   function renderConversa(chat) {
+    ligarDigitando('widget-visitante',panel.querySelector('#szc-nova-msg'),chat,'visitante');
     const noFim = corpo.scrollTop + corpo.clientHeight >= corpo.scrollHeight - 30;
     const salvo = chatSalvo();
     // protocolo (mesma numeracao global dos tickets) - a pessoa ja recebe
@@ -683,6 +697,7 @@
   }
 
   async function enviarMensagem() {
+    window.nopulsoDigitando?.enviado('widget-visitante');
     const salvo = chatSalvo();
     if (!salvo) return;
     const input = panel.querySelector('#szc-nova-msg');
@@ -1018,8 +1033,10 @@
       });
     }
     const input = corpo.querySelector('#szc-atend-msg');
+    ligarDigitando('widget-suporte',input,chat,'suporte');
     const anexoInput = corpo.querySelector('#szc-atend-anexo');
     const enviar = async () => {
+      window.nopulsoDigitando?.enviado('widget-suporte');
       const texto = input.value.trim();
       const arquivo = anexoInput.files[0];
       if (!texto && !arquivo) return;
@@ -1064,6 +1081,7 @@
   // nova em QUALQUER conversa, nao so a aberta) recriava o input inteiro,
   // apagando o que a pessoa estava digitando no meio da resposta.
   function atendAtualizarThreadAoVivo(chat) {
+    ligarDigitando('widget-suporte',corpo.querySelector('#szc-atend-msg'),chat,'suporte');
     const threadEl = corpo.querySelector('#szc-atend-thread');
     if (!threadEl) { atendRenderConversa(chat, true); return; } // painel nao esta na estrutura esperada - refaz do zero
     const noFim = corpo.scrollTop + corpo.clientHeight >= corpo.scrollHeight - 30;

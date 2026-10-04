@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="/beniboy-192.png">
 <link rel="manifest" href="/manifest-beniboy.json">
 <script src="/beniboy-app.js" defer></script>
+<script src="/chat-digitando.js" defer></script>
 <meta name="theme-color" content="#0b0d10">
 <style>
   :root{
@@ -1039,7 +1040,7 @@ function renderPaineis(){
   }).join('');
   const contexto=document.getElementById('contexto-corpo');
   contexto.innerHTML='Selecione uma conversa para ver o contexto.';
-  if(!PAINEIS_ABERTOS.length){ wrap.innerHTML = ''; return; }
+  if(!PAINEIS_ABERTOS.length){ window.nopulsoDigitando?.parar('central'); wrap.innerHTML = ''; return; }
   wrap.innerHTML = PAINEIS_ABERTOS.map(id=>painelHtml(ITENS.find(c=>c.id===id))).join('');
   wrap.querySelectorAll('.painel-conversa').forEach(p=>p.classList.toggle('hidden',p.dataset.painelId!==CONVERSA_ATIVA));
   const selecionada=ITENS.find(c=>c.id===CONVERSA_ATIVA);
@@ -1061,6 +1062,7 @@ function renderPaineis(){
     });
   }
   restaurarEstadoPaineis();
+  window.nopulsoDigitando?.conectar({ chave:'central', input:document.getElementById(`d-texto-${CONVERSA_ATIVA}`), id:CONVERSA_ATIVA, token:selecionada.digitacaoToken, lado:'suporte', antes:painel.querySelector('.chat-compositor') });
 }
 
 async function enviarResposta(id){
@@ -1075,6 +1077,7 @@ async function enviarResposta(id){
   const citacao=CITACOES_PAINEL_CHAT.get(id);
   const texto=citacao?`Respondendo a ${citacao.nome}:\n${citacao.texto.split('\n').map(l=>'> '+l).join('\n')}\n\n${resposta}`:resposta;
   ENVIOS_PAINEL_CHAT.add(id);
+  window.nopulsoDigitando?.enviado('central');
   input.disabled = true;
   try{
     // multipart so quando ha anexo - sem arquivo o corpo segue JSON, que e o

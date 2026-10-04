@@ -75,6 +75,7 @@ const chamadosTI = require('./chamadosTI');
 const chamadoRelatorio = require('./chamadoRelatorio');
 const chamadosManutencao = require('./chamadosManutencao');
 const suporteChat = require('./suporteChat');
+const chatDigitando = require('./chatDigitando');
 const suporteChatPDF = require('./suporteChatPDF');
 const segurancaChat = require('./segurancaChat');
 const suporteBot = require('./suporteBot');
@@ -324,6 +325,7 @@ app.use(enderecoAntigo.middleware(() => APP_BASE_URL));
 app.use(compression({
   filter: (req, res) => {
     if (req.path === '/api/stream') return false;
+    if (/^\/api\/suporte-chat\/[^/]+\/digitando-stream$/.test(req.path)) return false;
     return compression.filter(req, res);
   },
 }));
@@ -416,6 +418,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/solicitacoes/decidir-info',
   '/api/solicitacoes/decidir',
   '/suporte-chat.js',
+  '/chat-digitando.js',
   '/rh-colaborador.html',
   '/rh-cadastro.html',
   '/api/rh/cadastro-publico',
@@ -2059,10 +2062,11 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
   }
 });
 
+chatDigitando.registrarRotas(app);
 app.get('/api/suporte-chat/:id', async (req, res) => {
   const chat = await suporteChat.getPublico(req.params.id, req.query.token);
   if (!chat) return res.sendStatus(404);
-  res.json(chat);
+  res.json({ ...chat, digitacaoToken: chatDigitando.emitir(chat, 'visitante') });
 });
 
 // upload.single deixa passar mesmo sem arquivo nenhum (so multipart/
@@ -17067,7 +17071,7 @@ app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {
   if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
   const todos = await suporteChat.listAll();
   // token do visitante nunca sai pro atendimento - nao precisa
-  res.json(todos.map(({ token, ...resto }) => resto));
+  res.json(todos.map(({ token, ...resto }) => ({ ...resto, digitacaoToken: chatDigitando.emitir(resto, 'suporte', req.user.id) })));
 });
 
 // dashboard de metricas dos atendimentos via chat (dashboard-atendimentos.html)
@@ -17125,7 +17129,7 @@ app.post('/api/suporte-chats/:id/responder', auth.requireAuth, uploadChatAnexo.s
     const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'suporte', texto: req.body.texto, autorEmail: req.user.email, anexo });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     const { token, ...resto } = chat;
-    res.json(resto);
+    res.json({ ...resto, digitacaoToken: chatDigitando.emitir(chat, 'suporte', req.user.id) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -17135,6 +17139,7 @@ app.post('/api/suporte-chats/:id/finalizar', auth.requireAuth, async (req, res) 
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const chat = await suporteChat.finalizar(req.params.id, { autorEmail: req.user.email });
+    chatDigitando.revogar(chat.id);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     const { token, ...resto } = chat;
     res.json(resto);
@@ -17263,6 +17268,7 @@ app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => 
       autor,
       transferidoPara: req.body.transferidoPara || null,
     });
+    if (chat.status !== 'ABERTO') chatDigitando.revogar(chat.id);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     // quem recebeu a conversa é avisado no nome dele - senão a transferência
     // depende de a pessoa estar com a Central aberta na hora

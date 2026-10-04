@@ -29404,7 +29404,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       + 'hashchange storage keypress dblclick mousedown mouseup mousemove open close play pause ended canplay '
       + 'loadedmetadata invalid reset select toggle copy cut focusin focusout compositionstart compositionend '
       + 'appinstalled beforeinstallprompt pageshow notificationclick push pushsubscriptionchange release '
-      + 'DOMContentLoaded').split(' '));
+      + 'DOMContentLoaded pagehide').split(' '));
     // SEM TELA, E ESTÁ CERTO ASSIM. Cada linha diz POR QUE - "esqueci" não é
     // motivo, e quem ligar a tela depois tira o nome daqui.
     const SEM_TELA = new Map([
@@ -30004,6 +30004,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e){ruins++;console.log('✗ Login Android: '+e.message);}
   try {await require('./testeAvisoAtualizacaoAndroid').testar();await require('./testeAvisoAtualizacaoAndroid').testarHttp({postarJson});}
   catch(e){ruins++;console.log('✗ Aviso de atualização Android: '+e.message);}
+  try { await require('./testeChatDigitando').testar(); await require('./testeChatDigitando').testarHttp({DOCS,token,pedir,postarJson,LEITURAS}); await require('./testeChatDigitando').testarSSE(); }
+  catch(e) { ruins++; console.log('✗ Digitando: '+e.message); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

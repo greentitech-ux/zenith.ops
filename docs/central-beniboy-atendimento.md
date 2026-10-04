@@ -47,6 +47,34 @@ de DNS/Render; esta entrega não o publica nem altera o domínio do NoPulso.
 
 ## Atualização e custo
 
+### Aviso de digitação
+
+Central e widget mostram “Solicitante está digitando…” / “Suporte está
+digitando…”. Nenhum texto é enviado antes da mensagem. Os pacotes aceitam
+somente uma capacidade temporária e um booleano; campo `texto` é recusado.
+Há no máximo um sinal positivo a cada 4 segundos, parada após 3 segundos
+sem entrada, ao sair do campo/enviar/ocultar, e expiração de segurança em
+8 segundos. O relógio do aparelho não precisa coincidir com o servidor.
+
+`chatDigitando.js` mantém concessões e estado só em memória. As capacidades
+imprevisíveis, específicas de conversa/lado/atendente, são fornecidas nas
+consultas já autorizadas e expiram em 15 minutos; fechar a conversa revoga.
+Reiniciar/deploy apaga o estado. Não concedem leitura de mensagens nem
+permissões administrativas. O visitante só recebe a sua; atendimento mantém
+o gate Master/Admin/seção Suporte. Vários atendentes são agregados sem que
+a parada de um apague a digitação do outro.
+
+O SSE de digitação é separado e direcionado à conversa, sem broadcast para
+todo o suporte, push ou recarga da fila. Só permanece conectado enquanto o
+campo estiver visível. Há limites de concessões, conexões e buffer; o helper
+do widget é carregado sob demanda. Falha nesse recurso não impede mensagens.
+Os sinais não leem/gravam no Firestore, nem alteram a frequência do poll
+existente. Ainda consomem processamento e banda do Render — não custo zero.
+
+Testes: `testeChatDigitando.js` (isolamento, expiração, sabotagem e SSE HTTP)
+e `testeChatDigitandoVisual.js` (sigilo, rajada, aviso dos dois lados e
+ocultação). A suíte de rotas mede dez sinais HTTP sem leitura adicional.
+
 Reaproveita `/api/suporte-chats` e o ao vivo compartilhado do NoPulso.
 Mantém a atualização de segurança a cada 60 segundos somente com a aba visível.
 Chamadas simultâneas da fila são agrupadas. Filtros e troca de abas não fazem
