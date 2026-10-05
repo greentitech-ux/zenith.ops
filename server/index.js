@@ -12548,15 +12548,12 @@ app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async 
   // agregada por unidade+dia: e' assim que a coluna "Entrada de dinheiro"
   // da tela e o relatorio mostram (um dia = uma linha). O total nao muda.
   const entradas = auth.filterByUnidade(req, await saidasPainel.listarEntradasPorDia(fechamentosData));
-  // "dinheiro em loja" ACOMPANHA o "Ate" do filtro (pedido do Master: olhando
-  // agosto, o card nao pode falar de hoje), mas NAO o "De": a janela comeca na
-  // ultima retirada de cada unidade, nao no inicio do periodo (mesma regua da
-  // conferencia, ver dinheiroEmLoja). Por isso a lista vai SEM corte de data -
-  // o historico antes do "De" e' o que diz desde quando o dinheiro acumula.
+  // Os quatro cards seguem o mesmo período: entradas - saídas - sangrias.
+  // A lista completa preserva as opções de unidade; o cálculo aplica as datas.
   const caixa = saidasPainel.dinheiroEmLoja(
     saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo }),
     saidasPainel.filtrar(auth.filterByUnidade(req, await saidasPainel.listarEntradas(fechamentosData)), { unidades: unidadesSet, grupo }),
-    { ate: fim },
+    { inicio, ate: fim },
   );
   res.json({
     itens,

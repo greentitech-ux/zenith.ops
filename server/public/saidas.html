@@ -652,24 +652,23 @@ function renderTudo(){
   if(PODE_CONFERIR){
     const totalEntrada = entradas.reduce((s,e)=>s+(e.valor||0),0);
     document.getElementById('kpi-entrada').textContent = fmtMoney(totalEntrada);
-    // Dinheiro em loja: o servidor manda a janela POR LOJA (desde a última
-    // sangria de cada uma até o "Até" do filtro, ver dinheiroEmLoja) e o card
+    // Dinheiro em loja: o servidor manda o saldo POR LOJA no período
+    // dos demais cards (ver dinheiroEmLoja) e o card
     // soma SÓ as lojas do filtro da tela - o MESMO recorte de Grupo/Loja que
     // as colunas usam. Pedido do Master: "preciso que seja o valor de cada
     // loja quando filtrado" - antes o total era fixo porque Grupo/Loja
     // filtram em memória e nunca chegam ao servidor.
     const grupoSel = document.getElementById('f-grupo').value;
     const fimAtual = document.getElementById('f-data-ate').value || '';
-    const caixaCorrespondeAoPeriodo = String(CAIXA.ate || '') === fimAtual;
+    const caixaCorrespondeAoPeriodo = String(CAIXA.ate || '') === fimAtual
+      && String(CAIXA.inicio || '') === (document.getElementById('f-data-de').value || '');
     const caixaDoFiltro = (caixaCorrespondeAoPeriodo ? (CAIXA.porUnidade || []) : []).filter(u =>
       (!grupoSel || u.grupo === grupoSel) && (SEL_UNIDADE.size === 0 || SEL_UNIDADE.has(u.unidade)));
-    // loja sem sangria lançada não tem janela nem base (ver dinheiroEmLoja):
-    // fica fora da soma - contar o histórico inteiro como gaveta foi o que
-    // inflou o card pra R$ 490 mil
+    // Sem movimento registrado desde a data-base, não há saldo apurado.
     const caixaComBase = caixaDoFiltro.filter(u => !u.semBase);
-    const saldo = caixaComBase.reduce((t, u) => t + (u.valor || 0), 0);
+    const saldo = caixaComBase.reduce((t, u) => t + Math.round((u.valor || 0) * 100), 0) / 100;
     const elSaldo = document.getElementById('kpi-saldo');
-    // filtro só com loja sem sangria lançada: não há o que medir, e um zero
+    // filtro só com loja sem movimento registrado: não há o que medir, e um zero
     // aqui mentiria - o traço diz "sem base", não "gaveta vazia"
     elSaldo.textContent = caixaComBase.length ? fmtMoney(saldo) : '—';
     elSaldo.classList.toggle('bad', caixaComBase.length > 0 && saldo < 0);
@@ -684,7 +683,7 @@ function renderTudo(){
     document.getElementById('card-saldo').title = !caixaComBase.length
       ? 'Nenhuma loja do filtro tem sangria lançada nem movimento - não há base pra medir.'
       : `Dinheiro em loja ${!ateFiltro || ateFiltro >= hojeISO ? 'hoje' : 'em ' + fmtData(ateFiltro)}`
-        + ', contado desde a última sangria/depósito de cada loja.';
+        + ': entradas menos saídas avulsas menos sangrias, no período selecionado. Não é contagem física do caixa.';
   }
 
   // o botao de mover em lote so existe quando ha o que mover (e so pro Master)

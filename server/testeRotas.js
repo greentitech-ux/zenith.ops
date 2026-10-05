@@ -11032,7 +11032,7 @@ setTimeout(async () => {
       nomeDepositante: 'Fulano Teste', password: process.env.MASTER_PASSWORD,
     }, cabMaster)).corpo);
 
-    const periodo = 'inicio=2026-11-01&fim=2026-11-30';
+    const periodo = 'inicio=2026-08-01&fim=2026-11-30';
     const ler = async () => JSON.parse((await pedir(`/api/saidas-painel?${periodo}`, cabMaster)).corpo);
     const sangriaDe = (r) => (r.itens || []).find((it) => it.chave === `sangria::${sg.id}`);
     const entradaDe = (r) => (r.entradas || []).find((e) => e.unidade === UNI && e.data === '2026-11-01');
@@ -11208,26 +11208,19 @@ setTimeout(async () => {
       'entrada negativa é recusada': rNegativo.status === 400,
       'sem informar o lançamento é recusado, e a mensagem diz o que falta':
         rSemLancamento.status === 400 && /Informe o lançamento/.test(JSON.parse(rSemLancamento.corpo || '{}').error || ''),
-      // DINHEIRO EM LOJA pela mesma régua: o que entrou menos o que saiu DESDE
-      // A ÚLTIMA RETIRADA. Antes o card fazia "entrada − saídas − sangria do
-      // PERÍODO", que com o filtro no mês somava contra a entrada do mês uma
-      // sangria que tinha fechado o caixa do mês anterior. Aqui: depois da 2ª
-      // sangria (02/11) não entrou mais nada, então a gaveta está zerada.
-      'dinheiro em loja é contado desde a última retirada, não pelo período do filtro':
-        !!linhaCaixa && cem(linhaCaixa.valor) === 0 && linhaCaixa.desde === '2026-11-02',
+      // Os quatro cards seguem o MESMO filtro. As duas retiradas somam
+      // exatamente o disponível neste cenário: 1300 - 100 - 1200 = 0.
+      'dinheiro em loja desconta as retiradas, mantendo os movimentos do filtro':
+        !!linhaCaixa && cem(linhaCaixa.valor) === 0 && linhaCaixa.desde === '2026-07-31',
       'a conta vem aberta (desde quando, quanto entrou, quanto saiu) pra dar pra conferir':
-        !!linhaCaixa && cem(linhaCaixa.entrou) === 0 && cem(linhaCaixa.saiu) === 0,
-      // o card antigo fazia "entrada − saídas − sangria do PERÍODO": no mês
-      // inteiro daria 1000 + 300 − 100 − 900 − 300 = 0 por coincidência aqui,
-      // então o que prova a régua nova é a janela abrir na sangria de 02/11 e
-      // ignorar tudo que veio antes dela
-      'a janela ignora o que é anterior à última retirada (não é o saldo do mês)':
-        !!linhaCaixaAntes && linhaCaixaAntes.desde === '2026-11-01' && cem(linhaCaixaAntes.entrou) === 30000,
+        !!linhaCaixa && cem(linhaCaixa.entrou) === 130000 && cem(linhaCaixa.saiu) === 10000 && cem(linhaCaixa.retirado) === 120000,
+      // A primeira retirada abate 900, sem apagar os movimentos anteriores.
+      'antes da segunda retirada, preserva o saldo anterior e desconta a primeira':
+        !!linhaCaixaAntes && linhaCaixaAntes.desde === '2026-07-31' && cem(linhaCaixaAntes.entrou) === 130000 && cem(linhaCaixaAntes.valor) === 30000,
       // ---- o card acompanha o "Até" do filtro ----
-      // a mesma loja: 60 na gaveta hoje (entrada de 05/08), e R$ 0,00 em
-      // 04/08, porque naquele dia esse dinheiro ainda não tinha entrado
+      // Até 04/08 ainda não há movimento no período; em agosto entram 60.
       'olhando uma data passada, o card mostra a gaveta DAQUELE dia, não a de hoje':
-        !!antigaEm0408 && antigaEm0408.semBase === false && cem(antigaEm0408.valor) === 0
+        !!antigaEm0408 && antigaEm0408.semBase === true && antigaEm0408.valor === null
         && !!linhaSangriaAntiga && cem(linhaSangriaAntiga.valor) === 6000,
       // o pedido literal: um saldo de hoje não pode aparecer num mês em que
       // a loja não tinha tido movimento nenhum
@@ -11235,27 +11228,20 @@ setTimeout(async () => {
         !!caixaEmOutubro && caixaEmOutubro.semBase === true && caixaEmOutubro.valor === null,
       'a resposta diz ATÉ QUANDO contou (pra tela poder dizer de quando é o número)':
         (comDuas.caixa || {}).ate === '2026-11-30' && (emQuatroDeAgosto.caixa || {}).ate === '2026-08-04',
-      // o "De" NÃO pode entrar na conta: a janela abre na última retirada.
-      // Com o filtro em novembro inteiro ou só no fim do mês, a gaveta é a
-      // mesma - se o "De" cortasse, o histórico da 2ª sangria sumiria
-      'o "De" do filtro continua sem efeito na gaveta (senão vira saldo do período)':
-        !!antigaDeDepois && antigaDeDepois.desde === '2026-07-31'
-        && cem(antigaDeDepois.entrou) === 6000 && cem(antigaDeDepois.valor) === 6000,
-      // decisão do Master (27/08): "desconsidere meses para trás! seguiremos
-      // com o mês de Agosto apenas pra frente". O R$ 490.806,62 não volta: o
-      // que é anterior a 01/08/2026 nunca entra na conta da gaveta.
-      'o card DESCONSIDERA meses pra trás: loja cujo movimento é todo anterior a agosto fica sem base':
+      // O início do filtro também vale para o saldo, sem trazer outros meses.
+      'o "De" do filtro corta os mesmos movimentos que os demais cards':
+        !!antigaDeDepois && antigaDeDepois.semBase === true && antigaDeDepois.valor === null,
+      // O filtro desta consulta começa em agosto: junho e julho ficam fora.
+      'o card respeita agosto como início solicitado: movimento anterior fica fora':
         !!linhaAntiga && linhaAntiga.semBase === true && linhaAntiga.valor === null,
-      'loja sem sangria mas COM movimento desde agosto conta a partir do piso (01/08), não "desde sempre"':
+      'loja sem sangria mas COM movimento conta a partir do início selecionado':
         !!linhaPiso && linhaPiso.semBase === false && linhaPiso.desde === '2026-07-31' && cem(linhaPiso.valor) === 45000,
-      'sangria antiga (junho) NÃO arrasta a janela pra trás do piso: só os 60 de agosto contam, não os 300 de julho':
+      'sangria de junho não muda o filtro: só os 60 de agosto contam, não os 300 de julho':
         !!linhaSangriaAntiga && linhaSangriaAntiga.desde === '2026-07-31' && cem(linhaSangriaAntiga.valor) === 6000,
-      // o card zerou em São Miguel porque a janela cortava pela DATA da
-      // sangria (26/08), engolindo a entrada daquele mesmo dia. O corte é o
-      // fim do PERÍODO que ela declarou levar (25/08), então os R$ 91,00 que
-      // entraram em 26/08 continuam na gaveta.
+      // Retirada de 450 não apaga a entrada de 91 no mesmo dia:
+      // 450 + 91 - 450 = 91, independentemente do período declarado.
       'sangria lançada em 26/08 cobrindo até 25/08 deixa na gaveta o que entrou em 26/08 (R$ 91, não R$ 0)':
-        !!linhaSobra && linhaSobra.semBase === false && linhaSobra.desde === '2026-08-25' && cem(linhaSobra.valor) === 9100,
+        !!linhaSobra && linhaSobra.semBase === false && linhaSobra.desde === '2026-07-31' && cem(linhaSobra.valor) === 9100,
       'e a conferência dessa mesma sangria fecha no fim do período (450 de 25/08), sem puxar os 91 do dia seguinte':
         !!sgSobraLida && cem(sgSobraLida.esperado) === 45000 && sgSobraLida.temDivergencia === false,
       'o total soma só as lojas com base (a sem sangria não infla o número)':
