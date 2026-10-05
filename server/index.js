@@ -146,6 +146,7 @@ const qualidadeReport = require('./qualidadeReport');
 const reparoNocZenithScript = require('./reparoNocZenithScript');
 const procedimentosSocorro = require('./procedimentosSocorro');
 const loginCustom = require('./loginCustom');
+const historicoEntradas = require('./historicoEntradas');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -712,8 +713,8 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
     });
     LOGIN_FALHAS.delete(chaveTentativa);
     console.log(`[passkey] entrada por biometria: ${result.user.email} (${credencial.aparelho})`);
+    await notificarEntradaUsuario(result.user,req,'biometria');
     res.json(result);
-    notificarEntradaUsuario(result.user,req,'biometria');
   } catch (err) {
     if (['COMPUTADOR_NOC_OBRIGATORIO','UNIDADE_NOC_NAO_AUTORIZADA'].includes(err.code)) return res.status(403).json({error:err.message,code:err.code});
     const atual = LOGIN_FALHAS.get(chaveTentativa);
@@ -850,8 +851,8 @@ app.post('/api/auth/login', async (req, res) => {
       ip: req.headers['x-forwarded-for'] || req.ip,
     });
     LOGIN_FALHAS.delete(chave);
+    await notificarEntradaUsuario(result.user,req,'senha');
     res.json(result);
-    notificarEntradaUsuario(result.user,req,'senha');
   } catch (err) {
     if (['COMPUTADOR_NOC_OBRIGATORIO','UNIDADE_NOC_NAO_AUTORIZADA'].includes(err.code)) return res.status(403).json({ error: err.message, code: err.code });
     const atual = LOGIN_FALHAS.get(chave);
@@ -3321,11 +3322,16 @@ function requireAnySection(...sections) {
 // pela permissao de unidade), entao incluir `unidade` faria o filtro abaixo
 // descartar o evento pra quem tem permissions.unidades vazio/diferente
 const sseClients = new Set();
-function notificarEntradaUsuario(usuario,req,metodo) {
+async function notificarEntradaUsuario(usuario,req,metodo) {
+  const computador=req.computadorNocValidado;
+  const nomeUnidade=computador ? nomeCanonicoUnidade(computador.codigo,computador.codigo) : null;
+  // O histórico nunca pode impedir uma entrada legítima: o login só grava o
+  // resumo mínimo e uma falha isolada no Firestore fica registrada no log.
   try {
-    const computador=req.computadorNocValidado;
-    require('./avisosLogin').avisarEntrada(sseClients,usuario,{metodo,computador,
-      nomeUnidade:computador ? nomeCanonicoUnidade(computador.codigo,computador.codigo) : null});
+    await historicoEntradas.registrar({usuario,metodo,computador,nomeUnidade});
+  } catch(e) { console.error('[login] Falha ao registrar entrada:',e.message); }
+  try {
+    require('./avisosLogin').avisarEntrada(sseClients,usuario,{metodo,computador,nomeUnidade});
   } catch(e) { console.error('[login] Falha no aviso ao Master:',e.message); }
 }
 nocLogin.alteracoes.on('politica', userId => {
@@ -6881,6 +6887,25 @@ app.delete('/api/refund-requests/:id', auth.requireMaster, async (req, res) => {
 // ---------- gestao de usuarios (so o Master) ----------
 // leitura tambem libera pro Admin, que precisa da lista de tecnicos pra
 // decidir solicitacoes de Suporte de TI; escrita continua so-Master
+// Histórico de segurança: só Master, sob demanda, paginado. Não é incluído
+// em /api/users porque abrir a administração não pode disparar uma leitura de
+// auditoria sem a pessoa pedir.
+app.get('/api/users/entradas', auth.requireMaster, async (req, res) => {
+  try {
+    const entradas = await historicoEntradas.listar({
+      antes: req.query.antes,
+      limite: req.query.limite,
+    });
+    // O cache é exclusivamente no servidor; assim "Atualizar" vê a mudança
+    // imediatamente depois de uma nova entrada, sem leitura periódica.
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ entradas, proximo: entradas.length ? entradas[entradas.length - 1].ordem : null });
+  } catch (err) {
+    console.error('[login] Falha ao listar histórico de entradas:', err.message);
+    res.status(500).json({ error: 'Não foi possível carregar o histórico de entradas.' });
+  }
+});
+
 // Guarda comum para todas as alterações de conta (inclusive senha/sessões).
 app.use('/api/users/:id', async (req, res, next) => {
   try {

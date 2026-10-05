@@ -353,6 +353,23 @@
 
   <div class="admin-section"><span>02 · <b>Operações administrativas</b></span></div>
   <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <h2 style="margin:0;">🔐 Histórico de entradas</h2>
+      <button type="button" class="back" id="btn-entradas-carregar" onclick="carregarHistoricoEntradas(true)">Carregar histórico</button>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:9px 0 12px;">Registra somente entradas bem-sucedidas: data e hora, usuário, unidade e máquina NOC quando houver. Não guarda senha, IP nem acompanha em tempo real; a consulta só acontece ao abrir esta lista.</p>
+    <div class="tablewrap">
+      <table style="min-width:620px;">
+        <thead><tr><th>Data e hora</th><th>Usuário</th><th>Entrada</th><th>Unidade</th><th>Máquina</th></tr></thead>
+        <tbody id="entradas-body"><tr><td colspan="5" style="color:var(--muted);">Clique em “Carregar histórico” para consultar as entradas registradas.</td></tr></tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:center;margin-top:12px;">
+      <button type="button" class="back hidden" id="btn-entradas-mais" onclick="carregarHistoricoEntradas(false)">Carregar mais</button>
+    </div>
+  </div>
+
+  <div class="panel">
     <h2>Atualizar usuários (login) em massa</h2>
     <p style="font-size:12px;color:var(--muted);margin:-6px 0 12px;">Cole uma linha por acesso, no formato <code>email,usuário</code> (ex: copiado de uma planilha - vírgula ou tab entre as colunas). Aplica um por um e mostra o resultado de cada linha; se algum email não existir ou o usuário já estiver em uso, só aquela linha falha, o resto é aplicado normalmente.</p>
     <textarea class="valor-exato" id="bulk-username-texto" rows="6" style="width:100%;font-family:var(--mono);font-size:12px;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);" placeholder="jessica.rayana@exemplo.com,jeh&#10;jessica.natacha@exemplo.com,jn&#10;aurea.morais@exemplo.com,aurea"></textarea>
@@ -880,6 +897,57 @@ function baixarRelatorioUsuarios(formato){
 async function carregarUsuarios(){
   USERS = await fetch('/api/users').then(r=>r.json());
   renderUsers();
+}
+
+let ENTRADAS_CURSOR = null;
+let ENTRADAS_CARREGADAS = 0;
+const ENTRADAS_POR_PAGINA = 50;
+
+function formatarEntradaData(data){
+  if(!data) return '—';
+  const d = new Date(data);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'});
+}
+
+async function carregarHistoricoEntradas(reiniciar){
+  const btn = document.getElementById(reiniciar ? 'btn-entradas-carregar' : 'btn-entradas-mais');
+  const corpo = document.getElementById('entradas-body');
+  const mais = document.getElementById('btn-entradas-mais');
+  btn.disabled = true;
+  const textoOriginal = btn.textContent;
+  btn.textContent = 'Carregando...';
+  try{
+    if(reiniciar){
+      ENTRADAS_CURSOR = null;
+      ENTRADAS_CARREGADAS = 0;
+      corpo.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">Carregando histórico...</td></tr>';
+    }
+    const params = new URLSearchParams({limite:String(ENTRADAS_POR_PAGINA)});
+    if(!reiniciar && ENTRADAS_CURSOR) params.set('antes',ENTRADAS_CURSOR);
+    const res = await fetch('/api/users/entradas?'+params.toString());
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'Não foi possível carregar o histórico.');
+    const entradas = Array.isArray(data.entradas) ? data.entradas : [];
+    const linhas = entradas.map(e=>`<tr>
+      <td>${escapeHtml(formatarEntradaData(e.em))}</td>
+      <td>${escapeHtml(e.usuario||'—')}</td>
+      <td><span class="badge ${e.metodo==='biometria'?'on':'user'}">${e.metodo==='biometria'?'Biometria':'Senha'}</span></td>
+      <td>${escapeHtml(e.unidade||'Sem unidade NOC')}</td>
+      <td>${escapeHtml(e.maquina||'—')}</td>
+    </tr>`).join('');
+    if(reiniciar) corpo.innerHTML = linhas || '<tr><td colspan="5" style="color:var(--muted);">Nenhuma entrada registrada desde a ativação deste histórico.</td></tr>';
+    else if(linhas) corpo.insertAdjacentHTML('beforeend',linhas);
+    ENTRADAS_CARREGADAS += entradas.length;
+    ENTRADAS_CURSOR = data.proximo || ENTRADAS_CURSOR;
+    mais.classList.toggle('hidden', entradas.length < ENTRADAS_POR_PAGINA);
+    document.getElementById('btn-entradas-carregar').textContent = ENTRADAS_CARREGADAS ? `Atualizar histórico (${ENTRADAS_CARREGADAS})` : 'Carregar histórico';
+  }catch(err){
+    if(reiniciar) corpo.innerHTML = `<tr><td colspan="5" style="color:var(--bad);">${escapeHtml(err.message)}</td></tr>`;
+    else alert(err.message);
+  }finally{
+    btn.disabled = false;
+    if(!reiniciar) btn.textContent = textoOriginal;
+  }
 }
 
 function fmtBytes(n){

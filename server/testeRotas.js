@@ -515,6 +515,27 @@ setTimeout(async () => {
     if (!ok) ruins += 1;
     console.log(`${ok ? '✓' : '✗'} ${nome}: HTTP ${r.status} ${r.corpo.slice(0, 120)}`);
   }
+
+  // Histórico de entradas: uma autenticação bem-sucedida deve gravar só o
+  // resumo de auditoria (nunca senha/IP) e o Master deve poder consultá-lo.
+  // A rota real é importante aqui: chamar auth.login direto não executaria o
+  // registro que mora no handler HTTP.
+  const loginParaHistorico = await postarJson('/api/auth/login', {
+    identifier: process.env.MASTER_EMAIL,
+    password: process.env.MASTER_PASSWORD,
+  });
+  const consultaEntradas = await pedir('/api/users/entradas?limite=50', token ? { Authorization: 'Bearer ' + token } : {});
+  let entradasOk = false;
+  try {
+    const corpo = JSON.parse(consultaEntradas.corpo);
+    entradasOk = loginParaHistorico.status === 200 && consultaEntradas.status === 200
+      && Array.isArray(corpo.entradas)
+      && corpo.entradas.some((e) => e && e.usuario && e.em && e.metodo === 'senha'
+        && !Object.hasOwn(e, 'ip') && !Object.hasOwn(e, 'userAgent'));
+  } catch {}
+  if (!entradasOk) ruins += 1;
+  console.log(`${entradasOk ? '✓' : '✗'} histórico de entradas registra login e não expõe IP/sessão: login ${loginParaHistorico.status}, consulta ${consultaEntradas.status}`);
+
   // --- abertura do chat de suporte ---
   const semAnexo = await postarMultipart('/api/suporte-chat/iniciar',
     { nome: 'Well', contato: 'well@x.com', texto: 'não consigo entrar', assunto: 'Acesso/Senha' });
