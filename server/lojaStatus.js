@@ -393,7 +393,9 @@ const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
 // wallpaper básico, sem reaplicar as demais políticas da estação.
 // Revisão 6: força uma nova montagem dos fundos básicos já existentes após
 // a correção da atualização de logos. Não afeta artes enviadas pelo Master.
-const REVISAO_MODELO_BASICO = 6;
+// Mudar o desenho sem trocar logos também precisa redesenhar as máquinas já
+// instaladas; esta revisão viaja no heartbeat somente para o modelo básico.
+const REVISAO_MODELO_BASICO = 7;
 // Uma revisão visual não deve reexecutar USB, atalhos, barra e arquivamento.
 // O heartbeat leva esta chave separada: quando ela mudar, o agente troca só o
 // papel de parede, inclusive se o Windows ainda estiver com uma imagem antiga.

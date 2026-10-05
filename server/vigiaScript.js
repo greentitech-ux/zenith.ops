@@ -62,7 +62,8 @@
 // 140: restaura o acesso normal NoPulso, sem atalho/portal especial de chat.
 // 141: validação local silenciosa do login NOC, sem atalho extra.
 // 142: campanha como fundo do modelo, sem remover logos, identificação e suporte.
-const VERSAO_VIGIA = 142;
+// 143: amplia proporcionalmente a logo do grupo no modelo básico.
+const VERSAO_VIGIA = 143;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2375,7 +2376,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     // blocos, de cima pra baixo (em px de referencia): logos centralizados e
     // maiores, com pouco espaco morto no cartao da marca. A composicao inteira
     // continua centralizada na tela, inclusive em monitor vertical.
-    '  $alturaBloco = 245.0; if ($temCartao) { $alturaBloco += 480 }; if ($temGrupo) { $alturaBloco += 220 }',
+    '  $alturaBloco = 245.0; if ($temCartao) { $alturaBloco += 480 }; if ($temGrupo) { $alturaBloco += 280 }',
     // O cartão de suporte é desenhado no canto; a composição central não muda.
     '  $y = ($H - $alturaBloco * $e) / 2.0; $cx = $W / 2.0',
     '  $bmp = New-Object System.Drawing.Bitmap -ArgumentList $W, $H',
@@ -2393,8 +2394,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '      }',
     '      if ($temGrupo) {',
     '        $img = Abrir-ImagemSemTravar $arqGrupo',
-    '        try { Desenhar-ImagemNaCaixa $g $img ($cx - 220 * $e) $y (440 * $e) (140 * $e) } finally { $img.Dispose() }',
-    '        $y += 220 * $e',
+    // 40% maior que o bloco anterior (440×140): melhora a leitura da marca
+    // do grupo sem invadir o cartão da franquia abaixo.
+    '        try { Desenhar-ImagemNaCaixa $g $img ($cx - 308 * $e) $y (616 * $e) (196 * $e) } finally { $img.Dispose() }',
+    '        $y += 280 * $e',
     '      }',
     '      if ($temCartao) {',
     '        $cw = 720 * $e; $ch = 410 * $e; $cxCartao = $cx - $cw / 2',
