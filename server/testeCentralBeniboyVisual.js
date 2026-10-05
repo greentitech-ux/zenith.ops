@@ -10,7 +10,9 @@ const html = fs.readFileSync(path.join(raiz, 'beniboy.html'), 'utf8');
 for (const s of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) new vm.Script(s[1]);
 new vm.Script(fs.readFileSync(path.join(raiz,'beniboy-app.js'),'utf8'));
 const manifesto=JSON.parse(fs.readFileSync(path.join(raiz,'manifest-beniboy.json'),'utf8'));
-assert.equal(manifesto.start_url,'/beniboy');
+assert.equal(manifesto.start_url,'/atendimento/central');
+assert.equal(manifesto.scope,'/atendimento/');
+assert.notEqual(manifesto.id,JSON.parse(fs.readFileSync(path.join(raiz,'manifest.json'),'utf8')).id);
 assert.equal(JSON.parse(fs.readFileSync(path.join(raiz,'manifest.json'),'utf8')).start_url,'/','app principal mantém sua entrada');
 const agora = new Date().toISOString();
 const me = { id:'suporte-teste', nome:'Suporte teste', username:'Suporte teste', email:'suporte@teste.invalid', role:'master', permissions:{sections:['suporte','network-private']} };
@@ -29,7 +31,7 @@ function conversas() {
     for(const [largura,tema] of [[1440,'escuro'],[1024,'claro'],[390,'escuro']]) {
       const page=await navegador.newPage({viewport:{width:largura,height:900}});
       const erros=[];page.on('pageerror',e=>erros.push(e.message));
-      let itens=conversas(), envios=0, negar=false;
+      let itens=conversas(), envios=0, negar=false, liberarBeniboy=true;
       itens[1].mensagens.push({de:'suporte',texto:'',em:agora,anexo:{nome:'audio-teste.wav',tipo:'audio/wav',path:'teste-audio'}});
       // WAV válido em memória: o teste realmente toca, sem arquivo de produção.
       const wav=Buffer.alloc(44+8000*2*10);
@@ -43,6 +45,7 @@ function conversas() {
           let dados=[];
           if(u.pathname==='/api/suporte-chats/chat-b/anexo/1') return route.fulfill({contentType:'audio/wav',body:wav});
           if(u.pathname==='/api/me') dados=me;
+          if(u.pathname==='/api/beniboy/acesso') dados={permitido:liberarBeniboy};
           if(u.pathname==='/api/stream') return route.fulfill({contentType:'text/event-stream',body:': teste\n\n'});
           if(u.pathname==='/api/suporte-chats') return route.fulfill({status:negar?503:200,json:negar?{error:'teste'}:itens});
           if(u.pathname.endsWith('/status')) {
@@ -76,7 +79,7 @@ function conversas() {
       const inicioAtalho=30+zipAtalho.readUInt16LE(26);
       assert.equal(zipAtalho.subarray(30,inicioAtalho).toString(),'Central Beniboy.url');
       const conteudoAtalho=zipAtalho.subarray(inicioAtalho,inicioAtalho+zipAtalho.readUInt32LE(18)).toString();
-      assert.equal(conteudoAtalho,'[InternetShortcut]\r\nURL=https://nopulso.teste/beniboy\r\n','atalho não transporta sessão');
+      assert.equal(conteudoAtalho,'[InternetShortcut]\r\nURL=https://nopulso.teste/atendimento/central\r\n','atalho não transporta sessão');
       await page.evaluate(()=>fecharAppBeniboy());
       await page.getByRole('button',{name:'Claro / Escuro',exact:true}).click();
       assert.equal(await page.locator('html').getAttribute('data-tema'),tema==='claro'?'escuro':'claro');
@@ -202,6 +205,7 @@ function conversas() {
       await page.screenshot({path:path.join(destino,`central-beniboy-${largura}-${tema}.png`),fullPage:true});
       // A mesma página não pode mostrar conversas para quem não tem a seção.
       await page.route('**/api/me',route=>route.fulfill({json:{id:'sem-acesso',role:'user',permissions:{sections:[]}}}));
+      liberarBeniboy=false;
       await page.reload();
       await page.locator('#sem-acesso').waitFor({state:'visible'});
       assert.equal(await page.locator('#root').isVisible(),false);

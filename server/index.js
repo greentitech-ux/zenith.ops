@@ -76,6 +76,7 @@ const chamadoRelatorio = require('./chamadoRelatorio');
 const chamadosManutencao = require('./chamadosManutencao');
 const suporteChat = require('./suporteChat');
 const chatDigitando = require('./chatDigitando');
+const centralBeniboy = require('./centralBeniboy');
 const suporteChatPDF = require('./suporteChatPDF');
 const segurancaChat = require('./segurancaChat');
 const suporteBot = require('./suporteBot');
@@ -404,6 +405,8 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/estorno-cliente.html',
   '/solicitacao-publica.html',
   '/atendimento.html',
+  '/atendimento/central', '/atendimento/entrar', '/atendimento/sw.js',
+  '/beniboy-portal.js', '/beniboy-alertas.js', '/beniboy-app.js', '/beniboy-marca.css', '/manifest-beniboy.json',
   '/unidade.html', '/sessao-unidade.js', '/api/acesso-unidade/vinculo',
   '/api/acesso-unidade/registrar', '/api/acesso-unidade/sessao',
   '/api/meta/unidades-publico',
@@ -1978,7 +1981,7 @@ async function usuarioLogadoDoHeader(req) {
     // desbloquear o login pelo chat - usado por desbloquear_login
     // (suporteBot.js) pra dispensar a checagem de "contato bate com o email"
     // que protege o autoatendimento anonimo contra desbloquear conta alheia
-    ehTimeSuporte: auth.ehTimeSuporte({ isMaster, isAdmin: !!user.isAdmin, permissions: user.permissions }),
+    ehTimeSuporte: centralBeniboy.podeAtender({ user, isMaster }),
   };
 }
 
@@ -2054,7 +2057,7 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
     });
     await completarContatoAusenteDoChat(logado, chat, [req.body.contato, req.body.texto]);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
-    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Novo chat de suporte`, `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico');
+    push.notifyChatBeniboy(chat, `Ticket #${chat.numeroTicket} · Novo atendimento`, `${chat.nome} · ${chat.assunto || 'Suporte'}`).catch(e=>console.error('[beniboy] push:',e.message));
     const resumo = await suporteChat.responderReferencia(chat, req.body.texto, logado);
     if (resumo) {
       await suporteChat.adicionarMensagem(chat.id, { de:'suporte', texto:resumo, bot:true });
@@ -2109,7 +2112,7 @@ app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), asyn
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     // notificacao no celular do time tambem em MENSAGEM nova (nao so na
     // abertura da conversa) - o atendente ve e responde de onde estiver
-    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Nova mensagem no chat de suporte`, `${chat.nome} · ${texto.slice(0, 80) || (anexo ? '📎 ' + anexo.nome : '')}`, chat.id, '/tecnico');
+    push.notifyChatBeniboy(chat, `Ticket #${chat.numeroTicket} · Nova mensagem`, `${chat.nome} · ${texto.slice(0, 80) || 'Anexo recebido'}`).catch(e=>console.error('[beniboy] push:',e.message));
     // fecha a brecha de seguranca pedida pelo usuario: texto tipo comando/
     // script no chat publico (sem login) NUNCA e executado pelo Beniboy (ele
     // so gera texto - ver suporteBot.js), mas mandar isso e sinal forte de
@@ -3241,6 +3244,7 @@ app.get('/api/me', async (req, res) => {
     isMasterPrincipal: !!req.isMasterPrincipal,
     isQaUser: req.isQaUser,
     ehTimeSuporte: ehSuporte,
+    podeAtenderBeniboy: centralBeniboy.podeAtender(req),
     verticaisDoUsuario,
     // REDE(S) das lojas desse acesso (ARCFOOD / GBE, ver redes.js). O menu
     // usa isso pra so mostrar "Fechamentos Arcfood" pra quem tem loja
@@ -3328,7 +3332,7 @@ function broadcast(event, data, section) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of sseClients) {
     if (!client.isMaster) {
-      if (section && !client.sections.has(section)) continue;
+      if (section && !client.sections.has(section) && !(event === 'suporte-chat' && client.beniboy)) continue;
       if (data && data.unidade && !client.unidades.has(data.unidade)) continue;
     }
     client.res.write(payload);
@@ -3375,6 +3379,7 @@ app.get('/api/stream', (req, res) => {
     userId: req.user.id,
     isMaster: req.isMaster,
     isMasterPrincipal: req.isMasterPrincipal === true,
+    beniboy: centralBeniboy.podeAtender(req),
     sections: req.isMaster ? null : new Set(req.permissions.sections || []),
     unidades: req.isMaster ? null : new Set(req.permissions.unidades || []),
   };
@@ -6392,6 +6397,7 @@ app.post('/api/formularios/:id/enviar-pagamento', requireSection('formularios'),
 
 // ---------- notificacoes push (estorno, estorno agendado, chargeback, fraude) ----------
 app.post('/api/push/subscribe', async (req, res) => {
+  if(req.body.appBeniboy && !centralBeniboy.podeAtender(req)) return res.status(403).json({error:'A Central é exclusiva para Master, Suporte e Técnico.'});
   // guarda quem e essa inscricao (Master ve tudo; usuario comum so recebe
   // alerta das unidades e secoes que ele tem acesso - sem isso o push
   // vazava fraude/chargeback/estorno de TODAS as unidades pra qualquer
@@ -6405,6 +6411,8 @@ app.post('/api/push/subscribe', async (req, res) => {
     unidades: req.isMaster ? null : (req.permissions.unidades || []),
     sections: req.isMaster ? null : (req.permissions.sections || []),
     cargo: (req.user && req.user.cargo) || null,
+    cargos: users.tagsDe(req.user),
+    appBeniboy: req.body.appBeniboy === true,
   });
   res.json({ ok: true });
 });
@@ -17076,9 +17084,11 @@ app.post('/api/mensagens/:id/lida', auth.requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/beniboy/acesso', (req,res)=>res.json({permitido:centralBeniboy.podeAtender(req)}));
+
 // ----- lado do atendimento -----
 app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {
-  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+  if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
   const todos = await suporteChat.listAll();
   // token do visitante nunca sai pro atendimento - nao precisa
   res.json(todos.map(({ token, ...resto }) => ({ ...resto, digitacaoToken: chatDigitando.emitir(resto, 'suporte', req.user.id) })));
@@ -17088,7 +17098,7 @@ app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {
 // - pedido explicito do usuario, inspirado num dashboard de outra plataforma
 // de atendimento que ele usa. de/ate no formato YYYY-MM-DD (opcionais).
 app.get('/api/suporte-chats/estatisticas', auth.requireAuth, async (req, res) => {
-  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+  if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
   const { de, ate } = req.query;
   res.json(await suporteChat.estatisticas({ de, ate }));
 });
@@ -17106,7 +17116,7 @@ app.get('/api/suporte-chats/:id/pdf', auth.requireMaster, async (req, res) => {
 // anexo de uma mensagem, lado do atendimento (mesmo gate das outras rotas de
 // /api/suporte-chats)
 app.get('/api/suporte-chats/:id/anexo/:indice', auth.requireAuth, async (req, res) => {
-  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+  if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
   const chat = await suporteChat.getOne(req.params.id);
   if (!chat) return res.sendStatus(404);
   const msg = (chat.mensagens || [])[Number(req.params.indice)];
@@ -17116,7 +17126,7 @@ app.get('/api/suporte-chats/:id/anexo/:indice', auth.requireAuth, async (req, re
 
 app.post('/api/suporte-chats/:id/responder', auth.requireAuth, uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
-    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     let anexo = null;
     if (req.file) {
       const validacao = segurancaChat.validarAnexo(req.file);
@@ -17148,7 +17158,7 @@ app.post('/api/suporte-chats/:id/responder', auth.requireAuth, uploadChatAnexo.s
 
 app.post('/api/suporte-chats/:id/finalizar', auth.requireAuth, async (req, res) => {
   try {
-    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const chat = await suporteChat.finalizar(req.params.id, { autorEmail: req.user.email });
     chatDigitando.revogar(chat.id);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
@@ -17164,7 +17174,7 @@ app.post('/api/suporte-chats/:id/finalizar', auth.requireAuth, async (req, res) 
 // Mantemos a rota para clientes antigos não conseguirem pular a triagem.
 app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, res) => {
   try {
-    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const chat = await suporteChat.getOne(req.params.id);
     if (!chat) return res.status(404).json({ error: 'Conversa não encontrada.' });
     return res.status(409).json({ error: 'Esta conversa precisa virar tarefa primeiro. Abra a tarefa e, se necessário, converta-a em Solicitação de Suporte de TI.' });
@@ -17199,7 +17209,7 @@ function resumoChatParaTarefa(chat) {
 // sem furar ou repetir a sequência global de Ticket #.
 app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, res) => {
   try {
-    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const chat = await suporteChat.getOne(req.params.id);
     if (!chat) return res.status(404).json({ error: 'Conversa não encontrada.' });
     if (chat.tarefaId) {
@@ -17237,7 +17247,7 @@ app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, re
 // precisa enxergar isso na hora de escolher, não depois.
 app.get('/api/suporte/agentes', auth.requireAuth, async (req, res) => {
   try {
-    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const lista = await users.listarPorTag('suporte');
     res.json(lista.map((u) => ({
       id: u.id,
@@ -17255,7 +17265,7 @@ app.get('/api/suporte/agentes', auth.requireAuth, async (req, res) => {
 // Mesma porta do resto da Central do Beniboy: time de suporte.
 app.post('/api/suporte-chats/:id/notas/:indice/tratada', auth.requireAuth, async (req, res) => {
   try {
-    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const chat = await suporteChat.marcarNotaTratada(req.params.id, req.params.indice, {
       email: req.user.email,
       nome: req.user.username || req.user.email,
@@ -17270,7 +17280,7 @@ app.post('/api/suporte-chats/:id/notas/:indice/tratada', auth.requireAuth, async
 
 app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => {
   try {
-    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const autor = { id: req.user.id, email: req.user.email, nome: req.user.username || req.user.email };
     let chat = await suporteChat.atualizarStatusAtendimento(req.params.id, {
       statusAtendimento: req.body.statusAtendimento,
@@ -18495,6 +18505,10 @@ app.post('/api/ifood/sincronizar', auth.requireMaster, async (req, res) => {
 // So redireciona arquivos HTML que existem dentro de public. Assim uma rota de
 // API, um anexo ou um caminho inexistente nunca e' alterado por engano.
 const DIRETORIO_PUBLICO = path.join(__dirname, 'public');
+// Caminhos exclusivos do atalho; /beniboy permanece compatível com links antigos.
+app.get('/atendimento/central', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'beniboy.html')));
+app.get('/atendimento/entrar', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'atendimento.html')));
+app.get('/atendimento/sw.js', (_req,res)=>{res.set('Cache-Control','no-cache');res.sendFile(path.join(DIRETORIO_PUBLICO,'beniboy-sw.js'));});
 app.get(/^(.*)\.html$/, (req, res, next) => {
   const rotaHtml = req.path;
   const arquivo = path.resolve(DIRETORIO_PUBLICO, '.' + rotaHtml);

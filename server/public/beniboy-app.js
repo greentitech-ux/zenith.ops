@@ -11,7 +11,7 @@
   window.abrirAppBeniboy=function(){
     document.getElementById('overlay-app-beniboy').classList.remove('hidden');
     const instalada=window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-    aviso(instalada?'Você está usando a Central em uma janela de app. Pode baixar o atalho para outro computador.':'Escolha instalar como app ou baixar um atalho para Windows. Não é um APK nem um instalador EXE.');
+    aviso(instalada?'Este é o atalho da Central, separado do NoPulso.':'Adicione o atalho da Central: abre em janela própria, junto do NoPulso. Não usa Play Store, APK ou EXE.');
   };
   window.fecharAppBeniboy=function(){document.getElementById('overlay-app-beniboy').classList.add('hidden');};
   window.instalarAppBeniboy=async function(){
@@ -30,7 +30,7 @@
     aviso('No Chrome ou Edge: abra o menu ⋮/… e procure “Instalar Central Beniboy”, “Instalar página como app” ou “Adicionar à tela inicial”. A opção depende do navegador.');
   };
   window.baixarAtalhoBeniboy=function(){
-    const url=new URL('/beniboy',location.origin);
+    const url=new URL('/atendimento/central',location.origin);
     if(!['https:','http:'].includes(url.protocol)) return;
     // ZIP evita que navegadores renomeiem .url para .download por segurança.
     const nome=new TextEncoder().encode('Central Beniboy.url');

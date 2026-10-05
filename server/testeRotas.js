@@ -23426,8 +23426,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
     const semAutocomplete = campos.filter((c) => !c.ac);
     // só o login de verdade pode pedir a senha salva
     const pedemSenhaSalva = campos.filter((c) => c.ac === 'current-password');
-    const soOLogin = pedemSenhaSalva.length === 1
-      && pedemSenhaSalva[0].arquivo === 'index.html' && pedemSenhaSalva[0].id === 'auth-password';
+    const loginsPermitidos=new Set(['index.html#auth-password','atendimento.html#portal-senha']);
+    const soOLogin = pedemSenhaSalva.length === loginsPermitidos.size
+      && pedemSenhaSalva.every(c=>loginsPermitidos.has(c.arquivo+'#'+c.id));
 
     const conf = {
       'todo campo de senha declara o que o navegador pode fazer':
@@ -23687,11 +23688,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     const conf = {
       'Master cai no Meu Dia': fn({ role: 'master', permissions: { sections: [] } }) === '/tarefas',
-      'app dedicado volta à Central só para quem pode atender':
-        entradaBeniboy({role:'master'})==='/beniboy'
-        && entradaBeniboy({role:'user',permissions:{sections:['suporte']}})==='/beniboy'
-        && entradaBeniboy({role:'user',permissions:{sections:[]}})==='/tarefas'
-        && entradaBeniboy(null)==='/tarefas',
+      'app dedicado volta ao portal público; o servidor decide acesso à equipe':
+        entradaBeniboy({role:'master'})==='/atendimento'
+        && entradaBeniboy({role:'user',cargo:'suporte'})==='/atendimento'
+        && entradaBeniboy({role:'user',permissions:{sections:[]}})==='/atendimento'
+        && entradaBeniboy(null)==='/atendimento',
       'destino do app não aceita URL externa':
         entradaComBusca('?app=https://externo.invalid')({role:'master'})==='/tarefas',
       'quem tem cargo também (loja, técnico, suporte, manutenção)':
@@ -29032,7 +29033,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'a rota está atrás do time de suporte': (() => {
         const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
         const i = idx.indexOf("'/api/suporte-chats/:id/notas/:indice/tratada'");
-        return i > 0 && /if \(!ehTimeSuporte\(req\)\) return res\.status\(403\)/.test(idx.slice(i, i + 420));
+        return i > 0 && /if \(!centralBeniboy\.podeAtender\(req\)\) return res\.status\(403\)/.test(idx.slice(i, i + 420));
       })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -30008,6 +30009,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e) { ruins++; console.log('✗ Digitando: '+e.message); }
   try { await require('./testeAtendimentoAguardo').testarHttp({DOCS,token,pedir,postarJson}); }
   catch(e) { ruins++; console.log('✗ Em aguardo: '+e.message); }
+  try { await require('./testePortalBeniboy').testarHttp({DOCS,pedir,postarJson}); }
+  catch(e) { ruins++; console.log('✗ Portal Beniboy: '+e.message); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -4,6 +4,7 @@
 const webpush = require('web-push');
 const db = require('./firestore');
 const users = require('./users');
+const centralBeniboy = require('./centralBeniboy');
 const { ehCargoGerente } = users;
 const alertasCentral = require('./alertasCentral');
 
@@ -28,12 +29,14 @@ if (PUBLIC_KEY && PRIVATE_KEY) {
 const SUBS_TTL_MS = 60 * 1000;
 let SUBS_CACHE = null;
 let SUBS_CACHE_EM = 0;
-async function loadSubs() {
-  if (SUBS_CACHE && Date.now() - SUBS_CACHE_EM < SUBS_TTL_MS) return SUBS_CACHE;
-  const snap = await COLLECTION.get();
-  SUBS_CACHE = snap.docs.map((d) => d.data());
-  SUBS_CACHE_EM = Date.now();
-  return SUBS_CACHE;
+async function loadSubs(incluirBeniboy = false) {
+  if (!SUBS_CACHE || Date.now() - SUBS_CACHE_EM >= SUBS_TTL_MS) {
+    const snap = await COLLECTION.get();
+    SUBS_CACHE = snap.docs.map((d) => d.data());
+    SUBS_CACHE_EM = Date.now();
+  }
+  // O registro paralelo não recebe alertas financeiros/NOC/RH do app principal.
+  return incluirBeniboy ? SUBS_CACHE : SUBS_CACHE.filter(sub=>!sub.meta?.appBeniboy);
 }
 function invalidarSubs() { SUBS_CACHE = null; }
 
@@ -305,6 +308,18 @@ async function notifyAbastecimento(title, body, tag, secao) {
 // critico (sirene + tela cheia pedindo pra "atender") por um push normal
 // explicando a causa real, e manda pro NOC Zenith em vez da tela de
 // atendimento (nao ha nada pra "atender" ali - o problema e' conectividade)
+async function notifyChatBeniboy(chat, title, body) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY || !chat?.id) return;
+  const atuais = await users.list(); // Cache de contas existente; revogação não depende do aparelho reabrir.
+  const payload=JSON.stringify({title,body,tag:'chat-'+chat.id,beniboy:true,chatId:chat.id,icone:'/beniboy-app-192.png',url:'/atendimento/central?chat='+encodeURIComponent(chat.id)});
+  for(const sub of await loadSubs(true)){
+    const u=atuais.find(u=>u.id===sub.meta?.userId);
+    if(!centralBeniboy.podeAtender(u)) continue;
+    try{await webpush.sendNotification(sub,payload);}
+    catch(e){if(e.statusCode===404 || e.statusCode===410) await removeSubscription(sub.endpoint);else console.error('Erro no push Beniboy:',e.message);}
+  }
+}
+
 async function notifyBeniboyEscalonamento(chat, motivo, opts) {
   const chatId = chat && chat.id;
   if (!chatId) return;
@@ -329,10 +344,12 @@ async function notifyBeniboyEscalonamento(chat, motivo, opts) {
   };
   await alertasCentral.registrar({ tipo: lojaOffline ? 'noc-loja-offline-conversa' : 'beniboy', titulo: dados.title, resumo: dados.body, url: dados.url, critico: !lojaOffline });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  dados.beniboy=true;dados.chatId=chatId;
+  const atuais=await users.list();
   const payload = JSON.stringify(dados);
-  const subs = await loadSubs();
+  const subs = await loadSubs(true);
   for (const sub of subs) {
-    if (!podeReceberCritico(sub)) continue;
+    if (!centralBeniboy.podeAtender(atuais.find(u=>u.id===sub.meta?.userId))) continue;
     try {
       await webpush.sendNotification(sub, payload, { urgency: lojaOffline ? 'normal' : 'high' });
     } catch (err) {
@@ -1766,6 +1783,7 @@ module.exports = {
   notifyProgramaSumido,
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyAgregador, notifyPorTag, notifyUsuario, notifyBateriaAparelho, notifyDocumentoQA, publicoDocumentoQA, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
+  notifyChatBeniboy,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyRamAlerta, notifyVmCaiu, notifyComandoSemAdmin, notifyComandoTravado, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,

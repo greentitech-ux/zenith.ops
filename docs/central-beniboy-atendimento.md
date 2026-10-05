@@ -1,8 +1,10 @@
 # Central Beniboy — mesa de atendimento
 
-Acesse **Central do Beniboy** pelo menu ou `/beniboy`. O botão ↗ no
-cabeçalho abre uma aba exclusiva, paralela aos outros painéis do NoPulso.
-O login e as permissões continuam os mesmos: Master, Admin ou seção Suporte.
+Acesse o portal público em `/atendimento` e a mesa da equipe em
+`/atendimento/central`. O endereço antigo `/beniboy` continua compatível.
+O usuário e senha são os do NoPulso, mas a mesa é exclusiva para Master ou
+cargo Suporte/Técnico. Admin ou seção Suporte isolados não concedem acesso.
+A autorização também é aplicada nas rotas de leitura e resposta.
 
 ## Organização
 
@@ -39,8 +41,25 @@ O botão abre opções de instalação web (PWA), conforme suporte do navegador,
 ou download opcional do atalho Windows em ZIP. Extraia o `.url` e mova-o para
 a Área de Trabalho. O arquivo não contém token ou senha. A instalação web
 abre uma janela própria; o atalho abre o navegador padrão. Nenhum é APK/EXE.
-O manifesto principal permanece com entrada `/`; o da Central usa `/beniboy`.
-O login iniciado pelo app volta à Central apenas para quem tem acesso.
+O manifesto principal permanece com entrada `/`; o da Central usa
+`/atendimento/central`, identidade própria e escopo `/atendimento/`.
+O login do atalho fica em `/atendimento/entrar` e volta à Central só para
+quem tem acesso. A política NOC e a preparação obrigatória da conta continuam
+valendo. As duas janelas compartilham a conta/sessão do mesmo navegador:
+separar atalhos não significa criar sessões independentes.
+O ícone amarelo/preto é renderizado do Beniboy original em `tema.js`, pelo
+script `server/gerarIconesBeniboy.js`, sem manter outro desenho.
+
+Visitantes escolhem “Iniciar atendimento sem login” e continuam informando
+nome e telefone/e-mail. A Central não exige credenciais para pedir ajuda,
+mas não expõe fila, notas ou conversas de terceiros ao visitante.
+
+O sino da Central pede permissão de notificações e cria uma inscrição push
+própria, sem substituir o registro do NoPulso. Esse registro recebe apenas
+atendimentos. O envio verifica o cargo atual, incluindo revogação. Alertas
+dependem de navegador compatível, conexão, permissão e políticas de bateria
+do aparelho; não há garantia de entrega com navegador encerrado pelo sistema.
+O service worker não armazena chats/senhas nem oferece atendimento offline.
 
 O subdomínio `atendimento.nopulso.com.br` ainda depende de configuração
 de DNS/Render; esta entrega não o publica nem altera o domínio do NoPulso.
@@ -61,7 +80,7 @@ imprevisíveis, específicas de conversa/lado/atendente, são fornecidas nas
 consultas já autorizadas e expiram em 15 minutos; fechar a conversa revoga.
 Reiniciar/deploy apaga o estado. Não concedem leitura de mensagens nem
 permissões administrativas. O visitante só recebe a sua; atendimento mantém
-o gate Master/Admin/seção Suporte. Vários atendentes são agregados sem que
+o gate Master/cargo Suporte/Técnico. Vários atendentes são agregados sem que
 a parada de um apague a digitação do outro.
 
 O SSE de digitação é separado e direcionado à conversa, sem broadcast para
@@ -124,3 +143,9 @@ rascunho/citação e confirma que as asserções reprovam a perda de estado.
 
 Capturas em `docs/varredura/central-beniboy-*.png` (artefatos locais ignorados).
 Nenhuma conversa ou mensagem foi criada em produção durante os testes.
+
+Testes adicionais: `testePortalBeniboyVisual.js` (nome/contato, acesso,
+recusa sem substituir sessão e três tamanhos), `testePortalBeniboy.js`
+(HTTP real contra banco simulado, cargo e revogação) e
+`testeBeniboyPush.js` (envios simulados, cargos atuais e isolamento).
+Publicação no Git não efetua deploy: Render permanece em Manual Deploy.

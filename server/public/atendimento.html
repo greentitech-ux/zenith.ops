@@ -3,11 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Fale com a gente · NoPulso</title>
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="manifest" href="/manifest.json">
+<title>Portal da Central Beniboy</title>
+<link rel="icon" href="/beniboy-app-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="/beniboy-app-192.png">
+<link rel="manifest" href="/manifest-beniboy.json">
+<link rel="stylesheet" href="/beniboy-marca.css">
+<script src="/beniboy-portal.js" defer></script>
+<script src="/noc-validacao.js" defer></script>
 <meta name="theme-color" content="#0b0d10">
 <style>
   :root{
@@ -36,12 +38,30 @@
 </head>
 <body>
 
+<main id="portal-beniboy" class="portal-beniboy">
+  <span id="portal-marca" class="marca-beniboy"></span>
+  <h1>Portal da Central Beniboy</h1>
+  <p>Atendimento separado do NoPulso. A equipe usa o mesmo usuário e senha.</p>
+  <form id="portal-login">
+    <label for="portal-usuario">Usuário ou e-mail</label><input id="portal-usuario" name="identifier" autocomplete="username">
+    <label for="portal-senha">Senha</label><input id="portal-senha" name="password" type="password" autocomplete="current-password">
+    <button id="portal-entrar" type="submit">Entrar na Central</button>
+    <div id="portal-erro" role="alert" hidden></div>
+  </form>
+  <p>Área da equipe: Master, Suporte e Técnico.</p>
+  <a href="/?app=beniboy">Acesso normal, validação NOC e recuperação de conta</a>
+  <div class="ou">Precisa de ajuda? Não é necessário ter login.</div>
+  <button id="portal-anonimo" type="button">Iniciar atendimento sem login</button>
+  <p>Informe seu nome e telefone ou e-mail para conversar.</p>
+</main>
+<div id="publico-chat" hidden>
 <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
 <div class="icone" id="icone-beniboy"></div>
 <script>document.getElementById('icone-beniboy').innerHTML = window.beniboySVG ? window.beniboySVG(64) : '🤖';</script>
 <h1>Fale com o Beniboy</h1>
 <p>Nosso assistente já abriu a conversa aqui embaixo - conte o que você precisa (estorno, dúvida sobre um pedido, qualquer outra coisa) que ele te ajuda na hora. Não precisa de WhatsApp nem de login.</p>
 <div class="dica"><span class="seta">↘</span> continue por ali</div>
+</div>
 
 <div id="mensagemBanner" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;padding:24px;">
   <div style="background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px;max-width:420px;text-align:center;">
@@ -61,7 +81,7 @@
 // O script do widget so e injetado DEPOIS dessa resolucao terminar (em vez
 // de uma <script src> fixa) pra nunca correr o risco dele ler
 // __zenithLojaContexto antes da respota do fetch chegar.
-window.__zenithAbrirChatAuto = true;
+window.__zenithAbrirChatAuto = false;
 
 // heartbeat de presenca do computador (ver lojaStatus.js/index.js): so faz
 // sentido quando o link tem ?unidade= (quiosque fixo de uma loja - link
@@ -163,11 +183,28 @@ async function boot(){
     // a permanente; onde o navegador não tiver a trava, segue como antes.
     if (window.manterTelaAcordada) window.manterTelaAcordada();
   }
-  const s = document.createElement('script');
-  s.src = '/suporte-chat.js';
-  document.body.appendChild(s);
+  window.__zenithAbrirChatAuto = true;
+  const lancador=document.querySelector('.szc-btn');
+  if(lancador) {
+    const painel=document.querySelector('.szc-panel');
+    if(painel?.classList.contains('szc-hidden')) lancador.click();
+  } else {
+    const existente=document.querySelector('script[src="/suporte-chat.js"]');
+    if(existente) existente.addEventListener('load',()=>{const b=document.querySelector('.szc-btn'),p=document.querySelector('.szc-panel');if(b && p?.classList.contains('szc-hidden')) b.click();},{once:true});
+    else {const s=document.createElement('script');s.src='/suporte-chat.js';document.body.appendChild(s);}
+  }
 }
-boot();
+let chatPublicoAberto=false;
+window.abrirChatPublicoBeniboy=function(){
+  if(chatPublicoAberto) return;
+  chatPublicoAberto=true;
+  document.body.classList.add('chat-publico-aberto');
+  document.getElementById('portal-beniboy').hidden=true;
+  document.getElementById('publico-chat').hidden=false;
+  boot();
+};
+// Mantém os links/atalhos de quiosque já instalados nas lojas.
+if(new URLSearchParams(location.search).has('unidade') || localStorage.getItem('zenithMonitorFixo')) window.abrirChatPublicoBeniboy();
 </script>
 </body>
 </html>

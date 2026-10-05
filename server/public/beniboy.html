@@ -4,9 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Central do Beniboy · NoPulso</title>
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
-<link rel="apple-touch-icon" href="/beniboy-192.png">
+<link rel="icon" href="/beniboy-app-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="/beniboy-app-192.png">
+<link rel="stylesheet" href="/beniboy-marca.css">
+<script src="/beniboy-alertas.js" defer></script>
 <link rel="manifest" href="/manifest-beniboy.json">
 <script src="/beniboy-app.js" defer></script>
 <script src="/chat-digitando.js" defer></script>
@@ -238,15 +239,14 @@
 <header>
   <div class="header-top">
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <a class="btn-notif" href="/" target="_blank" rel="noopener" aria-label="Abrir NoPulso separado" title="Abrir NoPulso separado">↗</a>
       <div style="min-width:0;">
         <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
-        <h1><span id="bb-marca" style="display:inline-flex;vertical-align:-12px;margin-right:8px;"></span>Central do Beniboy</h1>
+        <h1><span id="bb-marca" class="marca-beniboy" style="vertical-align:-12px;margin-right:8px;"></span>Central do Beniboy</h1>
       </div>
     </div>
     <div class="header-nav">
-      <a class="btn-notif" href="/beniboy" target="_blank" rel="noopener" aria-label="Abrir central em outra aba" title="Abrir central em outra aba">↗</a>
-      <button class="btn-notif" onclick="abrirMensagemDireta()" title="Mandar mensagem direta pra alguém">💬</button>
+      <button type="button" class="btn-notif" onclick="ativarAlertasBeniboy()" title="Ativar alertas da Central" aria-label="Ativar alertas da Central">🔔</button>
       <button class="btn-notif" onclick="carregarLista()" title="Atualizar">🔄</button>
       <div class="nav-divider"></div>
       <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
@@ -258,6 +258,7 @@
 <nav class="nav-drawer hidden" id="nav-drawer"></nav>
 
 <div id="sem-acesso" class="empty hidden">Você não tem acesso à Central do Beniboy. Fale com o administrador (Master).</div>
+<div id="beniboy-alertas-aviso" role="status" class="sub"></div>
 
 <div id="root" class="hidden">
   <div class="central-barra">
@@ -302,9 +303,9 @@
   <div class="sheet-wrap" style="max-width:460px;">
     <div class="sheet">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;"><h3 id="beniboy-app-titulo">Central Beniboy no seu aparelho</h3><button class="btn-ghost" onclick="fecharAppBeniboy()" aria-label="Fechar instalação">×</button></div>
-      <p class="sub">Ícone próprio, mesmo login e mesmas permissões do NoPulso. Instalação opcional — nada será instalado automaticamente nas máquinas da unidade.</p>
+      <p class="sub">Atalho exclusivo de atendimento, com ícone amarelo/preto e janela separada do NoPulso. Acesso de equipe: Master, Suporte e Técnico. Não é um aplicativo da Play Store.</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;">
-        <button class="btn-primary" onclick="instalarAppBeniboy()">Instalar app</button>
+        <button class="btn-primary" onclick="instalarAppBeniboy()">Adicionar atalho da Central</button>
         <button class="btn-ghost" onclick="baixarAtalhoBeniboy()">Baixar atalho Windows</button>
       </div>
       <p id="beniboy-app-aviso" role="status" style="font-size:13px;line-height:1.6;margin-bottom:0;"></p>
@@ -346,7 +347,7 @@
 
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
-if(!AUTH_TOKEN){ location.replace('/?app=beniboy'); }
+if(!AUTH_TOKEN){ location.replace('/atendimento/entrar?equipe=1'); }
 
 const _rawFetch = window.fetch.bind(window);
 window.fetch = (url, opts = {}) => {
@@ -355,7 +356,7 @@ window.fetch = (url, opts = {}) => {
   }
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
-function logout(){ localStorage.removeItem('authToken'); location.href = '/?app=beniboy'; }
+function logout(){ localStorage.removeItem('authToken'); location.href = '/atendimento/entrar?equipe=1'; }
 function abrirMenu(){}
 function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1237,7 +1238,8 @@ async function boot(){
   IS_MASTER = ME.role==='master';
   IS_ADMIN = !!ME.isAdmin;
   const secoes = (ME.permissions && ME.permissions.sections) || [];
-  if(!(IS_MASTER || IS_ADMIN || secoes.includes('suporte'))){
+  const acesso=await fetch('/api/beniboy/acesso').then(r=>r.ok?r.json():({permitido:false}));
+  if(!acesso.permitido){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
   }
@@ -1248,6 +1250,7 @@ async function boot(){
   await carregarLista();
   carregarNoc();
   conectarStream();
+  window.prepararAlertasBeniboy?.();
   setInterval(()=>{ if(!document.hidden) carregarLista(); }, 60000);
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) carregarLista(); });
   // ?chat=<id> - deep link vindo do alerta critico (alerta-beniboy.html /
@@ -1258,13 +1261,11 @@ async function boot(){
 }
 boot();
 </script>
-<script src="/notif-central.js"></script>
 <script src="/recolher.js"></script>
 <script>
   // marca do assistente no cabecalho da Central (48px, BENIBOY.md)
   (function(){ var m=document.getElementById('bb-marca');
     if (m && window.beniboySVG) m.innerHTML = window.beniboySVG(48); })();
 </script>
-<script src="/nav-menu.js"></script>
 </body>
 </html>
