@@ -222,6 +222,23 @@
   .chat-citacao span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .chat-citacao .btn-ghost{margin-left:auto;}
   .central-aparencia{display:flex;gap:6px;}
+  .central-disposicao{display:flex;gap:6px;align-items:center;}
+  .btn-colunas{display:inline-flex;align-items:center;justify-content:center;width:40px;height:36px;padding:7px;}
+  .btn-colunas svg{width:24px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;}
+  .btn-colunas[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);}
+  .central-mesa.multiconversa{grid-template-columns:240px minmax(0,1fr);}
+  .central-mesa.multiconversa .central-contexto{display:none;}
+  .central-mesa.multiconversa.ver-contexto{grid-template-columns:240px minmax(0,1fr) 240px;}
+  .central-mesa.multiconversa.ver-contexto .central-contexto{display:block;}
+  .multiconversa .paineis-wrap{overflow-x:auto;}
+  .multiconversa .paineis{display:grid;grid-template-columns:repeat(var(--colunas-visiveis,2),minmax(300px,1fr));overflow:visible;}
+  .multiconversa .painel-conversa{border-right:1px solid var(--line);padding:12px;}
+  .multiconversa .painel-conversa.painel-ativo{box-shadow:inset 0 3px var(--accent);}
+  .multiconversa .painel-conversa .d-acoes{flex:none;}
+  @media(max-width:760px){
+    .central-mesa.multiconversa,.central-mesa.multiconversa.ver-contexto{display:flex;}
+    .central-disposicao{margin-left:auto;}
+  }
   @media(max-width:760px){
     .painel-conversa .d-acoes{flex-wrap:nowrap;overflow-x:auto;flex:none;padding-bottom:4px;}
     .painel-conversa .d-acoes>*{flex:none;}
@@ -270,7 +287,11 @@
       <button class="btn-ghost" onclick="aparenciaCentral('tema')">Claro / Escuro</button>
     </div>
     <button class="btn-ghost" onclick="abrirAppBeniboy()">App / Atalho</button>
-    <button class="btn-ghost" onclick="toggleContexto()" aria-controls="central-contexto">Dados da conversa</button>
+    <div class="central-disposicao" aria-label="Disposição das conversas">
+      <button class="btn-ghost" onclick="toggleContexto()" aria-controls="central-contexto">Dados da conversa</button>
+      <button type="button" id="central-colunas-2" class="btn-ghost btn-colunas" aria-label="Mostrar 2 conversas lado a lado" title="2 conversas lado a lado — clique novamente para voltar a uma" aria-pressed="false" onclick="definirColunasCentral(2)"><svg viewBox="0 0 24 20" aria-hidden="true"><rect x="1" y="2" width="22" height="16" rx="2"/><path d="M12 2v16"/></svg></button>
+      <button type="button" id="central-colunas-3" class="btn-ghost btn-colunas" aria-label="Mostrar 3 conversas lado a lado" title="3 conversas lado a lado — clique novamente para voltar a uma" aria-pressed="false" onclick="definirColunasCentral(3)"><svg viewBox="0 0 24 20" aria-hidden="true"><rect x="1" y="2" width="22" height="16" rx="2"/><path d="M8 2v16M16 2v16"/></svg></button>
+    </div>
   </div>
   <div id="central-erro" class="hidden" role="alert"></div>
   <div class="central-mesa" id="central-mesa">
@@ -389,6 +410,27 @@ let ITENS = [];
 let CONVERSA_ATIVA = null, FILTRO_MINHAS = false;
 let FILTRO_DESBLOQUEIO = false;
 let PAINEIS_ABERTOS = []; // ids das conversas abertas agora, na ordem em que foram abertas - mais de uma ao mesmo tempo, ver renderPaineis()
+let COLUNAS_CENTRAL = 1, PAINEIS_VISIVEIS = [];
+try { const salvo=Number(localStorage.getItem('beniboyColunasCentral')); if([1,2,3].includes(salvo)) COLUNAS_CENTRAL=salvo; } catch(_) {}
+const DIGITACAO_PAINEIS = new Set();
+// Mantém os vizinhos visíveis; uma aba fora da grade substitui o último slot.
+function selecionarPaineisVisiveis(abertos, anteriores, ativa, limite){
+  if(!abertos.length) return [];
+  if(limite===1) return [ativa || abertos[0]];
+  const ids=anteriores.filter(id=>abertos.includes(id)).slice(0,limite);
+  if(ativa && !ids.includes(ativa)){ if(ids.length===limite) ids.pop(); ids.push(ativa); }
+  for(const id of abertos){ if(ids.length===limite) break; if(!ids.includes(id)) ids.push(id); }
+  return ids;
+}
+function definirColunasCentral(n){
+  if(![2,3].includes(n)) return;
+  // Não recriar o compositor durante uma gravação em curso.
+  if(GRAVACOES_PAINEL_CHAT.size){ alert('Conclua ou descarte a gravação antes de mudar a disposição.'); return; }
+  guardarEstadoPaineis();
+  COLUNAS_CENTRAL=COLUNAS_CENTRAL===n?1:n;
+  try { localStorage.setItem('beniboyColunasCentral',String(COLUNAS_CENTRAL)); } catch(_) {}
+  renderPaineis();
+}
 let DRAG_ID = null;
 let ACAO_PENDENTE = null; // {id, statusAlvo}
 // dados do NOC-NoPulso (ver loja-status.html) - só pra achar, quando o
@@ -1102,6 +1144,12 @@ function renderPaineis(){
   if(!PAINEIS_ABERTOS.includes(CONVERSA_ATIVA)) CONVERSA_ATIVA=PAINEIS_ABERTOS.at(-1)||null;
   const outer = document.getElementById('paineis-outer');
   const wrap = document.getElementById('paineis-wrap');
+  PAINEIS_VISIVEIS=selecionarPaineisVisiveis(PAINEIS_ABERTOS,PAINEIS_VISIVEIS,CONVERSA_ATIVA,COLUNAS_CENTRAL);
+  const mesa=document.getElementById('central-mesa');
+  mesa.classList.toggle('multiconversa',COLUNAS_CENTRAL>1);
+  wrap.style.setProperty('--colunas-visiveis',Math.max(1,PAINEIS_VISIVEIS.length));
+  [2,3].forEach(n=>document.getElementById(`central-colunas-${n}`).setAttribute('aria-pressed',String(COLUNAS_CENTRAL===n)));
+  for(const id of DIGITACAO_PAINEIS){if(!PAINEIS_VISIVEIS.includes(id)){window.nopulsoDigitando?.parar(`central-${id}`);DIGITACAO_PAINEIS.delete(id);}}
   outer.classList.toggle('hidden', !PAINEIS_ABERTOS.length);
   document.getElementById('paineis-count').textContent = PAINEIS_ABERTOS.length ? ` · ${PAINEIS_ABERTOS.length}` : '';
   document.getElementById('central-vazio').classList.toggle('hidden',!!CONVERSA_ATIVA);
@@ -1117,7 +1165,10 @@ function renderPaineis(){
   // Reaproveita o player na atualização: não baixa nem reinicia o áudio do zero.
   const audios = new Map(Array.from(wrap.querySelectorAll('audio.chat-anexo-audio'),a=>[a.dataset.audioChave,{elemento:a,tocando:!a.paused&&!a.ended}]));
   wrap.innerHTML = PAINEIS_ABERTOS.map(id=>painelHtml(ITENS.find(c=>c.id===id))).join('');
-  wrap.querySelectorAll('.painel-conversa').forEach(p=>p.classList.toggle('hidden',p.dataset.painelId!==CONVERSA_ATIVA));
+  wrap.querySelectorAll('.painel-conversa').forEach(p=>{
+    p.classList.toggle('hidden',!PAINEIS_VISIVEIS.includes(p.dataset.painelId));
+    p.classList.toggle('painel-ativo',p.dataset.painelId===CONVERSA_ATIVA);
+  });
   wrap.querySelectorAll('audio.chat-anexo-audio').forEach(a=>{
     const anterior=audios.get(a.dataset.audioChave);
     if(!anterior || anterior.elemento.src!==a.src) return;
@@ -1125,7 +1176,31 @@ function renderPaineis(){
     if(anterior.elemento.closest('.painel-conversa').classList.contains('hidden')) anterior.elemento.pause();
     else if(anterior.tocando) anterior.elemento.play().catch(()=>{});
   });
+  renderContextoConversa();
+  // Ctrl+V continua separado por ID de conversa, inclusive na grade.
+  if(window.colarImagemNoChat){
+    PAINEIS_ABERTOS.forEach(id=>{
+      const idAttr = CSS.escape(id);
+      window.colarImagemNoChat(`#d-texto-${idAttr}`, `#d-anexo-${idAttr}`, { previa: `#d-previa-${idAttr}` });
+    });
+  }
+  restaurarEstadoPaineis();
+  window.nopulsoDigitando?.parar('central');
+  PAINEIS_VISIVEIS.forEach(id=>{
+    const chat=ITENS.find(c=>c.id===id),p=wrap.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"]`);
+    window.nopulsoDigitando?.conectar({ chave:`central-${id}`, input:document.getElementById(`d-texto-${id}`), id, token:chat.digitacaoToken, lado:'suporte', antes:p.querySelector('.chat-compositor') });
+    DIGITACAO_PAINEIS.add(id);
+  });
+}
+
+function renderContextoConversa(){
+  const wrap=document.getElementById('paineis-wrap'),contexto=document.getElementById('contexto-corpo');
+  // Devolve os controles ao painel anterior antes de mostrar outro contexto.
+  const anterior=wrap.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(contexto.dataset.conversaId||'')}"]`);
+  if(anterior) contexto.querySelectorAll(':scope > .d-tickets, :scope > .d-alerta-seguranca').forEach(el=>anterior.insertBefore(el,anterior.querySelector('.painel-msgs')));
+  contexto.dataset.conversaId=CONVERSA_ATIVA||'';
   const selecionada=ITENS.find(c=>c.id===CONVERSA_ATIVA);
+  if(!selecionada){contexto.textContent='Selecione uma conversa para ver o contexto.';return;}
   const campo=(nome,valor)=>`<div class="contexto-campo"><small>${nome}</small><strong>${escapeHtml(valor||'Não informado')}</strong></div>`;
   contexto.innerHTML=campo('Solicitante',selecionada.nome)+campo('Contato',selecionada.contato)
     +campo('Unidade',selecionada.lojaContexto)+campo('Assunto',selecionada.assunto)
@@ -1134,17 +1209,17 @@ function renderPaineis(){
   // Reaproveita os controles existentes: nenhuma nova rota de dados ou permissão.
   const painel=wrap.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(CONVERSA_ATIVA)}"]`);
   painel.querySelectorAll(':scope > .d-tickets, :scope > .d-alerta-seguranca').forEach(el=>contexto.appendChild(el));
-  // Ctrl+V cola o print na resposta - um por painel aberto. O innerHTML acima
-  // recria os campos, entao religar aqui e o certo (o helper do tema.js
-  // marca o campo pra nao ligar duas vezes no mesmo elemento)
-  if(window.colarImagemNoChat){
-    PAINEIS_ABERTOS.forEach(id=>{
-      const idAttr = CSS.escape(id);
-      window.colarImagemNoChat(`#d-texto-${idAttr}`, `#d-anexo-${idAttr}`, { previa: `#d-previa-${idAttr}` });
-    });
-  }
-  restaurarEstadoPaineis();
-  window.nopulsoDigitando?.conectar({ chave:'central', input:document.getElementById(`d-texto-${CONVERSA_ATIVA}`), id:CONVERSA_ATIVA, token:selecionada.digitacaoToken, lado:'suporte', antes:painel.querySelector('.chat-compositor') });
+}
+// Foco/click altera somente o contexto, nunca recria campos com texto/anexo.
+document.getElementById('paineis-wrap').addEventListener('focusin',ativarPainelVisivel);
+document.getElementById('paineis-wrap').addEventListener('pointerdown',ativarPainelVisivel);
+function ativarPainelVisivel(evento){
+  const painel=evento.target.closest('.painel-conversa'),id=painel?.dataset.painelId;
+  if(!id || id===CONVERSA_ATIVA || !PAINEIS_VISIVEIS.includes(id)) return;
+  CONVERSA_ATIVA=id;
+  document.querySelectorAll('.painel-conversa').forEach(p=>p.classList.toggle('painel-ativo',p.dataset.painelId===id));
+  document.querySelectorAll('.conversa-aba').forEach(a=>{const ativa=a.dataset.id===id;a.classList.toggle('ativa',ativa);a.querySelector('button').setAttribute('aria-pressed',String(ativa));});
+  renderContextoConversa();renderKanban();
 }
 
 async function enviarResposta(id){
@@ -1160,7 +1235,7 @@ async function enviarResposta(id){
   const citacao=CITACOES_PAINEL_CHAT.get(id);
   const texto=citacao?`Respondendo a ${citacao.nome}:\n${citacao.texto.split('\n').map(l=>'> '+l).join('\n')}\n\n${resposta}`:resposta;
   ENVIOS_PAINEL_CHAT.add(id);
-  window.nopulsoDigitando?.enviado('central');
+  window.nopulsoDigitando?.enviado(`central-${id}`);
   input.disabled = true;
   try{
     // multipart so quando ha anexo - sem arquivo o corpo segue JSON, que e o
