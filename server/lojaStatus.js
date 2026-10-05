@@ -909,6 +909,8 @@ async function migrarLegado(docs) {
 const ESPELHO_TTL_MS = 10 * 60 * 1000;
 let espelho = null;      // Map docId -> dados
 let espelhoEm = 0;
+let cargaEspelhoEmCurso = null;
+let geracaoEspelho = 0;
 
 // Campos de que o heartbeat e DONO: so ele escreve neles. Como a gravacao
 // no Firestore passou a ser espacada (ver PERSIST_MS), a memoria fica mais
@@ -964,7 +966,15 @@ async function carregarEspelho() {
 
 async function garantirEspelho() {
   if (espelho && (Date.now() - espelhoEm) < ESPELHO_TTL_MS) return espelho;
-  return carregarEspelho();
+  if (!cargaEspelhoEmCurso) {
+    const geracao = geracaoEspelho;
+    cargaEspelhoEmCurso = carregarEspelho().then((mapa) => {
+      // Uma edição durante a consulta não pode ser considerada já recarregada.
+      if (geracao !== geracaoEspelho) espelhoEm = 0;
+      return mapa;
+    }).finally(() => { cargaEspelhoEmCurso = null; });
+  }
+  return cargaEspelhoEmCurso;
 }
 
 // Zera a validade, mas NAO joga fora o mapa: a proxima carga precisa dele
@@ -972,7 +982,7 @@ async function garantirEspelho() {
 // carregarEspelho). Descartar aqui fazia uma edicao de nome/tipo derrubar
 // junto o ultimoHeartbeatEm ainda nao gravado - e a varredura seguinte
 // anunciava uma queda que nunca houve.
-function invalidarEspelho() { espelhoEm = 0; }
+function invalidarEspelho() { geracaoEspelho++; espelhoEm = 0; }
 
 // ---------------------------------------------------------------------
 // POR QUE ISSO EXISTE (custo do Firestore):
@@ -4868,7 +4878,7 @@ async function varrerAlertas() {
       });
     }
   }
-  if (transicoes.length) cache.invalidar();
+  if (transicoes.length) cacheBase.invalidar();
   // Internet da UNIDADE (ver avaliarInternetUnidades em redeDiagnostico.js).
   // Entra na MESMA varredura porque os documentos ja estao lidos aqui - avaliar
   // link nao custa uma leitura a mais no Firestore.
