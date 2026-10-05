@@ -61,7 +61,8 @@
 // 139: Windows antigo opera sem app, ícones, chat, print ou navegador automático.
 // 140: restaura o acesso normal NoPulso, sem atalho/portal especial de chat.
 // 141: validação local silenciosa do login NOC, sem atalho extra.
-const VERSAO_VIGIA = 141;
+// 142: campanha como fundo do modelo, sem remover logos, identificação e suporte.
+const VERSAO_VIGIA = 142;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -2362,7 +2363,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     // Medidas no desenho de referencia (1920x1080, o das artes do grupo) e
     // escaladas: na horizontal pelo lado que limita, na vertical (Makeline)
     // pela largura - senao o bloco sairia minusculo no meio da tela em pe.
-    'function Desenhar-ModeloBasico([string]$saida, $modelo, $arqMarca, $arqGrupo) {',
+    'function Desenhar-ModeloBasico([string]$saida, $modelo, $arqMarca, $arqGrupo, $arqFundo = $null) {',
     '  Add-Type -AssemblyName System.Drawing -ErrorAction Stop',
     '  $tam = @(Tamanho-TelaPrincipal); $W = [int]$tam[0]; $H = [int]$tam[1]',
     '  if ($H -gt $W) { $e = $W / 1080.0 } else { $e = [math]::Min($W / 1920.0, $H / 1080.0) }',
@@ -2386,6 +2387,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '      $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit',
     '      $fundo = New-Object System.Drawing.Drawing2D.LinearGradientBrush((New-Object System.Drawing.Rectangle 0, 0, $W, $H), [System.Drawing.ColorTranslator]::FromHtml("#050607"), [System.Drawing.ColorTranslator]::FromHtml("#151a20"), [single]90)',
     '      try { $g.FillRectangle($fundo, 0, 0, $W, $H) } finally { $fundo.Dispose() }',
+    '      if ($arqFundo) {',
+    '        $imgFundo = Abrir-ImagemSemTravar $arqFundo',
+    '        try { Desenhar-ImagemNaCaixa $g $imgFundo 0 0 $W $H } finally { $imgFundo.Dispose() }',
+    '      }',
     '      if ($temGrupo) {',
     '        $img = Abrir-ImagemSemTravar $arqGrupo',
     '        try { Desenhar-ImagemNaCaixa $g $img ($cx - 220 * $e) $y (440 * $e) (140 * $e) } finally { $img.Dispose() }',
@@ -2427,10 +2432,19 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '}',
     'function Novo-ModeloBasico($modelo) {',
     '  $saida = Caminho-ModeloBasico',
+    '  $arqFundo = $null',
+    '  if ($modelo -and $modelo.fundoVersao) {',
+    '    $arqFundo = Join-Path (Split-Path -Parent $PSCommandPath) "modelo-basico-fundo.img"',
+    '    $temporario = "$arqFundo.download"',
+    '    try {',
+    '      Invoke-WebRequest -Uri "$($UrlPapelDeParede)?v=$([uri]::EscapeDataString([string]$modelo.fundoVersao))" -Headers $CabecalhosAgente -OutFile $temporario -TimeoutSec 30 -UseBasicParsing | Out-Null',
+    '      Move-Item -LiteralPath $temporario -Destination $arqFundo -Force -ErrorAction Stop',
+    '    } catch { Escrever-Log "Papel de parede: nao baixou o fundo do modelo ($($_.Exception.Message))."; return $null }',
+    '  }',
     '  $arqMarca = $null; $arqGrupo = $null',
     '  if ($modelo -and $modelo.logoMarca) { $arqMarca = Baixar-LogoCarimbo "marca" "$($modelo.logoMarcaVersao)"; if (-not $arqMarca) { return $null } }',
     '  if ($modelo -and $modelo.logoGrupo) { $arqGrupo = Baixar-LogoCarimbo "grupo" "$($modelo.logoGrupoVersao)"; if (-not $arqGrupo) { return $null } }',
-    '  try { return (Desenhar-ModeloBasico $saida $modelo $arqMarca $arqGrupo) }',
+    '  try { return (Desenhar-ModeloBasico $saida $modelo $arqMarca $arqGrupo $arqFundo) }',
     '  catch { Escrever-Log "Papel de parede: nao montei o modelo basico ($($_.Exception.Message))."; return $null }',
     '}',
     '',

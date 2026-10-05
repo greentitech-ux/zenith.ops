@@ -7928,6 +7928,8 @@ app.put('/api/loja-status/papel-de-parede', auth.requireMaster, uploadLoginFundo
     // entao so existem depois do multer - nao da pra ler antes do upload
     const { marca, chave } = await chaveDaArteDoPedido(req.body);
     const arte = { caminho: null, tipo: req.file.mimetype || 'image/jpeg', em: Date.now(), versao: Date.now() };
+    // Campanha como fundo: o agente mantém logos, cartão, identificação e suporte.
+    arte.preservarModelo = req.body.preservarModelo === 'true';
     arte.caminho = await storage.salvarArquivo('parque', req.file, chave ? `papel-de-parede-${chave.replace(':', '-')}` : 'papel-de-parede');
     if (!marca) {
       const cfg = await lojaStatus.setConfig({ papelDeParede: arte });

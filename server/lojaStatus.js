@@ -1467,8 +1467,8 @@ async function heartbeat(codigo, posto, info, token) {
   // versão do modelo básico: só pra quem NÃO tem arte (com arte, logo novo
   // não muda nada na tela). Leva o nome da máquina junto: renomear no NOC
   // redesenha o nome escrito na tela.
-  const versaoModeloBasico = arteDaMaquina ? null
-    : versaoModeloBasicoDe(await versaoLogosDe(codigo).catch(() => 0), atual);
+  const versaoModeloBasico = arteDaMaquina && !arteDaMaquina.preservarModelo ? null
+    : `${versaoModeloBasicoDe(await versaoLogosDe(codigo).catch(() => 0), atual)}${arteDaMaquina ? '|fundo:' + arteDaMaquina.versao : ''}`;
   return {
     mensagemPendente,
     comandoPendente,
@@ -2081,7 +2081,8 @@ async function configuracaoAgente(codigo, posto, token, { unidadeNome } = {}) {
   const arte = politica.papelDeParedeAtivo ? await papelDeParedeDe(codigo, posto) : null;
   // o modelo básico vale pra quem não tem arte E pra tela sem imagem de quem
   // está com a chave desligada - então resolve os logos nos dois casos
-  const logos = arte ? null : await logosDaUnidade(codigo).catch(() => null);
+  const usarModelo = !arte || arte.preservarModelo === true;
+  const logos = usarModelo ? await logosDaUnidade(codigo).catch(() => null) : null;
   return {
     noPulsoPrint: !!atual.noPulsoPrint,
     noPulsoPrintAtalho: normalizarAtalhoNoPulsoPrint(atual.noPulsoPrintAtalho),
@@ -2095,11 +2096,12 @@ async function configuracaoAgente(codigo, posto, token, { unidadeNome } = {}) {
     // (loja + máquina) na tela preta. Vai como campo próprio em vez de o
     // agente deduzir pelo 404 da imagem: o 404 também sai quando o Storage
     // falha a leitura, e aí uma arte que existe viraria tela preta.
-    papelDeParedeSemArte: !!politica.papelDeParedeAtivo && !arte,
-    versaoModeloBasico: arte ? null : versaoModeloBasicoDe(logos ? logos.versao : 0, atual),
+    papelDeParedeSemArte: !!politica.papelDeParedeAtivo && usarModelo,
+    versaoModeloBasico: usarModelo ? `${versaoModeloBasicoDe(logos ? logos.versao : 0, atual)}${arte ? '|fundo:' + arte.versao : ''}` : null,
     // o que o modelo básico escreve e quais logos a máquina deve baixar (a
     // imagem sai pela rota da própria máquina, com o token dela)
-    modeloBasico: arte ? null : {
+    modeloBasico: usarModelo ? {
+      fundoVersao: arte ? String(arte.versao || '') : null,
       maquina: String(atual.nome || '').trim() || posto,
       linha: linhaDoCarimbo(logos && logos.marca, unidadeNome || codigo),
       marcaRotulo: logos && logos.marca ? (unidades.MARCAS_LABEL[logos.marca] || logos.marca) : null,
@@ -2110,7 +2112,7 @@ async function configuracaoAgente(codigo, posto, token, { unidadeNome } = {}) {
       // substituir o PNG, sem expor o caminho do Storage.
       logoMarcaVersao: logos && logos.logoMarca ? String(logos.logoMarca.versao || '') : null,
       logoGrupoVersao: logos && logos.logoGrupo ? String(logos.logoGrupo.versao || '') : null,
-    },
+    } : null,
   };
 }
 

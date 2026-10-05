@@ -784,11 +784,13 @@
   <div data-recolher>
   <div class="agente-titulo" data-recolher-titulo><h2>🖼️ Papel de parede do parque</h2></div>
   <div class="agente-sub">
+    <b>Para campanhas sem perder a estrutura:</b> mantenha marcada a opção <b>Trocar só o fundo</b>. O agente v142 ou superior desenha por cima as logos da unidade, o cartão central, o nome da máquina, a unidade e o suporte. Deixe livres o centro da imagem e o canto inferior direito. Desmarque apenas para enviar uma arte completa, que já contenha as logos e o suporte.<br>
     Uma arte por <b>grupo + marca</b> — porque a imagem carrega as duas logos. A máquina coloca o <b>nome do computador na placa branca do card central</b>; o <b>nome da loja</b> fica no topo-direito na arte horizontal e centralizado embaixo na vertical (Makeline). Deixe esses slots livres nas bases genéricas. Assim a mesma arte serve a loja inteira e cada máquina se identifica sozinha. A marca sai do <b>perfil da unidade</b> e o grupo sai do <b>cadastro de empresas</b>. Um envio em massa mais novo <b>substitui também as artes individuais anteriores</b>; uma arte individual enviada depois vale só para aquela máquina até o próximo envio em massa. Nada entra em máquina nenhuma sozinho: em cada computador você liga <b>🖼️ Papel de parede da rede</b> na política do card. Trocar a arte aqui chega na próxima consulta da máquina.
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
     <select id="pp-marca" style="max-width:200px;" onchange="atualizarVerPapelDeParede()"><option value="">Todas as marcas (padrão)</option></select>
     <input type="file" id="pp-arquivo" accept="image/png,image/jpeg,image/webp" style="max-width:260px;">
+    <label style="font-size:12px;"><input type="checkbox" id="pp-preservar-modelo" checked> Trocar só o fundo — manter logos, cartão, máquina e suporte</label>
     <button type="button" class="btn-mini ok" onclick="enviarPapelDeParede()">Enviar imagem</button>
     <a class="btn-mini" id="pp-ver" href="/api/loja-status/papel-de-parede" target="_blank" rel="noopener">👁 Ver atual</a>
     <button type="button" class="btn-mini danger hidden" id="pp-remover" onclick="removerPapelDeParedeAtual()" title="Remove a arte do escopo selecionado">✕ Remover atual</button>
@@ -4876,6 +4878,7 @@ async function enviarPapelDeParede(){
     fd.append('password', senha);
     if(marca) fd.append('marca', marca);
     if(rede) fd.append('rede', rede);
+    fd.append('preservarModelo', String(document.getElementById('pp-preservar-modelo').checked));
     const r = await fetch('/api/loja-status/papel-de-parede', { method:'PUT', body: fd });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Não consegui enviar.');
