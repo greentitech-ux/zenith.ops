@@ -38,6 +38,11 @@ function conversas() {
           if(u.pathname==='/api/me') dados=me;
           if(u.pathname==='/api/stream') return route.fulfill({contentType:'text/event-stream',body:': teste\n\n'});
           if(u.pathname==='/api/suporte-chats') return route.fulfill({status:negar?503:200,json:negar?{error:'teste'}:itens});
+          if(u.pathname.endsWith('/status')) {
+            const c=itens.find(c=>c.id===u.pathname.split('/')[3]);
+            c.statusAtendimento=route.request().postDataJSON().statusAtendimento;
+            return route.fulfill({json:c});
+          }
           if(u.pathname.endsWith('/responder')) {
             envios++;
             const id=u.pathname.split('/')[3],texto=route.request().postDataJSON().texto;
@@ -135,6 +140,22 @@ function conversas() {
       assert.equal(await page.locator('.fila-card').count(),2,'erro não apaga fila');
       negar=false;await page.evaluate(()=>carregarLista());
       assert.equal(await page.locator('#central-erro').isVisible(),false);
+      await page.getByRole('button',{name:'Deixar em aguardo',exact:true}).click();
+      await page.getByRole('button',{name:'Retomar atendimento',exact:true}).waitFor();
+      assert.equal(itens[0].status,'ABERTO');
+      assert.equal(await page.locator('#d-texto-chat-a').isVisible(),true,'aguardo mantém envio');
+      await page.getByRole('button',{name:'Dados da conversa',exact:true}).click();
+      await page.locator('#contexto-corpo .resumo-atendimento summary').click();
+      assert.match(await page.locator('#contexto-corpo .resumo-atendimento').innerText(),/Rascunho da Ana/,'resumo mostra resposta humana anterior');
+      await page.screenshot({path:path.join(destino,`central-beniboy-aguardo-${largura}.png`),fullPage:true});
+      await page.getByRole('button',{name:'Dados da conversa',exact:true}).click();
+      if(largura<=760) await page.getByRole('button',{name:'← Fila',exact:true}).click();
+      await page.getByLabel('Status das conversas').selectOption('EM_AGUARDO');
+      assert.equal(await page.locator('.fila-card').count(),1,'aguardo fica no radar');
+      await page.getByLabel('Status das conversas').selectOption('ABERTAS');
+      await page.locator('[data-id="chat-a"].fila-card').click();
+      await page.getByRole('button',{name:'Retomar atendimento',exact:true}).click();
+      await page.getByRole('button',{name:'Deixar em aguardo',exact:true}).waitFor();
       await page.getByRole('button',{name:'Responder a esta mensagem',exact:true}).first().click();
       await page.getByRole('button',{name:'Cancelar resposta citada',exact:true}).click();
       assert.equal(await page.locator('#d-citacao-chat-a').isVisible(),false);

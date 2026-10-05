@@ -30006,6 +30006,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e){ruins++;console.log('✗ Aviso de atualização Android: '+e.message);}
   try { await require('./testeChatDigitando').testar(); await require('./testeChatDigitando').testarHttp({DOCS,token,pedir,postarJson,LEITURAS}); await require('./testeChatDigitando').testarSSE(); }
   catch(e) { ruins++; console.log('✗ Digitando: '+e.message); }
+  try { await require('./testeAtendimentoAguardo').testarHttp({DOCS,token,pedir,postarJson}); }
+  catch(e) { ruins++; console.log('✗ Em aguardo: '+e.message); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

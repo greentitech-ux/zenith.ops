@@ -399,10 +399,11 @@ const ASSUNTOS_NOC = ['Computador/Sistema', 'Acesso/Senha'];
 let NOC_UNIDADES = [];
 let NOC_COMPUTADORES = [];
 
-// mesmos 6 valores de STATUS_ATENDIMENTO em suporteChat.js, na ordem do funil
+// Mesmos valores de STATUS_ATENDIMENTO em suporteChat.js, na ordem do funil.
 const COLUNAS = [
   { key:'PENDENTE',       label:'Pendente',        icone:'🕓', cor:'var(--warn)' },
   { key:'EM_ATENDIMENTO', label:'Em atendimento',  icone:'🙋', cor:'var(--accent)' },
+  { key:'EM_AGUARDO',     label:'Em aguardo',      icone:'⏳', cor:'var(--warn)' },
   { key:'TRANSFERIDO',    label:'Transferido',     icone:'🔀', cor:'var(--purple)' },
   { key:'TICKET_CRIADO',  label:'Ticket criado',   icone:'🎫', cor:'var(--teal)' },
   { key:'RESOLVIDO',      label:'Resolvido',       icone:'✅', cor:'var(--ok)' },
@@ -797,6 +798,8 @@ function painelHtml(chat){
     acoes.push(`<button type="button" class="btn-icone" data-dica="Assumir atendimento" aria-label="Assumir atendimento" onclick="assumirAtendimento('${chat.id}')">🙋</button>`);
   }
   if(statusAtual!=='RESOLVIDO' && statusAtual!=='SEM_SOLUCAO'){
+    if(statusAtual!=='EM_AGUARDO') acoes.push(`<button type="button" class="btn-icone" data-dica="Deixar em aguardo" aria-label="Deixar em aguardo" onclick="iniciarTransicao('${chat.id}','EM_AGUARDO')">⏳</button>`);
+    else acoes.push(`<button type="button" class="btn-icone" data-dica="Retomar atendimento" aria-label="Retomar atendimento" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">▶</button>`);
     acoes.push(`<button type="button" class="btn-icone" data-dica="Transferir" aria-label="Transferir" onclick="iniciarTransicao('${chat.id}','TRANSFERIDO')">🔀</button>`);
     acoes.push(`<button type="button" class="btn-icone" data-dica="Marcar resolvido" aria-label="Marcar resolvido" onclick="iniciarTransicao('${chat.id}','RESOLVIDO')">✅</button>`);
     acoes.push(`<button type="button" class="btn-icone perigo" data-dica="Sem solução" aria-label="Sem solução" onclick="iniciarTransicao('${chat.id}','SEM_SOLUCAO')">⛔</button>`);
@@ -876,6 +879,11 @@ function painelHtml(chat){
         ${n.situacao==='PENDENTE' ? `<br><button type="button" class="btn-ghost" style="margin-top:6px;font-size:11.5px;padding:5px 9px;" onclick="marcarNotaTratada('${chat.id}',${ix},'${escapeHtml(n.em||'')}')">Marcar tratada</button>` : ''}
       </div>`).join('')}</details></div>` : ''}
     <div class="d-acoes">${acoes.join('')}</div>
+    ${statusAtual==='EM_AGUARDO'?'<div class="d-tickets">⏳ Em aguardo de solução — permanece aberto, sem encerramento por inatividade.</div>':''}
+    <details class="d-tickets resumo-atendimento"><summary>Resumo e últimas respostas do Ticket #${escapeHtml(chat.numeroTicket||'—')}</summary>
+      <p>${escapeHtml((chat.mensagens||[]).find(m=>m.de==='visitante')?.texto||'Solicitação com anexo.')}</p>
+      ${(chat.mensagens||[]).filter(m=>m.de==='suporte'&&!m.bot&&!m.automatica&&m.texto).slice(-2).map(m=>`<p><b>Suporte · ${escapeHtml(fmtDataHora(m.em))}</b><br>${escapeHtml(m.texto)}</p>`).join('')||'<p>Ainda não há resposta humana registrada.</p>'}
+    </details>
     <div class="painel-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${msgsHtml}</div>
     ${finalizado
       ? '<div class="empty" style="padding:14px 0 0;">Conversa finalizada — mova pra uma coluna aberta se precisar reabrir.</div>'

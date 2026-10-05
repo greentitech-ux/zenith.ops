@@ -2055,8 +2055,13 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
     await completarContatoAusenteDoChat(logado, chat, [req.body.contato, req.body.texto]);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Novo chat de suporte`, `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico');
+    const resumo = await suporteChat.responderReferencia(chat, req.body.texto, logado);
+    if (resumo) {
+      await suporteChat.adicionarMensagem(chat.id, { de:'suporte', texto:resumo, bot:true });
+      broadcast('suporte-chat', { id:chat.id }, 'suporte');
+    }
     res.json({ id: chat.id, token: chat.token, numeroTicket: chat.numeroTicket });
-    acionarBeniboy(chat.id);
+    if (!resumo) acionarBeniboy(chat.id);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2112,8 +2117,13 @@ app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), asyn
     // com o maximo de contexto do acesso (ver alertarSegurancaChat acima)
     const motivoSuspeito = segurancaChat.detectarConteudoSuspeito(texto);
     if (motivoSuspeito) alertarSegurancaChat(req, chat, motivoSuspeito, texto);
+    const resumo = await suporteChat.responderReferencia(chat, texto, logado);
+    if (resumo) {
+      await suporteChat.adicionarMensagem(chat.id, { de:'suporte', texto:resumo, bot:true });
+      broadcast('suporte-chat', { id:chat.id }, 'suporte');
+    }
     res.json({ ok: true });
-    acionarBeniboy(chat.id);
+    if (!resumo) acionarBeniboy(chat.id);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -17120,6 +17130,7 @@ app.post('/api/suporte-chats/:id/responder', auth.requireAuth, uploadChatAnexo.s
     // mensagemAssumir em suporteChat.js) antes da resposta digitada.
     const atual = await suporteChat.getOne(req.params.id);
     if (atual && atual.status === 'ABERTO'
+        && atual.statusAtendimento !== 'EM_AGUARDO'
         && (!atual.responsavel || atual.responsavel.email !== req.user.email)) {
       await suporteChat.atualizarStatusAtendimento(req.params.id, {
         statusAtendimento: 'EM_ATENDIMENTO',

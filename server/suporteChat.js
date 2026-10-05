@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const ticketCounter = require('./ticketCounter');
+const resumoAtendimento = require('./resumoAtendimento');
 
 const COLLECTION = db.collection('suporteChats');
 
@@ -23,7 +24,7 @@ const MAX_MENSAGENS = 300;
 // visitante ainda pode escrever). PENDENTE e o ponto de partida de toda
 // conversa nova; RESOLVIDO/SEM_SOLUCAO sao terminais e finalizam a conversa
 // pro visitante tambem (ver atualizarStatusAtendimento).
-const STATUS_ATENDIMENTO = ['PENDENTE', 'EM_ATENDIMENTO', 'TRANSFERIDO', 'TICKET_CRIADO', 'RESOLVIDO', 'SEM_SOLUCAO'];
+const STATUS_ATENDIMENTO = ['PENDENTE', 'EM_ATENDIMENTO', 'EM_AGUARDO', 'TRANSFERIDO', 'TICKET_CRIADO', 'RESOLVIDO', 'SEM_SOLUCAO'];
 const STATUS_TERMINAL = new Set(['RESOLVIDO', 'SEM_SOLUCAO']);
 // nivel do atendimento: 1 = Beniboy sozinho (bot), 2 = agente humano (secao
 // suporte), 3 = Master. Sobe conforme o card anda no funil; volta pra 1 so
@@ -331,6 +332,10 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
   if (statusAtendimento === 'PENDENTE') {
     nivel = 1;
     responsavel = null;
+  } else if (statusAtendimento === 'EM_AGUARDO') {
+    // Não troca o responsável de quem está resolvendo nem encerra o chat.
+    nivel = Math.max(nivel, 2);
+    responsavel = responsavel || autor || null;
   } else if (statusAtendimento === 'TRANSFERIDO') {
     nivel = nivelValido(nivelDestino) ? Number(nivelDestino) : Math.max(nivel, 2);
     // transferir é ENTREGAR a conversa: o dono passa a ser quem recebeu, não
@@ -397,6 +402,15 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
   // respondeu antes), o bot continua fora dali por segurança - ver o gate
   // em suporteBot.js (botDesativado || atendidoPorEmail)
   if (statusAtendimento === 'PENDENTE') patch.botDesativado = false;
+  if (statusAtendimento === 'EM_AGUARDO') {
+    patch.botDesativado = true;
+    if (chat.statusAtendimento !== 'EM_AGUARDO') {
+      patch.mensagens = [...(chat.mensagens || []), {
+        de:'suporte', automatica:true, em:agora,
+        texto:`Ticket #${chat.numeroTicket}: atendimento em aguardo, ainda sem conclusão. Continuaremos acompanhando. Você pode enviar novas mensagens aqui.`,
+      }];
+    }
+  }
   if (STATUS_TERMINAL.has(statusAtendimento) && chat.status === 'ABERTO') {
     patch.status = 'FINALIZADO';
     patch.finalizadoEm = agora;
@@ -526,6 +540,19 @@ async function listAllUncached() {
 }
 const chatsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = chatsCache.cached;
+
+// O número não é uma senha. Só retorna o próprio chat com chave já validada,
+// outro chat da conta autenticada ou o histórico permitido ao time de suporte.
+async function responderReferencia(chatAtual, texto, logado) {
+  const numero = resumoAtendimento.referenciaTicket(texto);
+  if (!numero) return null;
+  const alvo = Number(chatAtual.numeroTicket) === numero ? chatAtual
+    : logado?.id ? (await listAll()).find(c => Number(c.numeroTicket) === numero) : null;
+  if (!resumoAtendimento.podeConsultar(alvo, chatAtual, logado)) {
+    return 'Não foi possível consultar esse protocolo com seu acesso atual. Entre com a conta que abriu o atendimento ou peça ao Suporte para localizar o ticket. O número sozinho não libera o histórico.';
+  }
+  return resumoAtendimento.resumoTexto(alvo);
+}
 
 // Brasilia e sempre UTC-3 (sem horario de verao desde 2019) - monta o limite
 // do dia local direto, sem depender de Intl/timeZone pra cada comparacao
@@ -720,7 +747,7 @@ async function finalizarOciosos() {
   const agora = Date.now();
   const finalizados = [];
   for (const chat of chats) {
-    if (chat.status !== 'ABERTO') continue;
+    if (chat.status !== 'ABERTO' || chat.statusAtendimento === 'EM_AGUARDO') continue;
     const mensagens = chat.mensagens || [];
     const ultimaEm = mensagens.length ? mensagens[mensagens.length - 1].em : chat.criadoEm;
     if (!ultimaEm || agora - new Date(ultimaEm).getTime() < OCIOSO_MS) continue;
@@ -740,4 +767,5 @@ module.exports = {
   atualizarStatusAtendimento, marcarDesbloqueio, restringirAposConclusao, adicionarTicketVinculado, marcarEncaminhadoCowork, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, marcarNotaTratada, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,
+  responderReferencia,
 };

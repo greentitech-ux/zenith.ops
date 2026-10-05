@@ -84,6 +84,29 @@ normal de cada página; isso não é uma promessa de custo zero.
 Erros de rede mostram aviso e mantêm a lista anterior. Não há indicador
 inventado de disponibilidade/online do atendente.
 
+## Atendimento em aguardo e consulta de protocolo
+
+O botão ⏳ “Deixar em aguardo” e o filtro “Em aguardo” mantêm a conversa
+ABERTA, com responsável e histórico, fora do encerramento automático de
+40 minutos. O solicitante recebe a informação no chat e pode falar novamente;
+mensagens novas seguem o aviso normal ao suporte. ▶ retoma o atendimento;
+somente as ações de conclusão encerram um atendimento em aguardo.
+
+Pesquisar o protocolo na fila e abrir a conversa mostra “Resumo e últimas
+respostas”. No chat, escrever “ticket #12345” ou “protocolo #12345” retorna
+um resumo factual e as duas últimas respostas humanas, datadas, sem IA.
+Não transmite notas internas, contato ou identidade do atendente. Outro
+protocolo exige a conta autenticada vinculada à conversa ou acesso de suporte;
+nome/telefone digitado ou número do ticket não são prova de identidade.
+Conversas sensíveis concluídas continuam restritas. A consulta cobre protocolos
+do chat Beniboy; não libera históricos de outras áreas por número.
+
+Usa o cache de chats existente para referências a outro protocolo e a mesma
+escrita de status para entrar em aguardo; o resumo enviado é uma mensagem
+normal persistida. Não cria consulta periódica ou chamada extra de IA.
+Testes HTTP em `testeAtendimentoAguardo.js` incluem controle negativo de
+inatividade e sabotagem de autorização.
+
 ## Verificação
 
 `server/testeCentralBeniboyVisual.js`: Chromium, interface real e APIs

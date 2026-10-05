@@ -1,0 +1,43 @@
+'use strict';
+const assert = require('assert/strict');
+const resumo = require('./resumoAtendimento');
+async function testarHttp({DOCS, token, pedir, postarJson}) {
+  const chat = require('./suporteChat');
+  const antigo = new Date(Date.now()-3*86400000).toISOString();
+  const id='aguardo-teste';
+  DOCS.set('suporteChats/'+id, {id,numeroTicket:987650,criadoEm:antigo,atualizadoEm:antigo,status:'ABERTO',statusAtendimento:'EM_ATENDIMENTO',token:'chave-aguardo',nome:'Teste',contato:'teste@invalid',responsavel:{id:'dono',email:'dono@invalid'},mensagens:[{de:'visitante',texto:'Impressora não funciona',em:antigo},{de:'suporte',texto:'A peça chega amanhã.',em:antigo,autorEmail:'privado@invalid'}],notasInternas:[{resumo:'SEGREDO INTERNO'}]});
+  const headers={Authorization:'Bearer '+token};
+  assert.equal((await postarJson(`/api/suporte-chats/${id}/status`,{statusAtendimento:'EM_AGUARDO'})).status,401);
+  assert.equal((await postarJson(`/api/suporte-chats/${id}/status`,{statusAtendimento:'EM_AGUARDO'},headers)).status,200);
+  let c=await chat.getOne(id);
+  assert.equal(c.status,'ABERTO');assert.equal(c.responsavel.id,'dono');assert.equal(c.botDesativado,true);
+  DOCS.set('suporteChats/'+id,{...c,mensagens:c.mensagens.map(m=>({...m,em:antigo}))});
+  await chat.finalizarOciosos();assert.equal((await chat.getOne(id)).status,'ABERTO');
+  assert.equal((await postarJson(`/api/suporte-chats/${id}/responder`,{texto:'Continuamos aguardando a peça.'},headers)).status,200);
+  assert.equal((await chat.getOne(id)).statusAtendimento,'EM_AGUARDO','resposta não conclui nem tira do aguardo');
+  // Sabotagem: sem o estado de aguardo, a mesma conversa antiga fecha.
+  DOCS.set('suporteChats/aguardo-sabotado',{...c,id:'aguardo-sabotado',statusAtendimento:'EM_ATENDIMENTO',mensagens:[{de:'visitante',texto:'Teste',em:antigo}]});
+  await chat.finalizarOciosos();assert.equal((await chat.getOne('aguardo-sabotado')).status,'FINALIZADO');
+  assert.equal((await postarJson(`/api/suporte-chat/${id}/mensagem`,{token:'errado',texto:'ticket #987650'})).status,400);
+  assert.equal((await postarJson(`/api/suporte-chat/${id}/mensagem`,{token:'chave-aguardo',texto:'Como está o ticket #987650?'})).status,200);
+  c=await chat.getOne(id);assert.equal(c.statusAtendimento,'EM_AGUARDO');
+  const publico=JSON.parse((await pedir(`/api/suporte-chat/${id}?token=chave-aguardo`)).corpo);
+  const resposta=publico.mensagens.at(-1).texto;
+  assert.match(resposta,/Em aguardo/);assert.match(resposta,/A peça chega amanhã/);assert.doesNotMatch(resposta,/SEGREDO INTERNO|privado@invalid/);
+  assert.equal(resumo.podeConsultar(c,{id:'outro'},null),false);
+  assert.throws(()=>assert.equal(true,resumo.podeConsultar(c,{id:'outro'},null)),'sabotagem detecta número liberando histórico');
+  assert.equal(resumo.podeConsultar({...c,logado:{id:'u'}},{id:'outro'},{id:'u'}),true);
+  assert.equal(resumo.podeConsultar({...c,status:'FINALIZADO',restritoAposConclusao:true,logado:{id:'u'}},{id:'outro'},{id:'u'}),false);
+  const indisponivel=await chat.responderReferencia({id:'outro',numeroTicket:1},'ticket #987650',null);
+  assert.doesNotMatch(indisponivel,/A peça chega amanhã/);
+  assert.equal(resumo.referenciaTicket('protocolo #987650'),987650);
+  assert.equal(resumo.referenciaTicket('Minha impressora 987650'),null);
+  assert.equal(resumo.referenciaTicket('Pedido #987650'),null,'preserva consulta de pedidos');
+  DOCS.set('suporteChats/aguardo-outro',{...c,id:'aguardo-outro',numeroTicket:987651,token:'chave-outra',notasInternas:[]});
+  assert.equal((await postarJson('/api/suporte-chat/aguardo-outro/mensagem',{token:'chave-outra',texto:'ticket #987650'})).status,200);
+  assert.doesNotMatch((await chat.getOne('aguardo-outro')).mensagens.at(-1).texto,/A peça chega amanhã|Impressora não funciona/,'HTTP não vaza outro atendimento');
+  await postarJson(`/api/suporte-chats/${id}/status`,{statusAtendimento:'RESOLVIDO'},headers);
+  assert.equal((await chat.getOne(id)).status,'FINALIZADO');
+  console.log('✓ Em aguardo: permanece aberto, dono preservado, inatividade ignorada, retorno por ticket, respostas públicas, sigilo e sabotagem.');
+}
+module.exports = { testarHttp };
