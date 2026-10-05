@@ -759,6 +759,7 @@ function abrirDetalhePorId(id){
   renderKanban();
 }
 function fecharPainel(id){
+  if(GRAVACOES_PAINEL_CHAT.has(id)) { alert('Conclua ou descarte a gravação antes de fechar.'); return; }
   guardarEstadoPaineis();
   const rascunho=RASCUNHOS_PAINEL_CHAT.get(id);
   if((rascunho?.texto || rascunho?.arquivo) && !confirm('Fechar esta conversa e descartar a resposta ainda não enviada?')) return;
@@ -893,9 +894,11 @@ function painelHtml(chat){
         <div class="chat-compositor">
           <div id="d-citacao-${idAttr}" class="chat-citacao hidden"></div>
           <div class="chat-compositor-linha">
-          <label class="foto-btn" title="Anexar print, foto ou PDF" style="cursor:pointer;flex:none;"><span id="d-anexo-icone-${idAttr}">📎</span><input type="file" id="d-anexo-${idAttr}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden onchange="registrarAnexoResposta('${idAttr}', this)"></label>
-          <textarea rows="2" id="d-texto-${idAttr}" aria-label="Escrever uma mensagem" placeholder="Escreva uma mensagem" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();enviarResposta('${idAttr}');}"></textarea>
-          <button type="button" class="btn-primary" onclick="enviarResposta('${idAttr}')">Enviar</button>
+          <label class="foto-btn" title="Anexar print, foto, áudio ou PDF" style="cursor:pointer;flex:none;"><span id="d-anexo-icone-${idAttr}">📎</span><input type="file" id="d-anexo-${idAttr}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,audio/*" hidden onchange="registrarAnexoResposta('${idAttr}', this)"></label>
+          <textarea rows="2" id="d-texto-${idAttr}" aria-label="Escrever uma mensagem" placeholder="Escreva uma mensagem" oninput="atualizarCompositor('${idAttr}')" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();enviarResposta('${idAttr}');}"></textarea>
+          <button type="button" class="btn-primary hidden" id="d-enviar-${idAttr}" onclick="enviarResposta('${idAttr}')">Enviar</button>
+          <button type="button" class="btn-primary" id="d-microfone-${idAttr}" aria-label="Gravar áudio" title="Gravar áudio" onclick="alternarGravacao('${idAttr}')">🎙️</button>
+          <button type="button" class="foto-btn hidden" id="d-descartar-audio-${idAttr}" aria-label="Descartar áudio" title="Descartar áudio" onclick="descartarAudio('${idAttr}')">🗑️</button>
           </div>
         </div><div class="chat-ajuda">Cole uma imagem aqui. Enter envia · Shift+Enter quebra linha. A resposta citada é enviada como texto.</div>`}
   </div>`;
@@ -933,6 +936,59 @@ function anexoHtml(chatId, m){
 // anexo, foco/cursor e leitura: chegar uma mensagem nunca deve interromper
 // quem esta atendendo (nem mandar quem leu algo antigo de volta para o fim).
 const RASCUNHOS_PAINEL_CHAT = new Map();
+const GRAVACOES_PAINEL_CHAT = new Map();
+function atualizarCompositor(id){
+  const campo=document.getElementById(`d-texto-${id}`),enviar=document.getElementById(`d-enviar-${id}`),microfone=document.getElementById(`d-microfone-${id}`);
+  if(!campo||!enviar||!microfone)return;
+  const arquivo=document.getElementById(`d-anexo-${id}`)?.files?.[0] || RASCUNHOS_PAINEL_CHAT.get(id)?.arquivo;
+  const gravacao=GRAVACOES_PAINEL_CHAT.get(id),temConteudo=!!campo.value.trim()||!!arquivo;
+  enviar.classList.toggle('hidden',!temConteudo||!!gravacao);
+  microfone.classList.toggle('hidden',temConteudo&&!gravacao);
+  microfone.textContent=gravacao ? `⏹ ${Math.floor((Date.now()-gravacao.inicio)/1000)}s` : '🎙️';
+  microfone.setAttribute('aria-label',gravacao?'Concluir gravação':'Gravar áudio');
+  microfone.title=gravacao?'Concluir gravação':'Gravar áudio';
+  document.getElementById(`d-descartar-audio-${id}`)?.classList.toggle('hidden',!gravacao&&!arquivo?.type?.startsWith('audio/'));
+  enviar.disabled=ENVIOS_PAINEL_CHAT.has(id);microfone.disabled=ENVIOS_PAINEL_CHAT.has(id)||!!gravacao?.iniciando;
+}
+async function alternarGravacao(id){
+  const atual=GRAVACOES_PAINEL_CHAT.get(id);
+  if(atual){if(atual.recorder?.state==='recording')atual.recorder.stop();return;}
+  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){alert('Este navegador não permite gravar áudio. Use um navegador atualizado e conexão HTTPS.');return;}
+  const estado={inicio:Date.now(),iniciando:true,partes:[]};
+  GRAVACOES_PAINEL_CHAT.set(id,estado);atualizarCompositor(id);
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});estado.stream=stream;
+    if(estado.descartado){stream.getTracks().forEach(t=>t.stop());return;}
+    const mime=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t));
+    const recorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);estado.recorder=recorder;estado.iniciando=false;
+    recorder.ondataavailable=e=>{if(e.data.size)estado.partes.push(e.data);};
+    recorder.onstop=()=>{
+      clearInterval(estado.timer);clearTimeout(estado.limite);stream.getTracks().forEach(t=>t.stop());
+      GRAVACOES_PAINEL_CHAT.delete(id);
+      if(!estado.descartado&&estado.partes.length){
+        const tipo=(recorder.mimeType||mime||'audio/webm').split(';')[0],ext=tipo==='audio/mp4'?'m4a':tipo==='audio/ogg'?'ogg':'webm';
+        const arquivo=new File(estado.partes,`audio-${Date.now()}.${ext}`,{type:tipo});
+        if(arquivo.size>8*1024*1024)alert('O áudio ultrapassou 8 MB. Grave uma mensagem menor.');
+        else RASCUNHOS_PAINEL_CHAT.set(id,{...(RASCUNHOS_PAINEL_CHAT.get(id)||{}),arquivo});
+      }
+      const icone=document.getElementById(`d-anexo-icone-${id}`);if(icone)icone.textContent=RASCUNHOS_PAINEL_CHAT.get(id)?.arquivo?'✅':'📎';
+      atualizarCompositor(id);
+    };
+    recorder.onerror=()=>{estado.descartado=true;if(recorder.state!=='inactive')recorder.stop();else{stream.getTracks().forEach(t=>t.stop());GRAVACOES_PAINEL_CHAT.delete(id);atualizarCompositor(id);}alert('Não foi possível gravar o áudio. Tente novamente.');};
+    recorder.start();estado.inicio=Date.now();estado.timer=setInterval(()=>atualizarCompositor(id),1000);
+    estado.limite=setTimeout(()=>{if(recorder.state==='recording')recorder.stop();},120000);
+    atualizarCompositor(id);
+  }catch(e){estado.stream?.getTracks().forEach(t=>t.stop());GRAVACOES_PAINEL_CHAT.delete(id);atualizarCompositor(id);alert('Não foi possível usar o microfone. Confira a permissão de microfone do navegador.');}
+}
+function descartarAudio(id){
+  const estado=GRAVACOES_PAINEL_CHAT.get(id);
+  if(estado){estado.descartado=true;if(estado.recorder?.state==='recording')estado.recorder.stop();else{GRAVACOES_PAINEL_CHAT.delete(id);atualizarCompositor(id);}return;}
+  const rascunho=RASCUNHOS_PAINEL_CHAT.get(id);if(rascunho)rascunho.arquivo=null;
+  const campo=document.getElementById(`d-anexo-${id}`);if(campo)campo.value='';
+  const icone=document.getElementById(`d-anexo-icone-${id}`);if(icone)icone.textContent='📎';
+  atualizarCompositor(id);
+}
+window.addEventListener('pagehide',()=>{for(const id of GRAVACOES_PAINEL_CHAT.keys())descartarAudio(id);});
 const ROLAGEM_PAINEL_CHAT = new Map();
 const ENVIOS_PAINEL_CHAT = new Set();
 const CITACOES_PAINEL_CHAT = new Map();
@@ -993,6 +1049,7 @@ function registrarAnexoResposta(id, campo){
   RASCUNHOS_PAINEL_CHAT.set(id, { ...anterior, arquivo });
   const icone = document.getElementById(`d-anexo-icone-${id}`);
   if(icone) icone.textContent = arquivo ? '✅' : '📎';
+  atualizarCompositor(id);
 }
 
 function limparRascunhoResposta(id){
@@ -1031,6 +1088,7 @@ function restaurarEstadoPaineis(){
     }
     const mensagens = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"] .painel-msgs`);
     const rolagem = ROLAGEM_PAINEL_CHAT.get(id);
+    atualizarCompositor(id);
     if(mensagens){
       mensagens.scrollTop = rolagem && !rolagem.noFim ? rolagem.topo : mensagens.scrollHeight;
     }
@@ -1090,6 +1148,7 @@ function renderPaineis(){
 }
 
 async function enviarResposta(id){
+  if(GRAVACOES_PAINEL_CHAT.has(id)) return;
   if(ENVIOS_PAINEL_CHAT.has(id)) return;
   const input = document.getElementById(`d-texto-${id}`);
   if(!input) return;

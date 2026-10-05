@@ -423,6 +423,10 @@ setTimeout(async () => {
     token = r && r.token;
   } catch (e) { console.log('login falhou: ' + e.message); }
   console.log(token ? 'token obtido ✓' : 'SEM TOKEN - as rotas vao devolver 401');
+  if(process.env.TESTE_SEGURANCA === '1') {
+    try {await require('./testeSegurancaHttp').testar({ARQUIVOS,DOCS,postarMultipart,postarJson,pedir});process.exit(0);}
+    catch(e){console.error(e);process.exit(1);}
+  }
   if(process.env.TESTE_LOGIN_ANDROID === '1') {
     try {await require('./testeLoginAndroid').testar();await require('./testeLoginAndroid').testarHttp({DOCS,postarJson,pedir,http});process.exit(0);}
     catch(e){console.error(e);process.exit(1);}
@@ -12648,7 +12652,7 @@ setTimeout(async () => {
       'a regra vale tambem no re-sync do historico (aprovado + bloqueio = concluida, mesmo sem FINALIZADO)':
         /function ehTicketDeBloqueio\(ticket\)/.test(srcTfE) && /\(ticket\.execucaoStatus === 'FINALIZADO' \|\| ehTicketDeBloqueio\(ticket\)\) \? 'CONCLUIDA' : 'A_FAZER'/.test(srcTfE)
         && /const versao = 'tickets-v[5-9]';/.test(srcTfE),
-      'decidir pelo link do e-mail sincroniza a tarefa': /await sincronizarTarefasDoTicket\(atualizado\);\n    res\.json\(\{ ok: true, numeroTicket: atualizado\.numeroTicket/.test(srcIdxE),
+        'decidir pelo link do e-mail sincroniza a tarefa': /await sincronizarTarefasDoTicket\(atualizado\);\r?\n    res\.json\(\{ ok: true, numeroTicket: atualizado\.numeroTicket/.test(srcIdxE),
       'prestacao de contas (adiantamento FINALIZADO) sincroniza a tarefa': /await sincronizarTarefasDoTicket\(registro\); \/\/ prestacao de contas encerra/.test(srcIdxE),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -15058,6 +15062,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
     // 3) token errado nao entra
     const errado = await pedir('/api/me', { Authorization: 'Bearer ' + 'b'.repeat(64) });
     const vazio = await pedir('/api/me', { Authorization: 'Bearer ' });
+      const registrosApi=[];const logApiAnterior=console.log;
+      let rotaAuditada;
+      try{
+        console.log=(...args)=>registrosApi.push(args.join(' '));
+        rotaAuditada=await pedir('/api/me?teste=parametro-nao-deve-ir-ao-log',cabTok);
+      }finally{console.log=logApiAnterior;}
+      const apiPelaQuery=await pedir('/api/me?token='+encodeURIComponent(TOK));
     const conf = {
       'o token entra como o Master de verdade (mesma identidade da sessão)':
         eu.status === 200 && euJson.role === 'master' && euJson.email === process.env.MASTER_EMAIL,
@@ -15086,8 +15097,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
       })(),
       'o token não vira sessão de navegador (sid nulo)': /await aplicarUsuarioNoReq\(req, user, null\);/.test(authSrc),
       'o valor do token NUNCA vai pro log (só o método e a rota)':
-        /console\.log\(`\[api-token\] \$\{req\.method\} \$\{req\.originalUrl \|\| req\.url\}`\)/.test(authSrc)
-        && !/console\.log\([^)]*MASTER_API_TOKEN/.test(authSrc),
+          rotaAuditada.status===200 && registrosApi.some(l=>l.startsWith('[api-token] GET '))
+          && registrosApi.every(l=>!l.includes(TOK)&&!l.includes('parametro-nao-deve-ir-ao-log')&&!l.includes('?')),
+        'o token de API só entra no Authorization, nunca na URL':apiPelaQuery.status===401,
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okApiToken = !falhas.length;

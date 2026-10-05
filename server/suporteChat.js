@@ -34,6 +34,11 @@ function nivelValido(n) { return [1, 2, 3].includes(Number(n)); }
 function limpar(texto, max) {
   return String(texto || '').trim().slice(0, max);
 }
+function validarAbertura({nome,contato,texto}={}){
+  if(!limpar(nome,120)) throw new Error('Informe seu nome.');
+  if(!limpar(contato,120)) throw new Error('Informe um contato (e-mail ou telefone).');
+  if(!limpar(texto,MAX_TEXTO)) throw new Error('Escreva sua mensagem.');
+}
 
 // lista curta e fixa (sem IA) so pra agrupar as conversas na Central de
 // Soluções - o visitante escolhe ao abrir o chat, sem custo de token
@@ -67,9 +72,7 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto, unid
   // pedido ao computador da loja quando o chat abre no atendimento.html.
   const unidadeContextoLimpa = limpar(unidadeContexto, 100);
   const postoContextoLimpo = limpar(postoContexto, 100);
-  if (!nomeLimpo) throw new Error('Informe seu nome.');
-  if (!contatoLimpo) throw new Error('Informe um contato (e-mail ou telefone).');
-  if (!textoLimpo) throw new Error('Escreva sua mensagem.');
+  validarAbertura({nome,contato,texto});
 
   const doc = COLLECTION.doc();
   const agora = new Date().toISOString();
@@ -176,7 +179,7 @@ async function getComToken(id, token) {
 async function atualizarLogado(id, logado) {
   const chat = await getOne(id);
   if (!chat) throw new Error('Conversa não encontrada.');
-  if (!logado || !logado.id) return chat;
+  logado = logado?.id ? logado : null;
   await COLLECTION.doc(id).update({ logado, atualizadoEm: new Date().toISOString() });
   chatsCache.invalidar();
   return getOne(id);
@@ -768,4 +771,5 @@ module.exports = {
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, marcarNotaTratada, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,
   responderReferencia,
+  validarAbertura,
 };

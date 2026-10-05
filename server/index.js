@@ -158,7 +158,7 @@ const upload = multer({
 // formatos de imagem comuns, um arquivo e tamanho compatível com 4G.
 const uploadEvidenciaPedido = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 8 * 1024 * 1024, files: 1, fields: 30, parts: 31, fieldSize: 16 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (!/^image\/(jpeg|png|webp)$/i.test(file.mimetype || '')) {
       return cb(new Error('Envie uma imagem JPEG, PNG ou WebP.'));
@@ -1768,6 +1768,8 @@ app.post('/api/central/:tipo/:id/chat-publico', upload.single('imagem'), async (
     const autorNome = String(payload.autorNome || '').trim().slice(0, 80) || 'Visitante';
     let imagem = null;
     if (req.file) {
+      const validacao=segurancaChat.validarAnexo(req.file);
+      if(!validacao.ok) return res.status(400).json({error:validacao.motivo});
       const path = await storage.salvarArquivo(req.params.id, req.file, 'central-chat');
       imagem = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream' };
     }
@@ -2034,6 +2036,7 @@ async function alertarSegurancaChat(req, chat, motivo, detalheExtra) {
 // anexo continua exatamente como era.
 app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
+    suporteChat.validarAbertura(req.body);
     const logado = await usuarioLogadoDoHeader(req);
     const unidade=null; // Cookies do antigo portal não representam o colaborador.
     let anexo = null;
@@ -2082,6 +2085,10 @@ app.get('/api/suporte-chat/:id', async (req, res) => {
 // suporte-chat.js), tenha foto ou nao, pra usar o MESMO caminho dos dois casos
 app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
+    const autorizada=await suporteChat.getComToken(req.params.id,req.body.token);
+    if(!autorizada) return res.status(400).json({error:'Conversa não encontrada.'});
+    if(autorizada.status!=='ABERTO') return res.status(400).json({error:'Essa conversa já foi finalizada. Inicie uma nova.'});
+    if((autorizada.mensagens||[]).length>=300) return res.status(400).json({error:'Essa conversa ficou muito longa. Inicie uma nova.'});
     const texto = req.body.texto || '';
     let anexo = null;
     if (req.file) {
@@ -2105,7 +2112,9 @@ app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), asyn
     // da conta: assim o Beniboy consegue confirmar que a própria pessoa pede
     // o desbloqueio, sem usar o texto livre do campo "contato" como prova.
     const logado = await usuarioLogadoDoHeader(req);
-    if (logado && chat.logado?.id !== logado.id) {
+    // O token da conversa não substitui a sessão; logout/revogação remove
+    // privilégios e mudanças de cargo/unidades atualizam o retrato do bot.
+    if (JSON.stringify(chat.logado || null) !== JSON.stringify(logado || null)) {
       chat = await suporteChat.atualizarLogado(chat.id, logado);
     }
     await completarContatoAusenteDoChat(logado, chat, [texto]);
@@ -3047,7 +3056,7 @@ app.get('/api/push/vapid-public-key', (req, res) => {
 // quem ja provou que tinha a inscricao antiga, sabendo o endpoint dela
 app.post('/api/push/migrar-subscricao', async (req, res) => {
   try {
-    await push.migrarSubscricao(req.body.oldEndpoint, req.body.subscricao);
+    await push.migrarSubscricao(req.body.oldEndpoint, req.body.subscricao, req.body.oldAuth);
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -6397,6 +6406,7 @@ app.post('/api/formularios/:id/enviar-pagamento', requireSection('formularios'),
 
 // ---------- notificacoes push (estorno, estorno agendado, chargeback, fraude) ----------
 app.post('/api/push/subscribe', async (req, res) => {
+  try {
   if(req.body.appBeniboy && !centralBeniboy.podeAtender(req)) return res.status(403).json({error:'A Central é exclusiva para Master, Suporte e Técnico.'});
   // guarda quem e essa inscricao (Master ve tudo; usuario comum so recebe
   // alerta das unidades e secoes que ele tem acesso - sem isso o push
@@ -6415,11 +6425,12 @@ app.post('/api/push/subscribe', async (req, res) => {
     appBeniboy: req.body.appBeniboy === true,
   });
   res.json({ ok: true });
+  } catch(e){res.status(400).json({error:e.message});}
 });
 
 app.post('/api/push/unsubscribe', async (req, res) => {
-  await push.removeSubscription(req.body.endpoint);
-  res.json({ ok: true });
+  try {await push.removeSubscription(req.body.endpoint,req.user.id);res.json({ ok: true });}
+  catch(e){res.status(400).json({error:e.message});}
 });
 
 // dispara uma notificacao de teste pra TODOS os aparelhos do proprio

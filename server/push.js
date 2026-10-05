@@ -5,13 +5,22 @@ const webpush = require('web-push');
 const db = require('./firestore');
 const users = require('./users');
 const centralBeniboy = require('./centralBeniboy');
+const pushSeguranca = require('./pushSeguranca');
 const { ehCargoGerente } = users;
 const alertasCentral = require('./alertasCentral');
 
 const COLLECTION = db.collection('push_subscriptions');
 
 function subDocId(endpoint) {
-  return Buffer.from(endpoint).toString('base64').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 400);
+  return pushSeguranca.idSubscricao(endpoint);
+}
+function idLegado(endpoint){return Buffer.from(endpoint).toString('base64').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,400);}
+async function localizarInscricao(endpoint){
+  for(const id of [subDocId(endpoint),idLegado(endpoint)]){
+    const ref=COLLECTION.doc(id),snap=await ref.get();
+    if(snap.exists && snap.data().endpoint===endpoint) return {ref,dados:snap.data()};
+  }
+  return null;
 }
 
 const PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
@@ -32,11 +41,27 @@ let SUBS_CACHE_EM = 0;
 async function loadSubs(incluirBeniboy = false) {
   if (!SUBS_CACHE || Date.now() - SUBS_CACHE_EM >= SUBS_TTL_MS) {
     const snap = await COLLECTION.get();
-    SUBS_CACHE = snap.docs.map((d) => d.data());
+    SUBS_CACHE = snap.docs.map((d) => d.data()).filter(sub=>{
+      try{pushSeguranca.validarSubscricao(sub);return true;}catch(e){return false;}
+    });
     SUBS_CACHE_EM = Date.now();
   }
-  // O registro paralelo não recebe alertas financeiros/NOC/RH do app principal.
-  return incluirBeniboy ? SUBS_CACHE : SUBS_CACHE.filter(sub=>!sub.meta?.appBeniboy);
+  // A inscrição não congela privilégios. Reusa o cache de autenticação (15s,
+  // invalidado ao editar a conta) e só conserva permissões ainda vigentes.
+  const candidatos=incluirBeniboy?SUBS_CACHE:SUBS_CACHE.filter(sub=>!sub.meta?.appBeniboy);
+  const donos=new Map();
+  for(const sub of candidatos) if(sub.meta?.userId && !donos.has(sub.meta.userId)) donos.set(sub.meta.userId,require('./auth').getUserById(sub.meta.userId));
+  const atuais=await Promise.all(candidatos.map(async sub=>{
+    const u=await donos.get(sub.meta?.userId);
+    if(!u || u.active===false || u.locked || u.precisaTrocarSenha) return null;
+    const meta=sub.meta,isMaster=!!meta.isMaster && u.role==='master';
+    let unidades=(meta.unidades||[]).filter(c=>(u.permissions?.unidades||[]).includes(c));
+    if(u.empresaId){const permitidas=new Set(await require('./empresas').unidadesDaEmpresa(u.empresaId));unidades=unidades.filter(c=>permitidas.has(c));}
+    return {...sub,meta:{...meta,isMaster,isAdmin:!!meta.isAdmin&&!!u.isAdmin,isQaMaster:!!u.qaMaster,
+      podeRhTodasUnidades:!!meta.podeRhTodasUnidades&&!!u.podeRhTodasUnidades,cargo:u.cargo||null,
+      unidades:isMaster?null:unidades,sections:isMaster?null:(meta.sections||[]).filter(s=>(u.permissions?.sections||[]).includes(s))}};
+  }));
+  return atuais.filter(Boolean);
 }
 function invalidarSubs() { SUBS_CACHE = null; }
 
@@ -45,7 +70,11 @@ function invalidarSubs() { SUBS_CACHE = null; }
 // dessa checagem existir) e tratado como sem permissao nenhuma, nao como
 // acesso total - mais seguro pedir pra re-inscrever do que vazar alerta.
 async function addSubscription(sub, meta) {
-  await COLLECTION.doc(subDocId(sub.endpoint)).set({ ...sub, meta: meta || null }, { merge: true });
+  const limpa=pushSeguranca.validarSubscricao(sub);
+  const antiga=await localizarInscricao(limpa.endpoint);
+  if(antiga && !pushSeguranca.provaDePosse(antiga.dados.keys?.auth,limpa.keys.auth)) throw new Error('Inscrição push inválida.');
+  await COLLECTION.doc(subDocId(limpa.endpoint)).set({ ...limpa, meta: meta || null });
+  if(antiga && antiga.ref.id!==subDocId(limpa.endpoint)) await antiga.ref.delete();
   invalidarSubs();
 }
 
@@ -57,16 +86,19 @@ async function addSubscription(sub, meta) {
 // acesso ao token de login guardado no localStorage da pagina, entao nao da
 // pra chamar a rota autenticada de sempre (POST /api/push/subscribe). Em vez
 // disso, so migra o META (permissoes) da inscricao antiga pra nova, usando o
-// proprio endpoint antigo como prova de posse (so quem ja tinha a inscricao
-// valida sabe esse endpoint) - nao concede nada novo, so preserva o que ja
+// endpoint e segredo auth antigos como prova de posse - nao concede nada
+// novo, so preserva o que ja
 // existia, pra o alerta nao morrer em silencio
-async function migrarSubscricao(oldEndpoint, novaSubscricao) {
-  if (!oldEndpoint || !novaSubscricao || !novaSubscricao.endpoint) return;
-  const antigaRef = COLLECTION.doc(subDocId(oldEndpoint));
-  const antigaSnap = await antigaRef.get();
-  const meta = antigaSnap.exists ? antigaSnap.data().meta : null;
-  await COLLECTION.doc(subDocId(novaSubscricao.endpoint)).set({ ...novaSubscricao, meta: meta || null }, { merge: true });
-  if (antigaSnap.exists && oldEndpoint !== novaSubscricao.endpoint) await antigaRef.delete();
+async function migrarSubscricao(oldEndpoint, novaSubscricao, oldAuth) {
+  const origem=pushSeguranca.endpointSeguro(oldEndpoint);
+  const nova=pushSeguranca.validarSubscricao(novaSubscricao);
+  const antiga=await localizarInscricao(origem);
+  if(!antiga?.dados.meta?.userId || !pushSeguranca.provaDePosse(antiga.dados.keys?.auth,oldAuth)) throw new Error('Renovação de notificações inválida. Reative o sino após entrar.');
+  const destino=await localizarInscricao(nova.endpoint);
+  if(destino && destino.dados.meta?.userId!==antiga.dados.meta.userId) throw new Error('Renovação de notificações inválida.');
+  await COLLECTION.doc(subDocId(nova.endpoint)).set({ ...nova, meta: antiga.dados.meta });
+  if(destino && destino.ref.id!==subDocId(nova.endpoint) && destino.ref.id!==antiga.ref.id) await destino.ref.delete();
+  if(antiga.ref.id!==subDocId(nova.endpoint)) await antiga.ref.delete();
   invalidarSubs();
 }
 
@@ -162,8 +194,11 @@ function podeReceberCritico(sub) {
   return (meta.sections || []).includes('suporte');
 }
 
-async function removeSubscription(endpoint) {
-  await COLLECTION.doc(subDocId(endpoint)).delete();
+async function removeSubscription(endpoint, userId) {
+  const limpa=pushSeguranca.endpointSeguro(endpoint);
+  const registro=await localizarInscricao(limpa);
+  if(registro && userId && registro.dados.meta?.userId!==userId) throw new Error('Esta inscrição pertence a outro acesso.');
+  if(registro) await registro.ref.delete();
   invalidarSubs();
 }
 

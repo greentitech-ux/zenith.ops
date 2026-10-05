@@ -93,7 +93,16 @@ async function salvarArquivoDoDisco(pedidoId, file, pasta = 'disputes') {
 
 async function streamArquivo(caminho, tipo, res) {
   const bucket = await resolverBucket();
-  if (tipo) res.set('Content-Type', tipo);
+  const mime = String(tipo || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+  // SVG/HTML enviados como anexo não podem executar no domínio do sistema.
+  // Imagens comuns, PDF e áudio/vídeo continuam abrindo normalmente.
+  const inline = /^(image\/(jpeg|png|gif|webp|heic|heif|bmp|avif)|audio\/[a-z0-9.+-]+|video\/[a-z0-9.+-]+|application\/pdf)$/.test(mime);
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Content-Type', inline ? mime : 'application/octet-stream');
+  if (!inline) {
+    res.set('Content-Disposition', 'attachment');
+    res.set('Content-Security-Policy', "sandbox; default-src 'none'");
+  }
   bucket
     .file(caminho)
     .createReadStream()

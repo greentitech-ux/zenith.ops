@@ -74,6 +74,7 @@ function urlBase64ToUint8Array(base64String) {
 // o alerta simplesmente para de chegar em silencio, sem ninguem perceber.
 self.addEventListener('pushsubscriptionchange', (event) => {
   const oldEndpoint = event.oldSubscription && event.oldSubscription.endpoint;
+  const oldAuth = event.oldSubscription?.toJSON().keys?.auth;
   event.waitUntil(
     (async () => {
       try {
@@ -86,7 +87,7 @@ self.addEventListener('pushsubscriptionchange', (event) => {
         await fetch('/api/push/migrar-subscricao', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldEndpoint, subscricao: novaSubscricao }),
+          body: JSON.stringify({ oldEndpoint, oldAuth, subscricao: novaSubscricao }),
         });
       } catch (e) { /* proxima troca de inscricao tenta de novo */ }
     })()
@@ -97,7 +98,10 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   // so caminho relativo dentro do proprio app - nada de URL externa
   let url = (event.notification.data && event.notification.data.url) || '/';
-  if (!url.startsWith('/')) url = '/';
+  try{
+    const destino=new URL(url,self.location.origin);
+    url=destino.origin===self.location.origin?destino.pathname+destino.search:'/';
+  }catch(e){url='/';}
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       // 1) ja tem uma aba EXATAMENTE nessa tela (path + query, ex: um turno

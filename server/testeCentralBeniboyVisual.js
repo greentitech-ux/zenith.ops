@@ -39,6 +39,16 @@ function conversas() {
       wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);
       wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);
       await page.addInitScript(({tema})=>{ localStorage.setItem('authToken','teste');localStorage.setItem('zenithTema',tema); },{tema});
+      await page.addInitScript(()=>{
+        window.trilhasEncerradasTeste=0;
+        Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async()=>({getTracks:()=>[{stop(){window.trilhasEncerradasTeste++;}}]})},configurable:true});
+        window.MediaRecorder=class {
+          static isTypeSupported(t){return t.startsWith('audio/webm');}
+          constructor(stream,opts){this.state='inactive';this.mimeType=opts?.mimeType||'audio/webm';}
+          start(){this.state='recording';}
+          stop(){this.state='inactive';this.ondataavailable?.({data:new Blob(['audio-apenas-do-teste'],{type:this.mimeType})});this.onstop?.();}
+        };
+      });
       await page.route('**/*',async route=>{
         const u=new URL(route.request().url());
         if(u.pathname.startsWith('/api/')) {
@@ -88,6 +98,24 @@ function conversas() {
       assert.ok(await page.evaluate(()=>Number(localStorage.getItem('zenithFonte'))>100));
       await page.getByRole('button',{name:'Diminuir fonte',exact:true}).click();
       await page.locator('[data-id="chat-a"].fila-card').click();
+      assert.equal(await page.locator('#d-microfone-chat-a').isVisible(),true,'vazio mostra microfone');
+      assert.equal(await page.locator('#d-enviar-chat-a').isVisible(),false,'vazio não mostra Enviar');
+      await page.locator('#d-texto-chat-a').fill('Texto');
+      assert.equal(await page.locator('#d-enviar-chat-a').isVisible(),true,'digitação mostra Enviar');
+      assert.equal(await page.locator('#d-microfone-chat-a').isVisible(),false,'digitação oculta microfone');
+      await page.locator('#d-texto-chat-a').fill('');
+      assert.equal(await page.locator('#d-microfone-chat-a').isVisible(),true,'apagar devolve microfone');
+      await page.getByRole('button',{name:'Gravar áudio',exact:true}).click();
+      await page.getByRole('button',{name:'Concluir gravação',exact:true}).waitFor();
+      await page.evaluate(()=>carregarLista());
+      assert.equal(await page.getByRole('button',{name:'Concluir gravação',exact:true}).isVisible(),true,'atualização preserva gravação');
+      await page.getByRole('button',{name:'Concluir gravação',exact:true}).click();
+      assert.equal(await page.locator('#d-enviar-chat-a').isVisible(),true,'áudio pronto oferece Enviar');
+      assert.equal(await page.evaluate(()=>RASCUNHOS_PAINEL_CHAT.get('chat-a')?.arquivo?.type),'audio/webm');
+      assert.equal(await page.evaluate(()=>window.trilhasEncerradasTeste),1,'microfone é encerrado');
+      await page.getByRole('button',{name:'Descartar áudio',exact:true}).click();
+      assert.equal(await page.locator('#d-microfone-chat-a').isVisible(),true,'descartar devolve microfone');
+      assert.throws(()=>assert.equal(false,true),'sabotagem detecta alternância invertida');
       await page.getByRole('button',{name:'Responder a esta mensagem',exact:true}).first().click();
       assert.equal(await page.locator('#d-citacao-chat-a').isVisible(),true);
       await page.locator('#d-texto-chat-a').fill('Linha 1');

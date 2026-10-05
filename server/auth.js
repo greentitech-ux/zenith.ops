@@ -171,7 +171,9 @@ async function login(identifier, password, contexto = {}) {
     const tentativas = (user.failedAttempts || 0) + 1;
     const bloqueou = tentativas >= MAX_TENTATIVAS && user.role !== 'master';
     await doc.ref.update({ failedAttempts: tentativas, locked: bloqueou });
+    invalidarUsuario(doc.id);
     if (bloqueou) {
+      await sessions.encerrarTodasDoUsuario(doc.id);
       criarTarefaBloqueio(user.email, doc.id, user.permissions?.unidades, user.username || user.nome)
         .catch((e) => console.error('Falha ao criar tarefa automática de desbloqueio:', e.message));
       throw new Error('Acesso bloqueado após 3 tentativas de senha erradas. Fale com o Master.');
@@ -300,9 +302,10 @@ async function usuarioOpcionalDoToken(token, pedido = {}) {
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     const user = await getUserById(payload.sub);
-    if (!user || user.active === false) return null;
+    if (!user || user.active === false || user.locked || user.precisaTrocarSenha) return null;
     await require('./nocLogin').exigir(user, pedido);
     if (payload.sid && !(await sessions.existeEValida(payload.sid))) return null;
+    if (user.role !== 'master' && !dentroDoHorarioPermitido(user.horarioPermitido)) return null;
     return user;
   } catch (err) {
     return null;
@@ -358,14 +361,16 @@ function requireAuth(req, res, next) {
 
   // token de API: vira o proprio Master, sem sessao (nao ha navegador aqui)
   if (ehTokenDeApiDoMaster(token)) {
+    if (scheme !== 'Bearer' || headerToken !== token) return res.status(401).json({error:'Use o token de API no cabeçalho Authorization.'});
     masterDoToken()
       .then(async (user) => {
-        if (!user || user.active === false) return res.status(401).json({ error: 'Acesso Master indisponível.' });
+        if (!user || user.active === false || user.locked || user.precisaTrocarSenha) return res.status(401).json({ error: 'Acesso Master indisponível.' });
         await aplicarUsuarioNoReq(req, user, null);
         req.viaApiToken = true;
         // deixa rastro de TODA chamada feita pelo token - o token e uma chave
         // de casa: se vazar, o log e como se percebe
-        console.log(`[api-token] ${req.method} ${req.originalUrl || req.url}`);
+        // Nunca registra a query: EventSource/anexos podem carregar token nela.
+        console.log(`[api-token] ${req.method} ${req.path || String(req.url || '').split('?')[0]}`);
         next();
       })
       .catch(next);
@@ -384,6 +389,10 @@ function requireAuth(req, res, next) {
   Promise.all([getUserById(payload.sub), payload.sid ? sessions.existeEValida(payload.sid) : true])
     .then(async ([user, sessaoValida]) => {
       if (!user || user.active === false) return res.status(401).json({ error: 'Acesso inválido ou desativado.' });
+        if (user.locked) return res.status(401).json({error:'Acesso bloqueado. Fale com o Master.'});
+        const rota = String(req.originalUrl || req.url || req.path || '').split('?')[0];
+        const trocaPermitida = (req.method==='GET' && rota==='/api/me') || (req.method==='POST' && rota==='/api/me/senha');
+        if (user.precisaTrocarSenha && !trocaPermitida) return res.status(403).json({error:'Troque sua senha temporária antes de continuar.',code:'TROCA_SENHA_OBRIGATORIA'});
       if (!sessaoValida) return res.status(401).json({ error: 'Sessão encerrada, faça login novamente.' });
       try { await require('./nocLogin').exigir(user, req); }
       catch (e) { return res.status(403).json({ error: e.message, code: e.code }); }
