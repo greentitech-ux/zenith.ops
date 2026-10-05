@@ -110,6 +110,7 @@
      balão encolhe até o conteúdo. */
   .msg-item .m-cab{display:flex;justify-content:flex-start;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);flex-wrap:wrap;}
   .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
+  .chat-anexo-audio{display:block;width:240px;max-width:100%;height:40px;margin-top:6px;}
   .d-acoes{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
   .d-tickets{font-size:11.5px;color:var(--muted);margin-bottom:8px;}
   /* alertas de seguranca dessa conversa (texto tipo comando/script ou upload
@@ -900,7 +901,7 @@ function painelHtml(chat){
 }
 
 // anexo de uma mensagem da conversa. Imagem aparece embutida (clicavel, abre
-// em tamanho real); PDF vira link. Mesma rota que o widget usa do lado do
+// em tamanho real); áudio tem player e PDF vira link. Mesma rota do lado do
 // time (/api/suporte-chats/:id/anexo/:indice, atras do login)
 function anexoHtml(chatId, m){
   if(!m.anexo) return '';
@@ -911,6 +912,11 @@ function anexoHtml(chatId, m){
   // é o alt (o nome do arquivo) sublinhado, parecendo link estranho.
   // Mesmo caminho que o suporte-chat.js já usa no atendimento.
   const url = `/api/suporte-chats/${encodeURIComponent(chatId)}/anexo/${m.indice}?token=${encodeURIComponent(AUTH_TOKEN || '')}`;
+  const tipo = String(m.anexo.tipo || '').split(';')[0].trim().toLowerCase();
+  const audio = tipo.startsWith('audio/') || ((!tipo || tipo==='application/octet-stream') && /\.(mp3|m4a|wav|ogg|webm|aac|flac)$/i.test(m.anexo.nome || ''));
+  if(audio){
+    return `<audio class="chat-anexo-audio" data-audio-chave="${escapeHtml(chatId+':'+m.indice)}" aria-label="Ouvir áudio da mensagem" controls preload="none" src="${url}">Seu navegador não reproduz este áudio.</audio>`;
+  }
   if(/^image\//.test(m.anexo.tipo||'')){
     // o alt e' o que aparece se a imagem nao carregar (storage fora, sessao
     // expirada): "📎 nome - toque pra abrir" diz o que e', o nome cru do
@@ -1049,8 +1055,17 @@ function renderPaineis(){
   const contexto=document.getElementById('contexto-corpo');
   contexto.innerHTML='Selecione uma conversa para ver o contexto.';
   if(!PAINEIS_ABERTOS.length){ window.nopulsoDigitando?.parar('central'); wrap.innerHTML = ''; return; }
+  // Reaproveita o player na atualização: não baixa nem reinicia o áudio do zero.
+  const audios = new Map(Array.from(wrap.querySelectorAll('audio.chat-anexo-audio'),a=>[a.dataset.audioChave,{elemento:a,tocando:!a.paused&&!a.ended}]));
   wrap.innerHTML = PAINEIS_ABERTOS.map(id=>painelHtml(ITENS.find(c=>c.id===id))).join('');
   wrap.querySelectorAll('.painel-conversa').forEach(p=>p.classList.toggle('hidden',p.dataset.painelId!==CONVERSA_ATIVA));
+  wrap.querySelectorAll('audio.chat-anexo-audio').forEach(a=>{
+    const anterior=audios.get(a.dataset.audioChave);
+    if(!anterior || anterior.elemento.src!==a.src) return;
+    a.replaceWith(anterior.elemento);
+    if(anterior.elemento.closest('.painel-conversa').classList.contains('hidden')) anterior.elemento.pause();
+    else if(anterior.tocando) anterior.elemento.play().catch(()=>{});
+  });
   const selecionada=ITENS.find(c=>c.id===CONVERSA_ATIVA);
   const campo=(nome,valor)=>`<div class="contexto-campo"><small>${nome}</small><strong>${escapeHtml(valor||'Não informado')}</strong></div>`;
   contexto.innerHTML=campo('Solicitante',selecionada.nome)+campo('Contato',selecionada.contato)

@@ -30,11 +30,18 @@ function conversas() {
       const page=await navegador.newPage({viewport:{width:largura,height:900}});
       const erros=[];page.on('pageerror',e=>erros.push(e.message));
       let itens=conversas(), envios=0, negar=false;
+      itens[1].mensagens.push({de:'suporte',texto:'',em:agora,anexo:{nome:'audio-teste.wav',tipo:'audio/wav',path:'teste-audio'}});
+      // WAV válido em memória: o teste realmente toca, sem arquivo de produção.
+      const wav=Buffer.alloc(44+8000*2*10);
+      wav.write('RIFF',0);wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);
+      wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);
+      wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);
       await page.addInitScript(({tema})=>{ localStorage.setItem('authToken','teste');localStorage.setItem('zenithTema',tema); },{tema});
       await page.route('**/*',async route=>{
         const u=new URL(route.request().url());
         if(u.pathname.startsWith('/api/')) {
           let dados=[];
+          if(u.pathname==='/api/suporte-chats/chat-b/anexo/1') return route.fulfill({contentType:'audio/wav',body:wav});
           if(u.pathname==='/api/me') dados=me;
           if(u.pathname==='/api/stream') return route.fulfill({contentType:'text/event-stream',body:': teste\n\n'});
           if(u.pathname==='/api/suporte-chats') return route.fulfill({status:negar?503:200,json:negar?{error:'teste'}:itens});
@@ -88,6 +95,24 @@ function conversas() {
       await page.locator('#d-texto-chat-a').fill('Rascunho da Ana');
       if(largura<=760) await page.getByRole('button',{name:'← Fila',exact:true}).click();
       await page.locator('[data-id="chat-b"].fila-card').click();
+      const player=page.locator('.painel-conversa:visible audio.chat-anexo-audio');
+      assert.equal(await player.count(),1,'áudio aparece como player, não link');
+      assert.equal(await player.getAttribute('controls'),'');
+      assert.equal(await player.getAttribute('preload'),'none','não baixa antes do play');
+      assert.match(await player.getAttribute('src'),/anexo\/1\?token=teste$/,'mantém autenticação');
+      await player.evaluate(a=>a.play());
+      await page.waitForFunction(()=>document.querySelector('.painel-conversa:not(.hidden) audio')?.currentTime>0.05);
+      const tocando=await player.evaluate(a=>{window.audioTesteOriginal=a;return a.currentTime;});
+      await page.evaluate(()=>carregarLista());
+      await page.waitForFunction(()=>{const a=document.querySelector('.painel-conversa:not(.hidden) audio');return a===window.audioTesteOriginal&&!a.paused;});
+      assert.ok(await player.evaluate(a=>a.currentTime)>=tocando,'atualização não reinicia áudio');
+      await page.screenshot({path:path.join(destino,`central-beniboy-audio-${largura}.png`),fullPage:true});
+      await player.evaluate(a=>a.pause());
+      const legado=await page.evaluate(()=>anexoHtml('chat-b',{indice:2,anexo:{nome:'audio-antigo.webm',tipo:'application/octet-stream'}}));
+      assert.match(legado,/<audio /,'áudio antigo com MIME genérico também recebe player');
+      const falso=await page.evaluate(()=>anexoHtml('chat-b',{indice:2,anexo:{nome:'comprovante.pdf',tipo:'application/pdf'}}));
+      assert.doesNotMatch(falso,/<audio /,'PDF continua arquivo');
+      assert.throws(()=>assert.match('<a>audio-teste.wav</a>',/<audio /),'sabotagem detecta retorno do link');
       await page.getByRole('button',{name:'Ana Atendimento',exact:true}).click();
       assert.equal(await page.locator('#d-texto-chat-a').inputValue(),'Rascunho da Ana','trocar de conversa preserva texto');
       await page.evaluate(()=>carregarLista());

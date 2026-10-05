@@ -109,6 +109,12 @@ inatividade e sabotagem de autorização.
 
 ## Verificação
 
+Áudios na Central usam player nativo com play/pausa e linha do tempo, na
+mesma rota autenticada de anexos. Não baixam antes do play (`preload=none`).
+Anexos antigos com MIME ausente/genérico são reconhecidos pela extensão de
+áudio. Atualizar a conversa reaproveita o player; PDFs seguem como links.
+O teste visual reproduz WAV válido e verifica retomada sem voltar ao início.
+
 `server/testeCentralBeniboyVisual.js`: Chromium, interface real e APIs
 simuladas, desktop 1440, tablet 1024 (Claro) e celular 390.
 Verifica filtros, abas, envio, rascunhos, contexto, erros de rede, citação,
