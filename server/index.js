@@ -11814,9 +11814,16 @@ app.post('/api/fornecedores/publico/:token', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// ?desde=<atualizadoEm da tarefa mais nova que a tela ja tem> devolve SO o
+// que mudou depois disso ({ alteradas, removidas }) - e o que o Meu Dia usa
+// ao receber `tarefas-atualizada` (custa ~1 leitura em vez da colecao inteira
+// por aba aberta, ver tarefas.listarMinhasDesde). Sem o parametro devolve a
+// lista completa, que e o caso da abertura da tela.
 app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
   try {
-    res.json(await tarefas.listarMinhas(acessoDasTarefas(req)));
+    const acesso = acessoDasTarefas(req);
+    const desde = String(req.query.desde || '').trim();
+    res.json(desde ? await tarefas.listarMinhasDesde(acesso, desde) : await tarefas.listarMinhas(acesso));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

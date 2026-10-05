@@ -12513,6 +12513,86 @@ setTimeout(async () => {
   console.log(`${okBracos ? '✓' : '✗'} Agente "braços do Master": 9 ações de sistema executam em nome do Master que pediu, e recusam quem não é`);
 
   // ------------------------------------------------------------------
+  // MEU DIA SEM RELER A COLEÇÃO (05/10/2026). A conta do Firestore saltou em
+  // outubro e a causa era a mesma de agosto (alertasCentral): uma coleção que
+  // cresce, relida INTEIRA por cada aba aberta. listarMinhas() lia tudo sem
+  // cache, e desde 24/09 o tarefas.html chamava load() a cada um dos 38
+  // `tarefas-atualizada` que o servidor emite. Três coisas sob prova:
+  //   1) a lista inteira passa por cache (N abas = 1 leitura) e QUALQUER
+  //      escrita invalida sozinha - a invalidação é estrutural (COLLECTION.doc
+  //      devolve ref que invalida), e nenhuma gravação pode passar por fora
+  //      via snapshot.ref;
+  //   2) a leitura incremental (?desde=) devolve só o que mudou, no formato
+  //      da lista, respeita o MESMO acesso e avisa o que saiu (removidas);
+  //   3) a tela aplica a incremental e não relê tudo a cada evento.
+  // Verificado por sabotagem: sem o createCache a 1ª asserção cai; com um
+  // `.ref.update(` de volta a estática cai; `await load()` de volta no
+  // handler, a última cai.
+  let okMeuDiaLeituras = false;
+  try {
+    const tf = require('/home/user/adyen-monitor/server/tarefas.js');
+    const masterLogin = await auth.login(process.env.MASTER_EMAIL, process.env.MASTER_PASSWORD);
+    const masterId = masterLogin.user.id;
+    const acessoMaster = { usuario: { id: masterId, email: process.env.MASTER_EMAIL }, isMaster: true, isAdmin: false, unidades: [] };
+    const usuarioMaster = { id: masterId, email: process.env.MASTER_EMAIL, nome: 'Master' };
+    const acessoOutra = { usuario: { id: 'u-meudia-outra', email: 'outra-meudia@teste.local' }, isMaster: false, isAdmin: false, unidades: ['AERO'] };
+    const cab = { Authorization: 'Bearer ' + masterLogin.token };
+    const maisNovo = (lista) => lista.reduce((m, x) => (String(x.atualizadoEm || '') > m ? String(x.atualizadoEm) : m), '');
+
+    const t1 = await tf.criar({ titulo: 'Leituras: tarefa 1', usuario: usuarioMaster });
+    const antes = LEITURAS.docs;
+    const l1 = await tf.listarMinhas(acessoMaster);
+    const lidoNaPrimeira = LEITURAS.docs - antes;
+    const l2 = await tf.listarMinhas(acessoMaster);
+    const l3 = await tf.listarMinhas(acessoOutra);
+    const lidoNasSeguintes = LEITURAS.docs - antes - lidoNaPrimeira;
+
+    await tf.adicionarComentario(t1.id, { usuario: usuarioMaster, isMaster: true, isAdmin: false, unidades: [], texto: 'isto invalida o cache?' });
+    const l4 = await tf.listarMinhas(acessoMaster);
+    const comentarios = ((l4.find((x) => x.id === t1.id) || {}).comentarios) || [];
+
+    const marco = maisNovo(l4);
+    const nada = await tf.listarMinhasDesde(acessoMaster, marco);
+    await new Promise((r) => setTimeout(r, 5)); // garante atualizadoEm > marco
+    const t2 = await tf.criar({ titulo: 'Leituras: tarefa 2 (nova)', usuario: usuarioMaster });
+    const antesInc = LEITURAS.docs;
+    const inc = await tf.listarMinhasDesde(acessoMaster, marco);
+    const lidoIncremental = LEITURAS.docs - antesInc;
+    await new Promise((r) => setTimeout(r, 5));
+    await tf.arquivar(t2.id, acessoMaster);
+    const inc2 = await tf.listarMinhasDesde(acessoMaster, marco);
+    const incOutra = await tf.listarMinhasDesde(acessoOutra, marco);
+
+    const viaRota = await pedir('/api/tarefas/minhas?desde=' + encodeURIComponent(marco), cab);
+    const corpoRota = viaRota.status === 200 ? JSON.parse(viaRota.corpo) : null;
+    const semDesde = await pedir('/api/tarefas/minhas', cab);
+
+    const fs = require('fs');
+    const fonteTarefas = fs.readFileSync(__dirname + '/tarefas.js', 'utf8');
+    const tela = fs.readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const handler = (tela.match(/zenithAoVivo\('tarefas-atualizada',[\s\S]*?\n\}\);/) || [''])[0];
+
+    const conf = {
+      'a lista inteira sai do Firestore na 1ª vez e do cache nas seguintes': lidoNaPrimeira >= 1 && lidoNasSeguintes === 0 && l2.length === l1.length,
+      'o cache não vaza entre pessoas: quem não participa não vê a tarefa': l1.some((x) => x.id === t1.id) && !l3.some((x) => x.id === t1.id),
+      'escrever (comentário) invalida o cache sem ninguém chamar invalidar()': comentarios.some((c) => /isto invalida o cache\?/.test(c.texto || '')),
+      'incremental sem novidade não devolve nada': nada.alteradas.length === 0 && nada.removidas.length === 0,
+      'incremental devolve só a tarefa nova, lendo 1 documento e não a coleção': inc.alteradas.length === 1 && inc.alteradas[0].id === t2.id && inc.alteradas[0].podeGerir === true && lidoIncremental === 1 && lidoIncremental < lidoNaPrimeira,
+      'arquivada vira "removida", pra tela tirar da lista': inc2.removidas.includes(t2.id) && !inc2.alteradas.some((x) => x.id === t2.id),
+      'incremental respeita o acesso igual à lista inteira': !incOutra.alteradas.some((x) => x.id === t2.id),
+      'a rota ?desde= responde { alteradas, removidas }': !!corpoRota && Array.isArray(corpoRota.alteradas) && Array.isArray(corpoRota.removidas),
+      'sem ?desde= a rota continua devolvendo a lista inteira': semDesde.status === 200 && Array.isArray(JSON.parse(semDesde.corpo)),
+      'nenhuma gravação em tarefas.js passa por fora da invalidação (snapshot.ref)': !/\.ref\.(set|update|delete)\(/.test(fonteTarefas) && /createCache\(/.test(fonteTarefas),
+      'a tela do Meu Dia não relê a lista inteira a cada evento': !!handler && !/await load\(\)/.test(handler) && /aplicarMudancas\(\)/.test(handler) && /\/api\/tarefas\/minhas\?desde=/.test(tela),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMeuDiaLeituras = !falhas.length;
+    if (falhas.length) console.log('  falhou: ' + falhas.join(' | ') + ` (1ª=${lidoNaPrimeira}, seguintes=${lidoNasSeguintes}, incremental=${lidoIncremental})`);
+  } catch (e) { okMeuDiaLeituras = false; console.log('  erro: ' + e.message); }
+  if (!okMeuDiaLeituras) ruins += 1;
+  console.log(`${okMeuDiaLeituras ? '✓' : '✗'} Meu Dia: lista em cache com invalidação estrutural, leitura incremental (?desde=) e a tela sem reler a coleção a cada evento`);
+
+  // ------------------------------------------------------------------
   // ENCERRADO VAI PRA CONCLUIDOS (pedido do Master, 12/09/2026). Caso real:
   // ticket automatico "Login bloqueado" (#10191) aprovado - a conta destrava na
   // hora, mas o ticket ficava com execucao PENDENTE e a tarefa do Meu Dia em

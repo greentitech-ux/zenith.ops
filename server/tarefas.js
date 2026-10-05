@@ -4,6 +4,7 @@
 // pendência. A tarefa nunca substitui as regras próprias do ticket.
 const crypto = require('crypto');
 const db = require('./firestore');
+const { createCache } = require('./liveCache');
 const reuniaoGoogle = require('./reuniaoGoogle');
 const ticketCounter = require('./ticketCounter');
 const prioridades = require('./prioridades');
@@ -63,7 +64,48 @@ async function salaDoWorkspace(reuniao, { titulo, descricao, dia, pessoas }) {
   return { linkReuniao: sala.link, linkOrigem: 'google', eventoGoogleId: sala.eventoId };
 }
 
-const COLLECTION = db.collection('tarefas');
+// A coleção inteira é lida por listarMinhas() - e a tela do Meu Dia a relia
+// a cada evento SSE, por aba aberta (ver listaCache abaixo). Toda escrita
+// precisa invalidar esse cache (CLAUDE.md §3). Com 40+ pontos de escrita
+// neste arquivo, confiar em cada um lembrar de chamar invalidar() é confiar
+// no próximo esquecimento: a referência de documento devolvida por
+// COLLECTION.doc() já invalida sozinha em set/update/delete. O que NÃO passa
+// por aqui é o `ref` de um documento vindo de consulta - por isso este arquivo
+// não grava por ele: pega o id e volta por COLLECTION.doc(id). O
+// testeRotas.js reprova quem reintroduzir.
+const BASE = db.collection('tarefas');
+function refQueInvalida(ref) {
+  return new Proxy(ref, {
+    get(alvo, prop) {
+      const v = alvo[prop];
+      if (typeof v !== 'function') return v;
+      if (prop === 'set' || prop === 'update' || prop === 'delete') {
+        return async (...args) => {
+          try { return await v.apply(alvo, args); } finally { listaCache.invalidar(); }
+        };
+      }
+      return v.bind(alvo);
+    },
+  });
+}
+const COLLECTION = new Proxy(BASE, {
+  get(alvo, prop) {
+    if (prop === 'doc') return (id) => refQueInvalida(alvo.doc(id));
+    const v = alvo[prop];
+    return typeof v === 'function' ? v.bind(alvo) : v;
+  },
+});
+
+// A lista do Meu Dia. 60s é piso, não teto: qualquer escrita (acima)
+// invalida na hora. O que o TTL compra é o caso que explodiu a conta em
+// outubro/2026: um evento `tarefas-atualizada` chegava em N abas abertas e
+// cada uma relia a coleção INTEIRA (meses de concluídas, cada tarefa com até
+// 100 comentários). Com o cache, N abas custam 1 leitura; com a leitura
+// incremental (listarMinhasDesde), nem essa.
+const listaCache = createCache(async () => {
+  const snap = await BASE.orderBy('atualizadoEm', 'desc').get();
+  return snap.docs.map((d) => d.data());
+}, 60 * 1000);
 const CONTROLE = db.collection('tarefasControle');
 const STATUS_ABERTO = new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']);
 // pra dizer em que estado a tarefa está, em vez de só "não dá" (ver cancelar)
@@ -210,12 +252,12 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
     const tarefa = doc.data();
     if (alvoIds.has(tarefa.responsavelId)) continue;
     if (STATUS_ABERTO.has(tarefa.status)) {
-      await doc.ref.update({ status: 'CANCELADA', canceladaEm: agora, motivoCancelamento: 'Ticket redirecionado.' });
+      await COLLECTION.doc(doc.id).update({ status: 'CANCELADA', canceladaEm: agora, motivoCancelamento: 'Ticket redirecionado.', atualizadoEm: agora });
     } else if (tarefa.status === 'CONCLUIDA' && masterIds.has(tarefa.responsavelId)) {
       // cópia CONCLUÍDA de um Master que não é o da fila: é a triplicata
       // antiga (uma por Master). Some da lista sem apagar o histórico - o
       // ticket continua com a tarefa do Master da fila.
-      await doc.ref.update({ status: 'ARQUIVADA', arquivadaEm: agora, arquivadaPorNome: 'Sincronização (cópia repetida do ticket)', atualizadoEm: agora });
+      await COLLECTION.doc(doc.id).update({ status: 'ARQUIVADA', arquivadaEm: agora, arquivadaPorNome: 'Sincronização (cópia repetida do ticket)', atualizadoEm: agora });
     }
   }
 
@@ -271,14 +313,47 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
   return alteradas;
 }
 
+// Uma regra só de "esta tarefa aparece pra esta pessoa", usada pela lista
+// inteira e pela leitura incremental - se divergissem, a tela mostraria ao
+// vivo o que esconde na abertura (ou o contrário).
+function visivelPara(tarefa, acesso) {
+  return tarefa.status !== 'ARQUIVADA' && (tarefa.status !== 'CANCELADA' || acesso.isMaster) && podeParticipar(tarefa, acesso);
+}
+// podeGerir vai junto pra tela saber o que desabilitar (prazo, participantes,
+// remover) sem ter que reimplementar a regra no navegador
+function paraTela(tarefa, acesso) {
+  return { ...tarefa, podeGerir: podeGerir(tarefa, acesso) };
+}
+
 async function listarMinhas(acesso) {
-  const snap = await COLLECTION.orderBy('atualizadoEm', 'desc').get();
-  return snap.docs.map((d) => d.data())
-    .filter((tarefa) => tarefa.status !== 'ARQUIVADA' && (tarefa.status !== 'CANCELADA' || acesso.isMaster) && podeParticipar(tarefa, acesso))
-    // podeGerir vai junto pra tela saber o que desabilitar (prazo, participantes,
-    // remover) sem ter que reimplementar a regra no navegador
-    .map((tarefa) => ({ ...tarefa, podeGerir: podeGerir(tarefa, acesso) }))
+  return (await listaCache.cached())
+    .filter((tarefa) => visivelPara(tarefa, acesso))
+    .map((tarefa) => paraTela(tarefa, acesso))
     .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
+}
+
+// LEITURA INCREMENTAL (mesma receita do alertasCentral.listarDesde, que
+// resolveu o salto de agosto): a tela manda o `atualizadoEm` mais novo que já
+// tem e recebe SÓ o que mudou depois dele. Quase sempre é 1 documento - o que
+// o evento SSE anunciou - em vez da coleção inteira. Desigualdade e ordenação
+// no mesmo campo: índice de campo único, sem índice composto.
+//
+// Volta em duas listas: `alteradas`, no mesmo formato da lista inteira, e
+// `removidas`, os ids do que mudou mas a pessoa NÃO vê mais (arquivada,
+// cancelada sem ser Master, tirada dos participantes) - sem isso a tarefa
+// ficaria na tela até o próximo F5.
+async function listarMinhasDesde(acesso, desde) {
+  const marco = String(desde || '').trim();
+  if (!marco) return { alteradas: await listarMinhas(acesso), removidas: [] };
+  const snap = await BASE.where('atualizadoEm', '>', marco).orderBy('atualizadoEm', 'desc').get();
+  const alteradas = [];
+  const removidas = [];
+  for (const d of snap.docs) {
+    const tarefa = d.data();
+    if (visivelPara(tarefa, acesso)) alteradas.push(paraTela(tarefa, acesso));
+    else removidas.push(tarefa.id || d.id);
+  }
+  return { alteradas, removidas };
 }
 
 // CONSULTAS DO CLAUDE/COWORK (coworkApi: listar_tarefas, consultar_ticket).
@@ -666,7 +741,7 @@ async function arquivarQuebrasAutomaticas() {
     const tarefa = d.data();
     return tarefa.status !== 'ARQUIVADA' && tarefa.vinculo?.ticketTipo === 'quebra-caixa' && tarefa.origem === 'ticket';
   });
-  await Promise.all(alvos.map((doc) => doc.ref.update({ status: 'ARQUIVADA', arquivadaEm: agora, arquivadaPorNome: 'Sistema', motivoArquivamento: 'Quebra de caixa não gera tarefa automaticamente.', atualizadoEm: agora })));
+  await Promise.all(alvos.map((doc) => COLLECTION.doc(doc.id).update({ status: 'ARQUIVADA', arquivadaEm: agora, arquivadaPorNome: 'Sistema', motivoArquivamento: 'Quebra de caixa não gera tarefa automaticamente.', atualizadoEm: agora })));
   return alvos.length;
 }
 
@@ -1300,4 +1375,5 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
+  listarMinhasDesde, visivelPara,
   camposDaReuniao, listarAbertas, porNumero, LIMITE_ABERTAS_AGENTE, virarTarefa, decisoesEmTarefas, decisoesLimpas, DECISOES_MAX, adicionarSubtarefa, alternarSubtarefa, atualizarSubtarefa, removerSubtarefa, gentePermitida, progressoSubtarefas, SUBTAREFA_MAX, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, atualizarDescricao, salvarDefesa, preencherDefesaPeloAgente, comentarComoAgente, atualizarResumo, RESUMO_MAX, ehArquivoDeTranscricao, tipoDaTranscricao, textoDaTranscricao, criarLinkExterno, encerrarLinkExterno, reuniaoPorLinkExterno, reuniaoPublica, comentarPorLinkExterno, adicionarAnexo, removerAnexo, atualizarDatas, reagendar, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

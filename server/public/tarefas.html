@@ -1074,9 +1074,25 @@ Promise.all([contexto(),load()]).then(()=>{
 // junta as rajadas e - o que mais importa aqui - não redesenha por cima de
 // quem está digitando, porque repintar reconstrói o formulário da defesa
 // inteiro e apagaria o campo em edição.
+// AO VIVO, SEM RELER TUDO. A primeira versão chamava load() aqui - a coleção
+// inteira, por aba aberta, a cada um dos 38 eventos que o servidor emite. Foi
+// a maior linha da conta do Firestore em outubro/2026. Agora a tela pede só o
+// que mudou depois da tarefa mais nova que já tem (?desde=), aplica e
+// redesenha; a lista inteira só na abertura (load) ou se a incremental falhar.
+async function aplicarMudancas(){
+  const marco=L.reduce((m,x)=>String(x.atualizadoEm||'')>m?String(x.atualizadoEm):m,'');
+  if(!marco) return load();
+  const r=await fetch('/api/tarefas/minhas?desde='+encodeURIComponent(marco));
+  if(!r.ok) return load();
+  const d=await r.json();
+  const fora=new Set(d.removidas||[]);
+  if(fora.size) L=L.filter(x=>!fora.has(x.id));
+  for(const t of (d.alteradas||[])){const i=L.findIndex(x=>x.id===t.id);if(i<0)L.push(t);else L[i]=t}
+  montarTipos();render();
+}
 window.zenithAoVivo && zenithAoVivo('tarefas-atualizada', async (d) => {
   const aberta = O && O.id;
-  await load();
+  await aplicarMudancas();
   // a ficha aberta se redesenha com o que chegou; fechada, basta a lista
   if(aberta && L.find(x=>x.id===aberta)) openT(aberta);
 });
