@@ -998,8 +998,9 @@ app.get('/api/login-custom', async (req, res) => {
 });
 app.get('/api/login-custom/fundo', async (req, res) => {
   const config = await loginCustom.obter();
-  if (!config.fundoArquivo) return res.sendStatus(404);
-  storage.streamArquivo(config.fundoArquivo, null, res);
+  const arquivo = req.query.mobile === '1' ? config.fundoMobileArquivo : config.fundoArquivo;
+  if (!arquivo) return res.sendStatus(404);
+  storage.streamArquivo(arquivo, null, res);
 });
 // imagem de cada logo do rodapé - pública pelo mesmo motivo do fundo: quem
 // lê é a própria tela de login, antes de existir sessão
@@ -14718,13 +14719,15 @@ app.put('/api/login-custom', auth.requireMaster, async (req, res) => {
 app.post('/api/login-custom/fundo', auth.requireMaster, uploadLoginFundo.single('fundo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Anexe uma imagem.' });
+    const mobile = req.query.mobile === '1';
+    const campo = mobile ? 'fundoMobileArquivo' : 'fundoArquivo';
     const atual = await loginCustom.obter();
     const caminho = await storage.salvarArquivo('login-custom', req.file, 'login-custom');
-    const config = await loginCustom.salvarFundo(caminho, req.user.email);
+    const config = await loginCustom.salvarFundo(caminho, req.user.email, mobile);
     // apaga o fundo antigo DEPOIS de garantir que o novo já foi salvo - se o
     // upload novo falhasse antes, o antigo continuaria valendo em vez de
     // sumir e deixar a tela sem nada
-    if (atual.fundoArquivo && atual.fundoArquivo !== caminho) await storage.apagarArquivo(atual.fundoArquivo);
+    if (atual[campo] && atual[campo] !== caminho) await storage.apagarArquivo(atual[campo]);
     res.json(config);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -14732,9 +14735,11 @@ app.post('/api/login-custom/fundo', auth.requireMaster, uploadLoginFundo.single(
 });
 app.delete('/api/login-custom/fundo', auth.requireMaster, async (req, res) => {
   try {
+    const mobile = req.query.mobile === '1';
+    const campo = mobile ? 'fundoMobileArquivo' : 'fundoArquivo';
     const atual = await loginCustom.obter();
-    if (atual.fundoArquivo) await storage.apagarArquivo(atual.fundoArquivo);
-    const config = await loginCustom.removerFundo(req.user.email);
+    const config = await loginCustom.removerFundo(req.user.email, mobile);
+    if (atual[campo]) await storage.apagarArquivo(atual[campo]);
     res.json(config);
   } catch (err) {
     res.status(400).json({ error: err.message });

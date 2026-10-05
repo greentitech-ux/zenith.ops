@@ -6126,6 +6126,14 @@ setTimeout(async () => {
     const naoImagem = await postarMultipart('/api/login-custom/logos', { nome: 'PDF' },
       { nome: 'x.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4') }, 'logo', cab);
 
+    const fundoDesktop = await postarMultipart('/api/login-custom/fundo', {},
+      { nome: 'desktop.png', tipo: 'image/png', buffer: PNG }, 'fundo', cab);
+    const fundoMobile = await postarMultipart('/api/login-custom/fundo?mobile=1', {},
+      { nome: 'mobile.png', tipo: 'image/png', buffer: PNG }, 'fundo', cab);
+    const imagemMobile = await pedirBinario('/api/login-custom/fundo?mobile=1');
+    const semPermissao = await postarMultipart('/api/login-custom/fundo?mobile=1', {},
+      { nome: 'mobile.png', tipo: 'image/png', buffer: PNG }, 'fundo', {});
+
     const criada = await postarMultipart('/api/login-custom/logos', { nome: 'Grupo Bravo' },
       { nome: 'bravo.png', tipo: 'image/png', buffer: PNG }, 'logo', cab);
     const dCriada = criada.status === 200 ? JSON.parse(criada.corpo) : {};
@@ -6140,6 +6148,10 @@ setTimeout(async () => {
     const removida = await pedirJsonDelete(`/api/login-custom/logos/${encodeURIComponent(logo.id)}`, cab);
     const dRemovida = removida.status === 200 ? JSON.parse(removida.corpo) : {};
     const removerDeNovo = await pedirJsonDelete(`/api/login-custom/logos/${encodeURIComponent(logo.id)}`, cab);
+    const mobileRemovido = await pedirJsonDelete('/api/login-custom/fundo?mobile=1', cab);
+    const aposRemoverMobile = JSON.parse((await pedir('/api/login-custom')).corpo);
+    const desktopPreservado = await pedirBinario('/api/login-custom/fundo');
+    await pedirJsonDelete('/api/login-custom/fundo', cab);
 
     const conferencias = {
       'sem arquivo é recusado': semArquivo.status === 400,
@@ -6149,7 +6161,10 @@ setTimeout(async () => {
         publico.status === 200 && (dPublico.logos || []).some((l) => l.id === logo.id),
       'a rota pública NUNCA devolve o caminho do arquivo no Storage':
         !/login-custom\//.test(publico.corpo) && (dPublico.logos || []).every((l) => l.arquivo === undefined)
-        && dPublico.fundoArquivo === undefined,
+        && dPublico.fundoArquivo === undefined && dPublico.fundoMobileArquivo === undefined,
+      'Master salva os dois fundos sem misturar': fundoDesktop.status === 200 && fundoMobile.status === 200 && dPublico.temFundo && dPublico.temFundoMobile,
+      'mobile público serve a imagem, mas escrita exige autenticação': imagemMobile.status === 200 && semPermissao.status === 401,
+      'remover mobile preserva desktop': mobileRemovido.status === 200 && !aposRemoverMobile.temFundoMobile && aposRemoverMobile.temFundo && desktopPreservado.status === 200,
       'a imagem sai pela rota pública': imagem.status === 200 && imagem.buffer.length > 0,
       'id inexistente devolve 404': inexistente.status === 404,
       'Master remove e a lista fica vazia de novo':

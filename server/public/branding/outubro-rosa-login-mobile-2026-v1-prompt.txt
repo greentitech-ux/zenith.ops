@@ -1,0 +1,4 @@
+Modo: ferramenta image_gen integrada (sem CLI).
+Uso: fundo vertical mobile do login; centro livre e detalhes nas bordas.
+Prompt final:
+Use case: ads-marketing. Asset type: portrait 9:16 mobile background for NoPulso login, Outubro Rosa awareness tribute. Warm ivory and pale blush pink, premium pink satin ribbon near bottom left edge, delicate flowing satin pink shapes along bottom and outer edges. Very large quiet light center and top area for existing dark login card and welcome bubble overlay, keep decoration mostly in outer 8% edges and bottom 12%. Respectful hopeful polished studio lighting, realistic silk folds. No text, no logos, no interface, no people, no watermark. Portrait mobile wallpaper, not a mockup.

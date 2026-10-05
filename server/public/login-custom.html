@@ -122,7 +122,7 @@
   </div>
 
   <div class="panel">
-    <h2>Fundo da tela de login</h2>
+    <h2>Imagem para computadores</h2>
     <div class="sub">A frase do rodapé, o card de login e o robô continuam do mesmo jeito - isso aqui troca só o fundo por trás de tudo. Sem imagem enviada, fica o fundo padrão escuro. Com imagem, a arte aparece limpa e o rodapé desce um pouco, dentro de uma caixa preta arredondada, pra continuar legível sem escurecer a campanha.</div>
     <div class="fundo-preview" id="fundo-preview"><span class="vazio">Carregando...</span></div>
     <div class="fundo-acoes">
@@ -130,6 +130,18 @@
       <button type="button" class="btn-ghost bad hidden" id="btn-remover-fundo" onclick="removerFundo()">🗑️ Remover fundo</button>
     </div>
     <div class="msg hidden" id="msg-fundo"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Imagem para celular (mobile)</h2>
+    <div class="sub">Salve uma arte vertical, de preferência 9:16, com o centro livre para o login. Usada em telas até 640px. Sem imagem mobile, o celular usa a imagem para computadores.</div>
+    <div class="fundo-preview" id="fundo-preview-mobile" style="height:240px;"><span class="vazio">Carregando...</span></div>
+    <div class="fundo-acoes">
+      <label class="btn-ghost">📤 Enviar e salvar imagem mobile<input type="file" id="f-fundo-mobile" accept="image/jpeg,image/png,image/webp" hidden onchange="enviarFundo(true)"></label>
+      <button type="button" class="btn-ghost bad hidden" id="btn-remover-fundo-mobile" onclick="removerFundo(true)">🗑️ Remover imagem mobile</button>
+      <a class="btn-ghost" href="/branding/outubro-rosa-login-mobile-2026-v1.png" download>⬇️ Baixar arte Outubro Rosa mobile</a>
+    </div>
+    <div class="msg hidden" id="msg-fundo-mobile"></div>
   </div>
 
   <div class="panel">
@@ -192,11 +204,12 @@ function atualizarPreview(){
   document.getElementById('preview-texto').textContent = texto || '(sem texto)';
 }
 
-function renderFundoPreview(temFundo){
-  const el = document.getElementById('fundo-preview');
-  const btnRemover = document.getElementById('btn-remover-fundo');
+function renderFundoPreview(temFundo, mobile = false){
+  const sufixo = mobile ? '-mobile' : '';
+  const el = document.getElementById('fundo-preview' + sufixo);
+  const btnRemover = document.getElementById('btn-remover-fundo' + sufixo);
   if(temFundo){
-    el.innerHTML = `<img src="/api/login-custom/fundo?_=${Date.now()}" alt="Fundo atual">`;
+    el.innerHTML = `<img src="/api/login-custom/fundo?mobile=${mobile ? '1' : '0'}&_=${Date.now()}" alt="Fundo atual" style="${mobile ? 'object-fit:contain;' : ''}">`;
     btnRemover.classList.remove('hidden');
   } else {
     el.innerHTML = '<span class="vazio">Nenhuma imagem enviada - usando o fundo padrão.</span>';
@@ -268,6 +281,7 @@ async function carregarConfig(){
   document.getElementById('f-texto').value = CONFIG_ATUAL.bubbleTexto || '';
   atualizarPreview();
   renderFundoPreview(!!CONFIG_ATUAL.temFundo);
+  renderFundoPreview(!!CONFIG_ATUAL.temFundoMobile, true);
 }
 
 async function salvar(){
@@ -294,23 +308,24 @@ async function salvar(){
   }
 }
 
-async function enviarFundo(){
-  const input = document.getElementById('f-fundo');
+async function enviarFundo(mobile = false){
+  const sufixo = mobile ? '-mobile' : '';
+  const input = document.getElementById('f-fundo' + sufixo);
   const arquivo = input.files[0];
   if(!arquivo) return;
-  const msg = document.getElementById('msg-fundo');
+  const msg = document.getElementById('msg-fundo' + sufixo);
   msg.classList.add('hidden');
   try{
     const fd = new FormData();
     fd.append('fundo', arquivo);
-    const resp = await fetch('/api/login-custom/fundo', { method:'POST', body: fd });
+    const resp = await fetch('/api/login-custom/fundo' + (mobile ? '?mobile=1' : ''), { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar a imagem.');
     // enviado: zera o input E o rascunho do tema.js, que senao devolvia o
     // File ao input no proximo redesenho e ele ia junto outra vez
     window.zenithRascunhos?.limparAnexoEnviado(input);
     CONFIG_ATUAL = data;
-    renderFundoPreview(true);
+    renderFundoPreview(true, mobile);
     msg.textContent = '✅ Fundo atualizado!'; msg.className = 'msg ok'; msg.classList.remove('hidden');
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
@@ -319,16 +334,16 @@ async function enviarFundo(){
   }
 }
 
-async function removerFundo(){
+async function removerFundo(mobile = false){
   if(!confirm('Remover a imagem de fundo e voltar pro padrão?')) return;
-  const msg = document.getElementById('msg-fundo');
+  const msg = document.getElementById('msg-fundo' + (mobile ? '-mobile' : ''));
   msg.classList.add('hidden');
   try{
-    const resp = await fetch('/api/login-custom/fundo', { method:'DELETE' });
+    const resp = await fetch('/api/login-custom/fundo' + (mobile ? '?mobile=1' : ''), { method:'DELETE' });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao remover.');
     CONFIG_ATUAL = data;
-    renderFundoPreview(false);
+    renderFundoPreview(false, mobile);
     msg.textContent = '✅ Fundo removido, voltou pro padrão.'; msg.className = 'msg ok'; msg.classList.remove('hidden');
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');

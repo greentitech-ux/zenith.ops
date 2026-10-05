@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const db = require('./firestore');
 const DOC = db.collection('loginCustomConfig').doc('config');
 
-const PADRAO = { ativo: false, bubbleTitulo: '', bubbleTexto: '', fundoArquivo: null, logos: [] };
+const PADRAO = { ativo: false, bubbleTitulo: '', bubbleTexto: '', fundoArquivo: null, fundoMobileArquivo: null, logos: [] };
 
 // Logos das empresas que fazem parte do NoPulso, no rodapé da tela de login.
 // Antes era UMA imagem fixa no código (/grupo-bravo.png): toda vez que uma
@@ -32,10 +32,11 @@ async function obter() {
 // a tela de login publica so precisa saber SE tem fundo customizado, nunca o
 // caminho em si
 function semDetalheInterno(config) {
-  const { fundoArquivo, logos, ...resto } = config;
+  const { fundoArquivo, fundoMobileArquivo, logos, ...resto } = config;
   return {
     ...resto,
     temFundo: !!fundoArquivo,
+    temFundoMobile: !!fundoMobileArquivo,
     // a tela pública recebe só id + nome; a imagem sai por
     // /api/login-custom/logo/:id, nunca o caminho do Storage
     logos: (logos || []).map((l) => ({ id: l.id, nome: l.nome })),
@@ -54,13 +55,13 @@ async function salvar({ ativo, bubbleTitulo, bubbleTexto, atualizadoPorEmail }) 
   return obter();
 }
 
-async function salvarFundo(caminho, atualizadoPorEmail) {
-  await DOC.set({ fundoArquivo: caminho, atualizadoEm: new Date().toISOString(), atualizadoPorEmail: atualizadoPorEmail || null }, { merge: true });
+async function salvarFundo(caminho, atualizadoPorEmail, mobile = false) {
+  await DOC.set({ [mobile ? 'fundoMobileArquivo' : 'fundoArquivo']: caminho, atualizadoEm: new Date().toISOString(), atualizadoPorEmail: atualizadoPorEmail || null }, { merge: true });
   return obter();
 }
 
-async function removerFundo(atualizadoPorEmail) {
-  await DOC.set({ fundoArquivo: null, atualizadoEm: new Date().toISOString(), atualizadoPorEmail: atualizadoPorEmail || null }, { merge: true });
+async function removerFundo(atualizadoPorEmail, mobile = false) {
+  await DOC.set({ [mobile ? 'fundoMobileArquivo' : 'fundoArquivo']: null, atualizadoEm: new Date().toISOString(), atualizadoPorEmail: atualizadoPorEmail || null }, { merge: true });
   return obter();
 }
 

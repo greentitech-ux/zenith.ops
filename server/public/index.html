@@ -69,6 +69,10 @@
      precisa de contraste ganha sombra LOCAL abaixo (login-footer /
      login-bubble), em vez de apagar a arte toda. */
   #auth-screen.auth-screen.tem-fundo::before{ background: none; }
+  #auth-screen.auth-screen.tem-fundo{background-image:var(--login-fundo-desktop,none);}
+  @media(max-width:640px){
+    #auth-screen.auth-screen.tem-fundo{background-image:var(--login-fundo-mobile,var(--login-fundo-desktop,none));}
+  }
   /* Com campanha, o rodapé desce um pouco e ganha uma caixa preta
      arredondada só pra ele. É o contrário da cortina que existia antes:
      em vez de escurecer a arte inteira pra o texto poder ser lido, escurece
@@ -670,9 +674,11 @@ async function carregarLoginCustom(){
       if(config.bubbleTitulo) document.getElementById('login-bubble-titulo').textContent = config.bubbleTitulo;
       if(config.bubbleTexto) document.getElementById('login-bubble-texto').textContent = config.bubbleTexto;
     }
-    if(config && config.temFundo){
+    if(config && (config.temFundo || config.temFundoMobile)){
       const tela = document.getElementById('auth-screen');
-      tela.style.backgroundImage = `url(/api/login-custom/fundo)`;
+      const versao = encodeURIComponent(config.atualizadoEm || '');
+      if(config.temFundo) tela.style.setProperty('--login-fundo-desktop', `url(/api/login-custom/fundo?v=${versao})`);
+      if(config.temFundoMobile) tela.style.setProperty('--login-fundo-mobile', `url(/api/login-custom/fundo?mobile=1&v=${versao})`);
       tela.classList.add('tem-fundo');
     }
     // logos das empresas do grupo. Só troca o que está na tela quando há
