@@ -17,6 +17,8 @@ function preparar(atual, indice, dados, destino = atual) {
     const nome = String(dados.criadoPorNome).trim().slice(0, 120);
     if (!nome) throw new Error('Informe quem lançou.');
     novo.criadoPorNome = nome;
+    if (dados.criadoPorId !== undefined) novo.criadoPorId = dados.criadoPorId;
+    if (dados.criadoPorEmail !== undefined) novo.criadoPorEmail = dados.criadoPorEmail;
   }
   const em = new Date().toISOString();
   const movida = atual.id !== destino.id;

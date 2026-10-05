@@ -29975,7 +29975,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e){ruins++;console.log('✗ Estorno do Beniboy: '+e.message);}
   try {await require('./testeAcoesEntregas').testarHttp({DOCS,enviarJson,postarJson});}
   catch(e){ruins++;console.log('✗ Permissões e ações de entregas: '+e.message);}
-  try {await require('./testeSaidaAvulsaPermissoes').testarHttp({DOCS,enviarJson,postarJson});}
+  try {await require('./testeSaidaAvulsaPermissoes').testarHttp({DOCS,enviarJson,postarJson,pedir});}
   catch(e){ruins++;console.log('✗ Permissões das saídas avulsas: '+e.message);}
   try {
     const pedirNocReal = (rota, corpo, headers = {}, method = 'POST') => new Promise((resolve, reject) => {

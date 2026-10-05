@@ -87,7 +87,7 @@ async function reclassificar(chave, { origem, porId, porEmail }) {
 // reescrita por nos (CLAUDE.md §1). Se a linha da planilha mudar depois, a
 // correcao continua valendo por cima dela - e' o que o Master decidiu que
 // vale.
-async function corrigirItem(chave, { descricao, valor, porId, porEmail, unidade, unidadeNome, grupo, data, criadoPorNome, excluir }) {
+async function corrigirItem(chave, { descricao, valor, porId, porEmail, unidade, unidadeNome, grupo, data, criadoPorNome, criadoPorId, criadoPorEmail, excluir }) {
   if (!chave || typeof chave !== 'string') throw new Error('Chave inválida.');
   const v = Number(valor);
   if (!Number.isFinite(v) || v < 0) throw new Error('Informe um valor válido para a saída.');
@@ -103,6 +103,8 @@ async function corrigirItem(chave, { descricao, valor, porId, porEmail, unidade,
     if (criadoPorNome !== undefined) {
       correcao.criadoPorNome = String(criadoPorNome).trim().slice(0, 120);
       if (!correcao.criadoPorNome) throw new Error('Informe quem lançou.');
+      if (criadoPorId !== undefined) correcao.criadoPorId = criadoPorId;
+      if (criadoPorEmail !== undefined) correcao.criadoPorEmail = criadoPorEmail;
     }
     if (excluir === true) { correcao.excluida = true; correcao.valor = 0; }
     const registro = {

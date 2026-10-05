@@ -22,15 +22,16 @@ async function testar(sabotagem = false) {
   const handlers={};let criado;
   const auth={requireMasterOrAdmin:()=>{},podeVerUnidade:(req,u)=>req.isMaster||req.permitidas.includes(u)};
   const routeCtx={app:{patch:(url,...h)=>handlers.patch=h.at(-1),post:(url,...h)=>handlers.post=h.at(-1)},auth,
-    require:()=>regra,fechamentosData:[],broadcast(){},fechamentosLive:{getOne:contexto.getOne,editarSaidaPainel:contexto.editarSaidaPainel,
+    require:n=>n==='./autoresSaida'?{resolver:async(id,u)=>{assert.equal(id,'andre-id');assert.ok(['A','B'].includes(u));return {criadoPorId:id,criadoPorNome:'André',criadoPorEmail:'andre@teste'};}}:regra,fechamentosData:[],broadcast(){},fechamentosLive:{getOne:contexto.getOne,editarSaidaPainel:contexto.editarSaidaPainel,
     adicionarSaidaDireto:async dados=>{criado=dados;return dados;}},saidasPainel:{},construirUnidadesMapa:async()=>({A:'Loja A',B:'Loja B'}),redes:{redeDaUnidade:()=> 'BRAVO'}};
   vm.createContext(routeCtx);
   let trecho=fonte.slice(fonte.indexOf("app.patch('/api/fechamentos/:id/saidas/:indice'"),fonte.indexOf('// mesmas colunas do painel'));
-  if(sabotagem) trecho=trecho.replace("req.body.criadoPorNome !== undefined && !req.isMaster",'false');
+  if(sabotagem) trecho=trecho.replace("['criadoPorNome', 'criadoPorId', 'criadoPorEmail'].some(k => req.body[k] !== undefined) && !req.isMaster",'false');
   vm.runInContext(trecho,routeCtx);
   const req=(body,master=false,permitidas=['A','B'])=>({body,isMaster:master,permitidas,user:{id:'andre-id',email:'andre@teste',nome:'André'},params:{id:'A__2026-10-04',indice:'0'}});
   const chamar=async (handler,r)=>{const res={codigo:200,status(n){this.codigo=n;return this;},json(d){this.dados=d;return this;}};await handler(r,res);return res;};
-  assert.equal((await chamar(handlers.patch,req({criadoPorNome:'Outro'}))).codigo,403,'Admin não pode falsificar autoria');
+  assert.equal((await chamar(handlers.patch,req({criadoPorId:'andre-id'}))).codigo,403,'Admin não pode falsificar autoria');
+  assert.equal((await chamar(handlers.patch,req({criadoPorNome:'Livre'},true))).codigo,400,'nome livre recusado até para Master');
   assert.equal((await chamar(handlers.patch,req({unidade:'C'}))).codigo,403,'destino não permitido');
   assert.equal((await chamar(handlers.patch,req({valor:40},false,['B']))).codigo,403,'origem não permitida');
   assert.equal((await chamar(handlers.patch,req({data:'2026-02-30'}))).codigo,400);
@@ -39,7 +40,7 @@ async function testar(sabotagem = false) {
   assert.equal((await chamar(handlers.patch,req({valor:35}))).codigo,200);
   assert.equal(docs.get('A__2026-10-04').totalSaida,55);
   assert.equal(docs.get('A__2026-10-04').detalhesSaidas[0].criadoPorNome,undefined,'edição de valor não troca autor legado');
-  assert.equal((await chamar(handlers.patch,req({criadoPorNome:'André'},true))).codigo,200);
+  assert.equal((await chamar(handlers.patch,req({criadoPorId:'andre-id'},true))).codigo,200);
   assert.equal(docs.get('A__2026-10-04').detalhesSaidas[0].criadoPorNome,'André');
   assert.equal((await chamar(handlers.patch,req({unidade:'B',data:'2026-10-05',valor:32}))).codigo,200);
   assert.equal(docs.get('A__2026-10-04').totalSaida,20);
@@ -65,7 +66,7 @@ async function testar(sabotagem = false) {
   const html=fs.readFileSync(__dirname+'/public/saidas.html','utf8');
   for(const m of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) new vm.Script(m[1]);
 }
-async function testarHttp({DOCS,enviarJson,postarJson}) {
+async function testarHttp({DOCS,enviarJson,postarJson,pedir}) {
   const headers={},hash=require('bcryptjs').hashSync('SenhaTeste!2026',4);
   for(const perfil of ['loja','admin','master']) {
     const email='saida-permissao-'+perfil+'@teste.local';
@@ -74,6 +75,14 @@ async function testarHttp({DOCS,enviarJson,postarJson}) {
     assert.equal(login.status,200,login.corpo);headers[perfil]={Authorization:'Bearer '+JSON.parse(login.corpo).token};
   }
   const seed=(id,u,data)=>DOCS.set('fechamentosLive/'+id,{id,unidade:u,unidadeNome:u,grupo:'BRAVO',data,gerente:'Leisly',totalSaida:30,detalhesSaidas:[{descricao:'uber',valor:30}],historico:[]});
+  require('./users').invalidar();
+  let autores=await pedir('/api/saidas-painel/autores?unidade=Saida%20A',headers.master);
+  assert.equal(autores.status,200,autores.corpo);
+  const elegiveis=JSON.parse(autores.corpo);
+  assert.ok(elegiveis.some(u=>u.id==='saida-permissao-admin'));
+  assert.ok(elegiveis.some(u=>u.id==='saida-permissao-loja'));
+  assert.ok(!elegiveis.some(u=>u.id==='saida-permissao-master'));
+  assert.equal((await pedir('/api/saidas-painel/autores?unidade=Saida%20A',headers.admin)).status,403);
   seed('Saida_A__2026-10-04','Saida A','2026-10-04');seed('Saida_B__2026-10-05','Saida B','2026-10-05');
   require('./fechamentosLive').invalidarCache();
   const rota='/api/fechamentos/Saida_A__2026-10-04/saidas/0';
@@ -82,7 +91,9 @@ async function testarHttp({DOCS,enviarJson,postarJson}) {
   assert.equal((await enviarJson('PATCH',rota,{unidade:'Outra'},headers.admin)).status,403);
   let r=await enviarJson('PATCH',rota,{valor:35},headers.admin);assert.equal(r.status,200,r.corpo);
   assert.equal(DOCS.get('fechamentosLive/Saida_A__2026-10-04').gerente,'Leisly');
-  r=await enviarJson('PATCH',rota,{criadoPorNome:'André'},headers.master);assert.equal(r.status,200,r.corpo);
+  r=await enviarJson('PATCH',rota,{criadoPorNome:'André'},headers.master);assert.equal(r.status,400,r.corpo);
+  r=await enviarJson('PATCH',rota,{criadoPorId:'id-inexistente'},headers.master);assert.equal(r.status,400,r.corpo);
+  r=await enviarJson('PATCH',rota,{criadoPorId:'saida-permissao-admin'},headers.master);assert.equal(r.status,200,r.corpo);
   r=await enviarJson('PATCH',rota,{unidade:'Saida B',data:'2026-10-05'},headers.admin);assert.equal(r.status,200,r.corpo);
   assert.equal(DOCS.get('fechamentosLive/Saida_A__2026-10-04').totalSaida,0);
   assert.equal(DOCS.get('fechamentosLive/Saida_B__2026-10-05').totalSaida,65);
@@ -90,6 +101,7 @@ async function testarHttp({DOCS,enviarJson,postarJson}) {
   assert.equal(DOCS.get('fechamentosLive/Saida_B__2026-10-05').totalSaida,30);
   r=await postarJson('/api/fechamentos/saidas',{unidade:'Saida A',data:'2026-10-04',descricao:'taxi',valor:12,criadoPorNome:'Falso'},headers.admin);assert.equal(r.status,200,r.corpo);
   assert.equal(DOCS.get('fechamentosLive/Saida_A__2026-10-04').detalhesSaidas.at(-1).criadoPorNome,'André');
+  await require('./testeAutoresSaida').testar();
   await testar();await assert.rejects(()=>testar(true),/Admin não pode falsificar autoria/);
   console.log('✓ Saídas avulsas HTTP autenticado: Master/Admin, autoria exclusiva do Master, usuário real, origem/destino, transação, exclusão com histórico e sabotagem.');
 }

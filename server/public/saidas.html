@@ -243,7 +243,7 @@
     <div id="ed-saida-dados" class="hidden">
       <label>Unidade</label><select id="ed-saida-unidade"></select>
       <label>Data</label><input type="date" id="ed-saida-data">
-      <div id="ed-saida-autor-bloco" class="hidden"><label>Quem lançou (somente Master)</label><input id="ed-saida-autor" maxlength="120"></div>
+      <div id="ed-saida-autor-bloco" class="hidden"><label for="ed-saida-autor">Quem lançou (somente Master)</label><select id="ed-saida-autor"><option value="">Selecione a unidade</option></select><small id="ed-saida-autor-atual"></small></div>
     </div>
     <div id="ed-saida-descricao-bloco">
       <label>Descrição</label>
@@ -724,6 +724,34 @@ function renderTudo(){
 // aprova na Central - decisão do Master: "as demais tags pedem correção da
 // mesma forma do fechamento".
 let ED_SAIDA = null;
+let AUTORES_SAIDA_SEQ = 0;
+async function carregarAutoresSaida(){
+  if(!IS_MASTER || !ED_SAIDA) return;
+  const seq = ++AUTORES_SAIDA_SEQ, item = ED_SAIDA;
+  const unidade = document.getElementById('ed-saida-unidade').value;
+  const campo = document.getElementById('ed-saida-autor');
+  campo.disabled = true;
+  campo.innerHTML = '<option value="">Carregando usuários da unidade…</option>';
+  try {
+    const res = await fetch('/api/saidas-painel/autores?unidade='+encodeURIComponent(unidade));
+    const lista = await res.json();
+    if(!res.ok) throw new Error(lista.error || 'Não foi possível carregar os usuários.');
+    if(seq !== AUTORES_SAIDA_SEQ || item !== ED_SAIDA) return;
+    // Autor legado não vira uma opção nova de outra unidade. Sem seleção,
+    // preserva o registro existente ao corrigir apenas valor/descrição.
+    const mesmoLocal = unidade === item.unidade;
+    campo.innerHTML = `<option value="">${mesmoLocal ? 'Manter autor registrado' : 'Selecione quem lançou'}</option>`
+      + lista.map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.nome)}${u.username ? ' (@'+escapeHtml(u.username)+')' : ''}${u.admin ? ' · Admin' : ''}</option>`).join('');
+    if(mesmoLocal && item.criadoPorId && lista.some(u=>u.id === item.criadoPorId)) campo.value = item.criadoPorId;
+    campo.disabled = false;
+  } catch(err) {
+    if(seq !== AUTORES_SAIDA_SEQ || item !== ED_SAIDA) return;
+    campo.innerHTML = '<option value="">Não foi possível carregar os usuários</option>';
+    const msg = document.getElementById('ed-saida-msg');
+    msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden');
+  }
+}
+document.getElementById('ed-saida-unidade').addEventListener('change',carregarAutoresSaida);
 function abrirEditarSaida(it){
   ED_TIPO = 'saida';
   ED_SAIDA = it;
@@ -738,7 +766,7 @@ function abrirEditarSaida(it){
   document.getElementById('ed-saida-unidade').innerHTML = [...unidades].filter(([u])=>u).map(([u,n])=>`<option value="${escapeHtml(u)}">${escapeHtml(n)}</option>`).join('');
   document.getElementById('ed-saida-unidade').value = it.unidade;
   document.getElementById('ed-saida-data').value = it.data;
-  document.getElementById('ed-saida-autor').value = it.criadoPorNome || it.criadoPorEmail || '';
+  document.getElementById('ed-saida-autor-atual').textContent = 'Autor registrado: '+(it.criadoPorNome || it.criadoPorEmail || 'não informado');
   document.getElementById('ed-saida-titulo').textContent = PODE_CONFERIR ? '✏️ Editar saída' : '✏️ Pedir correção da saída';
   document.getElementById('ed-saida-sub').textContent = `${it.unidadeNome||it.unidade||''} · ${fmtData(it.data)}`;
   document.getElementById('ed-saida-descricao').value = it.descricao || '';
@@ -750,6 +778,7 @@ function abrirEditarSaida(it){
   document.getElementById('ed-saida-salvar').textContent = PODE_CONFERIR ? 'Salvar' : 'Pedir correção';
   document.getElementById('ed-saida-msg').classList.add('hidden');
   document.getElementById('ed-saida-overlay').classList.remove('hidden');
+  carregarAutoresSaida();
 }
 function fecharEditarSaida(){
   document.getElementById('ed-saida-overlay').classList.add('hidden');
@@ -873,6 +902,7 @@ async function salvarEditarSaida(){
   const msg = document.getElementById('ed-saida-msg');
   const btn = document.getElementById('ed-saida-salvar');
   msg.classList.add('hidden');
+  if(IS_MASTER && document.getElementById('ed-saida-autor').disabled){ msg.textContent='Carregue os usuários da unidade antes de salvar. Reabra a edição para tentar novamente.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
   const descricao = document.getElementById('ed-saida-descricao').value.trim();
   const valor = Number(document.getElementById('ed-saida-valor').value);
   const motivo = document.getElementById('ed-saida-motivo').value.trim();
@@ -891,7 +921,7 @@ async function salvarEditarSaida(){
         method:'PATCH', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ descricao, valor, motivo,
           unidade:document.getElementById('ed-saida-unidade').value, data:document.getElementById('ed-saida-data').value,
-          ...(IS_MASTER && document.getElementById('ed-saida-autor').value.trim() !== (ED_SAIDA.criadoPorNome || ED_SAIDA.criadoPorEmail || '') ? { criadoPorNome:document.getElementById('ed-saida-autor').value.trim() } : {}) }),
+          ...(IS_MASTER && !document.getElementById('ed-saida-autor').disabled && document.getElementById('ed-saida-autor').value ? { criadoPorId:document.getElementById('ed-saida-autor').value } : {}) }),
       });
     } else {
       res = await fetch(`/api/fechamentos/${encodeURIComponent(fechamentoId)}/solicitar-edicao`, {

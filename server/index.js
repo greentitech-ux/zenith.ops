@@ -12669,9 +12669,16 @@ app.post('/api/saidas-painel/reclassificar-sangrias', auth.requireMaster, async 
 // Master: "ADMIN e MASTER edita e as demais tags pedem correcao"). Quem nao
 // e Master/Admin usa a MESMA fila de correcao do fechamento, com
 // tipoCorrecao 'saida-item' (ver /api/fechamentos/:id/solicitar-edicao).
+app.get('/api/saidas-painel/autores', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await require('./autoresSaida').listar(req.query.unidade));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.patch('/api/fechamentos/:id/saidas/:indice', auth.requireMasterOrAdmin, async (req, res) => {
   try {
-    if (req.body.criadoPorNome !== undefined && !req.isMaster) return res.status(403).json({ error: 'Somente o Master pode alterar quem lançou.' });
+    if (['criadoPorNome', 'criadoPorId', 'criadoPorEmail'].some(k => req.body[k] !== undefined) && !req.isMaster) return res.status(403).json({ error: 'Somente o Master pode alterar quem lançou.' });
+    if (req.body.criadoPorNome !== undefined || req.body.criadoPorEmail !== undefined) return res.status(400).json({ error: 'Selecione quem lançou pela lista de usuários da unidade.' });
     if (req.body.data !== undefined) require('./saidaAvulsaEdicao').validarData(req.body.data);
     if (req.body.unidade !== undefined && (!req.body.unidade || !auth.podeVerUnidade(req, req.body.unidade))) return res.status(403).json({ error: 'Você não tem acesso à unidade de destino.' });
     const atual = await fechamentosLive.getOne(req.params.id);
@@ -12691,12 +12698,13 @@ app.patch('/api/fechamentos/:id/saidas/:indice', auth.requireMasterOrAdmin, asyn
       if (!linha) return res.status(400).json({ error: 'Saída não encontrada.' });
       if (!auth.podeVerUnidade(req, linha.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
       const destino = req.body.unidade || linha.unidade;
+      const autor = req.body.criadoPorId === undefined ? {} : await require('./autoresSaida').resolver(req.body.criadoPorId, destino);
       const mapa = await construirUnidadesMapa();
       const chave = `${req.params.id}::${req.params.indice}`;
       const corrigido = await saidasPainel.corrigirItemPlanilha(chave, {
         descricao: req.body.descricao ?? linha.descricao, valor: req.body.valor ?? linha.valor,
         unidade: destino, unidadeNome: mapa[destino] || destino, grupo: redes.redeDaUnidade(destino),
-        data: req.body.data || linha.data, criadoPorNome: req.body.criadoPorNome, excluir: req.body.excluir === true,
+        data: req.body.data || linha.data, ...autor, excluir: req.body.excluir === true,
         porId: req.user.id, porEmail: req.user.email,
       }, fechamentosData);
       broadcast('saida-verificada', { chave }, 'lancamento');
@@ -12706,12 +12714,13 @@ app.patch('/api/fechamentos/:id/saidas/:indice', auth.requireMasterOrAdmin, asyn
     if (!auth.podeVerUnidade(req, atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    const autor = req.body.criadoPorId === undefined ? {} : await require('./autoresSaida').resolver(req.body.criadoPorId, req.body.unidade || atual.unidade);
     const registro = await fechamentosLive.editarSaidaPainel({
       fechamentoId: req.params.id,
       indice: req.params.indice,
       descricao: req.body.descricao,
       valor: req.body.valor,
-      unidade: req.body.unidade, data: req.body.data, criadoPorNome: req.body.criadoPorNome, excluir: req.body.excluir === true,
+      unidade: req.body.unidade, data: req.body.data, ...autor, excluir: req.body.excluir === true,
       motivo: req.body.motivo,
       editadoPorEmail: req.user.email,
     });
