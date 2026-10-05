@@ -63,7 +63,8 @@
 // 141: validação local silenciosa do login NOC, sem atalho extra.
 // 142: campanha como fundo do modelo, sem remover logos, identificação e suporte.
 // 143: amplia proporcionalmente a logo do grupo no modelo básico.
-const VERSAO_VIGIA = 143;
+// 144: envia estado ARP; cache Stale/Permanent não confirma troca de IP.
+const VERSAO_VIGIA = 144;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -1055,7 +1056,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '      $priv = ($o[0] -eq "10") -or ($o[0] -eq "192" -and $o[1] -eq "168") -or ($o[0] -eq "172" -and [int]$o[1] -ge 16 -and [int]$o[1] -le 31)',
     '      if (-not $priv) { continue }',
     '      if ($mac -eq "FF-FF-FF-FF-FF-FF" -or $mac -eq "00-00-00-00-00-00" -or $mac -like "01-00-5E-*") { continue }',
-    '      $lista += @{ ip = $ip; mac = $mac; nome = $null }',
+    '      $lista += @{ ip = $ip; mac = $mac; nome = $null; estadoVizinho = "$($n.State)" }',
     '    }',
     '  } catch { Escrever-Log "Falha na varredura da rede: $($_.Exception.Message)" }',
     '  # NOME do aparelho. Duas tentativas, da mais barata pra mais cara:',

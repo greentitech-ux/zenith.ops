@@ -331,15 +331,23 @@ function normalizarMac(v) {
 function sanitizarDispositivos(entrada) {
   const lista = comoLista(entrada);
   if (!lista.length) return null;
-  const vistos = new Set();
+  const vistos = new Map();
   const out = [];
   for (const d of lista) {
     const mac = normalizarMac(d && d.mac);
     const ip = d && IPV4_RE.test(String(d.ip || '').trim()) ? String(d.ip).trim() : null;
-    if (!mac || !ip || vistos.has(mac)) continue;
-    vistos.add(mac);
-    out.push({ mac, ip, nome: texto(d && d.nome, 40) });
-    if (out.length >= DISPOSITIVOS_MAX) break;
+    if (!mac || !ip) continue;
+    const estadoVizinho = ['Reachable', 'Stale', 'Permanent'].includes(d.estadoVizinho) ? d.estadoVizinho : null;
+    const novo = { mac, ip, nome: texto(d && d.nome, 40), estadoVizinho, ipConflitante: false };
+    const anterior = vistos.get(mac);
+    if (anterior) {
+      if (anterior.estadoVizinho === 'Reachable' && estadoVizinho === 'Reachable' && anterior.ip !== ip) anterior.ipConflitante = true;
+      if (anterior.estadoVizinho !== 'Reachable' && estadoVizinho === 'Reachable') Object.assign(anterior, novo);
+      continue;
+    }
+    if (out.length >= DISPOSITIVOS_MAX) continue;
+    vistos.set(mac, novo);
+    out.push(novo);
   }
   return out.length ? out : null;
 }
@@ -374,20 +382,26 @@ function mesclarDispositivos(anteriores, atuais, agora) {
   const mudaramIp = [];
   atuais.forEach((d) => {
     const antes = porMac.get(d.mac);
+    const leituraConfirmavel = d.estadoVizinho === 'Reachable' && !d.ipConflitante;
     if (!antes) {
-      const registro = { mac: d.mac, ip: d.ip, nome: d.nome || null, desde: agora, visto: agora, ativo: true };
+      const registro = { mac: d.mac, ip: d.ip, ipAlcancavel: leituraConfirmavel ? d.ip : null, nome: d.nome || null, estadoVizinho: d.estadoVizinho || null, ipConflitante: !!d.ipConflitante, desde: agora, visto: agora, ativo: true };
       porMac.set(d.mac, registro);
       if (!primeiraVez) novos.push(registro);
       return;
     }
-    const ipAntes = antes.ip || null;
-    const mudouIp = !!ipAntes && ipAntes !== d.ip;
+    // Uma entrada Stale entre duas coletas Reachable não inventa outra troca
+    // no histórico local. Agentes antigos permanecem apenas como inventário.
+    const ipAntes = antes.ipAlcancavel || (antes.estadoVizinho === 'Reachable' && !antes.ipConflitante ? antes.ip : null);
+    const mudouIp = !!ipAntes && ipAntes !== d.ip && leituraConfirmavel;
     const ipHistorico = mudouIp
       ? [...(Array.isArray(antes.ipHistorico) ? antes.ipHistorico : []), { de: ipAntes, para: d.ip, em: agora }].slice(-IP_HISTORICO_MAX)
       : (Array.isArray(antes.ipHistorico) ? antes.ipHistorico : []);
     const atualizado = {
       ...antes,
       ip: d.ip,
+      ipAlcancavel: leituraConfirmavel ? d.ip : ipAntes,
+      estadoVizinho: d.estadoVizinho || null,
+      ipConflitante: !!d.ipConflitante,
       // nome só é sobrescrito quando a resolução DEU certo - senão um DNS
       // que falhou uma vez apagaria o nome que já tínhamos
       nome: d.nome || antes.nome || null,

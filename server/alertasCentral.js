@@ -87,6 +87,7 @@ async function registrarUnico({ chave, tipo, titulo, resumo, url, critico }) {
   };
   let novo = false;
   await db.runTransaction(async (tx) => {
+    novo = false; // O Firestore pode repetir o callback após conflito.
     const anterior = await tx.get(ref);
     if (anterior.exists) return;
     tx.set(ref, registro);

@@ -37,6 +37,8 @@
 const crypto = require('crypto');
 const net = require('net');
 const db = require('./firestore');
+const { criarMonitor } = require('./nocIp');
+const monitorIp = criarMonitor(db);
 const { createCache, createKeyedCache } = require('./liveCache');
 const redeDiagnostico = require('./redeDiagnostico');
 const nocMaquina = require('./nocMaquina');
@@ -4536,6 +4538,18 @@ async function varrerAlertas() {
   const apelidosTodos = await getApelidos();
   const tiposDispositivo = await listarTiposDispositivo();
   const transicoes = [];
+  const configuracoesIp = Object.fromEntries(Object.entries(apelidosTodos).map(([codigo, itens]) => [codigo,
+    Object.fromEntries(Object.entries(itens).map(([mac, entrada]) => {
+      const cfg = normalizarEntradaApelido(entrada);
+      return [mac, { ...cfg, tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo) }];
+    })),
+  ]));
+  try {
+    transicoes.push(...await monitorIp.varrer(docs, configuracoesIp));
+  } catch (err) {
+    // Uma falha na confirmação de IP não pode suspender os alarmes de queda.
+    console.error('[NOC] Falha ao confirmar IPs de rede:', err.message);
+  }
   for (const candidato of docs) {
     // dispositivo de rede marcado como MONITORADO (impressora/VM - pedido do
     // Master: "perdeu rede, precisa alarmar"). Reaproveita a varredura ARP
@@ -4572,38 +4586,10 @@ async function varrerAlertas() {
             tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
           });
         }
-        // TROCOU DE IP. Pedido do Master (13/09): "ela perde muito IP, muda
-        // muito de IP, precisa atualizar no Servidor e isso só manualmente -
-        // ao menos ter alerta". O DHCP da loja devolve outro endereço, o
-        // servidor continua apontando pro antigo e a impressão para sem que
-        // nada no NOC pisque: pro monitor a impressora está ativa, só que
-        // noutro lugar.
-        //
-        // Para todo EQUIPAMENTO CATEGORIZADO, identificado pelo MAC. Celular
-        // ou aparelho aleatório sem tipo continua fora: DHCP deles muda o dia
-        // inteiro e alertar tudo seria ruído puro.
-        //
-        // ipAvisado guarda o ÚLTIMO endereço que já apareceu num alerta (ou o
-        // primeiro que vimos). Primeira vez não avisa: não há "de" nenhum, e
-        // anunciar o IP inicial de cada impressora marcada seria um alerta
-        // por dispositivo no dia em que isto subir.
-        if (acompanharIp && disp.ativo && disp.ip && estado && estado.ipAvisado && estado.ipAvisado !== disp.ip) {
-          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...estado, ipAvisado: disp.ip, ipMudouEm: Date.now() } };
-          transicoes.push({
-            codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
-            tipo: 'dispositivo-ip-mudou', mac: disp.mac,
-            de: estado.ipAvisado, para: disp.ip,
-            apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
-            tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
-          });
-        } else if (acompanharIp && disp.ativo && disp.ip && (!estado || !estado.ipAvisado)) {
-          // linha de base, em silêncio: a partir daqui qualquer troca aparece
-          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...(estado || {}), ipAvisado: disp.ip } };
-        }
+        // IP é confirmado acima por unidade/MAC, cruzando os observadores.
+        // O estado abaixo continua sendo exclusivamente o alarme de presença.
         if (cfg.monitorar && disp.ativo && estado && estado.avisadoOffline) {
-          // preserva o que ja estava na entrada (ipAvisado, inclusive o que a
-          // checagem de IP acabou de gravar) - antes isto reescrevia a entrada
-          // inteira e a linha de base do IP se perdia a cada volta
+          // Preserva os demais campos históricos do alarme de presença.
           const base = (alarmePatch || alarmeAtual)[disp.mac] || estado;
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { ...base, avisadoOffline: false, offlineDesde: null } };
           transicoes.push({
@@ -5287,6 +5273,7 @@ module.exports = {
   // alerta de internet por unidade: o estado vive em memoria, e o teste
   // precisa comecar cada cenario do zero
   _resetarEstadoInternet,
+  confirmarAlertaIp: monitorIp.confirmar,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
   sanitizarAcessosConhecidos, acessoConhecidoDe, idAnydeskLimpo,
   listarCatalogoProgramas, salvarCatalogoProgramas, comandoInstalarCatalogo, comandoRemoverPrograma, programaPodeSerRemovido, comandoInstalarSiigmaBox, codigoSiigmaValido,

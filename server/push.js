@@ -1249,16 +1249,18 @@ async function notifyAlertaExterno(titulo, corpo, tag, critico) {
   }
 }
 
-async function notifyDispositivoIpMudou(unidadeNome, codigo, apelido, tipoRotulo, de, para) {
+async function notifyDispositivoIpMudou(unidadeNome, codigo, apelido, tipoRotulo, de, para, mac, eventoId) {
+  if (!mac || !eventoId) throw new Error('Alerta de IP requer MAC e evento confirmado.');
   const que = apelido || tipoRotulo || 'Dispositivo';
   const dados = {
     title: '🔀 IP mudou',
     body: `${que} · ${unidadeNome || codigo}: o endereço passou de ${de} para ${para}. `
-      + 'Atualize no servidor da loja — até lá, o trabalho continua saindo pro endereço antigo.',
-    tag: `noc-ip-${codigo}-${apelido || tipoRotulo || 'dispositivo'}`,
+      + `MAC ${mac}. Confirmado em duas coletas recentes. Verifique a reserva DHCP e os sistemas que utilizam esse IP antes de alterar configurações.`,
+    tag: `noc-ip-${codigo}-${mac}`,
     url: '/loja-status',
   };
-  await alertasCentral.registrar({ tipo: 'noc-ip', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  const registro = await alertasCentral.registrarUnico({ chave: eventoId, tipo: 'noc-ip', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!registro.novo) return;
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();

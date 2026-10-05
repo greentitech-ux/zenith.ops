@@ -7715,17 +7715,28 @@ setTimeout(async () => {
     // cadastrado e não pode gerar ruído.
     await ls.definirApelidoDispositivo(UNI, MAC_CELULAR, { apelido: 'Celular do gerente' });
 
-    const comDisp = (zebraIp, celularIp) => {
+    let coletaIp = Date.now() - 29 * 60 * 1000;
+    const comDisp = async (zebraIp, celularIp) => {
       const b = DOCS.get(idDoc);
       DOCS.set(idDoc, {
         ...b,
+        ultimoHeartbeatEm: Date.now(),
         dispositivos: [
           { mac: MAC_ZEBRA, ip: zebraIp, nome: 'ZEBRA', desde: Date.now() - 86400000, visto: Date.now(), ativo: true },
           { mac: MAC_CELULAR, ip: celularIp, nome: 'CEL', desde: Date.now() - 86400000, visto: Date.now(), ativo: true },
         ],
       });
-      ls.descartarEspelhoTeste();
-      return ls.varrerAlertas();
+      const publicar = async () => {
+        coletaIp += 60000;
+        const atual = DOCS.get(idDoc);
+        DOCS.set(idDoc, { ...atual, dispositivos: atual.dispositivos.map(d => ({ ...d, visto: coletaIp, estadoVizinho: 'Reachable' })) });
+        ls.descartarEspelhoTeste();
+        return ls.varrerAlertas();
+      };
+      await publicar();
+      const resultado = await publicar();
+      for (const t of resultado.filter(t => t.codigo === UNI && t.tipo === 'dispositivo-ip-mudou')) await ls.confirmarAlertaIp(t);
+      return resultado;
     };
     const doIp = (ts) => ts.filter((t) => t.codigo === UNI && t.tipo === 'dispositivo-ip-mudou');
 
@@ -7772,7 +7783,7 @@ setTimeout(async () => {
       'trocou outra vez: o "de" é o endereço mais recente, não o original':
         mudouDeNovo.length === 1 && mudouDeNovo[0].de === '10.0.0.77' && mudouDeNovo[0].para === '10.0.0.88',
       'sumir e voltar no MESMO IP não alarma (a linha de base sobrevive à volta)':
-        !voltouMesmoIp.length && (alarme[MAC_ZEBRA] || {}).ipAvisado === '10.0.0.88',
+        !voltouMesmoIp.length,
       'o reset da Zebra limpa a fila do WINDOWS antes do ~JA/~JR, só das impressoras daquele IP':
         /function Limpar-FilaDoIp\(\$ip\)/.test(cmdZebra)
         && /Win32_TCPIpPrinterPort[\s\S]{0,120}HostAddress -eq \$ip/.test(cmdZebra)
@@ -7845,10 +7856,10 @@ setTimeout(async () => {
         return ip === '10.161.124.52';
       })(),
       'index.js despacha o push de IP alterado e deixa a troca no log':
-        /t\.tipo === 'dispositivo-ip-mudou'/.test(srcIdxIp) && /push\.notifyDispositivoIpMudou\(nome, t\.codigo, t\.apelido, t\.tipoRotulo, t\.de, t\.para\)/.test(srcIdxIp)
+        /t\.tipo === 'dispositivo-ip-mudou'/.test(srcIdxIp) && /push\.notifyDispositivoIpMudou\(nome, t\.codigo, t\.apelido, t\.tipoRotulo, t\.de, t\.para, t\.mac, t\.eventoId\)/.test(srcIdxIp)
         && /trocou de IP: \$\{t\.de\} -> \$\{t\.para\}/.test(srcIdxIp),
       'o push leva os dois endereços e diz o que fazer, no mesmo gate dos outros alarmes':
-        /passou de \$\{de\} para \$\{para\}/.test(corpoN) && /Atualize no servidor/.test(corpoN)
+        /passou de \$\{de\} para \$\{para\}/.test(corpoN) && /Verifique a reserva DHCP/.test(corpoN) && /registrarUnico/.test(corpoN)
         && /podeReceberCritico\(sub\)/.test(corpoN) && !/deu errado|Ops/i.test(corpoN),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -7857,6 +7868,13 @@ setTimeout(async () => {
   } catch (e) { okIpMudou = false; console.log('  erro: ' + e.message); }
   if (!okIpMudou) ruins += 1;
   console.log(`${okIpMudou ? '✓' : '✗'} NOC: impressora monitorada que TROCA DE IP vira alerta (e o reset da Zebra zera a fila do Windows)`);
+  try {
+    await require('./testeNocIp').testar();
+    console.log('✓ NOC IP: coletas recentes, conflitos, unidade/MAC e persistência idempotente');
+  } catch (e) {
+    ruins += 1;
+    console.log('✗ NOC IP: ' + e.message);
+  }
 
   // ------------------------------------------------------------------
   // REINICIAR A PARTIR DA SAÚDE DAS MÁQUINAS. Pedido do Master (13/09/2026):
