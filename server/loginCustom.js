@@ -9,9 +9,10 @@
 // da equipe, feriados etc) sem precisar mexer em codigo a cada data.
 const crypto = require('crypto');
 const db = require('./firestore');
+const campanha = require('./public/login-campanha');
 const DOC = db.collection('loginCustomConfig').doc('config');
 
-const PADRAO = { ativo: false, bubbleTitulo: '', bubbleTexto: '', fundoArquivo: null, fundoMobileArquivo: null, logos: [] };
+const PADRAO = { ...campanha.PADRAO, ativo: false, bubbleTitulo: '', bubbleTexto: '', fundoArquivo: null, fundoMobileArquivo: null, logos: [] };
 
 // Logos das empresas que fazem parte do NoPulso, no rodapé da tela de login.
 // Antes era UMA imagem fixa no código (/grupo-bravo.png): toda vez que uma
@@ -31,19 +32,21 @@ async function obter() {
 // so o Master ve o caminho de Storage do fundo (ver rota admin em index.js) -
 // a tela de login publica so precisa saber SE tem fundo customizado, nunca o
 // caminho em si
-function semDetalheInterno(config) {
+function semDetalheInterno(config, admin = false) {
+  if(!admin) config = campanha.efetiva(config);
   const { fundoArquivo, fundoMobileArquivo, logos, ...resto } = config;
   return {
     ...resto,
     temFundo: !!fundoArquivo,
     temFundoMobile: !!fundoMobileArquivo,
+    servidorAgora: new Date().toISOString(),
     // a tela pública recebe só id + nome; a imagem sai por
     // /api/login-custom/logo/:id, nunca o caminho do Storage
     logos: (logos || []).map((l) => ({ id: l.id, nome: l.nome })),
   };
 }
 
-async function salvar({ ativo, bubbleTitulo, bubbleTexto, atualizadoPorEmail }) {
+async function salvar({ ativo, bubbleTitulo, bubbleTexto, atualizadoPorEmail, campanhaRosa, campanhaFim, tamanhoLogin, fundoPosicao }) {
   const dados = {
     ativo: !!ativo,
     bubbleTitulo: String(bubbleTitulo || '').trim().slice(0, 80),
@@ -51,6 +54,23 @@ async function salvar({ ativo, bubbleTitulo, bubbleTexto, atualizadoPorEmail }) 
     atualizadoEm: new Date().toISOString(),
     atualizadoPorEmail: atualizadoPorEmail || null,
   };
+  if(campanhaRosa !== undefined) {
+    if(typeof campanhaRosa !== 'boolean') throw new Error('Informe se a campanha está ativada.');
+    dados.campanhaRosa = campanhaRosa;
+  }
+  if(campanhaFim !== undefined) {
+    if(typeof campanhaFim !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?-03:00$/.test(campanhaFim) || !Number.isFinite(Date.parse(campanhaFim))) throw new Error('Informe a data de encerramento no horário de Brasília.');
+    if(new Date(Date.parse(campanhaFim)-3*3600000).toISOString().slice(0,16) !== campanhaFim.slice(0,16)) throw new Error('Data de encerramento inválida.');
+    dados.campanhaFim = campanhaFim;
+  }
+  if(tamanhoLogin !== undefined) {
+    if(!['padrao','ampliado'].includes(tamanhoLogin)) throw new Error('Tamanho de login inválido.');
+    dados.tamanhoLogin = tamanhoLogin;
+  }
+  if(fundoPosicao !== undefined) {
+    if(!['right bottom','center center','left bottom'].includes(fundoPosicao)) throw new Error('Enquadramento inválido.');
+    dados.fundoPosicao = fundoPosicao;
+  }
   await DOC.set(dados, { merge: true });
   return obter();
 }
@@ -106,4 +126,5 @@ async function acharLogo(id) {
 module.exports = {
   obter, salvar, salvarFundo, removerFundo, semDetalheInterno,
   adicionarLogo, removerLogo, acharLogo, MAX_LOGOS,
+  efetiva: campanha.efetiva,
 };

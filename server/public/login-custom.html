@@ -52,6 +52,12 @@
   label{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px;}
   label:first-of-type{margin-top:0;}
   input,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:12px;font:14px var(--sans);}
+  #root{max-width:1100px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
+  #root .panel{max-width:none;margin-bottom:0;}
+  .campanha-config{grid-column:1/-1;}
+  .config-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:14px;}
+  @media(max-width:760px){#root,.config-grid{grid-template-columns:1fr;}.campanha-config{grid-column:auto;}}
   textarea{resize:vertical;min-height:64px;}
   input:focus,textarea:focus{outline:none;border-color:var(--accent);}
   .toggle-linha{display:flex;align-items:center;gap:8px;margin:14px 0 0;}
@@ -109,6 +115,20 @@
 <div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. Só o Master personaliza a tela de login.</div>
 
 <div id="root" class="hidden">
+  <div class="panel campanha-config">
+    <h2>Campanha e apresentação do login</h2>
+    <div class="sub">Configure tudo aqui. O Outubro Rosa usa detalhes rosa e um laço pulsante apenas no login; não muda as cores do restante do NoPulso.</div>
+    <div class="toggle-linha"><input type="checkbox" id="f-campanha-rosa"><span>Ativar Outubro Rosa com encerramento automático</span></div>
+    <div class="config-grid">
+      <div><label for="f-campanha-fim">Encerrar em (horário de Brasília)</label><input type="datetime-local" id="f-campanha-fim" required><div class="sub">00h de 01/11 mantém a homenagem durante todo o dia 31/10.</div></div>
+      <div><label for="f-tamanho-login">Tamanho do formulário e balão</label><select id="f-tamanho-login"><option value="ampliado">Ampliado e proporcional</option><option value="padrao">Padrão</option></select></div>
+      <div><label for="f-fundo-posicao">Enquadramento das imagens</label><select id="f-fundo-posicao"><option value="right bottom">Preservar direita e parte de baixo</option><option value="center center">Centralizado</option><option value="left bottom">Preservar esquerda e parte de baixo</option></select></div>
+    </div>
+    <div class="info-box" id="campanha-status"></div>
+    <button type="button" class="btn-primary" onclick="salvar()">💾 Salvar configuração e mensagem</button>
+    <a class="btn-ghost" href="/" target="_blank" rel="noopener">👁️ Conferir login</a>
+    <div class="sub" style="margin-top:12px;">Ao encerrar, rosa, laço, balão da campanha e fundos deixam de aparecer automaticamente, inclusive em uma tela já aberta. Os arquivos continuam salvos aqui. Desative a campanha para voltar a usar livremente as imagens e a mensagem cadastradas.</div>
+  </div>
   <div class="panel">
     <h2>Empresas do grupo (logos do rodapé)</h2>
     <div class="sub">São as logos que aparecem embaixo de "NoPulso faz parte do", na tela de login. Suba quando uma empresa entrar no grupo e remova quando sair - sem precisar de deploy. Enquanto não houver nenhuma cadastrada aqui, a tela continua mostrando a logo fixa do Grupo Bravo.</div>
@@ -127,6 +147,7 @@
     <div class="fundo-preview" id="fundo-preview"><span class="vazio">Carregando...</span></div>
     <div class="fundo-acoes">
       <label class="btn-ghost">📤 Enviar imagem<input type="file" id="f-fundo" accept="image/jpeg,image/png,image/webp" hidden onchange="enviarFundo()"></label>
+      <a class="btn-ghost" href="/branding/outubro-rosa-login-2026-v1.png" download>⬇️ Arte Outubro Rosa PC</a>
       <button type="button" class="btn-ghost bad hidden" id="btn-remover-fundo" onclick="removerFundo()">🗑️ Remover fundo</button>
     </div>
     <div class="msg hidden" id="msg-fundo"></div>
@@ -175,6 +196,7 @@
   </div>
 </div>
 
+<script src="/login-campanha.js"></script>
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -204,13 +226,27 @@ function atualizarPreview(){
   document.getElementById('preview-texto').textContent = texto || '(sem texto)';
 }
 
-function renderFundoPreview(temFundo, mobile = false){
+const PREVIEW_FUNDOS = {};
+const PREVIEW_VERSOES = {};
+async function renderFundoPreview(temFundo, mobile = false){
   const sufixo = mobile ? '-mobile' : '';
+  const versao = PREVIEW_VERSOES[sufixo] = (PREVIEW_VERSOES[sufixo] || 0) + 1;
   const el = document.getElementById('fundo-preview' + sufixo);
   const btnRemover = document.getElementById('btn-remover-fundo' + sufixo);
+  if(PREVIEW_FUNDOS[sufixo]) URL.revokeObjectURL(PREVIEW_FUNDOS[sufixo]);
+  delete PREVIEW_FUNDOS[sufixo];
   if(temFundo){
-    el.innerHTML = `<img src="/api/login-custom/fundo?mobile=${mobile ? '1' : '0'}&_=${Date.now()}" alt="Fundo atual" style="${mobile ? 'object-fit:contain;' : ''}">`;
     btnRemover.classList.remove('hidden');
+    el.innerHTML = '<span class="vazio">Carregando imagem salva...</span>';
+    try{
+      const r = await fetch('/api/login-custom/preview-fundo?mobile=' + (mobile ? '1' : '0'));
+      if(!r.ok) throw new Error('Não foi possível carregar a imagem salva.');
+      const blob = await r.blob();
+      if(PREVIEW_VERSOES[sufixo] !== versao) return;
+      const url = URL.createObjectURL(blob);
+      PREVIEW_FUNDOS[sufixo] = url;
+      el.innerHTML = `<img src="${url}" alt="Fundo atual" style="${mobile ? 'object-fit:contain;' : ''}">`;
+    }catch(e){ if(PREVIEW_VERSOES[sufixo] === versao) el.textContent = e.message; }
   } else {
     el.innerHTML = '<span class="vazio">Nenhuma imagem enviada - usando o fundo padrão.</span>';
     btnRemover.classList.add('hidden');
@@ -274,7 +310,12 @@ async function removerLogo(id, nome){
 }
 
 async function carregarConfig(){
-  CONFIG_ATUAL = await fetch('/api/login-custom').then(r=>r.json());
+  CONFIG_ATUAL = await fetch('/api/login-custom/config').then(r=>r.json());
+  document.getElementById('f-campanha-rosa').checked = !!CONFIG_ATUAL.campanhaRosa;
+  document.getElementById('f-campanha-fim').value = (CONFIG_ATUAL.campanhaFim || loginCampanha.PADRAO.campanhaFim).slice(0,16);
+  document.getElementById('f-tamanho-login').value = CONFIG_ATUAL.tamanhoLogin || 'ampliado';
+  document.getElementById('f-fundo-posicao').value = CONFIG_ATUAL.fundoPosicao || 'right bottom';
+  atualizarStatusCampanha();
   renderLogos(CONFIG_ATUAL.logos);
   document.getElementById('f-ativo').checked = !!CONFIG_ATUAL.ativo;
   document.getElementById('f-titulo').value = CONFIG_ATUAL.bubbleTitulo || '';
@@ -282,6 +323,12 @@ async function carregarConfig(){
   atualizarPreview();
   renderFundoPreview(!!CONFIG_ATUAL.temFundo);
   renderFundoPreview(!!CONFIG_ATUAL.temFundoMobile, true);
+}
+
+function atualizarStatusCampanha(){
+  const c = loginCampanha.efetiva(CONFIG_ATUAL || {}, Date.parse(CONFIG_ATUAL?.servidorAgora) || Date.now());
+  const fim = new Date(c.campanhaFim).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'});
+  document.getElementById('campanha-status').textContent = !c.campanhaRosa ? 'Campanha desativada. As imagens e a mensagem cadastradas são usadas normalmente.' : c.campanhaExpirada ? 'Campanha encerrada. Os fundos e a mensagem estão guardados, mas não aparecem no login.' : 'Encerramento programado para ' + fim + ' (Brasília). Sem apagar as imagens e sem consultas periódicas ao servidor.';
 }
 
 async function salvar(){
@@ -294,10 +341,15 @@ async function salvar(){
       ativo: document.getElementById('f-ativo').checked,
       bubbleTitulo: document.getElementById('f-titulo').value,
       bubbleTexto: document.getElementById('f-texto').value,
+      campanhaRosa: document.getElementById('f-campanha-rosa').checked,
+      campanhaFim: document.getElementById('f-campanha-fim').value + '-03:00',
+      tamanhoLogin: document.getElementById('f-tamanho-login').value,
+      fundoPosicao: document.getElementById('f-fundo-posicao').value,
     })});
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
     CONFIG_ATUAL = data;
+    atualizarStatusCampanha();
     msg.textContent = '✅ Salvo! Já vale na próxima vez que a tela de login carregar.';
     msg.className = 'msg ok';
     msg.classList.remove('hidden');

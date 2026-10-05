@@ -104,6 +104,31 @@
   .auth-link:hover,.auth-card button.auth-link:hover{color:var(--text);}
   .auth-voltar{margin-top:14px;text-align:center;color:var(--muted);font-size:12px;}
   /* ===== fim login: balão ===== */
+  /* Campanha restrita ao login; não altera tema/cores das outras telas. */
+  #auth-screen.login-ampliado{padding:clamp(20px,3vw,40px);gap:24px;min-height:100svh;}
+  #auth-screen.login-ampliado .auth-card{max-width:400px;padding:clamp(22px,3vw,32px);border-radius:18px;}
+  #auth-screen.login-ampliado .login-hero{width:100%;}
+  #auth-screen.login-ampliado .login-bubble{width:100%;max-width:320px;padding:16px 20px;border-radius:18px;}
+  #auth-screen.login-ampliado .login-bubble b{font-size:16px;line-height:1.35;}
+  #auth-screen.login-ampliado .login-bubble small{font-size:13.5px;line-height:1.5;margin-top:7px;}
+  #auth-screen.login-ampliado .auth-card input{font-size:16px;padding:12px;min-height:44px;}
+  #auth-screen.login-ampliado #auth-btn{font-size:15px;min-height:46px;}
+  #auth-screen.outubro-rosa{--accent:#ff9ac0;--rosa-suave:#ffd6e5;--rosa-linha:#9c4869;--panel:#17191f;--panel2:#211e27;--text:#f7eef3;--muted:#c6b7c0;background-color:#fff4f4;background-repeat:no-repeat;}
+  #auth-screen.outubro-rosa .auth-card{border-color:var(--rosa-linha);box-shadow:0 12px 36px rgba(97,35,60,.18);}
+  #auth-screen.outubro-rosa .auth-card label{color:var(--rosa-suave);}
+  #auth-screen.outubro-rosa .auth-card input{border-color:var(--rosa-linha);}
+  #auth-screen.outubro-rosa .login-bubble{border-color:var(--rosa-linha);}
+  #auth-screen.outubro-rosa .login-bubble b{color:var(--rosa-suave);}
+  #auth-screen.outubro-rosa .login-bubble small{color:#d9c4ce;}
+  #auth-screen.outubro-rosa .auth-marca>svg{display:none;}
+  #auth-screen.outubro-rosa .auth-marca::before{content:'';width:48px;height:54px;flex:none;background:url(/branding/laco-outubro-rosa.svg) center/contain no-repeat;animation:laco-pulsar 2.8s ease-in-out infinite;}
+  @keyframes laco-pulsar{0%,100%{transform:scale(1);}50%{transform:scale(1.06);}}
+  @media(prefers-reduced-motion:reduce){#auth-screen.outubro-rosa .auth-marca::before{animation:none;}}
+  @media(max-width:640px){
+    #auth-screen.login-ampliado{padding:24px 16px 32px;gap:20px;}
+    #auth-screen.login-ampliado .login-bubble{max-width:340px;}
+    #auth-screen.login-ampliado .auth-card{padding:24px 22px;}
+  }
 </style>
 <script src="/tema.js"></script>
 <script src="/aparelho.js"></script>
@@ -248,6 +273,8 @@
   </div>
 </div>
 
+<script src="/login-campanha.js"></script>
+<script src="/login-campanha-ui.js"></script>
 <script>
 // "/" e so o portao de entrada da aplicacao: se ja tem sessao valida, manda
 // direto pro Painel (pagina padrao de pouso, ver painel.html); sem sessao,
@@ -670,17 +697,7 @@ iniciarHeartbeatLoja();
 async function carregarLoginCustom(){
   try{
     const config = await fetch('/api/login-custom').then(r=>r.ok?r.json():null);
-    if(config && config.ativo && (config.bubbleTitulo || config.bubbleTexto)){
-      if(config.bubbleTitulo) document.getElementById('login-bubble-titulo').textContent = config.bubbleTitulo;
-      if(config.bubbleTexto) document.getElementById('login-bubble-texto').textContent = config.bubbleTexto;
-    }
-    if(config && (config.temFundo || config.temFundoMobile)){
-      const tela = document.getElementById('auth-screen');
-      const versao = encodeURIComponent(config.atualizadoEm || '');
-      if(config.temFundo) tela.style.setProperty('--login-fundo-desktop', `url(/api/login-custom/fundo?v=${versao})`);
-      if(config.temFundoMobile) tela.style.setProperty('--login-fundo-mobile', `url(/api/login-custom/fundo?mobile=1&v=${versao})`);
-      tela.classList.add('tem-fundo');
-    }
+    if(config) window.aplicarLoginCampanha(config);
     // logos das empresas do grupo. Só troca o que está na tela quando há
     // pelo menos uma cadastrada - lista vazia mantém a logo fixa do Bravo,
     // em vez de deixar o rodapé oco.

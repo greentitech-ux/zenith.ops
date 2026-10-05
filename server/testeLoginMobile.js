@@ -6,7 +6,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 (async () => {
-  let documento = {};
+  let documento = { campanhaRosa: false };
   const doc = { get: async () => ({ exists: true, data: () => documento }), set: async dados => { documento = { ...documento, ...dados }; } };
   const contexto = { module: { exports: {} }, require: nome => nome === './firestore' ? { collection: () => ({ doc: () => doc }) } : require(nome) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'loginCustom.js'), 'utf8'), contexto);

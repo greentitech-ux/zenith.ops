@@ -994,10 +994,11 @@ app.get('/api/meta/endereco', (req, res) => {
 // e o painel em login-custom.html, Master) - publica porque quem le e a
 // propria tela de login, antes de qualquer sessao existir
 app.get('/api/login-custom', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.json(loginCustom.semDetalheInterno(await loginCustom.obter()));
 });
 app.get('/api/login-custom/fundo', async (req, res) => {
-  const config = await loginCustom.obter();
+  const config = loginCustom.efetiva(await loginCustom.obter());
   const arquivo = req.query.mobile === '1' ? config.fundoMobileArquivo : config.fundoArquivo;
   if (!arquivo) return res.sendStatus(404);
   storage.streamArquivo(arquivo, null, res);
@@ -14703,6 +14704,16 @@ app.post('/api/kpis-operacionais/relatorio', requireKpis, async (req, res) => {
 // painel de personalização da tela de login (ver /login-custom.html) -
 // Master edita o texto do balão do robô e o fundo; a leitura pública (tela
 // de login em si) está lá em cima, perto de /api/meta/unidades-publico
+app.get('/api/login-custom/config', auth.requireMaster, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(loginCustom.semDetalheInterno(await loginCustom.obter(), true));
+});
+app.get('/api/login-custom/preview-fundo', auth.requireMaster, async (req, res) => {
+  const config = await loginCustom.obter();
+  const arquivo = req.query.mobile === '1' ? config.fundoMobileArquivo : config.fundoArquivo;
+  if(!arquivo) return res.sendStatus(404);
+  storage.streamArquivo(arquivo, null, res);
+});
 app.put('/api/login-custom', auth.requireMaster, async (req, res) => {
   try {
     const config = await loginCustom.salvar({
@@ -14710,6 +14721,10 @@ app.put('/api/login-custom', auth.requireMaster, async (req, res) => {
       bubbleTitulo: req.body.bubbleTitulo,
       bubbleTexto: req.body.bubbleTexto,
       atualizadoPorEmail: req.user.email,
+      campanhaRosa: req.body.campanhaRosa,
+      campanhaFim: req.body.campanhaFim,
+      tamanhoLogin: req.body.tamanhoLogin,
+      fundoPosicao: req.body.fundoPosicao,
     });
     res.json(config);
   } catch (err) {

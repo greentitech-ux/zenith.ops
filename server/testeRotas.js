@@ -423,6 +423,10 @@ setTimeout(async () => {
     token = r && r.token;
   } catch (e) { console.log('login falhou: ' + e.message); }
   console.log(token ? 'token obtido ✓' : 'SEM TOKEN - as rotas vao devolver 401');
+  if(process.env.TESTE_LOGIN_CAMPANHA === '1') {
+    try {await require('./testeLoginCampanha').testarHttp({token,DOCS,postarMultipart,putJson,pedir});process.exit(0);}
+    catch(e){console.error(e);process.exit(1);}
+  }
   if(process.env.TESTE_SEGURANCA === '1') {
     try {await require('./testeSegurancaHttp').testar({ARQUIVOS,DOCS,postarMultipart,postarJson,pedir});process.exit(0);}
     catch(e){console.error(e);process.exit(1);}
