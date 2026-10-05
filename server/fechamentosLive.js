@@ -540,7 +540,7 @@ async function tiposKpiDaUnidade(unidade) {
   return out;
 }
 
-async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpisExtras, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas, criadoPorId, criadoPorEmail, lancamentoDaLoja = false }) {
+async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpisExtras, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas, criadoPorId, criadoPorEmail, criadoPorNome, lancamentoDaLoja = false }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new Error('Data inválida.');
 
@@ -607,7 +607,7 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
   exigirFechamentoConsistente(registro);
   registro.detalhesMaquinas = sanitizarItens(detalhesMaquinas);
   registro.detalhesMaquinasPos = sanitizarItens(detalhesMaquinasPos);
-  registro.detalhesSaidas = sanitizarItens(detalhesSaidas);
+  registro.detalhesSaidas = sanitizarItens(detalhesSaidas).map((item) => ({ ...item, criadoPorId: criadoPorId || null, criadoPorEmail, criadoPorNome: criadoPorNome || criadoPorEmail }));
 
   const agora = new Date().toISOString();
   registro.criadoPorId = criadoPorId;
@@ -874,7 +874,7 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
     // na aprovacao - o fechamento pode mudar entre pedir e aprovar
     const atualSaida = await getOne(fechamentoId);
     const i = Number(itemNovo && itemNovo.indice);
-    if (!atualSaida || !Number.isInteger(i) || !((atualSaida.detalhesSaidas || [])[i])) {
+    if (!atualSaida || !Number.isInteger(i) || !((atualSaida.detalhesSaidas || [])[i]) || atualSaida.detalhesSaidas[i].excluida) {
       throw new Error('Saída não encontrada nesse fechamento.');
     }
     const valor = num(itemNovo.valor);
@@ -1062,7 +1062,7 @@ async function editarItemSaida({ fechamentoId, indice, descricao, valor, motivo,
   if (!atual) throw new Error('Fechamento não encontrado.');
   const itens = [...(atual.detalhesSaidas || [])];
   const i = Number(indice);
-  if (!Number.isInteger(i) || !itens[i]) throw new Error('Saída não encontrada nesse fechamento.');
+  if (!Number.isInteger(i) || !itens[i] || itens[i].excluida) throw new Error('Saída não encontrada nesse fechamento.');
 
   const antigo = itens[i];
   const desc = String(descricao != null ? descricao : (antigo.descricao || '')).trim().slice(0, 300);
@@ -1071,7 +1071,7 @@ async function editarItemSaida({ fechamentoId, indice, descricao, valor, motivo,
   if (desc === String(antigo.descricao || '').trim() && novoValor === num(antigo.valor)) {
     throw new Error('Nada mudou nessa saída.');
   }
-  itens[i] = { descricao: desc, valor: novoValor };
+  itens[i] = { ...antigo, descricao: desc, valor: novoValor };
   // ajuste pela DIFERENCA, com piso em zero. No lancamento o totalSaida e
   // DIGITADO a parte (os itens de detalhesSaidas sao a memoria de calculo, e
   // podem nao somar exatamente o total). Quando o total nao incluia esse
@@ -1105,7 +1105,7 @@ async function editarItemSaida({ fechamentoId, indice, descricao, valor, motivo,
 // isso o fechamento precisa existir. Nao criamos um fechamento so pra
 // pendurar uma saida: um fechamento com faturamento zero apareceria na tela
 // de Fechamentos como se a loja tivesse fechado o dia com R$0.
-async function adicionarSaidaDireto({ unidade, data, descricao, valor, motivo, editadoPorEmail }) {
+async function adicionarSaidaDireto({ unidade, data, descricao, valor, motivo, editadoPorEmail, editadoPorId, editadoPorNome }) {
   if (!unidade) throw new Error('Escolha a unidade.');
   if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new Error('Data inválida.');
   const v = num(valor);
@@ -1117,7 +1117,7 @@ async function adicionarSaidaDireto({ unidade, data, descricao, valor, motivo, e
   const atual = await getOne(id);
   if (!atual) throw new Error('Não há fechamento lançado nessa data pra essa unidade - a saída avulsa mora dentro do fechamento do dia.');
 
-  const itens = [...(atual.detalhesSaidas || []), { descricao: desc, valor: v }];
+  const itens = [...(atual.detalhesSaidas || []), { descricao: desc, valor: v, criadoPorId: editadoPorId || null, criadoPorEmail: editadoPorEmail, criadoPorNome: editadoPorNome || editadoPorEmail, criadoEm: new Date().toISOString() }];
   const totalSaida = +(num(atual.totalSaida) + v).toFixed(2);
   const merged = { ...atual, detalhesSaidas: itens, totalSaida };
   recomputarTotais(merged, { totalSaida }, await defsExtrasDaUnidade(unidade));
@@ -1343,7 +1343,7 @@ async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
           camposMudados = { adyenPos: novosValores.adyenPos };
         } else {
           novosValores = {
-            detalhesSaidas: [...(atual.detalhesSaidas || []), { descricao, valor }],
+            detalhesSaidas: [...(atual.detalhesSaidas || []), { descricao, valor, criadoPorId: pedido.solicitadoPorId || null, criadoPorEmail: pedido.solicitadoPorEmail, criadoPorNome: pedido.solicitadoPorEmail }],
             totalSaida: +(num(atual.totalSaida) + valor).toFixed(2),
           };
           camposMudados = { totalSaida: novosValores.totalSaida };
@@ -1394,10 +1394,42 @@ function invalidarCache() {
   fechamentosCache.invalidar();
 }
 
+// Edição do painel: move só a saída, nunca o fechamento inteiro.
+async function editarSaidaPainel({ fechamentoId, indice, ...dados }) {
+  const regra = require('./saidaAvulsaEdicao');
+  const referencia = await getOne(fechamentoId);
+  if (!referencia) throw new Error('Fechamento não encontrado.');
+  const unidade = dados.unidade || referencia.unidade, data = dados.data || referencia.data;
+  regra.validarData(data);
+  const origemRef = COLLECTION.doc(fechamentoId), destinoRef = COLLECTION.doc(docId(unidade, data));
+  const defsOrigem = await defsExtrasDaUnidade(referencia.unidade);
+  const defsDestino = unidade === referencia.unidade ? defsOrigem : await defsExtrasDaUnidade(unidade);
+  const resultado = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(origemRef);
+    if (!snap.exists) throw new Error('Fechamento não encontrado.');
+    const atual = { ...snap.data(), id: fechamentoId };
+    const mover = destinoRef.path !== origemRef.path && dados.excluir !== true;
+    const alvoSnap = mover ? await tx.get(destinoRef) : snap;
+    if (!alvoSnap.exists) throw new Error('A unidade/data de destino precisa ter fechamento lançado.');
+    const destino = mover ? { ...alvoSnap.data(), id: docId(unidade, data) } : atual;
+    const patches = regra.preparar(atual, indice, dados, destino);
+    for (const [f, patch, ref, defs] of [[atual, patches.origem, origemRef, defsOrigem], [destino, patches.destino, destinoRef, defsDestino]]) {
+      if (!patch) continue;
+      const merged = { ...f, ...patch };
+      recomputarTotais(merged, { totalSaida: patch.totalSaida }, defs);
+      Object.assign(patch, { faturamento: merged.faturamento, totalDeclarado: merged.totalDeclarado, diferenca: merged.diferenca });
+      tx.update(ref, patch);
+    }
+    return { ...atual, ...patches.origem };
+  });
+  fechamentosCache.invalidar();
+  return resultado;
+}
+
 module.exports = {
   diasPendentesDeFechamento, HORA_COBRANCA_FECHAMENTO, DIAS_PENDENCIA_FECHAMENTO,
   explicarDiferenca, exigirFechamentoConsistente, LIMITE_OBSERVACAO_OBRIGATORIA,
-  editarItemSaida, adicionarSaidaDireto,
+  editarItemSaida, adicionarSaidaDireto, editarSaidaPainel,
   CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, getEdicao,
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,
   suspenderInvalidacao, retomarInvalidacao,

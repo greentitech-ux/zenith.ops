@@ -87,20 +87,35 @@ async function reclassificar(chave, { origem, porId, porEmail }) {
 // reescrita por nos (CLAUDE.md §1). Se a linha da planilha mudar depois, a
 // correcao continua valendo por cima dela - e' o que o Master decidiu que
 // vale.
-async function corrigirItem(chave, { descricao, valor, porId, porEmail }) {
+async function corrigirItem(chave, { descricao, valor, porId, porEmail, unidade, unidadeNome, grupo, data, criadoPorNome, excluir }) {
   if (!chave || typeof chave !== 'string') throw new Error('Chave inválida.');
   const v = Number(valor);
   if (!Number.isFinite(v) || v < 0) throw new Error('Informe um valor válido para a saída.');
   const desc = String(descricao || '').trim().slice(0, 300);
   if (!desc) throw new Error('Descreva a saída.');
-  const registro = {
-    chave,
-    correcao: { descricao: desc, valor: +v.toFixed(2) },
-    corrigidoPorId: porId,
-    corrigidoPorEmail: porEmail,
-    corrigidoEm: new Date().toISOString(),
-  };
-  await COLLECTION.doc(chave).set(registro, { merge: true });
+  const ref = COLLECTION.doc(chave);
+  const registro = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const anterior = snap.exists ? snap.data() : {};
+    const correcao = { ...(anterior.correcao || {}), descricao: desc, valor: +v.toFixed(2) };
+    if (unidade !== undefined) Object.assign(correcao, { unidade, unidadeNome, grupo });
+    if (data !== undefined) { require('./saidaAvulsaEdicao').validarData(data); correcao.data = data; }
+    if (criadoPorNome !== undefined) {
+      correcao.criadoPorNome = String(criadoPorNome).trim().slice(0, 120);
+      if (!correcao.criadoPorNome) throw new Error('Informe quem lançou.');
+    }
+    if (excluir === true) { correcao.excluida = true; correcao.valor = 0; }
+    const registro = {
+      chave,
+      correcao,
+      historico: [...(anterior.historico || []), { em: new Date().toISOString(), por: porEmail, anterior: anterior.correcao || null, novo: correcao }],
+      corrigidoPorId: porId,
+      corrigidoPorEmail: porEmail,
+      corrigidoEm: new Date().toISOString(),
+    };
+    tx.set(ref, registro, { merge: true });
+    return registro;
+  });
   cache.invalidar();
   return registro;
 }

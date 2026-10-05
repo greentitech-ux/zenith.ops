@@ -70,20 +70,22 @@ function linhasDeFechamento(f, mapaVerif) {
       valorOriginal: correcao ? item.valor : null,
       descricaoOriginal: correcao ? (item.descricao || null) : null,
       reclassificadaPorEmail: (v && v.origemManualPorEmail) || null,
-      unidade: f.unidade,
-      unidadeNome: f.unidadeNome,
-      grupo: f.grupo,
-      data: f.data,
+      unidade: correcao?.unidade || f.unidade,
+      unidadeNome: correcao?.unidadeNome || f.unidadeNome,
+      grupo: correcao?.grupo || f.grupo,
+      data: correcao?.data || f.data,
       descricao: (correcao ? correcao.descricao : item.descricao) || 'Saída avulsa',
       valor: correcao ? correcao.valor : item.valor,
-      criadoPorEmail: f.gerente || f.criadoPorEmail,
-      criadoEm: f.criadoEm,
+      criadoPorEmail: item.criadoPorEmail || f.gerente || f.criadoPorEmail,
+      criadoPorNome: correcao?.criadoPorNome || item.criadoPorNome || item.criadoPorEmail || f.gerente || f.criadoPorEmail,
+      criadoEm: item.criadoEm || f.criadoEm,
+      excluida: !!(item.excluida || correcao?.excluida),
       verificada: !!(v && v.verificada),
       verificadaPorEmail: (v && v.verificadaPorEmail) || null,
       verificadaEm: (v && v.verificadaEm) || null,
       extra: null,
     };
-  });
+  }).filter((item) => !item.excluida);
 }
 
 // O MESMO fechamento pode existir NAS DUAS fontes, e isso nao e' acidente:
@@ -501,7 +503,7 @@ async function reclassificar(chave, { origem, porId, porEmail }, extrasFechament
 // fechamento importado vive so em memoria), entao a correcao fica ao lado do
 // item, na mesma colecao da verificacao, e linhasDeFechamento aplica por
 // cima. A planilha continua intacta.
-async function corrigirItemPlanilha(chave, { descricao, valor, porId, porEmail }, extrasFechamentos = []) {
+async function corrigirItemPlanilha(chave, dados, extrasFechamentos = []) {
   if (typeof chave !== 'string' || !chave.includes('::')) throw new Error('Chave inválida.');
   const partes = chave.split('::');
   const idx = Number(partes.pop());
@@ -510,7 +512,8 @@ async function corrigirItemPlanilha(chave, { descricao, valor, porId, porEmail }
   if (!f || !Number.isInteger(idx) || !((f.detalhesSaidas || [])[idx])) {
     throw new Error('Saída não encontrada nesse lançamento.');
   }
-  const r = await verificacoesSaida.corrigirItem(chave, { descricao, valor, porId, porEmail });
+  const item = f.detalhesSaidas[idx];
+  const r = await verificacoesSaida.corrigirItem(chave, { ...dados, descricao: dados.descricao ?? item.descricao, valor: dados.excluir === true ? 0 : (dados.valor ?? item.valor) });
   return { chave, unidade: f.unidade, ...r };
 }
 

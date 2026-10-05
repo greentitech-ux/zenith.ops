@@ -9145,6 +9145,7 @@ app.post('/api/fechamentos/lancar', requireSection('lancamento'), upload.any(), 
       unidade, unidadeNome, grupo, data, gerente, campos, kpisExtras, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas,
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,
+      criadoPorNome: req.user.nome || req.user.username || req.user.email,
       // a corrente do caixa (final obrigatorio, inicial herdado) vale AQUI, no
       // lançamento da loja - nunca na importação da planilha, que traz histórico
       lancamentoDaLoja: true,
@@ -12557,6 +12558,7 @@ app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async 
   );
   res.json({
     itens,
+    unidadesEdicao: Object.entries(await construirUnidadesMapa()).filter(([codigo]) => auth.podeVerUnidade(req, codigo)).map(([codigo, nome]) => ({ codigo, nome })),
     entradas: saidasPainel.filtrar(entradas, { unidades: unidadesSet, grupo, inicio, fim }),
     caixa,
   });
@@ -12669,6 +12671,9 @@ app.post('/api/saidas-painel/reclassificar-sangrias', auth.requireMaster, async 
 // tipoCorrecao 'saida-item' (ver /api/fechamentos/:id/solicitar-edicao).
 app.patch('/api/fechamentos/:id/saidas/:indice', auth.requireMasterOrAdmin, async (req, res) => {
   try {
+    if (req.body.criadoPorNome !== undefined && !req.isMaster) return res.status(403).json({ error: 'Somente o Master pode alterar quem lançou.' });
+    if (req.body.data !== undefined) require('./saidaAvulsaEdicao').validarData(req.body.data);
+    if (req.body.unidade !== undefined && (!req.body.unidade || !auth.podeVerUnidade(req, req.body.unidade))) return res.status(403).json({ error: 'Você não tem acesso à unidade de destino.' });
     const atual = await fechamentosLive.getOne(req.params.id);
     if (!atual) {
       // Saida que veio da PLANILHA: o fechamento importado vive so em memoria
@@ -12681,9 +12686,17 @@ app.patch('/api/fechamentos/:id/saidas/:indice', auth.requireMasterOrAdmin, asyn
       if (!auth.podeVerUnidade(req, daPlanilha.unidade)) {
         return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
       }
+      // Uma correção anterior pode ter mudado a unidade visível do item.
+      const linha = (await saidasPainel.listar(fechamentosData)).find((it) => it.chave === `${req.params.id}::${req.params.indice}`);
+      if (!linha) return res.status(400).json({ error: 'Saída não encontrada.' });
+      if (!auth.podeVerUnidade(req, linha.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+      const destino = req.body.unidade || linha.unidade;
+      const mapa = await construirUnidadesMapa();
       const chave = `${req.params.id}::${req.params.indice}`;
       const corrigido = await saidasPainel.corrigirItemPlanilha(chave, {
-        descricao: req.body.descricao, valor: req.body.valor,
+        descricao: req.body.descricao ?? linha.descricao, valor: req.body.valor ?? linha.valor,
+        unidade: destino, unidadeNome: mapa[destino] || destino, grupo: redes.redeDaUnidade(destino),
+        data: req.body.data || linha.data, criadoPorNome: req.body.criadoPorNome, excluir: req.body.excluir === true,
         porId: req.user.id, porEmail: req.user.email,
       }, fechamentosData);
       broadcast('saida-verificada', { chave }, 'lancamento');
@@ -12693,11 +12706,12 @@ app.patch('/api/fechamentos/:id/saidas/:indice', auth.requireMasterOrAdmin, asyn
     if (!auth.podeVerUnidade(req, atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
-    const registro = await fechamentosLive.editarItemSaida({
+    const registro = await fechamentosLive.editarSaidaPainel({
       fechamentoId: req.params.id,
       indice: req.params.indice,
       descricao: req.body.descricao,
       valor: req.body.valor,
+      unidade: req.body.unidade, data: req.body.data, criadoPorNome: req.body.criadoPorNome, excluir: req.body.excluir === true,
       motivo: req.body.motivo,
       editadoPorEmail: req.user.email,
     });
@@ -12721,6 +12735,7 @@ app.post('/api/fechamentos/saidas', auth.requireMasterOrAdmin, async (req, res) 
     }
     const registro = await fechamentosLive.adicionarSaidaDireto({
       unidade, data, descricao, valor, motivo, editadoPorEmail: req.user.email,
+      editadoPorId: req.user.id, editadoPorNome: req.user.nome || req.user.username || req.user.email,
     });
     broadcast('saida-verificada', { unidade, data }, 'lancamento');
     broadcast('saida-verificada', { unidade, data }, 'sangria');

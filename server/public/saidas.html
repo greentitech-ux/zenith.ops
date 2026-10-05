@@ -240,6 +240,11 @@
   <div class="modal">
     <h3 id="ed-saida-titulo">✏️ Editar saída</h3>
     <div class="sub" id="ed-saida-sub"></div>
+    <div id="ed-saida-dados" class="hidden">
+      <label>Unidade</label><select id="ed-saida-unidade"></select>
+      <label>Data</label><input type="date" id="ed-saida-data">
+      <div id="ed-saida-autor-bloco" class="hidden"><label>Quem lançou (somente Master)</label><input id="ed-saida-autor" maxlength="120"></div>
+    </div>
     <div id="ed-saida-descricao-bloco">
       <label>Descrição</label>
       <input type="text" id="ed-saida-descricao" maxlength="300">
@@ -341,6 +346,7 @@ let PODE_CONFERIR = false;
 let ENTRADAS = [];
 let CAIXA = { total: 0, porUnidade: [] };
 let ITENS = []; // lista bruta do periodo (inicio/fim), sem filtro de loja/grupo - esses dois filtram em memoria (ver renderTudo)
+let UNIDADES_EDICAO = [];
 let CARREGAMENTO_SEQ = 0;
 let CARREGAMENTO_ABORT = null;
 
@@ -526,6 +532,7 @@ async function carregar(){
     const resp = await res.json();
     if(seq !== CARREGAMENTO_SEQ) return;
     ITENS = resp.itens || [];
+    UNIDADES_EDICAO = resp.unidadesEdicao || [];
     ENTRADAS = resp.entradas || [];
     CAIXA = resp.caixa || { total: 0, porUnidade: [] };
     renderUnidadePanel();
@@ -590,7 +597,7 @@ function cardHtml(it){
     corrigirSangria = `<button type="button" class="link-btn" onclick='abrirEditarSangria(${JSON.stringify(it)})'>✏️ Editar</button>`;
   }
   let corrigir = '';
-  if(it.origem === 'saida' && !it.chave.startsWith('sangria::')){
+  if(!it.chave.startsWith('sangria::')){
     corrigir = PODE_CONFERIR
       ? `<button type="button" class="link-btn" onclick='abrirEditarSaida(${JSON.stringify(it)})'>✏️ Editar</button>`
       : `<button type="button" class="link-btn" onclick='abrirEditarSaida(${JSON.stringify(it)})'>✏️ Pedir correção</button>`;
@@ -605,7 +612,7 @@ function cardHtml(it){
     </div>
     <div class="saida-desc">${escapeHtml(it.descricao)}</div>
     <div class="saida-valor">${fmtMoney(it.valor)}</div>
-    <div class="saida-sub">${fmtData(it.data)} · ${escapeHtml(it.criadoPorEmail||'—')}</div>
+    <div class="saida-sub">${fmtData(it.data)} · ${escapeHtml(it.criadoPorNome||it.criadoPorEmail||'—')}</div>
     ${it.corrigida ? `<div class="saida-sub">antes: ${escapeHtml(it.descricaoOriginal||'')} · ${fmtMoney(it.valorOriginal)} · corrigida por ${escapeHtml(it.corrigidaPorEmail||'—')}</div>` : ''}
     ${it.temDivergencia ? `<div class="saida-sub dif-motivo">esperado ${fmtMoney(it.esperado)} · ${escapeHtml(it.motivoDivergencia || 'sem motivo informado')}${(it.extra&&it.extra.diasSemFechamento) ? ` · ${it.extra.diasSemFechamento} dia(s) sem fechamento na hora` : ''}</div>` : ''}
     ${it.verificada ? `<div class="saida-sub" style="color:var(--ok);">verificada por ${escapeHtml(it.verificadaPorEmail||'—')} em ${fmtDataHora(it.verificadaEm)}</div>` : ''}
@@ -722,9 +729,16 @@ function abrirEditarSaida(it){
   ED_SAIDA = it;
   restaurarBlocoDescricao();
   document.getElementById('ed-saida-descricao-bloco').classList.remove('hidden');
-  // saída avulsa não se exclui por aqui: ela é linha do fechamento, e apagar
-  // uma linha é correção do fechamento (fila da Central), não ação de painel
-  document.getElementById('ed-saida-excluir').classList.add('hidden');
+  document.getElementById('ed-saida-excluir').classList.toggle('hidden', !PODE_CONFERIR);
+  document.getElementById('ed-saida-dados').classList.toggle('hidden', !PODE_CONFERIR);
+  document.getElementById('ed-saida-autor-bloco').classList.toggle('hidden', !IS_MASTER);
+  const unidades = new Map([...ITENS, ...ENTRADAS, ...(CAIXA.porUnidade || [])].map(x=>[x.unidade,x.unidadeNome||x.unidade]));
+  UNIDADES_EDICAO.forEach(u=>unidades.set(u.codigo,u.nome));
+  unidades.set(it.unidade,it.unidadeNome||it.unidade);
+  document.getElementById('ed-saida-unidade').innerHTML = [...unidades].filter(([u])=>u).map(([u,n])=>`<option value="${escapeHtml(u)}">${escapeHtml(n)}</option>`).join('');
+  document.getElementById('ed-saida-unidade').value = it.unidade;
+  document.getElementById('ed-saida-data').value = it.data;
+  document.getElementById('ed-saida-autor').value = it.criadoPorNome || it.criadoPorEmail || '';
   document.getElementById('ed-saida-titulo').textContent = PODE_CONFERIR ? '✏️ Editar saída' : '✏️ Pedir correção da saída';
   document.getElementById('ed-saida-sub').textContent = `${it.unidadeNome||it.unidade||''} · ${fmtData(it.data)}`;
   document.getElementById('ed-saida-descricao').value = it.descricao || '';
@@ -758,6 +772,7 @@ function restaurarBlocoDescricao(){
 }
 
 function abrirEditarSangria(it){
+  document.getElementById('ed-saida-dados').classList.add('hidden');
   ED_TIPO = 'sangria';
   ED_SAIDA = it;
   restaurarBlocoDescricao();
@@ -777,6 +792,7 @@ function abrirEditarSangria(it){
 // (ver `origens`), o modal pede qual - somar tudo num campo só faria o Master
 // escolher no escuro qual lançamento receberia a diferença.
 function abrirEditarEntrada(e){
+  document.getElementById('ed-saida-dados').classList.add('hidden');
   ED_TIPO = 'entrada';
   ED_ENTRADA = e;
   const origens = e.origens || [];
@@ -822,12 +838,19 @@ async function excluirDoModal(){
   } else if(ED_TIPO === 'entrada'){
     const o = origemEntradaSelecionada();
     if(!confirm(`Excluir a entrada de ${fmtMoney(o.valor)} do dia ${fmtData(ED_ENTRADA.data)}?\n\nO fechamento continua; some só a entrada em dinheiro.`)) return;
+  } else if(ED_TIPO === 'saida' && PODE_CONFERIR){
+    if(!confirm(`Excluir esta saída de ${fmtMoney(ED_SAIDA.valor)}? O fechamento e o histórico serão preservados.`)) return;
   } else return;
   btn.disabled = true;
   try{
     let res;
     if(ED_TIPO === 'sangria'){
       res = await fetch('/api/sangrias/' + ED_SAIDA.chave.replace('sangria::',''), { method:'DELETE' });
+    } else if(ED_TIPO === 'saida') {
+      const partes = ED_SAIDA.chave.split('::'), indice = partes.pop();
+      res = await fetch(`/api/fechamentos/${encodeURIComponent(partes.join('::'))}/saidas/${encodeURIComponent(indice)}`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ excluir:true, motivo:document.getElementById('ed-saida-motivo').value.trim() })
+      });
     } else {
       const o = origemEntradaSelecionada();
       res = await fetch('/api/saidas-painel/entrada', { method:'PATCH', headers:{'Content-Type':'application/json'},
@@ -866,7 +889,9 @@ async function salvarEditarSaida(){
     if(PODE_CONFERIR){
       res = await fetch(`/api/fechamentos/${encodeURIComponent(fechamentoId)}/saidas/${encodeURIComponent(indice)}`, {
         method:'PATCH', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ descricao, valor, motivo }),
+        body: JSON.stringify({ descricao, valor, motivo,
+          unidade:document.getElementById('ed-saida-unidade').value, data:document.getElementById('ed-saida-data').value,
+          ...(IS_MASTER && document.getElementById('ed-saida-autor').value.trim() !== (ED_SAIDA.criadoPorNome || ED_SAIDA.criadoPorEmail || '') ? { criadoPorNome:document.getElementById('ed-saida-autor').value.trim() } : {}) }),
       });
     } else {
       res = await fetch(`/api/fechamentos/${encodeURIComponent(fechamentoId)}/solicitar-edicao`, {

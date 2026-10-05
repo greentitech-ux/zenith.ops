@@ -11255,10 +11255,10 @@ setTimeout(async () => {
       'a tela recarrega tudo do servidor depois de editar/excluir (KPIs e colunas juntos)':
         /async function salvarEditarEntrada\(\)[\s\S]{0,1400}await carregar\(\);/.test(htmlSaidas)
         && /async function salvarEditarSangria\(\)[\s\S]{0,1400}await carregar\(\);/.test(htmlSaidas)
-        && /async function excluirDoModal\(\)[\s\S]{0,1800}await carregar\(\);/.test(htmlSaidas),
+        && /await carregar\(\);/.test(htmlSaidas.split('async function excluirDoModal(){')[1].split('async function salvarEditarSaida(){')[0]),
       'o botão Excluir fica DENTRO do modal, ao lado do valor que ele apaga (não solto no card)':
         /id="ed-saida-excluir"[^>]*onclick="excluirDoModal\(\)"/.test(htmlSaidas)
-        && /getElementById\('ed-saida-excluir'\)\.classList\.add\('hidden'\)/.test(htmlSaidas),
+        && /getElementById\('ed-saida-excluir'\)\.classList\.toggle\('hidden', !PODE_CONFERIR\)/.test(htmlSaidas),
       'excluir pede confirmação antes (é ação que não desfaz)':
         /async function excluirDoModal\(\)[\s\S]{0,900}confirm\(/.test(htmlSaidas),
     };
@@ -29975,6 +29975,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e){ruins++;console.log('✗ Estorno do Beniboy: '+e.message);}
   try {await require('./testeAcoesEntregas').testarHttp({DOCS,enviarJson,postarJson});}
   catch(e){ruins++;console.log('✗ Permissões e ações de entregas: '+e.message);}
+  try {await require('./testeSaidaAvulsaPermissoes').testarHttp({DOCS,enviarJson,postarJson});}
+  catch(e){ruins++;console.log('✗ Permissões das saídas avulsas: '+e.message);}
   try {
     const pedirNocReal = (rota, corpo, headers = {}, method = 'POST') => new Promise((resolve, reject) => {
       const texto = JSON.stringify(corpo || {});
