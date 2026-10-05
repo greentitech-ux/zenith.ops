@@ -158,14 +158,23 @@ endereço do piloto. Esta é a variável mais importante do arquivo.
 
 ## 5. As cinco travas de isolamento
 
-1. **Sem porta pública. Sem DNS. Sem proxy reverso.** Acesso só pelo
-   Tailscale.
-2. **Bind explícito na interface do tailnet**, não em `0.0.0.0`. Em Docker:
-   `-p 100.101.44.126:3000:3000` — e **não** `-p 3000:3000`. Com `0.0.0.0` o
-   piloto aparece em `10.168.10.10:3000` para a LAN inteira.
-3. **Não instalar como aplicativo da loja da Umbrel.** O empacotamento de
-   app da Umbrel expõe o serviço na LAN por padrão, que é o oposto do item
-   2. Container Docker simples, com o bind acima.
+1. **Sem porta pública. Sem DNS. Sem proxy reverso.**
+2. **Política de rede (proposta, aguardando aprovação): acesso somente pelo
+   IP Tailscale `100.101.44.126`; LAN bloqueada.** O que se exige é um
+   *resultado*, não um método: do lado da LAN, `10.168.10.10:<porta>` não
+   pode responder. Duas camadas, porque nenhuma sozinha garante:
+   - **Bind** na interface do tailnet. Em Docker: `-p 100.101.44.126:3000:3000`,
+     e não `-p 3000:3000` (que escuta em `0.0.0.0` e aparece na LAN).
+   - **Firewall do host** negando a LAN para essa porta. Quem desenha a
+     regra é o Codex; **eu não verifiquei o firewall nem o estado real da
+     rede** — o texto acima é critério de aceitação, não constatação.
+   Aprovada a política, a verificação é externa: de **um aparelho da LAN
+   que não esteja no tailnet**, a porta tem que recusar; de **um aparelho no
+   tailnet**, tem que responder. Teste só de dentro da Umbrel não prova nada.
+3. **Não instalar como aplicativo da loja da Umbrel** — presumivelmente
+   expõe o serviço na LAN, o que contradiria o item 2. *Isso é inferência
+   minha sobre o comportamento do umbrelOS 2.0, não verificado; o Codex
+   confirma no painel/compose antes de depender dela.*
 4. **O webhook da Adyen nunca aponta para o piloto.** É a pior configuração
    errada possível neste sistema: no minuto em que o webhook for redirecionado,
    o Monitor de produção para de receber transação. O webhook não se encosta
@@ -173,8 +182,8 @@ endereço do piloto. Esta é a variável mais importante do arquivo.
 5. **Nenhuma máquina de loja conhece o endereço do piloto.** Se um agente
    instalado pedisse a versão ao piloto e visse um número maior, ele baixaria
    o `.ps1` do piloto, se sobrescreveria e reiniciaria apontando para o
-   piloto. Em 52 máquinas isso é reinstalação na mão. Tailscale-only já
-   resolve — não crie exceção.
+   piloto. Em 52 máquinas isso é reinstalação na mão. A política de rede do item 2
+   é o que protege contra isso — não crie exceção.
 
 ---
 
@@ -238,8 +247,10 @@ desfeito.
 2. Item 7 respondido pelo Codex.
 3. Container `node:22`, repositório clonado, `npm install`, `npm run teste`
    passando.
-4. `npm run local` com o bind do item 5.2. Abrir pelo Tailscale e confirmar
-   que `10.168.10.10:3000` **não** responde da LAN.
+4. `npm run local` com o bind do item 5.2. Confirmar, de aparelhos reais,
+   que responde pelo Tailscale e que `10.168.10.10:3000` **não** responde da
+   LAN. Só depois da aprovação da política de rede.
+   **Este passo só acontece depois de decidido que haverá piloto.**
 5. Só então as permissões do item 7.5 — o mínimo acordado, nada além.
 
 Nada deste piloto chega perto do `Manual Deploy` do Render. São duas coisas
@@ -247,52 +258,56 @@ sem ligação.
 
 ---
 
-## 9. A pergunta que precisa de número antes de instalar serviço
+## 9. Custo: o que está comprovado e o que não está
 
-O objetivo declarado do piloto é **avaliar se a Umbrel reduz o custo do
-NoPulso**. Antes de instalar qualquer coisa, vale olhar de onde o custo vem
-hoje — porque boa parte dele a Umbrel não alcança.
+**Estado: nenhuma instalação por enquanto.** A pergunta "a Umbrel reduz
+custo?" será respondida pelo Codex, com código e métricas atuais. Esta seção
+só separa o que tem prova do que não tem.
 
-| Custo hoje | A Umbrel reduz? |
+### Dados de outubro (informados pelo usuário; não os vi, não os verifiquei)
+
+- O principal custo comprovado é **transferência de dados do Firestore**.
+- **Cloud Storage apareceu zerado** no relatório fornecido.
+
+### O que *não* conta como evidência da situação atual
+
+- A queda de ~1.500 para ~84 leituras/min, de 23/08, é medição **de agosto**,
+  em **leituras**. Não diz nada sobre transferência de saída em outubro, e
+  uma coisa não implica a outra.
+- `plan: free` no `render.yaml` é o que está **no repositório**, não o que
+  está contratado hoje. Não prova o plano real do serviço.
+
+Uma versão anterior deste documento tratava essas duas coisas como prova de
+que o Render custava zero e de que o Firestore já estava resolvido. Estava
+errada: não eram verificação, eram leitura do arquivo e de um registro
+antigo.
+
+### Consequência para o desenho do piloto
+
+A hipótese anterior ("mover só o Storage") **cai**: se o Storage está zerado,
+não há o que economizar ali. O candidato óbvio agora seria o que gera
+transferência no Firestore — mas isso significa tocar o banco de produção,
+que é o que o piloto não pode fazer e o que o usuário ainda não autorizou
+sequer a *discutir* como migração.
+
+Então, nesta etapa, o que existe é uma lista de perguntas, não de respostas:
+
+| Pergunta | Quem responde |
 |---|---|
-| Render — `plan: free` no `render.yaml` | **Não.** Já é zero. Auto-hospedar troca zero por consumo de energia e por manutenção sua |
-| Firestore — leitura por documento, medido em ~84 leituras/min depois das correções de 23/08 (vinha de ~1.500) | **Só substituindo o Firestore**, o que é migração de banco — exatamente o que está fora de escopo agora |
-| Firebase Storage — snapshot do `store`, arquivo de pagamentos de 180 dias, PDFs | **Provavelmente sim.** É volume, é sequencial, não é sensível a latência |
-| API da Anthropic — OCR e o Beniboy | **Não.** Modelo local num i5 sem GPU não entrega a qualidade que essas duas funções exigem |
-| Gmail, Sheets | Não — já é zero |
+| Qual coleção/rota gera a transferência? (`/api/debug/leituras` do app dá leitura por rota; transferência é outra grandeza e vem do console do Firebase) | Codex |
+| Dá para reduzir **sem migrar nada** — cache, `Cache-Control`, compressão, payload menor? | Codex |
+| Se só migrar resolve, qual parte, e o que acontece com o NoPulso se a Umbrel cair? | Codex, com decisão do usuário |
+| Qual é o plano real do Render hoje? | usuário, pelo painel |
 
-Leitura disto: o trabalho de 23/08 já derrubou o custo do Firestore em ~18×.
-O que sobra de conta significativa não é o que auto-hospedar resolve, com
-**uma** exceção plausível.
+Registro de uma observação de código para o Codex avaliar, **sem tê-la
+medido**: o app serve as telas e usa SSE, e `compression` já está nas
+dependências do servidor. Se a transferência medida no Firestore for de
+*dados lidos*, ela vem das leituras, não do tráfego HTTP do Render — e aí a
+alavanca é ler menos documento ou menor, não hospedar em outro lugar.
 
-### Candidato a primeiro piloto: só o Storage
+### Onde a Umbrel pode valer algo independente do custo
 
-Hipótese a ser **precificada pelo Codex**, não conclusão:
-
-> Mover para a Umbrel apenas o conteúdo volumoso do Firebase Storage —
-> snapshot do `store`, os JSONs de `pagamentos-arquivo/AAAA-MM-DD.json`, os
-> PDFs gerados — mantendo o Firestore, o Render e todo o dado operacional
-> exatamente onde estão.
-
-Por que este é o candidato certo para começar:
-
-- Não toca no Firestore, logo não toca na parte caríssima e delicada.
-- É dado derivado ou histórico: se o piloto cair, nada da operação para.
-- Não exige porta pública: o app no Render precisaria alcançar a Umbrel, o
-  que é um problema de rede a ser **decidido pelo usuário**, não improvisado
-  — e enquanto não for decidido, o piloto é só leitura local.
-- Dá um número real para comparar, que é o objetivo do piloto.
-
-O que falta para transformar isso em decisão: o Codex medir quanto o Storage
-custa por mês hoje. Se for alguns reais, o piloto correto é **não migrar
-nada** e usar a Umbrel para outra coisa — e descobrir isso antes de instalar
-é o melhor resultado possível desta etapa.
-
-### Onde a Umbrel provavelmente vale mais que em custo
-
-Vale registrar, porque pode ser o verdadeiro valor dela: ambiente de teste
-permanente. Hoje `npm run local` e o `varreduraVisual.js` rodam na sua
-máquina. Na Umbrel, pelo Tailscale, viram um piloto sempre disponível —
-sem custo de Firestore, sem risco de produção, e resolvendo o problema real
-de não ter CI. Isso não reduz a fatura, mas é ganho concreto e **não exige
-migrar dado nenhum**.
+Ambiente de teste permanente: `npm run local` e o `varreduraVisual.js`,
+acessíveis pelo Tailscale, sem Firestore e sem risco de produção — o que
+atenuaria a falta de CI. Não reduz fatura, e é **hipótese**: só vale se
+alguém realmente for usá-lo, e continua condicionado a haver piloto.
