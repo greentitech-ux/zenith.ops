@@ -5204,8 +5204,11 @@ app.post('/api/monitor/alertar-loja', requireSection('monitor'), async (req, res
     if (!alvo.length) return res.status(404).json({ error: 'Nenhum computador encontrado pra essa loja.' });
     const cliente = String(req.body.cliente || 'Cliente').slice(0, 80);
     const valor = Number(req.body.valor || 0);
-    const pedidoId = String(req.body.pedidoId || '').slice(0, 60);
-    const texto = `🚨 CONFIRA ESSE PEDIDO: ${cliente} · R$ ${valor.toFixed(2)}${pedidoId ? ' · #' + pedidoId : ''} - o Monitor pediu pra verificar agora.`;
+    // O identificador do pedido continua no Monitor para rastreio, mas nao vai
+    // ao banner da loja: codigo longo na tela operacional atrapalha a leitura.
+    // Mantemos o mesmo formato objetivo do alerta de estorno: nome, valor e a
+    // descricao clara da acao esperada.
+    const texto = `🚨 CONFIRA ESSE PEDIDO: ${cliente} · R$ ${valor.toFixed(2)} · O Monitor pediu para verificar agora.`;
     await Promise.all(alvo.map((c) => lojaStatus.enviarMensagem(c.codigo, c.posto, texto, req.user.email)));
     res.json({ ok: true, avisados: alvo.length });
   } catch (err) {
