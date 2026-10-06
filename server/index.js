@@ -2314,9 +2314,9 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
     const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe, token, ehSessao);
     // Desde 09/09/2026 o agente sabe separar SESSAO (alguem entrou, lido do
     // log da propria ferramenta) de servico conectado. Só sessão real vira
-    // push; o batimento de nuvem nunca apita o celular. Por isso o alerta é
-    // ligado por padrão e uma sessão conhecida também PRECISA avisar: a lista
-    // serve para identificar quem entrou, nunca para esconder um acesso.
+    // push; o batimento de nuvem nunca apita o celular. IDs cadastrados ficam
+    // no histórico, mas não geram alarme; acessos desconhecidos continuam
+    // sendo alertados.
     const conhecido = ehSessao
       ? lojaStatus.acessoConhecidoDe(req.body.detalhe, (await lojaStatus.getConfig()).acessosConhecidos)
       : null;
@@ -2324,9 +2324,9 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
       ? `${req.body.detalhe || 'conexão de acesso remoto'} · acesso identificado: ${conhecido.nome || conhecido.id}`
       : req.body.detalhe;
     if (conhecido) {
-      console.log(`[NOC] acesso remoto identificado (${conhecido.nome || conhecido.id}) em ${req.params.codigo}/${req.params.posto} - push enviado.`);
+      console.log(`[NOC] acesso remoto identificado (${conhecido.nome || conhecido.id}) em ${req.params.codigo}/${req.params.posto} - somente histórico, sem alarme.`);
     }
-    if (ehSessao && await lojaStatus.pushAcessoRemotoAtivo()) {
+    if (ehSessao && !conhecido && await lojaStatus.pushAcessoRemotoAtivo()) {
       const mapa = await construirUnidadesMapa();
       push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, detalheAlerta)
         .catch((err) => console.error('Erro no push de acesso remoto:', err.message));

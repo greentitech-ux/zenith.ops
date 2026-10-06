@@ -127,7 +127,9 @@ function sanitizarAcessosConhecidos(lista) {
 function acessoConhecidoDe(detalhe, conhecidos) {
   const lista = sanitizarAcessosConhecidos(conhecidos);
   if (!lista.length) return null;
-  const numeros = new Set(String(detalhe || '').match(/\d{6,16}/g) || []);
+  // O ID precisa ocupar o número inteiro: um ID conhecido não pode liberar
+  // um ID diferente que apenas o contenha como trecho.
+  const numeros = new Set(String(detalhe || '').match(/(?<!\d)\d{6,16}(?!\d)/g) || []);
   return lista.find((c) => numeros.has(c.id)) || null;
 }
 
