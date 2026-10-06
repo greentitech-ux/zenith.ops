@@ -96,10 +96,14 @@
   .login-bubble small{display:block;font-weight:500;color:var(--muted);font-size:11.5px;margin-top:3px;}
   .login-footer{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:7px;}
   .login-footer span{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:#5b6572;}
-  .login-footer img{height:44px;width:auto;opacity:.9;}
+  .login-footer img{height:42px;width:auto;opacity:.9;}
+  /* As marcas foram desenhadas com proporções bem diferentes. Equalizamos
+     o peso visual no rodapé, sem deformar nenhuma arte. */
+  .login-footer img.logo-arcfood{height:58px;}
+  .login-footer img.logo-solutions{height:54px;}
   /* várias logos lado a lado (empresas do grupo, cadastradas em
      login-custom.html) - quebra linha sozinho quando não couber */
-  .login-logos{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;}
+  .login-logos{display:flex;align-items:flex-end;justify-content:center;gap:18px;flex-wrap:wrap;}
   .auth-link,.auth-card button.auth-link{display:block;width:auto;margin:12px auto 0;padding:0;border:0;border-radius:0;background:none;color:var(--accent);font:600 12px var(--sans);cursor:pointer;text-decoration:underline;text-underline-offset:3px;}
   .auth-link:hover,.auth-card button.auth-link:hover{color:var(--text);}
   .auth-voltar{margin-top:14px;text-align:center;color:var(--muted);font-size:12px;}
@@ -702,9 +706,11 @@ async function carregarLoginCustom(){
     // pelo menos uma cadastrada - lista vazia mantém a logo fixa do Bravo,
     // em vez de deixar o rodapé oco.
     if(config && Array.isArray(config.logos) && config.logos.length){
-      document.getElementById('login-logos').innerHTML = config.logos.map(l =>
-        `<img src="/api/login-custom/logo/${encodeURIComponent(l.id)}" alt="${String(l.nome||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}" loading="lazy">`
-      ).join('');
+      document.getElementById('login-logos').innerHTML = config.logos.map(l => {
+        const nomeMarca = String(l.nome || '').trim().toLowerCase();
+        const classe = /arc\s*food/.test(nomeMarca) ? 'logo-arcfood' : /solutions/.test(nomeMarca) ? 'logo-solutions' : '';
+        return `<img ${classe ? `class="${classe}" ` : ''}src="/api/login-custom/logo/${encodeURIComponent(l.id)}" alt="${String(l.nome||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}" loading="lazy">`;
+      }).join('');
     }
   }catch(e){ /* segue com a mensagem/fundo padrao */ }
 }
