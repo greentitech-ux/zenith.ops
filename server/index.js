@@ -2293,7 +2293,9 @@ app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, 
 app.post('/api/loja-status/:codigo/computadores/:posto/chat-responder', async (req, res) => {
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    res.json(await lojaStatus.responderChat(req.params.codigo, req.params.posto, req.body.texto, token));
+    const resposta = await lojaStatus.responderChat(req.params.codigo, req.params.posto, req.body.texto, token);
+    broadcastParaCentralBeniboy('beniboy-computador-mensagem', { codigo: resposta.codigo, posto: resposta.posto, de: 'computador', em: Date.now() });
+    res.json(resposta);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3353,6 +3355,18 @@ function broadcast(event, data, section) {
       if (data && data.unidade && !client.unidades.has(data.unidade)) continue;
     }
     client.res.write(payload);
+  }
+}
+
+// O chat dos computadores tambem aparece na Central do Beniboy. Nao usamos
+// `broadcast(..., 'suporte')` porque Tecnicos podem atender na Central sem
+// receber permissao para abrir o NOC inteiro. O payload leva so a chave da
+// conversa; cada tela busca o historico somente se aquela maquina estiver
+// aberta nela.
+function broadcastParaCentralBeniboy(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    if (client.isMaster || client.beniboy) client.res.write(payload);
   }
 }
 
@@ -17164,6 +17178,58 @@ app.post('/api/mensagens/:id/lida', auth.requireAuth, async (req, res) => {
 });
 
 app.get('/api/beniboy/acesso', (req,res)=>res.json({permitido:centralBeniboy.podeAtender(req)}));
+
+// ----- conversa com computadores, dentro da Central do Beniboy -----
+// A Central nao recebe o detalhe do NOC: nada de IP, AnyDesk, token do agente,
+// inventario ou comandos. A lista e' carregada apenas quando a aba e aberta;
+// depois, o SSE abaixo avisa da resposta sem virar poll/leituras recorrentes.
+function exigirAcessoCentralBeniboy(req, res, next) {
+  if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso à Central do Beniboy.' });
+  next();
+}
+function resumoComputadorCentral(c, mapa) {
+  return {
+    codigo: c.codigo,
+    unidadeNome: mapa[c.codigo] || c.codigo,
+    posto: c.posto,
+    nome: c.nome || c.posto,
+    tipo: c.tipo || null,
+    online: c.online === true,
+    estado: c.estado || (c.online === true ? 'operacional' : 'indisponível'),
+    ultimoHeartbeatEm: c.ultimoHeartbeatEm || c.heartbeatEm || c.ultimoSinalEm || null,
+  };
+}
+function mensagensComputadorCentral(c) {
+  return (Array.isArray(c.chatMensagens) ? c.chatMensagens : []).slice(-30).map((m) => ({
+    de: m && m.de === 'computador' ? 'computador' : 'suporte',
+    // O e-mail do atendente pertence ao NOC, nao precisa circular na Central.
+    autor: m && m.de === 'computador' ? (c.nome || c.posto) : 'Central',
+    texto: String((m && m.texto) || '').slice(0, 500),
+    em: Number(m && m.em) || null,
+  }));
+}
+app.get('/api/beniboy/computadores', exigirAcessoCentralBeniboy, async (req, res) => {
+  try {
+    const [lista, mapa] = await Promise.all([lojaStatus.listarResumo(), construirUnidadesMapa()]);
+    res.json(lista.map((c) => resumoComputadorCentral(c, mapa)).sort((a, b) =>
+      a.unidadeNome.localeCompare(b.unidadeNome, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR')));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.get('/api/beniboy/computadores/:codigo/:posto/mensagens', exigirAcessoCentralBeniboy, async (req, res) => {
+  try {
+    const c = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!c) return res.status(404).json({ error: 'Computador não encontrado.' });
+    const mapa = await construirUnidadesMapa();
+    res.json({ computador: resumoComputadorCentral(c, mapa), mensagens: mensagensComputadorCentral(c) });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/beniboy/computadores/:codigo/:posto/mensagens', exigirAcessoCentralBeniboy, async (req, res) => {
+  try {
+    const resultado = await lojaStatus.enviarMensagem(req.params.codigo, req.params.posto, req.body?.texto, req.user.email);
+    broadcastParaCentralBeniboy('beniboy-computador-mensagem', { codigo: resultado.codigo, posto: resultado.posto, de: 'suporte', em: Date.now() });
+    res.json({ ok: true, ...resultado });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 
 // ----- lado do atendimento -----
 app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {

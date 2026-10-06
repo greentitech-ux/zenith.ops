@@ -163,6 +163,25 @@
   .conversa-aba button{background:none;border:none;color:var(--muted);padding:8px;cursor:pointer;font-family:inherit;}
   .conversa-aba.ativa button:first-child{color:var(--accent);}
   .conversa-aba button:first-child{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .conversa-aba.computadores{border-color:var(--accent2);}
+  .conversa-aba.computadores.ativa button:first-child{color:var(--accent2);}
+  .aba-alerta-computador{display:inline-flex;min-width:16px;height:16px;align-items:center;justify-content:center;border-radius:10px;background:var(--bad);color:#fff;font:700 10px var(--mono);}
+  .painel-computadores{flex:1;min-height:0;display:flex;flex-direction:column;padding:16px;gap:12px;overflow:hidden;}
+  .computadores-topo{display:flex;align-items:end;gap:8px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid var(--line);}
+  .computadores-topo h3{margin:0;font-size:16px;}
+  .computadores-topo .sub{font:11px var(--mono);color:var(--muted);width:100%;}
+  .computador-filtro{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto;gap:8px;width:min(760px,100%);}
+  .computador-chat{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;}
+  .computador-resumo{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .computador-estado{font:700 11px var(--mono);padding:3px 8px;border-radius:12px;background:var(--bad-dim);color:var(--bad);}
+  .computador-estado.online{background:var(--ok-dim);color:var(--ok);}
+  .computador-mensagens{flex:1;min-height:100px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:4px 2px;}
+  .computador-msg{align-self:flex-start;max-width:min(82%,720px);border:1px solid var(--line);border-radius:14px;background:var(--panel2);padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;}
+  .computador-msg.suporte{align-self:flex-end;background:var(--ok-dim);border-color:#24533f;}
+  .computador-msg-cab{font:700 11px var(--mono);color:var(--accent);margin-bottom:4px;display:flex;gap:8px;justify-content:space-between;}
+  .computador-msg time{font-weight:400;color:var(--muted);}
+  .computador-vazio{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);padding:28px;}
+  @media(max-width:760px){.painel-computadores{padding:10px;}.computador-filtro{grid-template-columns:1fr;}.computador-msg{max-width:90%;}}
   .paineis-outer{margin:0;flex:1;min-height:0;display:flex;flex-direction:column;}
   .paineis-wrap,.paineis{height:100%;min-height:0;min-width:0;overflow:hidden;display:block;padding:0;}
   .painel-conversa{width:100%;height:100%;max-height:none;border:0;border-radius:0;padding:16px;min-height:0;}
@@ -287,6 +306,7 @@
       <button class="btn-ghost" onclick="aparenciaCentral('tema')">Claro / Escuro</button>
     </div>
     <button class="btn-ghost" onclick="abrirAppBeniboy()">App / Atalho</button>
+    <button class="btn-ghost" onclick="abrirComputadoresCentral()">💻 Computadores</button>
     <div class="central-disposicao" aria-label="Disposição das conversas">
       <button class="btn-ghost" onclick="toggleContexto()" aria-controls="central-contexto">Dados da conversa</button>
       <button type="button" id="central-colunas-2" class="btn-ghost btn-colunas" aria-label="Mostrar 2 conversas lado a lado" title="2 conversas lado a lado — clique novamente para voltar a uma" aria-pressed="false" onclick="definirColunasCentral(2)"><svg viewBox="0 0 24 20" aria-hidden="true"><rect x="1" y="2" width="22" height="16" rx="2"/><path d="M12 2v16"/></svg></button>
@@ -309,6 +329,24 @@
       <div style="padding:6px 12px;"><button class="btn-ghost central-mobile-voltar" onclick="voltarFila()">← Fila</button></div>
       <div id="conversas-abas" aria-label="Conversas abertas"></div>
       <div id="central-vazio"><span id="central-avatar"></span><strong>Seu espaço de atendimento</strong><span>Selecione uma conversa na fila para acompanhar e responder.</span></div>
+      <section id="painel-computadores" class="painel-computadores hidden" aria-label="Conversas com computadores">
+        <div class="computadores-topo">
+          <div><h3>Conversas com computadores</h3><div class="sub">Selecione a unidade e a máquina. O histórico fica limitado às últimas 30 mensagens.</div></div>
+          <div class="computador-filtro">
+            <select id="computador-unidade" aria-label="Unidade" onchange="trocarUnidadeComputador()"><option value="">Escolha uma unidade</option></select>
+            <select id="computador-posto" aria-label="Computador" onchange="trocarComputadorCentral()" disabled><option value="">Escolha um computador</option></select>
+            <button class="btn-ghost" type="button" onclick="carregarComputadoresCentral(true)">↻ Atualizar</button>
+          </div>
+        </div>
+        <div class="computador-chat">
+          <div id="computador-resumo" class="computador-resumo hidden"></div>
+          <div id="computador-mensagens" class="computador-mensagens"><div class="computador-vazio">Escolha uma unidade e um computador para abrir a conversa.</div></div>
+          <div id="computador-compositor" class="chat-compositor hidden">
+            <div class="chat-compositor-linha"><textarea id="computador-texto" rows="1" maxlength="500" placeholder="Escreva uma mensagem para o computador" onkeydown="enviarMensagemComputadorPorTecla(event)"></textarea><button class="btn-primary" type="button" onclick="enviarMensagemComputadorCentral()">Enviar</button></div>
+            <div class="chat-ajuda">Enter envia · Shift+Enter quebra linha · a mensagem será entregue no próximo sinal da máquina.</div>
+          </div>
+        </div>
+      </section>
       <div class="paineis-outer hidden" id="paineis-outer">
         <span id="paineis-count" class="hidden"></span>
         <div class="paineis-wrap"><div class="paineis" id="paineis-wrap"></div></div>
@@ -442,6 +480,13 @@ let ACAO_PENDENTE = null; // {id, statusAlvo}
 const ASSUNTOS_NOC = ['Computador/Sistema', 'Acesso/Senha'];
 let NOC_UNIDADES = [];
 let NOC_COMPUTADORES = [];
+// Conversas com as máquinas usam a mesma thread já entregue pelo NOCZenith.
+// Não há poll: a lista é carregada ao abrir a aba e respostas chegam por SSE.
+let MODO_COMPUTADORES = false;
+let COMPUTADORES_CENTRAL = [];
+let COMPUTADOR_ATIVO = null; // { codigo, posto }
+let COMPUTADOR_DETALHE = null;
+let COMPUTADORES_NOVOS = new Set();
 
 // Mesmos valores de STATUS_ATENDIMENTO em suporteChat.js, na ordem do funil.
 const COLUNAS = [
@@ -499,7 +544,10 @@ function toggleMinhas(){
   renderKanban();
 }
 function toggleContexto(){document.getElementById('central-mesa').classList.toggle('ver-contexto');}
-function voltarFila(){document.getElementById('central-mesa').classList.remove('com-conversa','ver-contexto');}
+function voltarFila(){
+  if(MODO_COMPUTADORES){ fecharComputadoresCentral(); return; }
+  document.getElementById('central-mesa').classList.remove('com-conversa','ver-contexto');
+}
 function montarFiltroUnidades(){
   const sel=document.getElementById('f-unidade'), anterior=sel.value;
   const unidades=[...new Set(ITENS.map(c=>c.lojaContexto).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
@@ -794,6 +842,7 @@ async function moverPara(id, statusAlvo, extra){
 function abrirDetalhePorId(id){
   const chat = ITENS.find(c=>c.id===id);
   if(!chat) return;
+  MODO_COMPUTADORES=false;
   if(!PAINEIS_ABERTOS.includes(id)) PAINEIS_ABERTOS.push(id);
   guardarEstadoPaineis();
   CONVERSA_ATIVA=id;
@@ -1137,6 +1186,125 @@ function restaurarEstadoPaineis(){
   });
 }
 
+function chaveComputador(codigo,posto){ return `${codigo}::${posto}`; }
+function computadorSelecionado(){
+  return COMPUTADOR_ATIVO && COMPUTADORES_CENTRAL.find(c=>c.codigo===COMPUTADOR_ATIVO.codigo&&c.posto===COMPUTADOR_ATIVO.posto);
+}
+function renderAbaComputadores(){
+  const abas=document.getElementById('conversas-abas');
+  const total=COMPUTADORES_NOVOS.size;
+  const aba=`<div class="conversa-aba computadores ${MODO_COMPUTADORES?'ativa':''}"><button type="button" aria-pressed="${MODO_COMPUTADORES}" onclick="abrirComputadoresCentral()">💻 Computadores${total?` <span class="aba-alerta-computador" aria-label="${total} nova${total>1?'s':''} resposta${total>1?'s':''}">${total>9?'9+':total}</span>`:''}</button>${MODO_COMPUTADORES?'<button type="button" aria-label="Fechar conversas com computadores" onclick="fecharComputadoresCentral()">×</button>':''}</div>`;
+  abas.innerHTML=aba+PAINEIS_ABERTOS.map(id=>{
+    const chat=ITENS.find(c=>c.id===id);
+    return `<div class="conversa-aba ${id===CONVERSA_ATIVA?'ativa':''}" data-id="${escapeHtml(id)}"><button type="button" aria-pressed="${id===CONVERSA_ATIVA}" onclick="abrirDetalhePorId(this.parentElement.dataset.id)">${escapeHtml(chat.nome||'Visitante')}</button><button type="button" aria-label="Fechar conversa de ${escapeHtml(chat.nome||'Visitante')}" onclick="fecharPainel(this.parentElement.dataset.id)">×</button></div>`;
+  }).join('');
+}
+function preencherUnidadesComputador(){
+  const sel=document.getElementById('computador-unidade');
+  const anterior=sel.value;
+  const unidades=[...new Map(COMPUTADORES_CENTRAL.map(c=>[c.codigo,c.unidadeNome||c.codigo])).entries()].sort((a,b)=>a[1].localeCompare(b[1],'pt-BR'));
+  sel.innerHTML='<option value="">Escolha uma unidade</option>'+unidades.map(([codigo,nome])=>`<option value="${escapeHtml(codigo)}">${escapeHtml(nome)}</option>`).join('');
+  if(unidades.some(([codigo])=>codigo===anterior)) sel.value=anterior;
+  trocarUnidadeComputador();
+}
+function trocarUnidadeComputador(){
+  const codigo=document.getElementById('computador-unidade').value;
+  const sel=document.getElementById('computador-posto');
+  const anterior=sel.value;
+  const lista=COMPUTADORES_CENTRAL.filter(c=>c.codigo===codigo);
+  sel.disabled=!codigo;
+  sel.innerHTML='<option value="">Escolha um computador</option>'+lista.map(c=>`<option value="${escapeHtml(c.posto)}">${escapeHtml(c.nome||c.posto)} · ${c.online?'online':'sem sinal'}</option>`).join('');
+  if(lista.some(c=>c.posto===anterior)) sel.value=anterior;
+  if(!codigo || !lista.some(c=>c.posto===sel.value)) { COMPUTADOR_ATIVO=null; COMPUTADOR_DETALHE=null; renderConversaComputador(); }
+}
+async function trocarComputadorCentral(){
+  const codigo=document.getElementById('computador-unidade').value;
+  const posto=document.getElementById('computador-posto').value;
+  if(!codigo || !posto) return;
+  COMPUTADOR_ATIVO={codigo,posto};
+  COMPUTADORES_NOVOS.delete(chaveComputador(codigo,posto));
+  renderAbaComputadores();
+  await carregarConversaComputador();
+}
+async function carregarComputadoresCentral(forcar=false){
+  if(COMPUTADORES_CENTRAL.length && !forcar){ preencherUnidadesComputador(); return; }
+  try{
+    const resp=await fetch('/api/beniboy/computadores');
+    const dados=await resp.json();
+    if(!resp.ok) throw new Error(dados.error||'Não foi possível carregar os computadores.');
+    COMPUTADORES_CENTRAL=Array.isArray(dados)?dados:[];
+    preencherUnidadesComputador();
+  }catch(e){ alert(e.message); }
+}
+function renderConversaComputador(){
+  const resumo=document.getElementById('computador-resumo');
+  const msgs=document.getElementById('computador-mensagens');
+  const compositor=document.getElementById('computador-compositor');
+  const computador=COMPUTADOR_DETALHE?.computador || computadorSelecionado();
+  if(!COMPUTADOR_ATIVO || !computador){
+    resumo.classList.add('hidden'); compositor.classList.add('hidden');
+    msgs.innerHTML='<div class="computador-vazio">Escolha uma unidade e um computador para abrir a conversa.</div>';
+    return;
+  }
+  resumo.classList.remove('hidden'); compositor.classList.remove('hidden');
+  resumo.innerHTML=`<strong>${escapeHtml(computador.unidadeNome||computador.codigo)} · ${escapeHtml(computador.nome||computador.posto)}</strong><span class="computador-estado ${computador.online?'online':''}">${computador.online?'● online':'● sem sinal'}</span><span class="sub">${escapeHtml(computador.estado||'')}</span>`;
+  const lista=COMPUTADOR_DETALHE?.mensagens || [];
+  msgs.innerHTML=lista.length?lista.map(m=>`<article class="computador-msg ${m.de==='suporte'?'suporte':''}"><div class="computador-msg-cab"><span>${escapeHtml(m.autor|| (m.de==='suporte'?'Central':'Computador'))}</span><time title="${escapeHtml(fmtDataHora(m.em))}">${escapeHtml(horaMsg(m.em))}</time></div>${escapeHtml(m.texto)}</article>`).join(''):'<div class="computador-vazio">Ainda não há mensagens nesta conversa.</div>';
+  msgs.scrollTop=msgs.scrollHeight;
+}
+async function carregarConversaComputador(){
+  if(!COMPUTADOR_ATIVO) return;
+  const {codigo,posto}=COMPUTADOR_ATIVO;
+  const msgs=document.getElementById('computador-mensagens');
+  msgs.innerHTML='<div class="computador-vazio">Carregando conversa…</div>';
+  try{
+    const resp=await fetch(`/api/beniboy/computadores/${encodeURIComponent(codigo)}/${encodeURIComponent(posto)}/mensagens`);
+    const dados=await resp.json();
+    if(!resp.ok) throw new Error(dados.error||'Não foi possível abrir a conversa.');
+    if(!COMPUTADOR_ATIVO || COMPUTADOR_ATIVO.codigo!==codigo || COMPUTADOR_ATIVO.posto!==posto) return;
+    COMPUTADOR_DETALHE=dados;
+    renderConversaComputador();
+  }catch(e){ msgs.innerHTML=`<div class="computador-vazio">${escapeHtml(e.message)}</div>`; }
+}
+function abrirComputadoresCentral(){
+  MODO_COMPUTADORES=true;
+  document.getElementById('central-mesa').classList.add('com-conversa');
+  renderPaineis();
+  carregarComputadoresCentral();
+}
+function fecharComputadoresCentral(){
+  MODO_COMPUTADORES=false;
+  document.getElementById('central-mesa').classList.remove('com-conversa','ver-contexto');
+  renderPaineis();
+}
+function enviarMensagemComputadorPorTecla(event){
+  if(event.key==='Enter'&&!event.shiftKey){ event.preventDefault(); enviarMensagemComputadorCentral(); }
+}
+async function enviarMensagemComputadorCentral(){
+  if(!COMPUTADOR_ATIVO) return;
+  const input=document.getElementById('computador-texto');
+  const texto=input.value.trim();
+  if(!texto) return;
+  input.disabled=true;
+  try{
+    const {codigo,posto}=COMPUTADOR_ATIVO;
+    const resp=await fetch(`/api/beniboy/computadores/${encodeURIComponent(codigo)}/${encodeURIComponent(posto)}/mensagens`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texto})});
+    const dados=await resp.json();
+    if(!resp.ok) throw new Error(dados.error||'Não foi possível enviar a mensagem.');
+    input.value='';
+    await carregarConversaComputador();
+  }catch(e){ alert(e.message); }finally{ input.disabled=false; input.focus(); }
+}
+function recebeuMensagemComputador(dados){
+  if(!dados?.codigo || !dados?.posto) return;
+  const chave=chaveComputador(dados.codigo,dados.posto);
+  const aberta=MODO_COMPUTADORES && COMPUTADOR_ATIVO && chave===chaveComputador(COMPUTADOR_ATIVO.codigo,COMPUTADOR_ATIVO.posto);
+  if(aberta){ carregarConversaComputador(); return; }
+  if(dados.de==='computador') COMPUTADORES_NOVOS.add(chave);
+  renderAbaComputadores();
+  if(dados.de==='computador' && document.hidden && window.Notification?.permission==='granted') new Notification('Central Beniboy', { body:'Nova resposta de um computador.' });
+}
+
 function renderPaineis(){
   guardarEstadoPaineis();
   // remove da lista qualquer conversa que sumiu (filtro, etc.)
@@ -1147,20 +1315,23 @@ function renderPaineis(){
   PAINEIS_VISIVEIS=selecionarPaineisVisiveis(PAINEIS_ABERTOS,PAINEIS_VISIVEIS,CONVERSA_ATIVA,COLUNAS_CENTRAL);
   const mesa=document.getElementById('central-mesa');
   mesa.classList.toggle('multiconversa',COLUNAS_CENTRAL>1);
+  const painelComputadores=document.getElementById('painel-computadores');
+  painelComputadores.classList.toggle('hidden',!MODO_COMPUTADORES);
   wrap.style.setProperty('--colunas-visiveis',Math.max(1,PAINEIS_VISIVEIS.length));
   [2,3].forEach(n=>document.getElementById(`central-colunas-${n}`).setAttribute('aria-pressed',String(COLUNAS_CENTRAL===n)));
   for(const id of DIGITACAO_PAINEIS){if(!PAINEIS_VISIVEIS.includes(id)){window.nopulsoDigitando?.parar(`central-${id}`);DIGITACAO_PAINEIS.delete(id);}}
-  outer.classList.toggle('hidden', !PAINEIS_ABERTOS.length);
+  outer.classList.toggle('hidden', MODO_COMPUTADORES || !PAINEIS_ABERTOS.length);
   document.getElementById('paineis-count').textContent = PAINEIS_ABERTOS.length ? ` · ${PAINEIS_ABERTOS.length}` : '';
-  document.getElementById('central-vazio').classList.toggle('hidden',!!CONVERSA_ATIVA);
-  document.getElementById('central-mesa').classList.toggle('com-conversa',!!CONVERSA_ATIVA);
-  const abas=document.getElementById('conversas-abas');
-  abas.innerHTML=PAINEIS_ABERTOS.map(id=>{
-    const chat=ITENS.find(c=>c.id===id);
-    return `<div class="conversa-aba ${id===CONVERSA_ATIVA?'ativa':''}" data-id="${escapeHtml(id)}"><button type="button" aria-pressed="${id===CONVERSA_ATIVA}" onclick="abrirDetalhePorId(this.parentElement.dataset.id)">${escapeHtml(chat.nome||'Visitante')}</button><button type="button" aria-label="Fechar conversa de ${escapeHtml(chat.nome||'Visitante')}" onclick="fecharPainel(this.parentElement.dataset.id)">×</button></div>`;
-  }).join('');
+  document.getElementById('central-vazio').classList.toggle('hidden',MODO_COMPUTADORES || !!CONVERSA_ATIVA);
+  document.getElementById('central-mesa').classList.toggle('com-conversa',MODO_COMPUTADORES || !!CONVERSA_ATIVA);
+  renderAbaComputadores();
   const contexto=document.getElementById('contexto-corpo');
   contexto.innerHTML='Selecione uma conversa para ver o contexto.';
+  if(MODO_COMPUTADORES){
+    window.nopulsoDigitando?.parar('central');
+    renderConversaComputador();
+    return;
+  }
   if(!PAINEIS_ABERTOS.length){ window.nopulsoDigitando?.parar('central'); wrap.innerHTML = ''; return; }
   // Reaproveita o player na atualização: não baixa nem reinicia o áudio do zero.
   const audios = new Map(Array.from(wrap.querySelectorAll('audio.chat-anexo-audio'),a=>[a.dataset.audioChave,{elemento:a,tocando:!a.paused&&!a.ended}]));
@@ -1362,7 +1533,9 @@ function unidadeComAcessoRemoto(nomeLoja){
 
 
 function conectarStream(){
-  window.zenithAoVivo && zenithAoVivo(['suporte-chat','agregador-pedido'], ()=>carregarLista());
+  if(!window.zenithAoVivo) return;
+  zenithAoVivo(['suporte-chat','agregador-pedido'], ()=>carregarLista());
+  zenithAoVivo(['beniboy-computador-mensagem'], recebeuMensagemComputador, {imediato:true});
 }
 
 async function boot(){

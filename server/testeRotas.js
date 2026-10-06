@@ -30069,6 +30069,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e) { ruins++; console.log('✗ Em aguardo: '+e.message); }
   try { await require('./testePortalBeniboy').testarHttp({DOCS,pedir,postarJson}); }
   catch(e) { ruins++; console.log('✗ Portal Beniboy: '+e.message); }
+  try { await require('./testeBeniboyComputadores').testarHttp({token,pedir,postarJson}); }
+  catch(e) { ruins++; console.log('✗ Central ↔ computadores: '+e.message); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
