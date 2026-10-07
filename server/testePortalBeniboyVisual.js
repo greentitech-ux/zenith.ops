@@ -43,6 +43,7 @@ const pasta=path.join(__dirname,'public');
       await page.locator('#portal-anonimo').click();
       await page.locator('#szc-nome').waitFor({state:'visible'});
       assert.equal(await page.locator('#szc-contato').isVisible(),true,'anônimo continua pedindo contato');
+      assert.equal(await page.locator('.szc-panel').evaluate(e=>e.parentElement?.id),'publico-chat-form','formulário público fica centralizado na página');
       await page.goto('https://nopulso.teste/atendimento/entrar');
       permitido=true;
       await page.locator('#portal-usuario').fill('suporte');

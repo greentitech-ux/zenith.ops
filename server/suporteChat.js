@@ -145,10 +145,9 @@ async function getOne(id) {
 async function getPublico(id, token) {
   const chat = await getOne(id);
   if (!chat || !token || chat.token !== token) return null;
-  // Encerrado não significa "público para sempre". O token fica salvo no
-  // navegador e, em casos de acesso/senha, permitir a releitura ou o PDF
-  // contrariaria a separação pedida entre solicitante e Master/Suporte.
-  if (chat.status !== 'ABERTO' && (chat.desbloqueio || chat.restritoAposConclusao)) return null;
+  // O token público fica salvo no navegador. Atendimento encerrado nunca é
+  // histórico público: somente o Master o consulta pela Central autenticada.
+  if (chat.status !== 'ABERTO') return null;
   return {
     id: chat.id,
     numeroTicket: chat.numeroTicket,
@@ -167,7 +166,7 @@ async function getPublico(id, token) {
 async function getComToken(id, token) {
   const chat = await getOne(id);
   if (!chat || !token || chat.token !== token) return null;
-  if (chat.status !== 'ABERTO' && (chat.desbloqueio || chat.restritoAposConclusao)) return null;
+  if (chat.status !== 'ABERTO') return null;
   return chat;
 }
 

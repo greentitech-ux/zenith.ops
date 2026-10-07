@@ -29,6 +29,13 @@
   h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0 0 10px;}
   p{font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;max-width:340px;}
   .dica{margin-top:22px;font-size:12px;color:var(--muted);}
+  /* Atendimento público usa o mesmo fluxo visual do login: o formulário é
+     central, legível e não fica perdido como um balão no canto. */
+  #publico-chat{width:min(100%,540px);margin:auto;text-align:center;}
+  #publico-chat .atendimento-cabecalho{margin-bottom:18px;}
+  .chat-publico-aberto .szc-btn,.chat-publico-aberto .szc-bot-nome-wrap{display:none!important;}
+  .chat-publico-aberto .szc-panel{position:relative!important;right:auto!important;bottom:auto!important;z-index:1!important;width:100%!important;max-width:540px!important;max-height:min(650px,calc(100vh - 190px));margin:0 auto;text-align:left;}
+  .chat-publico-aberto #publico-chat-form{display:flex;justify-content:center;width:100%;}
   .seta{display:inline-block;animation:szc-atend-bounce 1.4s ease-in-out infinite;}
   @keyframes szc-atend-bounce{0%,100%{transform:translateY(0);}50%{transform:translateY(6px);}}
   @media (prefers-reduced-motion:reduce){ .seta{animation:none;} }
@@ -55,12 +62,14 @@
   <p>Informe seu nome e telefone ou e-mail para conversar.</p>
 </main>
 <div id="publico-chat" hidden>
-<div class="eyebrow">NoPulso · Solutions Ti Tech</div>
-<div class="icone" id="icone-beniboy"></div>
-<script>document.getElementById('icone-beniboy').innerHTML = window.beniboySVG ? window.beniboySVG(64) : '🤖';</script>
-<h1>Fale com o Beniboy</h1>
-<p>Nosso assistente já abriu a conversa aqui embaixo - conte o que você precisa (estorno, dúvida sobre um pedido, qualquer outra coisa) que ele te ajuda na hora. Não precisa de WhatsApp nem de login.</p>
-<div class="dica"><span class="seta">↘</span> continue por ali</div>
+<div class="atendimento-cabecalho">
+  <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
+  <div class="icone" id="icone-beniboy"></div>
+  <script>document.getElementById('icone-beniboy').innerHTML = window.beniboySVG ? window.beniboySVG(64) : '🤖';</script>
+  <h1>Fale com o Beniboy</h1>
+  <p>Conte o que precisa — estorno, pedido, acesso ou outra dúvida. Não precisa de WhatsApp nem login.</p>
+</div>
+<div id="publico-chat-form" aria-live="polite"></div>
 </div>
 
 <div id="mensagemBanner" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;padding:24px;">
@@ -190,9 +199,14 @@ async function boot(){
     if(painel?.classList.contains('szc-hidden')) lancador.click();
   } else {
     const existente=document.querySelector('script[src="/suporte-chat.js"]');
-    if(existente) existente.addEventListener('load',()=>{const b=document.querySelector('.szc-btn'),p=document.querySelector('.szc-panel');if(b && p?.classList.contains('szc-hidden')) b.click();},{once:true});
-    else {const s=document.createElement('script');s.src='/suporte-chat.js';document.body.appendChild(s);}
+    if(existente) existente.addEventListener('load',()=>{const b=document.querySelector('.szc-btn'),p=document.querySelector('.szc-panel');if(b && p?.classList.contains('szc-hidden')) b.click();encaixarChatPublico();},{once:true});
+    else {const s=document.createElement('script');s.src='/suporte-chat.js';s.addEventListener('load',()=>{const b=document.querySelector('.szc-btn');if(b) b.click();encaixarChatPublico();},{once:true});document.body.appendChild(s);}
   }
+}
+function encaixarChatPublico(){
+  const painel=document.querySelector('.szc-panel');
+  const destino=document.getElementById('publico-chat-form');
+  if(painel && destino && painel.parentElement!==destino) destino.appendChild(painel);
 }
 let chatPublicoAberto=false;
 window.abrirChatPublicoBeniboy=function(){
@@ -202,6 +216,8 @@ window.abrirChatPublicoBeniboy=function(){
   document.getElementById('portal-beniboy').hidden=true;
   document.getElementById('publico-chat').hidden=false;
   boot();
+  encaixarChatPublico();
+  setTimeout(encaixarChatPublico,0);
 };
 // Mantém os links/atalhos de quiosque já instalados nas lojas.
 if(new URLSearchParams(location.search).has('unidade') || localStorage.getItem('zenithMonitorFixo')) window.abrirChatPublicoBeniboy();

@@ -38,6 +38,7 @@ async function testarHttp({DOCS, token, pedir, postarJson}) {
   assert.doesNotMatch((await chat.getOne('aguardo-outro')).mensagens.at(-1).texto,/A peça chega amanhã|Impressora não funciona/,'HTTP não vaza outro atendimento');
   await postarJson(`/api/suporte-chats/${id}/status`,{statusAtendimento:'RESOLVIDO'},headers);
   assert.equal((await chat.getOne(id)).status,'FINALIZADO');
+  assert.equal((await pedir(`/api/suporte-chat/${id}?token=chave-aguardo`)).status,404,'histórico finalizado não fica exposto ao visitante');
   console.log('✓ Em aguardo: permanece aberto, dono preservado, inatividade ignorada, retorno por ticket, respostas públicas, sigilo e sabotagem.');
 }
 module.exports = { testarHttp };
