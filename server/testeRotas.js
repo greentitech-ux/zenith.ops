@@ -7896,6 +7896,13 @@ setTimeout(async () => {
     ruins += 1;
     console.log('✗ NOC IP: ' + e.message);
   }
+  try {
+    await require('./testeCorrecaoEnvioRapido').testar();
+    console.log('✓ Mobiel: correção sincroniza pedido e envio rápido atomicamente, sem alterar envios independentes');
+  } catch (e) {
+    ruins += 1;
+    console.log('✗ Mobiel: correção do envio rápido: ' + e.message);
+  }
 
   // ------------------------------------------------------------------
   // REINICIAR A PARTIR DA SAÚDE DAS MÁQUINAS. Pedido do Master (13/09/2026):

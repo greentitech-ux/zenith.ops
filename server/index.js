@@ -15579,6 +15579,7 @@ app.post('/api/abastecimento', auth.requireAuth, upload.array('fotosAvarias', 20
       remake,
       observacao: body.observacao,
       atendePedidoId: body.atendePedidoId,
+      envioRapido: body.envioRapido === true,
       jaRecebido: body.jaRecebido,
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,

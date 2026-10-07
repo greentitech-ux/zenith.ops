@@ -550,7 +550,18 @@ async function remakesDoDia(dia) {
   return { dia: alvo, total, porSabor, registros: doDia.length };
 }
 
-async function criar({ tipo, pizzas, insumos, avarias, remake, observacao, atendePedidoId, jaRecebido, criadoPorId, criadoPorEmail, criadoPorNome, operador }) {
+function ehEnvioRapido(reg) {
+  return reg.tipo === 'ENVIO' && (reg.envioRapido === true || (reg.envioRapido == null
+    && ['Envio rápido (igual ao pedido)', 'Baixa retroativa — material já entregue (lançamento atrasado)'].includes(reg.observacao)));
+}
+function mesmosItens(a, b) {
+  const quantidade = q => Number.isFinite(Number(q)) ? Number(q) : String(q || '').trim();
+  const itens = r => JSON.stringify({ pizzas: sanitizarPizzas(r.pizzas), insumos: (r.insumos || []).map(i =>
+    JSON.stringify([i.insumoId || i.descricao || '', i.embalagem || '', quantidade(i.quantidade)])).sort() });
+  return itens(a) === itens(b);
+}
+
+async function criar({ tipo, pizzas, insumos, avarias, remake, observacao, atendePedidoId, envioRapido, jaRecebido, criadoPorId, criadoPorEmail, criadoPorNome, operador }) {
   if (!TIPOS.includes(tipo)) throw new Error('Tipo inválido (use PEDIDO, ENVIO, CONTAGEM ou REMAKE).');
   const pizzasLimpas = sanitizarPizzas(pizzas);
   const insumosLimpos = await resolverInsumos(insumos);
@@ -589,6 +600,7 @@ async function criar({ tipo, pizzas, insumos, avarias, remake, observacao, atend
     // ENVIO -> qual pedido ele atende (opcional); PEDIDO -> qual envio o
     // atendeu (preenchido quando o envio vinculado nasce)
     atendePedidoId: atendePedidoId || null,
+    envioRapido: tipo === 'ENVIO' && !!atendePedidoId && (envioRapido === true || ehEnvioRapido({ tipo, observacao })),
     atendidoPorEnvioId: null,
     // PEDIDO: confirmacao de ciencia da loja (o alarme sonoro/popup do lado
     // de quem envia so para quando alguem aperta OK -> marcarVisto)
@@ -634,10 +646,18 @@ async function criar({ tipo, pizzas, insumos, avarias, remake, observacao, atend
       confirmadoPorNome: registro.operadorNome || registro.criadoPorNome || null,
     };
   }
-  await doc.set(registro);
   if (pedidoAtendido) {
-    await COLLECTION.doc(pedidoAtendido.id).update({ atendidoPorEnvioId: registro.id });
-  }
+    await db.runTransaction(async tx => {
+      const refPedido = COLLECTION.doc(pedidoAtendido.id);
+      const p = (await tx.get(refPedido)).data();
+      if (!p || p.tipo !== 'PEDIDO') throw new Error('Pedido não encontrado.');
+      if (p.atendidoPorEnvioId || p.jaLancadoEm) throw new Error('Esse pedido já foi atendido ou baixado.');
+      // O envio rápido copia a versão atual do servidor, nunca a tela antiga.
+      if (registro.envioRapido) { registro.pizzas = p.pizzas || {}; registro.insumos = p.insumos || []; }
+      tx.set(doc, registro);
+      tx.update(refPedido, { atendidoPorEnvioId: registro.id });
+    });
+  } else await doc.set(registro);
   cache.invalidar();
   return registro;
 }
@@ -718,7 +738,34 @@ async function decidirCorrecao(id, { aprovar, porEmail, porNome }) {
     merge.dataHoraCorrigidaPorEmail = porEmail || null;
     merge.dataHoraCorrigidaPorNome = porNome || null;
   }
-  await COLLECTION.doc(id).update(merge);
+  if (aprovar && c.acao === 'alterar') {
+    await db.runTransaction(async tx => {
+      const ref = COLLECTION.doc(id);
+      const pedido = (await tx.get(ref)).data();
+      if (!pedido || JSON.stringify(pedido.correcao) !== JSON.stringify(c)) throw new Error('A correção mudou. Atualize a tela antes de decidir.');
+      let refEnvio, envio, patchEnvio;
+      if (pedido.tipo === 'PEDIDO' && pedido.atendidoPorEnvioId) {
+        refEnvio = COLLECTION.doc(pedido.atendidoPorEnvioId);
+        envio = (await tx.get(refEnvio)).data();
+        if (envio && envio.atendePedidoId === id && ehEnvioRapido(envio)) {
+          if (envio.correcao?.numeroTicket && (envio.correcao.status || 'pendente') === 'pendente') throw new Error('O envio rápido tem uma correção pendente. Decida essa correção antes de alterar o pedido.');
+          if (!mesmosItens(envio, pedido) && !mesmosItens(envio, merge)) throw new Error('O envio rápido foi alterado separadamente. Confira sua correção antes de alterar o pedido.');
+          patchEnvio = { pizzas: merge.pizzas, insumos: merge.insumos,
+            correcaoPedido: { pedidoId: id, numeroTicket: c.numeroTicket, em: decisao.decididaEm, porEmail: porEmail || null, porNome: porNome || null } };
+        }
+      }
+      const historico = (reg, origem) => [...(reg.historicoCorrecoes || []), {
+        numeroTicket: c.numeroTicket, pedidoId: pedido.tipo === 'PEDIDO' ? id : null, origem,
+        em: decisao.decididaEm, porEmail: porEmail || null, porNome: porNome || null,
+        antes: { pizzas: reg.pizzas || {}, insumos: reg.insumos || [] },
+        depois: { pizzas: merge.pizzas, insumos: merge.insumos },
+      }];
+      merge.historicoCorrecoes = historico(pedido, 'correcao');
+      if (pedido.tipo === 'ENVIO') merge.envioRapido = false; // correção própria deixa de ser espelho
+      if (patchEnvio) tx.update(refEnvio, { ...patchEnvio, historicoCorrecoes: historico(envio, 'correcao-pedido') });
+      tx.update(ref, merge);
+    });
+  } else await COLLECTION.doc(id).update(merge);
   cache.invalidar();
   return { removido: false, registro: { ...atual, ...merge } };
 }

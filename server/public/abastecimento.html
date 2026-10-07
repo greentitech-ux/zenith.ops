@@ -1358,6 +1358,9 @@ function regCardHtml(r){
   if(r.editadoEm){
     statusBadge += ` <span class="badge visto" title="Editado por ${escapeHtml(r.editadoPorNome||'Master')}">✏️ editado ${fmtHora(r.editadoEm)}</span>`;
   }
+  if(r.correcaoPedido){
+    statusBadge += ` <span class="badge visto" title="Envio rápido atualizado junto com o pedido">✅ corrigido com o pedido · Ticket #${escapeHtml(String(r.correcaoPedido.numeroTicket))}</span>`;
+  }
   const insumosHtml = (r.insumos||[]).length
     ? `<div class="reg-insumos">${r.insumos.map(insumoTexto).join(' &nbsp;•&nbsp; ')}</div>`
     : '';
@@ -2017,6 +2020,7 @@ async function confirmarEnvioRapido(){
       insumos: (p.insumos||[]).map(i=>i.insumoId ? ({ insumoId: i.insumoId, embalagem: i.embalagem, quantidade: i.quantidade }) : ({ descricao: i.descricao, quantidade: i.quantidade })),
       observacao: p.jaRecebido ? 'Baixa retroativa — material já entregue (lançamento atrasado)' : 'Envio rápido (igual ao pedido)',
       atendePedidoId: p.id,
+      envioRapido: true,
       operadorUsuario,
       operadorSenha: document.getElementById('pin-senha').value.trim(),
     };
