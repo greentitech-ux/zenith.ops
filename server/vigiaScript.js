@@ -64,7 +64,9 @@
 // 142: campanha como fundo do modelo, sem remover logos, identificação e suporte.
 // 143: amplia proporcionalmente a logo do grupo no modelo básico.
 // 144: envia estado ARP; cache Stale/Permanent não confirma troca de IP.
-const VERSAO_VIGIA = 144;
+// 145: identifica o SSID quando o caminho ativo e Wi-Fi e escolhe o IP local
+//      pela interface da rota padrão, em vez de uma placa aleatória.
+const VERSAO_VIGIA = 145;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 
@@ -1131,6 +1133,17 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '    $principal = if ($ethernetUp.Count -gt 0) { $ethernetUp[0] } else { $ativas[0] }',
     '    $r.tipo = (& $classificar $principal)',
     '    $r.nome = [string]$principal.Name',
+    '    # Para Wi-Fi, o nome útil para quem opera é a REDE (SSID), não o',
+    '    # nome genérico do adaptador ("Wi-Fi"). netsh já vem no Windows e',
+    '    # não faz varredura nem cria conexão; apenas lê a associação atual.',
+    '    if ($r.tipo -eq "wifi") {',
+    '      try {',
+    '        $ssid = @(netsh wlan show interfaces 2>$null | ForEach-Object {',
+    '          if ($_ -match "^\\s*SSID\\s*:\\s*(.+)$") { $matches[1].Trim() }',
+    '        } | Where-Object { $_ }) | Select-Object -First 1',
+    '        if ($ssid) { $r.nome = [string]$ssid }',
+    '      } catch {}',
+    '    }',
     '    # LinkSpeed vem como texto ("1 Gbps", "100 Mbps") - vira numero em',
     '    # Mbps pra dar pra comparar (placa gigabit negociando 100 = cabo ruim)',
     '    try {',
@@ -1152,6 +1165,12 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '      foreach ($a in $velhas) {',
     '        if ("$($a.Name)" -match "Wireless|Wi-?Fi|802\\.11") { $r.tipo = "wifi" }',
     '        elseif ($r.tipo -ne "ethernet") { $r.tipo = "ethernet"; $r.nome = [string]$a.Name }',
+    '      }',
+    '      if ($r.tipo -eq "wifi") {',
+    '        try {',
+    '          $ssid = @(netsh wlan show interfaces 2>$null | ForEach-Object { if ($_ -match "^\\s*SSID\\s*:\\s*(.+)$") { $matches[1].Trim() } } | Where-Object { $_ }) | Select-Object -First 1',
+    '          if ($ssid) { $r.nome = [string]$ssid }',
+    '        } catch {}',
     '      }',
     '    } catch {}',
     '    return $r',
@@ -3635,7 +3654,13 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '# largada (reaparece logo apos reinicio/atualizacao) e a cada ~6 ticks.',
     'function Reportar-IpLocal {',
     '  try {',
-    '    $ip = (Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue |',
+    '    # A rota padrão é a interface que realmente sai para a internet.',
+    '    # Sem este filtro, máquina com VPN/VM podia enviar o IP de uma placa',
+    '    # secundária em vez do IP interno em uso.',
+    '    $rota = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue | Sort-Object RouteMetric,InterfaceMetric | Select-Object -First 1',
+    '    $ips = Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue',
+    '    if ($rota -and $rota.InterfaceIndex) { $pelaRota = @($ips | Where-Object { $_.InterfaceIndex -eq $rota.InterfaceIndex }); if ($pelaRota.Count) { $ips = $pelaRota } }',
+    '    $ip = ($ips |',
     '      Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |',
     '      Select-Object -First 1 -ExpandProperty IPAddress)',
     '    if ($ip) { Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body (@{ ip = $ip } | ConvertTo-Json) -TimeoutSec 10 | Out-Null }',
@@ -4005,7 +4030,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '# cada tick pesado.',
     'function Reportar-IpLocal {',
     '  try {',
-    '    $ip = (Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue |',
+    '    # Reportar o IP da interface da rota padrão evita mostrar VPN/VM.',
+    '    $rota = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue | Sort-Object RouteMetric,InterfaceMetric | Select-Object -First 1',
+    '    $ips = Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue',
+    '    if ($rota -and $rota.InterfaceIndex) { $pelaRota = @($ips | Where-Object { $_.InterfaceIndex -eq $rota.InterfaceIndex }); if ($pelaRota.Count) { $ips = $pelaRota } }',
+    '    $ip = ($ips |',
     '      Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |',
     '      Select-Object -First 1 -ExpandProperty IPAddress)',
     '    if ($ip) {',

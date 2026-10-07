@@ -1842,8 +1842,21 @@ function atualizarConteudoDetalhe(codigo, c){
   // ip = publico (visto pelo servidor via x-forwarded-for); ipLocal = da
   // rede da loja, reportado pelo script de vigia (ver baixarVigia) - e o
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
-  if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
-  if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
+  // Os dois endereços ficam sempre visíveis. Quando o agente ainda não
+  // enviou o interno, deixar isso explícito é mais honesto que parecer que o
+  // dado não existe — e mostra exatamente o que falta para o acesso local.
+  infoBits.push(c.ipLocal
+    ? `🏠 IP interno: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP interno" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`
+    : '🏠 IP interno: <span class="sub">aguardando agente</span>');
+  infoBits.push(c.ip
+    ? `🌐 IP público: ${escapeHtml(c.ip)}`
+    : '🌐 IP público: <span class="sub">aguardando sinal</span>');
+  if(c.link){
+    const viaLink = c.link.tipo === 'wifi' ? 'Wi-Fi' : (c.link.tipo === 'ethernet' ? 'cabo' : (c.link.tipo || 'rede'));
+    const redeWifi = c.link.tipo === 'wifi'
+      ? ` · Rede: <b>${escapeHtml(c.link.nome || 'não informada')}</b>` : '';
+    infoBits.push(`📡 Conexão: <b>${escapeHtml(viaLink)}</b>${redeWifi}${c.link.mbps ? ` · ~${escapeHtml(String(c.link.mbps))} Mbps` : ''}`);
+  }
   if(c.anydeskId) infoBits.push(`🖥️ AnyDesk: <b>${escapeHtml(c.anydeskId)}</b> <button type="button" class="btn-copiar-ip" title="Copiar ID do AnyDesk" onclick="copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">📋</button>${c.anydeskIdFonte === 'maquina' ? ' <span class="sub">· lido do AnyDesk desta máquina</span>' : ' <span class="sub">· referência cadastrada; aguardando leitura local</span>'}`);
   // quem ligou e pra que hora - a mesma informação que evita o chamado de
   // "o computador reiniciou sozinho de madrugada"
@@ -1886,9 +1899,12 @@ function atualizarConteudoDetalhe(codigo, c){
   if(ap && ap.armazenamento && ap.armazenamento.totalGb){
     infoBits.push(`💾 Espaço do app: <b>${ap.armazenamento.usadoGb} GB</b> de ${ap.armazenamento.totalGb} GB (${ap.armazenamento.usadoPct}%)`);
   }
-  if(ap && ap.rede && (ap.rede.tipo || ap.rede.geracao)){
+  // O agente Windows conhece o link físico e o SSID; quando ele existe é a
+  // fonte mais fiel. A telemetria do navegador fica para tablet/celular.
+  if(ap && !c.link && ap.rede && (ap.rede.tipo || ap.rede.geracao || ap.rede.nome)){
     const via = ap.rede.tipo === 'wifi' ? 'Wi-Fi' : (ap.rede.tipo === 'cellular' ? 'dados móveis' : (ap.rede.tipo || ap.rede.geracao));
-    infoBits.push(`📡 Conexão: <b>${escapeHtml(String(via))}</b>${ap.rede.geracao && ap.rede.tipo ? ` · ${escapeHtml(ap.rede.geracao)}` : ''}${ap.rede.downlinkMbps ? ` · ~${ap.rede.downlinkMbps} Mbps` : ''}`);
+    const redeWifi = ap.rede.tipo === 'wifi' ? ` · Rede: <b>${escapeHtml(ap.rede.nome || 'não informada pelo navegador')}</b>` : '';
+    infoBits.push(`📡 Conexão: <b>${escapeHtml(String(via))}</b>${redeWifi}${ap.rede.geracao && ap.rede.tipo ? ` · ${escapeHtml(ap.rede.geracao)}` : ''}${ap.rede.downlinkMbps ? ` · ~${ap.rede.downlinkMbps} Mbps` : ''}`);
   }
   if(ap && ap.so && ap.so.nome){
     infoBits.push(`📱 Sistema: <b>${escapeHtml(ap.so.nome)}${ap.so.versao ? ' ' + escapeHtml(ap.so.versao) : ''}</b>`);

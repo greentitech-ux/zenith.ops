@@ -1561,9 +1561,14 @@ function sanitizarAparelho(bruto) {
   if (rede && typeof rede === 'object') {
     const r = {};
     const tipo = String(rede.tipo || '').trim().slice(0, 20);
+    // O navegador comum não revela SSID por privacidade. Ainda assim o
+    // contrato aceita o nome quando um cliente nativo autorizado puder
+    // informá-lo; nunca preservamos texto ilimitado vindo do heartbeat.
+    const nome = String(rede.nome || '').trim().replace(/[\r\n\t]+/g, ' ').slice(0, 80);
     const geracao = String(rede.geracao || '').trim().slice(0, 10);
     const downlinkMbps = numeroEntre(rede.downlinkMbps, 0, 10000, 2);
     if (tipo) r.tipo = tipo;
+    if (nome) r.nome = nome;
     if (geracao) r.geracao = geracao;
     if (downlinkMbps !== null) r.downlinkMbps = downlinkMbps;
     if (Object.keys(r).length) saida.rede = r;
