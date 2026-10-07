@@ -431,6 +431,11 @@
   .prog-manut-card h4{margin:0;font-size:12.5px;line-height:1.25;color:var(--text);}
   .prog-manut-card p{margin:0;min-height:3.1em;color:var(--muted);font-size:11px;line-height:1.4;}
   .prog-manut-card button{width:100%;margin-top:auto;}
+  /* O APK e o retorno para o agente pertencem ao mesmo fluxo. Em telas
+     estreitas o texto pode quebrar, mas nunca pode escapar do cartão. */
+  .prog-manut-android .btn-android-apk,.prog-manut-android .btn-android-configurar{width:100%;min-height:42px;white-space:normal;overflow-wrap:anywhere;line-height:1.2;text-align:center;}
+  .android-inscricao-acoes,.android-abrir-agente-slot{width:100%;display:grid;gap:8px;}
+  .android-abrir-agente-slot:empty{display:none;}
   .prog-manut-card.perigo{border-color:rgba(255,91,91,.3);}
   .prog-manut-card.perigo h4{color:var(--warn);}
   .prog-manut-aviso{padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:12px;line-height:1.5;}
@@ -1775,6 +1780,28 @@ function metricasTileHtml(c){
   // chamado de TI
   const planoTile = planoReinicioDe(c);
   if(planoTile) bits.push(`<span class="m-chip" style="color:var(--accent);border-color:var(--accent);" title="Reinicia sozinha: ${escapeHtml(resumoReinicio(planoTile))}">⏰ ${escapeHtml(chipReinicio(planoTile))}</span>`);
+  // Tablet/celular não tem disco e RAM do vigia Windows. Os dados do
+  // aparelho preenchem o cartão com a mesma linguagem visual, sem inventar
+  // telemetria quando o Android ainda não a informou.
+  const ap = c.aparelho || null;
+  if(ap && ap.bateria && typeof ap.bateria.porcento === 'number'){
+    const p = ap.bateria.porcento;
+    const cls = ap.bateria.carregando ? '' : (p <= BATERIA_CRITICA ? 'ruim' : (p <= BATERIA_BAIXA ? 'alerta' : ''));
+    bits.push(`<span class="m-chip ${cls}" title="Bateria${ap.bateria.carregando ? ' · carregando' : ''}">${ap.bateria.carregando ? '🔌' : '🔋'} ${p}%</span>`);
+  }
+  if(ap && ap.armazenamento && typeof ap.armazenamento.usadoPct === 'number'){
+    const pct = ap.armazenamento.usadoPct;
+    bits.push(`<span class="m-chip ${pct >= 95 ? 'ruim' : (pct >= 85 ? 'alerta' : '')}" title="Espaço usado pelo aparelho">💾 ${pct}%</span>`);
+  }
+  if(ap && ap.rede && (ap.rede.tipo || ap.rede.geracao || ap.rede.nome)){
+    const wifi = ap.rede.tipo === 'wifi';
+    const via = wifi ? 'Wi-Fi' : (ap.rede.geracao || (ap.rede.tipo === 'cellular' ? 'dados' : ap.rede.tipo));
+    const detalhe = [wifi ? ap.rede.nome : '', ap.rede.downlinkMbps ? `~${ap.rede.downlinkMbps} Mbps` : ''].filter(Boolean).join(' · ');
+    bits.push(`<span class="m-chip" title="${escapeHtml(detalhe || String(via))}">${wifi ? '📶' : '📡'} ${escapeHtml(String(via))}</span>`);
+  }
+  if(ap && ap.so && ap.so.nome){
+    bits.push(`<span class="m-chip" title="Sistema do aparelho">📱 ${escapeHtml(`${ap.so.nome}${ap.so.versao ? ` ${ap.so.versao}` : ''}`)}</span>`);
+  }
   return bits.length ? `<div class="tile-metricas">${bits.join('')}</div>` : '';
 }
 
@@ -1813,7 +1840,7 @@ function equipTileHtml(codigo, c){
     </div>
     <div class="equip-tile-unidade" title="${nomeOk}">${nomeOk}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
-    ${c.ipLocal ? `<div class="equip-tile-ip" title="Copiar IP local" onclick="event.stopPropagation();copiarIpLocal('${escapeJs(c.ipLocal)}')">🏠 ${escapeHtml(c.ipLocal)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
+    ${c.ipLocal ? `<div class="equip-tile-ip" title="Copiar IP local" onclick="event.stopPropagation();copiarIpLocal('${escapeJs(c.ipLocal)}')">🏠 ${escapeHtml(c.ipLocal)} <span class="equip-tile-ip-copy">📋</span></div>` : (c.ip ? `<div class="equip-tile-ip" title="Copiar IP público" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(c.ip)}','IP público')">🌐 ${escapeHtml(c.ip)} <span class="equip-tile-ip-copy">📋</span></div>` : '')}
     ${c.anydeskId ? `<div class="equip-tile-ip" title="Copiar ID do AnyDesk" onclick="event.stopPropagation();copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">🖥️ ${escapeHtml(c.anydeskId)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
     ${metricasTileHtml(c)}
   </div>`;
@@ -2522,13 +2549,16 @@ function pintarManutencaoProgramas(corpo){
         <p>Baixa o script individualizado para uso sem área de transferência ou por suporte local.</p>
         <button type="button" class="btn-ghost" onclick="baixarVigia('${codigo}','${posto}','${tipo}')">Baixar script</button>
       </article>
-      ${PODE_BAIXAR_ANDROID ? `<article class="prog-manut-card">
+      ${PODE_BAIXAR_ANDROID ? `<article class="prog-manut-card prog-manut-android">
         <h4>📱 Inscrever tablet ou celular</h4>
         <p>1. Baixe e instale o APK neste tablet (Android 7 ou superior). 2. Volte aqui e toque em Inscrever este tablet. O atalho do site NoPulso não substitui o agente.</p>
-        <button type="button" class="btn-primary" onclick="baixarAgenteAndroid(this)" ${ANDROID_DISPONIVEL ? '' : 'disabled'}>Baixar agente Android (APK)</button>
+        <div class="android-inscricao-acoes">
+          <button type="button" class="btn-primary btn-android-apk" onclick="baixarAgenteAndroid(this)" ${ANDROID_DISPONIVEL ? '' : 'disabled'}>Baixar agente Android (APK)</button>
+          <button type="button" class="btn-ghost" onclick="inscreverEsteTablet('${codigo}','${posto}','${tipo}')">Inscrever este tablet</button>
+          <button type="button" class="btn-ghost" onclick="copiarLinkAndroid('${codigo}','${posto}','${tipo}')">Copiar link de inscrição</button>
+        </div>
         ${ANDROID_DISPONIVEL ? '' : '<p>Instalador assinado ainda não disponível. O Master precisa configurar a publicação do APK.</p>'}
-        <button type="button" class="btn-ghost" onclick="inscreverEsteTablet('${codigo}','${posto}','${tipo}')">Inscrever este tablet</button>
-        <button type="button" class="btn-ghost" onclick="copiarLinkAndroid('${codigo}','${posto}','${tipo}')">Copiar link de inscrição</button>
+        <div id="android-abrir-agente-slot" class="android-abrir-agente-slot" aria-live="polite"></div>
       </article>` : ''}
       ${acoesInternas}
     </div>`;
@@ -4444,12 +4474,14 @@ async function inscreverEsteTablet(codigo, posto, tipo){
     const linkAndroid = String(dados.linkAndroid || '').trim();
     const formatoSeguro = /^nopulso:\/\/inscrever\?(?=[^\r\n]*\bu=)(?=[^\r\n]*\bp=)(?=[^\r\n]*\bt=)[^\r\n]+$/i;
     if(!formatoSeguro.test(linkAndroid)) throw new Error('Não foi possível validar a inscrição gerada. Atualize a página e tente novamente.');
+    const destino = document.getElementById('android-abrir-agente-slot');
+    if(!destino) throw new Error('Abra novamente a manutenção para concluir a inscrição.');
     const anterior = document.getElementById('android-abrir-agente');
     if(anterior) anterior.remove();
     const link = document.createElement('a');
-    link.id = 'android-abrir-agente'; link.className = 'btn-primary';
-    link.href = linkAndroid; link.textContent = 'Abrir NoPulso Agente e confirmar inscrição';
-    document.getElementById('prog-corpo').prepend(link);
+    link.id = 'android-abrir-agente'; link.className = 'btn-primary btn-android-configurar';
+    link.href = linkAndroid; link.textContent = 'Abrir NoPulso Agente e configurar';
+    destino.appendChild(link);
     link.focus();
   }catch(e){ alert(e.message); }
 }
