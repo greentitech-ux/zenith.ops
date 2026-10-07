@@ -4435,13 +4435,20 @@ async function inscreverEsteTablet(codigo, posto, tipo){
     const resposta = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
     if(!resposta.ok) throw new Error('Não foi possível gerar a inscrição.');
     const dados = await resposta.json();
-    const url = new URL(dados.linkAndroid);
-    if(url.protocol !== 'nopulso:' || url.hostname !== 'inscrever') throw new Error('Link de inscrição inválido.');
+    // `nopulso:` é um esquema privado. Alguns navegadores Android tratam
+    // esquemas que não conhecem de modo diferente no construtor URL e acabam
+    // devolvendo host vazio, embora o link seja exatamente o que o aplicativo
+    // registrado no Android aceita. Validar o FORMATO emitido pelo servidor,
+    // em vez de depender desse parser, elimina o falso "link inválido" sem
+    // abrir a porta para outro esquema ou para texto injetado.
+    const linkAndroid = String(dados.linkAndroid || '').trim();
+    const formatoSeguro = /^nopulso:\/\/inscrever\?(?=[^\r\n]*\bu=)(?=[^\r\n]*\bp=)(?=[^\r\n]*\bt=)[^\r\n]+$/i;
+    if(!formatoSeguro.test(linkAndroid)) throw new Error('Não foi possível validar a inscrição gerada. Atualize a página e tente novamente.');
     const anterior = document.getElementById('android-abrir-agente');
     if(anterior) anterior.remove();
     const link = document.createElement('a');
     link.id = 'android-abrir-agente'; link.className = 'btn-primary';
-    link.href = dados.linkAndroid; link.textContent = 'Abrir NoPulso Agente e confirmar inscrição';
+    link.href = linkAndroid; link.textContent = 'Abrir NoPulso Agente e confirmar inscrição';
     document.getElementById('prog-corpo').prepend(link);
     link.focus();
   }catch(e){ alert(e.message); }
