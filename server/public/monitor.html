@@ -844,7 +844,12 @@ function lblDisputa(s){ return String(s||'').replace(/_/g,' '); }
 // mostra a miniatura certa conforme o tipo do anexo (foto/print, video ou
 // audio da ligacao) - qualquer outro tipo vira link de download
 function renderAnexo(disputeId, index, anexo){
-  const url = `/api/disputes/anexo/${disputeId}/${index}`;
+  // <img>, <video> e uma nova aba não passam pelo wrapper de fetch acima;
+  // sem o token, a rota protegida respondia apenas "Autenticação necessária".
+  // O token na query é aceito exclusivamente para esses anexos e não entra
+  // nos logs (auth.js omite a query). Mantém a mesma autorização da seção de
+  // disputas, inclusive o filtro de unidade no servidor.
+  const url = `/api/disputes/anexo/${encodeURIComponent(disputeId)}/${index}?token=${encodeURIComponent(AUTH_TOKEN || '')}`;
   const tipo = anexo.tipo || '';
   if(tipo.startsWith('image/')) return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${esc(anexo.nome||'evidência')}"></a>`;
   if(tipo.startsWith('video/')) return `<video src="${url}" controls style="max-width:220px;max-height:140px;border-radius:6px;border:1px solid var(--line);"></video>`;
