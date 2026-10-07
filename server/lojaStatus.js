@@ -2935,6 +2935,67 @@ const COMANDO_LIMPAR_TRAVADOS = [
   '"Processos NOCZenith orfaos encerrados: $mortos"',
 ].join('\n');
 
+// Instalação fechada do cliente Syncthing: versão e origem são fixas neste
+// catálogo, jamais vêm de tela ou parâmetro. O agente valida o SHA-256 que a
+// API oficial publica para o ativo exato antes de extrair qualquer arquivo.
+// A GUI fica local, protegida por senha aleatória descartada após o hash; uma
+// regra explícita bloqueia conexões de entrada para não abrir o roteador.
+const COMANDO_INSTALAR_SYNCTHING = [
+  '$ErrorActionPreference = "Stop"',
+  '$versao = "2.1.6"',
+  '$arquivoNome = "syncthing-windows-amd64-v$versao.zip"',
+  '$apiRelease = "https://api.github.com/repos/syncthing/syncthing/releases/tags/v$versao"',
+  '$raiz = Join-Path $env:ProgramData "NoPulso\\Syncthing"',
+  '$home = Join-Path $raiz "dados"',
+  '$exe = Join-Path $raiz "syncthing.exe"',
+  'if (-not [Environment]::Is64BitOperatingSystem) { throw "Sincronização segura requer Windows 64 bits nesta versão." }',
+  'if (Test-Path -LiteralPath $exe) {',
+  '  $idExistente = ([string](& $exe device-id --home $home 2>$null | Select-Object -First 1)).Trim()',
+  '  if ($LASTEXITCODE -eq 0 -and $idExistente) { "SYNCTHING JÁ INSTALADO · ID DO DISPOSITIVO: $idExistente"; exit 0 }',
+  '  throw "Há uma instalação incompleta do Syncthing em $raiz. Não foi substituída automaticamente."',
+  '}',
+  '$cabecalhos = @{ "User-Agent" = "NoPulso-NOC"; "Accept" = "application/vnd.github+json" }',
+  '$release = Invoke-RestMethod -Uri $apiRelease -Headers $cabecalhos -TimeoutSec 30 -ErrorAction Stop',
+  'if ($release.tag_name -ne "v$versao") { throw "Release oficial inesperado: $($release.tag_name)." }',
+  '$asset = @($release.assets | Where-Object { $_.name -eq $arquivoNome }) | Select-Object -First 1',
+  'if (-not $asset -or -not $asset.browser_download_url) { throw "Arquivo oficial do Syncthing não encontrado no release v$versao." }',
+  '$esperado = ([string]$asset.digest -replace "^sha256:", "").ToLowerInvariant()',
+  'if ($esperado -notmatch "^[a-f0-9]{64}$") { throw "O release oficial não informou um SHA-256 válido; instalação cancelada." }',
+  '$temporario = Join-Path $env:TEMP ("NoPulso-Syncthing-" + [guid]::NewGuid().ToString("N"))',
+  'try {',
+  '  New-Item -ItemType Directory -Path $temporario -Force | Out-Null',
+  '  $zip = Join-Path $temporario $arquivoNome',
+  '  Invoke-WebRequest -Uri $asset.browser_download_url -Headers $cabecalhos -OutFile $zip -UseBasicParsing -TimeoutSec 180 -ErrorAction Stop',
+  '  $calculado = (Get-FileHash -LiteralPath $zip -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()',
+  '  if ($calculado -ne $esperado) { throw "Falha na validação SHA-256 do pacote oficial; nada foi instalado." }',
+  '  $extraido = Join-Path $temporario "extraido"',
+  '  Expand-Archive -LiteralPath $zip -DestinationPath $extraido -Force -ErrorAction Stop',
+  '  $origemExe = @(Get-ChildItem -LiteralPath $extraido -Filter "syncthing.exe" -Recurse -File -ErrorAction Stop) | Select-Object -First 1',
+  '  if (-not $origemExe) { throw "O pacote validado não contém syncthing.exe." }',
+  '  New-Item -ItemType Directory -Path $raiz -Force | Out-Null',
+  '  Copy-Item -LiteralPath $origemExe.FullName -Destination $exe -Force -ErrorAction Stop',
+  '  New-Item -ItemType Directory -Path $home -Force | Out-Null',
+  '  $bytes = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)',
+  '  $senhaGui = [Convert]::ToBase64String($bytes)',
+  '  & $exe generate --home $home --gui-user "nopulso-servico" --gui-password $senhaGui --no-port-probing | Out-Null',
+  '  $senhaGui = $null; [Array]::Clear($bytes, 0, $bytes.Length)',
+  '  if ($LASTEXITCODE -ne 0) { throw "Não foi possível gerar a configuração protegida do Syncthing." }',
+  '  $regra = "NoPulso Syncthing - bloquear entrada"',
+  '  Get-NetFirewallRule -DisplayName $regra -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue',
+  '  New-NetFirewallRule -DisplayName $regra -Direction Inbound -Program $exe -Action Block -Profile Any | Out-Null',
+  '  $acaoTarefa = "`"$exe`" serve --home `"$home`" --no-browser --no-console --no-restart --no-upgrade"',
+  '  & schtasks.exe /Create /TN "NoPulso-Syncthing" /TR $acaoTarefa /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F | Out-Null',
+  '  if ($LASTEXITCODE -ne 0) { throw "Não foi possível registrar o serviço de sincronização." }',
+  '  & schtasks.exe /Run /TN "NoPulso-Syncthing" | Out-Null',
+  '  Start-Sleep -Seconds 3',
+  '  $id = ([string](& $exe device-id --home $home 2>$null | Select-Object -First 1)).Trim()',
+  '  if (-not $id) { throw "Instalado, mas não consegui confirmar a identidade do dispositivo." }',
+  '  "SYNCTHING INSTALADO · serviço SYSTEM ativo · entrada bloqueada no firewall · ID DO DISPOSITIVO: $id"',
+  '} finally {',
+  '  if (Test-Path -LiteralPath $temporario) { Remove-Item -LiteralPath $temporario -Recurse -Force -ErrorAction SilentlyContinue }',
+  '}',
+].join('\n');
+
 // Diagnóstico fechado de desempenho e reinício inesperado: apenas lê
 // indicadores que ajudam a separar disco cheio, falha de hardware, tela azul
 // e queda de energia. Não coleta linha de comando, arquivos do usuário ou
@@ -5301,7 +5362,7 @@ module.exports = {
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   dispositivosComTipoDe, resumoDe,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_REINICIAR_VM_SILENCIOSO, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_INSTALAR_SYNCTHING, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_REINICIAR_VM_SILENCIOSO, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf, comandoReiniciarVmPulse, comandoReiniciarVmGcom,
   ESTADOS, estadoDe, motivosDeDegradacao,
