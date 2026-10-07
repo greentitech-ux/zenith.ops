@@ -1130,7 +1130,7 @@
     <div class="radio-tipo">
       <label><input type="radio" name="novo-comp-tipo" value="atendimento" checked><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
       <label><input type="radio" name="novo-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do NoPulso - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
-      <label><input type="radio" name="novo-comp-tipo" value="abastecimento"><span><b>🛒 Abastecimento Carrinho</b><small>tela do Abastecimento (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
+      <label><input type="radio" name="novo-comp-tipo" value="abastecimento"><span><b>🛒 Mobiel</b><small>tela do Mobiel (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
     </div>
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;">
       <input type="checkbox" id="novo-comp-servidor" style="margin-top:3px;">
@@ -1237,7 +1237,7 @@
     <div class="radio-tipo">
       <label><input type="radio" name="editar-comp-tipo" value="atendimento"><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
       <label><input type="radio" name="editar-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do NoPulso - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
-      <label><input type="radio" name="editar-comp-tipo" value="abastecimento"><span><b>🛒 Abastecimento Carrinho</b><small>tela do Abastecimento (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
+      <label><input type="radio" name="editar-comp-tipo" value="abastecimento"><span><b>🛒 Mobiel</b><small>tela do Mobiel (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
     </div>
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;">
       <input type="checkbox" id="editar-comp-notebook" style="margin-top:3px;">
@@ -1569,7 +1569,7 @@ function fmtDuracao(ms){
   return `${d}d ${h%24}h`;
 }
 
-const TIPO_COMPUTADOR_LABEL = { atendimento: '🤖 atendimento', interno: '🔒 interno', abastecimento: '🛒 abastecimento' };
+const TIPO_COMPUTADOR_LABEL = { atendimento: '🤖 atendimento', interno: '🔒 interno', abastecimento: '🛒 Mobiel' };
 // qual pagina cada tipo de computador abre - usado no link gerado
 // (copiarLinkComputador) e no script de vigia (baixarVigia)
 function paginaDoTipo(tipo){
@@ -5192,7 +5192,7 @@ function msgModalAberto(){ return !document.getElementById('msg-overlay').classL
 const MSG_COMO_RECEBE = {
   interno: { curto: 'janela + responde', longo: 'abre a janela do NOCZenith na tela e a loja pode responder' },
   atendimento: { curto: 'só aviso', longo: 'aparece como aviso na tela de atendimento (a loja não responde por ali)' },
-  abastecimento: { curto: '⚠ não exibe', longo: 'a tela do Abastecimento não mostra mensagem — vai ficar só no histórico' },
+  abastecimento: { curto: '⚠ não exibe', longo: 'a tela do Mobiel não mostra mensagem — vai ficar só no histórico' },
 };
 function comoRecebe(c){ return MSG_COMO_RECEBE[(c && c.tipo) || 'atendimento'] || MSG_COMO_RECEBE.atendimento; }
 function compDe(codigo, posto){ return COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto) || null; }
