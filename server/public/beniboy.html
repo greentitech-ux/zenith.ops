@@ -275,7 +275,7 @@
 <header>
   <div class="header-top">
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-      <a class="btn-notif" href="/" target="_blank" rel="noopener" aria-label="Abrir NoPulso separado" title="Abrir NoPulso separado">↗</a>
+      <a class="btn-notif" id="link-nopulso" href="/" target="_blank" rel="noopener" aria-label="Abrir NoPulso separado" title="Abrir NoPulso separado">↗</a>
       <div style="min-width:0;">
         <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1><span id="bb-marca" class="marca-beniboy" style="vertical-align:-12px;margin-right:8px;"></span>Central do Beniboy</h1>
@@ -416,6 +416,11 @@ window.fetch = (url, opts = {}) => {
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
 function logout(){ localStorage.removeItem('authToken'); location.href = '/atendimento/entrar?equipe=1'; }
+// Na origem própria da Central, o atalho ↗ deve abrir o NoPulso no endereço
+// oficial, e não recarregar a própria Central em outra aba.
+_rawFetch('/api/meta/endereco').then(r=>r.ok?r.json():null).then(d=>{
+  try { const oficial=new URL(d && d.oficial); if(oficial.origin!==location.origin) document.getElementById('link-nopulso').href=oficial.origin+'/'; } catch(_) {}
+}).catch(()=>{});
 function abrirMenu(){}
 function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

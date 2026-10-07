@@ -12,6 +12,18 @@
     document.getElementById('overlay-app-beniboy').classList.remove('hidden');
     const instalada=window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
     aviso(instalada?'Este é o atalho da Central, separado do NoPulso.':'Adicione o atalho da Central: abre em janela própria, junto do NoPulso. Não usa Play Store, APK ou EXE.');
+    // No www o app instalado do NoPulso pode capturar a rota da Central. O
+    // endereço próprio dá ao navegador uma origem e um ícone independentes.
+    fetch('/api/meta/endereco').then(r=>r.ok?r.json():null).then(d=>{
+      let proprio; try { proprio=new URL(d && d.atendimento); } catch(_) { return; }
+      if(proprio.origin===location.origin) return;
+      const el=document.getElementById('beniboy-app-aviso'); if(!el) return;
+      el.textContent='Para o ícone abrir só a Central, instale pelo endereço próprio: ';
+      const a=document.createElement('a');
+      a.href=proprio.origin+'/';a.textContent=proprio.host;a.target='_blank';a.rel='noopener';a.style.color='var(--accent)';
+      el.appendChild(a);
+      el.appendChild(document.createTextNode(' (entre de novo com seu usuário lá).'));
+    }).catch(()=>{});
   };
   window.fecharAppBeniboy=function(){document.getElementById('overlay-app-beniboy').classList.add('hidden');};
   window.instalarAppBeniboy=async function(){

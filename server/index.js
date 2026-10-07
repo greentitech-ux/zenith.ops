@@ -136,6 +136,7 @@ const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
 const coworkApi = require('./coworkApi');
 const enderecoAntigo = require('./enderecoAntigo');
+const centralSubdominio = require('./centralSubdominio');
 const defesaChargeback = require('./defesaChargeback');
 const pagamentosArquivo = require('./pagamentosArquivo');
 const vigiaScript = require('./vigiaScript');
@@ -314,6 +315,11 @@ app.use((req, res, next) => {
 // leva toda TELA pro endereço novo, com o localStorage junto. API, webhook e
 // agentes continuam sendo atendidos aqui até o subdomínio ser desligado.
 app.use(enderecoAntigo.middleware(() => APP_BASE_URL));
+
+// A Central usa outra origem para não cair no escopo do NoPulso instalado no
+// www. Só telas HTML são redirecionadas; APIs, arquivos e autenticação seguem
+// a cadeia normal, sem copiar token ou sessão entre domínios.
+app.use(centralSubdominio.middleware(() => APP_BASE_URL));
 
 // gzip em TODA resposta compressivel (JSON, HTML, CSV, JS). Motivo direto:
 // o plano free do Render inclui so 5 GB/mes de banda e o servico foi
@@ -988,7 +994,7 @@ app.get('/api/defesa-arquivo', async (req, res) => {
 });
 
 app.get('/api/meta/endereco', (req, res) => {
-  res.json({ oficial: APP_BASE_URL });
+  res.json({ oficial: APP_BASE_URL, atendimento: `https://${centralSubdominio.hostAtendimento()}` });
 });
 
 // personalizacao da tela de login (fundo + balao do robo, ver loginCustom.js
@@ -18657,6 +18663,16 @@ const DIRETORIO_PUBLICO = path.join(__dirname, 'public');
 app.get('/atendimento/central', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'beniboy.html')));
 app.get('/atendimento/entrar', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'atendimento.html')));
 app.get('/atendimento/sw.js', (_req,res)=>{res.set('Cache-Control','no-cache');res.sendFile(path.join(DIRETORIO_PUBLICO,'beniboy-sw.js'));});
+// Nesta origem, o atalho da Central controla a raiz inteira; no www o mesmo
+// manifesto permanece limitado a /atendimento/ para não capturar o NoPulso.
+app.get('/manifest-beniboy.json', (req,res,next)=>{
+  if(!centralSubdominio.ehHostAtendimento(req)) return next();
+  try {
+    const base = JSON.parse(fs.readFileSync(path.join(DIRETORIO_PUBLICO,'manifest-beniboy.json'),'utf8'));
+    res.set('Cache-Control','no-cache');
+    res.type('application/manifest+json').send(JSON.stringify(centralSubdominio.manifesto(base)));
+  } catch (_) { next(); }
+});
 app.get(/^(.*)\.html$/, (req, res, next) => {
   const rotaHtml = req.path;
   const arquivo = path.resolve(DIRETORIO_PUBLICO, '.' + rotaHtml);
