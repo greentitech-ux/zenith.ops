@@ -7903,6 +7903,13 @@ setTimeout(async () => {
     ruins += 1;
     console.log('✗ Mobiel: correção do envio rápido: ' + e.message);
   }
+  try {
+    require('./testeKpiHostVm').testar();
+    console.log('✓ NOC: contadores de servidores incluem HOST e VM sem duplicar máquinas');
+  } catch (e) {
+    ruins += 1;
+    console.log('✗ NOC: contadores HOST e VM: ' + e.message);
+  }
 
   // ------------------------------------------------------------------
   // REINICIAR A PARTIR DA SAÚDE DAS MÁQUINAS. Pedido do Master (13/09/2026):
@@ -8392,7 +8399,7 @@ setTimeout(async () => {
           && /onclick="filtrarGrupoKpi\(event,'\$\{st\}','\$\{grupo\}',\$\{n\}\)"/.test(htmlNoc)
           && /\$\{n \? '' : ' kpi-zero'\}/.test(htmlNoc)
           && /parte\('regular', reg, ''/.test(htmlNoc) && /parte\('servidor', serv, 'kpi-serv'/.test(htmlNoc)
-          && /if\(FILTRO_SERVIDOR\) lista = lista\.filter\(c => \(FILTRO_SERVIDOR === 'servidor'\) === !!c\.ehServidor\);/.test(htmlNoc)
+          && /if\(FILTRO_SERVIDOR\) lista = lista\.filter\(c => \(FILTRO_SERVIDOR === 'servidor'\) === ehGrupoServidor\(c\)\);/.test(htmlNoc)
           && /FILTRO_STATUS = \(FILTRO_STATUS === v\) \? '' : v;\n  FILTRO_SERVIDOR = '';/.test(htmlNoc)
           && /\.kpi-parte\.kpi-zero\{cursor:default/.test(htmlNoc);
       })(),

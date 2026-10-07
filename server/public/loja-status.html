@@ -2882,6 +2882,7 @@ function setFiltroStatus(v){
 }
 
 function ehHostOuVm(c){ return !!(c.ehHostVm || c.ehVmPulse || c.ehVmGcom); }
+function ehGrupoServidor(c){ return !!c.ehServidor || ehHostOuVm(c); }
 function alternarFiltroHostVm(){
   FILTRO_HOST_VM = !FILTRO_HOST_VM;
   FILTRO_SERVIDOR = '';
@@ -2895,6 +2896,7 @@ function alternarFiltroHostVm(){
 function filtrarGrupoKpi(ev, st, grupo, n){
   ev.stopPropagation();
   if(!n) return;
+  FILTRO_HOST_VM = false;
   if(FILTRO_STATUS === st && FILTRO_SERVIDOR === grupo){ FILTRO_STATUS = ''; FILTRO_SERVIDOR = ''; }
   else { FILTRO_STATUS = st; FILTRO_SERVIDOR = grupo; }
   render();
@@ -3037,12 +3039,13 @@ function renderKpis(){
   // servidores no parque: com ao menos um, cada status vira "regulares · N"
   // (N = servidores NAQUELE status). Sem servidor nenhum, fica o número puro
   // de sempre. O Total continua sendo o total geral (soma de tudo).
-  const temServidor = reais.some(c => c.ehServidor);
+  const temServidor = reais.some(ehGrupoServidor);
+  document.getElementById('btn-host-vm').textContent = `🗄️ HOST & VM (${reais.filter(ehHostOuVm).length})`;
   const doStatus = st => reais.filter(c => statusDe(c)===st);
   document.getElementById('kpi-num-total').textContent = total;
   [['online','online'],['degradado','degradado'],['offline','offline'],['nunca','nunca']].forEach(([id, st]) => {
     const lista = doStatus(st);
-    const serv = lista.filter(c => c.ehServidor).length;
+    const serv = lista.filter(ehGrupoServidor).length;
     const reg = lista.length - serv;
     const el = document.getElementById('kpi-num-'+id);
     // regulares = os que NÃO são servidor; o "· N" separa os servidores.
@@ -3052,7 +3055,7 @@ function renderKpis(){
       return `<span class="kpi-parte ${classe}${n ? '' : ' kpi-zero'}${ativo ? ' ativo' : ''}" title="${titulo}" onclick="filtrarGrupoKpi(event,'${st}','${grupo}',${n})">${n}</span>`;
     };
     el.innerHTML = temServidor
-      ? parte('regular', reg, '', `${reg} computador(es) neste status - clique pra ver só eles`) + '<span class="kpi-serv-sep">·</span>' + parte('servidor', serv, 'kpi-serv', `${serv} servidor(es) neste status - clique pra ver só eles`)
+      ? parte('regular', reg, '', `${reg} computador(es) neste status - clique pra ver só eles`) + '<span class="kpi-serv-sep">·</span>' + parte('servidor', serv, 'kpi-serv', `${serv} servidor(es), HOST(s) ou VM(s) neste status - clique pra ver só eles`)
       : String(lista.length);
   });
   ['total','online','degradado','offline','nunca'].forEach(k => {
@@ -3332,7 +3335,7 @@ function render(){
   let lista = computadoresReais();
   if(FILTRO_UNIDADE) lista = lista.filter(c => c.codigo === FILTRO_UNIDADE);
   if(FILTRO_STATUS) lista = lista.filter(c => statusDe(c) === FILTRO_STATUS);
-  if(FILTRO_SERVIDOR) lista = lista.filter(c => (FILTRO_SERVIDOR === 'servidor') === !!c.ehServidor);
+  if(FILTRO_SERVIDOR) lista = lista.filter(c => (FILTRO_SERVIDOR === 'servidor') === ehGrupoServidor(c));
   if(FILTRO_HOST_VM) lista = lista.filter(ehHostOuVm);
   document.getElementById('btn-host-vm').classList.toggle('ativo', FILTRO_HOST_VM);
   if(FILTRO_TEXTO){
