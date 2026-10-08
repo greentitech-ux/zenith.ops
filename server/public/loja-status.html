@@ -1538,6 +1538,17 @@ function statusDe(c){
   return (c.degradacao && c.degradacao.length) ? 'degradado' : 'online';
 }
 // como a máquina está falando com a gente agora (link físico do NOCZenith)
+function conexaoComputadorHtml(c){
+  const link=c && c.link;
+  if(!link || !link.tipo) return '';
+  const tipos={ethernet:'Ethernet (cabo)',wifi:'Wi-Fi',nenhum:'sem placa de rede ativa',outro:'outro meio'};
+  const velocidade=Number(link.mbps);
+  const mbps=Number.isFinite(velocidade)&&velocidade>0 ? ` · ${velocidade.toLocaleString('pt-BR')} Mbps` : '';
+  const aviso=link.ethernetCaida ? ' · Ethernet caída' : '';
+  const interfaceNome=link.nome ? ` · ${link.tipo==='wifi'?'Rede':'interface'}: ${escapeHtml(String(link.nome))}` : '';
+  const leitura=c.linkEm ? ` · leitura ${escapeHtml(tempoRelativo(c.linkEm))}` : '';
+  return `📡 Conexão: <b>${escapeHtml(tipos[link.tipo]||String(link.tipo))}</b>${link.tipo==='nenhum'?'':mbps}${interfaceNome}${aviso}${leitura}`;
+}
 function linkTexto(c){
   const l = c && c.link;
   if(!l) return '';
@@ -1878,12 +1889,8 @@ function atualizarConteudoDetalhe(codigo, c){
   infoBits.push(c.ip
     ? `🌐 IP público: ${escapeHtml(c.ip)}`
     : '🌐 IP público: <span class="sub">aguardando sinal</span>');
-  if(c.link){
-    const viaLink = c.link.tipo === 'wifi' ? 'Wi-Fi' : (c.link.tipo === 'ethernet' ? 'cabo' : (c.link.tipo || 'rede'));
-    const redeWifi = c.link.tipo === 'wifi'
-      ? ` · Rede: <b>${escapeHtml(c.link.nome || 'não informada')}</b>` : '';
-    infoBits.push(`📡 Conexão: <b>${escapeHtml(viaLink)}</b>${redeWifi}${c.link.mbps ? ` · ~${escapeHtml(String(c.link.mbps))} Mbps` : ''}`);
-  }
+  const conexaoPc = conexaoComputadorHtml(c);
+  if(conexaoPc) infoBits.push(conexaoPc);
   if(c.anydeskId) infoBits.push(`🖥️ AnyDesk: <b>${escapeHtml(c.anydeskId)}</b> <button type="button" class="btn-copiar-ip" title="Copiar ID do AnyDesk" onclick="copiarDadoRede('${escapeJs(c.anydeskId)}','ID do AnyDesk')">📋</button>${c.anydeskIdFonte === 'maquina' ? ' <span class="sub">· lido do AnyDesk desta máquina</span>' : ' <span class="sub">· referência cadastrada; aguardando leitura local</span>'}`);
   // quem ligou e pra que hora - a mesma informação que evita o chamado de
   // "o computador reiniciou sozinho de madrugada"
@@ -1931,7 +1938,7 @@ function atualizarConteudoDetalhe(codigo, c){
   if(ap && !c.link && ap.rede && (ap.rede.tipo || ap.rede.geracao || ap.rede.nome)){
     const via = ap.rede.tipo === 'wifi' ? 'Wi-Fi' : (ap.rede.tipo === 'cellular' ? 'dados móveis' : (ap.rede.tipo || ap.rede.geracao));
     const redeWifi = ap.rede.tipo === 'wifi' ? ` · Rede: <b>${escapeHtml(ap.rede.nome || 'não informada pelo navegador')}</b>` : '';
-    infoBits.push(`📡 Conexão: <b>${escapeHtml(String(via))}</b>${redeWifi}${ap.rede.geracao && ap.rede.tipo ? ` · ${escapeHtml(ap.rede.geracao)}` : ''}${ap.rede.downlinkMbps ? ` · ~${ap.rede.downlinkMbps} Mbps` : ''}`);
+    infoBits.push(`📡 Conexão: <b>${escapeHtml(String(via))}</b>${redeWifi}${ap.rede.geracao && ap.rede.tipo ? ` · ${escapeHtml(ap.rede.geracao)}` : ''}${ap.rede.downlinkMbps ? ` · ~${ap.rede.downlinkMbps} Mbps (estimativa)` : ''}${ap.rede.rttMs !== undefined ? ` · latência estimada: ${ap.rede.rttMs} ms` : ''}${ap.rede.economiaDados === true ? ' · economia de dados ligada' : ''}`);
   }
   if(ap && ap.so && ap.so.nome){
     infoBits.push(`📱 Sistema: <b>${escapeHtml(ap.so.nome)}${ap.so.versao ? ' ' + escapeHtml(ap.so.versao) : ''}</b>`);

@@ -171,6 +171,9 @@
   .computadores-topo h3{margin:0;font-size:16px;}
   .computadores-topo .sub{font:11px var(--mono);color:var(--muted);width:100%;}
   .computador-filtro{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto;gap:8px;width:min(760px,100%);}
+  .computadores-pendentes{display:flex;gap:8px;flex-wrap:wrap;max-height:180px;overflow-y:auto;flex-shrink:0;}
+  .computador-pendente{display:flex;flex-direction:column;gap:5px;text-align:left;border:1px solid var(--accent2);border-radius:10px;background:var(--panel);color:var(--text);padding:10px 12px;max-width:100%;overflow-wrap:anywhere;cursor:pointer;}
+  .computador-pendente span{font-size:12px;color:var(--muted);}
   .computador-chat{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;}
   .computador-resumo{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
   .computador-estado{font:700 11px var(--mono);padding:3px 8px;border-radius:12px;background:var(--bad-dim);color:var(--bad);}
@@ -338,6 +341,7 @@
             <button class="btn-ghost" type="button" onclick="carregarComputadoresCentral(true)">↻ Atualizar</button>
           </div>
         </div>
+        <div id="computadores-pendentes" class="computadores-pendentes hidden" aria-label="Computadores com novas mensagens"></div>
         <div class="computador-chat">
           <div id="computador-resumo" class="computador-resumo hidden"></div>
           <div id="computador-mensagens" class="computador-mensagens"><div class="computador-vazio">Escolha uma unidade e um computador para abrir a conversa.</div></div>
@@ -1192,10 +1196,29 @@ function restaurarEstadoPaineis(){
 }
 
 function chaveComputador(codigo,posto){ return `${codigo}::${posto}`; }
+function renderPendentesComputadores(){
+  const area=document.getElementById('computadores-pendentes');
+  area.classList.toggle('hidden',!COMPUTADORES_NOVOS.size);
+  area.innerHTML=[...COMPUTADORES_NOVOS].map(chave=>{
+    const separador=chave.indexOf('::');
+    const codigo=chave.slice(0,separador), posto=chave.slice(separador+2);
+    const c=COMPUTADORES_CENTRAL.find(c=>c.codigo===codigo&&c.posto===posto);
+    return `<button type="button" class="computador-pendente" data-codigo="${escapeHtml(codigo)}" data-posto="${escapeHtml(posto)}" onclick="abrirPendenteComputador(this.dataset.codigo,this.dataset.posto)"><strong>${escapeHtml(c?.nome||posto)} <span class="aba-alerta-computador">!</span></strong><span>${escapeHtml(c?.unidadeNome||codigo)}</span><span>Nova mensagem · abrir conversa</span></button>`;
+  }).join('');
+}
+async function abrirPendenteComputador(codigo,posto){
+  document.getElementById('computador-unidade').value=codigo;
+  trocarUnidadeComputador();
+  document.getElementById('computador-posto').value=posto;
+  COMPUTADOR_ATIVO={codigo,posto};
+  COMPUTADOR_DETALHE=null;
+  await carregarConversaComputador();
+}
 function computadorSelecionado(){
   return COMPUTADOR_ATIVO && COMPUTADORES_CENTRAL.find(c=>c.codigo===COMPUTADOR_ATIVO.codigo&&c.posto===COMPUTADOR_ATIVO.posto);
 }
 function renderAbaComputadores(){
+  renderPendentesComputadores();
   const abas=document.getElementById('conversas-abas');
   const total=COMPUTADORES_NOVOS.size;
   const aba=`<div class="conversa-aba computadores ${MODO_COMPUTADORES?'ativa':''}"><button type="button" aria-pressed="${MODO_COMPUTADORES}" onclick="abrirComputadoresCentral()">💻 Computadores${total?` <span class="aba-alerta-computador" aria-label="${total} nova${total>1?'s':''} resposta${total>1?'s':''}">${total>9?'9+':total}</span>`:''}</button>${MODO_COMPUTADORES?'<button type="button" aria-label="Fechar conversas com computadores" onclick="fecharComputadoresCentral()">×</button>':''}</div>`;
@@ -1227,8 +1250,6 @@ async function trocarComputadorCentral(){
   const posto=document.getElementById('computador-posto').value;
   if(!codigo || !posto) return;
   COMPUTADOR_ATIVO={codigo,posto};
-  COMPUTADORES_NOVOS.delete(chaveComputador(codigo,posto));
-  renderAbaComputadores();
   await carregarConversaComputador();
 }
 async function carregarComputadoresCentral(forcar=false){
@@ -1239,6 +1260,7 @@ async function carregarComputadoresCentral(forcar=false){
     if(!resp.ok) throw new Error(dados.error||'Não foi possível carregar os computadores.');
     COMPUTADORES_CENTRAL=Array.isArray(dados)?dados:[];
     preencherUnidadesComputador();
+    renderPendentesComputadores();
   }catch(e){ alert(e.message); }
 }
 function renderConversaComputador(){
@@ -1268,6 +1290,8 @@ async function carregarConversaComputador(){
     if(!resp.ok) throw new Error(dados.error||'Não foi possível abrir a conversa.');
     if(!COMPUTADOR_ATIVO || COMPUTADOR_ATIVO.codigo!==codigo || COMPUTADOR_ATIVO.posto!==posto) return;
     COMPUTADOR_DETALHE=dados;
+    COMPUTADORES_NOVOS.delete(chaveComputador(codigo,posto));
+    renderAbaComputadores();
     renderConversaComputador();
   }catch(e){ msgs.innerHTML=`<div class="computador-vazio">${escapeHtml(e.message)}</div>`; }
 }

@@ -852,7 +852,7 @@ function sanitizarLink(bruto) {
 }
 function mesmoLink(a, b) {
   if (!a || !b) return a === b;
-  return a.tipo === b.tipo && a.ethernetCaida === b.ethernetCaida && a.mbps === b.mbps;
+  return a.tipo === b.tipo && a.nome === b.nome && a.ethernetCaida === b.ethernetCaida && a.mbps === b.mbps;
 }
 
 // Reinício: o agente lê o LastBootUpTime UMA vez, quando sobe, e carrega
@@ -1571,6 +1571,9 @@ function sanitizarAparelho(bruto) {
     if (nome) r.nome = nome;
     if (geracao) r.geracao = geracao;
     if (downlinkMbps !== null) r.downlinkMbps = downlinkMbps;
+    const rttMs = typeof rede.rttMs === 'number' ? numeroEntre(rede.rttMs, 0, 60000, 0) : null;
+    if (rttMs !== null) r.rttMs = rttMs;
+    if (typeof rede.economiaDados === 'boolean') r.economiaDados = rede.economiaDados;
     if (Object.keys(r).length) saida.rede = r;
   }
 

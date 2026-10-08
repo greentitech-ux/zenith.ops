@@ -74,6 +74,8 @@
       if (c.type) saida.tipo = String(c.type);
       if (c.effectiveType) saida.geracao = String(c.effectiveType);
       if (typeof c.downlink === 'number') saida.downlinkMbps = c.downlink;
+      if (typeof c.rtt === 'number') saida.rttMs = c.rtt;
+      if (typeof c.saveData === 'boolean') saida.economiaDados = c.saveData;
       return Object.keys(saida).length ? saida : null;
     } catch (e) { return null; }
   }
