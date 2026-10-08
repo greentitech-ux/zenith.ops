@@ -439,6 +439,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/loja-status/agente-android/versao',
   '/api/loja-status/reparo-noczenith.ps1',
   '/assinar.html',
+  '/preencher.html', '/formulario-preencher.html',
   '/reuniao-publica.html',
   '/treinamento-publico.html',
   '/evidencia-pedido.html',
@@ -1087,17 +1088,16 @@ app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, 
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype || 'application/octet-stream' });
     }
 
-    const tarefa = await criarTarefaDeTriagem({
-      titulo: `Estorno (cliente) · ${nomeCliente || 'sem nome informado'}`,
-      descricao: `Pedido de estorno recebido pelo formulário público. Unidade: ${unidadeNome || unidade || 'não informada'}.`,
-      unidade, unidadeNome, origem: 'estorno-cliente', anexos,
-      triagem: { tipoSugerido: 'estorno', estorno: { origem: 'cliente', motivoEstorno, motivoOutro, valorVenda, formaPagamento,
+    const { tarefa, estorno } = await require('./estornoPublico').criar({
+      usuario: await masterDaTriagem(), anexos,
+      dados: { unidade, unidadeNome, motivoEstorno, motivoOutro, valorVenda, formaPagamento,
         bandeira, ultimos4, dataVenda, horaVenda, valorEstornar, nomeCliente, cpfCnpjCliente, telefoneCliente,
-        pixChave, pixNomeTitular, pixBanco, observacaoCliente } },
+        pixChave, pixNomeTitular, pixBanco, observacaoCliente },
     });
     broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
-    push.notifySolicitacao(`Ticket #${tarefa.numeroTicket} · Pedido de estorno (triagem)`, `${unidadeNome} · R$ ${(Number(valorEstornar) || 0).toFixed(2)}`, tarefa.id);
-    res.json({ ok: true, id: tarefa.id });
+    broadcast('refund-request-changed', estorno, 'monitor');
+    push.notifySolicitacao(`Ticket #${tarefa.numeroTicket} · Pedido de estorno`, `${unidadeNome} · R$ ${(Number(valorEstornar) || 0).toFixed(2)}`, tarefa.id);
+    res.json({ ok: true, id: tarefa.id, estornoId: estorno.id, numeroTicket: tarefa.numeroTicket });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -6725,6 +6725,7 @@ app.post('/api/refund-requests', auth.requireAuth, async (req, res) => {
     let origemTarefa = null;
     let numeroTicketDaTarefa = null;
     let dadosDaTriagem = null;
+    let anexosDaTriagem = [];
     if (tarefaOrigemId) {
       const preparada = await tarefas.prepararConversaoEmSolicitacao(String(tarefaOrigemId), acessoDasTarefas(req), 'estorno');
       if (preparada.jaTemSolicitacao) {
@@ -6741,6 +6742,7 @@ app.post('/api/refund-requests', auth.requireAuth, async (req, res) => {
       origemTarefa = { id: preparada.tarefa.id, titulo: preparada.tarefa.titulo, criadoPorNome: preparada.tarefa.criadoPorNome, criadaEm: preparada.tarefa.criadaEm };
       numeroTicketDaTarefa = preparada.numeroTicket;
       dadosDaTriagem = preparada.tarefa.triagem?.estorno || null;
+      anexosDaTriagem = preparada.tarefa.anexos || [];
     }
 
     // Criar estorno é sempre uma decisão posterior à triagem. Sem tarefa de
@@ -6779,6 +6781,7 @@ app.post('/api/refund-requests', auth.requireAuth, async (req, res) => {
       direcionadoParaId: valorDaTriagem(direcionadoParaId, 'direcionadoParaId'), direcionadoParaEmail: valorDaTriagem(direcionadoParaEmail, 'direcionadoParaEmail'),
       teste: valorDaTriagem(undefined, 'teste') || req.isQaMaster || req.isQaUser,
       numeroTicket: numeroTicketDaTarefa, origemTarefa,
+      anexos: anexosDaTriagem,
     });
     if (tarefaOrigemId) {
       await tarefas.registrarGerado(String(tarefaOrigemId), acessoDasTarefas(req), {
@@ -18664,6 +18667,11 @@ app.post('/api/ifood/sincronizar', auth.requireMaster, async (req, res) => {
 // So redireciona arquivos HTML que existem dentro de public. Assim uma rota de
 // API, um anexo ou um caminho inexistente nunca e' alterado por engano.
 const DIRETORIO_PUBLICO = path.join(__dirname, 'public');
+// Preserva os links antigos enviados pelo conector e a query com o token.
+app.get(['/preencher', '/formulario-preencher', '/formulario-preencher.html'], (_req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  res.sendFile(path.join(DIRETORIO_PUBLICO, 'preencher.html'));
+});
 // Caminhos exclusivos do atalho; /beniboy permanece compatível com links antigos.
 app.get('/atendimento/central', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'beniboy.html')));
 app.get('/atendimento/entrar', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'atendimento.html')));

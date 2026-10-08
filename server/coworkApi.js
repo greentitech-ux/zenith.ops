@@ -21,6 +21,7 @@ const store = require('./store');
 const adyenDisputas = require('./adyenDisputas');
 const refunds = require('./refunds');
 const catalogo = require('./coworkCatalogo');
+const { validarLinkPreenchimento } = require('./formularioLinkPublico');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const suporteChat = require('./suporteChat');
 
@@ -984,7 +985,8 @@ async function criarFormulario(p, ator) {
   const base = { tipo: p.tipo, unidade: cadastro.unidade, criadoPorId: ator.id, criadoPorEmail: `${ator.email} via Claude/Cowork` };
   if (p.modo === 'link') {
     const r = await formularios.criarParaPreenchimento(base);
-    return { mensagem: `Formulário #${r.numeroTicket} criado pra preenchimento por link.`, id: r.id, linkPreenchimento: r.tokenPreenchimento ? `${baseUrl()}/formulario-preencher?token=${encodeURIComponent(r.tokenPreenchimento)}` : null };
+    const linkPreenchimento = await validarLinkPreenchimento(baseUrl(), r);
+    return { mensagem: `Formulário #${r.numeroTicket} criado pra preenchimento por link.`, id: r.id, linkPreenchimento, linkValidado: true };
   }
   const r = await formularios.criar({ ...base, campos: p.campos || {}, linhas: p.linhas || [], anexos: [], rascunho: true, preparadoPor });
   const cheio = await formularios.getOne(r.id);
@@ -1416,7 +1418,18 @@ async function executar({ nome, entrada, idempotencyKey }) {
   const ator = await resolverAtor();
   const ref = IDEMPOTENCIA.doc(crypto.createHash('sha256').update(chave).digest('hex'));
   const anterior = await ref.get();
-  if (anterior.exists) return { ...anterior.data().resposta, repetida: true };
+  if (anterior.exists) {
+    const salva = anterior.data();
+    const resposta = salva.resposta;
+    // Links guardados antes da correção também passam pela checagem pública.
+    if (salva.nome === 'criar_formulario' && resposta?.resultado?.linkPreenchimento) {
+      const formulario = await formularios.getOne(resposta.resultado.id);
+      if (!formulario) throw new Error('Formulário não encontrado; gere um novo link.');
+      const linkPreenchimento = await validarLinkPreenchimento(baseUrl(), formulario);
+      return { ...resposta, resultado: { ...resposta.resultado, linkPreenchimento, linkValidado: true }, repetida: true };
+    }
+    return { ...resposta, repetida: true };
+  }
   // Reserva ANTES de alterar qualquer coisa. Duas chamadas simultâneas com a
   // mesma chave não podem criar dois tickets/usuários. `create` é atômico.
   try {

@@ -39,7 +39,7 @@ async function create({
   pixChave, pixNomeTitular, pixBanco, observacaoCliente,
   requestedById, requestedByEmail, direcionadoParaId, direcionadoParaEmail,
   numeroTicket, convertidoDeTipo, convertidoDeId, origemTarefa, teste,
-}) {
+}, { lote = null } = {}) {
   origem = ORIGENS.includes(origem) ? origem : 'interno';
 
   if (origem === 'interno') {
@@ -154,8 +154,8 @@ async function create({
     linkAcaoGeradoEm: null,
     linkAcaoRevogado: false,
   };
-  await doc.set(registro);
-  refundsCache.invalidar();
+  if (lote) lote.set(doc, registro);
+  else { await doc.set(registro); refundsCache.invalidar(); }
   return registro;
 }
 

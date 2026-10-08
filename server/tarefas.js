@@ -325,7 +325,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null, defesaChargeback = null, desbloqueioLogin = null, autorizacao = null }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false, subtarefas = [], serie = null, anexosIniciais = [], triagem = null, defesaChargeback = null, desbloqueioLogin = null, autorizacao = null }, { lote = null } = {}) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -411,7 +411,8 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
     // de qual serie recorrente esta ocorrencia saiu (null = tarefa avulsa)
     serieId: (serie && serie.id) || null, serieData: (serie && serie.data) || null,
   };
-  await ref.set(tarefa);
+  if (lote) lote.set(ref, tarefa);
+  else await ref.set(tarefa);
   return tarefa;
 }
 

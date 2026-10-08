@@ -145,6 +145,7 @@ const fakeDb = {
 process.env.PORT = '8899';
 process.env.DASHBOARD_USER = 'x';
 process.env.DASHBOARD_PASS = 'x';
+if (process.env.TESTE_FORMULARIO_DASHBOARD === '1') process.env.DASHBOARD_PASSWORD = 'x';
 process.env.MASTER_EMAIL = 'master@teste.local';
 process.env.MASTER_PASSWORD = 'SenhaDeTeste!2026';
 // token de API do Master (pedido 12/09/2026: ele chama a API de um chat no
@@ -415,6 +416,10 @@ function enviarJson(metodo, caminho, corpoObj, headers = {}) {
 }
 
 setTimeout(async () => {
+  if (process.env.TESTE_FORMULARIO_PUBLICO === '1') {
+    try { await require('./testeFluxoFormularioPublico').testar({ DOCS, postarJson }); process.exit(0); }
+    catch (e) { console.error(e); process.exit(1); }
+  }
   // sessão de Master direto no módulo de auth (não passa pelo login)
   // login de verdade (ensureMaster criou o Master no Firestore falso no boot)
   let token = null;
@@ -30085,6 +30090,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e) { ruins++; console.log('✗ Portal Beniboy: '+e.message); }
   try { await require('./testeBeniboyComputadores').testarHttp({token,pedir,postarJson}); }
   catch(e) { ruins++; console.log('✗ Central ↔ computadores: '+e.message); }
+  try { await require('./testeFluxoFormularioPublico').testar({ DOCS, postarJson }); }
+  catch (e) { ruins++; console.log('✗ Formulário público: ' + e.stack); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
