@@ -575,6 +575,7 @@ const TAREFAS_NOC = {
   'diagnostico-desempenho': { verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
   'inventario-estacao': { verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
   syncthing: { verbo: 'Instalar sincronização segura em', comando: lojaStatus.COMANDO_INSTALAR_SYNCTHING, origem: 'manutencao-syncthing', requerAdmin: true },
+  'vincular-syncthing': { verbo: 'Vincular sincronização segura ao Umbrel em', comando: lojaStatus.comandoVincularSyncthingAoUmbrel, origem: 'manutencao-vincular-syncthing', requerAdmin: true },
   'limpeza-segura': { verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },
   'corrigir-memoria-limitada': { verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
   'remover-office': { verbo: 'Remover Microsoft Office de', comando: lojaStatus.COMANDO_REMOVER_OFFICE, origem: 'manutencao-remover-office', requerAdmin: true },

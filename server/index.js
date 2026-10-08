@@ -7009,6 +7009,7 @@ const EXECUTORES_QA = {
   'manutencao.reiniciarGsurfRsa': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_GSURF_RSA, { origem: 'manutencao-gsurf-rsa' }),
   'manutencao.encerrarGcomWcf': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoEncerrarGcomWcf, { origem: 'manutencao-gcom-wcf' }),
   'manutencao.instalarSyncthing': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_INSTALAR_SYNCTHING, { origem: 'manutencao-syncthing', requerAdmin: true }),
+  'manutencao.vincularSyncthing': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoVincularSyncthingAoUmbrel, { origem: 'manutencao-vincular-syncthing', requerAdmin: true }),
   'manutencao.limpezaSegura': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_LIMPEZA_SEGURA, { origem: 'manutencao-limpeza-segura' }),
   'manutencao.corrigirMemoriaLimitada': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, { origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true }),
   'manutencao.removerOffice': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REMOVER_OFFICE, { origem: 'manutencao-remover-office', requerAdmin: true }),
@@ -7468,7 +7469,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'reiniciar-vm-pulse', 'reiniciar-vm-gcom', 'abortar', 'anydesk', 'gsurfRsa', 'diagnostico-tef', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'syncthing', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'reiniciar-vm-pulse', 'reiniciar-vm-gcom', 'abortar', 'anydesk', 'gsurfRsa', 'diagnostico-tef', 'gcomWcf', 'zebra', 'rede', 'reset-senha', 'diagnostico-desempenho', 'inventario-estacao', 'syncthing', 'vincular-syncthing', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const nomeConta = tarefa === 'reset-senha' ? req.body.nomeConta : undefined;
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
@@ -7478,6 +7479,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       'diagnostico-desempenho': { acao: 'manutencao.diagnosticoDesempenho', verbo: 'Diagnosticar desempenho de', comando: lojaStatus.COMANDO_DIAGNOSTICO_DESEMPENHO, origem: 'manutencao-diagnostico-desempenho' },
       'inventario-estacao': { acao: 'manutencao.inventarioEstacao', verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
       syncthing: { acao: 'manutencao.instalarSyncthing', verbo: 'Instalar sincronização segura em', comando: lojaStatus.COMANDO_INSTALAR_SYNCTHING, origem: 'manutencao-syncthing', requerAdmin: true },
+      'vincular-syncthing': { acao: 'manutencao.vincularSyncthing', verbo: 'Vincular sincronização segura ao Umbrel em', comando: lojaStatus.comandoVincularSyncthingAoUmbrel, origem: 'manutencao-vincular-syncthing', requerAdmin: true },
       'limpeza-segura': { acao: 'manutencao.limpezaSegura', verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },
       'corrigir-memoria-limitada': { acao: 'manutencao.corrigirMemoriaLimitada', verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
       'remover-office': { acao: 'manutencao.removerOffice', verbo: 'Remover Microsoft Office de', comando: lojaStatus.COMANDO_REMOVER_OFFICE, origem: 'manutencao-remover-office', requerAdmin: true },

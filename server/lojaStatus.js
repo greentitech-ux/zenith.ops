@@ -2999,6 +2999,87 @@ const COMANDO_INSTALAR_SYNCTHING = [
   '}',
 ].join('\n');
 
+// Vinculação fechada do Syncthing com o Umbrel: não recebe hostname, caminho,
+// ID de pasta ou destino pela tela. A única identidade remota vem da variável
+// protegida do servidor e os três perfis autorizados abaixo são imutáveis no
+// código. Assim a manutenção não vira um canal para compartilhar qualquer
+// diretório de uma máquina com um destino arbitrário.
+const SYNCTHING_UMBREL_DEVICE_ID = String(process.env.NOPULSO_UMBREL_SYNCTHING_DEVICE_ID || '').trim().toUpperCase();
+const PERFIS_SYNCTHING_GRANDE_FRATELLO = Object.freeze({
+  'AERO-CAR-PDV.01': Object.freeze({
+    pastaId: 'nopulso-processados-aero-car-pdv-01',
+    rotulo: 'NOPULSO PROCESSADOS - GRANDE-FRATELLO - AERO-CAR-PDV.01',
+  }),
+  'DOM-AERO-PDV.01': Object.freeze({
+    pastaId: 'nopulso-processados-dom-aero-pdv-01',
+    rotulo: 'NOPULSO PROCESSADOS - GRANDE-FRATELLO - DOM-AERO-PDV.01',
+  }),
+  'SPO-AERO-PDV.01': Object.freeze({
+    pastaId: 'nopulso-processados-spo-aero-pdv-01',
+    rotulo: 'NOPULSO PROCESSADOS - GRANDE-FRATELLO - SPO-AERO-PDV.01',
+  }),
+});
+
+function perfilSyncthingGrandeFratello(doc) {
+  const nome = String((doc && (doc.nome || doc.posto)) || '').trim().toUpperCase();
+  const perfil = PERFIS_SYNCTHING_GRANDE_FRATELLO[nome];
+  if (!perfil) throw new Error('Esta vinculação Syncthing é permitida somente para AERO-CAR-PDV.01, DOM-AERO-PDV.01 e SPO-AERO-PDV.01.');
+  if (!/^[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}$/.test(SYNCTHING_UMBREL_DEVICE_ID)) {
+    throw new Error('A identidade segura do Umbrel ainda não está configurada no servidor. Defina NOPULSO_UMBREL_SYNCTHING_DEVICE_ID antes de vincular máquinas.');
+  }
+  return { ...perfil, nome, caminho: `C:\\ProgramData\\NoPulso\\Syncthing\\saida\\GRANDE-FRATELLO\\${nome}` };
+}
+
+function comandoVincularSyncthingAoUmbrel(doc) {
+  const perfil = perfilSyncthingGrandeFratello(doc);
+  // Usa os modelos que o próprio Syncthing expõe na API em vez de escrever
+  // config.xml manualmente. Isso preserva campos novos entre versões e permite
+  // validar cada alteração contra a instância local antes de salvar.
+  return [
+    '$ErrorActionPreference = "Stop"',
+    '$raiz = Join-Path $env:ProgramData "NoPulso\\Syncthing"',
+    '$syncHome = Join-Path $raiz "dados"',
+    '$exe = Join-Path $raiz "syncthing.exe"',
+    '$configPath = Join-Path $syncHome "config.xml"',
+    `$umbrelId = "${SYNCTHING_UMBREL_DEVICE_ID}"`,
+    `$folderId = "${perfil.pastaId}"`,
+    `$folderLabel = "${perfil.rotulo}"`,
+    `$folderPath = "${perfil.caminho}"`,
+    'if (-not (Test-Path -LiteralPath $exe) -or -not (Test-Path -LiteralPath $configPath)) { throw "Syncthing não está instalado pelo NOC nesta máquina. Execute primeiro Preparar sincronização segura." }',
+    'New-Item -ItemType Directory -Path $folderPath -Force | Out-Null',
+    '$xml = [xml](Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop)',
+    '$apiKey = [string]$xml.configuration.gui.apikey',
+    'if ([string]::IsNullOrWhiteSpace($apiKey)) { throw "A API local protegida do Syncthing não está disponível; a vinculação foi cancelada." }',
+    '$headers = @{ "X-API-Key" = $apiKey }',
+    '$base = "http://127.0.0.1:8384/rest"',
+    'try { Invoke-RestMethod -Uri "$base/system/ping" -Headers $headers -TimeoutSec 12 -ErrorAction Stop | Out-Null } catch { throw "O serviço local do Syncthing não respondeu. Nenhuma configuração foi alterada." }',
+    '$devices = @(Invoke-RestMethod -Uri "$base/config/devices" -Headers $headers -TimeoutSec 12 -ErrorAction Stop)',
+    '$remote = @($devices | Where-Object { [string]$_.deviceID -eq $umbrelId }) | Select-Object -First 1',
+    'if (-not $remote) {',
+    '  $remote = Invoke-RestMethod -Uri "$base/config/defaults/device" -Headers $headers -TimeoutSec 12 -ErrorAction Stop',
+    '  $remote.deviceID = $umbrelId; $remote.name = "UMBREL-NOPULSO"; $remote.addresses = @("dynamic"); $remote.paused = $false; $remote.autoAcceptFolders = $false',
+    '  Invoke-RestMethod -Uri "$base/config/devices" -Method Post -Headers $headers -ContentType "application/json" -Body ($remote | ConvertTo-Json -Depth 32 -Compress) -TimeoutSec 12 -ErrorAction Stop | Out-Null',
+    '}',
+    '$folders = @(Invoke-RestMethod -Uri "$base/config/folders" -Headers $headers -TimeoutSec 12 -ErrorAction Stop)',
+    '$folder = @($folders | Where-Object { [string]$_.id -eq $folderId }) | Select-Object -First 1',
+    'if ($folder) {',
+    '  if ([string]$folder.path -ne $folderPath -or [string]$folder.type -ne "sendonly") { throw "Já existe uma pasta Syncthing com este ID e configuração diferente; nada foi sobrescrito." }',
+    '  $hasUmbrel = @($folder.devices | Where-Object { [string]$_.deviceID -eq $umbrelId }).Count -gt 0',
+    '  if (-not $hasUmbrel) {',
+    '    $folder.devices = @($folder.devices) + @([pscustomobject]@{ deviceID = $umbrelId; introducedBy = ""; encryptionPassword = "" })',
+    '    Invoke-RestMethod -Uri "$base/config/folders/$folderId" -Method Put -Headers $headers -ContentType "application/json" -Body ($folder | ConvertTo-Json -Depth 32 -Compress) -TimeoutSec 12 -ErrorAction Stop | Out-Null',
+    '  }',
+    '} else {',
+    '  $folder = Invoke-RestMethod -Uri "$base/config/defaults/folder" -Headers $headers -TimeoutSec 12 -ErrorAction Stop',
+    '  $folder.id = $folderId; $folder.label = $folderLabel; $folder.path = $folderPath; $folder.type = "sendonly"; $folder.devices = @([pscustomobject]@{ deviceID = $umbrelId; introducedBy = ""; encryptionPassword = "" })',
+    '  Invoke-RestMethod -Uri "$base/config/folders" -Method Post -Headers $headers -ContentType "application/json" -Body ($folder | ConvertTo-Json -Depth 32 -Compress) -TimeoutSec 12 -ErrorAction Stop | Out-Null',
+    '}',
+    '$restart = Invoke-RestMethod -Uri "$base/config/restart-required" -Headers $headers -TimeoutSec 12 -ErrorAction Stop',
+    'if ($restart.restartRequired) { Invoke-RestMethod -Uri "$base/system/restart" -Method Post -Headers $headers -TimeoutSec 12 -ErrorAction Stop | Out-Null }',
+    '"SYNCTHING VINCULADO AO UMBREL · pasta de saída preparada: $folderPath · modo somente envio · nenhum arquivo do GCOM foi copiado."',
+  ].join('\n');
+}
+
 // Diagnóstico fechado de desempenho e reinício inesperado: apenas lê
 // indicadores que ajudam a separar disco cheio, falha de hardware, tela azul
 // e queda de energia. Não coleta linha de comando, arquivos do usuário ou
@@ -5365,7 +5446,7 @@ module.exports = {
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   dispositivosComTipoDe, resumoDe,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_INSTALAR_SYNCTHING, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_REINICIAR_VM_SILENCIOSO, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_INSTALAR_SYNCTHING, comandoVincularSyncthingAoUmbrel, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_REINICIAR_VM_SILENCIOSO, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf, comandoReiniciarVmPulse, comandoReiniciarVmGcom,
   ESTADOS, estadoDe, motivosDeDegradacao,
