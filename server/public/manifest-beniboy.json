@@ -1,7 +1,7 @@
 {
   "id": "/central-beniboy-app",
-  "name": "Central Beniboy",
-  "short_name": "Beniboy",
+  "name": "Suporte NoPulso",
+  "short_name": "Suporte NoPulso",
   "description": "Central de atendimento do NoPulso: conversas, anexos e suporte em uma janela própria.",
   "start_url": "/atendimento/central",
   "scope": "/atendimento/",
