@@ -160,6 +160,25 @@ async function getPublico(id, token) {
   };
 }
 
+// Portal do solicitante: o mesmo token aleatório da conversa funciona como
+// link secreto. Diferente do widget, ele pode mostrar o ÚLTIMO atendimento
+// encerrado ao dono do link, mas nunca devolve notas, responsáveis, alertas
+// ou quaisquer campos internos.
+async function getPortalPublico(id, token) {
+  const chat = await getOne(id);
+  if (!chat || !token || chat.token !== token) return null;
+  return {
+    id: chat.id, numeroTicket: chat.numeroTicket, nome: chat.nome, assunto: chat.assunto,
+    status: chat.status, statusAtendimento: chat.statusAtendimento || 'PENDENTE', criadoEm: chat.criadoEm, finalizadoEm: chat.finalizadoEm || null,
+    mensagens: (chat.mensagens || []).map((m) => ({ de: m.de, texto: m.texto, em: m.em, ...(m.bot ? { bot: true } : {}), ...(m.anexo ? { anexo: { nome: m.anexo.nome, tipo: m.anexo.tipo, tamanho: m.anexo.tamanho } } : {}) })),
+  };
+}
+
+async function getPortalComToken(id, token) {
+  const chat = await getOne(id);
+  return chat && token && chat.token === token ? chat : null;
+}
+
 // mesma checagem de token da visao publica (getPublico), mas devolvendo o
 // registro cru - usado só pra montar o PDF (server/suporteChatPDF.js), que
 // precisa do texto puro (mensagens ja vem sem o "de" trocado por rotulo)
@@ -765,7 +784,7 @@ async function finalizarOciosos() {
 
 module.exports = {
   registrarPedidoVerificado,
-  criar, getOne, getPublico, getComToken, atualizarLogado, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
+  criar, getOne, getPublico, getPortalPublico, getPortalComToken, getComToken, atualizarLogado, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, restringirAposConclusao, adicionarTicketVinculado, marcarEncaminhadoCowork, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, marcarNotaTratada, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,

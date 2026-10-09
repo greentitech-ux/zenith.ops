@@ -412,6 +412,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/estorno-cliente.html',
   '/solicitacao-publica.html',
   '/atendimento.html',
+  '/meu-atendimento.html',
   '/atendimento/central', '/atendimento/entrar', '/atendimento/sw.js',
   '/beniboy-portal.js', '/beniboy-alertas.js', '/beniboy-app.js', '/beniboy-marca.css', '/manifest-beniboy.json',
   '/unidade.html', '/sessao-unidade.js', '/api/acesso-unidade/vinculo',
@@ -2085,6 +2086,11 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
       logado, lojaContexto: unidade?.nome || req.body.lojaContexto, unidadeContexto: unidade?.codigo || req.body.unidadeContexto,
       postoContexto: unidade?.posto || req.body.postoContexto, anexo,
     });
+    // Link com segredo no fragmento: o token não vai ao servidor nos acessos
+    // seguintes nem pode ser adivinhado pelo número do protocolo. É a forma
+    // de visitante sem login acompanhar o próprio atendimento encerrado.
+    const linkAcompanhamento = `${APP_BASE_URL}/meu-atendimento.html#id=${encodeURIComponent(chat.id)}&token=${encodeURIComponent(chat.token)}`;
+    await suporteChat.adicionarMensagem(chat.id, { de: 'suporte', bot: true, texto: `Guarde este link para acompanhar seu protocolo #${chat.numeroTicket}: ${linkAcompanhamento}` });
     await completarContatoAusenteDoChat(logado, chat, [req.body.contato, req.body.texto]);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifyChatBeniboy(chat, `Ticket #${chat.numeroTicket} · Novo atendimento`, `${chat.nome} · ${chat.assunto || 'Suporte'}`).catch(e=>console.error('[beniboy] push:',e.message));
@@ -2172,7 +2178,7 @@ app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), asyn
 // token da conversa. Enderecado pelo INDICE da mensagem no array (mensagens
 // so sao acrescentadas, nunca reordenadas/removidas - indice e estavel)
 app.get('/api/suporte-chat/:id/anexo/:indice', async (req, res) => {
-  const chat = await suporteChat.getComToken(req.params.id, req.query.token);
+  const chat = await suporteChat.getPortalComToken(req.params.id, req.query.token);
   if (!chat) return res.sendStatus(404);
   const msg = (chat.mensagens || [])[Number(req.params.indice)];
   if (!msg || !msg.anexo) return res.sendStatus(404);
@@ -2186,6 +2192,54 @@ app.get('/api/suporte-chat/:id/pdf', async (req, res) => {
   const chat = await suporteChat.getComToken(req.params.id, req.query.token);
   if (!chat) return res.sendStatus(404);
   suporteChatPDF.gerarChatPDF(res, chat);
+});
+
+// Link secreto (token no fragmento da URL no navegador) para quem abriu o
+// atendimento sem login. O protocolo sozinho nunca serve como chave.
+app.get('/api/meu-atendimento/:id', async (req, res) => {
+  const chat = await suporteChat.getPortalPublico(req.params.id, req.query.token);
+  if (!chat) return res.sendStatus(404);
+  res.json(chat);
+});
+
+// Pessoa logada: só conversas ligadas ao próprio id de sessão. A equipe usa
+// /api/suporte-chats e não passa por esta visão reduzida.
+app.get('/api/meus-atendimentos', auth.requireAuth, async (req, res) => {
+  const meus = (await suporteChat.listAll()).filter((chat) => chat.logado?.id === req.user.id);
+  const abertos = meus.filter((c) => c.status === 'ABERTO').sort((a, b) => String(b.atualizadoEm || '').localeCompare(String(a.atualizadoEm || '')));
+  const ultimoFechado = meus.filter((c) => c.status === 'FINALIZADO').sort((a, b) => String(b.finalizadoEm || '').localeCompare(String(a.finalizadoEm || '')))[0] || null;
+  const resumir = (c) => !c ? null : ({ id: c.id, numeroTicket: c.numeroTicket, assunto: c.assunto, status: c.status, statusAtendimento: c.statusAtendimento || 'PENDENTE', criadoEm: c.criadoEm, finalizadoEm: c.finalizadoEm || null });
+  res.json({ abertos: abertos.map(resumir), ultimoEncerrado: resumir(ultimoFechado) });
+});
+app.get('/api/meus-atendimentos/:id', auth.requireAuth, async (req, res) => {
+  const chat = await suporteChat.getOne(req.params.id);
+  if (!chat || chat.logado?.id !== req.user.id) return res.sendStatus(404);
+  res.json({ id: chat.id, numeroTicket: chat.numeroTicket, nome: chat.nome, assunto: chat.assunto, status: chat.status, statusAtendimento: chat.statusAtendimento || 'PENDENTE', criadoEm: chat.criadoEm, finalizadoEm: chat.finalizadoEm || null, mensagens: (chat.mensagens || []).map((m) => ({ de: m.de, texto: m.texto, em: m.em, ...(m.bot ? { bot: true } : {}), ...(m.anexo ? { anexo: m.anexo } : {}) })) });
+});
+app.get('/api/meus-atendimentos/:id/anexo/:indice', auth.requireAuth, async (req, res) => {
+  const chat = await suporteChat.getOne(req.params.id);
+  if (!chat || chat.logado?.id !== req.user.id) return res.sendStatus(404);
+  const msg = (chat.mensagens || [])[Number(req.params.indice)];
+  if (!msg?.anexo) return res.sendStatus(404);
+  storage.streamArquivo(msg.anexo.path, msg.anexo.tipo, res);
+});
+app.post('/api/meus-atendimentos/:id/mensagem', auth.requireAuth, uploadChatAnexo.single('anexo'), async (req, res) => {
+  try {
+    const chat = await suporteChat.getOne(req.params.id);
+    if (!chat || chat.logado?.id !== req.user.id || chat.status !== 'ABERTO') return res.status(404).json({ error: 'Atendimento não disponível.' });
+    let anexo = null;
+    if (req.file) {
+      const validacao = segurancaChat.validarAnexo(req.file);
+      if (!validacao.ok) return res.status(400).json({ error: validacao.motivo });
+      const arquivo = await storage.salvarArquivo(chat.id, req.file, 'suporte-chat');
+      anexo = { nome: req.file.originalname, path: arquivo, tipo: req.file.mimetype || 'application/octet-stream', tamanho: req.file.size };
+    }
+    const atualizado = await suporteChat.adicionarMensagem(chat.id, { de: 'visitante', texto: req.body?.texto || '', token: chat.token, anexo });
+    broadcast('suporte-chat', { id: atualizado.id }, 'suporte');
+    push.notifyChatBeniboy(atualizado, `Ticket #${atualizado.numeroTicket} · Nova mensagem`, `${atualizado.nome} · ${(req.body?.texto || '').slice(0, 80) || 'Anexo recebido'}`).catch(() => {});
+    res.json({ ok: true });
+    acionarBeniboy(atualizado.id);
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // Pedido de XML feito por qualquer pessoa no próprio chat. A chave pública da
