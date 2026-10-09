@@ -90,8 +90,8 @@ async function solicitarXmlProcessadosNoChat(chat, input) {
   if (!mes || !XML_CHAT_ALVOS.includes(computador)) throw new Error('Informe uma máquina autorizada e o mês de 1 a 12.');
   const resumo = await lojaStatus.listarResumo();
   const resumoMaquina = resumo.find((d) => String(d.nome || d.posto || '').trim().toUpperCase() === computador);
-  const maquina = resumoMaquina && await lojaStatus.detalhar(resumoMaquina.codigo, resumoMaquina.posto);
-  if (!maquina || maquina.tipo !== 'interno' || !maquina.agentToken) throw new Error('Essa máquina não está pronta para preparar o ZIP seguro.');
+  const maquina = resumoMaquina && await lojaStatus.alvoProntoParaComando(resumoMaquina.codigo, resumoMaquina.posto);
+  if (!maquina || !maquina.pronto) throw new Error('Essa máquina não está pronta para preparar o ZIP seguro.');
   const tokenEntrega = crypto.randomBytes(32).toString('base64url');
   const ref = XML_CHAT_ENTREGAS.doc();
   const expiraEm = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();

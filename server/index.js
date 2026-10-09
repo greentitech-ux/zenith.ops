@@ -2256,8 +2256,8 @@ app.post('/api/suporte-chat/:id/solicitar-xml', async (req, res) => {
     }
     const maquinas = await lojaStatus.listarResumo();
     const maquinaResumo = maquinas.find((d) => String(d.nome || d.posto || '').trim().toUpperCase() === computador);
-    const maquina = maquinaResumo && await lojaStatus.detalhar(maquinaResumo.codigo, maquinaResumo.posto);
-    if (!maquina || maquina.tipo !== 'interno' || !maquina.agentToken) {
+    const maquina = maquinaResumo && await lojaStatus.alvoProntoParaComando(maquinaResumo.codigo, maquinaResumo.posto);
+    if (!maquina || !maquina.pronto) {
       return res.status(400).json({ error: 'A máquina solicitada não está pronta para preparar o arquivo seguro.' });
     }
     const tokenEntrega = crypto.randomBytes(32).toString('base64url');

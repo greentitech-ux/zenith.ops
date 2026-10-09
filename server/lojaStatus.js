@@ -1794,6 +1794,23 @@ async function detalhar(codigo, posto) {
   return (await listar()).find((d) => docIdFor(d.codigo, d.posto) === alvo) || null;
 }
 
+// `listar()` e `detalhar()` deliberadamente removem o agentToken antes de
+// devolver qualquer ficha, inclusive para evitar que uma rota nova o exponha
+// por acidente. Os fluxos internos que precisam apenas SABER se o canal de
+// comando seguro existe usam esta vista mínima: ela nunca retorna o token.
+async function alvoProntoParaComando(codigo, posto) {
+  const alvo = docIdFor(codigo, posto);
+  const doc = (await listUncached()).find((d) => docIdFor(d.codigo, d.posto) === alvo);
+  if (!doc) return null;
+  return {
+    codigo: doc.codigo,
+    posto: doc.posto,
+    nome: doc.nome || null,
+    tipo: doc.tipo,
+    pronto: doc.tipo === 'interno' && !!doc.agentToken,
+  };
+}
+
 // DIAGNOSTICO DO PAPEL DE PAREDE (pedido do Master: "por que não subiu em
 // todos?"). Pra cada computador diz o que a máquina VAI mostrar e, quando não
 // vai, por quê — sem o Master ter que abrir máquina por máquina. Motivos, na
@@ -5521,7 +5538,7 @@ module.exports = {
   substituirSegredos, SEGREDOS_PERMITIDOS,
   impressorasPraSondar, comandoFixarIpZebra,
   flushHeartbeatsPendentes,
-  heartbeat, listar, listarResumo, detalhar, diagnosticoPapelDeParede, motivoDoPapel, VERSAO_MODELO_BASICO, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
+  heartbeat, listar, listarResumo, detalhar, alvoProntoParaComando, diagnosticoPapelDeParede, motivoDoPapel, VERSAO_MODELO_BASICO, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   // alerta de internet por unidade: o estado vive em memoria, e o teste
   // precisa comecar cada cenario do zero
