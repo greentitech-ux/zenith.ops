@@ -3122,18 +3122,19 @@ function comandoVincularSyncthingAoUmbrel(doc) {
 }
 
 // Cópia fechada dos XMLs NFC-e: o mês é um número validado no servidor e os
-// únicos caminhos possíveis são os três perfis da Grande-Fratello. O comando
-// nunca move/apaga nada do GCOM; cria um ZIP na pasta send-only que já está
-// vinculada ao Umbrel. O pacote único é o que o solicitante recebe depois.
+// únicos caminhos possíveis são os três perfis da Grande-Fratello. A série
+// NÃO é fixa: cada PDV pode emitir em uma Serie_* própria. O comando nunca
+// move/apaga nada do GCOM; cria um ZIP na pasta send-only que já está
+// vinculada ao Umbrel, mantendo uma subpasta por série no pacote.
 const MESES_PROCESSADOS = Object.freeze([
   null, '01_janeiro', '02_fevereiro', '03_marco', '04_abril', '05_maio', '06_junho',
   '07_julho', '08_agosto', '09_setembro', '10_outubro', '11_novembro', '12_dezembro',
 ]);
 
-// `entrega` só é preenchida pelo fluxo de chat aprovado pelo Master. O URL e
-// o token são criados no servidor, nunca vêm do visitante, e o token é de uso
-// único/curta duração. O ZIP continua indo ao Umbrel via Syncthing; o upload
-// adicional é apenas a cópia que volta como anexo para QUEM pediu no chat.
+// `entrega` só é preenchida pelo fluxo de chat. O URL e o token são criados
+// no servidor, nunca vêm do visitante, e o token é de uso único/curta duração.
+// O ZIP continua indo ao Umbrel via Syncthing; o upload adicional é apenas a
+// cópia que volta como anexo para QUEM pediu no chat.
 function comandoPuxarProcessadosGcom(doc, mes, entrega) {
   const perfil = perfilSyncthingGrandeFratello(doc);
   const mesNumero = Number(mes);
@@ -3151,10 +3152,12 @@ function comandoPuxarProcessadosGcom(doc, mes, entrega) {
     '$ErrorActionPreference = "Stop"',
     '$ano = (Get-Date).Year',
     `$pastaMes = "${pastaMes}"`,
-    '$origem = "C:\\GCOM\\nfce\\Serie_11\\$ano\\$pastaMes\\Processados"',
+    '$raizNfce = "C:\\GCOM\\nfce"',
     `$destinoRaiz = "${perfil.caminho}"`,
     '$destino = Join-Path $destinoRaiz "$ano\\$pastaMes"',
-    `$nomeZip = "XML_PROCESSADOS_${perfil.nome}_$ano-$('{0:D2}' -f $mesNumero).zip"`,
+    // V2 evita reutilizar um ZIP antigo criado quando a coleta olhava apenas
+    // Serie_11. A partir daqui ele pode ser reutilizado, pois já traz todas.
+    `$nomeZip = "XML_PROCESSADOS_${perfil.nome}_$ano-$('{0:D2}' -f $mesNumero)_SERIES-v2.zip"`,
     '$arquivoZip = Join-Path $destino $nomeZip',
     'New-Item -ItemType Directory -Path $destino -Force | Out-Null',
     '$reutilizado = Test-Path -LiteralPath $arquivoZip -PathType Leaf',
@@ -3162,17 +3165,39 @@ function comandoPuxarProcessadosGcom(doc, mes, entrega) {
     '$temporario = Join-Path $env:TEMP ("NoPulso-Processados-" + [guid]::NewGuid().ToString("N"))',
     'try {',
     '  if (-not $reutilizado) {',
-    '    if (-not (Test-Path -LiteralPath $origem -PathType Container)) { throw "A pasta de origem não existe e não há ZIP anterior: $origem" }',
-    '    $xmls = @(Get-ChildItem -LiteralPath $origem -Filter "*.xml" -File -Recurse -ErrorAction Stop)',
-    '    if ($xmls.Count -eq 0) { throw "Nenhum XML foi encontrado em $origem." }',
-    '    $quantidadeXmls = $xmls.Count',
+    '    if (-not (Test-Path -LiteralPath $raizNfce -PathType Container)) { throw "A raiz NFC-e não existe: $raizNfce" }',
+    '    $series = @(Get-ChildItem -LiteralPath $raizNfce -Directory -Filter "Serie_*" -ErrorAction Stop)',
+    '    if ($series.Count -eq 0) { throw "Nenhuma série NFC-e (Serie_*) foi encontrada em $raizNfce." }',
+    '    $pastasEncontradas = @(',
+    '      foreach ($serie in $series) {',
+    '        $processados = Join-Path $serie.FullName "$ano\\$pastaMes\\Processados"',
+    '        if (Test-Path -LiteralPath $processados -PathType Container) { [pscustomobject]@{ Serie = $serie.Name; Caminho = $processados } }',
+    '      }',
+    '    )',
+    '    if ($pastasEncontradas.Count -eq 0) {',
+    '      $seriesTexto = ($series | ForEach-Object { $_.Name }) -join ", "',
+    '      throw "Nenhuma pasta Processados encontrada para $ano\\$pastaMes. Séries localizadas: $seriesTexto"',
+    '    }',
+    '    $coletas = @(',
+    '      foreach ($pasta in $pastasEncontradas) {',
+    '        $xmlsDaSerie = @(Get-ChildItem -LiteralPath $pasta.Caminho -Filter "*.xml" -File -Recurse -ErrorAction Stop)',
+    '        if ($xmlsDaSerie.Count -gt 0) { [pscustomobject]@{ Serie = $pasta.Serie; Caminho = $pasta.Caminho; Xmls = $xmlsDaSerie } }',
+    '      }',
+    '    )',
+    '    if ($coletas.Count -eq 0) {',
+    '      $pastasTexto = ($pastasEncontradas | ForEach-Object { "$($_.Serie): $($_.Caminho)" }) -join " | "',
+    '      throw "As pastas Processados existem, mas não há XMLs para $ano\\$pastaMes. Pastas verificadas: $pastasTexto"',
+    '    }',
+    '    $quantidadeXmls = @($coletas | ForEach-Object { $_.Xmls } | ForEach-Object { $_ }).Count',
     '    New-Item -ItemType Directory -Path $temporario -Force | Out-Null',
-    '    foreach ($arquivo in $xmls) {',
-    '      $relativo = $arquivo.FullName.Substring($origem.Length).TrimStart("\\")',
-    '      $alvo = Join-Path $temporario $relativo',
-    '      $pastaAlvo = Split-Path -Parent $alvo',
-    '      if (-not (Test-Path -LiteralPath $pastaAlvo)) { New-Item -ItemType Directory -Path $pastaAlvo -Force | Out-Null }',
-    '      Copy-Item -LiteralPath $arquivo.FullName -Destination $alvo -Force -ErrorAction Stop',
+    '    foreach ($coleta in $coletas) {',
+    '      foreach ($arquivo in $coleta.Xmls) {',
+    '        $relativo = $arquivo.FullName.Substring($coleta.Caminho.Length).TrimStart("\\")',
+    '        $alvo = Join-Path (Join-Path $temporario $coleta.Serie) $relativo',
+    '        $pastaAlvo = Split-Path -Parent $alvo',
+    '        if (-not (Test-Path -LiteralPath $pastaAlvo)) { New-Item -ItemType Directory -Path $pastaAlvo -Force | Out-Null }',
+    '        Copy-Item -LiteralPath $arquivo.FullName -Destination $alvo -Force -ErrorAction Stop',
+    '      }',
     '    }',
     '    $zipTemporario = Join-Path $env:TEMP ("NoPulso-Processados-" + [guid]::NewGuid().ToString("N") + ".zip")',
     '    if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {',
