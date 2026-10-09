@@ -2495,6 +2495,7 @@ const PROG_MANUTENCOES = [
   ['diagnostico-desempenho','🩺 Diagnosticar falha','Lê tela azul, disco, hardware, minidumps e consumo atual. Não altera a máquina.'],
   ['syncthing','☁️ Preparar sincronização segura','Instala o cliente oficial verificado para enviar somente arquivos Processados ao Umbrel. Não compartilha pastas nem abre porta de entrada.', 'perigo'],
   ['vincular-syncthing','🔗 Vincular ao Umbrel','Somente para as três máquinas autorizadas da GRANDE-FRATELLO. Cria uma pasta local vazia de saída e pareia com o Umbrel; não lê nem envia arquivos do GCOM.', 'perigo'],
+  ['puxar-processados-gcom','📥 Puxar XMLs Processados','Copia somente os XMLs do mês escolhido em C:\\GCOM\\nfce\\Serie_11\\ANO\\MÊS\\Processados para a saída segura do Umbrel. Não move nem apaga arquivos do GCOM.', 'perigo'],
   ['limpeza-segura','🧹 Liberar espaço seguro','Remove temporários e Lixeira, medindo antes e depois. Não toca em documentos, Downloads ou programas.'],
   ['corrigir-memoria-limitada','🧠 Corrigir memória limitada','Em Windows 64 bits, remove somente limites indevidos da inicialização. Em Windows 32 bits ou com reserva de hardware, explica a causa sem forçar alteração. Exige reinício quando corrigir.', 'perigo'],
   ['remover-office','🗑️ Remover Office','Desinstala Office/Microsoft 365 detectado; preserva documentos do usuário.', 'perigo'],
@@ -2509,8 +2510,10 @@ async function executarManutencaoDoPrograma(tarefa){
   if(!c || !item || c.tipo !== 'interno') return;
   const nome = c.nome || c.posto;
   const nomeConta = tarefa === 'reset-senha' ? document.getElementById('prog-reset-conta').value.trim() : undefined;
+  const mesProcessados = tarefa === 'puxar-processados-gcom' ? Number(document.getElementById('prog-processados-mes').value) : undefined;
   if(tarefa === 'reset-senha' && !nomeConta){ alert('Informe o nome da conta do Windows.'); document.getElementById('prog-reset-conta').focus(); return; }
-  if(!confirm(`${item[1].replace(/^\S+\s/,'')} em ${nome}?\n\n${item[2]}${nomeConta ? `\nConta: ${nomeConta} (ficará sem senha).` : ''}\n\nA ação será registrada e enviada somente para esta máquina.`)) return;
+  if(tarefa === 'puxar-processados-gcom' && (!Number.isInteger(mesProcessados) || mesProcessados < 1 || mesProcessados > 12)){ alert('Escolha o mês dos XMLs Processados.'); return; }
+  if(!confirm(`${item[1].replace(/^\S+\s/,'')} em ${nome}?\n\n${item[2]}${nomeConta ? `\nConta: ${nomeConta} (ficará sem senha).` : ''}${mesProcessados ? `\nMês selecionado: ${mesProcessados}.` : ''}\n\nA ação será registrada e enviada somente para esta máquina.`)) return;
   const password = await pedirSenhaMaster(`autorizar: ${item[1].replace(/^\S+\s/,'')}`);
   if(password === null) return;
   const botoes = [...document.querySelectorAll(`[data-manut-programa="${tarefa}"]`)];
@@ -2518,7 +2521,7 @@ async function executarManutencaoDoPrograma(tarefa){
   try{
     const r = await fetch('/api/loja-status/manutencao/reiniciar', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({alvos:[{codigo:c.codigo,posto:c.posto}],tarefa,nomeConta,abortar:tarefa==='abortar',password}),
+      body:JSON.stringify({alvos:[{codigo:c.codigo,posto:c.posto}],tarefa,nomeConta,mesProcessados,abortar:tarefa==='abortar',password}),
     });
     const d = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error || 'Não consegui enviar a manutenção.');
@@ -2535,6 +2538,8 @@ function pintarManutencaoProgramas(corpo){
   const tipo = escapeJs(c.tipo || 'atendimento');
   const nomeJs = escapeJs(c.nome || c.posto);
   const interno = c.tipo === 'interno';
+  const mesAnterior = new Date().getMonth() || 12;
+  const mesesProcessados = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
   const acoesInternas = interno ? `
     <article class="prog-manut-card">
       <h4>⌁ Diagnóstico de rede</h4>
@@ -2554,6 +2559,7 @@ function pintarManutencaoProgramas(corpo){
     ${PROG_MANUTENCOES.map(([tarefa,titulo,descricao,classe])=>`<article class="prog-manut-card ${classe||''}">
       <h4>${titulo}</h4><p>${descricao}</p>
       ${tarefa === 'reset-senha' ? '<label for="prog-reset-conta">Nome da conta do Windows</label><input id="prog-reset-conta" type="text" maxlength="20" placeholder="Ex.: SUPORTE ou DOMINO&#39;S" autocomplete="off" style="width:100%;box-sizing:border-box;margin:8px 0 12px;">' : ''}
+      ${tarefa === 'puxar-processados-gcom' ? `<label for="prog-processados-mes">Mês dos XMLs</label><select id="prog-processados-mes" style="width:100%;box-sizing:border-box;margin:8px 0 12px;">${mesesProcessados.map((nomeMes,indice)=>`<option value="${indice+1}"${indice+1===mesAnterior?' selected':''}>${String(indice+1).padStart(2,'0')} — ${nomeMes}</option>`).join('')}</select>` : ''}
       <button type="button" class="btn-ghost" data-manut-programa="${tarefa}" onclick="executarManutencaoDoPrograma('${tarefa}')">Executar nesta máquina</button>
     </article>`).join('')}` : `
     <article class="prog-manut-aviso">Este equipamento é de atendimento. Comandos de rede, console e reinício são exclusivos de computadores internos.</article>`;

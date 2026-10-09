@@ -576,6 +576,7 @@ const TAREFAS_NOC = {
   'inventario-estacao': { verbo: 'Inventariar estação de', comando: lojaStatus.COMANDO_INVENTARIO_ESTACAO, origem: 'manutencao-inventario-estacao' },
   syncthing: { verbo: 'Instalar sincronização segura em', comando: lojaStatus.COMANDO_INSTALAR_SYNCTHING, origem: 'manutencao-syncthing', requerAdmin: true },
   'vincular-syncthing': { verbo: 'Vincular sincronização segura ao Umbrel em', comando: lojaStatus.comandoVincularSyncthingAoUmbrel, origem: 'manutencao-vincular-syncthing', requerAdmin: true },
+  'puxar-processados-gcom': { verbo: 'Puxar XMLs Processados em', comando: (doc, parametros) => lojaStatus.comandoPuxarProcessadosGcom(doc, Number(parametros.mesProcessados)), origem: 'manutencao-puxar-processados-gcom', requerAdmin: true },
   'limpeza-segura': { verbo: 'Limpar temporários de', comando: lojaStatus.COMANDO_LIMPEZA_SEGURA, origem: 'manutencao-limpeza-segura', requerAdmin: true },
   'corrigir-memoria-limitada': { verbo: 'Corrigir limite de memória de', comando: lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true },
   'remover-office': { verbo: 'Remover Microsoft Office de', comando: lojaStatus.COMANDO_REMOVER_OFFICE, origem: 'manutencao-remover-office', requerAdmin: true },
@@ -597,6 +598,7 @@ async function nocComando(params) {
   if (!alvos.length) throw new Error('Diga quais computadores (lista de {codigo, posto}).');
   if (alvos.length > 200) throw new Error('Muitos alvos de uma vez - divida em lotes.');
   if (p.tarefa === 'reset-senha' && !String(p.nomeConta || '').trim()) throw new Error('Informe nomeConta para remover a senha local.');
+  if (p.tarefa === 'puxar-processados-gcom' && (!Number.isInteger(Number(p.mesProcessados)) || Number(p.mesProcessados) < 1 || Number(p.mesProcessados) > 12)) throw new Error('Informe mesProcessados de 1 a 12 para copiar os XMLs.');
   const comando = typeof t.comando === 'function'
     ? ((doc) => t.comando(doc, p))
     : t.comando;

@@ -3104,6 +3104,53 @@ function comandoVincularSyncthingAoUmbrel(doc) {
   ].join('\n');
 }
 
+// Cópia fechada dos XMLs NFC-e: o mês é um número validado no servidor e os
+// únicos caminhos possíveis são os três perfis da Grande-Fratello. O comando
+// nunca move/apaga nada do GCOM; apenas replica XMLs para a pasta send-only
+// que já está vinculada ao Umbrel.
+const MESES_PROCESSADOS = Object.freeze([
+  null, '01_janeiro', '02_fevereiro', '03_marco', '04_abril', '05_maio', '06_junho',
+  '07_julho', '08_agosto', '09_setembro', '10_outubro', '11_novembro', '12_dezembro',
+]);
+
+function comandoPuxarProcessadosGcom(doc, mes) {
+  const perfil = perfilSyncthingGrandeFratello(doc);
+  const mesNumero = Number(mes);
+  if (!Number.isInteger(mesNumero) || mesNumero < 1 || mesNumero > 12) {
+    throw new Error('Escolha um mês válido para puxar os XMLs Processados.');
+  }
+  const pastaMes = MESES_PROCESSADOS[mesNumero];
+  return [
+    '$ErrorActionPreference = "Stop"',
+    '$ano = (Get-Date).Year',
+    `$pastaMes = "${pastaMes}"`,
+    '$origem = "C:\\GCOM\\nfce\\Serie_11\\$ano\\$pastaMes\\Processados"',
+    `$destinoRaiz = "${perfil.caminho}"`,
+    '$destino = Join-Path $destinoRaiz "$ano\\$pastaMes\\Processados"',
+    'if (-not (Test-Path -LiteralPath $origem -PathType Container)) { throw "A pasta de origem não existe: $origem" }',
+    'New-Item -ItemType Directory -Path $destino -Force | Out-Null',
+    '$xmls = @(Get-ChildItem -LiteralPath $origem -Filter "*.xml" -File -Recurse -ErrorAction Stop)',
+    'if ($xmls.Count -eq 0) { "PROCESSADOS: nenhum XML encontrado em $origem. Nada foi alterado."; exit 0 }',
+    '$copiados = 0; $mantidos = 0',
+    'foreach ($arquivo in $xmls) {',
+    '  $relativo = $arquivo.FullName.Substring($origem.Length).TrimStart("\\")',
+    '  $alvo = Join-Path $destino $relativo',
+    '  $pastaAlvo = Split-Path -Parent $alvo',
+    '  if (-not (Test-Path -LiteralPath $pastaAlvo)) { New-Item -ItemType Directory -Path $pastaAlvo -Force | Out-Null }',
+    '  $igual = $false',
+    '  if (Test-Path -LiteralPath $alvo -PathType Leaf) {',
+    '    $existente = Get-Item -LiteralPath $alvo -Force',
+    '    $igual = ($existente.Length -eq $arquivo.Length -and $existente.LastWriteTimeUtc -eq $arquivo.LastWriteTimeUtc)',
+    '  }',
+    '  if ($igual) { $mantidos++; continue }',
+    '  Copy-Item -LiteralPath $arquivo.FullName -Destination $alvo -Force -ErrorAction Stop',
+    '  (Get-Item -LiteralPath $alvo).LastWriteTimeUtc = $arquivo.LastWriteTimeUtc',
+    '  $copiados++',
+    '}',
+    '"PROCESSADOS PRONTOS PARA O UMBREL · $copiados XML(s) copiado(s) · $mantidos já estavam iguais · origem: $origem · saída Syncthing: $destino"',
+  ].join('\n');
+}
+
 // Diagnóstico fechado de desempenho e reinício inesperado: apenas lê
 // indicadores que ajudam a separar disco cheio, falha de hardware, tela azul
 // e queda de energia. Não coleta linha de comando, arquivos do usuário ou
@@ -5470,7 +5517,7 @@ module.exports = {
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   dispositivosComTipoDe, resumoDe,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_INSTALAR_SYNCTHING, comandoVincularSyncthingAoUmbrel, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_REINICIAR_VM_SILENCIOSO, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_INSTALAR_SYNCTHING, comandoVincularSyncthingAoUmbrel, comandoPuxarProcessadosGcom, COMANDO_DIAGNOSTICO_DESEMPENHO, COMANDO_INVENTARIO_ESTACAO, COMANDO_LIMPEZA_SEGURA, COMANDO_CORRIGIR_MEMORIA_LIMITADA, COMANDO_REMOVER_OFFICE, COMANDO_REINICIAR, COMANDO_REINICIAR_VM_SILENCIOSO, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK, COMANDO_REINICIAR_GSURF_RSA, COMANDO_DIAGNOSTICO_TEF, COMANDO_ENCERRAR_GCOM_WCF,
   COMANDO_REDE_DESTRAVAR, comandoResetSenha,
   comandoResetZebra, comandoEncerrarGcomWcf, comandoReiniciarVmPulse, comandoReiniciarVmGcom,
   ESTADOS, estadoDe, motivosDeDegradacao,
