@@ -23,8 +23,9 @@ const MAX_MENSAGENS = 300;
 // PROPRIO, independente de `status` (ABERTO/FINALIZADO, que so controla se o
 // visitante ainda pode escrever). PENDENTE e o ponto de partida de toda
 // conversa nova; RESOLVIDO/SEM_SOLUCAO sao terminais e finalizam a conversa
-// pro visitante tambem (ver atualizarStatusAtendimento).
-const STATUS_ATENDIMENTO = ['PENDENTE', 'EM_ATENDIMENTO', 'EM_AGUARDO', 'TRANSFERIDO', 'TICKET_CRIADO', 'RESOLVIDO', 'SEM_SOLUCAO'];
+// pro visitante tambem. AGUARDANDO_ESTORNO permanece aberto ate a devolução
+// financeira estar efetivamente concluída.
+const STATUS_ATENDIMENTO = ['PENDENTE', 'EM_ATENDIMENTO', 'EM_AGUARDO', 'AGUARDANDO_ESTORNO', 'TRANSFERIDO', 'TICKET_CRIADO', 'RESOLVIDO', 'SEM_SOLUCAO'];
 const STATUS_TERMINAL = new Set(['RESOLVIDO', 'SEM_SOLUCAO']);
 // nivel do atendimento: 1 = Beniboy sozinho (bot), 2 = agente humano (secao
 // suporte), 3 = Master. Sobe conforme o card anda no funil; volta pra 1 so
@@ -258,11 +259,23 @@ async function finalizar(id, { autorEmail }) {
   const chat = await getOne(id);
   if (!chat) throw new Error('Conversa não encontrada.');
   if (chat.status !== 'ABERTO') return chat;
+  const agora = new Date().toISOString();
+  // Esta rota também é usada pelo botão "Finalizar" e pelo Cowork. Antes ela
+  // fechava `status`, mas mantinha o cartão em PENDENTE; por isso um chat
+  // encerrado ainda aparecia na fila errada. Encerrar sem o fluxo de
+  // "Sem solução" significa resolvido.
+  const statusAtendimento = STATUS_TERMINAL.has(chat.statusAtendimento) ? chat.statusAtendimento : 'RESOLVIDO';
+  const historicoStatus = chat.statusAtendimento === statusAtendimento ? (chat.historicoStatus || []) : [
+    ...(chat.historicoStatus || []),
+    { statusAtendimento, nivel: chat.nivel || 1, por: autorEmail || null, em: agora },
+  ].slice(-50);
   await COLLECTION.doc(id).update({
     status: 'FINALIZADO',
-    finalizadoEm: new Date().toISOString(),
+    statusAtendimento,
+    historicoStatus,
+    finalizadoEm: agora,
     atendidoPorEmail: chat.atendidoPorEmail || autorEmail || null,
-    atualizadoEm: new Date().toISOString(),
+    atualizadoEm: agora,
   });
   chatsCache.invalidar();
   return getOne(id);
@@ -355,6 +368,11 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
     // Não troca o responsável de quem está resolvendo nem encerra o chat.
     nivel = Math.max(nivel, 2);
     responsavel = responsavel || autor || null;
+  } else if (statusAtendimento === 'AGUARDANDO_ESTORNO') {
+    // A devolução financeira ainda não terminou: não encerra e não deixa o
+    // caso perdido na fila genérica. Mantém o dono atual para acompanhamento.
+    nivel = Math.max(nivel, 2);
+    responsavel = responsavel || autor || null;
   } else if (statusAtendimento === 'TRANSFERIDO') {
     nivel = nivelValido(nivelDestino) ? Number(nivelDestino) : Math.max(nivel, 2);
     // transferir é ENTREGAR a conversa: o dono passa a ser quem recebeu, não
@@ -423,6 +441,15 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
       patch.mensagens = [...(chat.mensagens || []), {
         de:'suporte', automatica:true, em:agora,
         texto:`Ticket #${chat.numeroTicket}: atendimento em aguardo, ainda sem conclusão. Continuaremos acompanhando. Você pode enviar novas mensagens aqui.`,
+      }];
+    }
+  }
+  if (statusAtendimento === 'AGUARDANDO_ESTORNO') {
+    patch.botDesativado = false;
+    if (chat.statusAtendimento !== 'AGUARDANDO_ESTORNO') {
+      patch.mensagens = [...(chat.mensagens || []), {
+        de:'suporte', automatica:true, em:agora,
+        texto:`Ticket #${chat.numeroTicket}: aguardando a conclusão do estorno ou reembolso. Avisaremos por aqui quando a devolução for finalizada.`,
       }];
     }
   }

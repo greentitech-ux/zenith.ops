@@ -502,6 +502,7 @@ const COLUNAS = [
   { key:'PENDENTE',       label:'Pendente',        icone:'🕓', cor:'var(--warn)' },
   { key:'EM_ATENDIMENTO', label:'Em atendimento',  icone:'🙋', cor:'var(--accent)' },
   { key:'EM_AGUARDO',     label:'Em aguardo',      icone:'⏳', cor:'var(--warn)' },
+  { key:'AGUARDANDO_ESTORNO', label:'Aguardando estorno', icone:'💳', cor:'var(--purple)' },
   { key:'TRANSFERIDO',    label:'Transferido',     icone:'🔀', cor:'var(--purple)' },
   { key:'TICKET_CRIADO',  label:'Ticket criado',   icone:'🎫', cor:'var(--teal)' },
   { key:'RESOLVIDO',      label:'Resolvido',       icone:'✅', cor:'var(--ok)' },
@@ -902,6 +903,8 @@ function painelHtml(chat){
   }
   if(statusAtual!=='RESOLVIDO' && statusAtual!=='SEM_SOLUCAO'){
     if(statusAtual!=='EM_AGUARDO') acoes.push(`<button type="button" class="btn-icone" data-dica="Deixar em aguardo" aria-label="Deixar em aguardo" onclick="iniciarTransicao('${chat.id}','EM_AGUARDO')">⏳</button>`);
+    else acoes.push(`<button type="button" class="btn-icone" data-dica="Retomar atendimento" aria-label="Retomar atendimento" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">▶</button>`);
+    if(statusAtual!=='AGUARDANDO_ESTORNO') acoes.push(`<button type="button" class="btn-icone" data-dica="Aguardando estorno ou reembolso" aria-label="Aguardando estorno ou reembolso" onclick="iniciarTransicao('${chat.id}','AGUARDANDO_ESTORNO')">💳</button>`);
     else acoes.push(`<button type="button" class="btn-icone" data-dica="Retomar atendimento" aria-label="Retomar atendimento" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">▶</button>`);
     acoes.push(`<button type="button" class="btn-icone" data-dica="Transferir" aria-label="Transferir" onclick="iniciarTransicao('${chat.id}','TRANSFERIDO')">🔀</button>`);
     acoes.push(`<button type="button" class="btn-icone" data-dica="Marcar resolvido" aria-label="Marcar resolvido" onclick="iniciarTransicao('${chat.id}','RESOLVIDO')">✅</button>`);
