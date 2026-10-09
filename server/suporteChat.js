@@ -105,8 +105,8 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto, unid
     // comando/script, ou arquivo bloqueado no upload - ver segurancaChat.js)
     // - nunca sai na visao publica (getPublico), so no atendimento
     alertasSeguranca: [],
-    // true = o Beniboy (bot, ver suporteBot.js) saiu dessa conversa - ou
-    // porque ele mesmo chamou um atendente humano, ou por decisao do time
+    // Compatibilidade com atendimentos antigos. Escalar para o time não
+    // desliga mais o Beniboy: ele só para quando alguém assumir de fato.
     botDesativado: false,
     logado: logado || null,
     chamadoId: null,
@@ -230,10 +230,10 @@ async function adicionarMensagem(id, { de, texto, autorEmail, token, bot, anexo 
   if (de === 'suporte' && !bot && !chat.atendidoPorEmail) patch.atendidoPorEmail = autorEmail || null;
   // "tem gente esperando um humano?" gravado no proprio doc (ver
   // aguardandoHumano e listarParaReforcarAlarme). Visitante falou = esta
-  // esperando; humano respondeu = nao esta mais. Resposta do BOT nao zera se
-  // ele ja tinha desistido (botDesativado) - nesse caso quem a pessoa espera
-  // e um humano, e o bot falar por ultimo nao muda isso.
-  patch.aguardandoHumano = de === 'visitante' ? true : (bot ? !!chat.botDesativado : false);
+  // esperando; qualquer resposta remove a espera. Se o bot precisar mesmo
+  // de ajuda humana, o alerta é gerado à parte, mas ele continua atendendo
+  // até alguém do time assumir explicitamente.
+  patch.aguardandoHumano = de === 'visitante';
   await COLLECTION.doc(id).update(patch);
   chatsCache.invalidar();
   return getOne(id);
@@ -268,14 +268,12 @@ async function finalizar(id, { autorEmail }) {
   return getOne(id);
 }
 
-// tira o bot da conversa em definitivo (chamado pela tool chamar_atendente
-// do proprio bot) - dali em diante so humano responde
-async function desativarBot(id) {
-  // o bot desistiu: dali em diante a pessoa espera um HUMANO, mesmo que a
-  // ultima mensagem da conversa seja do proprio bot ("ja chamei um
-  // atendente"). Sem marcar aqui, a conversa escalada sairia da varredura
-  // de reforco (ver listarParaReforcarAlarme) e o alarme morreria calado.
-  await COLLECTION.doc(id).update({ botDesativado: true, aguardandoHumano: true, atualizadoEm: new Date().toISOString() });
+// Registra a necessidade de um humano, mas mantém o Beniboy ativo até uma
+// pessoa do time realmente assumir. O alarme inicial é disparado pelo
+// resultado `chamouAtendente` no index; se o bot falhar numa próxima resposta,
+// a própria mensagem do visitante volta a entrar na varredura de espera.
+async function sinalizarAtendente(id) {
+  await COLLECTION.doc(id).update({ botDesativado: false, aguardandoHumano: false, atualizadoEm: new Date().toISOString() });
   chatsCache.invalidar();
   return getOne(id);
 }
@@ -416,15 +414,11 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
     if (!chat.atendidoPorEmail) patch.atendidoPorEmail = autor.email || null;
   }
 
-  // voltar pro PENDENTE = devolver pro Beniboy de verdade (não só cosmético
-  // no kanban) - reativa o bot mesmo que ele tenha se calado antes (chamou
-  // atendente, ver desativarBot acima). Reverte só esse "desligamento
-  // manual"; se atendidoPorEmail já tiver sido gravado (algum humano
-  // respondeu antes), o bot continua fora dali por segurança - ver o gate
-  // em suporteBot.js (botDesativado || atendidoPorEmail)
+  // Campo legado mantido em falso: o Beniboy não é mais desligado por mudar
+  // o cartão de status. Só uma assunção/resposta humana o tira da conversa.
   if (statusAtendimento === 'PENDENTE') patch.botDesativado = false;
   if (statusAtendimento === 'EM_AGUARDO') {
-    patch.botDesativado = true;
+    patch.botDesativado = false;
     if (chat.statusAtendimento !== 'EM_AGUARDO') {
       patch.mensagens = [...(chat.mensagens || []), {
         de:'suporte', automatica:true, em:agora,
@@ -684,9 +678,9 @@ const REALERTA_MS = 30 * 1000;
 // Carencia antes de o alarme comecar quando o Beniboy NAO escalou sozinho.
 // Pedido do Master: "preciso ser avisado sempre que tiver alguem no chat
 // aguardando ser atendido" - nao so quando o bot desiste. Antes disso o
-// reforco exigia botDesativado, entao quem estava esperando com o bot ainda
-// "no comando" (bot travado, sem chave de API, ou respondendo sem resolver)
-// nunca gerava alarme nenhum - so o push comum. Essa carencia e o que
+// antes o reforço exigia que o bot saísse da conversa, então quem estava
+// esperando com o Beniboy ainda respondendo nunca gerava alarme algum. Esta
+// carência é o que
 // impede o outro extremo: alarmar toda conversa no segundo em que nasce,
 // inclusive as que o bot resolve sozinho em 20s.
 const ESPERA_SEM_ESCALAR_MS = Number(process.env.SUPORTE_ESPERA_SEM_ESCALAR_MS) >= 0
@@ -705,10 +699,9 @@ function esperaDoVisitante(chat, agora) {
 
 // candidatas a repetir o alarme critico: NINGUEM do time mexeu no card ainda
 // (statusAtendimento continua PENDENTE - sair do PENDENTE, mesmo sem mandar
-// mensagem, ja conta como "alguem assumiu" e silencia o reforco). Duas
-// portas de entrada: (1) o Beniboy escalou (botDesativado) - alarme imediato,
-// como sempre foi; (2) o visitante falou por ultimo e esta esperando ha mais
-// que ESPERA_SEM_ESCALAR_MS, mesmo com o bot ainda ligado. So entram as que
+// mensagem, já conta como "alguém assumiu" e silencia o reforço). Entra quando
+// o visitante falou por último e está esperando há mais que
+// ESPERA_SEM_ESCALAR_MS, mesmo com o bot ainda ligado. Só entram as que
 // passaram REALERTA_MS desde o ultimo alerta (ver marcarAlertaEnviado) - a
 // varredura de ociosos (40min sem nenhuma mensagem nova) acaba encerrando
 // sozinha quem ficou mesmo abandonada, entao o reforco nao roda pra sempre.
@@ -722,7 +715,7 @@ function esperaDoVisitante(chat, agora) {
 // ABERTO+PENDENTE traria TODA conversa viva a cada tick (com 8 conversas
 // abertas e o tick rapido ligado, ~26 mil leituras/dia so pra descobrir que
 // a maioria nem esta esperando). Por isso `aguardandoHumano` e gravado no
-// proprio doc (ver adicionarMensagem/desativarBot): com ele a consulta volta
+// próprio doc (ver adicionarMensagem): com ele a consulta volta
 // a ter 3 campos "==" (nao precisa de indice composto) e devolve SO quem de
 // fato espera - que e exatamente quem vai virar alarme. Nada vem a toa.
 async function listarParaReforcarAlarme() {
@@ -738,7 +731,7 @@ async function listarParaReforcarAlarme() {
     if (agora - desdeAlerta < REALERTA_MS) continue;
     const espera = esperaDoVisitante(c, agora);
     const esperandoDemais = espera != null && espera >= ESPERA_SEM_ESCALAR_MS;
-    if (!c.botDesativado && !esperandoDemais) continue;
+    if (!esperandoDemais) continue;
     // minutos que a pessoa ja esperou - entra no texto do push pra quem
     // recebe saber se e "acabou de chegar" ou "esta la ha 40min"
     out.push({ ...c, esperaMin: espera != null ? Math.max(1, Math.round(espera / 60000)) : null });
@@ -784,7 +777,7 @@ async function finalizarOciosos() {
 
 module.exports = {
   registrarPedidoVerificado,
-  criar, getOne, getPublico, getPortalPublico, getPortalComToken, getComToken, atualizarLogado, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
+  criar, getOne, getPublico, getPortalPublico, getPortalComToken, getComToken, atualizarLogado, adicionarMensagem, finalizar, sinalizarAtendente, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, restringirAposConclusao, adicionarTicketVinculado, marcarEncaminhadoCowork, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, marcarNotaTratada, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,

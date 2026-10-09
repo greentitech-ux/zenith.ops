@@ -13,9 +13,9 @@ async function testar(){
     getOne:async()=>structuredClone(chat),
     registrarPedidoVerificado:async(id,p)=>{chat.pedidoVerificado=structuredClone(p);},
     adicionarMensagem:async(id,m)=>{chat.mensagens.push({...m,em:'msg-'+(++sequencia)});return structuredClone(chat);},
-    desativarBot:async()=>{chat.botDesativado=true;},
+    sinalizarAtendente:async()=>{chat.botDesativado=false;},
   };
-  const mocks={'./suporteChat':suporte,'./store':{allOrders:()=>pedidos},'./pedidoWatch':{registrar:async()=>{}},'./users':{list:async()=>[],ehCargoGerente:()=>false},'./agenteAcoes':{obterContexto:async()=>({})},'@anthropic-ai/sdk':class {constructor(){this.messages={create:async()=>{assert(respostas.length,'Modelo local sem resposta preparada');return respostas.shift();}};}}};
+  const mocks={'./suporteChat':suporte,'./firestore':{collection:()=>({})},'./store':{allOrders:()=>pedidos},'./pedidoWatch':{registrar:async()=>{}},'./users':{list:async()=>[],ehCargoGerente:()=>false},'./agenteAcoes':{obterContexto:async()=>({})},'@anthropic-ai/sdk':class {constructor(){this.messages={create:async()=>{assert(respostas.length,'Modelo local sem resposta preparada');return respostas.shift();}};}}};
   const mod=new Module(path.join(__dirname,'suporteBot.js'),module);mod.filename=path.join(__dirname,'suporteBot.js');mod.paths=module.paths;mod.require=id=>mocks[id]||{};
   mod._compile(fonte+'\nmodule.exports.executarTool=executarTool;',mod.filename);
   const bot=mod.exports;

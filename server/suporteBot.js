@@ -12,10 +12,9 @@
 // Render). Sem ela, tudo aqui vira no-op e o chat segue 100% humano, como
 // era antes. A chave NUNCA aparece em codigo - so na env var.
 //
-// Quando o bot se cala (e o humano assume):
-// - alguem do time respondeu na conversa (atendidoPorEmail preenchido);
-// - o proprio bot chamou um atendente (botDesativado, via tool);
-// - a conversa passou do limite de respostas do bot (baixa interacao).
+// O bot só se cala quando alguém do time assume de fato a conversa
+// (atendidoPorEmail preenchido). Escalar pede apoio humano e dispara alerta,
+// mas não abandona a pessoa enquanto ninguém assumiu.
 const suporteChat = require('./suporteChat');
 const db = require('./firestore');
 const crypto = require('crypto');
@@ -48,10 +47,6 @@ const MODELO = process.env.SUPORTE_BOT_MODELO || 'claude-opus-5';
 const MAX_TOKENS = Number(process.env.SUPORTE_BOT_MAX_TOKENS) || 1100;
 const ESFORCO = process.env.SUPORTE_BOT_ESFORCO || 'medium';
 const MAX_RODADAS_TOOLS = 5; // seguranca do loop de tool use
-// Limite e rede de seguranca, nao uma forma silenciosa de abandonar a
-// conversa. Ao chegar nele, responderConversa faz handoff explicito, com
-// nota interna e alarme para o time.
-const MAX_RESPOSTAS_BOT = 12;
 
 // rede de seguranca: as vezes o modelo escreve na resposta final que "ja
 // chamou" um atendente sem de fato ter chamado a ferramenta chamar_atendente
@@ -732,7 +727,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
         ? `Última mensagem da pessoa: ${String(ultimaMensagem.texto).slice(0, 600)}`
         : 'Continuar o atendimento nesta conversa.',
     }).catch(() => {});
-    await suporteChat.desativarBot(chat.id);
+    await suporteChat.sinalizarAtendente(chat.id);
     resultado.chamouAtendente = true;
     resultado.motivoAtendente = motivo;
     return 'Atendente humano chamado — o time foi notificado e vai responder nessa mesma conversa. Avise a pessoa e se despeça.';
@@ -818,7 +813,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
           situacao: 'PENDENTE',
           pendencia: 'Master deve revisar a política de horário em Usuários; não resetar nem desbloquear a senha.',
         }).catch(() => {});
-        await suporteChat.desativarBot(chat.id);
+        await suporteChat.sinalizarAtendente(chat.id);
         resultado.chamouAtendente = true;
         resultado.motivoAtendente = motivo;
         return `O acesso de "${alvo.username || alvo.email}" não está bloqueado: ele está fora do horário permitido (${janela}). A senha continua a mesma. O Master foi acionado para revisar/liberar o horário.`;
@@ -891,7 +886,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       situacao: 'PENDENTE',
       pendencia: 'Master deve validar a nova senha do operador sem enviá-la por chat, telefone ou WhatsApp.',
     }).catch(() => {});
-    await suporteChat.desativarBot(chat.id);
+    await suporteChat.sinalizarAtendente(chat.id);
     resultado.chamouAtendente = true;
     resultado.motivoAtendente = motivo;
     resultado.alertaMaster = { tipo: 'nova-senha-operador', usuario: operador.usuario, motivo };
@@ -1151,7 +1146,7 @@ async function escalarPorLimite(chat) {
       ? `Última mensagem da pessoa: ${String(ultimaMensagem.texto).slice(0, 600)}`
       : 'Revisar o histórico desta conversa.',
   }).catch(() => {});
-  await suporteChat.desativarBot(chat.id);
+  await suporteChat.sinalizarAtendente(chat.id);
   const atualizado = await suporteChat.adicionarMensagem(chat.id, {
     de: 'suporte',
     bot: true,
@@ -1172,10 +1167,9 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
     // O Cowork assumiu pelo próprio Beniboy: duas inteligências respondendo
     // ao mesmo protocolo foi o incidente #12287. A partir daí só ele segue.
     if ((chat.mensagens || []).some((m) => m.autorEmail === 'Cowork via Beniboy')) return null;
-    if (chat.atendidoPorEmail || chat.botDesativado) return null; // humano assumiu / bot ja se despediu
+    if (chat.atendidoPorEmail) return null; // alguém do time assumiu de fato
     const msgs = chat.mensagens || [];
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
-    if (msgs.filter((m) => m.bot).length >= MAX_RESPOSTAS_BOT) return escalarPorLimite(chat);
 
     const resultado = { tickets: [], tarefas: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', alertaMaster: null, encerrar: null, agregador: null };
     // Conversas abertas antes desta versão não tinham podeCriarTarefa no
@@ -1230,7 +1224,7 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
     // chamar_atendente nao rodou nessa resposta - forca o escalonamento pra
     // o alarme (push+SSE) nunca deixar de disparar quando o bot promete isso
     if (!resultado.chamouAtendente && ESCALACAO_VERBO_RE.test(texto) && ESCALACAO_ALVO_RE.test(texto)) {
-      await suporteChat.desativarBot(chatId);
+      await suporteChat.sinalizarAtendente(chatId);
       resultado.chamouAtendente = true;
       resultado.motivoAtendente = 'Bot disse ter chamado atendente sem usar a ferramenta (rede de segurança)';
     }
