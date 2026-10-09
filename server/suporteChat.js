@@ -217,7 +217,7 @@ async function registrarPedidoVerificado(id, pedidoVerificado) {
 // `anexo`: { nome, path, tipo, tamanho } (ver storage.js/segurancaChat.js em
 // index.js) - pedido explicito do usuario: "precisa permitir enviar foto e
 // anexos no chat". Mensagem com anexo pode ir sem texto (so a foto)
-async function adicionarMensagem(id, { de, texto, autorEmail, token, bot, anexo }) {
+async function adicionarMensagem(id, { de, texto, autorEmail, token, bot, anexo, aviso }) {
   const chat = await getOne(id);
   if (!chat) throw new Error('Conversa não encontrada.');
   if (de === 'visitante' && chat.token !== token) throw new Error('Conversa não encontrada.');
@@ -226,7 +226,8 @@ async function adicionarMensagem(id, { de, texto, autorEmail, token, bot, anexo 
   if (!textoLimpo && !anexo) throw new Error('Escreva a mensagem ou anexe um arquivo.');
   if ((chat.mensagens || []).length >= MAX_MENSAGENS) throw new Error('Essa conversa ficou muito longa. Inicie uma nova.');
   const agora = new Date().toISOString();
-  const mensagens = [...(chat.mensagens || []), { de, texto: textoLimpo, em: agora, ...(de === 'suporte' ? { autorEmail: autorEmail || null } : {}), ...(bot ? { bot: true } : {}), ...(anexo ? { anexo } : {}) }];
+  const informativa = de === 'suporte' && bot === true && aviso === 'protocolo';
+  const mensagens = [...(chat.mensagens || []), { de, texto: textoLimpo, em: agora, ...(de === 'suporte' ? { autorEmail: autorEmail || null } : {}), ...(bot ? { bot: true } : {}), ...(anexo ? { anexo } : {}), ...(informativa ? { aviso: 'protocolo' } : {}) }];
   const patch = { mensagens, atualizadoEm: agora };
   if (de === 'suporte' && !bot && !chat.atendidoPorEmail) patch.atendidoPorEmail = autorEmail || null;
   // "tem gente esperando um humano?" gravado no proprio doc (ver
@@ -234,7 +235,8 @@ async function adicionarMensagem(id, { de, texto, autorEmail, token, bot, anexo 
   // esperando; qualquer resposta remove a espera. Se o bot precisar mesmo
   // de ajuda humana, o alerta é gerado à parte, mas ele continua atendendo
   // até alguém do time assumir explicitamente.
-  patch.aguardandoHumano = de === 'visitante';
+  // O recibo com o link não atende o pedido nem retira o chat da espera.
+  patch.aguardandoHumano = informativa ? !!chat.aguardandoHumano : de === 'visitante';
   await COLLECTION.doc(id).update(patch);
   chatsCache.invalidar();
   return getOne(id);
@@ -285,8 +287,8 @@ async function finalizar(id, { autorEmail }) {
 // pessoa do time realmente assumir. O alarme inicial é disparado pelo
 // resultado `chamouAtendente` no index; se o bot falhar numa próxima resposta,
 // a própria mensagem do visitante volta a entrar na varredura de espera.
-async function sinalizarAtendente(id) {
-  await COLLECTION.doc(id).update({ botDesativado: false, aguardandoHumano: false, atualizadoEm: new Date().toISOString() });
+async function sinalizarAtendente(id, { aguardandoHumano = false } = {}) {
+  await COLLECTION.doc(id).update({ botDesativado: false, aguardandoHumano, atualizadoEm: new Date().toISOString() });
   chatsCache.invalidar();
   return getOne(id);
 }

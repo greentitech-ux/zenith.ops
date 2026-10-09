@@ -2096,8 +2096,8 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
     // Link com segredo no fragmento: o token não vai ao servidor nos acessos
     // seguintes nem pode ser adivinhado pelo número do protocolo. É a forma
     // de visitante sem login acompanhar o próprio atendimento encerrado.
-    const linkAcompanhamento = `${APP_BASE_URL}/meu-atendimento.html#id=${encodeURIComponent(chat.id)}&token=${encodeURIComponent(chat.token)}`;
-    await suporteChat.adicionarMensagem(chat.id, { de: 'suporte', bot: true, texto: `Guarde este link para acompanhar seu protocolo #${chat.numeroTicket}: ${linkAcompanhamento}` });
+    const linkAcompanhamento = `${APP_BASE_URL}/meu-atendimento#id=${encodeURIComponent(chat.id)}&token=${encodeURIComponent(chat.token)}`;
+    await suporteChat.adicionarMensagem(chat.id, { de: 'suporte', bot: true, aviso: 'protocolo', texto: `Guarde este link para acompanhar seu protocolo #${chat.numeroTicket}: ${linkAcompanhamento}` });
     await completarContatoAusenteDoChat(logado, chat, [req.body.contato, req.body.texto]);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifyChatBeniboy(chat, `Ticket #${chat.numeroTicket} · Novo atendimento`, `${chat.nome} · ${chat.assunto || 'Suporte'}`).catch(e=>console.error('[beniboy] push:',e.message));
@@ -17080,8 +17080,8 @@ async function lojaContextoEstaOffline(lojaContexto) {
 // Beniboy (suporteBot.js): responde a conversa em segundo plano quando
 // nenhum humano assumiu. Roda DEPOIS da resposta HTTP (fire-and-forget) -
 // o widget do visitante busca a conversa a cada 5s e a resposta do bot
-// aparece ali. Qualquer falha da API so cai no log: o time humano ja foi
-// notificado pelo push normal e atende como sempre.
+// aparece ali. Falha na resposta automática é avisada na conversa e
+// encaminhada à Central pelo mesmo retorno de chamada de atendente.
 async function acionarBeniboy(chatId) {
   if (!suporteBot.ativo()) return;
   try {

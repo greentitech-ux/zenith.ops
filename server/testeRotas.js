@@ -199,6 +199,7 @@ const bucketFake = {
 // derrubava o envio antes da resposta (o "Failed to fetch").
 const OCR_FALSO = { ligado: false, chamadas: 0, resposta: {} };
 Module._load = function (req, parent, isMain) {
+  if (req === '@anthropic-ai/sdk' && process.env.TESTE_BENIBOY_RESPOSTA === '1') return require('./testeBeniboyResposta').ModeloFalso;
   if (req === './firestore') return fakeDb;
   if (req === './storageBucket') return { resolverBucket: async () => bucketFake, comBucket: async (fn) => fn(bucketFake) };
   if (req === './documentoIdentidadeOcr') {
@@ -428,6 +429,15 @@ setTimeout(async () => {
     token = r && r.token;
   } catch (e) { console.log('login falhou: ' + e.message); }
   console.log(token ? 'token obtido ✓' : 'SEM TOKEN - as rotas vao devolver 401');
+  if (process.env.TESTE_BENIBOY_RESPOSTA === '1') {
+    try {
+      process.env.ANTHROPIC_API_KEY = 'modelo-local-sem-rede';
+      const teste = require('./testeBeniboyResposta');
+      await teste.testarSabotagem();
+      await teste.testarHttp({ DOCS, postarJson, pedir, token });
+      process.exit(0);
+    } catch (e) { console.error(e); process.exit(1); }
+  }
   if(process.env.TESTE_LOGIN_CAMPANHA === '1') {
     try {await require('./testeLoginCampanha').testarHttp({token,DOCS,postarMultipart,putJson,pedir});process.exit(0);}
     catch(e){console.error(e);process.exit(1);}

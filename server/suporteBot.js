@@ -449,10 +449,20 @@ function montarTools(logado) {
 // historico da conversa -> turns da API. Mensagens do visitante viram user;
 // as do bot viram assistant. Se um humano do time ja falou, o bot nem chega
 // aqui (gate em responderConversa)
+function ehAvisoProtocolo(m) {
+  if (m.de !== 'suporte' || !m.bot || m.autorEmail) return false;
+  if (m.aviso === 'protocolo') return true;
+  // Compatibilidade com recibos anteriores à marcação. Só o texto exato do
+  // aviso é ignorado; respostas normais do bot/humano continuam contando.
+  return /^Guarde este link para acompanhar seu protocolo #\d+: https?:\/\/[^\s]+\/meu-atendimento(?:\.html)?#id=[^\s&]+&token=[^\s&]+$/.test(String(m.texto || '').trim());
+}
+function mensagensDeAtendimento(chat) {
+  return (chat.mensagens || []).filter(m => !ehAvisoProtocolo(m));
+}
 function montarMensagens(chat) {
   const turnos = [];
   const contexto = `(Início da conversa. Quem escreve: ${chat.nome || 'visitante'}${chat.contato ? ` · contato: ${chat.contato}` : ''}${chat.lojaContexto ? ` · loja: ${chat.lojaContexto} (já sabida pelo link/QR code que a pessoa usou - não precisa perguntar de novo)` : ''})`;
-  for (const m of chat.mensagens || []) {
+  for (const m of mensagensDeAtendimento(chat)) {
     const role = m.de === 'visitante' ? 'user' : 'assistant';
     const texto = String(m.texto || '').trim();
     if (!texto) continue;
@@ -1144,7 +1154,7 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
   try {
     const chat = await suporteChat.getOne(chatId);
     if (!chat || chat.status !== 'ABERTO') return null;
-    const msgs = chat.mensagens || [];
+    const msgs = mensagensDeAtendimento(chat);
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
     // Um pedido de XML é uma exceção segura: mesmo se o protocolo já estiver
     // com humano/Cowork, a repetição do pedido deve tentar a coleta novamente
@@ -1193,7 +1203,7 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
       });
     }
 
-    if (resp.stop_reason === 'refusal') return null; // sem resposta - fica pro humano
+    if (resp.stop_reason === 'refusal') throw new Error('Modelo não produziu resposta de atendimento.');
     let texto = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
     // Nem uma URL escrita pelo modelo pode contornar a ferramenta e a ordem
     // de verificação. Consulta atual só libera link num turno posterior.
@@ -1202,7 +1212,7 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
       const p=resultado.consultaPedido;
       texto=`Pedido ${p.pedidoId} · ${(unidadesPorCodigo||{})[p.unidade]||p.unidade} · Cliente: ${p.cliente} · ${Number(p.valor).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · Status no Monitor: ${p.status}.\n\n${texto}`;
     }
-    if (!texto) return null;
+    if (!texto) throw new Error('Modelo retornou sem texto de atendimento.');
 
     // rede de seguranca: o texto diz que ja chamou humano mas a ferramenta
     // chamar_atendente nao rodou nessa resposta - forca o escalonamento pra
@@ -1240,10 +1250,24 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
     }
     return { chat: atualizado, ...resultado };
   } catch (err) {
-    // erro de API (rede, cota, chave...) NUNCA quebra o chat - o time humano
-    // ja foi notificado da mensagem pelo push normal e atende como antes
     console.error('[suporteBot] falha ao responder:', err.message);
-    return null;
+    // A falha não pode deixar apenas o recibo na conversa. Encaminha pelo
+    // mesmo retorno que acionarBeniboy usa para avisar a Central.
+    try {
+      const atual = await suporteChat.getOne(chatId);
+      if (!atual || atual.status !== 'ABERTO' || atual.atendidoPorEmail
+          || (atual.mensagens || []).some(m => m.autorEmail === 'Cowork via Beniboy')
+          || mensagensDeAtendimento(atual).at(-1)?.de !== 'visitante') return null;
+      const atualizado = await suporteChat.adicionarMensagem(chatId, {
+        de: 'suporte', bot: true,
+        texto: 'Não consegui concluir a resposta automática agora. Seu pedido continua neste protocolo e foi encaminhado ao time de atendimento.',
+      });
+      const sinalizado = await suporteChat.sinalizarAtendente(chatId, { aguardandoHumano: true });
+      return { chat: sinalizado || atualizado, tickets: [], tarefas: [], direcionados: [], chamouAtendente: true, motivoAtendente: 'Falha na resposta automática do Beniboy.' };
+    } catch (falha) {
+      console.error('[suporteBot] falha ao encaminhar atendimento:', falha.message);
+      return null;
+    }
   } finally {
     emAndamento.delete(chatId);
   }
