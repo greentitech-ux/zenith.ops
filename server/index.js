@@ -513,7 +513,7 @@ const ROTA_LOJA_CHAT_RESPONDER_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[
 // maquina, sem sessao de usuario. O token do agente continua obrigatorio.
 const ROTA_LOJA_TELEMETRIA_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/telemetria$/;
 function rotaPublicaSemDashboard(path) {
-  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/') || path.startsWith('/api/reunioes/publica/') || path.startsWith('/api/treinamentos-publico/')
+  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/xml-chat-entregas/') || path.startsWith('/api/rh/publico/') || path.startsWith('/api/reunioes/publica/') || path.startsWith('/api/treinamentos-publico/')
     || path.startsWith('/api/pedido-evidencias/publico/')
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
@@ -1023,6 +1023,24 @@ app.get('/api/login-custom/logo/:id', async (req, res) => {
 // do NoPulso, ex: mandados pelo Beniboy no chat pro colaborador repassar pro
 // cliente por WhatsApp). Mesmo padrao ja usado em relatorioMV.js.
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
+
+// Cada entrega de XML para o chat nasce de uma aprovação do Master. O token
+// não é uma senha de usuário: é descartável, exclusivo daquele ZIP e vence
+// em poucas horas. Guardamos apenas o hash no registro de entrega; o valor
+// puro vive só no payload protegido da autorização até o agente executar.
+const XML_CHAT_ENTREGAS = db.collection('xmlChatEntregas');
+const XML_CHAT_MAX_BYTES = 150 * 1024 * 1024;
+const XML_CHAT_ALVOS = Object.freeze(['AERO-CAR-PDV.01', 'DOM-AERO-PDV.01', 'SPO-AERO-PDV.01']);
+function hashEntregaXml(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+function mesXmlValido(mes) {
+  const n = Number(mes);
+  return Number.isInteger(n) && n >= 1 && n <= 12 ? n : null;
+}
+function nomeArquivoXmlSeguro(nome) {
+  return String(nome || 'XML_PROCESSADOS.zip').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 180);
+}
 
 // acha a loja que mais bate com o que o colaborador escreveu no chat (nome
 // solto, com ou sem acento/maiusculas - ex: "dom bessa", "Bessa") - usado
@@ -2169,6 +2187,131 @@ app.get('/api/suporte-chat/:id/pdf', async (req, res) => {
   if (!chat) return res.sendStatus(404);
   suporteChatPDF.gerarChatPDF(res, chat);
 });
+
+// Pedido de XML feito por qualquer pessoa no próprio chat. A chave pública da
+// conversa só prova que ela pode acompanhar AQUELA conversa; não autoriza
+// leitura de XML. A coleta fica parada na fila do Master até senha/digital.
+app.post('/api/suporte-chat/:id/solicitar-xml', async (req, res) => {
+  try {
+    const chat = await suporteChat.getComToken(req.params.id, req.body?.token);
+    if (!chat) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    const mes = mesXmlValido(req.body?.mes);
+    const computador = String(req.body?.computador || '').trim().toUpperCase();
+    if (!mes || !XML_CHAT_ALVOS.includes(computador)) {
+      return res.status(400).json({ error: 'Escolha uma das três máquinas autorizadas e um mês válido.' });
+    }
+    const maquinas = await lojaStatus.listarResumo();
+    const maquinaResumo = maquinas.find((d) => String(d.nome || d.posto || '').trim().toUpperCase() === computador);
+    const maquina = maquinaResumo && await lojaStatus.detalhar(maquinaResumo.codigo, maquinaResumo.posto);
+    if (!maquina || maquina.tipo !== 'interno' || !maquina.agentToken) {
+      return res.status(400).json({ error: 'A máquina solicitada não está pronta para preparar o arquivo seguro.' });
+    }
+    const tokenEntrega = crypto.randomBytes(32).toString('base64url');
+    const entregaRef = XML_CHAT_ENTREGAS.doc();
+    const expiraEm = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    await entregaRef.set({
+      id: entregaRef.id, chatId: chat.id, computador, mes, ano: new Date().getFullYear(),
+      tokenHash: hashEntregaXml(tokenEntrega), status: 'aguardando-autorizacao', criadoEm: new Date().toISOString(), expiraEm,
+      arquivo: null, aprovadoPorEmail: null, entregueEm: null,
+    });
+    const mesExtenso = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(2026, mes - 1, 1));
+    const pendente = await qaAprovacoes.criar({
+      tipo: 'xml-chat.entregar-processados',
+      resumo: `Entregar XML Processados (${mesExtenso}) no chat #${chat.numeroTicket}`,
+      origem: 'beniboy',
+      criadoPorId: chat.logado?.id || null,
+      criadoPorEmail: chat.logado?.email || `chat:${chat.numeroTicket}`,
+      expiraEm,
+      detalhes: [
+        { rotulo: 'Solicitante', valor: chat.nome || 'Visitante' },
+        { rotulo: 'Contato', valor: chat.contato || 'Não informado' },
+        { rotulo: 'Máquina autorizada', valor: computador },
+        { rotulo: 'Mês/ano', valor: `${mesExtenso}/${new Date().getFullYear()}` },
+        { rotulo: 'Entrega', valor: 'ZIP será anexado somente nesta conversa após aprovação.' },
+      ],
+      payload: {
+        entregaId: entregaRef.id, tokenEntrega, mes, computador,
+        alvos: [{ codigo: maquina.codigo, posto: maquina.posto }],
+      },
+    });
+    await XML_CHAT_ENTREGAS.doc(entregaRef.id).update({ autorizacaoId: pendente.id });
+    const atualizado = await suporteChat.adicionarMensagem(chat.id, {
+      de: 'suporte', bot: true,
+      texto: `Pedido de XML de ${mesExtenso}/${new Date().getFullYear()} para ${computador} registrado. Aguarde a autorização do Master por senha ou digital; o ZIP será enviado aqui nesta conversa.`,
+    });
+    broadcast('suporte-chat', { id: atualizado.id }, 'suporte');
+    push.notifyQaAprovacaoPendente(pendente.resumo, chat.logado?.email || chat.contato || 'chat público', { id: pendente.id, origem: 'xml-chat' })
+      .then((entrega) => qaAprovacoes.registrarEntregaPush(pendente.id, entrega))
+      .catch((err) => console.error('[xml-chat] Falha no push de autorização:', err.message));
+    res.status(202).json({ pendenteAprovacao: true, id: pendente.id, expiraEm });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Recebe o ZIP diretamente do NOCZenith depois da autorização. Não aceita
+// sessão, nome de arquivo ou chat vindos da máquina: tudo é decidido pelo
+// registro criado antes da aprovação. O token é comparado por hash e usado
+// uma única vez; depois disso o anexo só é servido pelo token da conversa.
+app.post('/api/xml-chat-entregas/:id', express.raw({ type: 'application/zip', limit: XML_CHAT_MAX_BYTES }), async (req, res) => {
+  try {
+    const snap = await XML_CHAT_ENTREGAS.doc(String(req.params.id || '')).get();
+    if (!snap.exists) return res.sendStatus(404);
+    const entrega = snap.data();
+    const token = String(req.headers['x-nopulso-entrega'] || '');
+    const hashRecebido = Buffer.from(hashEntregaXml(token), 'hex');
+    const hashEsperado = Buffer.from(String(entrega.tokenHash || ''), 'hex');
+    if (!token || hashEsperado.length !== hashRecebido.length || !crypto.timingSafeEqual(hashRecebido, hashEsperado)) return res.sendStatus(403);
+    if (entrega.status !== 'autorizado' || !entrega.expiraEm || Date.parse(entrega.expiraEm) <= Date.now()) return res.status(410).json({ error: 'Esta autorização de entrega venceu ou já foi usada.' });
+    const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (bytes.length < 4 || bytes.length > XML_CHAT_MAX_BYTES || bytes.subarray(0, 2).toString('ascii') !== 'PK') return res.status(400).json({ error: 'O arquivo recebido não é um ZIP válido.' });
+    const nome = nomeArquivoXmlSeguro(`XML_PROCESSADOS_${entrega.computador}_${entrega.ano}-${String(entrega.mes).padStart(2, '0')}.zip`);
+    const arquivoPath = await storage.salvarArquivo(`xml-chat-${entrega.id}`, { buffer: bytes, originalname: nome, mimetype: 'application/zip' }, 'xml-chat');
+    const chat = await suporteChat.adicionarMensagem(entrega.chatId, {
+      de: 'suporte', autorEmail: entrega.aprovadoPorEmail || null,
+      texto: `O Master autorizou a solicitação. O ZIP dos XMLs Processados está pronto para baixar.`,
+      anexo: { nome, path: arquivoPath, tipo: 'application/zip', tamanho: bytes.length },
+    });
+    await snap.ref.update({ status: 'entregue', entregueEm: new Date().toISOString(), arquivo: { nome, path: arquivoPath, tamanho: bytes.length }, tokenHash: null });
+    broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('[xml-chat] Falha ao receber ZIP:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+async function executarEntregaXmlNoChat(payload, aprovacao) {
+  const entregaId = String(payload?.entregaId || '');
+  const snap = await XML_CHAT_ENTREGAS.doc(entregaId).get();
+  if (!snap.exists) throw new Error('A entrega de XML não foi encontrada. Peça uma nova solicitação pelo chat.');
+  const entrega = snap.data();
+  const mes = mesXmlValido(entrega.mes);
+  const computador = String(entrega.computador || '').toUpperCase();
+  if (!mes || !XML_CHAT_ALVOS.includes(computador) || entrega.status !== 'aguardando-autorizacao') {
+    throw new Error('O pedido de XML não está mais disponível para autorização.');
+  }
+  if (!entrega.expiraEm || Date.parse(entrega.expiraEm) <= Date.now()) throw new Error('O pedido venceu. Solicite novamente pelo chat.');
+  const alvos = Array.isArray(payload.alvos) ? payload.alvos : [];
+  if (alvos.length !== 1) throw new Error('O destino autorizado não foi encontrado.');
+  const maquina = await lojaStatus.detalhar(alvos[0].codigo, alvos[0].posto);
+  if (!maquina || String(maquina.nome || maquina.posto || '').toUpperCase() !== computador) throw new Error('A máquina autorizada não está disponível.');
+  const tokenEntrega = String(payload.tokenEntrega || '');
+  if (!/^[A-Za-z0-9_-]{32,}$/.test(tokenEntrega) || hashEntregaXml(tokenEntrega) !== entrega.tokenHash) throw new Error('A chave temporária de entrega não confere. Solicite novamente pelo chat.');
+  const url = `${APP_BASE_URL}/api/xml-chat-entregas/${encodeURIComponent(entregaId)}`;
+  const comando = lojaStatus.comandoPuxarProcessadosGcom(maquina, mes, { url, token: tokenEntrega });
+  const registro = await lojaStatus.enfileirarComando(maquina.codigo, maquina.posto, comando, {
+    origem: 'xml-chat-entregar-processados', requerAdmin: true, aprovacaoId: aprovacao.autorizacaoId,
+    solicitadoPor: aprovacao.email,
+  });
+  await snap.ref.update({ status: 'autorizado', aprovadoEm: new Date().toISOString(), aprovadoPorEmail: aprovacao.email, comandoId: registro.id });
+  const chat = await suporteChat.adicionarMensagem(entrega.chatId, {
+    de: 'suporte', autorEmail: aprovacao.email,
+    texto: `O Master autorizou com ${aprovacao.metodo === 'digital' ? 'digital' : 'senha'}. Estamos preparando o ZIP; ele aparecerá aqui assim que a máquina concluir o envio.`,
+  });
+  broadcast('suporte-chat', { id: chat.id }, 'suporte');
+  return `Autorizado e enviado para ${computador}. O ZIP será anexado ao chat #${chat.numeroTicket} quando o agente concluir.`;
+}
 
 // ---------- heartbeat de presenca das lojas (ver lojaStatus.js) - a tela
 // publica atendimento.html em modo quiosque manda isso periodicamente;
@@ -7014,6 +7157,10 @@ const EXECUTORES_QA = {
   'manutencao.instalarSyncthing': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_INSTALAR_SYNCTHING, { origem: 'manutencao-syncthing', requerAdmin: true }),
   'manutencao.vincularSyncthing': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.comandoVincularSyncthingAoUmbrel, { origem: 'manutencao-vincular-syncthing', requerAdmin: true }),
   'manutencao.puxarProcessadosGcom': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, (doc) => lojaStatus.comandoPuxarProcessadosGcom(doc, p.mesProcessados), { origem: 'manutencao-puxar-processados-gcom', requerAdmin: true }),
+  // Pedido público de XML: só chega aqui DEPOIS de o Master confirmar com
+  // senha ou digital na fila de autorizações. O visitante nunca recebe o
+  // comando, token de upload ou caminho da máquina.
+  'xml-chat.entregar-processados': (p, aprovacao) => executarEntregaXmlNoChat(p, aprovacao),
   'manutencao.limpezaSegura': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_LIMPEZA_SEGURA, { origem: 'manutencao-limpeza-segura' }),
   'manutencao.corrigirMemoriaLimitada': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_CORRIGIR_MEMORIA_LIMITADA, { origem: 'manutencao-corrigir-memoria-limitada', requerAdmin: true }),
   'manutencao.removerOffice': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REMOVER_OFFICE, { origem: 'manutencao-remover-office', requerAdmin: true }),
@@ -7356,6 +7503,19 @@ app.post('/api/qa-aprovacoes/:id/rejeitar', requireMasterDeVerdade, async (req, 
     if(!identidadeOk)return res.status(400).json({error:'Confirme este pedido com a digital ou sua senha.'});
     if(!req.body?.revisao)return res.status(400).json({error:'Reabra o pedido antes de decidir.'});
     const atualizado = await qaAprovacoes.marcarDecidido(req.params.id, { status: 'rejeitado', decididoPorEmail: req.user.email, motivoRejeicao: req.body.motivo || null,revisaoEsperada:req.body.revisao });
+    // O solicitante não fica esperando indefinidamente se o Master optar por
+    // recusar o arquivo. A razão detalhada continua restrita à aprovação;
+    // no chat vai somente o resultado da decisão.
+    if (pendente.tipo === 'xml-chat.entregar-processados' && pendente.payload?.entregaId) {
+      const entregaRef = XML_CHAT_ENTREGAS.doc(String(pendente.payload.entregaId));
+      const entregaSnap = await entregaRef.get();
+      if (entregaSnap.exists && entregaSnap.data().status === 'aguardando-autorizacao') {
+        const entrega = entregaSnap.data();
+        await entregaRef.update({ status: 'recusado', recusadoEm: new Date().toISOString(), recusadoPorEmail: req.user.email, tokenHash: null });
+        const chat = await suporteChat.adicionarMensagem(entrega.chatId, { de: 'suporte', autorEmail: req.user.email, texto: 'O Master não autorizou este envio de XML. Se precisar, envie uma nova solicitação pelo chat.' });
+        broadcast('suporte-chat', { id: chat.id }, 'suporte');
+      }
+    }
     res.json(atualizado);
   } catch (err) {
     res.status(400).json({ error: err.message });

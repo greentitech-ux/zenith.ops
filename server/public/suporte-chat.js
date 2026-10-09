@@ -77,6 +77,12 @@
   .szc-erro{font-size:11.5px;color:#ff5c5c;}
   .szc-fim{background:#181d24;border:1px dashed #232a33;color:#7d8896;border-radius:8px;padding:8px;font-size:11.5px;text-align:center;}
   .szc-link{background:none;border:none;color:var(--accent,#b8ff3c);font-size:12px;cursor:pointer;padding:0;}
+  .szc-xml-pedido{margin:8px 0 4px;padding:9px;border:1px solid #2c3542;border-radius:9px;background:#10151b;}
+  .szc-xml-pedido b{display:block;font-size:11.5px;color:#e7ecf1;margin-bottom:4px;}
+  .szc-xml-pedido p{margin:0 0 7px;color:#7d8896;font-size:10.5px;line-height:1.35;}
+  .szc-xml-linha{display:flex;gap:5px;align-items:center;}
+  .szc-xml-linha select{min-width:0;flex:1;padding:7px;font-size:10.5px;}
+  .szc-xml-linha button{padding:8px;font-size:10.5px;white-space:nowrap;}
   /* anexo (foto/PDF) no chat - pedido explicito do usuario: "precisa
      permitir enviar foto e anexos no chat" */
   .szc-anexo-btn{display:flex;align-items:center;justify-content:center;width:36px;flex-shrink:0;
@@ -657,6 +663,18 @@
       if (m.de !== 'visitante' && m.bot) jaApresentou = true;
       return html;
     }).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>');
+    // Pedido estruturado, em vez de depender do Beniboy interpretar texto
+    // livre. Qualquer visitante pode pedir, mas não recebe nada até o Master
+    // aprovar na fila com senha ou digital.
+    if (chat.status === 'ABERTO') {
+      const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+      const mesPadrao = new Date().getMonth() || 12; // mês anterior
+      corpo.insertAdjacentHTML('beforeend', `<div class="szc-xml-pedido">
+        <b>📦 Solicitar XML Processados</b><p>O Master precisa autorizar com senha ou digital. O ZIP será entregue aqui.</p>
+        <div class="szc-xml-linha"><select class="szc-input" id="szc-xml-computador"><option>AERO-CAR-PDV.01</option><option>DOM-AERO-PDV.01</option><option>SPO-AERO-PDV.01</option></select><select class="szc-input" id="szc-xml-mes">${meses.map((m,i)=>`<option value="${i+1}" ${i+1===mesPadrao?'selected':''}>${m}</option>`).join('')}</select><button class="szc-enviar" type="button" id="szc-xml-solicitar">Solicitar</button></div>
+      </div>`);
+      corpo.querySelector('#szc-xml-solicitar').addEventListener('click', () => solicitarXmlChat(chat));
+    }
     const pdfBtn = corpo.querySelector('#szc-pdf');
     if (pdfBtn) {
       pdfBtn.addEventListener('click', () => {
@@ -679,6 +697,28 @@
     const total = (chat.mensagens || []).length;
     if (noFim || total !== ultimoTotalMensagens) corpo.scrollTop = corpo.scrollHeight;
     ultimoTotalMensagens = total;
+  }
+
+  async function solicitarXmlChat(chat) {
+    const salvo = chatSalvo();
+    if (!salvo) return;
+    const botao = corpo.querySelector('#szc-xml-solicitar');
+    const computador = corpo.querySelector('#szc-xml-computador').value;
+    const mes = Number(corpo.querySelector('#szc-xml-mes').value);
+    if (!confirm(`Solicitar o ZIP de XML Processados de ${computador}? O Master precisará autorizar antes do envio.`)) return;
+    botao.disabled = true; botao.textContent = 'Enviando...';
+    try {
+      const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/solicitar-xml`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: salvo.token, computador, mes }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Não foi possível registrar o pedido.');
+      await carregarConversa();
+    } catch (err) {
+      alert(err.message);
+      botao.disabled = false; botao.textContent = 'Solicitar';
+    }
   }
 
   async function carregarConversa() {

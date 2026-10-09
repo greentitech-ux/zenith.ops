@@ -3113,13 +3113,23 @@ const MESES_PROCESSADOS = Object.freeze([
   '07_julho', '08_agosto', '09_setembro', '10_outubro', '11_novembro', '12_dezembro',
 ]);
 
-function comandoPuxarProcessadosGcom(doc, mes) {
+// `entrega` só é preenchida pelo fluxo de chat aprovado pelo Master. O URL e
+// o token são criados no servidor, nunca vêm do visitante, e o token é de uso
+// único/curta duração. O ZIP continua indo ao Umbrel via Syncthing; o upload
+// adicional é apenas a cópia que volta como anexo para QUEM pediu no chat.
+function comandoPuxarProcessadosGcom(doc, mes, entrega) {
   const perfil = perfilSyncthingGrandeFratello(doc);
   const mesNumero = Number(mes);
   if (!Number.isInteger(mesNumero) || mesNumero < 1 || mesNumero > 12) {
     throw new Error('Escolha um mês válido para puxar os XMLs Processados.');
   }
   const pastaMes = MESES_PROCESSADOS[mesNumero];
+  const entregaAtiva = entrega && typeof entrega === 'object';
+  const urlEntrega = entregaAtiva ? String(entrega.url || '') : '';
+  const tokenEntrega = entregaAtiva ? String(entrega.token || '') : '';
+  if (entregaAtiva && (!/^https:\/\//i.test(urlEntrega) || !/^[A-Za-z0-9_-]{32,}$/.test(tokenEntrega))) {
+    throw new Error('A entrega segura do chat não foi preparada corretamente.');
+  }
   return [
     '$ErrorActionPreference = "Stop"',
     '$ano = (Get-Date).Year',
@@ -3129,32 +3139,41 @@ function comandoPuxarProcessadosGcom(doc, mes) {
     '$destino = Join-Path $destinoRaiz "$ano\\$pastaMes"',
     `$nomeZip = "XML_PROCESSADOS_${perfil.nome}_$ano-$('{0:D2}' -f $mesNumero).zip"`,
     '$arquivoZip = Join-Path $destino $nomeZip',
-    'if (-not (Test-Path -LiteralPath $origem -PathType Container)) { throw "A pasta de origem não existe: $origem" }',
     'New-Item -ItemType Directory -Path $destino -Force | Out-Null',
-    '$xmls = @(Get-ChildItem -LiteralPath $origem -Filter "*.xml" -File -Recurse -ErrorAction Stop)',
-    'if ($xmls.Count -eq 0) { "PROCESSADOS: nenhum XML encontrado em $origem. Nada foi alterado."; exit 0 }',
+    '$reutilizado = Test-Path -LiteralPath $arquivoZip -PathType Leaf',
     '$temporario = Join-Path $env:TEMP ("NoPulso-Processados-" + [guid]::NewGuid().ToString("N"))',
     'try {',
-    '  New-Item -ItemType Directory -Path $temporario -Force | Out-Null',
-    '  foreach ($arquivo in $xmls) {',
-    '    $relativo = $arquivo.FullName.Substring($origem.Length).TrimStart("\\")',
-    '    $alvo = Join-Path $temporario $relativo',
-    '    $pastaAlvo = Split-Path -Parent $alvo',
-    '    if (-not (Test-Path -LiteralPath $pastaAlvo)) { New-Item -ItemType Directory -Path $pastaAlvo -Force | Out-Null }',
-    '    Copy-Item -LiteralPath $arquivo.FullName -Destination $alvo -Force -ErrorAction Stop',
+    '  if (-not $reutilizado) {',
+    '    if (-not (Test-Path -LiteralPath $origem -PathType Container)) { throw "A pasta de origem não existe e não há ZIP anterior: $origem" }',
+    '    $xmls = @(Get-ChildItem -LiteralPath $origem -Filter "*.xml" -File -Recurse -ErrorAction Stop)',
+    '    if ($xmls.Count -eq 0) { throw "Nenhum XML foi encontrado em $origem." }',
+    '    New-Item -ItemType Directory -Path $temporario -Force | Out-Null',
+    '    foreach ($arquivo in $xmls) {',
+    '      $relativo = $arquivo.FullName.Substring($origem.Length).TrimStart("\\")',
+    '      $alvo = Join-Path $temporario $relativo',
+    '      $pastaAlvo = Split-Path -Parent $alvo',
+    '      if (-not (Test-Path -LiteralPath $pastaAlvo)) { New-Item -ItemType Directory -Path $pastaAlvo -Force | Out-Null }',
+    '      Copy-Item -LiteralPath $arquivo.FullName -Destination $alvo -Force -ErrorAction Stop',
+    '    }',
+    '    $zipTemporario = Join-Path $env:TEMP ("NoPulso-Processados-" + [guid]::NewGuid().ToString("N") + ".zip")',
+    '    if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {',
+    '      Compress-Archive -Path (Join-Path $temporario "*") -DestinationPath $zipTemporario -CompressionLevel Optimal -Force -ErrorAction Stop',
+    '    } else {',
+    '      Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop',
+    '      [IO.Compression.ZipFile]::CreateFromDirectory($temporario, $zipTemporario, [IO.Compression.CompressionLevel]::Optimal, $false)',
+    '    }',
+    '    Copy-Item -LiteralPath $zipTemporario -Destination $arquivoZip -Force -ErrorAction Stop',
     '  }',
-    '  $zipTemporario = Join-Path $env:TEMP ("NoPulso-Processados-" + [guid]::NewGuid().ToString("N") + ".zip")',
-    '  if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {',
-    '    Compress-Archive -Path (Join-Path $temporario "*") -DestinationPath $zipTemporario -CompressionLevel Optimal -Force -ErrorAction Stop',
-    '  } else {',
-    '    # Windows 7/PowerShell antigo não tem Compress-Archive, mas o .NET',
-    '    # 4.5+ fornece o mesmo ZIP sem baixar programa adicional.',
-    '    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop',
-    '    [IO.Compression.ZipFile]::CreateFromDirectory($temporario, $zipTemporario, [IO.Compression.CompressionLevel]::Optimal, $false)',
-    '  }',
-    '  Copy-Item -LiteralPath $zipTemporario -Destination $arquivoZip -Force -ErrorAction Stop',
     '  $tamanhoMb = [math]::Round((Get-Item -LiteralPath $arquivoZip).Length / 1MB, 2)',
-    '  "ZIP PROCESSADOS PRONTO PARA O UMBREL · $($xmls.Count) XML(s) · $tamanhoMb MB · origem: $origem · arquivo Syncthing: $arquivoZip"',
+    '  $estadoZip = if ($reutilizado) { "ZIP já existente reutilizado" } else { "ZIP novo gerado" }',
+    ...(entregaAtiva ? [
+      `$urlEntrega = "${urlEntrega}"`,
+      `$tokenEntrega = "${tokenEntrega}"`,
+      '  Invoke-WebRequest -Uri $urlEntrega -Method Post -Headers @{ "X-NoPulso-Entrega" = $tokenEntrega } -ContentType "application/zip" -InFile $arquivoZip -UseBasicParsing -TimeoutSec 900 -ErrorAction Stop | Out-Null',
+      '  "ZIP ENTREGUE NO CHAT · $estadoZip · $tamanhoMb MB · arquivo Syncthing: $arquivoZip"',
+    ] : [
+      '  "ZIP PROCESSADOS PRONTO PARA O UMBREL · $estadoZip · $tamanhoMb MB · arquivo Syncthing: $arquivoZip"',
+    ]),
     '} finally {',
     '  if (Test-Path -LiteralPath $temporario) { Remove-Item -LiteralPath $temporario -Recurse -Force -ErrorAction SilentlyContinue }',
     '  if ($zipTemporario -and (Test-Path -LiteralPath $zipTemporario)) { Remove-Item -LiteralPath $zipTemporario -Force -ErrorAction SilentlyContinue }',
