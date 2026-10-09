@@ -843,16 +843,30 @@ function sanitizarLink(bruto) {
     tipo,
     nome: String(bruto.nome || '').trim().slice(0, 80) || null,
     mbps: Number.isFinite(mbps) && mbps > 0 ? Math.round(mbps) : null,
+    adaptador: String(bruto.adaptador || '').trim().slice(0, 100) || null,
     // a máquina tem placa Ethernet mas ela está fora do ar (cabo solto,
     // switch morto) - o caso que o Master pediu pra alertar. Só é
     // observável quando existe OUTRO caminho (Wi-Fi) mantendo ela viva;
     // se a Ethernet era o único caminho, ela some do ar e vira queda.
     ethernetCaida: !!bruto.ethernetCaida,
+    ethernetPresente: !!bruto.ethernetPresente,
+    ethernetAtiva: !!bruto.ethernetAtiva,
   };
 }
 function mesmoLink(a, b) {
   if (!a || !b) return a === b;
-  return a.tipo === b.tipo && a.nome === b.nome && a.ethernetCaida === b.ethernetCaida && a.mbps === b.mbps;
+  return a.tipo === b.tipo && a.nome === b.nome && a.adaptador === b.adaptador
+    && a.ethernetCaida === b.ethernetCaida && a.ethernetPresente === b.ethernetPresente
+    && a.ethernetAtiva === b.ethernetAtiva && a.mbps === b.mbps;
+}
+
+function sanitizarSistemaWindows(bruto) {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const nome = String(bruto.nome || '').trim().replace(/\s+/g, ' ').slice(0, 100);
+  const versao = String(bruto.versao || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  const arquitetura = ['32 bits', '64 bits'].includes(bruto.arquitetura) ? bruto.arquitetura : null;
+  if (!nome && !arquitetura) return null;
+  return { nome: nome || 'Windows', versao: versao || null, arquitetura };
 }
 
 // Reinício: o agente lê o LastBootUpTime UMA vez, quando sobe, e carrega
@@ -933,7 +947,7 @@ const CAMPOS_DO_HEARTBEAT = [
   // heartbeat seguinte veria "mudou" e inventaria um reinício que não houve.
   // ('eventos' de propósito FORA desta lista: a varredura também escreve
   // nele, e preservar a cópia da memória apagaria o que ela gravou.)
-  'bootEm', 'link', 'linkEm', 'desligamentoInesperado', 'anydeskServico',
+  'bootEm', 'link', 'linkEm', 'sistema', 'sistemaEm', 'desligamentoInesperado', 'anydeskServico',
   // contador de falhas do proprio agente (ver registrarHeartbeat): so o
   // heartbeat escreve, e e' o que separa "a loja caiu" de "so o caminho ate
   // o servidor falhou" na hora que ela volta
@@ -1276,6 +1290,7 @@ async function heartbeat(codigo, posto, info, token) {
   // "sem dado" em vez de inventar.
   const bootEm = Number(dados.bootEm) > 0 ? Number(dados.bootEm) : null;
   const linkNovo = sanitizarLink(dados.link);
+  const sistemaNovo = sanitizarSistemaWindows(dados.sistema);
   const linkAntes = (atual && atual.link) || null;
   let eventosNovos = [];
   if (bootEm) {
@@ -1325,6 +1340,10 @@ async function heartbeat(codigo, posto, info, token) {
         || (linkNovo.tipo === 'wifi' && linkAntes && linkAntes.tipo === 'ethernet');
       if (piorou) patch.linkAvisoPendente = { tipo: linkNovo.tipo, ethernetCaida: linkNovo.ethernetCaida, mbps: linkNovo.mbps };
     }
+  }
+  if (sistemaNovo) {
+    patch.sistema = sistemaNovo;
+    patch.sistemaEm = Date.now();
   }
   if (eventosNovos.length) {
     patch.eventos = [...((atual && atual.eventos) || []), ...eventosNovos].slice(-EVENTOS_MAX);
@@ -2625,6 +2644,11 @@ async function registrarTelemetria(codigo, posto, dados, token) {
         || (linkTelemetria.tipo === 'wifi' && atual.link && atual.link.tipo === 'ethernet');
       if (piorou) patch.linkAvisoPendente = { tipo: linkTelemetria.tipo, ethernetCaida: linkTelemetria.ethernetCaida, mbps: linkTelemetria.mbps };
     }
+  }
+  const sistemaTelemetria = sanitizarSistemaWindows(dados && dados.sistema);
+  if (sistemaTelemetria) {
+    patch.sistema = sistemaTelemetria;
+    patch.sistemaEm = agora;
   }
 
   // há quanto tempo o Windows está sem reiniciar. Regra da casa: reboot 1x

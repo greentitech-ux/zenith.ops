@@ -1544,10 +1544,17 @@ function conexaoComputadorHtml(c){
   const tipos={ethernet:'Ethernet (cabo)',wifi:'Wi-Fi',nenhum:'sem placa de rede ativa',outro:'outro meio'};
   const velocidade=Number(link.mbps);
   const mbps=Number.isFinite(velocidade)&&velocidade>0 ? ` · ${velocidade.toLocaleString('pt-BR')} Mbps` : '';
-  const aviso=link.ethernetCaida ? ' · Ethernet caída' : '';
+  // A ficha precisa dizer explicitamente o estado da Ethernet tambem quando
+  // o caminho ativo e Wi-Fi; isso separa "sem cabo" de "placa sem defeito".
+  const ethernetEstado=link.ethernetCaida
+    ? ' · Ethernet caída/desconectada'
+    : link.ethernetPresente
+    ? (link.ethernetAtiva ? ' · Ethernet: operacional' : ' · Ethernet: desconectada')
+    : ' · Ethernet: não disponível';
   const interfaceNome=link.nome ? ` · ${link.tipo==='wifi'?'Rede':'interface'}: ${escapeHtml(String(link.nome))}` : '';
+  const adaptador=link.adaptador && link.adaptador!==link.nome ? ` · adaptador: ${escapeHtml(String(link.adaptador))}` : '';
   const leitura=c.linkEm ? ` · leitura ${escapeHtml(tempoRelativo(c.linkEm))}` : '';
-  return `📡 Conexão: <b>${escapeHtml(tipos[link.tipo]||String(link.tipo))}</b>${link.tipo==='nenhum'?'':mbps}${interfaceNome}${aviso}${leitura}`;
+  return `📡 Conexão: <b>${escapeHtml(tipos[link.tipo]||String(link.tipo))}</b>${link.tipo==='nenhum'?'':mbps}${interfaceNome}${adaptador}${ethernetEstado}${leitura}`;
 }
 function linkTexto(c){
   const l = c && c.link;
@@ -1913,8 +1920,16 @@ function atualizarConteudoDetalhe(codigo, c){
     const extras = [t.ip ? `IP ${escapeHtml(t.ip)}` : null, t.nome ? escapeHtml(t.nome) : null, t.versao ? `v${escapeHtml(t.versao)}` : null].filter(Boolean).join(' · ');
     infoBits.push(`🔒 Tailscale: ${estado}${extras ? ` · <span style="font-size:11px;">${extras}</span>` : ''}`);
   }
-  const disp = resumoDispositivo(c.userAgent);
-  if(disp) infoBits.push(`💻 ${escapeHtml(disp)}`);
+  const sistema = c.sistema || null;
+  if(sistema && (sistema.nome || sistema.arquitetura)){
+    const nomeSistema = escapeHtml(String(sistema.nome || 'Windows'));
+    const versaoSistema = sistema.versao ? ` · ${escapeHtml(String(sistema.versao))}` : '';
+    const arquiteturaSistema = sistema.arquitetura ? ` · <b>${escapeHtml(String(sistema.arquitetura))}</b>` : '';
+    infoBits.push(`💻 Sistema: <b>${nomeSistema}</b>${versaoSistema}${arquiteturaSistema}`);
+  } else {
+    const disp = resumoDispositivo(c.userAgent);
+    if(disp) infoBits.push(`💻 ${escapeHtml(disp)}`);
+  }
   // APARELHO DE NAVEGADOR (tablet/celular de quiosque, ver public/aparelho.js).
   // Só aparece quando o aparelho REALMENTE contou - iOS não tem API de
   // bateria, e linha vazia é pior que linha nenhuma.
