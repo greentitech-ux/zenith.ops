@@ -513,7 +513,14 @@ const COLUNAS = [
 // esforco: se ja foi finalizada vira "Resolvido" (nao da pra saber se teve
 // solucao ou nao sem reprocessar tudo), senao cai em Pendente como qualquer
 // conversa nova. Mesma logica pro nivel (sem responsavel = so o bot mexeu).
-function statusDe(chat){ return chat.statusAtendimento || (chat.status==='FINALIZADO' ? 'RESOLVIDO' : 'PENDENTE'); }
+function statusDe(chat){
+  const estado = chat.statusAtendimento || 'PENDENTE';
+  // Conversas encerradas antes da correção possuíam status=FINALIZADO mas
+  // conservavam o statusAtendimento=PENDENTE. Na fila elas precisam aparecer
+  // no destino terminal correto já no próximo carregamento, sem reabri-las.
+  if(chat.status==='FINALIZADO' && !['RESOLVIDO','SEM_SOLUCAO'].includes(estado)) return 'RESOLVIDO';
+  return estado;
+}
 // Os três estados que uma NOTA pode ter (ver registrarNotaInterna). Não é o
 // mesmo conjunto do status da CONVERSA logo acima: EM_ANDAMENTO aqui quer
 // dizer "o Beniboy resolveu sozinho, é só acompanhar" - não pede ação de
