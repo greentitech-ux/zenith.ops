@@ -2243,61 +2243,18 @@ app.post('/api/meus-atendimentos/:id/mensagem', auth.requireAuth, uploadChatAnex
 });
 
 // Pedido de XML feito por qualquer pessoa no próprio chat. A chave pública da
-// conversa só prova que ela pode acompanhar AQUELA conversa; não autoriza
-// leitura de XML. A coleta fica parada na fila do Master até senha/digital.
+// conversa só prova que ela pode acompanhar AQUELA conversa. A coleta é
+// estritamente de leitura e o ZIP só volta como anexo para este mesmo chat.
 app.post('/api/suporte-chat/:id/solicitar-xml', async (req, res) => {
   try {
     const chat = await suporteChat.getComToken(req.params.id, req.body?.token);
     if (!chat) return res.status(404).json({ error: 'Conversa não encontrada.' });
     const mes = mesXmlValido(req.body?.mes);
     const computador = String(req.body?.computador || '').trim().toUpperCase();
-    if (!mes || !XML_CHAT_ALVOS.includes(computador)) {
-      return res.status(400).json({ error: 'Escolha uma das três máquinas autorizadas e um mês válido.' });
-    }
-    const maquinas = await lojaStatus.listarResumo();
-    const maquinaResumo = maquinas.find((d) => String(d.nome || d.posto || '').trim().toUpperCase() === computador);
-    const maquina = maquinaResumo && await lojaStatus.alvoProntoParaComando(maquinaResumo.codigo, maquinaResumo.posto);
-    if (!maquina || !maquina.pronto) {
-      return res.status(400).json({ error: 'A máquina solicitada não está pronta para preparar o arquivo seguro.' });
-    }
-    const tokenEntrega = crypto.randomBytes(32).toString('base64url');
-    const entregaRef = XML_CHAT_ENTREGAS.doc();
-    const expiraEm = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
-    await entregaRef.set({
-      id: entregaRef.id, chatId: chat.id, computador, mes, ano: new Date().getFullYear(),
-      tokenHash: hashEntregaXml(tokenEntrega), status: 'aguardando-autorizacao', criadoEm: new Date().toISOString(), expiraEm,
-      arquivo: null, aprovadoPorEmail: null, entregueEm: null,
-    });
-    const mesExtenso = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(2026, mes - 1, 1));
-    const pendente = await qaAprovacoes.criar({
-      tipo: 'xml-chat.entregar-processados',
-      resumo: `Entregar XML Processados (${mesExtenso}) no chat #${chat.numeroTicket}`,
-      origem: 'beniboy',
-      criadoPorId: chat.logado?.id || null,
-      criadoPorEmail: chat.logado?.email || `chat:${chat.numeroTicket}`,
-      expiraEm,
-      detalhes: [
-        { rotulo: 'Solicitante', valor: chat.nome || 'Visitante' },
-        { rotulo: 'Contato', valor: chat.contato || 'Não informado' },
-        { rotulo: 'Máquina autorizada', valor: computador },
-        { rotulo: 'Mês/ano', valor: `${mesExtenso}/${new Date().getFullYear()}` },
-        { rotulo: 'Entrega', valor: 'ZIP será anexado somente nesta conversa após aprovação.' },
-      ],
-      payload: {
-        entregaId: entregaRef.id, tokenEntrega, mes, computador,
-        alvos: [{ codigo: maquina.codigo, posto: maquina.posto }],
-      },
-    });
-    await XML_CHAT_ENTREGAS.doc(entregaRef.id).update({ autorizacaoId: pendente.id });
-    const atualizado = await suporteChat.adicionarMensagem(chat.id, {
-      de: 'suporte', bot: true,
-      texto: `Pedido de XML de ${mesExtenso}/${new Date().getFullYear()} para ${computador} registrado. Aguarde a autorização do Master por senha ou digital; o ZIP será enviado aqui nesta conversa.`,
-    });
-    broadcast('suporte-chat', { id: atualizado.id }, 'suporte');
-    push.notifyQaAprovacaoPendente(pendente.resumo, chat.logado?.email || chat.contato || 'chat público', { id: pendente.id, origem: 'xml-chat' })
-      .then((entrega) => qaAprovacoes.registrarEntregaPush(pendente.id, entrega))
-      .catch((err) => console.error('[xml-chat] Falha no push de autorização:', err.message));
-    res.status(202).json({ pendenteAprovacao: true, id: pendente.id, expiraEm });
+    if (!mes || !computador) return res.status(400).json({ error: 'Informe uma máquina GCOM e um mês válido.' });
+    const competencia = `${String(mes).padStart(2, '0')}/${new Date().getFullYear()}`;
+    const job = await coworkApi.solicitarXmlProcessados({ protocolo: chat.numeroTicket, maquina: computador, competencia });
+    res.status(202).json(job);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2319,14 +2276,16 @@ app.post('/api/xml-chat-entregas/:id', express.raw({ type: 'application/zip', li
     if (entrega.status !== 'autorizado' || !entrega.expiraEm || Date.parse(entrega.expiraEm) <= Date.now()) return res.status(410).json({ error: 'Esta autorização de entrega venceu ou já foi usada.' });
     const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     if (bytes.length < 4 || bytes.length > XML_CHAT_MAX_BYTES || bytes.subarray(0, 2).toString('ascii') !== 'PK') return res.status(400).json({ error: 'O arquivo recebido não é um ZIP válido.' });
+    const quantidadeCabecalho = Number(req.headers['x-nopulso-xml-quantidade']);
+    const quantidadeXmls = Number.isSafeInteger(quantidadeCabecalho) && quantidadeCabecalho >= 0 && quantidadeCabecalho <= 1000000 ? quantidadeCabecalho : null;
     const nome = nomeArquivoXmlSeguro(`XML_PROCESSADOS_${entrega.computador}_${entrega.ano}-${String(entrega.mes).padStart(2, '0')}.zip`);
     const arquivoPath = await storage.salvarArquivo(`xml-chat-${entrega.id}`, { buffer: bytes, originalname: nome, mimetype: 'application/zip' }, 'xml-chat');
     const chat = await suporteChat.adicionarMensagem(entrega.chatId, {
       de: 'suporte', autorEmail: entrega.aprovadoPorEmail || null,
-      texto: `O Master autorizou a solicitação. O ZIP dos XMLs Processados está pronto para baixar.`,
+      texto: 'O ZIP dos XMLs Processados está pronto para baixar.',
       anexo: { nome, path: arquivoPath, tipo: 'application/zip', tamanho: bytes.length },
     });
-    await snap.ref.update({ status: 'entregue', entregueEm: new Date().toISOString(), arquivo: { nome, path: arquivoPath, tamanho: bytes.length }, tokenHash: null });
+    await snap.ref.update({ status: 'entregue', entregueEm: new Date().toISOString(), arquivo: { nome, path: arquivoPath, tamanho: bytes.length, quantidadeXmls }, tokenHash: null });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     res.status(201).json({ ok: true });
   } catch (err) {

@@ -3051,20 +3051,20 @@ const PERFIS_SYNCTHING_GRANDE_FRATELLO = Object.freeze({
     pastaId: 'nopulso-processados-aero-car-pdv-01',
     rotulo: 'NOPULSO PROCESSADOS - GRANDE-FRATELLO - AERO-CAR-PDV.01',
   }),
-  'DOM-AERO-PDV.01': Object.freeze({
-    pastaId: 'nopulso-processados-dom-aero-pdv-01',
-    rotulo: 'NOPULSO PROCESSADOS - GRANDE-FRATELLO - DOM-AERO-PDV.01',
+  'AERO-DOM-PDV.01': Object.freeze({
+    pastaId: 'nopulso-processados-aero-dom-pdv-01',
+    rotulo: 'NOPULSO PROCESSADOS - GRANDE-FRATELLO - AERO-DOM-PDV.01',
   }),
-  'SPO-AERO-PDV.01': Object.freeze({
-    pastaId: 'nopulso-processados-spo-aero-pdv-01',
-    rotulo: 'NOPULSO PROCESSADOS - GRANDE-FRATELLO - SPO-AERO-PDV.01',
+  'AERO-SPO-PDV.01': Object.freeze({
+    pastaId: 'nopulso-processados-aero-spo-pdv-01',
+    rotulo: 'NOPULSO PROCESSADOS - GRANDE-FRATELLO - AERO-SPO-PDV.01',
   }),
 });
 
 function perfilSyncthingGrandeFratello(doc) {
   const nome = String((doc && (doc.nome || doc.posto)) || '').trim().toUpperCase();
   const perfil = PERFIS_SYNCTHING_GRANDE_FRATELLO[nome];
-  if (!perfil) throw new Error('Esta vinculação Syncthing é permitida somente para AERO-CAR-PDV.01, DOM-AERO-PDV.01 e SPO-AERO-PDV.01.');
+  if (!perfil) throw new Error('Esta vinculação Syncthing é permitida somente para AERO-CAR-PDV.01, AERO-DOM-PDV.01 e AERO-SPO-PDV.01.');
   if (!/^[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}$/.test(SYNCTHING_UMBREL_DEVICE_ID)) {
     throw new Error('A identidade segura do Umbrel ainda não está configurada no servidor. Defina NOPULSO_UMBREL_SYNCTHING_DEVICE_ID antes de vincular máquinas.');
   }
@@ -3158,12 +3158,14 @@ function comandoPuxarProcessadosGcom(doc, mes, entrega) {
     '$arquivoZip = Join-Path $destino $nomeZip',
     'New-Item -ItemType Directory -Path $destino -Force | Out-Null',
     '$reutilizado = Test-Path -LiteralPath $arquivoZip -PathType Leaf',
+    '$quantidadeXmls = 0',
     '$temporario = Join-Path $env:TEMP ("NoPulso-Processados-" + [guid]::NewGuid().ToString("N"))',
     'try {',
     '  if (-not $reutilizado) {',
     '    if (-not (Test-Path -LiteralPath $origem -PathType Container)) { throw "A pasta de origem não existe e não há ZIP anterior: $origem" }',
     '    $xmls = @(Get-ChildItem -LiteralPath $origem -Filter "*.xml" -File -Recurse -ErrorAction Stop)',
     '    if ($xmls.Count -eq 0) { throw "Nenhum XML foi encontrado em $origem." }',
+    '    $quantidadeXmls = $xmls.Count',
     '    New-Item -ItemType Directory -Path $temporario -Force | Out-Null',
     '    foreach ($arquivo in $xmls) {',
     '      $relativo = $arquivo.FullName.Substring($origem.Length).TrimStart("\\")',
@@ -3181,13 +3183,18 @@ function comandoPuxarProcessadosGcom(doc, mes, entrega) {
     '    }',
     '    Copy-Item -LiteralPath $zipTemporario -Destination $arquivoZip -Force -ErrorAction Stop',
     '  }',
+    '  if ($reutilizado) {',
+    '    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop',
+    '    $zipExistente = [IO.Compression.ZipFile]::OpenRead($arquivoZip)',
+    '    try { $quantidadeXmls = @($zipExistente.Entries | Where-Object { -not $_.FullName.EndsWith("/") -and $_.Name -like "*.xml" }).Count } finally { $zipExistente.Dispose() }',
+    '  }',
     '  $tamanhoMb = [math]::Round((Get-Item -LiteralPath $arquivoZip).Length / 1MB, 2)',
     '  $estadoZip = if ($reutilizado) { "ZIP já existente reutilizado" } else { "ZIP novo gerado" }',
     ...(entregaAtiva ? [
       `$urlEntrega = "${urlEntrega}"`,
       `$tokenEntrega = "${tokenEntrega}"`,
-      '  Invoke-WebRequest -Uri $urlEntrega -Method Post -Headers @{ "X-NoPulso-Entrega" = $tokenEntrega } -ContentType "application/zip" -InFile $arquivoZip -UseBasicParsing -TimeoutSec 900 -ErrorAction Stop | Out-Null',
-      '  "ZIP ENTREGUE NO CHAT · $estadoZip · $tamanhoMb MB · arquivo Syncthing: $arquivoZip"',
+      '  Invoke-WebRequest -Uri $urlEntrega -Method Post -Headers @{ "X-NoPulso-Entrega" = $tokenEntrega; "X-NoPulso-Xml-Quantidade" = [string]$quantidadeXmls } -ContentType "application/zip" -InFile $arquivoZip -UseBasicParsing -TimeoutSec 900 -ErrorAction Stop | Out-Null',
+      '  "ZIP ENTREGUE NO CHAT · $quantidadeXmls XML(s) · $estadoZip · $tamanhoMb MB · arquivo Syncthing: $arquivoZip"',
     ] : [
       '  "ZIP PROCESSADOS PRONTO PARA O UMBREL · $estadoZip · $tamanhoMb MB · arquivo Syncthing: $arquivoZip"',
     ]),

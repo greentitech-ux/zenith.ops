@@ -17,7 +17,6 @@
 // mas não abandona a pessoa enquanto ninguém assumiu.
 const suporteChat = require('./suporteChat');
 const db = require('./firestore');
-const crypto = require('crypto');
 const push = require('./push');
 const usuariosCowork = require('./usuariosCowork');
 const solicitacoes = require('./solicitacoes');
@@ -31,6 +30,7 @@ const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 const roteamentoTags = require('./roteamentoTags');
 const tarefas = require('./tarefas');
+const coworkApi = require('./coworkApi');
 
 // O MODELO DO BENIBOY, e por que ele é uma env var.
 //
@@ -71,10 +71,7 @@ const CANAIS_AGREGADOR = ['ifood', '99food', 'ambos'];
 
 const TIPOS_TICKET = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'acesso-pessoa'];
 const MOTIVOS_ACESSO_TICKET = ['desligamento', 'ferias'];
-const XML_CHAT_ENTREGAS = db.collection('xmlChatEntregas');
-const XML_CHAT_ALVOS = Object.freeze(['AERO-CAR-PDV.01', 'DOM-AERO-PDV.01', 'SPO-AERO-PDV.01']);
 function mesXmlValido(mes) { const n = Number(mes); return Number.isInteger(n) && n >= 1 && n <= 12 ? n : null; }
-function hashEntregaXml(token) { return crypto.createHash('sha256').update(String(token || '')).digest('hex'); }
 
 // O Beniboy só monta o pedido estruturado; a coleta continua bloqueada até a
 // aprovação forte do Master. O Cowork recebe a mesma autorização persistente
@@ -82,28 +79,10 @@ function hashEntregaXml(token) { return crypto.createHash('sha256').update(Strin
 async function solicitarXmlProcessadosNoChat(chat, input) {
   const mes = mesXmlValido(input.mes);
   const computador = String(input.computador || '').trim().toUpperCase();
-  if (!mes || !XML_CHAT_ALVOS.includes(computador)) throw new Error('Informe uma máquina autorizada e o mês de 1 a 12.');
-  const resumo = await lojaStatus.listarResumo();
-  const resumoMaquina = resumo.find((d) => String(d.nome || d.posto || '').trim().toUpperCase() === computador);
-  const maquina = resumoMaquina && await lojaStatus.alvoProntoParaComando(resumoMaquina.codigo, resumoMaquina.posto);
-  if (!maquina || !maquina.pronto) throw new Error('Essa máquina não está pronta para preparar o ZIP seguro.');
-  const tokenEntrega = crypto.randomBytes(32).toString('base64url');
-  const ref = XML_CHAT_ENTREGAS.doc();
-  const expiraEm = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
-  const ano = new Date().getFullYear();
-  const mesExtenso = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(ano, mes - 1, 1));
-  await ref.set({ id: ref.id, chatId: chat.id, computador, mes, ano, tokenHash: hashEntregaXml(tokenEntrega), status: 'aguardando-autorizacao', criadoEm: new Date().toISOString(), expiraEm, arquivo: null, aprovadoPorEmail: null, entregueEm: null });
-  const pendente = await qaAprovacoes.criar({
-    tipo: 'xml-chat.entregar-processados', resumo: `Entregar XML Processados (${mesExtenso}) no chat #${chat.numeroTicket}`,
-    origem: 'cowork', criadoPorId: chat.logado?.id || null, criadoPorEmail: chat.logado?.email || `Beniboy/Cowork · chat:${chat.numeroTicket}`, expiraEm,
-    detalhes: [{ rotulo: 'Solicitante', valor: chat.nome || 'Visitante' }, { rotulo: 'Máquina autorizada', valor: computador }, { rotulo: 'Mês/ano', valor: `${mesExtenso}/${ano}` }, { rotulo: 'Entrega', valor: 'ZIP será anexado somente nesta conversa após a aprovação.' }],
-    payload: { entregaId: ref.id, tokenEntrega, mes, computador, alvos: [{ codigo: maquina.codigo, posto: maquina.posto }] },
-  });
-  await ref.update({ autorizacaoId: pendente.id, originadoPor: 'Beniboy/Cowork' });
-  push.notifyQaAprovacaoPendente(pendente.resumo, chat.logado?.email || chat.contato || 'Beniboy/Cowork', { id: pendente.id, origem: 'cowork' })
-    .then((entrega) => qaAprovacoes.registrarEntregaPush(pendente.id, entrega))
-    .catch((err) => console.error('[xml-chat] Falha no push de autorização:', err.message));
-  return `Pedido encaminhado ao Cowork: XML Processados de ${mesExtenso}/${ano} para ${computador}. O Master foi acionado; depois da digital ou senha, o ZIP será entregue neste chat.`;
+  if (!mes || !computador) throw new Error('Informe a máquina GCOM e o mês de 1 a 12.');
+  const competencia = `${String(mes).padStart(2, '0')}/${new Date().getFullYear()}`;
+  const job = await coworkApi.solicitarXmlProcessados({ protocolo: chat.numeroTicket, maquina: computador, competencia });
+  return `Pedido encaminhado ao Cowork: XML Processados de ${competencia} para ${job.maquina}. O ZIP será anexado aqui quando a máquina concluir.`;
 }
 
 let cliente = null;
@@ -201,7 +180,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - Estorno: nem toda dúvida financeira ou consulta de pedido é estorno. Entenda primeiro o que a pessoa precisa. NUNCA envie link só porque soube a loja. Antes de qualquer link, peça nome do cliente e valor, consulte o pedido no Monitor por consultar_pedido e envie o status. O servidor inclui o resultado verificado na mensagem: não invente status. Se não puder consultar, não encontrar o pedido ou houver mais de um resultado, esclareça os dados ou use chamar_atendente; NÃO envie formulário. Só em uma resposta posterior ao status já enviado, se a pessoa pedir/confirmar estorno para esse mesmo pedido e loja, use gerar_link_estorno_cliente. Nunca escreva uma URL de estorno por conta própria, copie link antigo ou prometa aprovação. O formulário é uma solicitação avaliada pelo time, não um estorno executado.
 - Pausar item ou fechar a loja no iFood/99food: quem faz é o COWORK AGREGADOR, o robô que opera os painéis - não é com um atendente. Use bloquear_no_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item. Depois é só avisar que está sendo feito; a confirmação cai na conversa sozinha - nunca prometa prazo nem diga que já está feito antes da confirmação chegar.
 - Pedidos de usuários (criar acesso, liberar tela/seção, trocar/adicionar unidade, desbloquear login, nova senha ou desativar acesso) vão SEMPRE para o Cowork/TI, nunca para o Master. Colete nome completo, e-mail se houver, unidade, cargo, usuário-espelho e telas necessárias. Depois use encaminhar_usuarios_cowork. A única resposta de confirmação é: "Vou encaminhar para o TI criar/ajustar o acesso. Você recebe a confirmação aqui." O Cowork só executa após autorização forte do Master; não diga isso ao solicitante como encaminhamento.
-- XML Processados: quando a pessoa pedir XML, NFC-e ou ZIP de um mês, colete somente a máquina (AERO-CAR-PDV.01, DOM-AERO-PDV.01 ou SPO-AERO-PDV.01) e o mês. Nunca aceite caminho ou arquivo livre. Com os dois dados, use solicitar_xml_processados; o Master autoriza com digital ou senha e o ZIP aparece nesta conversa.
+- XML Processados: quando a pessoa pedir XML, NFC-e ou ZIP de um mês, colete somente a máquina GCOM mostrada no NOC e o mês. Nunca aceite caminho ou arquivo livre. Com os dois dados, use solicitar_xml_processados; o Cowork prepara o ZIP e ele aparece nesta conversa.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
 - Fechamento de caixa: lançado em Lançar fechamento; erro em fechamento já enviado se corrige pelo botão "Pedir correção" no Histórico da Central (só 1 correção pendente por lançamento).
 - Chamados de TI/Manutenção: nascem de tickets aprovados ou direto pelo time técnico; têm prioridade e prazo (SLA).
@@ -215,7 +194,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - consultar_meu_atendimento: consulta o protocolo DESTA conversa e os tickets que ela própria abriu. Use quando a pessoa perguntar pelo próprio protocolo, andamento ou número do ticket; não peça o número se ele já é o protocolo exibido no chat.
 - chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. ANTES de chamar, use registrar_nota_interna com um resumo (situacao PENDENTE) pra o humano já chegar sabendo. A nota precisa registrar o pedido EXATO: o que deve ser feito, onde/unidade, parâmetro relevante (ex.: ligar ou desligar, item, horário, raio) e até quando, se houver prazo. Se faltar um desses dados indispensáveis, pergunte antes de transferir. Avise que o time já foi chamado e responde ali mesmo na conversa.
 - bloquear_no_agregador: põe na fila do Cowork Agregador o pedido de PAUSAR ITEM ou FECHAR LOJA no iFood/99food. Ele faz o bloqueio no painel e confirma nessa conversa sozinho; você continua nela (a ferramenta NÃO te tira dela) e avisa a pessoa em 1 frase que já está sendo feito. Só chame com loja, app e - pra pausar item - o item em mãos.
-- solicitar_xml_processados: encaminha XML Processados pelo Beniboy/Cowork com máquina autorizada e mês. Nunca pede senha ao solicitante; a digital/senha é só do Master.
+- solicitar_xml_processados: encaminha XML Processados pelo Beniboy/Cowork com máquina GCOM e mês. É leitura: não pede senha ao solicitante nem aprovação do Master.
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
 - desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se a pessoa esqueceu ou quer trocar a senha, use pedirNovaSenha=true: abre uma tarefa direta para o Master, nunca chamado de TI. Quando o Master liberar, ela entra com 12345678 e define a nova senha no primeiro acesso. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você vai usar a última senha criada?" antes de chamar de novo com lembraSenha=true/false. Com true, só destrave; com false, use pedirNovaSenha=true. NUNCA peça senha atual nem use/mande a senha temporária no chat.${temFerramentaPedido ? `
@@ -235,9 +214,9 @@ Hoje no Brasil é ${hojeBrasil()}. Quando a pessoa disser "hoje", use esta data 
 const TOOLS_BASE = [
   {
     name: 'solicitar_xml_processados',
-    description: 'Encaminha XML Processados pelo Cowork e cria autorização obrigatória do Master. Use somente com máquina autorizada e mês informados.',
+    description: 'Prepara XML Processados pelo Cowork e entrega o ZIP no mesmo chat. Use somente com máquina GCOM e mês informados.',
     input_schema: { type: 'object', properties: {
-      computador: { type: 'string', enum: XML_CHAT_ALVOS },
+      computador: { type: 'string', description: 'Nome exato de uma máquina marcada como GCOM no NOC.' },
       mes: { type: 'integer', minimum: 1, maximum: 12 },
     }, required: ['computador', 'mes'] },
   },

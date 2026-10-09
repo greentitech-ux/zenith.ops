@@ -53,7 +53,7 @@ Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Ap
 
 ## Ferramentas iniciais
 
-`preparar_reuniao`, `consultar_noc`, `pesquisar_emails`, `ler_email`, `enviar_email`, `criar_tarefa`, `criar_reuniao`, `concluir_tarefa`, `cancelar_tarefa`, `criar_solicitacao_ti`, `criar_formulario`, `criar_usuario`, `desbloquear_usuario`, `criar_nova_senha` e `executar_noc`.
+`preparar_reuniao`, `consultar_noc`, `solicitar_xml_processados`, `consultar_xml_processados`, `pesquisar_emails`, `ler_email`, `enviar_email`, `criar_tarefa`, `criar_reuniao`, `concluir_tarefa`, `cancelar_tarefa`, `criar_solicitacao_ti`, `criar_formulario`, `criar_usuario`, `desbloquear_usuario`, `criar_nova_senha` e `executar_noc`.
 
 **Consultas (desde 23/09/2026, só leitura, sem autorização):**
 
@@ -80,7 +80,8 @@ Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Ap
 - **Conecta é um portal:**
   - O Claude baixa o PDF assinado (`obter_formulario` → `pdf`, link de 2h) e envia no navegador.
   - Depois registra com `registrar_envio_conecta` e o `protocolo`. Só formulário ASSINADO, uma vez só, com comentário no ticket.
-- `consultar_noc` devolve `gcom` (o "Possui GCOM" do cadastro da máquina) e aceita o filtro `gcom=true/false`.
+- `consultar_noc` devolve `gcom` (o "Possui GCOM" do cadastro da máquina), aceita o filtro `gcom=true/false` e, para máquinas GCOM, inclui `xmlPronto` e `xmlMotivo` antes de prometer uma coleta.
+- `solicitar_xml_processados` é somente leitura: recebe `protocolo`, `competencia` (`MM/AAAA`) e `maquina` **ou** `codigo` + `posto`; cria um job, manda o agente gerar o ZIP e o anexa automaticamente no chat daquele protocolo. Não usa aprovação do Master. Consulte com `consultar_xml_processados(jobId)` até `status=pronto` ou `erro`. Em erro, `motivo` traz a causa técnica disponível.
 - `listar_abastecimento_carrinho` (leitura): o Abastecimento do Carrinho (Dom Car Aero Recife; aceita o apelido `Carrinho Aeroporto`). Tipos reais: `envio` (produção que a loja mandou = o que "entra"), `remake` (descarte por qualidade, com motivo), `pedido`, `contagem`. **Não tem venda nem valor** — o que "sai" (vendido) sai do fechamento/PDV, ou se infere da contagem. `dataInicio`/`dataFim` são a **noite operacional**; a janela por hora (`horaInicio`/`horaFim`) **cruza a meia-noite** quando `horaFim <= horaInicio` (22:00→05:00: 01:30 do dia 02 cai na noite de 01). `agrupar`: nenhum, dia, hora, produto (sabor: calabresa/pepperoni/mussarela), tipo. Devolve os registros, os totais (enviado, remakes, média por noite, % de remake e média por dia da semana) e `paginacao`; use `pagina` e `limite` para os registros, sem alterar os totais.
 - Fluxo #12029: `obter_estorno numero=12029` → `criar_formulario tipo=estorno numero=12029` → `validar_formulario` → `pedir_assinatura destino=conecta` → digital do Master → `obter_formulario` (PDF) → portal do Conecta → `registrar_envio_conecta protocolo=…`. Só estorno **APROVADO** vira formulário.
 

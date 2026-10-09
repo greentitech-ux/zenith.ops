@@ -34,6 +34,12 @@ function configurar(opcoes = {}) {
 
 const AUDITORIA = db.collection('coworkApiAuditoria');
 const IDEMPOTENCIA = db.collection('coworkApiIdempotencia');
+// Um job de XML é o mesmo registro que autoriza o upload autenticado do ZIP
+// pelo NOCZenith. O token puro só vive enquanto montamos o comando; no banco
+// fica apenas seu hash, portanto nem o Cowork nem uma leitura posterior
+// conseguem reutilizá-lo para enviar outro arquivo.
+const XML_CHAT_ENTREGAS = db.collection('xmlChatEntregas');
+function hashEntregaXml(token) { return crypto.createHash('sha256').update(String(token || '')).digest('hex'); }
 
 const FERRAMENTAS = Object.freeze({
   // ---- consultas (etapa 2, 23/09/2026): o Claude enxerga antes de agir ----
@@ -69,6 +75,8 @@ const FERRAMENTAS = Object.freeze({
   registrar_envio_conecta: { descricao: 'Registra no NoPulso que o PDF ASSINADO foi enviado no portal do Conecta, com o número de protocolo que o portal deu. Use só depois de enviar de fato. Comenta no ticket de origem.', risco: 'baixo', obrigatorios: ['protocolo'] },
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
   consultar_noc: { descricao: 'Consulta o estado atual e compacto dos computadores monitorados.', risco: 'leitura', obrigatorios: [] },
+  solicitar_xml_processados: { descricao: 'Gera, por leitura, o ZIP de XML Processados da competência informada em uma máquina GCOM pronta e o anexa automaticamente no chat de suporte do protocolo. Não altera XMLs nem pede autorização do Master.', risco: 'baixo', obrigatorios: ['protocolo', 'competencia'] },
+  consultar_xml_processados: { descricao: 'Acompanha um job de XML Processados criado por solicitar_xml_processados.', risco: 'leitura', obrigatorios: ['jobId'] },
   listar_abastecimento_carrinho: { descricao: 'Lê o Abastecimento do Carrinho (Dom Car Aero Recife, abastecido pela Praça Aeroporto). Tipos REAIS: envio (produção que a loja mandou), remake (descarte por qualidade, com motivo), pedido (o que o carrinho pediu), contagem (com avarias). NÃO tem venda nem valor - venda sai do fechamento/PDV. Janela por hora que cruza a meia-noite (22:00→05:00): registro de 01:30 do dia 02 cai na noite de 01. dataInicio/dataFim = noite operacional. agrupar: nenhum, dia (noite), hora, produto (sabor), tipo. Sabores: calabresa, pepperoni, mussarela.', risco: 'leitura', obrigatorios: [] },
   pesquisar_emails: { descricao: 'Pesquisa a caixa corporativa autorizada usando a sintaxe de busca do Gmail.', risco: 'leitura', obrigatorios: [] },
   ler_email: { descricao: 'Lê uma mensagem específica encontrada pela pesquisa.', risco: 'leitura', obrigatorios: ['emailId'] },
@@ -129,6 +137,11 @@ const PROPRIEDADES_COMUNS = {
   responsavelEmail: { type: 'string', description: 'E-mail ou username do responsável. Sem ele, a tarefa fica com o Master.' },
   formularioId: { type: 'string', description: 'Id interno do formulário (vem de criar_formulario/obter_formulario).' },
   gcom: { type: 'boolean', description: 'consultar_noc: true = só as máquinas marcadas "Possui GCOM" no cadastro; false = só as sem.' },
+  maquina: { type: 'string', description: 'Nome da máquina no NOC, por exemplo AERO-CAR-PDV.01.' },
+  codigo: { type: 'string', description: 'Código da unidade da máquina, alternativa ao nome.' },
+  posto: { type: 'string', description: 'Posto da máquina, usado junto com codigo.' },
+  competencia: { type: 'string', pattern: '^(0[1-9]|1[0-2])/[0-9]{4}$', description: 'Mês dos XMLs no formato MM/AAAA, por exemplo 09/2026.' },
+  jobId: { type: 'string', description: 'Identificador retornado por solicitar_xml_processados.' },
   dataInicio: { type: 'string', description: 'AAAA-MM-DD (noite operacional inicial).' },
   dataFim: { type: 'string', description: 'AAAA-MM-DD (noite operacional final).' },
   horaFim: { type: 'string', description: 'HH:MM. Com horaFim <= horaInicio a janela cruza a meia-noite (ex.: 22:00→05:00).' },
@@ -179,6 +192,8 @@ const PARAMETROS = Object.freeze({
   listar_autorizacoes_pendentes: ['limite'],
   preparar_reuniao: ['termo', 'unidade', 'limite'],
   consultar_noc: ['unidade', 'gcom'],
+  solicitar_xml_processados: ['protocolo', 'maquina', 'codigo', 'posto', 'competencia'],
+  consultar_xml_processados: ['jobId'],
   listar_abastecimento_carrinho: ['unidade', 'dataInicio', 'dataFim', 'horaInicio', 'horaFim', 'tipo', 'agrupar', 'limite', 'pagina'],
   pesquisar_emails: ['consulta', 'limite'],
   ler_email: ['emailId'],
@@ -1237,6 +1252,86 @@ async function listarAbastecimentoCarrinho(p) {
   };
 }
 
+function competenciaXml(valor) {
+  const m = /^(0[1-9]|1[0-2])\/(\d{4})$/.exec(String(valor || '').trim());
+  if (!m) throw new Error('Competência inválida. Use MM/AAAA, por exemplo 09/2026.');
+  return { mes: Number(m[1]), ano: Number(m[2]), texto: `${m[1]}/${m[2]}` };
+}
+function xmlProntidao(resumo, seguro) {
+  if (!resumo || !resumo.temGcom) return { pronto: false, motivo: 'Máquina sem a tag GCOM.' };
+  if (!seguro) return { pronto: false, motivo: 'Máquina não encontrada no NOC.' };
+  if (seguro.tipo !== 'interno') return { pronto: false, motivo: 'A máquina não é do tipo interno e não processa comandos seguros do NOC.' };
+  if (!seguro.pronto) return { pronto: false, motivo: 'Agente NOC sem canal seguro. Reinstale/atualize o NOCZenith nesta máquina.' };
+  if (!resumo.online) return { pronto: false, motivo: 'Máquina offline; aguarde o agente NOC voltar a ficar online.' };
+  return { pronto: true, motivo: 'Canal NOC seguro pronto. A pasta GCOM e os XMLs serão conferidos durante a geração.' };
+}
+async function localizarMaquinaXml(entrada) {
+  const maquinas = await lojaStatus.listarResumo();
+  const nome = String(entrada.maquina || '').trim().toUpperCase();
+  const codigo = String(entrada.codigo || '').trim();
+  const posto = String(entrada.posto || '').trim();
+  const resumo = maquinas.find((m) => (nome && String(m.nome || '').trim().toUpperCase() === nome)
+    || (codigo && posto && String(m.codigo) === codigo && String(m.posto) === posto));
+  if (!resumo) {
+    const disponiveis = maquinas.filter((m) => m.temGcom).map((m) => m.nome || `${m.codigo}/${m.posto}`).filter(Boolean);
+    throw new Error(`Máquina GCOM não encontrada. Disponíveis: ${disponiveis.join(', ') || 'nenhuma'}.`);
+  }
+  const seguro = await lojaStatus.alvoProntoParaComando(resumo.codigo, resumo.posto);
+  const xml = xmlProntidao(resumo, seguro);
+  if (!xml.pronto) throw new Error(xml.motivo);
+  return { resumo, maquina: seguro };
+}
+async function chatDoProtocolo(protocolo) {
+  const numero = Number(String(protocolo || '').replace(/\D/g, ''));
+  if (!Number.isSafeInteger(numero)) throw new Error('Protocolo inválido.');
+  const chat = (await suporteChat.listAll()).find((c) => Number(c.numeroTicket) === numero);
+  if (!chat) throw new Error(`Protocolo #${numero} não encontrado.`);
+  if (chat.status !== 'ABERTO') throw new Error(`O protocolo #${numero} está encerrado e não pode receber o ZIP.`);
+  return chat;
+}
+async function solicitarXmlProcessados(entrada) {
+  const competencia = competenciaXml(entrada.competencia);
+  if (competencia.ano !== new Date().getFullYear()) throw new Error(`Só é permitido gerar XML do ano vigente (${new Date().getFullYear()}).`);
+  const [chat, alvo] = await Promise.all([chatDoProtocolo(entrada.protocolo), localizarMaquinaXml(entrada)]);
+  const tokenEntrega = crypto.randomBytes(32).toString('base64url');
+  const ref = XML_CHAT_ENTREGAS.doc();
+  const expiraEm = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+  await ref.set({
+    id: ref.id, chatId: chat.id, computador: alvo.maquina.nome, mes: competencia.mes, ano: competencia.ano,
+    tokenHash: hashEntregaXml(tokenEntrega), status: 'autorizado', criadoEm: new Date().toISOString(), expiraEm,
+    arquivo: null, aprovadoPorEmail: 'Claude (Cowork)', originadoPor: 'Cowork', protocolo: chat.numeroTicket,
+  });
+  try {
+    const url = `${baseUrl()}/api/xml-chat-entregas/${encodeURIComponent(ref.id)}`;
+    const comando = lojaStatus.comandoPuxarProcessadosGcom(alvo.maquina, competencia.mes, { url, token: tokenEntrega });
+    const registro = await lojaStatus.enfileirarComando(alvo.maquina.codigo, alvo.maquina.posto, comando, {
+      origem: 'cowork-xml-processados', requerAdmin: false, solicitadoPor: 'Claude (Cowork)',
+    });
+    await ref.update({ comandoId: registro.id });
+    await suporteChat.adicionarMensagem(chat.id, {
+      de: 'suporte', bot: true,
+      texto: `O Cowork está preparando o ZIP dos XMLs Processados de ${competencia.texto} para ${alvo.maquina.nome}. Ele será anexado aqui quando a máquina concluir.`,
+    });
+    return { ok: true, status: 'gerando', jobId: ref.id, protocolo: chat.numeroTicket, maquina: alvo.maquina.nome, competencia: competencia.texto };
+  } catch (err) {
+    await ref.update({ status: 'erro', erro: String(err.message || err).slice(0, 500), tokenHash: null });
+    throw err;
+  }
+}
+async function consultarXmlProcessados(jobId) {
+  const snap = await XML_CHAT_ENTREGAS.doc(String(jobId || '')).get();
+  if (!snap.exists) throw new Error('Job de XML não encontrado.');
+  const job = snap.data();
+  let status = job.status === 'entregue' ? 'pronto' : job.status === 'erro' ? 'erro' : 'gerando';
+  let motivo = job.erro || null;
+  if (status === 'gerando' && job.comandoId) {
+    const comando = await lojaStatus.detalharComando(job.comandoId);
+    if (comando?.status === 'erro') { status = 'erro'; motivo = comando.erro || 'O agente não conseguiu gerar o ZIP.'; await snap.ref.update({ status: 'erro', erro: motivo }); }
+  }
+  return { ok: status !== 'erro', status, jobId: job.id, protocolo: job.protocolo || null, maquina: job.computador, competencia: `${String(job.mes).padStart(2, '0')}/${job.ano}`, motivo: motivo || undefined,
+    arquivo: job.arquivo ? { nome: job.arquivo.nome, tamanho: job.arquivo.tamanho || null, quantidadeXmls: job.arquivo.quantidadeXmls || null, anexoNoChat: true } : null };
+}
+
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
   if (nome === 'listar_disputas') return listarDisputas(p);
@@ -1286,6 +1381,8 @@ async function despachar(nome, entrada, ator) {
     };
   }
   if (nome === 'listar_autorizacoes_pendentes') return listarAutorizacoesPendentes(p);
+  if (nome === 'solicitar_xml_processados') return solicitarXmlProcessados(p);
+  if (nome === 'consultar_xml_processados') return consultarXmlProcessados(p.jobId);
   if (nome === 'pesquisar_emails') return googleGmail.pesquisar({ consulta: p.consulta, limite: p.limite });
   if (nome === 'ler_email') return googleGmail.ler(p.emailId);
   if (nome === 'enviar_email') return googleGmail.enviar({ para: p.para, assunto: p.assunto, texto: p.texto });
@@ -1331,10 +1428,14 @@ async function despachar(nome, entrada, ator) {
     const unidade = String(p.unidade || '').trim().toLocaleLowerCase('pt-BR');
     // "Possui GCOM" é o checkbox do cadastro da máquina (temGcom)
     const soGcom = typeof p.gcom === 'boolean' ? p.gcom : null;
-    return (await lojaStatus.listarResumo())
+    const resumo = await lojaStatus.listarResumo();
+    return (await Promise.all(resumo
       .filter((m) => !unidade || String(m.codigo || '').toLocaleLowerCase('pt-BR').includes(unidade) || String(m.nomeUnidade || '').toLocaleLowerCase('pt-BR').includes(unidade))
       .filter((m) => soGcom === null || !!m.temGcom === soGcom)
-      .slice(0, 200).map((m) => ({
+      .slice(0, 200).map(async (m) => {
+      const seguro = m.temGcom ? await lojaStatus.alvoProntoParaComando(m.codigo, m.posto) : null;
+      const xml = m.temGcom ? xmlProntidao(m, seguro) : null;
+      return {
       codigo: m.codigo, posto: m.posto, unidade: m.nomeUnidade || m.codigo,
       // O nome do computador vive em `nome`. nomeComputador e hostname nao
       // existem no resumo, entao isto voltava null em TODAS as maquinas e a
@@ -1346,7 +1447,8 @@ async function despachar(nome, entrada, ator) {
       // e o resumo ja traz o campo, entao nao custa leitura nenhuma.
       versaoAgente: m.agenteVersao || null,
       gcom: !!m.temGcom,
-    }));
+      ...(xml ? { xmlPronto: xml.pronto, xmlMotivo: xml.motivo } : {}),
+    }; })));
   }
   if (nome === 'executar_noc') {
     const tarefa = String(p.tarefa || '');
@@ -1486,4 +1588,4 @@ async function executar({ nome, entrada, idempotencyKey }) {
   }
 }
 
-module.exports = { PARAMETROS, listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado, configurar };
+module.exports = { PARAMETROS, listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado, configurar, solicitarXmlProcessados, consultarXmlProcessados };
