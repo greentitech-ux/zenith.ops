@@ -181,6 +181,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - Pausar item ou fechar a loja no iFood/99food: quem faz é o COWORK AGREGADOR, o robô que opera os painéis - não é com um atendente. Use bloquear_no_agregador (nunca chamar_atendente). Pergunte o que faltar, uma coisa por vez: a loja, o app (iFood, 99food ou os dois) e, se for pausar item, qual item. Depois é só avisar que está sendo feito; a confirmação cai na conversa sozinha - nunca prometa prazo nem diga que já está feito antes da confirmação chegar.
 - Pedidos de usuários (criar acesso, liberar tela/seção, trocar/adicionar unidade, desbloquear login, nova senha ou desativar acesso) vão SEMPRE para o Cowork/TI, nunca para o Master. Colete nome completo, e-mail se houver, unidade, cargo, usuário-espelho e telas necessárias. Depois use encaminhar_usuarios_cowork. A única resposta de confirmação é: "Vou encaminhar para o TI criar/ajustar o acesso. Você recebe a confirmação aqui." O Cowork só executa após autorização forte do Master; não diga isso ao solicitante como encaminhamento.
 - XML Processados: quando a pessoa pedir XML, NFC-e ou ZIP de um mês, colete somente a máquina GCOM mostrada no NOC e o mês. Nunca aceite caminho ou arquivo livre. Com os dois dados, use solicitar_xml_processados; o Cowork prepara o ZIP e ele aparece nesta conversa.
+- XML Processados, regra de confirmação: depois de solicitar, o estado é somente "gerando". NUNCA diga que o XML foi providenciado, entregue, pronto ou disponível; NUNCA encerre o protocolo por XML; e nunca mande abrir outro chat, a menos que exista nesta conversa uma mensagem automática com o anexo ZIP. Se houver erro, explique que o arquivo NÃO foi entregue e informe o motivo técnico que chegou.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
 - Fechamento de caixa: lançado em Lançar fechamento; erro em fechamento já enviado se corrige pelo botão "Pedir correção" no Histórico da Central (só 1 correção pendente por lançamento).
 - Chamados de TI/Manutenção: nascem de tickets aprovados ou direto pelo time técnico; têm prioridade e prazo (SLA).
@@ -1143,12 +1144,16 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
   try {
     const chat = await suporteChat.getOne(chatId);
     if (!chat || chat.status !== 'ABERTO') return null;
-    // O Cowork assumiu pelo próprio Beniboy: duas inteligências respondendo
-    // ao mesmo protocolo foi o incidente #12287. A partir daí só ele segue.
-    if ((chat.mensagens || []).some((m) => m.autorEmail === 'Cowork via Beniboy')) return null;
-    if (chat.atendidoPorEmail) return null; // alguém do time assumiu de fato
     const msgs = chat.mensagens || [];
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
+    // Um pedido de XML é uma exceção segura: mesmo se o protocolo já estiver
+    // com humano/Cowork, a repetição do pedido deve tentar a coleta novamente
+    // no MESMO chat, em vez de mandar o visitante abrir outro atendimento.
+    const pedidoXml = /\b(?:xml|nfc-?e|processados)\b/i.test(String(msgs[msgs.length - 1].texto || ''));
+    // O Cowork assumiu pelo próprio Beniboy: duas inteligências respondendo
+    // ao mesmo protocolo foi o incidente #12287. Fora XML, só ele segue.
+    if ((chat.mensagens || []).some((m) => m.autorEmail === 'Cowork via Beniboy') && !pedidoXml) return null;
+    if (chat.atendidoPorEmail && !pedidoXml) return null; // alguém do time assumiu de fato
 
     const resultado = { tickets: [], tarefas: [], direcionados: [], chamouAtendente: false, motivoAtendente: '', alertaMaster: null, encerrar: null, agregador: null };
     // Conversas abertas antes desta versão não tinham podeCriarTarefa no

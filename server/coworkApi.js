@@ -1332,6 +1332,31 @@ async function consultarXmlProcessados(jobId) {
     arquivo: job.arquivo ? { nome: job.arquivo.nome, tamanho: job.arquivo.tamanho || null, quantidadeXmls: job.arquivo.quantidadeXmls || null, anexoNoChat: true } : null };
 }
 
+// O agente NOC devolve o resultado de forma assíncrona. Quando a geração do
+// ZIP falha, esta ponte atualiza o job e avisa o MESMO chat com o motivo real.
+// No sucesso o próprio endpoint de upload já anexou o ZIP e marcou o job como
+// entregue; por isso não há mensagem de "pronto" sem anexo real.
+async function registrarResultadoXmlProcessados(comando) {
+  if (!comando || comando.origem !== 'cowork-xml-processados' || !comando.id) return null;
+  const jobs = await XML_CHAT_ENTREGAS.where('comandoId', '==', String(comando.id)).limit(1).get();
+  if (jobs.empty) return null;
+  const snap = jobs.docs[0];
+  const job = snap.data();
+  if (job.status === 'entregue' || job.status === 'erro') return job;
+  if (comando.status !== 'erro') return job;
+  const motivo = String(comando.erro || 'O agente não conseguiu gerar o ZIP.').slice(0, 500);
+  await snap.ref.update({ status: 'erro', erro: motivo, tokenHash: null, concluidoEm: new Date().toISOString() });
+  try {
+    await suporteChat.adicionarMensagem(job.chatId, {
+      de: 'suporte', bot: true,
+      texto: `Não foi possível preparar o ZIP dos XMLs Processados de ${String(job.mes).padStart(2, '0')}/${job.ano} para ${job.computador}. O arquivo não foi entregue. Motivo: ${motivo}`,
+    });
+  } catch (err) {
+    console.error('[cowork-xml] Falha ao avisar o chat sobre o erro:', err.message);
+  }
+  return { ...job, status: 'erro', erro: motivo };
+}
+
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
   if (nome === 'listar_disputas') return listarDisputas(p);
@@ -1588,4 +1613,4 @@ async function executar({ nome, entrada, idempotencyKey }) {
   }
 }
 
-module.exports = { PARAMETROS, listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado, configurar, solicitarXmlProcessados, consultarXmlProcessados };
+module.exports = { PARAMETROS, listarFerramentas, ferramentasMcp, tokenValido, executar, executarAutorizado, configurar, solicitarXmlProcessados, consultarXmlProcessados, registrarResultadoXmlProcessados };

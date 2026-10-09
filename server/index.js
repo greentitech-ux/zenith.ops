@@ -2415,9 +2415,11 @@ app.post('/api/loja-status/:codigo/computadores/:posto/ip-local', async (req, re
 app.post('/api/loja-status/:codigo/computadores/:posto/comando-resultado', async (req, res) => {
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    res.json(await lojaStatus.marcarComandoExecutado(req.body.comandoId, { resultado: req.body.resultado, erro: req.body.erro }, {
+    const resultado = await lojaStatus.marcarComandoExecutado(req.body.comandoId, { resultado: req.body.resultado, erro: req.body.erro }, {
       codigo: req.params.codigo, posto: req.params.posto, token,
-    }));
+    });
+    await coworkApi.registrarResultadoXmlProcessados(resultado);
+    res.json(resultado);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
