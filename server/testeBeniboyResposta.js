@@ -10,42 +10,53 @@ class ModeloFalso {
 }
 async function esperar(teste) {
   for (let i = 0; i < 100; i++) { if (await teste()) return; await new Promise(r => setTimeout(r, 20)); }
-  assert.fail('Beniboy não respondeu ao pedido; ficou somente o link.');
+  assert.fail('Beniboy não respondeu ao pedido.');
 }
 async function testarHttp({ DOCS, postarJson, pedir, token }) {
   const suporte = require('./suporteChat');
   const bot = require('./suporteBot');
   const headers = { Authorization: 'Bearer ' + token };
   let liberar;
-  modelo.responder = () => new Promise(resolve => { liberar = () => resolve(resposta('Vou verificar os arquivos solicitados.')); });
-  const abertura = await postarJson('/api/suporte-chat/iniciar', { nome: 'Teste local', contato: 'teste@example.com', assunto: 'Outro', texto: 'Preciso dos arquivos XML do mês de setembro.' });
+  modelo.responder = () => new Promise(resolve => { liberar = () => resolve(resposta('Vamos verificar a configuração da impressora.')); });
+  const abertura = await postarJson('/api/suporte-chat/iniciar', { nome: 'Teste local', contato: 'teste@example.com', assunto: 'Computador', texto: 'A impressora continua saindo tudo ao contrário.' });
   assert.equal(abertura.status, 200, abertura.corpo);
   const c = JSON.parse(abertura.corpo), chave = 'suporteChats/' + c.id;
   await esperar(() => liberar);
   const iniciado = DOCS.get(chave);
-  assert.equal(iniciado.mensagens.at(-1).aviso, 'protocolo');
-  assert.equal(iniciado.aguardandoHumano, true, 'Recibo não retira o pedido da fila');
+  assert.equal(iniciado.mensagens.length, 1, 'Abertura não envia recibo/link automático');
+  assert.equal(iniciado.mensagens[0].de, 'visitante');
+  assert.equal(iniciado.aguardandoHumano, true, 'Pedido continua esperando a primeira resposta');
   assert.equal(iniciado.atendidoPorEmail, null);
   const entrada = modelo.chamadas.at(-1).messages;
   assert.equal(entrada.at(-1).role, 'user');
   assert(!JSON.stringify(entrada).includes(c.token), 'Token do acompanhamento não vai ao modelo');
   liberar();
-  await esperar(() => DOCS.get(chave).mensagens.length === 3);
+  await esperar(() => DOCS.get(chave).mensagens.length === 2);
   const publico = await pedir(`/api/suporte-chat/${c.id}?token=${c.token}`);
   assert.equal(publico.status, 200);
-  assert.match(JSON.parse(publico.corpo).mensagens.at(-1).texto, /arquivos solicitados/);
+  assert.match(JSON.parse(publico.corpo).mensagens.at(-1).texto, /configuração da impressora/);
   const central = await pedir('/api/suporte-chats', headers);
   assert.equal(central.status, 200, central.corpo);
-  assert.equal(JSON.parse(central.corpo).find(x => x.id === c.id).mensagens.length, 3, 'Central vê aviso e resposta');
+  assert.equal(JSON.parse(central.corpo).find(x => x.id === c.id).mensagens.length, 2, 'Central vê pedido e resposta, sem link automático');
   const quantas = modelo.chamadas.length;
   await bot.responderConversa(c.id);
   assert.equal(modelo.chamadas.length, quantas, 'Não duplica resposta ao consultar novamente');
   modelo.responder = async () => resposta('Continuamos no mesmo protocolo.');
   assert.equal((await postarJson(`/api/suporte-chat/${c.id}/mensagem`, { token: c.token, texto: 'Pode continuar por aqui?' })).status, 200);
   await esperar(() => DOCS.get(chave).mensagens.at(-1).texto === 'Continuamos no mesmo protocolo.');
+  // O mesmo fluxo vale com sessão autenticada; não depender da exceção XML.
+  const aberturaLogada = await postarJson('/api/suporte-chat/iniciar', { nome: 'Teste com login', contato: 'teste@example.com', assunto: 'Computador', texto: 'Minha impressora imprime ao contrário.' }, headers);
+  assert.equal(aberturaLogada.status, 200, aberturaLogada.corpo);
+  const logada = JSON.parse(aberturaLogada.corpo);
+  await esperar(() => DOCS.get('suporteChats/' + logada.id).mensagens.length === 2);
+  const chatLogado = DOCS.get('suporteChats/' + logada.id);
+  assert(chatLogado.logado?.id, 'A conversa está ligada à sessão autenticada');
+  assert.equal(chatLogado.mensagens[1].texto, 'Continuamos no mesmo protocolo.');
+  assert(!chatLogado.mensagens.some(m => /Guarde este link/.test(m.texto)));
   // Compatibilidade com conversa antiga que ficou apenas no recibo, sem migração.
   for (const sufixo of ['', '.html']) {
-    const legado = { ...iniciado, id: 'legado-resposta' + sufixo, mensagens: iniciado.mensagens.map(m => { const v = { ...m, texto: m.texto.replace('/meu-atendimento#', '/meu-atendimento' + sufixo + '#') }; delete v.aviso; return v; }) };
+    const reciboAntigo = { de: 'suporte', bot: true, texto: `Guarde este link para acompanhar seu protocolo #${c.numeroTicket}: https://www.nopulso.com.br/meu-atendimento${sufixo}#id=${c.id}&token=${c.token}` };
+    const legado = { ...iniciado, id: 'legado-resposta' + sufixo, mensagens: [...iniciado.mensagens, reciboAntigo] };
     DOCS.set('suporteChats/' + legado.id, legado);
     assert(await bot.responderConversa(legado.id));
     assert.match(DOCS.get('suporteChats/' + legado.id).mensagens.at(-1).texto, /mesmo protocolo/);
@@ -72,7 +83,7 @@ async function testarHttp({ DOCS, postarJson, pedir, token }) {
   // Campo interno nunca é aceito de um visitante nem faz sumir sua mensagem.
   await suporte.adicionarMensagem(c.id, { de: 'visitante', token: c.token, texto: 'Mais informações.', aviso: 'protocolo' });
   assert.equal(DOCS.get(chave).mensagens.at(-1).aviso, undefined);
-  console.log('✓ Beniboy HTTP: abertura + recibo + resposta, Central e visitante, continuidade, legado, API indisponível/vazia, fila de espera e humano assumindo.');
+  console.log('✓ Beniboy HTTP: impressora sem login e com login, primeira resposta sem link, Central e visitante, continuidade, legado, API indisponível/vazia, fila de espera e humano assumindo.');
 }
 async function testarSabotagem() {
   const arquivo = path.join(__dirname, 'suporteBot.js');

@@ -68,10 +68,17 @@
 //      pela interface da rota padrão, em vez de uma placa aleatória.
 // 146: instala a Central Beniboy como "Suporte NoPulso" nas estações elegíveis.
 //      Windows antigo, servidor, HOST e VMs continuam deliberadamente fora.
-const VERSAO_VIGIA = 147;
+// 148: define nome e logo amarela na própria política do app, inclusive para
+//      instalações antigas com ícone genérico. Preserva URL e identidade.
+const VERSAO_VIGIA = 148;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 const CENTRAL_BENIBOY_URL = `https://${String(process.env.ATENDIMENTO_HOST || 'atendimento.nopulso.com.br').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')}/atendimento/central`;
+const MANIFESTO_BENIBOY = require('./public/manifest-beniboy.json');
+const ICONE_BENIBOY = MANIFESTO_BENIBOY.icons.find(icone => icone.sizes === '192x192');
+// Lido uma vez no processo, sem download nem leitura de banco por máquina.
+const ICONE_BENIBOY_HASH = require('crypto').createHash('sha256').update(require('fs').readFileSync(require('path').join(__dirname, 'public', ICONE_BENIBOY.src))).digest('hex');
+const IDENTIDADE_BENIBOY = JSON.stringify({ custom_name: MANIFESTO_BENIBOY.name, custom_icon: { url: new URL(ICONE_BENIBOY.src, CENTRAL_BENIBOY_URL).href, hash: ICONE_BENIBOY_HASH } }).slice(1, -1);
 
 // qual pagina cada tipo de computador abre - mesmo mapeamento client-side
 // de loja-status.html (paginaDoTipo), usado so pra montar a URL que o
@@ -301,7 +308,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '',
     '# ---- CENTRAL BENIBOY / "SUPORTE NOPULSO" NA MAQUINA ----',
     '# A Central abre em janela propria com o icone de suporte. O nome do PWA e',
-    '# definido no manifesto como "Suporte NoPulso"; a Central continua sendo',
+    '# definido no manifesto como "Atendimento NoPulso"; a Central continua sendo',
     '# a tela de atendimento, nao o app operacional principal do NoPulso.',
     '# Aqui e o mesmo resultado sem clique: a politica WebAppInstallForceList do',
     '# Chrome/Edge (HKCU, vale sem dominio) manda o navegador instalar o PWA',
@@ -330,14 +337,16 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '      Remove-Item $item -Force -ErrorAction SilentlyContinue',
     '    }',
     '  }',
-    '  $atalhosSuporte = @(Get-Item "$env:USERPROFILE\\Desktop\\Suporte NoPulso*.lnk", "$env:PUBLIC\\Desktop\\Suporte NoPulso*.lnk" -Force -ErrorAction SilentlyContinue | Sort-Object @{ Expression = { if ($_.BaseName -ieq "Suporte NoPulso") { 0 } else { 1 } } }, LastWriteTime)',
+    '  $atalhosSuporte = @(Get-Item "$env:USERPROFILE\\Desktop\\Suporte NoPulso*.lnk", "$env:PUBLIC\\Desktop\\Suporte NoPulso*.lnk", "$env:USERPROFILE\\Desktop\\Atendimento NoPulso*.lnk", "$env:PUBLIC\\Desktop\\Atendimento NoPulso*.lnk" -Force -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -match "^(Suporte|Atendimento) NoPulso(\\s*\\(\\d+\\))?$" } | Sort-Object @{ Expression = { if ($_.BaseName -ieq "Atendimento NoPulso") { 0 } elseif ($_.BaseName -ieq "Suporte NoPulso") { 1 } else { 2 } } }, LastWriteTime)',
     '  if ($atalhosSuporte.Count -gt 1) {',
     '    foreach ($duplicado in @($atalhosSuporte | Select-Object -Skip 1)) { try { Remove-Item -LiteralPath $duplicado.FullName -Force -ErrorAction Stop; Escrever-Log "Suporte NoPulso: atalho duplicado removido: $($duplicado.Name)" } catch { Escrever-Log "Suporte NoPulso: não consegui remover atalho duplicado $($duplicado.Name): $($_.Exception.Message)" } }',
     '    $atalhosSuporte = @($atalhosSuporte | Select-Object -First 1)',
     '  }',
     '  $criarAtalho = ($atalhosSuporte.Count -eq 0)',
     '  # 2) Chrome/Edge só podem criar o ícone se ele ainda não existir.',
-    '  $politica = \'[{"url":"\' + $urlApp + \'","create_desktop_shortcut":\' + $(if ($criarAtalho) { "true" } else { "false" }) + \',"default_launch_container":"window"}]\'',
+    '  # custom_icon também corrige o ícone das instalações já existentes (Chrome/Edge 112+).',
+    '  # A URL e o id do manifesto não mudam: não instalar outro app para trocar a marca.',
+    '  $politica = \'[{"url":"\' + $urlApp + \'","create_desktop_shortcut":\' + $(if ($criarAtalho) { "true" } else { "false" }) + \',"default_launch_container":"window",' + IDENTIDADE_BENIBOY + '}]\'',
     // -ErrorAction Stop NAO e detalhe: sem ele, New-Item e New-ItemProperty
     // falham com erro NAO-TERMINANTE, que try/catch nao pega. O catch abaixo
     // era decoracao - o erro escapava e o Windows despejava um bloco vermelho
@@ -386,12 +395,12 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  }',
     '  if (-not $eraGerenciado) { Escrever-Log "Infraestrutura: nenhum atalho automatico do Suporte NoPulso identificado; instalacoes manuais foram preservadas."; return }',
     '  $chaves = @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")',
-    '  $apps = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match "^Suporte NoPulso(\\s*\\(\\d+\\))?$" -and $_.UninstallString -match "--uninstall-app-id=" })',
+    '  $apps = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match "^(Suporte|Atendimento) NoPulso(\\s*\\(\\d+\\))?$" -and $_.UninstallString -match "--uninstall-app-id=" })',
     '  foreach ($app in $apps) {',
     '    try { if ($app.UninstallString -match \'^"([^"]+)"\\s*(.*)$\') { Start-Process -FilePath $Matches[1] -ArgumentList ($Matches[2] + " --no-startup-window") -Wait -WindowStyle Hidden; Escrever-Log "Servidor: app automatico removido: $($app.DisplayName)" } } catch { Escrever-Log "Servidor: nao consegui remover app automatico $($app.DisplayName): $($_.Exception.Message)" }',
     '  }',
-    '  foreach ($lnk in @("$env:USERPROFILE\\Desktop\\Suporte NoPulso*.lnk", "$env:PUBLIC\\Desktop\\Suporte NoPulso*.lnk")) {',
-    '    foreach ($item in @(Get-Item $lnk -Force -ErrorAction SilentlyContinue)) { try { Remove-Item $item -Force -ErrorAction Stop; Escrever-Log "Servidor: atalho automatico removido: $($item.Name)" } catch { Escrever-Log "Servidor: nao consegui remover atalho $($item.Name): $($_.Exception.Message)" } }',
+    '  foreach ($lnk in @("$env:USERPROFILE\\Desktop\\Suporte NoPulso*.lnk", "$env:PUBLIC\\Desktop\\Suporte NoPulso*.lnk", "$env:USERPROFILE\\Desktop\\Atendimento NoPulso*.lnk", "$env:PUBLIC\\Desktop\\Atendimento NoPulso*.lnk")) {',
+    '    foreach ($item in @(Get-Item $lnk -Force -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -match "^(Suporte|Atendimento) NoPulso(\\s*\\(\\d+\\))?$" })) { try { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop; Escrever-Log "Servidor: atalho automatico removido: $($item.Name)" } catch { Escrever-Log "Servidor: nao consegui remover atalho $($item.Name): $($_.Exception.Message)" } }',
     '  }',
     '  Remove-Item $marcaGerenciada -Force -ErrorAction SilentlyContinue',
     '  Remove-Item (Join-Path $env:LOCALAPPDATA "NOCZenith\\central-suporte-v*.ok") -Force -ErrorAction SilentlyContinue',

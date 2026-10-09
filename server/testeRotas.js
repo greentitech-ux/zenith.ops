@@ -146,6 +146,7 @@ process.env.PORT = '8899';
 process.env.DASHBOARD_USER = 'x';
 process.env.DASHBOARD_PASS = 'x';
 if (process.env.TESTE_FORMULARIO_DASHBOARD === '1') process.env.DASHBOARD_PASSWORD = 'x';
+if (process.env.TESTE_IDENTIDADE_ATENDIMENTO === '1') process.env.DASHBOARD_PASSWORD = 'x';
 process.env.MASTER_EMAIL = 'master@teste.local';
 process.env.MASTER_PASSWORD = 'SenhaDeTeste!2026';
 // token de API do Master (pedido 12/09/2026: ele chama a API de um chat no
@@ -417,6 +418,31 @@ function enviarJson(metodo, caminho, corpoObj, headers = {}) {
 }
 
 setTimeout(async () => {
+  if (process.env.TESTE_IDENTIDADE_ATENDIMENTO === '1') {
+    try {
+      const assert = require('node:assert/strict');
+      const crypto = require('node:crypto');
+      const manifesto = require('./public/manifest-beniboy.json');
+      for (const host of ['www.nopulso.com.br', require('./centralSubdominio').hostAtendimento()]) {
+        const headers = { Host: host };
+        const manifest = await pedir('/manifest-beniboy.json', headers);
+        assert.equal(manifest.status, 200, 'Manifesto deve abrir sem autenticação: ' + host);
+        const d = JSON.parse(manifest.corpo);
+        assert.equal(d.name, 'Atendimento NoPulso');
+        assert.equal(d.id, '/central-beniboy-app');
+        for (const icone of manifesto.icons) {
+          const r = await pedirBinario(icone.src, headers);
+          assert.equal(r.status, 200, 'Logo deve abrir sem autenticação: ' + icone.src);
+          assert.match(r.headers['content-type'], /image\/png/);
+          const arquivo = require('node:fs').readFileSync(path.join(__dirname, 'public', icone.src));
+          assert.equal(crypto.createHash('sha256').update(r.buffer).digest('hex'), crypto.createHash('sha256').update(arquivo).digest('hex'));
+        }
+      }
+      assert.equal((await pedir('/api/me')).status, 401, 'A liberação dos ícones não libera APIs privadas');
+      console.log('✓ Identidade HTTP: nome, id preservado e PNGs públicos com Dashboard protegido, nas duas origens.');
+      process.exit(0);
+    } catch (e) { console.error(e); process.exit(1); }
+  }
   if (process.env.TESTE_FORMULARIO_PUBLICO === '1') {
     try { await require('./testeFluxoFormularioPublico').testar({ DOCS, postarJson }); process.exit(0); }
     catch (e) { console.error(e); process.exit(1); }

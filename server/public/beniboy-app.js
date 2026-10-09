@@ -3,7 +3,7 @@
 (function(){
   let convite=null;
   window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();convite=e;});
-  window.addEventListener('appinstalled',()=>{convite=null;aviso('Central Beniboy instalada. Abra pelo novo ícone do aparelho.');});
+  window.addEventListener('appinstalled',()=>{convite=null;aviso('Atendimento NoPulso instalado. Abra pelo ícone amarelo do aparelho.');});
   function aviso(texto){
     const el=document.getElementById('beniboy-app-aviso');
     if(el) el.textContent=texto;
@@ -32,20 +32,20 @@
       try{
         await evento.prompt();
         const escolha=await evento.userChoice;
-        aviso(escolha.outcome==='accepted'?'Instalação confirmada. Procure o ícone Central Beniboy no aparelho.':'Instalação cancelada. Você pode continuar usando a Central no navegador.');
-      }catch(e){aviso('Use o menu do navegador para instalar a Central Beniboy.');}
+        aviso(escolha.outcome==='accepted'?'Instalação confirmada. Procure o ícone amarelo Atendimento NoPulso no aparelho.':'Instalação cancelada. Você pode continuar usando a Central no navegador.');
+      }catch(e){aviso('Use o menu do navegador para instalar o Atendimento NoPulso.');}
       return;
     }
     if(/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1)){
-      aviso('No Safari: Compartilhar → Adicionar à Tela de Início → Adicionar. Abra depois pelo ícone Central Beniboy.');return;
+      aviso('No Safari: Compartilhar → Adicionar à Tela de Início → Adicionar. Abra depois pelo ícone Atendimento NoPulso.');return;
     }
-    aviso('No Chrome ou Edge: abra o menu ⋮/… e procure “Instalar Central Beniboy”, “Instalar página como app” ou “Adicionar à tela inicial”. A opção depende do navegador.');
+    aviso('No Chrome ou Edge: abra o menu ⋮/… e procure “Instalar Atendimento NoPulso”, “Instalar página como app” ou “Adicionar à tela inicial”. A opção depende do navegador.');
   };
   window.baixarAtalhoBeniboy=function(){
     const url=new URL('/atendimento/central',location.origin);
     if(!['https:','http:'].includes(url.protocol)) return;
     // ZIP evita que navegadores renomeiem .url para .download por segurança.
-    const nome=new TextEncoder().encode('Central Beniboy.url');
+    const nome=new TextEncoder().encode('Atendimento NoPulso.url');
     const dados=new TextEncoder().encode('[InternetShortcut]\r\nURL='+url.href+'\r\n');
     let crc=0xffffffff;
     for(const byte of dados){crc^=byte;for(let bit=0;bit<8;bit++) crc=(crc>>>1)^((crc&1)?0xedb88320:0);}
@@ -62,8 +62,8 @@
     const arquivo=new Blob([local,central,fim],{type:'application/zip'});
     const link=document.createElement('a');
     const objeto=URL.createObjectURL(arquivo);
-    link.href=objeto;link.download='Central Beniboy.zip';document.body.appendChild(link);link.click();link.remove();
+    link.href=objeto;link.download='Atendimento NoPulso.zip';document.body.appendChild(link);link.click();link.remove();
     setTimeout(()=>URL.revokeObjectURL(objeto),60000);
-    aviso('No Windows: abra “Central Beniboy.zip”, use Extrair tudo e mova “Central Beniboy.url” para a Área de Trabalho. Ele abre no navegador padrão; para janela própria, use Instalar app.');
+    aviso('No Windows: abra “Atendimento NoPulso.zip”, use Extrair tudo e mova “Atendimento NoPulso.url” para a Área de Trabalho. Ele abre no navegador padrão; para janela própria com a logo amarela, use Instalar app.');
   };
 })();

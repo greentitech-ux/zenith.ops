@@ -415,6 +415,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/meu-atendimento.html',
   '/atendimento/central', '/atendimento/entrar', '/atendimento/meu', '/atendimento/sw.js',
   '/beniboy-portal.js', '/beniboy-alertas.js', '/beniboy-app.js', '/beniboy-marca.css', '/manifest-beniboy.json',
+  '/beniboy-app-192.png', '/beniboy-app-512.png',
   '/unidade.html', '/sessao-unidade.js', '/api/acesso-unidade/vinculo',
   '/api/acesso-unidade/registrar', '/api/acesso-unidade/sessao',
   '/api/meta/unidades-publico',
@@ -2093,11 +2094,8 @@ app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (re
       logado, lojaContexto: unidade?.nome || req.body.lojaContexto, unidadeContexto: unidade?.codigo || req.body.unidadeContexto,
       postoContexto: unidade?.posto || req.body.postoContexto, anexo,
     });
-    // Link com segredo no fragmento: o token não vai ao servidor nos acessos
-    // seguintes nem pode ser adivinhado pelo número do protocolo. É a forma
-    // de visitante sem login acompanhar o próprio atendimento encerrado.
-    const linkAcompanhamento = `${APP_BASE_URL}/meu-atendimento#id=${encodeURIComponent(chat.id)}&token=${encodeURIComponent(chat.token)}`;
-    await suporteChat.adicionarMensagem(chat.id, { de: 'suporte', bot: true, aviso: 'protocolo', texto: `Guarde este link para acompanhar seu protocolo #${chat.numeroTicket}: ${linkAcompanhamento}` });
+    // A abertura registra só o pedido do visitante. Não enviar o link como
+    // resposta do Beniboy: a primeira resposta deve atender ao pedido.
     await completarContatoAusenteDoChat(logado, chat, [req.body.contato, req.body.texto]);
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifyChatBeniboy(chat, `Ticket #${chat.numeroTicket} · Novo atendimento`, `${chat.nome} · ${chat.assunto || 'Suporte'}`).catch(e=>console.error('[beniboy] push:',e.message));
