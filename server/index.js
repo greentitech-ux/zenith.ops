@@ -1030,10 +1030,17 @@ const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').
 // em poucas horas. Guardamos apenas o hash no registro de entrega; o valor
 // puro vive só no payload protegido da autorização até o agente executar.
 const XML_CHAT_ENTREGAS = db.collection('xmlChatEntregas');
+// Catálogo durável dos ZIPs já preparados: uma geração por máquina/mês, mas
+// quantas entregas no chat forem necessárias.
+const XML_PROCESSADOS_ARQUIVOS = db.collection('xmlProcessadosArquivos');
 const XML_CHAT_MAX_BYTES = 150 * 1024 * 1024;
 const XML_CHAT_ALVOS = Object.freeze(['AERO-CAR-PDV.01', 'DOM-AERO-PDV.01', 'SPO-AERO-PDV.01']);
 function hashEntregaXml(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+function chaveArquivoXmlProcessados(computador, ano, mes) {
+  const maquina = String(computador || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+  return `${maquina}_${Number(ano)}_${String(Number(mes)).padStart(2, '0')}`;
 }
 function mesXmlValido(mes) {
   const n = Number(mes);
@@ -2285,7 +2292,16 @@ app.post('/api/xml-chat-entregas/:id', express.raw({ type: 'application/zip', li
       texto: 'O ZIP dos XMLs Processados está pronto para baixar.',
       anexo: { nome, path: arquivoPath, tipo: 'application/zip', tamanho: bytes.length },
     });
-    await snap.ref.update({ status: 'entregue', entregueEm: new Date().toISOString(), arquivo: { nome, path: arquivoPath, tamanho: bytes.length, quantidadeXmls }, tokenHash: null });
+    const arquivo = { nome, path: arquivoPath, tamanho: bytes.length, quantidadeXmls };
+    const entregueEm = new Date().toISOString();
+    await snap.ref.update({ status: 'entregue', entregueEm, arquivo, tokenHash: null });
+    // Só entra no catálogo depois de o ZIP ter sido salvo e anexado ao chat
+    // original. Pedidos futuros reutilizam exatamente este artefato e não
+    // executam novamente a varredura/compactação no PDV.
+    await XML_PROCESSADOS_ARQUIVOS.doc(chaveArquivoXmlProcessados(entrega.computador, entrega.ano, entrega.mes)).set({
+      computador: entrega.computador, ano: entrega.ano, mes: entrega.mes, status: 'pronto',
+      arquivo, geradoEm: entregueEm, entregaOrigemId: entrega.id,
+    }, { merge: true });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     res.status(201).json({ ok: true });
   } catch (err) {

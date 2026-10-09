@@ -39,7 +39,15 @@ const IDEMPOTENCIA = db.collection('coworkApiIdempotencia');
 // fica apenas seu hash, portanto nem o Cowork nem uma leitura posterior
 // conseguem reutilizá-lo para enviar outro arquivo.
 const XML_CHAT_ENTREGAS = db.collection('xmlChatEntregas');
+// Um ZIP é um artefato mensal por computador. Separar este registro da
+// entrega evita acionar o PDV toda vez que outra pessoa pede a mesma
+// competência: cada chat recebe uma cópia/anexo do mesmo arquivo guardado.
+const XML_PROCESSADOS_ARQUIVOS = db.collection('xmlProcessadosArquivos');
 function hashEntregaXml(token) { return crypto.createHash('sha256').update(String(token || '')).digest('hex'); }
+function chaveArquivoXmlProcessados(computador, ano, mes) {
+  const maquina = String(computador || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_');
+  return `${maquina}_${Number(ano)}_${String(Number(mes)).padStart(2, '0')}`;
+}
 
 const FERRAMENTAS = Object.freeze({
   // ---- consultas (etapa 2, 23/09/2026): o Claude enxerga antes de agir ----
@@ -1292,14 +1300,46 @@ async function chatDoProtocolo(protocolo) {
 async function solicitarXmlProcessados(entrada) {
   const competencia = competenciaXml(entrada.competencia);
   if (competencia.ano !== new Date().getFullYear()) throw new Error(`Só é permitido gerar XML do ano vigente (${new Date().getFullYear()}).`);
-  const [chat, alvo] = await Promise.all([chatDoProtocolo(entrada.protocolo), localizarMaquinaXml(entrada)]);
+  const chat = await chatDoProtocolo(entrada.protocolo);
+
+  // Consulta o arquivo ANTES de validar o canal NOC. Assim, mesmo que o PDV
+  // esteja desligado, um XML já gerado no mês continua disponível ao próximo
+  // solicitante sem criar outro comando nem outra geração.
+  const maquinaInformada = String(entrada.maquina || '').trim().toUpperCase();
+  if (maquinaInformada) {
+    const arquivoSnap = await XML_PROCESSADOS_ARQUIVOS.doc(chaveArquivoXmlProcessados(maquinaInformada, competencia.ano, competencia.mes)).get();
+    const guardado = arquivoSnap.exists ? arquivoSnap.data() : null;
+    if (guardado?.status === 'pronto' && guardado?.arquivo?.path && guardado?.arquivo?.nome) {
+      const ref = XML_CHAT_ENTREGAS.doc();
+      const arquivo = guardado.arquivo;
+      await ref.set({
+        id: ref.id, chatId: chat.id, computador: guardado.computador || maquinaInformada, mes: competencia.mes, ano: competencia.ano,
+        status: 'entregue', criadoEm: new Date().toISOString(), entregueEm: new Date().toISOString(),
+        arquivo, artefatoId: arquivoSnap.id, aprovadoPorEmail: 'Claude (Cowork)',
+        originadoPor: 'Cowork · arquivo mensal reutilizado', protocolo: chat.numeroTicket,
+      });
+      const conversa = await suporteChat.adicionarMensagem(chat.id, {
+        de: 'suporte', bot: true,
+        texto: `O ZIP dos XMLs Processados de ${competencia.texto} para ${guardado.computador || maquinaInformada} já estava guardado e foi anexado novamente nesta conversa.`,
+        anexo: { nome: arquivo.nome, path: arquivo.path, tipo: 'application/zip', tamanho: arquivo.tamanho || null },
+      });
+      return {
+        ok: true, status: 'pronto', jobId: ref.id, protocolo: chat.numeroTicket,
+        maquina: guardado.computador || maquinaInformada, competencia: competencia.texto,
+        arquivo: { nome: arquivo.nome, tamanho: arquivo.tamanho || null, quantidadeXmls: arquivo.quantidadeXmls || null, anexoNoChat: Boolean(conversa) },
+      };
+    }
+  }
+
+  const alvo = await localizarMaquinaXml(entrada);
   const tokenEntrega = crypto.randomBytes(32).toString('base64url');
   const ref = XML_CHAT_ENTREGAS.doc();
+  const artefatoId = chaveArquivoXmlProcessados(alvo.maquina.nome, competencia.ano, competencia.mes);
   const expiraEm = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
   await ref.set({
     id: ref.id, chatId: chat.id, computador: alvo.maquina.nome, mes: competencia.mes, ano: competencia.ano,
     tokenHash: hashEntregaXml(tokenEntrega), status: 'autorizado', criadoEm: new Date().toISOString(), expiraEm,
-    arquivo: null, aprovadoPorEmail: 'Claude (Cowork)', originadoPor: 'Cowork', protocolo: chat.numeroTicket,
+    arquivo: null, artefatoId, aprovadoPorEmail: 'Claude (Cowork)', originadoPor: 'Cowork', protocolo: chat.numeroTicket,
   });
   try {
     const url = `${baseUrl()}/api/xml-chat-entregas/${encodeURIComponent(ref.id)}`;
