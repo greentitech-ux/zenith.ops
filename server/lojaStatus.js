@@ -3106,8 +3106,8 @@ function comandoVincularSyncthingAoUmbrel(doc) {
 
 // Cópia fechada dos XMLs NFC-e: o mês é um número validado no servidor e os
 // únicos caminhos possíveis são os três perfis da Grande-Fratello. O comando
-// nunca move/apaga nada do GCOM; apenas replica XMLs para a pasta send-only
-// que já está vinculada ao Umbrel.
+// nunca move/apaga nada do GCOM; cria um ZIP na pasta send-only que já está
+// vinculada ao Umbrel. O pacote único é o que o solicitante recebe depois.
 const MESES_PROCESSADOS = Object.freeze([
   null, '01_janeiro', '02_fevereiro', '03_marco', '04_abril', '05_maio', '06_junho',
   '07_julho', '08_agosto', '09_setembro', '10_outubro', '11_novembro', '12_dezembro',
@@ -3126,28 +3126,39 @@ function comandoPuxarProcessadosGcom(doc, mes) {
     `$pastaMes = "${pastaMes}"`,
     '$origem = "C:\\GCOM\\nfce\\Serie_11\\$ano\\$pastaMes\\Processados"',
     `$destinoRaiz = "${perfil.caminho}"`,
-    '$destino = Join-Path $destinoRaiz "$ano\\$pastaMes\\Processados"',
+    '$destino = Join-Path $destinoRaiz "$ano\\$pastaMes"',
+    `$nomeZip = "XML_PROCESSADOS_${perfil.nome}_$ano-$('{0:D2}' -f $mesNumero).zip"`,
+    '$arquivoZip = Join-Path $destino $nomeZip',
     'if (-not (Test-Path -LiteralPath $origem -PathType Container)) { throw "A pasta de origem não existe: $origem" }',
     'New-Item -ItemType Directory -Path $destino -Force | Out-Null',
     '$xmls = @(Get-ChildItem -LiteralPath $origem -Filter "*.xml" -File -Recurse -ErrorAction Stop)',
     'if ($xmls.Count -eq 0) { "PROCESSADOS: nenhum XML encontrado em $origem. Nada foi alterado."; exit 0 }',
-    '$copiados = 0; $mantidos = 0',
-    'foreach ($arquivo in $xmls) {',
-    '  $relativo = $arquivo.FullName.Substring($origem.Length).TrimStart("\\")',
-    '  $alvo = Join-Path $destino $relativo',
-    '  $pastaAlvo = Split-Path -Parent $alvo',
-    '  if (-not (Test-Path -LiteralPath $pastaAlvo)) { New-Item -ItemType Directory -Path $pastaAlvo -Force | Out-Null }',
-    '  $igual = $false',
-    '  if (Test-Path -LiteralPath $alvo -PathType Leaf) {',
-    '    $existente = Get-Item -LiteralPath $alvo -Force',
-    '    $igual = ($existente.Length -eq $arquivo.Length -and $existente.LastWriteTimeUtc -eq $arquivo.LastWriteTimeUtc)',
+    '$temporario = Join-Path $env:TEMP ("NoPulso-Processados-" + [guid]::NewGuid().ToString("N"))',
+    'try {',
+    '  New-Item -ItemType Directory -Path $temporario -Force | Out-Null',
+    '  foreach ($arquivo in $xmls) {',
+    '    $relativo = $arquivo.FullName.Substring($origem.Length).TrimStart("\\")',
+    '    $alvo = Join-Path $temporario $relativo',
+    '    $pastaAlvo = Split-Path -Parent $alvo',
+    '    if (-not (Test-Path -LiteralPath $pastaAlvo)) { New-Item -ItemType Directory -Path $pastaAlvo -Force | Out-Null }',
+    '    Copy-Item -LiteralPath $arquivo.FullName -Destination $alvo -Force -ErrorAction Stop',
     '  }',
-    '  if ($igual) { $mantidos++; continue }',
-    '  Copy-Item -LiteralPath $arquivo.FullName -Destination $alvo -Force -ErrorAction Stop',
-    '  (Get-Item -LiteralPath $alvo).LastWriteTimeUtc = $arquivo.LastWriteTimeUtc',
-    '  $copiados++',
+    '  $zipTemporario = Join-Path $env:TEMP ("NoPulso-Processados-" + [guid]::NewGuid().ToString("N") + ".zip")',
+    '  if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {',
+    '    Compress-Archive -Path (Join-Path $temporario "*") -DestinationPath $zipTemporario -CompressionLevel Optimal -Force -ErrorAction Stop',
+    '  } else {',
+    '    # Windows 7/PowerShell antigo não tem Compress-Archive, mas o .NET',
+    '    # 4.5+ fornece o mesmo ZIP sem baixar programa adicional.',
+    '    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop',
+    '    [IO.Compression.ZipFile]::CreateFromDirectory($temporario, $zipTemporario, [IO.Compression.CompressionLevel]::Optimal, $false)',
+    '  }',
+    '  Copy-Item -LiteralPath $zipTemporario -Destination $arquivoZip -Force -ErrorAction Stop',
+    '  $tamanhoMb = [math]::Round((Get-Item -LiteralPath $arquivoZip).Length / 1MB, 2)',
+    '  "ZIP PROCESSADOS PRONTO PARA O UMBREL · $($xmls.Count) XML(s) · $tamanhoMb MB · origem: $origem · arquivo Syncthing: $arquivoZip"',
+    '} finally {',
+    '  if (Test-Path -LiteralPath $temporario) { Remove-Item -LiteralPath $temporario -Recurse -Force -ErrorAction SilentlyContinue }',
+    '  if ($zipTemporario -and (Test-Path -LiteralPath $zipTemporario)) { Remove-Item -LiteralPath $zipTemporario -Force -ErrorAction SilentlyContinue }',
     '}',
-    '"PROCESSADOS PRONTOS PARA O UMBREL · $copiados XML(s) copiado(s) · $mantidos já estavam iguais · origem: $origem · saída Syncthing: $destino"',
   ].join('\n');
 }
 
