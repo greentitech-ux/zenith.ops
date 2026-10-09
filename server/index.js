@@ -413,7 +413,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/solicitacao-publica.html',
   '/atendimento.html',
   '/meu-atendimento.html',
-  '/atendimento/central', '/atendimento/entrar', '/atendimento/sw.js',
+  '/atendimento/central', '/atendimento/entrar', '/atendimento/meu', '/atendimento/sw.js',
   '/beniboy-portal.js', '/beniboy-alertas.js', '/beniboy-app.js', '/beniboy-marca.css', '/manifest-beniboy.json',
   '/unidade.html', '/sessao-unidade.js', '/api/acesso-unidade/vinculo',
   '/api/acesso-unidade/registrar', '/api/acesso-unidade/sessao',
@@ -18895,6 +18895,7 @@ app.get(['/preencher', '/formulario-preencher', '/formulario-preencher.html'], (
 // Caminhos exclusivos do atalho; /beniboy permanece compatível com links antigos.
 app.get('/atendimento/central', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'beniboy.html')));
 app.get('/atendimento/entrar', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'atendimento.html')));
+app.get('/atendimento/meu', (_req,res)=>res.sendFile(path.join(DIRETORIO_PUBLICO,'meu-atendimento.html')));
 app.get('/atendimento/sw.js', (_req,res)=>{res.set('Cache-Control','no-cache');res.sendFile(path.join(DIRETORIO_PUBLICO,'beniboy-sw.js'));});
 // Nesta origem, o atalho da Central controla a raiz inteira; no www o mesmo
 // manifesto permanece limitado a /atendimento/ para não capturar o NoPulso.
