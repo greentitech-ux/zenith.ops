@@ -18371,7 +18371,7 @@ function prepararEntregasPorEntregador(rows) {
   const colunas = [
     { key: 'unidade', label: 'Unidade' }, { key: 'entregador', label: 'Nome' }, { key: 'quant', label: 'Quant.' },
     { key: 'valor', label: 'Valor' }, { key: 'ajudaCusto', label: 'Garantido / Encosta' }, { key: 'entrega', label: 'Entregas' },
-    { key: 'retorno', label: 'Retorno' }, { key: 'extra', label: 'Extra' }, { key: 'bonus', label: 'Valor Gami' },
+    { key: 'retorno', label: 'Retorno' }, { key: 'extra', label: 'Extra' },
     { key: 'foraDeArea', label: 'Fora de Área' }, { key: 'coopRecebe', label: 'COOP recebe' }, { key: 'tm', label: 'TM' },
   ];
   const porEntregador = {};
@@ -18396,7 +18396,7 @@ function prepararEntregasPorUnidade(rows) {
   const colunas = [
     { key: 'unidade', label: 'Unid.' }, { key: 'corridas', label: 'Corridas' }, { key: 'entrega', label: 'Entregas' },
     { key: 'retorno', label: 'Retorno' }, { key: 'extra', label: 'Extra' }, { key: 'foraDeArea', label: 'Fora área' },
-    { key: 'bonus', label: 'Bônus' }, { key: 'ajudaCusto', label: 'Garantido / Encosta' },
+    { key: 'ajudaCusto', label: 'Garantido / Encosta' },
     { key: 'valor', label: 'Valor pago' }, { key: 'coopRecebe', label: 'COOP recebe' }, { key: 'tm', label: 'TM' },
   ];
   const porUnidade = {};
@@ -18422,7 +18422,7 @@ function prepararEntregasLancamentos(rows) {
   const colunas = [
     { key: 'data', label: 'Data' }, { key: 'unidade', label: 'Unid.' }, { key: 'entregador', label: 'Entregador' },
     { key: 'entrega', label: 'Entregas' }, { key: 'retorno', label: 'Retorno' }, { key: 'extra', label: 'Extra' },
-    { key: 'pos00hs', label: 'Pos 00hs' }, { key: 'foraDeArea', label: 'Fora área' }, { key: 'bonus', label: 'Bônus' },
+    { key: 'pos00hs', label: 'Pos 00hs' }, { key: 'foraDeArea', label: 'Fora área' },
     { key: 'ajudaCusto', label: 'Garantido / Encosta' }, { key: 'camposRemovidos', label: 'Campos removidos' },
     { key: 'valor', label: 'Valor' }, { key: 'coopRecebe', label: 'COOP' },
     { key: 'quantTotal', label: 'Qtd. total' }, { key: 'observacao', label: 'Observação' },

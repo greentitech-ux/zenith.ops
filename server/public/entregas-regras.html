@@ -387,6 +387,11 @@ function campoCardHtml(c){
         </div>
         <label>Valor parcial (se não bater a meta)</label>
         <input type="number" step="0.01" data-f="metaValorParcial" value="${c.meta?c.meta.valorParcial:0}">
+        <fieldset style="margin:12px 0;padding:10px;border:1px solid var(--line);border-radius:8px;">
+          <legend>Dias em que a quantidade mínima não se aplica</legend>
+          <div class="grid2">${DIAS_SEMANA.map(d=>`<label class="campo-toggle"><input type="checkbox" data-meta-dia="${d[0]}" ${(c.meta?.diasSemMinimo||[]).includes(d[0])?'checked':''}> ${d[1]}</label>`).join('')}</div>
+          <p class="muted">Nos dias marcados, mantém o valor padrão ou o valor definido para esse dia, mesmo abaixo da quantidade mínima. Ex.: R$ 30 no sábado e domingo.</p>
+        </fieldset>
       </div>
 
       <label class="campo-toggle"><input type="checkbox" data-f="removivelPelaLoja" ${c.removivelPelaLoja?'checked':''}> Loja pode remover esse campo no lançamento (atraso, saiu antes, gerou prejuízo)</label>
@@ -419,6 +424,7 @@ function lerCamposValor(){
       baseContagem: card.querySelector('[data-f=metaBase]').value,
       minimo: card.querySelector('[data-f=metaMinimo]').value,
       valorParcial: card.querySelector('[data-f=metaValorParcial]').value,
+      diasSemMinimo: [...card.querySelectorAll('[data-meta-dia]:checked')].map(inp=>inp.dataset.metaDia),
     } : null;
     const removivelPelaLoja = card.querySelector('[data-f=removivelPelaLoja]').checked;
     return { campo: card.dataset.campo || undefined, label, base, destino, valorPadrao, valoresPorDiaSemana, meta, removivelPelaLoja };

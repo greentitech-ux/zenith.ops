@@ -104,8 +104,11 @@
   .comparativo-card .lbl{font-family:var(--mono);color:var(--muted);font-size:11px;text-transform:uppercase;}
   .comparativo-card strong{display:block;font-family:var(--mono);font-size:24px;margin:8px 0;overflow-wrap:anywhere;}
   .variacao{font-family:var(--mono);font-size:12px;margin-top:10px;color:var(--accent2);}
-  #grafico-entregas{padding:8px 16px;overflow-x:auto;}
-  #grafico-entregas svg{width:100%;min-width:650px;display:block;}
+  #grafico-entregas{padding:8px 16px;}
+  #grafico-entregas svg{width:100%;height:300px;display:block;}
+  .grafico-alvo{fill:transparent;cursor:pointer;}
+  .grafico-alvo:hover,.grafico-alvo:focus,.grafico-alvo.selecionado{fill:var(--accent2);fill-opacity:.12;outline:none;stroke:var(--accent2);stroke-width:1;}
+  .grafico-inspecao{margin:4px 16px 12px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12px;line-height:1.7;min-height:64px;overflow-wrap:anywhere;}
   .grafico-grade{stroke:var(--line);stroke-width:1;}
   .grafico-eixo{fill:var(--muted);font-size:11px;font-family:var(--mono);}
   .grafico-barra{fill:var(--accent);}
@@ -174,6 +177,7 @@
   </div>
   <div class="comparativo-grid" id="comparativo-entregas"></div>
   <div id="grafico-entregas"></div>
+  <div id="grafico-inspecao" class="grafico-inspecao" role="status" aria-live="polite">Passe o mouse, toque ou use o teclado para consultar um ponto.</div>
   <div class="grafico-legenda"><span style="color:var(--accent)">■ Atual</span> · <span style="color:var(--accent2)">┄ Anterior</span><br>Comparação por posição no intervalo; o filtro de dia da semana vale para os dois períodos. Sem lançamento não significa operação zerada. Períodos com hoje ainda são parciais. Semanas iniciam no domingo.</div>
   <details style="padding:0 16px 16px;"><summary>Consultar os números do gráfico</summary><div class="tablewrap" id="grafico-detalhes"></div></details>
 </div>
@@ -199,7 +203,7 @@
   <div class="controls filtros-local" id="filtros-entregadores"></div>
   <div class="tablewrap" style="max-height:none;overflow-x:auto;overflow-y:visible;">
     <table>
-      <thead><tr><th>Unidade</th><th>Nome</th><th>Quant.</th><th>Valor</th><th>TM</th><th>Garantido / Encosta</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Fora de Área</th><th>Valor Gami</th><th>COOP recebe</th></tr></thead>
+      <thead><tr><th>Unidade</th><th>Nome</th><th>Quant.</th><th>Valor</th><th>TM</th><th>Garantido / Encosta</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Fora de Área</th><th>COOP recebe</th></tr></thead>
       <tbody id="entregadores-body"></tbody>
     </table>
   </div>
@@ -216,7 +220,7 @@
   <div class="controls filtros-local" id="filtros-unidades"></div>
   <div class="tablewrap" style="max-height:none;overflow-x:auto;overflow-y:visible;">
     <table>
-      <thead><tr><th>Unid.</th><th>Lançamentos</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Fora área</th><th>Bônus</th><th>Valor pago</th><th>TM</th><th>Garantido / Encosta</th><th>COOP recebe</th></tr></thead>
+      <thead><tr><th>Unid.</th><th>Lançamentos</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Fora área</th><th>Valor pago</th><th>TM</th><th>Garantido / Encosta</th><th>COOP recebe</th></tr></thead>
       <tbody id="unidades-body"></tbody>
     </table>
   </div>
@@ -233,7 +237,7 @@
   <div class="controls filtros-local" id="filtros-lancamentos"></div>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Data</th><th>Unid.</th><th>Entregador</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Pos 00hs</th><th>Fora área</th><th>Bônus</th><th>Valor</th><th>Garantido / Encosta</th><th>COOP</th><th>Qtd. total</th><th>Etiqueta</th><th>Observação</th></tr></thead>
+      <thead><tr><th>Data</th><th>Unid.</th><th>Entregador</th><th>Entregas</th><th>Retorno</th><th>Extra</th><th>Pos 00hs</th><th>Fora área</th><th>Valor</th><th>Garantido / Encosta</th><th>COOP</th><th>Qtd. total</th><th>Etiqueta</th><th>Observação</th></tr></thead>
       <tbody id="lancamentos-body"></tbody>
     </table>
   </div>
@@ -612,9 +616,8 @@ function renderEntregadoresTable(rows){
       <td class="valor">${c.retorno}</td>
       <td class="valor">${c.extra}</td>
       <td class="valor">${c.foraDeArea}</td>
-      <td class="valor">${fmtMoney(c.bonus)}</td>
       <td class="valor">${fmtMoney(c.coopRecebe)}</td>
-    </tr>`).join('') : '<tr><td colspan="12" class="empty">Sem dados no período.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="11" class="empty">Sem dados no período.</td></tr>';
 }
 
 // tabela "Por unidade" cobre o roster inteiro (codigosDisponiveis()), nao so
@@ -647,12 +650,11 @@ function renderUnidadesTable(rows){
       <td class="valor">${c.retorno}</td>
       <td class="valor">${c.extra}</td>
       <td class="valor">${c.foraDeArea}</td>
-      <td class="valor">${fmtMoney(c.bonus)}</td>
       <td class="valor">${fmtMoney(c.valor)}</td>
       <td class="valor">${fmtMoney(c.entrega ? c.valor/c.entrega : 0)}</td>
       <td class="valor">${fmtMoney(c.ajudaCusto)}</td>
       <td class="valor">${fmtMoney(c.coopRecebe)}</td>
-    </tr>`).join('') : '<tr><td colspan="11" class="empty">Nenhuma unidade liberada.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="10" class="empty">Nenhuma unidade liberada.</td></tr>';
 }
 
 function renderTabela(rows){
@@ -668,14 +670,13 @@ function renderTabela(rows){
       <td class="valor" title="${escapeHtml(d.obsExtra||'')}">${d.extra}</td>
       <td class="valor">${d.pos00hs}</td>
       <td class="valor">${d.foraDeArea}</td>
-      <td class="valor">${fmtMoney(d.bonus)}</td>
       <td class="valor">${fmtMoney(d.valor)}</td>
       <td class="valor" title="${escapeHtml(detalhesValorTitle(d))}">${fmtMoney(d.ajudaCusto)}${(d.camposRemovidos&&d.camposRemovidos.length)?' <span style="color:var(--bad);" title="'+escapeHtml(d.camposRemovidos.join(', ')+' removido(s) - '+(MOTIVOS_REMOCAO_LABEL[d.motivoRemocaoCampos]||''))+'">✕</span>':''}</td>
       <td class="valor">${fmtMoney(d.coopRecebe)}</td>
       <td class="valor">${d.quantTotal}</td>
       <td>${d.etiquetaPath ? `<a href="/api/entregas/etiqueta/${d.id}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">📎 ver</a>` : (d.etiquetaOrigem ? `<span class="sub" title="Ainda não migrada pro app - referência original do AppSheet/Drive">📎 ${escapeHtml(d.etiquetaOrigem)}</span>` : '—')}</td>
       <td class="truncate" title="${escapeHtml(d.observacao||'')}">${escapeHtml(d.observacao||'—')}</td>
-    </tr>`).join('') : '<tr><td colspan="15" class="empty">Nenhuma entrega no período/unidade selecionados.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="14" class="empty">Nenhuma entrega no período/unidade selecionados.</td></tr>';
 }
 
 function render(){

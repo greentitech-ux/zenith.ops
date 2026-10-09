@@ -53,11 +53,37 @@ function desenharFiltroSecao(chave,livre=false){
   atualizarTituloUnidades(cont,f);
 }
 function linhasSecao(chave){return ANALISE.filtrar(DATA,FILTROS_SECOES[chave]||filtroResumo());}
+let PONTOS_GRAFICO=[];
+function inspecionarPontoGrafico(indice){
+  const ponto=PONTOS_GRAFICO[indice];if(!ponto)return;
+  const intervalo=p=>fmtData(p.data)+(p.fim!==p.data?' → '+fmtData(p.fim):'');
+  const descrever=p=>!p?.temDados?'Sem lançamentos':`${p.entrega} entregas · ${fmtMoney(p.valor)} · TM ${p.tm==null?'—':fmtMoney(p.tm)}`;
+  document.getElementById('grafico-inspecao').innerHTML=`<b>Atual · ${escapeHtml(intervalo(ponto.atual))}</b><br>${escapeHtml(descrever(ponto.atual))}<br><span class="sub">Anterior${ponto.anterior?' · '+escapeHtml(intervalo(ponto.anterior)):''}: ${escapeHtml(descrever(ponto.anterior))}</span>`;
+  document.querySelectorAll('.grafico-alvo').forEach(el=>el.classList.toggle('selecionado',Number(el.dataset.ponto)===indice));
+}
+const graficoInterativo=document.getElementById('grafico-entregas');
+for(const evento of ['pointerover','click','focusin'])graficoInterativo.addEventListener(evento,e=>{const alvo=e.target.closest('[data-ponto]');if(alvo)inspecionarPontoGrafico(Number(alvo.dataset.ponto));});
+graficoInterativo.addEventListener('keydown',e=>{
+  const alvo=e.target.closest('[data-ponto]');if(!alvo)return;
+  if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){
+    e.preventDefault();const i=Number(alvo.dataset.ponto),ultimo=PONTOS_GRAFICO.length-1;
+    const proximo=e.key==='Home'?0:e.key==='End'?ultimo:Math.max(0,Math.min(ultimo,i+(e.key==='ArrowRight'?1:-1)));
+    graficoInterativo.querySelector(`[data-ponto="${proximo}"]`)?.focus();
+  }
+});
+let larguraGraficoAnterior=0;
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(entries=>{
+  const largura=Math.round(entries[0].contentRect.width);
+  if(largura===larguraGraficoAnterior)return;larguraGraficoAnterior=largura;
+  requestAnimationFrame(renderGraficoEntregas);
+}).observe(graficoInterativo);
 function renderGraficoEntregas(){
   const filtro=FILTROS_SECOES.grafico;if(!filtro)return;
   const datas=DATA.map(r=>r.data).filter(Boolean).sort();
   const f={...filtro,inicio:filtro.inicio||datas[0]||ANALISE.periodo('30dias',isoLocal(agoraBrasilia())).inicio,fim:filtro.fim||datas.at(-1)||isoLocal(agoraBrasilia())};
   const grafico=document.getElementById('grafico-entregas'),comparativo=document.getElementById('comparativo-entregas');
+  PONTOS_GRAFICO=[];
+  document.getElementById('grafico-inspecao').textContent='Passe o mouse, toque ou use as setas do teclado para consultar um ponto.';
   if(!f.inicio||!f.fim||f.inicio>f.fim||(new Date(f.fim)-new Date(f.inicio))/86400000>3660){grafico.innerHTML='<div class="empty">Selecione um intervalo válido de até 10 anos.</div>';comparativo.innerHTML='';document.getElementById('grafico-detalhes').innerHTML='';return;}
   const anterior=ANALISE.comparar(f,document.getElementById('grafico-comparar').value);
   const atualRows=ANALISE.filtrar(DATA,f),antesRows=ANALISE.filtrar(DATA,anterior);
@@ -71,19 +97,24 @@ function renderGraficoEntregas(){
   const metrica=document.getElementById('grafico-metrica').value;
   let serie=ANALISE.serie(DATA,f),antesSerie=ANALISE.serie(DATA,anterior);
   // Agrupa períodos longos sem perder quantidades/valores ou fazer média de médias.
-  const passo=Math.max(1,Math.ceil(Math.max(serie.length,antesSerie.length)/90));
+  const largura=Math.max(280,grafico.clientWidth-32);
+  const limitePontos=Math.max(7,Math.min(60,Math.floor((largura-95)/32)));
+  const passo=Math.max(1,Math.ceil(Math.max(serie.length,antesSerie.length)/limitePontos));
   function agrupar(s){const out=[];for(let i=0;i<s.length;i+=passo){const grupo=s.slice(i,i+passo);out.push({data:grupo[0].data,fim:grupo.at(-1).data,temDados:grupo.some(p=>p.temDados),...ANALISE.somar(grupo)});}return out;}
   serie=agrupar(serie);antesSerie=agrupar(antesSerie);
   const quantidade=Math.max(serie.length,antesSerie.length),max=Math.max(1,...serie.map(p=>p[metrica]||0),...antesSerie.map(p=>p[metrica]||0));
-  const largura=1000,altura=300,margem=110,base=250,alto=210,espaco=(largura-margem-20)/Math.max(1,quantidade);
+  const altura=300,margem=metrica==='entrega'?48:95,base=250,alto=210,espaco=(largura-margem-20)/Math.max(1,quantidade);
   const x=i=>margem+espaco*(i+.5),y=v=>base-(v||0)/max*alto;
   const formatar=metrica==='entrega'?v=>String(Math.round(v)):fmtMoney;
-  let svg=`<svg viewBox="0 0 ${largura} ${altura}" role="img" aria-label="Evolução de ${metrica==='entrega'?'entregas':metrica==='valor'?'valor pago':'ticket médio'}; barras do período atual e linha tracejada do anterior"><title>Atual: ${fmtData(f.inicio)} a ${fmtData(f.fim)}. Anterior: ${fmtData(anterior.inicio)} a ${fmtData(anterior.fim)}.</title>`;
-  for(let i=0;i<=4;i++){const valor=max*i/4,py=y(valor);svg+=`<line x1="${margem}" x2="980" y1="${py}" y2="${py}" class="grafico-grade"/><text x="${margem-8}" y="${py+4}" text-anchor="end" class="grafico-eixo">${escapeHtml(formatar(valor))}</text>`;}
+  let svg=`<svg viewBox="0 0 ${largura} ${altura}" role="group" aria-label="Evolução de ${metrica==='entrega'?'entregas':metrica==='valor'?'valor pago':'ticket médio'}; barras do período atual e linha tracejada do anterior"><title>Atual: ${fmtData(f.inicio)} a ${fmtData(f.fim)}. Anterior: ${fmtData(anterior.inicio)} a ${fmtData(anterior.fim)}.</title>`;
+  for(let i=0;i<=4;i++){const valor=max*i/4,py=y(valor);svg+=`<line x1="${margem}" x2="${largura-20}" y1="${py}" y2="${py}" class="grafico-grade"/><text x="${margem-8}" y="${py+4}" text-anchor="end" class="grafico-eixo">${escapeHtml(formatar(valor))}</text>`;}
   serie.forEach((p,i)=>{if(p.temDados)svg+=`<rect x="${x(i)-espaco*.28}" y="${y(p[metrica])}" width="${espaco*.56}" height="${Math.max(1,base-y(p[metrica]))}" rx="2" class="grafico-barra"><title>${fmtData(p.data)}${passo>1?' a '+fmtData(p.fim):''}: ${escapeHtml(formatar(p[metrica]))}</title></rect>`;
-    if(i%Math.max(1,Math.ceil(quantidade/7))===0)svg+=`<text x="${x(i)}" y="275" text-anchor="middle" class="grafico-eixo">${fmtData(p.data).slice(0,5)}</text>`;});
+    if(i%Math.max(1,Math.ceil(quantidade/(largura<500?4:7)))===0)svg+=`<text x="${x(i)}" y="275" text-anchor="middle" class="grafico-eixo">${fmtData(p.data).slice(0,5)}</text>`;});
   let ultimo=null;
   antesSerie.forEach((p,i)=>{if(!p.temDados){ultimo=null;return;}const ponto={x:x(i),y:y(p[metrica])};if(ultimo)svg+=`<line x1="${ultimo.x}" y1="${ultimo.y}" x2="${ponto.x}" y2="${ponto.y}" class="grafico-anterior"/>`;svg+=`<circle cx="${ponto.x}" cy="${ponto.y}" r="3" class="grafico-ponto"><title>Anterior · ${fmtData(p.data)}: ${escapeHtml(formatar(p[metrica]))}</title></circle>`;ultimo=ponto;});
+  PONTOS_GRAFICO=serie.map((p,i)=>({atual:p,anterior:antesSerie[i]}));
+  serie.forEach((p,i)=>{svg+=`<rect class="grafico-alvo" data-ponto="${i}" tabindex="0" role="button" aria-label="Consultar ${fmtData(p.data)}${passo>1?' a '+fmtData(p.fim):''}" x="${x(i)-espaco/2}" y="35" width="${espaco}" height="${base-35}"/>`;});
   grafico.innerHTML=svg+'</svg>';
+  inspecionarPontoGrafico(serie.length-1);
   document.getElementById('grafico-detalhes').innerHTML=`<table><thead><tr><th>Período atual</th><th>Entregas</th><th>Valor pago</th><th>TM</th></tr></thead><tbody>${serie.map(p=>`<tr><td>${fmtData(p.data)}${passo>1?' → '+fmtData(p.fim):''}</td><td>${p.temDados?p.entrega:'—'}</td><td>${p.temDados?fmtMoney(p.valor):'—'}</td><td>${p.tm!=null?fmtMoney(p.tm):'—'}</td></tr>`).join('')}</tbody></table>`;
 }

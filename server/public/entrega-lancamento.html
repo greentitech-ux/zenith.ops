@@ -75,6 +75,13 @@
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
   .msg.err{background:var(--bad-dim);color:var(--bad);}
   .card{border-top:1px solid var(--line);padding:12px 0;}
+  .resumo-dia-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-top:12px;}
+  .resumo-dia{width:100%;border-collapse:collapse;font-size:12px;}
+  .resumo-dia th,.resumo-dia td{padding:10px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:anywhere;}
+  .resumo-dia th{font:10px var(--mono);color:var(--muted);}
+  .resumo-dia .numero{text-align:right;font-variant-numeric:tabular-nums;}
+  .resumo-dia tfoot{font-weight:700;}
+  .resumo-dia details{margin-top:7px;}.resumo-dia summary{cursor:pointer;color:var(--accent);font-size:11px;}
   .card:first-child{border-top:none;padding-top:0;}
   .card .linha1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;flex-wrap:wrap;}
   .card .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px;word-break:break-word;}
@@ -97,6 +104,7 @@
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
 </style>
 <script src="/tema.js"></script>
+<script src="/entregas-analise.js"></script>
 </head>
 <body>
 
@@ -286,7 +294,8 @@
 </div>
 
 <div class="panel">
-  <h2>Meus últimos lançamentos</h2>
+  <h2>Resumo do último dia lançado</h2>
+  <p class="muted">Somente a data do lançamento mais recente. O histórico e os períodos ficam no <a href="/entregas" style="color:var(--accent)">Resumo de Entregas</a>.</p>
   <div id="lista-lancamentos"><div class="empty">carregando...</div></div>
 </div>
 
@@ -797,7 +806,7 @@ function atualizarPreviewCalculado(){
   const linhas = (regra.camposValor||[]).filter(c=>c.destino!=='coopRecebe').map(c=>{
     if(removidos.has(c.campo)) return {label:c.label, valor:0, removido:true, quantidade:0, taxa:0, base:c.base};
     let taxa = (dia && c.valoresPorDiaSemana && c.valoresPorDiaSemana[dia]!=null) ? num(c.valoresPorDiaSemana[dia]) : num(c.valorPadrao);
-    if(c.meta){
+    if(c.meta && !(c.meta.diasSemMinimo || []).includes(dia)){
       const contagemMeta = contagens[c.meta.baseContagem] ?? 0;
       if(contagemMeta < num(c.meta.minimo)) taxa = num(c.meta.valorParcial);
     }
@@ -942,7 +951,7 @@ async function carregar(){
     fetch('/api/entregas/edicoes').then(r=>r.json()),
     fetch('/api/entregas/km/turnos').then(r=>r.json()),
   ]);
-  MEUS = meus.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||'')).slice(0,30);
+  MEUS = meus.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
   EDICOES = edicoes;
   TURNOS_KM = turnosKm;
   renderLista();
@@ -959,7 +968,31 @@ function ultimaDecisao(entregaId){
 function renderLista(){
   const el = document.getElementById('lista-lancamentos');
   if(!MEUS.length){ el.innerHTML = '<div class="empty">Nenhuma entrega lançada ainda.</div>'; return; }
-  el.innerHTML = MEUS.map(f=>{
+  const resumo=resumoUltimoDia(MEUS);
+  el.innerHTML=`<p class="muted">Data: <b>${fmtData(resumo.data)}</b></p><div class="resumo-dia-wrap"><table class="resumo-dia">
+    <thead><tr><th>Unidade</th><th>Nome</th><th class="numero">Quantidade total de entregas</th><th class="numero">Valor total</th></tr></thead>
+    <tbody>${resumo.linhas.map(c=>`<tr><td>${escapeHtml(c.unidadeNome)}</td><td>${escapeHtml(c.nome)}<details><summary>Ver lançamentos</summary>${detalhesLancamentos(c.registros)}</details></td><td class="numero">${c.quantidade}</td><td class="numero">${fmtMoney(c.valor)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="2">Total do dia</td><td class="numero">${resumo.quantidade}</td><td class="numero">${fmtMoney(resumo.valor)}</td></tr></tfoot></table></div>`;
+}
+
+function resumoUltimoDia(registros){
+  const ultimo=[...registros].sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''))[0];
+  const grupos=new Map();
+  for(const f of registros.filter(r=>r.data===ultimo?.data)){
+    const chave=JSON.stringify([f.unidade,f.entregador]);
+    if(!grupos.has(chave))grupos.set(chave,{unidadeNome:f.unidadeNome||f.unidade,nome:f.entregador,quantidade:0,valor:0,registros:[]});
+    const c=grupos.get(chave);c.registros.push(f);
+    if(['CANCELADO','EXCLUIDO'].includes(f.situacao))continue;
+    // A mesma normalização usada pelo Resumo evita contar adicionais duas vezes.
+    const normalizado=EntregasAnalise.normalizar(f);
+    c.quantidade+=normalizado.entrega;c.valor+=normalizado.valor;
+  }
+  const linhas=[...grupos.values()];
+  return {data:ultimo?.data,linhas,quantidade:linhas.reduce((s,c)=>s+c.quantidade,0),valor:linhas.reduce((s,c)=>s+c.valor,0)};
+}
+
+function detalhesLancamentos(registros){
+  return registros.map(f=>{
     const pendente = edicaoPendente(f.id);
     const decidida = !pendente && ultimaDecisao(f.id);
     return `

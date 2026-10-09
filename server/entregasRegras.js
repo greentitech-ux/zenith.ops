@@ -85,7 +85,8 @@ function sanitizarValoresPorDiaSemana(obj) {
 function sanitizarMeta(m) {
   if (!m || !m.ativo) return null;
   const baseContagem = ['entrega', 'retorno', 'extra', 'pos00hs', 'foraDeArea', 'quantTotal'].includes(m.baseContagem) ? m.baseContagem : 'entrega';
-  return { baseContagem, minimo: num(m.minimo), valorParcial: num(m.valorParcial) };
+  const diasSemMinimo = Array.isArray(m.diasSemMinimo) ? DIAS_SEMANA.filter(d=>m.diasSemMinimo.includes(d)) : [];
+  return { baseContagem, minimo: num(m.minimo), valorParcial: num(m.valorParcial), diasSemMinimo };
 }
 
 function sanitizarEntregadoresFixos(lista) {
@@ -321,7 +322,7 @@ function calcular(regra, { data, entrega, retorno, extra, pos00hs, foraDeArea, c
       return;
     }
     let taxa = (dia && c.valoresPorDiaSemana && c.valoresPorDiaSemana[dia] != null) ? c.valoresPorDiaSemana[dia] : c.valorPadrao;
-    if (c.meta) {
+    if (c.meta && !(c.meta.diasSemMinimo || []).includes(dia)) {
       const contagemMeta = contagens[c.meta.baseContagem] ?? 0;
       if (contagemMeta < c.meta.minimo) taxa = c.meta.valorParcial;
     }
