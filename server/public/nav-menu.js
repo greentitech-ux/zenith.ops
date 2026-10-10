@@ -138,6 +138,7 @@
       { grupo: 'Operação do parque', itens: [
       { id: 'nav-parque', href: '/parque', icone: '🎡', rotulo: 'Visão do Parque', secoes: ['parque'] },
       { id: 'nav-parque-checkin', href: '/parque-checkin', icone: '🤸', rotulo: 'Entradas do Parque', secoes: ['parque-checkin'] },
+      { id: 'nav-parque-pulseiras', href: '/parque-pulseiras', icone: '🎨', rotulo: 'Painel de Pulseiras', secoes: ['parque', 'parque-checkin'] },
       { id: 'nav-festas', href: '/festas', icone: '🎉', rotulo: 'Festas', secoes: ['festas'] },
       { id: 'nav-mensalistas', href: '/mensalistas', icone: '📅', rotulo: 'Mensalistas', secoes: ['parque'] },
       { id: 'nav-saltiverso-vendas', href: '/saltiverso-vendas', icone: '🥤', rotulo: 'Quiosque', secoes: ['parque-loja'] },

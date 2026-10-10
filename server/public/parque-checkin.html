@@ -114,6 +114,13 @@
   .etapa-acoes .btn-secundario{width:auto;min-width:110px;}
   .etapa-acoes .btn-primary{flex:1;}
   .etapa-resumo{font-size:12px;color:var(--muted);margin:0 0 4px;}
+  .pulseira-previa{display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);}
+  .pulseira-previa .amostra{width:34px;height:34px;border-radius:50%;border:2px solid rgba(255,255,255,.32);box-shadow:0 0 0 1px rgba(0,0,0,.28) inset;flex:none;}
+  .pulseira-previa .titulo{font-size:12px;font-weight:700;}
+  .pulseira-previa .detalhe{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px;}
+  .sequencia-pulseiras{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:8px;}
+  .sequencia-pulseiras select{padding:8px 6px;font-size:11px;}
+  .sequencia-pulseiras .posicao{font-family:var(--mono);font-size:9px;color:var(--muted);margin:0 0 3px;}
   @media(max-width:460px){.etapas{gap:4px}.etapa-indicador{padding:7px 4px;min-height:50px}.etapa-indicador b{font-size:10px}.etapa-indicador span{font-size:8px}.etapa-acoes .btn-secundario{min-width:86px;}}
 </style>
 <script src="/tema.js"></script>
@@ -191,17 +198,21 @@
     <div class="secao" data-etapa="2">
       <div class="secao-titulo">Data e tempo</div>
       <label>Data de utilização</label>
-      <input type="date" id="f-data" required onchange="atualizarPreviewValor()">
+      <input type="date" id="f-data" required onchange="atualizarPreviewValor();atualizarPreviewPulseira()">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
         <label style="margin:0;">Tempo contratado</label>
-        <button type="button" class="link-btn hidden" id="btn-editar-tabela-parque" style="margin:0;" onclick="abrirEditarTabelaParque()">⚙️ Editar tabela de preços</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="link-btn hidden" id="btn-editar-pulseiras" style="margin:0;" onclick="abrirConfigPulseiras()">⚙️ Pulseiras</button>
+          <button type="button" class="link-btn hidden" id="btn-editar-tabela-parque" style="margin:0;" onclick="abrirEditarTabelaParque()">⚙️ Editar tabela de preços</button>
+        </div>
       </div>
       <div class="toggle-grupo" id="tempos"></div>
       <label>Horário previsto de entrada</label>
-      <select id="f-horario-previsto" required></select>
+      <select id="f-horario-previsto" required onchange="atualizarPreviewPulseira()"></select>
       <div class="sub" style="font-family:var(--sans);color:var(--muted);font-size:12px;margin-top:-2px;">
         Sempre em janelas de 30 em 30 minutos (10:00 / 10:30 / 11:00). Se a pessoa chegar antes, o botão <b>Fazer check-in</b> inicia o relógio na hora exata da entrada (ex: 10:15) — entra antes e <b>sai antes</b>, sempre contando o tempo contratado. Se ninguém fizer o check-in até o horário previsto, o sistema inicia sozinho.
       </div>
+      <div class="pulseira-previa hidden" id="preview-pulseira" aria-live="polite"></div>
     </div>
 
     <div class="secao" data-etapa="2">
@@ -470,6 +481,40 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="overlay-pulseiras">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharConfigPulseiras()">✕</span>
+    <div class="sheet">
+      <h3>Configurar pulseiras</h3>
+      <div class="sub">Regra usada na compra: data, horário previsto e tipo de ticket definem a cor. Alterações valem para entradas novas; vendas já registradas preservam a pulseira gravada.</div>
+      <form id="form-pulseiras">
+        <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:0;">
+          <input type="checkbox" id="pp-ativo" style="width:auto;"> Mostrar indicação de pulseira no Check-in
+        </label>
+        <div class="grid2">
+          <div><label>Primeiro horário</label><input type="time" id="pp-inicio" step="60" required></div>
+          <div><label>Intervalo entre horários (min)</label><input type="number" id="pp-intervalo" min="5" max="120" step="5" required></div>
+        </div>
+        <label>Tipos de ticket na sequência</label>
+        <div class="grid2">
+          <div><label>Tipo 1 (minutos)</label><input type="number" id="pp-tipo-1" min="1" max="480" step="1" required></div>
+          <div><label>Tipo 2 (minutos)</label><input type="number" id="pp-tipo-2" min="1" max="480" step="1" required></div>
+          <div><label>Tipo 3 (opcional)</label><input type="number" id="pp-tipo-3" min="1" max="480" step="1"></div>
+          <div><label>Tipo 4 (opcional)</label><input type="number" id="pp-tipo-4" min="1" max="480" step="1"></div>
+        </div>
+        <div class="sub" style="margin-top:6px;">A posição 1 é o primeiro tipo no primeiro horário; as posições seguintes seguem os tipos configurados. A sequência é repetida durante o dia.</div>
+        <label>Paleta</label>
+        <div id="pp-paleta"></div>
+        <label style="margin-top:16px;">Sequência por dia</label>
+        <div class="sub" style="margin-top:-2px;">Escolha as oito cores em ordem. O sistema repete esta sequência durante o dia.</div>
+        <div id="pp-sequencias"></div>
+        <div class="msg hidden" id="msg-pulseiras"></div>
+        <button class="btn-primary" type="submit">Salvar regra de pulseiras</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -496,6 +541,24 @@ let TABELA_PRECOS = {
   pcd: [{chave:'pcd30',label:'PCD30',minutos:30,preco:32,visivel:true},{chave:'pcd60',label:'PCD60',minutos:60,preco:32,visivel:true}],
   pcdCortesiaLabel: '5%CP', pcdCortesiaMinutos: 60, pcdCortesiaVisivel: true,
   niverDesconto: 50, niverValorCheio: 0, niverAplicar30: false,
+  pulseiras: {
+    ativo:true, inicio:'10:00', intervaloMinutos:30, tiposMinutos:[30,60],
+    cores:[
+      {id:'cinza',nome:'Cinza',hex:'#6B7280'},{id:'roxa',nome:'Roxa',hex:'#7C3AED'},
+      {id:'amarela',nome:'Amarela',hex:'#EAB308'},{id:'branca',nome:'Branca',hex:'#F8FAFC'},
+      {id:'azul',nome:'Azul',hex:'#2563EB'},{id:'rosa',nome:'Rosa',hex:'#EC4899'},
+      {id:'verde',nome:'Verde',hex:'#22C55E'},{id:'laranja',nome:'Laranja',hex:'#F97316'},
+    ],
+    sequenciasSemana:{
+      0:['roxa','amarela','branca','azul','rosa','verde','laranja','cinza'],
+      1:['cinza','roxa','amarela','branca','azul','rosa','verde','laranja'],
+      2:['laranja','cinza','roxa','amarela','branca','azul','rosa','verde'],
+      3:['verde','laranja','cinza','roxa','amarela','branca','azul','rosa'],
+      4:['rosa','verde','laranja','cinza','roxa','amarela','branca','azul'],
+      5:['branca','azul','rosa','verde','laranja','cinza','roxa','amarela'],
+      6:['amarela','branca','azul','rosa','verde','laranja','cinza','roxa'],
+    },
+  },
 };
 // listas de minutos derivadas de TABELA_PRECOS.tempos, recalculadas em
 // carregarTabelaPrecos(). TEMPOS_VALIDOS: so os visiveis (compra nova - venda
@@ -588,6 +651,49 @@ function isoLocalBR(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padS
 function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
 function horaCurtaBrasilia(d){ return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 
+function minutosDaHora(hora){
+  const m = /^(\d{2}):(\d{2})$/.exec(String(hora||'').slice(0,5));
+  if(!m) return null;
+  const h=Number(m[1]), min=Number(m[2]);
+  return h<=23 && min<=59 ? h*60+min : null;
+}
+function resolverPulseiraNaTela(data, horario, minutos){
+  const cfg=TABELA_PRECOS.pulseiras;
+  if(!cfg || cfg.ativo===false || !data || !horario) return null;
+  const inicio=minutosDaHora(cfg.inicio), entrada=minutosDaHora(horario);
+  const tipos=Array.isArray(cfg.tiposMinutos)?cfg.tiposMinutos.map(Number):[];
+  const indiceTipo=tipos.indexOf(Number(minutos));
+  if(inicio===null || entrada===null || entrada<inicio || indiceTipo<0 || !tipos.length) return null;
+  const dia=new Date(`${data}T12:00:00Z`).getUTCDay();
+  const sequencia=(cfg.sequenciasSemana||{})[dia];
+  if(!Array.isArray(sequencia)||!sequencia.length) return null;
+  const slot=Math.floor((entrada-inicio)/Number(cfg.intervaloMinutos||30));
+  const corId=sequencia[(slot*tipos.length+indiceTipo)%sequencia.length];
+  return (cfg.cores||[]).find(c=>c.id===corId)||null;
+}
+function atualizarPreviewPulseira(){
+  const alvo=document.getElementById('preview-pulseira');
+  const data=document.getElementById('f-data')?.value;
+  const horario=document.getElementById('f-horario-previsto')?.value;
+  const planos=[...document.querySelectorAll('#lista-criancas .crianca-plano')];
+  const escolhas=planos.length ? planos.map((campo,indice)=>{
+    const valor=campo.value||'';
+    const normal=/^normal:(\d+)$/.exec(valor);
+    const minutos=normal ? Number(normal[1]) : (valor==='pcd30'||valor==='pcd60'||valor==='pcd-cortesia' ? minutosPcd(valor) : TEMPO_SELECIONADO);
+    const nome=document.querySelectorAll('#lista-criancas .crianca-nome')[indice]?.value?.trim() || `criança ${indice+1}`;
+    return {nome,minutos,cor:resolverPulseiraNaTela(data,horario,minutos)};
+  }) : [{nome:'',minutos:TEMPO_SELECIONADO,cor:resolverPulseiraNaTela(data, horario, TEMPO_SELECIONADO)}];
+  const indicadas=escolhas.filter(item=>item.cor);
+  if(!indicadas.length){ alvo.classList.add('hidden'); alvo.innerHTML=''; return; }
+  const primeira=indicadas[0].cor;
+  const mesmaCor=indicadas.every(item=>item.cor.id===primeira.id);
+  const detalhe=mesmaCor
+    ? `${escapeHtml(horario)} · ${indicadas[0].minutos} min · regra da data selecionada`
+    : indicadas.map(item=>`${escapeHtml(item.nome)}: ${escapeHtml(item.cor.nome)}`).join(' · ');
+  alvo.innerHTML=`<span class="amostra" style="background:${escapeHtml(primeira.hex)}"></span><div><div class="titulo">${mesmaCor?'Pulseira indicada:':'Pulseiras indicadas:'} <span>${mesmaCor?escapeHtml(primeira.nome):'confira por criança'}</span></div><div class="detalhe">${detalhe}</div></div>`;
+  alvo.classList.remove('hidden');
+}
+
 // preco por pulseira - primeiro tenta a tabela ATUAL (editavel, ver
 // TABELA_PRECOS.tempos); minutos fora dela (visita antiga com bucket que
 // saiu de linha) cai no calculo aditivo antigo, mesmo fallback do servidor
@@ -627,6 +733,7 @@ function renderTempos(){
   const cortesia = TABELA_PRECOS.pcdCortesiaVisivel===false ? '' :
     `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA==='pcd-cortesia'?'ativo':''}" data-categoria="pcd-cortesia" onclick="selecionarCategoriaPcd('pcd-cortesia')">${escapeHtml(TABELA_PRECOS.pcdCortesiaLabel)}</button>`;
   document.getElementById('tempos').innerHTML = normais + pcd + cortesia;
+  atualizarPreviewPulseira();
 }
 
 // busca a tabela editavel (tempos/PCD/desconto de aniversariante) no
@@ -639,6 +746,7 @@ async function carregarTabelaPrecos(){
   }catch(e){}
   TEMPOS_VALIDOS = TABELA_PRECOS.tempos.filter(t=>t.visivel!==false).map(t=>t.minutos);
   TEMPOS_TODOS = TABELA_PRECOS.tempos.map(t=>t.minutos);
+  atualizarPreviewPulseira();
 }
 
 // ---------- editar tabela de preços (só Master) - tempos contratados, PCD e
@@ -733,6 +841,65 @@ document.getElementById('form-tabela-parque').addEventListener('submit', async (
   }finally{
     btn.disabled = false;
   }
+});
+
+// ---------- regra de pulseiras (só Master) ----------
+const DIAS_PULSEIRA=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+function opcoesCoresPulseira(valor){
+  return (TABELA_PRECOS.pulseiras?.cores||[]).map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===valor?'selected':''}>${escapeHtml(c.nome)}</option>`).join('');
+}
+function renderConfigPulseiras(){
+  const cfg=TABELA_PRECOS.pulseiras;
+  document.getElementById('pp-ativo').checked=cfg.ativo!==false;
+  document.getElementById('pp-inicio').value=cfg.inicio||'10:00';
+  document.getElementById('pp-intervalo').value=cfg.intervaloMinutos||30;
+  document.getElementById('pp-tipo-1').value=cfg.tiposMinutos?.[0]||30;
+  document.getElementById('pp-tipo-2').value=cfg.tiposMinutos?.[1]||60;
+  document.getElementById('pp-tipo-3').value=cfg.tiposMinutos?.[2]||'';
+  document.getElementById('pp-tipo-4').value=cfg.tiposMinutos?.[3]||'';
+  document.getElementById('pp-paleta').innerHTML=(cfg.cores||[]).map(c=>`<div style="display:grid;grid-template-columns:1fr 62px;gap:8px;align-items:end;margin-top:7px;"><div><label style="margin:0 0 4px;">${escapeHtml(c.id)}</label><input class="pp-cor-nome" data-cor="${escapeHtml(c.id)}" maxlength="24" value="${escapeHtml(c.nome)}"></div><div><label style="margin:0 0 4px;">Cor</label><input class="pp-cor-hex" data-cor="${escapeHtml(c.id)}" type="color" value="${escapeHtml(c.hex)}" style="height:42px;padding:4px;"></div></div>`).join('');
+  document.getElementById('pp-sequencias').innerHTML=DIAS_PULSEIRA.map((dia,n)=>{
+    const seq=(cfg.sequenciasSemana||{})[n]||[];
+    return `<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px;"><b style="font-size:12px;">${dia}</b><div class="sequencia-pulseiras">${Array.from({length:8},(_,i)=>`<div><div class="posicao">${i+1}</div><select class="pp-sequencia" data-dia="${n}" data-posicao="${i}">${opcoesCoresPulseira(seq[i])}</select></div>`).join('')}</div></div>`;
+  }).join('');
+}
+async function abrirConfigPulseiras(){
+  await carregarTabelaPrecos();
+  renderConfigPulseiras();
+  document.getElementById('msg-pulseiras').classList.add('hidden');
+  document.getElementById('overlay-pulseiras').classList.remove('hidden');
+}
+function fecharConfigPulseiras(){ document.getElementById('overlay-pulseiras').classList.add('hidden'); }
+document.getElementById('form-pulseiras').addEventListener('submit',async(ev)=>{
+  ev.preventDefault();
+  const msg=document.getElementById('msg-pulseiras');
+  const btn=ev.target.querySelector('button[type="submit"]'); btn.disabled=true;
+  try{
+    const cfg=TABELA_PRECOS.pulseiras;
+    const cores=(cfg.cores||[]).map(c=>({
+      id:c.id,
+      nome:document.querySelector(`.pp-cor-nome[data-cor="${c.id}"]`).value,
+      hex:document.querySelector(`.pp-cor-hex[data-cor="${c.id}"]`).value,
+    }));
+    const sequenciasSemana={};
+    for(let dia=0;dia<7;dia++){
+      sequenciasSemana[dia]=Array.from({length:8},(_,pos)=>document.querySelector(`.pp-sequencia[data-dia="${dia}"][data-posicao="${pos}"]`).value);
+    }
+    const pulseiras={
+      ativo:document.getElementById('pp-ativo').checked,
+      inicio:document.getElementById('pp-inicio').value,
+      intervaloMinutos:Number(document.getElementById('pp-intervalo').value),
+      tiposMinutos:['pp-tipo-1','pp-tipo-2','pp-tipo-3','pp-tipo-4'].map(id=>Number(document.getElementById(id).value)).filter(Boolean),
+      cores, sequenciasSemana,
+    };
+    const resp=await fetch('/api/parque/pulseiras',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(pulseiras)});
+    const data=await resp.json(); if(!resp.ok) throw new Error(data.error||'Erro ao salvar as pulseiras.');
+    TABELA_PRECOS={...TABELA_PRECOS,pulseiras:data};
+    atualizarPreviewPulseira();
+    msg.textContent='Regra de pulseiras salva.'; msg.className='msg ok'; msg.classList.remove('hidden');
+    setTimeout(fecharConfigPulseiras,900);
+  }catch(err){ msg.textContent=err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+  finally{ btn.disabled=false; }
 });
 
 // horario previsto sempre em janelas de 30 em 30 minutos (10:00/10:30/
@@ -1167,7 +1334,7 @@ function adicionarCrianca(){
       <div><label style="margin-top:0;">Nascimento</label><input type="text" class="crianca-nasc" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" oninput="mascararDataBR(this)"></div>
       <button type="button" class="btn-remover-crianca" onclick="document.getElementById('${id}').remove(); atualizarPreviewPulseiras();" title="Remover">✕</button>
     </div>
-    <div style="grid-column:1 / -1;"><label style="margin-top:0;">Ingresso desta criança</label><select class="crianca-plano" onchange="atualizarPreviewValor()">${opcoesPlanoIndividual(`normal:${TEMPO_SELECIONADO}`)}</select></div>
+    <div style="grid-column:1 / -1;"><label style="margin-top:0;">Ingresso desta criança</label><select class="crianca-plano" onchange="atualizarPreviewValor();atualizarPreviewPulseira()">${opcoesPlanoIndividual(`normal:${TEMPO_SELECIONADO}`)}</select></div>
     <label class="crianca-meia-wrap" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
       <input type="checkbox" class="crianca-meia" style="width:auto;" onchange="atualizarPreviewValor()">
       🧦 Par de meia · R$25 <span style="color:var(--muted);">(marque se a criança precisa comprar o par de meia)</span>
@@ -1372,7 +1539,7 @@ function renderLista(){
         <span>${escapeHtml(c.responsavel?.nome||'')} · ${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtData(c.dataUtilizacao)}</span>
         <span class="badge ${status.classe}">${status.texto}</span>
       </div>
-      <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''} · <b>${fmtReal(valorDoCheckin(c))}</b>${c.metodoPagamento?' ('+escapeHtml(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}</div>
+      <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${resumoPulseiras(c)}${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''} · <b>${fmtReal(valorDoCheckin(c))}</b>${c.metodoPagamento?' ('+escapeHtml(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}</div>
       <div class="criancas">${escapeHtml(criancas)}</div>
       ${cortesiaHtml(c)}
       ${acoesCheckoutIndividuais(c)}
@@ -1389,6 +1556,18 @@ function renderLista(){
       </div>
     </div>`;
   }).join('');
+}
+
+function resumoPulseiras(c){
+  const cores = (c.pulseirasInfo||[]).filter(p=>p && p.nome);
+  if(!cores.length && !c.corPulseira) return '';
+  const unicas = [];
+  (cores.length ? cores : [c.corPulseira]).forEach(cor=>{
+    if(!unicas.some(item=>item.id===cor.id)) unicas.push(cor);
+  });
+  const texto = unicas.map(cor=>escapeHtml(cor.nome)).join(' / ');
+  const cor = unicas[0]?.hex || 'var(--text)';
+  return ` · <b style="color:${escapeHtml(cor)}">pulseira ${texto}</b>${c.pulseiraEstimada?' <span title="Calculada pelo horário real porque o horário previsto não foi gravado">(estimada)</span>':''}`;
 }
 
 // ---------- conferir o lançamento (👁 Ver) ----------
@@ -1438,6 +1617,11 @@ function abrirVer(id){
   html += verLinha('Contato', escapeHtml(c.responsavel?.contato||'—'));
   html += verLinha('Criança(s)', criancasHtml);
   html += verLinha('Pulseira(s) · meia(s)', `${c.pulseiras||0} pulseira(s) · ${meias} meia(s)${c.valorMeias?` (${fmtReal(c.valorMeias)})`:''}`);
+  if(c.pulseirasInfo?.length){
+    html += verLinha('Cor da pulseira', `${c.pulseiraEstimada?'<span style="color:var(--warn);">Estimativa pelo horário real registrado</span><br>':''}${c.pulseirasInfo.map(p=>`${escapeHtml(p.criancaNome||'Criança')}: <b style="color:${escapeHtml(p.hex||'var(--text)')}">${escapeHtml(p.nome||'—')}</b>`).join('<br>')}`);
+  } else if(c.corPulseira){
+    html += verLinha('Cor da pulseira', `<b style="color:${escapeHtml(c.corPulseira.hex||'var(--text)')}">${escapeHtml(c.corPulseira.nome||'—')}</b>`);
+  }
   if(c.adultoCortesia) html += verLinha('Adulto cortesia', `x${c.quantAC||1}`);
   if(c.relancadoDe) html += verLinha('Relançado', '🔁 termo do dia reaproveitado');
   if(c.motivoCortesia) html += verLinha('Motivo da cortesia', escapeHtml(c.motivoCortesia));
@@ -1764,6 +1948,7 @@ function resetarForm(){
   document.getElementById('lista-pagamentos').innerHTML = '';
   adicionarPagamento();
   atualizarPreviewValor();
+  atualizarPreviewPulseira();
   irParaEtapa(1, false);
 }
 
@@ -2081,12 +2266,14 @@ async function boot(){
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
 
   document.getElementById('btn-editar-tabela-parque').classList.toggle('hidden', !isMaster);
+  document.getElementById('btn-editar-pulseiras').classList.toggle('hidden', !isMaster);
   await carregarTabelaPrecos();
   renderTempos();
   setAC(false);
   document.getElementById('f-data').value = hojeBrasilia();
   document.getElementById('f-data').max = hojeBrasilia();
   preencherSelectSlots('f-horario-previsto', proximoSlot30());
+  atualizarPreviewPulseira();
   adicionarCrianca();
   adicionarPagamento();
 
@@ -2126,9 +2313,10 @@ window.zenithAoVivo && zenithAoVivo([
   'parque-checkin-excluido',
   'parque-checkin-automatico',
   'parque-tabela-atualizada',
+  'parque-pulseiras-atualizadas',
   'parque-edicao-solicitada',
   'parque-edicao-decidida',
-], () => carregar());
+], async () => { await carregarTabelaPrecos(); renderTempos(); await carregar(); });
 </script>
 </body>
 </html>
