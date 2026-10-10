@@ -21,6 +21,8 @@ const push = require('./push');
 const usuariosCowork = require('./usuariosCowork');
 const solicitacoes = require('./solicitacoes');
 const store = require('./store');
+const pedidosMonitor = require('./pedidosMonitor');
+const consultaPedidoPublico = require('./consultaPedidoPublico');
 const pedidoWatch = require('./pedidoWatch');
 const users = require('./users');
 const auth = require('./auth');
@@ -146,7 +148,7 @@ function hojeBrasil() {
 async function montarSystem(unidades, logado, unidadesPorCodigo = {}) {
   // Consultar andamento de pedido e necessidade da propria loja, nao apenas
   // de quem abre o painel Monitor. A consulta fica limitada as unidades do acesso.
-  const temFerramentaPedido = !!(logado && (logado.isMaster || (logado.unidades || []).length));
+  const temFerramentaPedido = !logado || !!(logado.isMaster || (logado.unidades || []).length);
   const [blocoConhecimento, blocoAgente] = await Promise.all([montarBlocoConhecimento(), montarBlocoAgente(logado)]);
   const texto = `Você é o Beniboy, atendente virtual do chat de suporte do NoPulso.
 
@@ -199,7 +201,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
 - desbloquear_login: diagnostica e, se necessário, destrava um login que não entra - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão, bloqueio real é resolvido mantendo a MESMA senha. Se a pessoa esqueceu ou quer trocar a senha, use pedirNovaSenha=true: abre uma tarefa direta para o Master, nunca chamado de TI. Quando o Master liberar, ela entra com 12345678 e define a nova senha no primeiro acesso. Se o resultado indicar horário restrito, explique que não é senha e que o Master foi acionado para liberar/revisar o horário. Se travar de novo depois de um desbloqueio real: no login principal, PERGUNTE "você vai usar a última senha criada?" antes de chamar de novo com lembraSenha=true/false. Com true, só destrave; com false, use pedirNovaSenha=true. NUNCA peça senha atual nem use/mande a senha temporária no chat.${temFerramentaPedido ? `
-- consultar_pedido: quando uma unidade perguntar pelo pedido de um cliente, consulte o status de UM pedido (aprovado, recusado, estornado ou em análise). Peça nome do cliente e valor. Se a conta tiver mais de uma unidade e o computador não tiver uma loja fixada, mostre as opções permitidas e peça que a pessoa escolha uma delas — nunca peça código IDPULSE nem aceite loja fora da lista. A busca é limitada às lojas que essa pessoa tem acesso. Devolva somente status, valor, loja e identificação do pedido; nunca dados de cartão. Se não achar, diga isso sem supor fraude/erro e ofereça chamar_atendente. Se o status mudar depois, a pessoa é avisada automaticamente.` : `
+- consultar_pedido: consulte o estado do pagamento, sem concluir que o pedido foi finalizado no PDV. Sem login, use a loja informada na conversa: peça nome completo, valor, data e número do pedido ou últimos quatro dígitos do cartão; não peça login, senha, CPF ou cartão completo. Não diga que falta unidade na sessão do visitante. A consulta pública só confirma um resultado único, sem listar compradores. Com login, mantenha as permissões de unidade da conta e do computador; nunca aceite loja fora desse acesso. Se não achar, esclareça os dados ou use chamar_atendente; não suponha fraude, pedido concluído, estorno creditado ou prazo bancário.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora porque não há uma unidade vinculada à sessão. Use chamar_atendente.`}${(logado && logado.isMaster) ? `
 - executar_acao_agente: executa uma ação do catálogo NOC-NoPulso (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
 
@@ -357,17 +359,20 @@ const TOOLS_BASE = [
   },
 ];
 
-// Entra para conta logada com pelo menos uma unidade. A ferramenta confere e
-// limita os codigos no servidor; visitante anonimo nunca a recebe.
+// Visitante recebe apenas consulta de coincidência única com identificadores.
+// Conta logada continua limitada às unidades autorizadas pelo servidor.
 const TOOL_CONSULTAR_PEDIDO = {
   name: 'consultar_pedido',
-  description: 'Consulta o status de um pedido/transação específico da própria unidade. O resultado é limitado às lojas do usuário. Peça nome do cliente e valor; se houver mais de uma unidade, apresente apenas as opções permitidas para a pessoa escolher. Nunca peça código IDPULSE.',
+  description: 'Consulta um pagamento. Com login, somente lojas permitidas. Sem login, peça loja, nome completo, valor, data e número do pedido ou final de cartão (4 dígitos); a identificação deve ser única. Não comprova conclusão no PDV nem crédito de estorno. Nunca peça senha ou cartão completo.',
   input_schema: {
     type: 'object',
     properties: {
       nomeCliente: { type: 'string', description: 'Nome do cliente do pedido, como a pessoa souber (pode ser parcial).' },
       valor: { type: 'string', description: 'Valor do pedido em reais, como a pessoa informar (ex: "45,90").' },
       unidade: { type: 'string', description: 'Nome da loja informado pela pessoa. Obrigatório apenas se ela tiver acesso a mais de uma unidade.' },
+      data: { type: 'string', description: 'Data do pedido AAAA-MM-DD. Sem data, consulta hoje.' },
+      finalCartao: { type: 'string', pattern: '^\\d{4}$' },
+      numeroPedido: { type: 'string' },
     },
     required: ['nomeCliente', 'valor'],
   },
@@ -433,7 +438,7 @@ function montarTools(logado) {
   // usuários pelo Cowork; esta ferramenta antiga acionava Master direto.
   const tools = TOOLS_BASE.filter((tool) => !['consultar_ticket', 'desbloquear_login'].includes(tool.name));
   if (logado && logado.ehTimeSuporte) tools.push(TOOLS_BASE.find((tool) => tool.name === 'consultar_ticket'));
-  if (logado && (logado.isMaster || (logado.unidades || []).length)) tools.push(TOOL_CONSULTAR_PEDIDO);
+  if (!logado || logado.isMaster || (logado.unidades || []).length) tools.push(TOOL_CONSULTAR_PEDIDO);
   if (logado && logado.isMaster) tools.push(TOOL_EXECUTAR_ACAO_AGENTE);
   if (!logado || !logado.podeCriarTarefa) {
     const indiceCriarTarefa = tools.findIndex((tool) => tool.name === 'criar_tarefa');
@@ -886,8 +891,17 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     const verificado=chat.pedidoVerificado;
     if(!verificado?.statusEnviadoEm || !verificado?.mensagemEm || !(chat.mensagens||[]).some(m=>m.de==='suporte' && m.bot && m.em===verificado.mensagemEm)) return 'Não gere nem escreva um link de estorno. Primeiro consulte o pedido no Monitor pelo nome do cliente e valor e envie seu status. Sem acesso ao Monitor, chame um atendente para verificar.';
     if(!pediuEstornoNestaConversa(chat)) return 'A pessoa não pediu estorno. Informe o status e entenda o que ela precisa; não ofereça formulário de estorno automaticamente.';
-    const atual=store.allOrders().find(o=>o.pedidoId===verificado.pedidoId && o.unidade===verificado.unidade);
-    if(!atual || atual.statusAtual!==verificado.status || atual.valor!==verificado.valor || String(atual.cliente||'')!==verificado.cliente) return 'O pedido mudou desde a verificação. Consulte novamente nome e valor e envie o status atualizado antes de gerar link de estorno.';
+    let atual;
+    if (verificado.psp) {
+      if (!store.estaCarregado()) return 'Monitor carregando. Aguarde para conferir novamente o pedido.';
+      try {
+        const p = pedidosMonitor.encontrar({ psp: verificado.psp, unidade: verificado.unidade }, store.allTransactions());
+        const status = pedidosMonitor.estadoPagamento(p).status;
+        atual = { statusAtual: status === 'AUTORIZADO' ? 'APROVADO' : status, valor: p.base.valor, cliente: p.base.nomeCliente || p.base.cardHolder };
+      } catch { atual = null; }
+    } else atual = store.allOrders().find(o=>o.pedidoId===verificado.pedidoId && o.unidade===verificado.unidade);
+    if(!atual || atual.statusAtual!==verificado.status || atual.valor!==verificado.valor || pedidosMonitor.normalizar(atual.cliente)!==pedidosMonitor.normalizar(verificado.cliente)) return 'O pedido mudou desde a verificação. Consulte novamente nome e valor e envie o status atualizado antes de gerar link de estorno.';
+    if (['ESTORNADO', 'ESTORNADO_PARCIAL', 'CANCELADO', 'ESTORNO_AGENDADO'].includes(atual.statusAtual)) return 'Já existe cancelamento/estorno neste pagamento. Confira o processamento com um atendente antes de abrir outra solicitação.';
     if (!resolverUnidadePublica || !linkEstornoCliente) return 'Sem acesso a essa ferramenta agora - chame um atendente.';
     const termo = String(input.unidade || '').trim();
     if (!termo) return 'Peça o nome da loja onde o cliente fez o pedido.';
@@ -911,6 +925,15 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     chat.pedidoVerificado=null;
     resultado.consultaPedido=null;
     resultado.linkEstorno=null;
+    if (!chat.logado) {
+      const d = { store, catalogo: require('./coworkCatalogo'), refunds: require('./refunds'), somentePublico: true };
+      const fixa = chat.unidadeContexto ? new Set(resolverUnidadesPorIdPulse ? resolverUnidadesPorIdPulse(chat.unidadeContexto) : [chat.unidadeContexto]) : null;
+      if (fixa) fixa.add(chat.unidadeContexto);
+      const consulta = await consultaPedidoPublico.consultar(input, { unidadeFixa: fixa,
+        buscar: (p) => pedidosMonitor.buscar(p, d), consumirTentativa: () => suporteChat.consumirConsultaPedidoPublico(chat.id) });
+      if (consulta.verificado) resultado.consultaPedido = consulta.verificado;
+      return consulta.aviso || JSON.stringify(consulta.publico);
+    }
     // Defesa em profundidade: nao basta a ferramenta ter sido apresentada ao
     // modelo. O servidor restringe a busca a unidade vinculada a sessao.
     if (!chat.logado || (!chat.logado.isMaster && !(chat.logado.unidades || []).length)) {
@@ -976,16 +999,15 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     // Um mesmo ponto pode ter codigo do Fechamento e outro no Monitor. Expande
     // somente os codigos da unidade ja autorizada, nunca uma busca global.
     const candidatos = expandirCodigos(bases);
-    let pedidos = store.allOrders().filter((o) => o.unidade && candidatos.has(o.unidade));
-    pedidos = pedidos.filter((o) => String(o.cliente || '').toLowerCase().includes(nomeCliente));
-    pedidos = pedidos.filter((o) => Math.abs((o.valor || 0) - valorNum) < 0.01);
-    const encontrados = pedidos
-      .sort((a, b) => String(b.ultimaAtualizacao || '').localeCompare(String(a.ultimaAtualizacao || '')))
-      .slice(0, 5);
+    const consulta = await pedidosMonitor.buscar({ nomeCliente, valor: valorNum, desde: input.data, ate: input.data,
+      ...(input.finalCartao ? { finalCartao: input.finalCartao } : {}), ...(input.numeroPedido ? { numeroPedido: input.numeroPedido } : {}), limite: 5 },
+    { store, catalogo: require('./coworkCatalogo'), refunds: require('./refunds'), somentePublico: true, unidadesPermitidas: candidatos });
+    const encontrados = consulta.pedidos.map((p) => ({ psp: p.psp, pedidoId: p.numeroPedido || p.psp, unidade: p.unidade, cliente: p.nomeCliente,
+      valor: p.valor, statusAtual: p.statusPagamento === 'AUTORIZADO' ? 'APROVADO' : p.statusPagamento, ultimaAtualizacao: p.data }));
     if (!encontrados.length) return 'Nenhum pedido encontrado com esse nome e valor nas unidades permitidas. Confira nome, valor e loja; se necessário, ofereça chamar um atendente.';
     if(encontrados.length===1 && encontrados[0].statusAtual){
       const o=encontrados[0];
-      resultado.consultaPedido={pedidoId:o.pedidoId,unidade:o.unidade,cliente:String(o.cliente||''),valor:o.valor,status:o.statusAtual};
+      resultado.consultaPedido={psp:o.psp,pedidoId:o.pedidoId,unidade:o.unidade,cliente:String(o.cliente||''),valor:o.valor,status:o.statusAtual};
     }
     // registra o "retrato" do status visto agora - se mudar depois, a pessoa
     // e avisada sozinha (SSE com o NoPulso aberto + push com fechado), sem
@@ -1210,7 +1232,7 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
     if(/estorno(?:-|%2d)cliente/i.test(texto) && !resultado.linkEstorno) texto='Antes de enviar um link de estorno, precisamos localizar o pedido no Monitor pelo nome do cliente e valor e informar seu status. Se esta conversa não tiver acesso à consulta, um atendente precisa verificar.';
     if(resultado.consultaPedido){
       const p=resultado.consultaPedido;
-      texto=`Pedido ${p.pedidoId} · ${(unidadesPorCodigo||{})[p.unidade]||p.unidade} · Cliente: ${p.cliente} · ${Number(p.valor).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · Status no Monitor: ${p.status}.\n\n${texto}`;
+      texto=`${p.publico ? 'Pagamento localizado' : `Pedido ${p.pedidoId}`} · ${(unidadesPorCodigo||{})[p.unidade]||p.unidade} · Cliente: ${p.cliente} · ${Number(p.valor).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · Status do pagamento no Monitor: ${p.status}. A conclusão do pedido na loja e o crédito de eventual estorno não são comprovados por este status.\n\n${texto}`;
     }
     if (!texto) throw new Error('Modelo retornou sem texto de atendimento.');
 

@@ -51,7 +51,96 @@ Toda chamada de escrita exige uma chave de idempotência, para uma repetição d
 
 Senhas temporárias são geradas pelo servidor, nunca escolhidas pelo modelo. Aparecem **só na tela do Master**, na hora em que ele autoriza — não vão para o agente, para o pedido gravado nem para a auditoria.
 
-## Ferramentas iniciais
+## Monitor, estorno online e atendimento (09/10/2026)
+
+O catálogo MCP publica estas ferramentas automaticamente após o deploy. A sessão
+do conector continua autenticada pelo token; “leitura sem aprovação” não é acesso
+público aos dados do Monitor.
+
+| Ferramenta | Entrada e comportamento |
+|---|---|
+| `buscar_pedidos_monitor` | `unidade`, `desde`, `ate`, `nomeCliente`, `valor`, `finalCartao`, `emailOuTelefone`, `numeroPedido`, `psp`, `status`, `canal`, `limite`. Todos opcionais; período padrão hoje em São Paulo, limite 20 (máximo 100). Nome parcial sem acentos; valor ±R$ 0,10; contato exato e final com 4 dígitos. Unidade curta ambígua pede esclarecimento. |
+| `obter_pedido_monitor` | `psp` ou `numeroPedido`; `unidade` opcional para desambiguar. Linha do tempo, solicitações internas e envio online, sem confundir pagamentos diferentes com o mesmo número de pedido. |
+| `solicitar_estorno_adyen` | `psp`, `motivo`, `protocoloChat`, `idempotencyKey`; `valor` opcional (omitido = total). Prévia exata de conta/PSP/valor, tarefa de Hoje e push ao Master. Vence em 2h; somente a autorização autenticada executa. |
+| `consultar_estorno_adyen` | `psp`. Estados `RECEBIDO`, `CONFIRMADO_PELA_ADYEN`, `RECUSADO`, `REVERTIDO`, `RESULTADO_INCERTO`, `ENVIANDO` ou `SEM_SOLICITACAO_CONHECIDA`. Nunca equivale a crédito confirmado na conta do cliente. |
+| `reabrir_chat_suporte` | `protocolo`, `motivo`, `idempotencyKey`. Preserva histórico e registra nota interna. Conversas de senha/acesso restritas não são reabertas; inicie outro atendimento. Depois use `responder_chat_suporte`. |
+| `buscar_pedidos_agregador` | `canal`, `unidade`, `desde`, `ate`, `numeroPedido`, `status`, `limite`. Apenas a base financeira iFood já sincronizada. `99FOOD` e iFood sem dados retornam `disponivel=false`, não uma conclusão de “nenhum pedido”. |
+
+Exemplo de busca (troque a data pela data informada pelo cliente):
+
+```json
+{"action":"buscar_pedidos_monitor","input":{"unidade":"Garanhuns","desde":"2026-10-09","ate":"2026-10-09","nomeCliente":"Jose Geova","valor":89.80}}
+```
+
+Limites importantes:
+
+- `statusPagamento` é o estado observado na Adyen. `statusPedido=NAO_INFORMADO`:
+  o Monitor não recebe a conclusão do pedido no PDV. O filtro
+  `PEDIDO_NAO_FINALIZADO` é recusado, sem deduzir conclusão de uma autorização.
+- Contatos e cartão são mascarados. O nome do comprador está disponível apenas
+  na consulta autenticada do conector; não há CPF, BIN, endereço ou payload bruto.
+- A fonte só cobre eventos recebidos e retidos no Monitor. Consulta vazia não
+  comprova ausência de cobrança. Canal ausente continua `NAO_INFORMADO`.
+- `solicitacoesLoja` distingue aprovação/execução interna de confirmação Adyen.
+  `previsaoCredito` e `cartaCancelamento` ficam nulos: não há essa fonte integrada.
+- Beniboy sem login pede loja, nome completo, valor, data e número do pedido ou
+  final do cartão. Só confirma uma coincidência única, sem listar compradores,
+  PSPs ou contatos. Até 8 tentativas por conversa. Não concede permissões de
+  usuário nem troca a unidade fixa de um computador. Contas logadas continuam
+  limitadas às lojas autorizadas. Consulta não executa estorno.
+
+### Habilitação explícita do Checkout Adyen
+
+Não reutilizamos as chaves da Disputes API. Configure os segredos no servidor:
+
+```text
+ADYEN_CHECKOUT_API_KEY=<chave Checkout com permissão de modificação de pagamentos>
+ADYEN_CHECKOUT_CONTAS={"CONTA_REAL_ADYEN":{"keyEnv":"ADYEN_CHECKOUT_API_KEY","baseUrl":"https://checkout-test.adyen.com/v72","onlineExclusivo":true,"reversaoHabilitada":true}}
+```
+
+O exemplo aponta para **homologação**. Produção exige o endpoint oficial da conta,
+`https://PREFIXO-checkout-live.adyenpayments.com/checkout/v72`, e a credencial de
+produção. Outras empresas usam `ADYEN_CHECKOUT_API_KEY_2`, `_3` etc., com mapeamento
+explícito de cada merchant. Não há tentativa de várias chaves em escrita.
+`onlineExclusivo` precisa ser conferido por um administrador; contas mistas não
+devem ser habilitadas. Só habilite `reversaoHabilitada` após confirmar que não há
+split nem múltiplas capturas parciais. O conector também recusa múltiplas capturas
+conhecidas. Parcial exige captura confirmada suficiente e valor em centavos BRL.
+
+Referências oficiais: [reversão total](https://docs.adyen.com/online-payments/reversal),
+[estorno](https://docs.adyen.com/online-payments/refund).
+
+Os webhooks autenticados `CANCEL_OR_REFUND`, `CANCELLATION`, `REFUND`, `REFUND_FAILED`
+e `REFUNDED_REVERSED` atualizam a consulta e registram o resultado no protocolo.
+Somente referência de modificação correspondente ao envio é associada. Repetições
+não duplicam mensagens. Chat fechado recebe nota interna, sem ser reaberto.
+
+A reserva financeira em `coworkEstornosAdyen` é única **por conta + PSP**, além da
+idempotência da API. Timeout, reinício ou erro de armazenamento nunca liberam um
+segundo envio. Se ficar `ENVIANDO`/`RESULTADO_INCERTO`, confira a referência e o
+histórico na Adyen: não tente outra chave nem apague a reserva. Uma segunda
+devolução parcial do mesmo pagamento exige conferência manual, fora deste fluxo.
+`auditoriaPendente=true` exige conferir a nota no protocolo; não reenviar dinheiro
+para corrigir uma falha de mensagem.
+
+### Integrações ainda não disponíveis
+
+WhatsApp Business (listar/ler/enviar) e API do Conecta (listar/responder/criar com
+anexos) dependem da documentação, credenciais e identificação da conta/provedor.
+Não existem executores para elas nesta versão. `registrar_envio_conecta` continua
+registrando um envio **já feito** no portal; não é envio via API. A fila de ações
+de agregadores não fornece pedidos de clientes do 99Food.
+
+### Verificação local
+
+`node testePedidosMonitorCowork.js` cobre regras, privacidade, idempotência,
+aprovação, timeouts, parciais e callbacks com API falsa. `--sabotar` deve falhar ao
+liberar um pagamento recusado. `testeEstornoBeniboy.js` cobre o fluxo do bot; a
+suíte `testeRotas.js` inclui `testeMonitorCoworkHttp.js`, passando pelos endpoints,
+autenticação e tarefa reais com Firestore e Adyen simulados. Nenhum teste deve
+usar credenciais reais.
+
+## Ferramentas anteriores
 
 `preparar_reuniao`, `consultar_noc`, `solicitar_xml_processados`, `consultar_xml_processados`, `pesquisar_emails`, `ler_email`, `enviar_email`, `criar_tarefa`, `criar_reuniao`, `concluir_tarefa`, `cancelar_tarefa`, `criar_solicitacao_ti`, `criar_formulario`, `criar_usuario`, `desbloquear_usuario`, `criar_nova_senha` e `executar_noc`.
 

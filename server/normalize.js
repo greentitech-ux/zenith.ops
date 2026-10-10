@@ -179,6 +179,12 @@ function normalize(item) {
     merchantReference: item.merchantReference,
     originalReference: item.originalReference || null,
     eventCode: item.eventCode,
+    // Necessário para distinguir captura/cancelamento confirmado de recusado.
+    // Legados sem esse campo não devem ser tratados como sucesso por suposição.
+    success: item.success === true || item.success === 'true',
+    eventDate: item.eventDate && Number.isFinite(Date.parse(item.eventDate)) ? new Date(item.eventDate).toISOString() : null,
+    canal: additional.terminalId ? 'MAQUININHA'
+      : ['Web', 'iOS', 'Android'].includes(additional.channel) ? 'ONLINE' : null,
     status,
     fraudeSuspeita: isFraudSuspect(item),
     motivo: item.reason || additional.refusalReasonRaw || '',

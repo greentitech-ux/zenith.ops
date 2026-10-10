@@ -455,6 +455,10 @@ setTimeout(async () => {
     token = r && r.token;
   } catch (e) { console.log('login falhou: ' + e.message); }
   console.log(token ? 'token obtido ✓' : 'SEM TOKEN - as rotas vao devolver 401');
+  if (process.env.TESTE_MONITOR_COWORK === '1') {
+    try { await require('./testeMonitorCoworkHttp').testar({ DOCS, pedir, postarJson, token }); process.exit(0); }
+    catch (e) { console.error(e); process.exit(1); }
+  }
   if (process.env.TESTE_NAVEGACAO_ATENDIMENTO === '1') {
     try {
       const teste = require('./testeNavegacaoAtendimento');
@@ -30136,6 +30140,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch(e) { ruins++; console.log('✗ Central ↔ computadores: '+e.message); }
   try { await require('./testeFluxoFormularioPublico').testar({ DOCS, postarJson }); }
   catch (e) { ruins++; console.log('✗ Formulário público: ' + e.stack); }
+  try { await require('./testeMonitorCoworkHttp').testar({ DOCS, pedir, postarJson, token }); }
+  catch (e) { ruins++; console.log('✗ Monitor/Cowork HTTP: ' + e.stack); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

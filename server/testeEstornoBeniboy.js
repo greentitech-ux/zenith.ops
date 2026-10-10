@@ -14,8 +14,14 @@ async function testar(){
     registrarPedidoVerificado:async(id,p)=>{chat.pedidoVerificado=structuredClone(p);},
     adicionarMensagem:async(id,m)=>{chat.mensagens.push({...m,em:'msg-'+(++sequencia)});return structuredClone(chat);},
     sinalizarAtendente:async()=>{chat.botDesativado=false;},
+    consumirConsultaPedidoPublico:async()=>{},
   };
-  const mocks={'./suporteChat':suporte,'./firestore':{collection:()=>({})},'./store':{allOrders:()=>pedidos},'./pedidoWatch':{registrar:async()=>{}},'./users':{list:async()=>[],ehCargoGerente:()=>false},'./agenteAcoes':{obterContexto:async()=>({})},'@anthropic-ai/sdk':class {constructor(){this.messages={create:async()=>{assert(respostas.length,'Modelo local sem resposta preparada');return respostas.shift();}};}}};
+  const mapa={A:{codigo:'A',nome:'Loja A',apelidos:[]},B:{codigo:'B',nome:'Loja B',apelidos:[]}};
+  const eventos=()=>pedidos.flatMap(p=>{
+    const base={pspReference:'PSP'+p.pedidoId,merchantReference:p.pedidoId,unidade:p.unidade,nomeCliente:p.cliente,valor:p.valor,moeda:'BRL',eventCode:'AUTHORISATION',status:'APROVADO',success:true,last4:'1234',dataHora:new Date().toISOString()};
+    return p.statusAtual==='ESTORNADO'?[base,{...base,originalReference:base.pspReference,pspReference:'MOD'+p.pedidoId,eventCode:'REFUND',status:'ESTORNADO'}]:[base];
+  });
+  const mocks={'./pedidosMonitor':require('./pedidosMonitor'),'./consultaPedidoPublico':require('./consultaPedidoPublico'),'./coworkCatalogo':{mapaDeUnidades:async()=>mapa},'./suporteChat':suporte,'./firestore':{collection:()=>({})},'./store':{allOrders:()=>pedidos,allTransactions:eventos,estaCarregado:()=>true},'./pedidoWatch':{registrar:async()=>{}},'./users':{list:async()=>[],ehCargoGerente:()=>false},'./agenteAcoes':{obterContexto:async()=>({})},'@anthropic-ai/sdk':class {constructor(){this.messages={create:async()=>{assert(respostas.length,'Modelo local sem resposta preparada');return respostas.shift();}};}}};
   const mod=new Module(path.join(__dirname,'suporteBot.js'),module);mod.filename=path.join(__dirname,'suporteBot.js');mod.paths=module.paths;mod.require=id=>mocks[id]||{};
   mod._compile(fonte+'\nmodule.exports.executarTool=executarTool;',mod.filename);
   const bot=mod.exports;
@@ -31,7 +37,7 @@ async function testar(){
     novo('Status do pedido de Maria Silva, R$80');
     respostas.push(chamar('consultar_pedido',{nomeCliente:'Maria Silva',valor:'80'}),texto('Como posso ajudar com este resultado?'));
     assert(await bot.responderConversa('c',contexto));
-    assert(chat.mensagens.at(-1).texto.includes('Status no Monitor: APROVADO'));assert(chat.mensagens.at(-1).texto.includes('Maria Silva'));
+    assert(chat.mensagens.at(-1).texto.includes('Status do pagamento no Monitor: APROVADO'));assert(chat.mensagens.at(-1).texto.includes('Maria Silva'));
     assert(chat.pedidoVerificado?.statusEnviadoEm,'Consulta precisa ser gravada somente após mensagem enviada');
     await ferramenta('gerar_link_estorno_cliente',{unidade:'Loja A'});assert.equal(links,0,'Consulta de status não é pedido de estorno');
     chat.mensagens.push({de:'visitante',texto:'Quero solicitar estorno',em:'nova'});
@@ -43,7 +49,10 @@ async function testar(){
     respostas.push(chamar('consultar_pedido',{nomeCliente:'Maria',valor:'80'}),texto('Há mais de um pedido. Preciso identificar qual é.'));
     await bot.responderConversa('c',contexto);assert.equal(chat.pedidoVerificado,null,'Resultado ambíguo não libera estorno');pedidos=[pedido];
     novo('Quero estorno');chat.logado=null;
-    await ferramenta('consultar_pedido',{nomeCliente:'Maria',valor:'80'});assert.equal(chat.pedidoVerificado,null,'Visitante não ganha acesso ao Monitor');
+    await ferramenta('consultar_pedido',{nomeCliente:'Maria',valor:'80'});assert.equal(chat.pedidoVerificado,null,'Visitante sem dados suficientes não ganha acesso a pagamentos');
+    const anonimo={};await ferramenta('consultar_pedido',{nomeCliente:'maria silva',valor:'80',unidade:'Loja A',finalCartao:'1234'},anonimo);
+    assert(anonimo.consultaPedido?.publico,'Visitante identifica um pagamento sem virar usuário autenticado');assert.equal(chat.logado,null);
+    const proibido={};await ferramenta('consultar_pedido',{nomeCliente:'maria silva',valor:'80',unidade:'Loja B',finalCartao:'1234'},proibido);assert(!proibido.consultaPedido,'Visitante não sai da unidade fixa');
     novo('Quero estorno');const r={};await ferramenta('consultar_pedido',{nomeCliente:'Maria',valor:'80'},r);
     assert(r.consultaPedido);await ferramenta('gerar_link_estorno_cliente',{unidade:'Loja A'});assert.equal(links,0,'Consulta ainda não enviada no chat não libera link');
     pedidos=[{...pedido,valor:1280.80}];const moeda={};await ferramenta('consultar_pedido',{nomeCliente:'Maria',valor:'R$ 1.280,80'},moeda);

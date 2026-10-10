@@ -24,6 +24,8 @@ const catalogo = require('./coworkCatalogo');
 const { validarLinkPreenchimento } = require('./formularioLinkPublico');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const suporteChat = require('./suporteChat');
+const pedidosMonitor = require('./pedidosMonitor');
+const estornosAdyenCowork = require('./estornosAdyenCowork');
 
 // O index.js liga aqui o broadcast da tela: sem isso, o comentário ou o
 // pré-preenchimento do Claude só apareceria na tarefa aberta depois de F5.
@@ -50,6 +52,12 @@ function chaveArquivoXmlProcessados(computador, ano, mes) {
 }
 
 const FERRAMENTAS = Object.freeze({
+  buscar_pedidos_agregador: { descricao: 'Consulta vendas iFood já sincronizadas por unidade/data (padrão hoje), pedido e status. Não lê o PDV e não opera pedidos. Retorna disponivel=false se não houver integração/dados; 99Food ainda não possui fonte de consulta.', risco: 'leitura', obrigatorios: ['canal', 'unidade'] },
+  buscar_pedidos_monitor: { descricao: 'Busca pagamentos sem PSP: unidade (inclusive apelido curto único), período ISO (padrão hoje em São Paulo), nome parcial sem acentos, valor ±R$ 0,10, final do cartão, contato exato, pedido, PSP, status e canal. Só dados retidos no Monitor; não infere conclusão no PDV nem canal ausente. Dados sensíveis mascarados.', risco: 'leitura', obrigatorios: [] },
+  obter_pedido_monitor: { descricao: 'Detalha pagamento por PSP ou número do pedido e unidade opcional: eventos, motivo, solicitações internas e confirmações Adyen. Solicitação não comprova estorno e pagamento não comprova pedido finalizado. Prazo/carta só quando disponíveis.', risco: 'leitura', obrigatorios: [] },
+  solicitar_estorno_adyen: { descricao: 'Solicita cancelamento/estorno online total (valor omitido) ou parcial em BRL. Exige Checkout configurado e protocoloChat de origem. Master confere PSP/conta/valor na tarefa de Hoje e autentica antes de qualquer envio. Recebimento não é confirmação de crédito. Não repetir se resultado incerto.', risco: 'alto', obrigatorios: ['psp', 'motivo', 'protocoloChat'], autorizar: true },
+  consultar_estorno_adyen: { descricao: 'Consulta por PSP o envio persistido e os webhooks do Monitor: recebido, confirmado pela Adyen, recusado ou incerto. Confirmação Adyen não comprova crédito na conta do cliente. Não inventar prazo.', risco: 'leitura', obrigatorios: ['psp'] },
+  reabrir_chat_suporte: { descricao: 'Reabre um protocolo finalizado comum, preservando histórico e registrando motivo interno. Não reabre conversas de acesso/senha com histórico restrito. Depois use responder_chat_suporte.', risco: 'baixo', obrigatorios: ['protocolo', 'motivo'] },
   // ---- consultas (etapa 2, 23/09/2026): o Claude enxerga antes de agir ----
   consultar_ticket: { descricao: 'Acha pelo NÚMERO que a pessoa vê (ex.: 12052 ou "#12052") a tarefa do Meu Dia e/ou a solicitação da Central com esse número. Devolve o tarefaId/solicitacaoId interno - é ele que as ações pedem, não o número.', risco: 'leitura', obrigatorios: ['numero'] },
   listar_tarefas: { descricao: 'Lista tarefas e reuniões ABERTAS do Meu Dia (Pendente, A fazer, Hoje, Em andamento), filtrando por unidade, status, responsável e texto. Concluída/cancelada: use consultar_ticket com o número.', risco: 'leitura', obrigatorios: [] },
@@ -110,6 +118,11 @@ function listarFerramentas() {
 }
 
 const PROPRIEDADES_COMUNS = {
+  ate: { type: 'string', description: 'Fim do período ISO, com fuso quando houver horário.' },
+  nomeCliente: { type: 'string' }, valor: { type: 'number', exclusiveMinimum: 0 },
+  finalCartao: { type: 'string', pattern: '^\\d{4}$' }, emailOuTelefone: { type: 'string' },
+  numeroPedido: { type: 'string' }, canal: { type: 'string', enum: pedidosMonitor.CANAIS },
+  protocoloChat: { oneOf: [{ type: 'string', pattern: '^\\d+$' }, { type: 'integer', minimum: 1 }] },
   termo: { type: 'string', description: 'Assunto, título ou texto para filtrar.' },
   consulta: { type: 'string', description: 'Busca do Gmail, por exemplo: newer_than:7d is:unread.' },
   emailId: { type: 'string' }, para: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
@@ -178,6 +191,12 @@ const PROPRIEDADES_COMUNS = {
 // toda tarefa criada pelo Claude caía no Master.
 // Cada nome aqui é o que o executor da ferramenta LÊ de verdade.
 const PARAMETROS = Object.freeze({
+  buscar_pedidos_agregador: ['canal', 'unidade', 'desde', 'ate', 'numeroPedido', 'status', 'limite'],
+  buscar_pedidos_monitor: ['unidade', 'desde', 'ate', 'nomeCliente', 'valor', 'finalCartao', 'emailOuTelefone', 'numeroPedido', 'psp', 'status', 'canal', 'limite'],
+  obter_pedido_monitor: ['psp', 'numeroPedido', 'unidade'],
+  solicitar_estorno_adyen: ['psp', 'valor', 'motivo', 'protocoloChat'],
+  consultar_estorno_adyen: ['psp'],
+  reabrir_chat_suporte: ['protocolo', 'motivo'],
   consultar_ticket: ['numero'],
   listar_tarefas: ['unidade', 'status', 'responsavel', 'termo', 'limite'],
   listar_solicitacoes: ['unidade', 'tipo', 'status', 'termo', 'tema', 'execucaoStatus', 'limite'],
@@ -230,7 +249,7 @@ const PARAMETROS = Object.freeze({
 });
 function propriedadesDe(nome, f) {
   const lista = [...(PARAMETROS[nome] || []), ...(f.risco === 'leitura' ? [] : ['idempotencyKey'])];
-  return Object.fromEntries(lista.map((k) => [k, PROPRIEDADES_COMUNS[k]]));
+  return Object.fromEntries(lista.map((k) => [k, nome === 'buscar_pedidos_monitor' && k === 'status' ? { type: 'string', enum: pedidosMonitor.STATUS } : PROPRIEDADES_COMUNS[k]]));
 }
 
 function ferramentasMcp() {
@@ -328,7 +347,7 @@ function resumoDoPedido(nome, entrada) {
   return `${TITULO_ACAO[nome] || nome}${e.tarefa ? ` (${e.tarefa})` : ''}${alvo ? ` · ${valorLegivel(alvo)}` : ''}`;
 }
 // comando de máquina aprovado horas depois já não é o que se pediu
-const VALIDADE_AUTORIZACAO_MS = { executar_noc: 2 * 60 * 60 * 1000 };
+const VALIDADE_AUTORIZACAO_MS = { executar_noc: 2 * 60 * 60 * 1000, solicitar_estorno_adyen: 2 * 60 * 60 * 1000 };
 const VALIDADE_PADRAO_MS = 24 * 60 * 60 * 1000;
 
 // Chamado pela APROVAÇÃO (index.js, EXECUTORES_QA['cowork.executar']), com
@@ -457,6 +476,16 @@ async function responderChatSuporte(p) {
   if (!texto) throw new Error('Escreva a resposta para o solicitante.');
   await suporteChat.adicionarMensagem(chat.id, { de: 'suporte', texto, autorEmail: 'Cowork via Beniboy', bot: true });
   return `Resposta enviada no protocolo #${chat.numeroTicket}.`;
+}
+async function reabrirChatSuporte(p, ator) {
+  const chat = await acharChatSuporte(p.protocolo);
+  if (chat.restritoAposConclusao || chat.desbloqueio) throw new Error('Conversa de acesso protegida: abra um novo atendimento, sem reexpor o histórico.');
+  if (chat.status === 'ABERTO') return `Protocolo #${chat.numeroTicket} já está aberto.`;
+  const motivo = String(p.motivo || '').trim();
+  if (!motivo) throw new Error('Informe o motivo da reabertura.');
+  await suporteChat.registrarNotaInterna(chat.id, { resumo: `Cowork reabriu o atendimento: ${motivo}`, situacao: 'PENDENTE' });
+  await suporteChat.atualizarStatusAtendimento(chat.id, { statusAtendimento: 'PENDENTE', autor: ator });
+  return `Protocolo #${chat.numeroTicket} reaberto; o histórico foi preservado.`;
 }
 async function finalizarChatSuporte(p) {
   const chat = await acharChatSuporte(p.protocolo);
@@ -1088,7 +1117,7 @@ async function antesDeAjustarPermissoes(entrada) {
     ],
   };
 }
-const ANTES_DE_AUTORIZAR = { pedir_assinatura: antesDePedirAssinatura, ajustar_permissoes_usuario: antesDeAjustarPermissoes };
+const ANTES_DE_AUTORIZAR = { pedir_assinatura: antesDePedirAssinatura, ajustar_permissoes_usuario: antesDeAjustarPermissoes, solicitar_estorno_adyen: estornosAdyenCowork.preparar };
 
 async function registrarNaDisputa(nome, p, ator) {
   const c = await disputes.getOne(String(p.disputaId));
@@ -1399,6 +1428,19 @@ async function registrarResultadoXmlProcessados(comando) {
 
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
+  if (nome === 'buscar_pedidos_agregador') return require('./pedidosAgregadorCowork').buscar(p);
+  if (nome === 'buscar_pedidos_monitor') {
+    const consulta = await pedidosMonitor.buscar(p);
+    const envios = consulta.pedidos.length ? await estornosAdyenCowork.listar() : [];
+    return { ...consulta, pedidos: consulta.pedidos.map((x) => ({ ...x, envioOnline: envios.find((r) => r.psp === x.psp && r.unidade === x.unidade) || null })) };
+  }
+  if (nome === 'obter_pedido_monitor') {
+    const pedido = await pedidosMonitor.obter(p);
+    return { ...pedido, envioOnline: await estornosAdyenCowork.consultar({ psp: pedido.psp, unidade: pedido.unidade }) };
+  }
+  if (nome === 'solicitar_estorno_adyen') return estornosAdyenCowork.executar(p);
+  if (nome === 'consultar_estorno_adyen') return estornosAdyenCowork.consultar(p);
+  if (nome === 'reabrir_chat_suporte') return reabrirChatSuporte(p, ator);
   if (nome === 'listar_disputas') return listarDisputas(p);
   if (nome === 'obter_disputa') return obterDisputa(p);
   if (nome === 'obter_pagamento_adyen') return obterPagamentoAdyen(p);
@@ -1572,6 +1614,16 @@ async function despachar(nome, entrada, ator) {
   throw new Error('Executor não implementado.');
 }
 
+function fingerprintIntencao(nome, entrada) {
+  const ordenar = (v) => Array.isArray(v) ? v.map(ordenar) : v && typeof v === 'object'
+    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, ordenar(v[k])])) : v;
+  const limpa = { ...(entrada || {}) }; delete limpa.confirmar; delete limpa.idempotencyKey;
+  return crypto.createHash('sha256').update(JSON.stringify([nome, ordenar(limpa)])).digest('hex');
+}
+function conferirRepeticao(salva, nome, fingerprint) {
+  if (salva.nome !== nome || (salva.fingerprint && salva.fingerprint !== fingerprint)) throw new Error('idempotencyKey já usada para outra intenção. Não altere os parâmetros ao repetir uma chamada.');
+  if (!salva.resposta) throw new Error(salva.status === 'ERRO' ? 'A tentativa anterior falhou. Consulte a auditoria antes de tentar outra intenção.' : 'Esta ação já está em execução. Aguarde.');
+}
 async function executar({ nome, entrada, idempotencyKey }) {
   const ferramenta = validar(String(nome || ''), entrada || {});
   const chave = String(idempotencyKey || '').trim().slice(0, 160);
@@ -1580,13 +1632,15 @@ async function executar({ nome, entrada, idempotencyKey }) {
     const ator = await resolverAtor();
     const resultado = await despachar(nome, entrada || {}, ator);
     await AUDITORIA.doc().set({ nome, risco: 'leitura', atorId: ator.id, atorEmail: ator.email, status: 'CONCLUIDO', criadoEm: new Date().toISOString() });
-    return { ok: true, resultado, tempoReal: true };
+    return { ok: true, resultado, tempoReal: !['buscar_pedidos_monitor', 'obter_pedido_monitor', 'consultar_estorno_adyen', 'buscar_pedidos_agregador'].includes(nome) };
   }
   const ator = await resolverAtor();
+  const fingerprint = fingerprintIntencao(nome, entrada);
   const ref = IDEMPOTENCIA.doc(crypto.createHash('sha256').update(chave).digest('hex'));
   const anterior = await ref.get();
   if (anterior.exists) {
     const salva = anterior.data();
+    conferirRepeticao(salva, nome, fingerprint);
     const resposta = salva.resposta;
     // Links guardados antes da correção também passam pela checagem pública.
     if (salva.nome === 'criar_formulario' && resposta?.resultado?.linkPreenchimento) {
@@ -1600,10 +1654,13 @@ async function executar({ nome, entrada, idempotencyKey }) {
   // Reserva ANTES de alterar qualquer coisa. Duas chamadas simultâneas com a
   // mesma chave não podem criar dois tickets/usuários. `create` é atômico.
   try {
-    await ref.create({ criadoEm: new Date().toISOString(), nome, status: 'EXECUTANDO' });
+    await ref.create({ criadoEm: new Date().toISOString(), nome, fingerprint, status: 'EXECUTANDO' });
   } catch (err) {
     const concorrente = await ref.get();
-    if (concorrente.exists && concorrente.data().resposta) return { ...concorrente.data().resposta, repetida: true };
+    if (concorrente.exists) {
+      conferirRepeticao(concorrente.data(), nome, fingerprint);
+      return { ...concorrente.data().resposta, repetida: true };
+    }
     const e = new Error('Esta ação com a mesma idempotencyKey já está em execução. Aguarde e consulte novamente.');
     e.code = 'ACAO_EM_EXECUCAO';
     throw e;

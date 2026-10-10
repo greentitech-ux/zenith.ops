@@ -3762,6 +3762,10 @@ app.post('/webhooks/adyen', async (req, res) => {
       }
     }
     store.addOrUpdate(tx);
+    // Só depois da validação do webhook. Registra o resultado no protocolo
+    // que originou o envio aprovado; não dispara nenhuma operação financeira.
+    try { await require('./estornosAdyenCowork').registrarWebhook(tx); }
+    catch (err) { console.error('[cowork-estorno] Falha ao registrar confirmação:', err.message); }
     broadcast('transaction', tx, 'monitor');
     push.notify(tx); // estorno, estorno agendado, chargeback ou fraude -> push no celular/navegador
 

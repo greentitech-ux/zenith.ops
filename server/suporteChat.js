@@ -16,6 +16,41 @@ const resumoAtendimento = require('./resumoAtendimento');
 
 const COLLECTION = db.collection('suporteChats');
 
+// Limite persistente por conversa: o modelo não pode varrer pagamentos com
+// milhares de combinações. Não é uma permissão de loja nem altera o login.
+async function consumirConsultaPedidoPublico(id) {
+  await db.runTransaction(async (tx) => {
+    const ref = COLLECTION.doc(id), snap = await tx.get(ref);
+    const chat = snap.exists ? snap.data() : null;
+    if (!chat || chat.status !== 'ABERTO') throw new Error('Conversa indisponível para consulta.');
+    const tentativas = Number(chat.consultasPedidoPublico || 0);
+    if (tentativas >= 8) throw new Error('Limite de consultas deste atendimento atingido. Chame um atendente para conferir o pedido.');
+    tx.update(ref, { consultasPedidoPublico: tentativas + 1 });
+  });
+  chatsCache.invalidar();
+}
+
+// Uma entrega financeira e sua nota interna entram juntas. A repetição do
+// webhook ou retry local não duplica a resposta. Não reabre chat encerrado.
+async function registrarEventoFinanceiro(id, { eventoId, resumo, textoPublico }) {
+  if (!/^[a-f0-9]{64}$/.test(eventoId || '')) throw new Error('Identificador financeiro inválido.');
+  await db.runTransaction(async (tx) => {
+    const ref = COLLECTION.doc(id), snap = await tx.get(ref);
+    if (!snap.exists) throw new Error('Conversa de origem não encontrada.');
+    const chat = snap.data(), recebidos = chat.eventosFinanceiros || {};
+    if (recebidos[eventoId]) return;
+    const em = new Date().toISOString();
+    const patch = { eventosFinanceiros: { ...recebidos, [eventoId]: em }, atualizadoEm: em,
+      notasInternas: [...(chat.notasInternas || []), { resumo: limpar(resumo, 1200), situacao: 'PENDENTE', por: 'Cowork · Adyen', em }].slice(-MAX_NOTAS_INTERNAS) };
+    if (chat.status === 'ABERTO' && textoPublico && (chat.mensagens || []).length < MAX_MENSAGENS) {
+      patch.mensagens = [...(chat.mensagens || []), { de: 'suporte', bot: true, automatica: true, autorEmail: 'Cowork via Beniboy', texto: limpar(textoPublico, MAX_TEXTO), em }];
+    }
+    tx.update(ref, patch);
+  });
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
 const MAX_TEXTO = 1000;
 const MAX_MENSAGENS = 300;
 
@@ -805,6 +840,8 @@ async function finalizarOciosos() {
 }
 
 module.exports = {
+  consumirConsultaPedidoPublico,
+  registrarEventoFinanceiro,
   registrarPedidoVerificado,
   criar, getOne, getPublico, getPortalPublico, getPortalComToken, getComToken, atualizarLogado, adicionarMensagem, finalizar, sinalizarAtendente, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, restringirAposConclusao, adicionarTicketVinculado, marcarEncaminhadoCowork, STATUS_ATENDIMENTO, finalizarOciosos,
