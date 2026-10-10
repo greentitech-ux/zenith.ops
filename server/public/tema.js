@@ -1298,13 +1298,15 @@
         '<button type="button" class="ztema-passo" id="ztema-fonte-menos" title="Diminuir a fonte">A−</button>' +
         '<span id="ztema-fonte-pct">100%</span>' +
         '<button type="button" class="ztema-passo" id="ztema-fonte-mais" title="Aumentar a fonte">A+</button>' +
-      '</div>';
+      '</div>' +
+      '<div class="ztema-linha"><button type="button" id="ztema-minha-imagem">🖼️ Minha imagem</button></div>';
     drawer.appendChild(grupo);
     drawer.appendChild(painel);
     painel.querySelector('[data-tema-btn="escuro"]').addEventListener('click', function () { definirTema('escuro'); });
     painel.querySelector('[data-tema-btn="claro"]').addEventListener('click', function () { definirTema('claro'); });
     painel.querySelector('#ztema-fonte-menos').addEventListener('click', function () { mudarFonte(-FONTE_PASSO); });
     painel.querySelector('#ztema-fonte-mais').addEventListener('click', function () { mudarFonte(FONTE_PASSO); });
+    painel.querySelector('#ztema-minha-imagem').addEventListener('click', function () { location.href = '/minha-aparencia'; });
     aplicar();
   }
 
@@ -1517,7 +1519,33 @@
     document.head.appendChild(tag);
   }
 
-  function iniciar() { montarControles(); vigiarDrawer(); avisarSinoNoEnderecoNovo(); avisarFechamentoPendente(); montarBeniboy(); }
+  // Faixa pessoal limitada às duas telas combinadas. A foto é buscada como
+  // Blob autenticado (nunca por URL pública) e só entra no DOM depois de o
+  // servidor confirmar que pertence ao usuário logado.
+  async function montarImagemPessoal() {
+    if (!['/painel', '/painel.html', '/tarefas', '/tarefas.html'].includes(location.pathname)) return;
+    var token = localStorage.getItem('authToken');
+    if (!token) return;
+    try {
+      var cab = { Authorization: 'Bearer ' + token };
+      var estado = await fetch('/api/me/personalizacao', { headers: cab });
+      if (!estado.ok || !(await estado.json()).temImagem) return;
+      var foto = await fetch('/api/me/personalizacao/imagem', { headers: cab });
+      if (!foto.ok) return;
+      var alvo = location.pathname.indexOf('tarefas') >= 0
+        ? document.querySelector('main > .top') : document.getElementById('painel-saudacao');
+      if (!alvo || document.getElementById('zenith-imagem-pessoal')) return;
+      var url = URL.createObjectURL(await foto.blob());
+      var estilo = document.createElement('style');
+      estilo.textContent = '.zenith-imagem-pessoal{height:104px;margin:12px 0 18px;border-radius:12px;overflow:hidden;border:1px solid var(--line,#27313b);background:var(--panel2,#181d24)}.zenith-imagem-pessoal img{width:100%;height:100%;object-fit:cover;display:block}@media(max-width:640px){.zenith-imagem-pessoal{height:82px;margin:10px 0 14px}}';
+      document.head.appendChild(estilo);
+      var faixa = document.createElement('section');
+      faixa.id = 'zenith-imagem-pessoal'; faixa.className = 'zenith-imagem-pessoal';
+      var img = document.createElement('img'); img.src = url; img.alt = 'Sua imagem de personalização';
+      faixa.appendChild(img); alvo.insertAdjacentElement('afterend', faixa);
+    } catch (_) { /* aparência nunca pode impedir o trabalho da tela */ }
+  }
+  function iniciar() { montarControles(); vigiarDrawer(); montarImagemPessoal(); avisarSinoNoEnderecoNovo(); avisarFechamentoPendente(); montarBeniboy(); }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
   else iniciar();

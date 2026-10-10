@@ -272,6 +272,14 @@ const uploadLoginFundo = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 1 },
 });
+const uploadImagemPersonalizacao = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.mimetype || '')) return cb(new Error('Escolha uma imagem JPG, PNG ou WebP.'));
+    cb(null, true);
+  },
+});
 
 const app = express();
 
@@ -3417,6 +3425,7 @@ app.get('/api/me', async (req, res) => {
     role: req.user.role,
     cargo: req.user.cargo || null,
     perfilVisual: req.user.perfilVisual || null,
+    temImagemPersonalizacao: !!req.user.imagemPersonalizacao,
     permissions: req.permissions,
     isAdmin: req.isAdmin,
     podeCatalogoEstoque: req.podeCatalogoEstoque,
@@ -3455,6 +3464,50 @@ app.get('/api/me', async (req, res) => {
       ? ((await empresas.list()).find((e) => e.id === req.empresaId) || {}).nome || null
       : null,
   });
+});
+
+// Personalização individual: cada pessoa só enxerga, troca ou remove a
+// própria imagem. Não há URL pública nem campo com o caminho do Storage no
+// perfil devolvido para o navegador.
+app.get('/api/me/personalizacao', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ temImagem: !!req.user.imagemPersonalizacao });
+});
+app.get('/api/me/personalizacao/imagem', async (req, res) => {
+  if (!req.user.imagemPersonalizacao) return res.sendStatus(404);
+  try {
+    await storage.streamArquivo(req.user.imagemPersonalizacao, req.user.imagemPersonalizacaoTipo || 'image/jpeg', res);
+  } catch (err) {
+    console.error('[personalizacao] Falha ao servir imagem:', err.message);
+    if (!res.headersSent) res.sendStatus(404);
+  }
+});
+app.post('/api/me/personalizacao/imagem', uploadImagemPersonalizacao.single('imagem'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Escolha uma imagem JPG, PNG ou WebP.' });
+    const anterior = req.user.imagemPersonalizacao || null;
+    const caminho = await storage.salvarArquivo(`personalizacao-${req.user.id}`, req.file, 'personalizacao-usuarios');
+    try {
+      await users.updateImagemPersonalizacao(req.user.id, caminho, req.file.mimetype);
+    } catch (err) {
+      await storage.apagarArquivo(caminho).catch(() => {});
+      throw err;
+    }
+    if (anterior && anterior !== caminho) await storage.apagarArquivo(anterior).catch(() => {});
+    res.status(201).json({ temImagem: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Não foi possível salvar a imagem.' });
+  }
+});
+app.delete('/api/me/personalizacao/imagem', async (req, res) => {
+  try {
+    const anterior = req.user.imagemPersonalizacao || null;
+    await users.updateImagemPersonalizacao(req.user.id, null);
+    if (anterior) await storage.apagarArquivo(anterior).catch(() => {});
+    res.json({ temImagem: false });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Não foi possível remover a imagem.' });
+  }
 });
 
 // self-service: o proprio usuario logado troca a propria senha (exige a

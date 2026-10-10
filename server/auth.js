@@ -266,6 +266,7 @@ function toPublicUser(id, user) {
     // Preferência puramente visual. O servidor continua resolvendo todas as
     // autorizações a partir de role/permissions, nunca a partir deste campo.
     perfilVisual: user.perfilVisual || null,
+    temImagemPersonalizacao: !!user.imagemPersonalizacao,
   };
 }
 

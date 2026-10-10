@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Minha imagem · NoPulso</title><script src="/tema.js"></script>
+  <style>
+    :root{--bg:#0b0d10;--panel:#12161b;--panel2:#181d24;--line:#27313b;--text:#e7ecf1;--muted:#8c99a7;--accent:#b8ff3c;--bad:#ff6b6b;--sans:Arial,sans-serif;--mono:ui-monospace,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px var(--sans)}main{max-width:760px;margin:auto;padding:28px 16px 56px}h1{margin:4px 0;font-size:25px}.eyebrow{font:700 10px var(--mono);letter-spacing:.11em;color:var(--accent);text-transform:uppercase}.meta{color:var(--muted);line-height:1.5}.card{margin-top:20px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}.preview{height:180px;border-radius:11px;background:var(--panel2);border:1px dashed var(--line);display:grid;place-items:center;overflow:hidden;color:var(--muted);margin:14px 0}.preview img{width:100%;height:100%;object-fit:cover;display:block}.acoes{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:8px;padding:10px 13px;font-weight:700;cursor:pointer;font:inherit}.btn:hover{border-color:var(--accent)}.primary{background:var(--accent);border-color:var(--accent);color:#0b0d10}.danger{color:var(--bad)}label.btn{display:inline-flex;align-items:center;cursor:pointer}.msg{margin-top:12px;font-size:12px}.msg.err{color:var(--bad)}.msg.ok{color:var(--accent)}a{color:var(--accent)}
+  </style>
+</head>
+<body><main>
+  <div class="eyebrow">Personalização individual</div><h1>Minha imagem</h1>
+  <p class="meta">Escolha uma imagem para o seu espaço no NoPulso. Ela aparece somente para você, no Painel e no Meu Dia. JPG, PNG ou WebP, até 5 MB.</p>
+  <section class="card"><b>Imagem de capa pessoal</b><div id="preview" class="preview">Nenhuma imagem escolhida</div>
+    <div class="acoes"><label class="btn">🖼️ Escolher imagem<input id="arquivo" type="file" accept="image/jpeg,image/png,image/webp" hidden></label><button id="salvar" class="btn primary" type="button">Salvar</button><button id="remover" class="btn danger" type="button">Remover</button><a class="btn" href="/painel">Voltar ao Painel</a></div><div id="msg" class="msg"></div>
+  </section>
+</main><script>
+const token=localStorage.getItem('authToken');if(!token)location.href='/';
+const headers={Authorization:'Bearer '+token}; const arq=document.getElementById('arquivo'),pv=document.getElementById('preview'),msg=document.getElementById('msg');let localUrl=null;
+function avisar(t,erro=false){msg.textContent=t;msg.className='msg '+(erro?'err':'ok');}
+function mostrar(url){pv.innerHTML='';const img=document.createElement('img');img.src=url;img.alt='Sua imagem de capa';pv.appendChild(img);}
+async function carregar(){const r=await fetch('/api/me/personalizacao',{headers});if(!r.ok)return;if((await r.json()).temImagem){const foto=await fetch('/api/me/personalizacao/imagem',{headers});if(foto.ok)mostrar(URL.createObjectURL(await foto.blob()));}}
+arq.onchange=()=>{const f=arq.files[0];if(!f)return;if(f.size>5*1024*1024){avisar('A imagem ultrapassa 5 MB.',true);arq.value='';return;}if(localUrl)URL.revokeObjectURL(localUrl);localUrl=URL.createObjectURL(f);mostrar(localUrl);avisar('Imagem escolhida. Clique em Salvar para usar.');};
+document.getElementById('salvar').onclick=async()=>{const f=arq.files[0];if(!f)return avisar('Escolha uma imagem antes de salvar.',true);const d=new FormData();d.append('imagem',f);const r=await fetch('/api/me/personalizacao/imagem',{method:'POST',headers,body:d});const j=await r.json().catch(()=>({}));if(!r.ok)return avisar(j.error||'Não foi possível salvar.',true);avisar('Imagem salva. Ela já aparecerá no Painel e no Meu Dia.');arq.value='';};
+document.getElementById('remover').onclick=async()=>{const r=await fetch('/api/me/personalizacao/imagem',{method:'DELETE',headers});if(!r.ok)return avisar('Não foi possível remover.',true);pv.textContent='Nenhuma imagem escolhida';arq.value='';avisar('Imagem removida.');};
+carregar();
+</script></body></html>

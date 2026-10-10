@@ -415,6 +415,20 @@ async function updatePerfilVisual(id, perfilVisual) {
   return toPublic(await ref.get());
 }
 
+// Imagem pessoal e' apenas apresentacao do proprio acesso. O caminho nunca
+// sai no /api/me: a entrega do arquivo e feita por rota autenticada que so
+// aceita o dono da conta, evitando que uma foto enviada por alguem vire URL
+// publica ou possa ser enumerada por outro usuario.
+async function updateImagemPersonalizacao(id, caminho, tipo = null) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  await ref.update({ imagemPersonalizacao: caminho || null, imagemPersonalizacaoTipo: caminho ? String(tipo || 'image/jpeg') : null });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return { anterior: snap.data().imagemPersonalizacao || null, imagem: !!caminho };
+}
+
 // atualizacao em massa: recebe uma lista [{email, username}] (ex: colada
 // pelo Master a partir de uma planilha) e aplica uma a uma, sem parar no
 // primeiro erro - devolve o resultado de cada linha pra revisao
@@ -1188,6 +1202,7 @@ module.exports = {
   updateSessaoLonga,
   updateCargo,
   updateUsername,
+  updateImagemPersonalizacao,
   updatePerfil,
   preencherContatoAusenteDoChat,
   updatePerfilVisual,
