@@ -353,6 +353,7 @@
       #nav-drawer .nmz-rodape .nmz-sair{ color:var(--bad,#ff5c5c); }
       #nav-drawer .nmz-rodape .nmz-sair:hover{ background:rgba(255,92,92,.1); }
       #nav-drawer .nmz-rodape .nmz-suporte{ color:var(--accent,#b8ff3c); }
+      #nav-drawer [data-area-destino][hidden]{ display:none!important; }
 
       @media (max-width:420px){ #nav-drawer{ width:86vw; } }
 
@@ -425,6 +426,7 @@
         <div id="nmz-itens">${corpo}</div>
       </div>
       <div class="nmz-rodape">
+        <a class="nmz-item" data-area-destino="atendimento" hidden><span class="nmz-ico">💬</span><span>Voltar ao Atendimento ↗</span></a>
         <a class="nmz-item" id="nav-ajuda" href="/ajuda"><span class="nmz-ico">❓</span><span>Ajuda</span></a>
         <a class="nmz-item nmz-suporte" href="https://wa.me/5581995148654" target="_blank" rel="noopener"><span class="nmz-ico">💬</span><span>Suporte (81) 99514-8654</span></a>
         <button type="button" class="nmz-item nmz-sair" id="nmz-sair"><span class="nmz-ico">🚪</span><span>Sair</span></button>
@@ -858,6 +860,12 @@
     nav.classList.add('nav-drawer');
     if (!nav.classList.contains('hidden')) nav.classList.add('hidden');
     montar(nav);
+    if (window.prepararNavegacaoAtendimento) window.prepararNavegacaoAtendimento();
+    else if (!document.querySelector('script[src="/atendimento-navegacao.js"]')) {
+      const script = document.createElement('script');
+      script.src = '/atendimento-navegacao.js';
+      document.head.appendChild(script);
+    }
     montarVoltar();
     marcarAtivo();
     acordeao();

@@ -65,4 +65,21 @@ function manifesto(base) {
   return { ...base, start_url: '/atendimento/central', scope: '/' };
 }
 
-module.exports = { HOST_PADRAO, hostAtendimento, ehHostAtendimento, destino, middleware, manifesto };
+// Só configuração do servidor define os destinos. Nunca usar Host, Referer,
+// returnTo, query ou dados de sessão para montar estes links.
+function navegacao(baseOficial) {
+  function raiz(valor) {
+    try {
+      const u = new URL(valor);
+      if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || u.pathname !== '/') return null;
+      return u.origin;
+    } catch (_) { return null; }
+  }
+  const oficial = raiz(baseOficial), atendimento = raiz(`https://${hostAtendimento()}`);
+  return {
+    nopulso: oficial ? oficial + '/' : null,
+    atendimento: atendimento ? atendimento + '/atendimento/central' : null,
+  };
+}
+
+module.exports = { HOST_PADRAO, hostAtendimento, ehHostAtendimento, destino, middleware, manifesto, navegacao };

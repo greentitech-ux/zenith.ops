@@ -16,14 +16,16 @@ const pasta=path.join(__dirname,'public');
   try{
     for(const largura of [390,1024,1440]){
       const page=await browser.newPage({viewport:{width:largura,height:900}});
-      let permitido=false;
+      let permitido=false, sessaoValida=false;
       const erros=[];page.on('pageerror',e=>erros.push(e.message));
       await page.route('**/*',async route=>{
         const u=new URL(route.request().url());
         if(u.pathname==='/api/auth/login') return route.fulfill({json:{token:'token-equipe',user:{precisaTrocarSenha:false,temPalavraRecuperacao:true}}});
+        if(u.pathname==='/api/me') return route.fulfill({status:sessaoValida?200:401,json:{temPalavraRecuperacao:true}});
         if(u.pathname==='/api/beniboy/acesso') return route.fulfill({json:{permitido}});
         if(u.pathname.startsWith('/api/')) return route.fulfill({json:[]});
         if(u.pathname==='/atendimento/central') return route.fulfill({body:'Central autorizada'});
+        if(u.pathname==='/atendimento/meu') return route.fulfill({body:'Somente meus atendimentos'});
         const arquivo=path.resolve(pasta,u.pathname==='/atendimento/entrar'?'atendimento.html':u.pathname.slice(1));
         if(!arquivo.startsWith(pasta+path.sep)||!fs.existsSync(arquivo)||!fs.statSync(arquivo).isFile()) return route.fulfill({status:404,body:''});
         return route.fulfill({path:arquivo});
@@ -45,6 +47,12 @@ const pasta=path.join(__dirname,'public');
       assert.equal(await page.locator('#szc-contato').isVisible(),true,'anônimo continua pedindo contato');
       assert.equal(await page.locator('.szc-panel').evaluate(e=>e.parentElement?.id),'publico-chat-form','formulário público fica centralizado na página');
       await page.goto('https://nopulso.teste/atendimento/entrar');
+      sessaoValida=true;
+      await page.locator('#portal-usuario').fill('operador');
+      await page.locator('#portal-senha').fill('senha-teste');
+      await page.locator('#portal-entrar').click();
+      await page.waitForURL('**/atendimento/meu');
+      await page.goto('https://nopulso.teste/atendimento/entrar');
       permitido=true;
       await page.locator('#portal-usuario').fill('suporte');
       await page.locator('#portal-senha').fill('senha-teste');
@@ -54,6 +62,6 @@ const pasta=path.join(__dirname,'public');
       assert.deepEqual(erros,[]);
       await page.close();
     }
-    console.log('✓ Portal Beniboy: cargos, recusa sem trocar sessão, nome/contato, login autorizado e três tamanhos.');
+    console.log('✓ Portal Beniboy: cargos, sessão inválida sem trocar acesso, nome/contato, operador no próprio painel, equipe na Central e três tamanhos.');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

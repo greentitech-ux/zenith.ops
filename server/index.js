@@ -414,7 +414,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/atendimento.html',
   '/meu-atendimento.html',
   '/atendimento/central', '/atendimento/entrar', '/atendimento/meu', '/atendimento/sw.js',
-  '/beniboy-portal.js', '/beniboy-alertas.js', '/beniboy-app.js', '/beniboy-marca.css', '/manifest-beniboy.json',
+  '/beniboy-portal.js', '/atendimento-navegacao.js', '/meu-atendimento.js', '/beniboy-alertas.js', '/beniboy-app.js', '/beniboy-marca.css', '/manifest-beniboy.json',
   '/beniboy-app-192.png', '/beniboy-app-512.png',
   '/unidade.html', '/sessao-unidade.js', '/api/acesso-unidade/vinculo',
   '/api/acesso-unidade/registrar', '/api/acesso-unidade/sessao',
@@ -17389,7 +17389,11 @@ app.post('/api/mensagens/:id/lida', auth.requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/beniboy/acesso', (req,res)=>res.json({permitido:centralBeniboy.podeAtender(req)}));
+app.get('/api/beniboy/acesso', (req,res)=>{
+  const permitido = centralBeniboy.podeAtender(req);
+  res.set('Cache-Control', 'no-store');
+  res.json({ permitido, destino: permitido ? '/atendimento/central' : '/atendimento/meu', enderecos: centralSubdominio.navegacao(APP_BASE_URL) });
+});
 
 // ----- conversa com computadores, dentro da Central do Beniboy -----
 // A Central nao recebe o detalhe do NOC: nada de IP, AnyDesk, token do agente,

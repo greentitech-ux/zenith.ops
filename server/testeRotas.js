@@ -455,6 +455,14 @@ setTimeout(async () => {
     token = r && r.token;
   } catch (e) { console.log('login falhou: ' + e.message); }
   console.log(token ? 'token obtido ✓' : 'SEM TOKEN - as rotas vao devolver 401');
+  if (process.env.TESTE_NAVEGACAO_ATENDIMENTO === '1') {
+    try {
+      const teste = require('./testeNavegacaoAtendimento');
+      teste.testarSabotagem();
+      await teste.testarHttp({ DOCS, pedir, postarJson, token });
+      process.exit(0);
+    } catch (e) { console.error(e); process.exit(1); }
+  }
   if (process.env.TESTE_BENIBOY_RESPOSTA === '1') {
     try {
       process.env.ANTHROPIC_API_KEY = 'modelo-local-sem-rede';

@@ -1,13 +1,45 @@
-<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Meu atendimento · Beniboy</title>
-<style>body{margin:0;background:#0b0d10;color:#e7ecf1;font:15px Arial,sans-serif}main{max-width:680px;margin:auto;padding:28px 16px}h1{font-size:22px}.sub,.meta{color:#98a3b3;font-size:13px}.card,.msg{border:1px solid #28303a;background:#12161b;border-radius:12px;padding:13px;margin:10px 0}.msg.eu{background:#12303a;margin-left:12%}.msg.suporte{margin-right:12%}button{background:#b8ff3c;border:0;border-radius:8px;padding:10px 14px;font-weight:bold;cursor:pointer}textarea,input{width:100%;box-sizing:border-box;margin:8px 0;background:#181d24;color:#fff;border:1px solid #28303a;border-radius:8px;padding:10px}a{color:#b8ff3c}.hidden{display:none}</style>
-<main><div class="sub">NOPULSO · CENTRAL BENIBOY</div><h1>Meu atendimento</h1><p class="sub">Acompanhe somente os seus protocolos. A equipe, outros clientes e notas internas não aparecem aqui.</p><div id="app">Carregando…</div></main>
-<script>
-const app=document.querySelector('#app');const esc=s=>String(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','>':'&gt;','&':'&amp;'}[c]));
-const auth=localStorage.getItem('authToken');const hash=new URLSearchParams(location.hash.slice(1));let atual=null,modo='';
-function status(c){return c.status==='FINALIZADO'?(c.statusAtendimento==='RESOLVIDO'?'Resolvido':'Sem solução'):(c.statusAtendimento||'Em andamento').replaceAll('_',' ')}
-async function json(url,opt={}){const h=opt.headers||{};if(auth)h.Authorization='Bearer '+auth;const r=await fetch(url,{...opt,headers:h});if(!r.ok)throw new Error('Não foi possível acessar este atendimento.');return r.json()}
-function anexo(m,i){if(!m.anexo)return '';const nome=esc(m.anexo.nome);if(modo==='link'){const u=`/api/suporte-chat/${atual.id}/anexo/${i}?token=${encodeURIComponent(hash.get('token'))}`;return `<br><a href="${u}">📎 ${nome}</a>`}return `<br><button class="arquivo" type="button" data-anexo="${i}" data-nome="${nome}">📎 ${nome}</button>`}
-function renderChat(c){atual=c;app.innerHTML=`<div class="card"><b>Protocolo #${c.numeroTicket}</b><div class="meta">${esc(c.assunto||'Atendimento')} · ${status(c)}</div></div><section>${c.mensagens.map((m,i)=>`<div class="msg ${m.de==='visitante'?'eu':'suporte'}"><b>${m.de==='visitante'?'Você':'Suporte'}</b><div>${esc(m.texto)}</div>${anexo(m,i)}<div class="meta">${new Date(m.em).toLocaleString('pt-BR')}</div></div>`).join('')}</section>${c.status==='ABERTO'?`<form id="f"><textarea name="texto" placeholder="Escreva sua resposta"></textarea><input name="anexo" type="file" accept="image/*,application/pdf"><button>Enviar mensagem</button></form>`:'<div class="card">Este é o último atendimento encerrado.</div>'}`;app.querySelectorAll('[data-anexo]').forEach(b=>b.onclick=async()=>{try{const r=await fetch(`/api/meus-atendimentos/${atual.id}/anexo/${b.dataset.anexo}`,{headers:{Authorization:'Bearer '+auth}});if(!r.ok)throw new Error();const url=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=url;a.download=b.dataset.nome||'anexo';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(_){alert('Não foi possível baixar este anexo.')}});const f=document.querySelector('#f');if(f)f.onsubmit=async e=>{e.preventDefault();const fd=new FormData(f);try{if(modo==='link')fd.append('token',hash.get('token'));await json(modo==='link'?`/api/suporte-chat/${atual.id}/mensagem`:`/api/meus-atendimentos/${atual.id}/mensagem`,{method:'POST',body:fd});carregarChat(atual.id)}catch(x){alert(x.message)}}}
-async function carregarChat(id){try{renderChat(await json(modo==='link'?`/api/meu-atendimento/${id}?token=${encodeURIComponent(hash.get('token'))}`:`/api/meus-atendimentos/${id}`))}catch(e){app.textContent=e.message}}
-async function iniciar(){if(hash.get('id')&&hash.get('token')){modo='link';return carregarChat(hash.get('id'))}if(!auth){app.innerHTML='<div class="card">Abra o link secreto enviado no seu atendimento ou entre no NoPulso para ver os seus protocolos.</div>';return}try{const d=await json('/api/meus-atendimentos');const todos=[...d.abertos,...(d.ultimoEncerrado?[d.ultimoEncerrado]:[])];app.innerHTML=todos.length?todos.map(c=>`<button style="display:block;width:100%;text-align:left;margin:8px 0" data-id="${c.id}">#${c.numeroTicket} · ${esc(c.assunto||'Atendimento')}<span class="meta"> — ${status(c)}</span></button>`).join(''):'<div class="card">Nenhum atendimento seu encontrado.</div>';app.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{modo='login';carregarChat(b.dataset.id)})}catch(e){app.textContent=e.message}}iniciar();
-</script></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Meus atendimentos · NoPulso</title>
+  <link rel="icon" href="/beniboy-app-192.png" type="image/png">
+  <style>
+    :root{--bg:#0b0d10;--panel:#12161b;--panel2:#181d24;--line:#28303a;--text:#e7ecf1;--muted:#98a3b3;--accent:#b8ff3c;--accent2:#5cc8ff;--bad:#ff5c5c;--sans:'Archivo',Arial,sans-serif;}
+    *{box-sizing:border-box;min-width:0;}
+    body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--sans);}
+    main{max-width:960px;margin:auto;padding:24px clamp(16px,4vw,32px);}
+    header,.acoes{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    header{justify-content:space-between;margin-bottom:24px;}h1{font-size:clamp(22px,4vw,30px);margin:0;}
+    .sub,.meta{color:var(--muted);font-size:13px;}p{margin:8px 0;}
+    .card,.msg{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:16px;margin:12px 0;overflow-wrap:anywhere;}
+    .msg.eu{background:var(--panel2);border-left:3px solid var(--accent);margin-left:10%;}.msg.suporte{margin-right:10%;}.texto{white-space:pre-wrap;}
+    button,.botao{display:inline-flex;align-items:center;justify-content:center;min-height:44px;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--panel2);color:var(--text);font:inherit;font-weight:600;text-decoration:none;cursor:pointer;overflow-wrap:anywhere;}
+    button:disabled{opacity:.6;cursor:wait;}button[type=submit]{background:var(--accent);color:#0b0d10;}
+    .protocolo{width:100%;display:flex;justify-content:space-between;text-align:left;flex-wrap:wrap;gap:8px;margin:12px 0;}
+    textarea,input{max-width:100%;width:100%;box-sizing:border-box;margin:8px 0 16px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit;}
+    textarea{min-height:100px;resize:vertical;}label{display:block;}a{color:var(--accent);}#erro{color:var(--bad);overflow-wrap:anywhere;}
+    [hidden]{display:none!important;}@media(max-width:480px){header .acoes{width:100%;}header .botao{flex:1;}.msg.eu{margin-left:4%;}.msg.suporte{margin-right:4%;}}
+  </style>
+  <script src="/tema.js"></script>
+  <script src="/atendimento-navegacao.js" defer></script>
+  <script src="/meu-atendimento.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <div><div class="sub">ATENDIMENTO NOPULSO</div><h1>Meus atendimentos</h1></div>
+    <nav class="acoes" aria-label="Navegação entre áreas">
+      <a class="botao" data-area-destino="nopulso" hidden>Ir para o NoPulso ↗</a>
+      <button id="sair" type="button" hidden>Sair</button>
+    </nav>
+  </header>
+  <p class="sub">Acompanhe seus protocolos abertos e o último encerrado. Os atendimentos de outras pessoas não aparecem aqui.</p>
+  <div class="acoes"><button id="voltar" type="button" hidden>← Meus atendimentos</button><a id="entrar" class="botao" href="/atendimento/entrar" hidden>Entrar com usuário e senha</a></div>
+  <p id="erro" role="alert" hidden></p>
+  <div id="app" aria-live="polite">Carregando…</div>
+</main>
+</body>
+</html>
