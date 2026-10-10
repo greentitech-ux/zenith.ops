@@ -65,6 +65,10 @@
   .card .linha1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;flex-wrap:wrap;}
   .card .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px;word-break:break-word;}
   .card .criancas{font-size:12px;color:var(--muted);margin-top:6px;}
+  .pulseira-fitas{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px;}
+  .pulseira-fita{min-height:34px;display:inline-flex;align-items:center;gap:7px;border-radius:7px;background:var(--pulseira-cor);color:var(--pulseira-texto);padding:7px 11px;font-weight:800;font-size:13px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35);}
+  .pulseira-fita .rotulo{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;opacity:.78;text-transform:uppercase;}
+  .pulseira-fita.estimada{outline:1px dashed var(--warn);outline-offset:2px;}
   .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
   .badge.aguardando{background:var(--warn-dim);color:var(--warn);}
   .badge.liberado{background:var(--ok-dim);color:var(--ok);}
@@ -1539,7 +1543,8 @@ function renderLista(){
         <span>${escapeHtml(c.responsavel?.nome||'')} · ${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtData(c.dataUtilizacao)}</span>
         <span class="badge ${status.classe}">${status.texto}</span>
       </div>
-      <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${resumoPulseiras(c)}${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''} · <b>${fmtReal(valorDoCheckin(c))}</b>${c.metodoPagamento?' ('+escapeHtml(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}</div>
+      <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''} · <b>${fmtReal(valorDoCheckin(c))}</b>${c.metodoPagamento?' ('+escapeHtml(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}</div>
+      ${fitasPulseiras(c)}
       <div class="criancas">${escapeHtml(criancas)}</div>
       ${cortesiaHtml(c)}
       ${acoesCheckoutIndividuais(c)}
@@ -1558,16 +1563,27 @@ function renderLista(){
   }).join('');
 }
 
-function resumoPulseiras(c){
-  const cores = (c.pulseirasInfo||[]).filter(p=>p && p.nome);
-  if(!cores.length && !c.corPulseira) return '';
-  const unicas = [];
-  (cores.length ? cores : [c.corPulseira]).forEach(cor=>{
-    if(!unicas.some(item=>item.id===cor.id)) unicas.push(cor);
+function textoPulseiraContrastante(hex){
+  const cor=String(hex||'').replace('#','');
+  if(!/^[0-9a-f]{6}$/i.test(cor)) return '#0b0d10';
+  const [r,g,b]=[0,2,4].map(i=>parseInt(cor.slice(i,i+2),16));
+  return ((r*299+g*587+b*114)/1000)>145 ? '#0b0d10' : '#ffffff';
+}
+function fitasPulseiras(c){
+  const cores=(c.pulseirasInfo||[]).filter(p=>p&&p.nome);
+  const lista=cores.length?cores:(c.corPulseira?[c.corPulseira]:[]);
+  if(!lista.length) return '';
+  const grupos=[];
+  lista.forEach(cor=>{
+    let grupo=grupos.find(item=>item.id===cor.id);
+    if(!grupo){grupo={...cor,quantidade:0};grupos.push(grupo)}
+    grupo.quantidade++;
   });
-  const texto = unicas.map(cor=>escapeHtml(cor.nome)).join(' / ');
-  const cor = unicas[0]?.hex || 'var(--text)';
-  return ` · <b style="color:${escapeHtml(cor)}">pulseira ${texto}</b>${c.pulseiraEstimada?' <span title="Calculada pelo horário real porque o horário previsto não foi gravado">(estimada)</span>':''}`;
+  return `<div class="pulseira-fitas">${grupos.map(cor=>{
+    const hex=cor.hex||'#6B7280';
+    const quantidade=cor.quantidade>1?` · ${cor.quantidade} crianças`:'';
+    return `<div class="pulseira-fita ${c.pulseiraEstimada?'estimada':''}" style="--pulseira-cor:${escapeHtml(hex)};--pulseira-texto:${textoPulseiraContrastante(hex)}"${c.pulseiraEstimada?' title="Cor estimada pela regra atual"':''}><span class="rotulo">Pulseira</span><span>${escapeHtml(cor.nome)}${quantidade}</span></div>`;
+  }).join('')}</div>`;
 }
 
 // ---------- conferir o lançamento (👁 Ver) ----------
