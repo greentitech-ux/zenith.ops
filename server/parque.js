@@ -51,6 +51,40 @@ const PCD_CORTESIA_MINUTOS_PADRAO = 60;
 // valorEntradaCriancas e a validacao em salvarConfigPrecos
 const NIVER_DESCONTO_PADRAO = 50;
 
+// A antiga planilha do Saltiverso define a pulseira por uma sequência de
+// oito posições: horário previsto (de 30 em 30 minutos) + tipo de ticket
+// (30 ou 60min). Manter a regra como configuração evita depender do Excel e
+// permite que o Master troque cor, ordem, início ou tipos sem deploy.
+const CORES_PULSEIRA_PADRAO = [
+  { id: 'cinza', nome: 'Cinza', hex: '#6B7280' },
+  { id: 'roxa', nome: 'Roxa', hex: '#7C3AED' },
+  { id: 'amarela', nome: 'Amarela', hex: '#EAB308' },
+  { id: 'branca', nome: 'Branca', hex: '#F8FAFC' },
+  { id: 'azul', nome: 'Azul', hex: '#2563EB' },
+  { id: 'rosa', nome: 'Rosa', hex: '#EC4899' },
+  { id: 'verde', nome: 'Verde', hex: '#22C55E' },
+  { id: 'laranja', nome: 'Laranja', hex: '#F97316' },
+];
+// 0=domingo ... 6=sábado. Sequências importadas da planilha "Identificador
+// da cor da pulseira por horário" recebida em 10/10/2026.
+const SEQUENCIAS_PULSEIRA_PADRAO = {
+  0: ['roxa', 'amarela', 'branca', 'azul', 'rosa', 'verde', 'laranja', 'cinza'],
+  1: ['cinza', 'roxa', 'amarela', 'branca', 'azul', 'rosa', 'verde', 'laranja'],
+  2: ['laranja', 'cinza', 'roxa', 'amarela', 'branca', 'azul', 'rosa', 'verde'],
+  3: ['verde', 'laranja', 'cinza', 'roxa', 'amarela', 'branca', 'azul', 'rosa'],
+  4: ['rosa', 'verde', 'laranja', 'cinza', 'roxa', 'amarela', 'branca', 'azul'],
+  5: ['branca', 'azul', 'rosa', 'verde', 'laranja', 'cinza', 'roxa', 'amarela'],
+  6: ['amarela', 'branca', 'azul', 'rosa', 'verde', 'laranja', 'cinza', 'roxa'],
+};
+const PULSEIRAS_PADRAO = {
+  ativo: true,
+  inicio: '10:00',
+  intervaloMinutos: 30,
+  tiposMinutos: [30, 60],
+  cores: CORES_PULSEIRA_PADRAO,
+  sequenciasSemana: SEQUENCIAS_PULSEIRA_PADRAO,
+};
+
 const PRECO_CONFIG_DOC = db.collection('parqueConfig').doc('tabela');
 const precoConfigCache = createCache(async () => {
   const snap = await PRECO_CONFIG_DOC.get();
@@ -69,9 +103,176 @@ const precoConfigCache = createCache(async () => {
     niverDesconto: Number.isFinite(data.niverDesconto) ? data.niverDesconto : NIVER_DESCONTO_PADRAO,
     niverValorCheio: Number.isFinite(data.niverValorCheio) && data.niverValorCheio > 0 ? data.niverValorCheio : 0,
     niverAplicar30: data.niverAplicar30 === true,
+    pulseiras: sanitizarConfigPulseiras(data.pulseiras),
   };
 }, 5 * 60 * 1000);
 const getConfigPrecos = precoConfigCache.cached;
+
+function horaEmMinutos(hora) {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(hora || ''));
+  if (!match) return null;
+  const horas = Number(match[1]); const minutos = Number(match[2]);
+  if (horas > 23 || minutos > 59) return null;
+  return horas * 60 + minutos;
+}
+
+function sanitizarConfigPulseiras(raw) {
+  const fonte = raw && typeof raw === 'object' ? raw : {};
+  const idsPadrao = new Set(CORES_PULSEIRA_PADRAO.map((cor) => cor.id));
+  const porId = new Map((Array.isArray(fonte.cores) ? fonte.cores : [])
+    .map((cor) => [String(cor && cor.id || '').trim().toLowerCase(), cor]));
+  const cores = CORES_PULSEIRA_PADRAO.map((padrao) => {
+    const recebida = porId.get(padrao.id) || {};
+    const nome = String(recebida.nome || padrao.nome).trim().slice(0, 24) || padrao.nome;
+    const hex = /^#[0-9a-f]{6}$/i.test(String(recebida.hex || '')) ? String(recebida.hex).toUpperCase() : padrao.hex;
+    return { id: padrao.id, nome, hex };
+  });
+  const tiposRecebidos = Array.isArray(fonte.tiposMinutos) ? fonte.tiposMinutos : PULSEIRAS_PADRAO.tiposMinutos;
+  const tiposMinutos = [...new Set(tiposRecebidos.map((v) => Math.round(num(v))).filter((v) => v > 0 && v <= 480))].slice(0, 4);
+  if (!tiposMinutos.length) tiposMinutos.push(...PULSEIRAS_PADRAO.tiposMinutos);
+  const inicio = horaEmMinutos(fonte.inicio) != null ? String(fonte.inicio) : PULSEIRAS_PADRAO.inicio;
+  const intervaloMinutos = Math.max(5, Math.min(120, Math.round(num(fonte.intervaloMinutos)) || PULSEIRAS_PADRAO.intervaloMinutos));
+  const tamanhoSequencia = CORES_PULSEIRA_PADRAO.length;
+  const sequenciasSemana = {};
+  for (let dia = 0; dia < 7; dia += 1) {
+    const recebida = fonte.sequenciasSemana && fonte.sequenciasSemana[dia];
+    const padrao = SEQUENCIAS_PULSEIRA_PADRAO[dia];
+    sequenciasSemana[dia] = Array.from({ length: tamanhoSequencia }, (_, indice) => {
+      const cor = String(Array.isArray(recebida) ? recebida[indice] : '').trim().toLowerCase();
+      return idsPadrao.has(cor) ? cor : padrao[indice];
+    });
+  }
+  return { ativo: fonte.ativo !== false, inicio, intervaloMinutos, tiposMinutos, cores, sequenciasSemana };
+}
+
+async function salvarConfigPulseiras(pulseiras, { porId, porEmail } = {}) {
+  const pulseirasOk = sanitizarConfigPulseiras(pulseiras);
+  await PRECO_CONFIG_DOC.set({
+    pulseiras: pulseirasOk,
+    pulseirasAtualizadoEm: new Date().toISOString(),
+    pulseirasAtualizadoPorId: porId || null,
+    pulseirasAtualizadoPorEmail: porEmail || null,
+  }, { merge: true });
+  precoConfigCache.invalidar();
+  return pulseirasOk;
+}
+
+// A cor é calculada no servidor e gravada no check-in. Assim, uma mudança
+// futura da regra não altera retrospectivamente o que foi entregue ao cliente.
+function resolverPulseira({ dataUtilizacao, horarioPrevisto, tempoMinutos }, tabela) {
+  const config = sanitizarConfigPulseiras(tabela && tabela.pulseiras);
+  if (!config.ativo || !dataUtilizacao || !horarioPrevisto) return null;
+  const inicio = horaEmMinutos(config.inicio);
+  const horario = horaEmMinutos(String(horarioPrevisto).slice(0, 5));
+  const tipoIndice = config.tiposMinutos.indexOf(Number(tempoMinutos));
+  if (inicio == null || horario == null || horario < inicio || tipoIndice < 0) return null;
+  const data = new Date(`${dataUtilizacao}T12:00:00Z`);
+  if (Number.isNaN(data.getTime())) return null;
+  const slot = Math.floor((horario - inicio) / config.intervaloMinutos);
+  if (slot < 0) return null;
+  const sequencia = config.sequenciasSemana[data.getUTCDay()] || [];
+  const corId = sequencia[(slot * config.tiposMinutos.length + tipoIndice) % sequencia.length];
+  const cor = config.cores.find((item) => item.id === corId);
+  return cor ? { id: cor.id, nome: cor.nome, hex: cor.hex, horario: String(horarioPrevisto).slice(0, 5), minutos: Number(tempoMinutos) } : null;
+}
+
+// Check-ins criados antes da implantação da pulseira não têm a cor gravada.
+// Para não reescrever o histórico (nem trocar uma cor que já foi entregue),
+// a leitura complementa somente os registros sem cor usando a regra atual.
+// Quando só houver o horário real do check-in, a indicação é marcada como
+// estimada: o horário previsto é a fonte correta para a tabela de pulseiras.
+function enriquecerPulseirasParaExibicao(checkin, tabela) {
+  if (!checkin || typeof checkin !== 'object') return checkin;
+  const criancas = Array.isArray(checkin.criancas) ? checkin.criancas : [];
+  const existentes = Array.isArray(checkin.pulseirasInfo) ? checkin.pulseirasInfo.filter((p) => p && p.id) : [];
+  if (existentes.length) return checkin;
+
+  if (checkin.corPulseira && checkin.corPulseira.id) {
+    return {
+      ...checkin,
+      pulseirasInfo: criancas.map((crianca, indice) => ({
+        ...checkin.corPulseira,
+        criancaIndice: indice,
+        criancaNome: crianca?.nome || '',
+      })),
+    };
+  }
+
+  const horarioDaRegra = checkin.horarioPrevisto || checkin.timeInicial;
+  if (!horarioDaRegra || !checkin.dataUtilizacao) return checkin;
+  const estimada = !checkin.horarioPrevisto;
+  const pessoas = criancas.length ? criancas : Array.from({ length: Math.max(0, Number(checkin.pulseiras) || 0) }, () => ({}));
+  const pulseirasInfo = pessoas.map((crianca, indice) => {
+    const cor = resolverPulseira({
+      dataUtilizacao: checkin.dataUtilizacao,
+      horarioPrevisto: horarioDaRegra,
+      tempoMinutos: crianca?.tempoMinutos || checkin.tempoMinutos,
+    }, tabela);
+    return cor ? {
+      ...cor,
+      criancaIndice: indice,
+      criancaNome: crianca?.nome || '',
+    } : null;
+  }).filter(Boolean);
+  if (!pulseirasInfo.length) return checkin;
+
+  const mesmaCor = new Set(pulseirasInfo.map((pulseira) => pulseira.id)).size === 1;
+  return {
+    ...checkin,
+    pulseirasInfo,
+    corPulseira: mesmaCor ? pulseirasInfo[0] : null,
+    pulseiraCalculada: true,
+    pulseiraEstimada: estimada,
+  };
+}
+
+// Leitura operacional para o painel de TV/tablet. Não altera nenhum
+// check-in: só organiza quem está no parque, os próximos horários de saída
+// e as pulseiras que acabaram de vencer.
+function resumoPulseirasAoVivo(checkins, tabela, { dataUtilizacao = hojeBrasiliaISO(), horaAgora = horaAgoraBrasilia() } = {}) {
+  const config = sanitizarConfigPulseiras(tabela && tabela.pulseiras);
+  const agora = String(horaAgora || '').slice(0, 5);
+  const hoje = (Array.isArray(checkins) ? checkins : [])
+    .filter((checkin) => checkin && checkin.dataUtilizacao === dataUtilizacao)
+    .map((checkin) => enriquecerPulseirasParaExibicao(checkin, tabela));
+  const pessoas = [];
+
+  hoje.forEach((checkin) => {
+    if (!checkin.iniciado || checkin.checkoutEm) return;
+    const criancas = Array.isArray(checkin.criancas) && checkin.criancas.length
+      ? checkin.criancas : Array.from({ length: Number(checkin.pulseiras) || 0 }, () => ({}));
+    criancas.forEach((crianca, indice) => {
+      if (crianca.checkoutEm) return;
+      const fim = String(crianca.timeFinal || checkin.timeFinal || '').slice(0, 5);
+      if (!fim) return;
+      const pulseira = (checkin.pulseirasInfo || []).find((item) => Number(item.criancaIndice) === indice)
+        || checkin.corPulseira || null;
+      if (!pulseira) return;
+      pessoas.push({
+        checkinId: checkin.id,
+        criancaIndice: indice,
+        nome: crianca.nome || `Pulseira ${indice + 1}`,
+        responsavel: checkin.responsavel?.nome || '',
+        unidade: checkin.unidade,
+        unidadeNome: checkin.unidadeNome || checkin.unidade,
+        terminaEm: fim,
+        pulseira,
+      });
+    });
+  });
+
+  const ordenadas = pessoas.slice().sort((a, b) => a.terminaEm.localeCompare(b.terminaEm));
+  const dentro = ordenadas.filter((pessoa) => pessoa.terminaEm > agora);
+  const finalizando = dentro.slice(0, 4);
+  const encerradas = ordenadas.filter((pessoa) => pessoa.terminaEm <= agora).sort((a, b) => b.terminaEm.localeCompare(a.terminaEm)).slice(0, 4);
+  const coresAgora = config.tiposMinutos.map((minutos) => resolverPulseira({
+    dataUtilizacao,
+    horarioPrevisto: agora,
+    tempoMinutos: minutos,
+  }, tabela)).filter(Boolean);
+
+  return { dataUtilizacao, horaAgora: agora, coresAgora, dentro, finalizando, encerradas };
+}
 
 function sanitizarTempos(lista) {
   const candidatos = (Array.isArray(lista) ? lista : []).map((t) => ({
@@ -600,6 +801,11 @@ async function criarComPlanosIndividuais(args, tabela) {
   if (valorFinal > 0 && Math.abs(somaPagamentos - valorFinal) > 0.01) throw new Error(`A soma das formas de pagamento (R$${somaPagamentos.toFixed(2)}) precisa bater com o valor total (R$${valorFinal.toFixed(2)}).`);
   const ref = COLLECTION.doc();
   const maiorTempo = Math.max(...criancasOk.map((c) => c.tempoMinutos));
+  const pulseirasInfo = criancasOk.map((crianca, indice) => ({
+    criancaIndice: indice,
+    criancaNome: crianca.nome,
+    ...resolverPulseira({ dataUtilizacao, horarioPrevisto: previsto, tempoMinutos: crianca.tempoMinutos }, tabela),
+  })).filter((pulseira) => pulseira.id);
   const registro = {
     id: ref.id, unidade, unidadeNome: unidadeNome || unidade,
     colaboradorId: colaboradorId || criadoPorId, colaboradorNome: colaboradorNome || criadoPorEmail,
@@ -611,6 +817,11 @@ async function criarComPlanosIndividuais(args, tabela) {
     timeInicial: null, timeFinal: null, iniciado: false, horarioPrevisto: previsto, autoCheckin: false,
     observacao: String(observacao || '').slice(0, 300), adultoCortesia: adultoCortesia === true, quantAC: adultoCortesia === true ? Math.max(0, Math.min(10, num(quantAC) || 1)) : 0,
     criancas: criancasOk, pulseiras: criancasOk.length,
+    // Cada criança pode escolher um plano diferente. Nessa modalidade a
+    // lista preserva a pulseira de cada uma; `corPulseira` é mantida quando
+    // todas recebem a mesma cor, para relatórios e telas antigas.
+    pulseirasInfo,
+    corPulseira: pulseirasInfo.length && new Set(pulseirasInfo.map((pulseira) => pulseira.id)).size === 1 ? pulseirasInfo[0] : null,
     metodoPagamento: valorFinal === 0 ? (temCortesia ? 'cortesia' : 'gratuidade') : (pagamentosOk.length === 1 ? pagamentosOk[0].forma : 'misto'), pagamentos: pagamentosOk,
     temCortesiaGeral: temCortesia, categoriaTempo: null, valorPulseira: null, meiasExtras: meiasExtrasOk, valorMeias: valorMeiasCalc, valor: valorFinal,
     minutosAdicionados: 0, acrescimos: [], cortesiaStatus: temCortesia ? 'PENDENTE' : null, motivoCortesia: temCortesia ? String(motivoCortesia).trim().slice(0, 300) : null,
@@ -685,6 +896,7 @@ async function criar({
   // normalmente. Se ninguem fizer o check-in ate esse horario, o sistema
   // inicia sozinho NESSE horario e avisa a equipe (ver rodarAutoCheckins)
   const previsto = horarioPrevisto ? validarHorarioPrevisto(horarioPrevisto) : null;
+  const corPulseira = resolverPulseira({ dataUtilizacao, horarioPrevisto: previsto, tempoMinutos: tempo }, tabela);
 
   // PCD cortesia: no maximo 2 criancas GRATUITAS por hora-relogio, por
   // unidade - nao bloqueia via card de aprovacao, so recusa a venda e avisa
@@ -739,6 +951,10 @@ async function criar({
     quantAC: adultoCortesia === true ? Math.max(0, Math.min(10, num(quantAC) || 1)) : 0,
     criancas: criancasOk,
     pulseiras: criancasOk.length,
+    corPulseira,
+    pulseirasInfo: corPulseira ? criancasOk.map((crianca, indice) => ({
+      ...corPulseira, criancaIndice: indice, criancaNome: crianca.nome,
+    })) : [],
     // financeiro: valor pela tabela (por pulseira) + meias (R$25 por crianca
     // optante + pares extras) + forma de pagamento - 'cortesia' registra a
     // entrada com valor zero. PCD-cortesia (botao "5%CP") e' gratuidade
@@ -1070,6 +1286,18 @@ async function atualizar(id, patch) {
   if (patch.termoAssinado !== undefined) merge.termoAssinado = patch.termoAssinado === true;
   if (patch.horarioPrevisto !== undefined) {
     merge.horarioPrevisto = patch.horarioPrevisto ? validarHorarioPrevisto(patch.horarioPrevisto) : null;
+  }
+  // Se o Master corrigir data, horário ou tempo antes do check-in, a nova
+  // venda deve mostrar a pulseira que teria sido indicada naquela compra.
+  if (patch.dataUtilizacao !== undefined || patch.horarioPrevisto !== undefined || patch.tempoMinutos !== undefined) {
+    const dataFinal = merge.dataUtilizacao !== undefined ? merge.dataUtilizacao : atual.dataUtilizacao;
+    const horarioFinal = merge.horarioPrevisto !== undefined ? merge.horarioPrevisto : atual.horarioPrevisto;
+    const corPulseira = resolverPulseira({ dataUtilizacao: dataFinal, horarioPrevisto: horarioFinal, tempoMinutos: tempo }, tabela);
+    merge.corPulseira = corPulseira;
+    const criancasFinais = merge.criancas || atual.criancas || [];
+    merge.pulseirasInfo = corPulseira ? criancasFinais.map((crianca, indice) => ({
+      ...corPulseira, criancaIndice: indice, criancaNome: crianca.nome,
+    })) : [];
   }
 
   merge.atualizadoEm = new Date().toISOString();
@@ -1733,7 +1961,7 @@ module.exports = {
   TERMO_STATUS, criarEmissaoTermo, finalizarEmissaoTermo, finalizarEmissoesDoAtendimento,
   cancelarEmissaoTermo, listarEmissoesTermo, chaveAtendimento, pendentesDoAtendimento,
   TERMO_ALERTA_HORAS, emissoesParaAlertar,
-  getConfigPrecos, salvarConfigPrecos,
+  getConfigPrecos, salvarConfigPrecos, salvarConfigPulseiras, resolverPulseira, enriquecerPulseirasParaExibicao, resumoPulseirasAoVivo,
   criar, checkin, listAll, listByUnidades, resumoDoDia, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   adicionarTempo, relancar, visitaHojePorCpf, remover,
   decidirCortesia, encerrarCortesia, ehAdminCortesia,

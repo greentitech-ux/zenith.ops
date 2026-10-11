@@ -128,9 +128,11 @@ Write-Output 'OK'
     await assert.rejects(() => auth.loginComPasskey(id, { pedido: req() }), bloqueado);
     const entrada = await auth.login(id, 'SenhaTeste123', { pedido: confiavel });
     assert.ok((await auth.loginComPasskey(id, { pedido: confiavel })).token);
-    assert.equal((await middleware(entrada.token, req())).codigo, 403);
+    // A prova NOC é exigida ao ENTRAR. Depois de emitida a sessão, ela segue
+    // válida mesmo se o cookie/agente NOC não estiver presente na requisição.
+    assert.equal((await middleware(entrada.token, req())).codigo, 200);
     assert.equal((await middleware(entrada.token, confiavel)).codigo, 200);
-    assert.equal(await auth.usuarioOpcionalDoToken(entrada.token, req()), null);
+    assert.equal((await auth.usuarioOpcionalDoToken(entrada.token, req())).id, id);
     assert.equal((await auth.usuarioOpcionalDoToken(entrada.token, confiavel)).id, id);
   }
   for (const id of ['liberado', 'principal']) assert.ok((await auth.login(id, 'SenhaTeste123', { pedido: req() })).token);

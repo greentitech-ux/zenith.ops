@@ -3646,16 +3646,10 @@ app.get('/api/stream', (req, res) => {
     unidades: req.isMaster ? null : new Set(req.permissions.unidades || []),
   };
   sseClients.add(client);
-  let vencimentoNoc;
-  if (!req.isMasterPrincipal && nocLogin.somenteNoc(req.user, users.tagsDe(req.user))) {
-    nocLogin.servico().validarPedido(req).then(prova => {
-      if (!prova) { sseClients.delete(client); res.end(); return; }
-      if (res.destroyed) return;
-      vencimentoNoc = setTimeout(() => { sseClients.delete(client); res.end(); }, Math.max(0, prova.expiraEm - Date.now()));
-      vencimentoNoc.unref();
-    }).catch(() => { sseClients.delete(client); res.end(); });
-  }
-  req.on('close', () => { clearTimeout(vencimentoNoc); sseClients.delete(client); });
+  // A conexão SSE pertence à sessão já autenticada. A prova NOC só é exigida
+  // no login; encerrar o fluxo ao expirar/oscilar o agente depois da entrada
+  // deixava telas em branco mesmo para quem já havia acessado corretamente.
+  req.on('close', () => { sseClients.delete(client); });
 });
 
 // ---------- validacao de assinatura HMAC da Adyen ----------
@@ -10444,6 +10438,41 @@ app.put('/api/parque/tabela', auth.requireMaster, async (req, res) => {
   }
 });
 
+// Regra da pulseira: configuração independente da tabela financeira. O
+// Check-in consome a mesma configuração no ato da compra, mas só Master pode
+// mudar a sequência, cores e parâmetros operacionais.
+app.put('/api/parque/pulseiras', auth.requireMaster, async (req, res) => {
+  try {
+    const pulseiras = await parque.salvarConfigPulseiras(req.body, { porId: req.user.id, porEmail: req.user.email });
+    broadcast('parque-pulseiras-atualizadas', {}, 'parque');
+    broadcast('parque-pulseiras-atualizadas', {}, 'parque-checkin');
+    res.json(pulseiras);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Painel operacional de pulseiras: pensado para ficar aberto numa TV,
+// tablet ou celular. A rota obedece à mesma permissão de Parque/Check-in e
+// nunca entrega unidades que o usuário não pode consultar.
+app.get('/api/parque/pulseiras/painel', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  const [tabela, acessiveis] = await Promise.all([
+    parque.getConfigPrecos(),
+    req.isMaster ? parque.listAll() : parque.listByUnidades(req.permissions.unidades || []),
+  ]);
+  const unidade = String(req.query.unidade || '').trim();
+  if (unidade && !req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  const checkins = unidade ? acessiveis.filter((checkin) => checkin.unidade === unidade) : acessiveis;
+  res.json({
+    ...parque.resumoPulseirasAoVivo(checkins, tabela),
+    unidades: [...new Map(acessiveis.map((checkin) => [checkin.unidade, checkin.unidadeNome || checkin.unidade])).entries()]
+      .map(([id, nome]) => ({ id, nome }))
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+  });
+});
+
 app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, res) => {
   try {
     const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo } = req.body;
@@ -10493,8 +10522,11 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
 });
 
 app.get('/api/parque/checkins', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
-  if (req.isMaster) return res.json(await parque.listAll());
-  res.json(await parque.listByUnidades(req.permissions.unidades || []));
+  const [tabela, checkins] = await Promise.all([
+    parque.getConfigPrecos(),
+    req.isMaster ? parque.listAll() : parque.listByUnidades(req.permissions.unidades || []),
+  ]);
+  res.json(checkins.map((checkin) => parque.enriquecerPulseirasParaExibicao(checkin, tabela)));
 });
 
 // autopreenchimento do formulario de check-in: acha o cadastro mais recente

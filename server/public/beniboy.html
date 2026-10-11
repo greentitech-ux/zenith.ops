@@ -152,6 +152,15 @@
   .central-filtros{padding:12px;display:grid;gap:8px;border-bottom:1px solid var(--line);}
   .central-filtros input,.central-filtros select{font-size:12px;padding:9px;}
   .central-filtros .chip{text-align:left;}
+  .fila-status-titulo{font:700 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:4px 2px 0;}
+  .filtros-status{display:grid;gap:4px;}
+  .filtro-status{width:100%;display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);padding:7px 8px;cursor:pointer;font:600 12px var(--sans);transition:background .15s ease,border-color .15s ease,color .15s ease;}
+  .filtro-status:hover{background:var(--panel2);color:var(--text);}
+  .filtro-status.ativo{color:var(--text);background:var(--panel2);border-color:var(--filtro-cor,var(--line));box-shadow:inset 3px 0 var(--filtro-cor,var(--line));}
+  .filtro-status-icone{width:17px;text-align:center;font-size:12px;}
+  .filtro-status-nome{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .filtro-status-contador{min-width:23px;padding:2px 6px;text-align:center;border-radius:10px;background:var(--bg);color:var(--text);font:700 10px var(--mono);}
+  .filtro-status.ativo .filtro-status-contador{color:var(--filtro-cor,var(--accent));}
   .central-fila #kanban-wrap{overflow-y:auto;padding:8px;flex:1;min-height:0;}
   .fila-card{width:100%;text-align:left;cursor:pointer;margin-bottom:6px;font-family:inherit;color:var(--text);}
   .fila-card.selecionado{border-color:var(--accent);box-shadow:inset 3px 0 var(--accent);}
@@ -209,6 +218,10 @@
     .central-barra{padding:8px 12px;gap:6px;} .central-barra .sub{display:none;}
     .central-mesa,.central-mesa.ver-contexto{display:flex;flex-direction:column;}
     .central-fila{flex:1;border:0;} .central-conversas{display:none;flex:1;}
+    .central-filtros{max-height:52dvh;overflow-y:auto;}
+    .filtros-status{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .filtro-status{gap:5px;padding:7px 6px;}
+    .filtro-status-nome{font-size:11px;}
     .central-mesa.com-conversa .central-fila{display:none;} .central-mesa.com-conversa .central-conversas{display:flex;}
     .central-mobile-voltar{display:inline-block;} .central-mesa.ver-contexto .central-contexto{display:block;flex:1;border:0;}
     .central-mesa.ver-contexto .central-fila,.central-mesa.ver-contexto .central-conversas{display:none;}
@@ -327,10 +340,11 @@
     <aside class="central-fila" aria-label="Fila de atendimento">
       <div class="central-filtros">
         <input type="search" id="f-busca" aria-label="Buscar conversas" placeholder="Nome, contato, assunto ou protocolo" oninput="renderKanban()">
-        <select id="f-status" aria-label="Status das conversas" onchange="renderKanban()"><option value="ABERTAS">Conversas abertas</option><option value="TODAS">Todas as conversas</option></select>
         <select id="f-unidade" aria-label="Unidade das conversas" onchange="renderKanban()"><option value="">Todas as unidades</option></select>
         <button type="button" class="chip" id="chip-minhas" onclick="toggleMinhas()" aria-pressed="false">Meus atendimentos</button>
         <button type="button" class="chip" id="chip-desbloqueio" onclick="toggleFiltroDesbloqueio()" aria-pressed="false">🔓 Só desbloqueios</button>
+        <div class="fila-status-titulo">Fila por status</div>
+        <div id="f-status" class="filtros-status" aria-label="Status das conversas"></div>
       </div>
       <div id="kanban-wrap"></div>
     </aside>
@@ -500,9 +514,9 @@ let COMPUTADORES_NOVOS = new Set();
 
 // Mesmos valores de STATUS_ATENDIMENTO em suporteChat.js, na ordem do funil.
 const COLUNAS = [
-  { key:'PENDENTE',       label:'Pendente',        icone:'🕓', cor:'var(--warn)' },
+  { key:'PENDENTE',       label:'Sem status',      icone:'🕓', cor:'var(--warn)' },
   { key:'EM_ATENDIMENTO', label:'Em atendimento',  icone:'🙋', cor:'var(--accent)' },
-  { key:'EM_AGUARDO',     label:'Em aguardo',      icone:'⏳', cor:'var(--warn)' },
+  { key:'EM_AGUARDO',     label:'Em espera',       icone:'⏳', cor:'var(--warn)' },
   { key:'AGUARDANDO_ESTORNO', label:'Aguardando estorno', icone:'💳', cor:'var(--purple)' },
   { key:'TRANSFERIDO',    label:'Transferido',     icone:'🔀', cor:'var(--purple)' },
   { key:'TICKET_CRIADO',  label:'Ticket criado',   icone:'🎫', cor:'var(--teal)' },
@@ -510,16 +524,34 @@ const COLUNAS = [
   { key:'SEM_SOLUCAO',    label:'Sem solução',     icone:'⛔', cor:'var(--bad)' },
 ];
 
+// A fila não é um dropdown: cada destino fica sempre visível e informa
+// quantas conversas há ali. ABERTAS é a visão operacional (sem status ou já
+// em atendimento); BENIBOY é uma lente adicional para o que ainda está com o
+// assistente, sem esconder essas conversas da visão aberta.
+const FILTROS_STATUS = [
+  { key:'ABERTAS', label:'Conversas abertas', icone:'☷', cor:'var(--accent2)' },
+  { key:'BENIBOY', label:'Beniboy em atendimento', icone:'✦', cor:'var(--accent)' },
+  { key:'EM_ATENDIMENTO', label:'Em atendimento', icone:'🙋', cor:'var(--accent)' },
+  { key:'EM_AGUARDO', label:'Em espera', icone:'⏳', cor:'var(--warn)' },
+  { key:'AGUARDANDO_ESTORNO', label:'Aguardando estorno', icone:'💳', cor:'var(--purple)' },
+  { key:'TICKET_CRIADO', label:'Ticket criado', icone:'🎫', cor:'var(--teal)' },
+  { key:'TRANSFERIDO', label:'Transferido', icone:'🔀', cor:'var(--purple)' },
+  { key:'RESOLVIDO', label:'Resolvido', icone:'✅', cor:'var(--ok)' },
+  { key:'SEM_SOLUCAO', label:'Sem solução', icone:'⛔', cor:'var(--bad)' },
+  { key:'TODAS', label:'Todas as conversas', icone:'◌', cor:'var(--muted)' },
+];
+let FILTRO_STATUS = 'ABERTAS';
+
 // conversas de antes dessa feature nao tem statusAtendimento gravado - melhor
 // esforco: se ja foi finalizada vira "Resolvido" (nao da pra saber se teve
 // solucao ou nao sem reprocessar tudo), senao cai em Pendente como qualquer
 // conversa nova. Mesma logica pro nivel (sem responsavel = so o bot mexeu).
 function statusDe(chat){
   const estado = chat.statusAtendimento || 'PENDENTE';
-  // Conversas encerradas antes da correção possuíam status=FINALIZADO mas
-  // conservavam o statusAtendimento=PENDENTE. Na fila elas precisam aparecer
-  // no destino terminal correto já no próximo carregamento, sem reabri-las.
-  if(chat.status==='FINALIZADO' && !['RESOLVIDO','SEM_SOLUCAO'].includes(estado)) return 'RESOLVIDO';
+  // Conversas antigas finalizadas sem um status de atendimento precisam cair
+  // em Resolvido. Mas um status explícito, como AGUARDANDO_ESTORNO, é a fonte
+  // de verdade e nunca pode ser apagado pela flag legada FINALIZADO.
+  if(chat.status==='FINALIZADO' && estado==='PENDENTE') return 'RESOLVIDO';
   return estado;
 }
 // Os três estados que uma NOTA pode ter (ver registrarNotaInterna). Não é o
@@ -535,18 +567,45 @@ function ultimaMsg(chat){
   return { de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'Beniboy':'Suporte'), texto: m.texto, em: m.em };
 }
 
-function passaFiltro(chat){
+function emAtendimentoPeloBeniboy(chat){
+  return statusDe(chat)==='PENDENTE' && nivelDe(chat)===1 && chat.botDesativado!==true;
+}
+
+function pertenceAoFiltroStatus(chat, status=FILTRO_STATUS){
+  const estado=statusDe(chat);
+  if(status==='TODAS') return true;
+  if(status==='ABERTAS') return estado==='PENDENTE' || estado==='EM_ATENDIMENTO';
+  if(status==='BENIBOY') return emAtendimentoPeloBeniboy(chat);
+  return estado===status;
+}
+
+function passaFiltrosBase(chat){
   if(FILTRO_DESBLOQUEIO && !chat.desbloqueio) return false;
   if(FILTRO_MINHAS && chat.responsavel?.id!==ME?.id && (!ME?.email || chat.responsavel?.email!==ME.email)) return false;
-  const status = document.getElementById('f-status').value;
-  if(status==='ABERTAS' && ['RESOLVIDO','SEM_SOLUCAO'].includes(statusDe(chat))) return false;
-  if(status!=='ABERTAS' && status!=='TODAS' && statusDe(chat)!==status) return false;
   const unidade = document.getElementById('f-unidade').value;
   if(unidade && chat.lojaContexto!==unidade) return false;
   const q = (document.getElementById('f-busca').value||'').trim().toLowerCase();
   if(!q) return true;
   const alvo = [chat.nome, chat.contato, chat.assunto, chat.lojaContexto, chat.numeroTicket].filter(Boolean).join(' ').toLowerCase();
   return alvo.includes(q);
+}
+
+function passaFiltro(chat){
+  return passaFiltrosBase(chat) && pertenceAoFiltroStatus(chat);
+}
+
+function selecionarFiltroStatus(status){
+  FILTRO_STATUS=status;
+  renderKanban();
+}
+
+function renderFiltrosStatus(base){
+  const alvo=document.getElementById('f-status');
+  if(!alvo) return;
+  alvo.innerHTML=FILTROS_STATUS.map(f=>{
+    const quantidade=base.filter(chat=>pertenceAoFiltroStatus(chat,f.key)).length;
+    return `<button type="button" class="filtro-status ${FILTRO_STATUS===f.key?'ativo':''}" style="--filtro-cor:${f.cor}" aria-pressed="${FILTRO_STATUS===f.key}" onclick="selecionarFiltroStatus('${f.key}')"><span class="filtro-status-icone" aria-hidden="true">${f.icone}</span><span class="filtro-status-nome">${f.label}</span><span class="filtro-status-contador">${quantidade}</span></button>`;
+  }).join('');
 }
 
 function toggleFiltroDesbloqueio(){
@@ -574,8 +633,10 @@ function montarFiltroUnidades(){
 }
 
 function renderKanban(){
-  const visiveis = ITENS.filter(passaFiltro);
+  const base = ITENS.filter(passaFiltrosBase);
+  const visiveis = base.filter(passaFiltro);
   document.getElementById('total-count').textContent = ITENS.length ? `· ${visiveis.length} de ${ITENS.length} conversa(s)` : '';
+  renderFiltrosStatus(base);
   const wrap = document.getElementById('kanban-wrap');
   visiveis.sort((a,b)=>(b.atualizadoEm||'').localeCompare(a.atualizadoEm||''));
   wrap.innerHTML = visiveis.length ? visiveis.map(cardHtml).join('') : '<div class="empty">Nenhuma conversa neste filtro.</div>';
@@ -1594,7 +1655,6 @@ async function boot(){
   document.getElementById('root').classList.remove('hidden');
   document.getElementById('central-atendente').textContent='Atendente: '+(ME.username||ME.nome||ME.email||'Suporte');
   document.getElementById('central-avatar').innerHTML=window.beniboySVG?window.beniboySVG(64):'';
-  document.getElementById('f-status').insertAdjacentHTML('beforeend',COLUNAS.map(c=>`<option value="${c.key}">${c.label}</option>`).join(''));
   await carregarLista();
   carregarNoc();
   conectarStream();
