@@ -12678,6 +12678,19 @@ app.get('/api/saltiverso/fechamento/alteracoes', auth.requireMasterOrAdmin, asyn
   res.json(await saltiversoFechamento.listAlteracoesPendentes(req.query.unidade));
 });
 
+// Correção direta de caixa individual: somente Master, com motivo e
+// controle de versão. Operadores continuam pelo pedido de aprovação.
+app.put('/api/saltiverso/fechamento/caixa/:id', auth.requireMaster, async (req, res) => {
+  try {
+    if (typeof req.body.versaoEsperada !== 'string' || !req.body.versaoEsperada) return res.status(400).json({ error: 'Atualize a tela antes de corrigir o caixa.' });
+    const caixa = await saltiversoFechamento.corrigirCaixa(req.params.id, {
+      declarado: req.body.declarado, motivo: req.body.motivo, versaoEsperada: req.body.versaoEsperada,
+    }, { porId: req.user.id, porEmail: req.user.email });
+    broadcast('saltiverso-fechamento-corrigido', { unidade: caixa.unidade, data: caixa.data }, 'parque-loja');
+    res.json(caixa);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/saltiverso/fechamento/alteracoes/:id/decidir', auth.requireMasterOrAdmin, async (req, res) => {
   try {
     const r = await saltiversoFechamento.decidirAlteracaoCaixa(req.params.id, { aprovado: !!req.body.aprovado, porId: req.user.id, porEmail: req.user.email });
