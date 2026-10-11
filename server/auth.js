@@ -297,14 +297,15 @@ function invalidarUsuario(id) {
 // token, expirado, sessao encerrada, conta desativada). Usado por rotas
 // PUBLICAS que enxergam "mais" quando quem esta do outro lado por acaso
 // esta logado (ex: chat de suporte oferecendo consulta de pedido pra quem
-// tem conta), sem exigir login pra usar a rota em si
+// tem conta), sem exigir login pra usar a rota em si. A prova do computador
+// NOC acontece na ENTRADA (login/passkey); uma sessão já emitida não pode
+// deixar de funcionar porque o agente ficou temporariamente indisponível.
 async function usuarioOpcionalDoToken(token, pedido = {}) {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     const user = await getUserById(payload.sub);
     if (!user || user.active === false || user.locked || user.precisaTrocarSenha) return null;
-    await require('./nocLogin').exigir(user, pedido);
     if (payload.sid && !(await sessions.existeEValida(payload.sid))) return null;
     if (user.role !== 'master' && !dentroDoHorarioPermitido(user.horarioPermitido)) return null;
     return user;
@@ -395,8 +396,10 @@ function requireAuth(req, res, next) {
         const trocaPermitida = (req.method==='GET' && rota==='/api/me') || (req.method==='POST' && rota==='/api/me/senha');
         if (user.precisaTrocarSenha && !trocaPermitida) return res.status(403).json({error:'Troque sua senha temporária antes de continuar.',code:'TROCA_SENHA_OBRIGATORIA'});
       if (!sessaoValida) return res.status(401).json({ error: 'Sessão encerrada, faça login novamente.' });
-      try { await require('./nocLogin').exigir(user, req); }
-      catch (e) { return res.status(403).json({ error: e.message, code: e.code }); }
+      // NOC é uma política de ENTRADA, não uma trava contínua da sessão.
+      // A máquina foi validada antes de este JWT ser emitido em login() ou
+      // loginComPasskey(). Daqui em diante, a sessão, permissões, bloqueio
+      // de conta e horário seguem sendo conferidos normalmente.
       if (user.role !== 'master' && !dentroDoHorarioPermitido(user.horarioPermitido)) {
         return res.status(401).json({ error: mensagemHorarioPermitido(user.horarioPermitido) });
       }

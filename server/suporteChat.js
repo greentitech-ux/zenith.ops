@@ -825,7 +825,10 @@ async function finalizarOciosos() {
   const agora = Date.now();
   const finalizados = [];
   for (const chat of chats) {
-    if (chat.status !== 'ABERTO' || chat.statusAtendimento === 'EM_AGUARDO') continue;
+    // Espera e estorno são acompanhamentos ativos: a ausência de mensagens
+    // durante 40 minutos não significa abandono. Eles só saem da fila por
+    // decisão explícita do time (Resolvido ou Sem solução).
+    if (chat.status !== 'ABERTO' || ['EM_AGUARDO', 'AGUARDANDO_ESTORNO'].includes(chat.statusAtendimento)) continue;
     const mensagens = chat.mensagens || [];
     const ultimaEm = mensagens.length ? mensagens[mensagens.length - 1].em : chat.criadoEm;
     if (!ultimaEm || agora - new Date(ultimaEm).getTime() < OCIOSO_MS) continue;

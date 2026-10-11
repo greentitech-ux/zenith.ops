@@ -3646,16 +3646,10 @@ app.get('/api/stream', (req, res) => {
     unidades: req.isMaster ? null : new Set(req.permissions.unidades || []),
   };
   sseClients.add(client);
-  let vencimentoNoc;
-  if (!req.isMasterPrincipal && nocLogin.somenteNoc(req.user, users.tagsDe(req.user))) {
-    nocLogin.servico().validarPedido(req).then(prova => {
-      if (!prova) { sseClients.delete(client); res.end(); return; }
-      if (res.destroyed) return;
-      vencimentoNoc = setTimeout(() => { sseClients.delete(client); res.end(); }, Math.max(0, prova.expiraEm - Date.now()));
-      vencimentoNoc.unref();
-    }).catch(() => { sseClients.delete(client); res.end(); });
-  }
-  req.on('close', () => { clearTimeout(vencimentoNoc); sseClients.delete(client); });
+  // A conexão SSE pertence à sessão já autenticada. A prova NOC só é exigida
+  // no login; encerrar o fluxo ao expirar/oscilar o agente depois da entrada
+  // deixava telas em branco mesmo para quem já havia acessado corretamente.
+  req.on('close', () => { sseClients.delete(client); });
 });
 
 // ---------- validacao de assinatura HMAC da Adyen ----------
