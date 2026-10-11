@@ -30142,6 +30142,24 @@ $r | ConvertTo-Json -Depth 4 -Compress
   catch (e) { ruins++; console.log('✗ Formulário público: ' + e.stack); }
   try { await require('./testeMonitorCoworkHttp').testar({ DOCS, pedir, postarJson, token }); }
   catch (e) { ruins++; console.log('✗ Monitor/Cowork HTTP: ' + e.stack); }
+  try {
+    const antes = await pedir('/api/debug/leituras', { Authorization: 'Bearer ' + token });
+    const zerado = await postarJson('/api/debug/leituras/zerar', {}, { Authorization: 'Bearer ' + token });
+    const cw = require('./coworkApi.js');
+    const masterAntes = process.env.NOPULSO_AGENT_MASTER;
+    DOCS.set('users/leituras-master', { email: 'leituras-master@teste.local', role: 'master', active: true, nome: 'Master Leituras' });
+    process.env.NOPULSO_AGENT_MASTER = 'leituras-master@teste.local';
+    let consulta;
+    try { consulta = await cw.executar({ nome: 'consultar_leituras', entrada: {} }); }
+    finally {
+      if (masterAntes === undefined) delete process.env.NOPULSO_AGENT_MASTER;
+      else process.env.NOPULSO_AGENT_MASTER = masterAntes;
+    }
+    const b = JSON.parse(antes.corpo), z = JSON.parse(zerado.corpo);
+    if (antes.status !== 200 || zerado.status !== 200 || z.total !== 0 || !Array.isArray(b.porColecao)
+      || !consulta?.resultado || !Array.isArray(consulta.resultado.porRota)) throw new Error('medição não respondeu no formato esperado');
+    console.log('✓ Diagnóstico Firestore: Master consulta e zera leituras; Cowork recebe o resumo em memória.');
+  } catch (e) { ruins++; console.log('✗ Diagnóstico Firestore: ' + e.message); }
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

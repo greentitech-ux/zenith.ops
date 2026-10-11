@@ -5161,6 +5161,18 @@ app.get('/api/debug/leituras', auth.requireMaster, (req, res) => {
   res.json(relatorio);
 });
 
+// O GET acima preserva a compatibilidade com o atalho antigo ?zerar=1. A
+// limpeza por POST evita que uma abertura/atualizacao acidental de URL apague
+// a janela de medicao e permite ao Master iniciar uma medicao limpa de forma
+// explícita.
+app.post('/api/debug/leituras/zerar', auth.requireMaster, (req, res) => {
+  if (!db.zerarLeituras || !db.relatorioLeituras) {
+    return res.status(503).json({ error: 'Contador de leituras não está instalado neste processo.' });
+  }
+  db.zerarLeituras();
+  res.json(db.relatorioLeituras());
+});
+
 app.post('/api/alertas-central/:id/atender', auth.requireMaster, async (req, res) => {
   try {
     const atualizado = await alertasCentral.atender(req.params.id, req.user.email);

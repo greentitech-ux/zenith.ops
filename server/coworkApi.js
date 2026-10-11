@@ -90,6 +90,7 @@ const FERRAMENTAS = Object.freeze({
   pedir_assinatura: { descricao: 'Manda o formulário pra assinatura do Master: valida (se faltar algo, recusa na hora e diz o quê), tira do rascunho e pede a digital dele no celular com a prévia. Aprovado, o Master assina eletronicamente o papel Responsável/Gerente, o PDF assinado fica pronto e o ticket de origem recebe o registro. Informe formularioId ou numero.', risco: 'medio', obrigatorios: [], autorizar: true },
   registrar_envio_conecta: { descricao: 'Registra no NoPulso que o PDF ASSINADO foi enviado no portal do Conecta, com o número de protocolo que o portal deu. Use só depois de enviar de fato. Comenta no ticket de origem.', risco: 'baixo', obrigatorios: ['protocolo'] },
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
+  consultar_leituras: { descricao: 'Mostra o diagnóstico em memória de leituras e bytes estimados do Firestore, agrupado por coleção e rota. Use para medir custo; não altera dados.', risco: 'leitura', obrigatorios: [] },
   consultar_noc: { descricao: 'Consulta o estado atual e compacto dos computadores monitorados.', risco: 'leitura', obrigatorios: [] },
   solicitar_xml_processados: { descricao: 'Gera, por leitura, o ZIP de XML Processados da competência informada em uma máquina GCOM pronta e o anexa automaticamente no chat de suporte do protocolo. Não altera XMLs nem pede autorização do Master.', risco: 'baixo', obrigatorios: ['protocolo', 'competencia'] },
   consultar_xml_processados: { descricao: 'Acompanha um job de XML Processados criado por solicitar_xml_processados.', risco: 'leitura', obrigatorios: ['jobId'] },
@@ -218,6 +219,7 @@ const PARAMETROS = Object.freeze({
   consultar_autorizacao: ['autorizacaoId'],
   listar_autorizacoes_pendentes: ['limite'],
   preparar_reuniao: ['termo', 'unidade', 'limite'],
+  consultar_leituras: [],
   consultar_noc: ['unidade', 'gcom'],
   solicitar_xml_processados: ['protocolo', 'maquina', 'codigo', 'posto', 'competencia'],
   consultar_xml_processados: ['jobId'],
@@ -1490,6 +1492,10 @@ async function despachar(nome, entrada, ator) {
   if (nome === 'listar_autorizacoes_pendentes') return listarAutorizacoesPendentes(p);
   if (nome === 'solicitar_xml_processados') return solicitarXmlProcessados(p);
   if (nome === 'consultar_xml_processados') return consultarXmlProcessados(p.jobId);
+  if (nome === 'consultar_leituras') {
+    if (!db.relatorioLeituras) throw new Error('Contador de leituras não está instalado neste processo.');
+    return db.relatorioLeituras();
+  }
   if (nome === 'pesquisar_emails') return googleGmail.pesquisar({ consulta: p.consulta, limite: p.limite });
   if (nome === 'ler_email') return googleGmail.ler(p.emailId);
   if (nome === 'enviar_email') return googleGmail.enviar({ para: p.para, assunto: p.assunto, texto: p.texto });
