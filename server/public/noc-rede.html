@@ -180,7 +180,7 @@
   <div class="secao">
     <div class="secao-cab"><h2>Latência por hora</h2></div>
     <div class="secao-sub">
-      Mediana da frota em destaque, e as piores lojas por cima. Se as linhas <b>sobem juntas</b>, é o servidor.
+      Mediana da frota em destaque e todas as máquinas selecionadas por cima. Se as linhas <b>sobem juntas</b>, é o servidor.
       Se só uma sobe enquanto a mediana fica baixa, é o link daquela loja. A faixa vermelha marca 1000ms —
       acima disso a lentidão já é percebida por quem está operando.
     </div>
@@ -232,6 +232,12 @@ window.fetch = (url, opts = {}) => {
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 
 const CORES = ['var(--serie-1)','var(--serie-2)','var(--serie-3)','var(--serie-4)'];
+// A mediana fica sempre azul. As máquinas precisam de cores estáveis mesmo
+// quando uma unidade tiver mais de três computadores selecionados.
+const CORES_COMPUTADORES = ['#fb7c35','#27ce9a','#f2b90f','#bc8cff','#f15b93','#24b9d8','#c3df45','#e99042','#7cc9a0','#e17be8'];
+function corComputador(indice){
+  return CORES_COMPUTADORES[indice] || `hsl(${(indice * 47 + 18) % 360} 72% 62%)`;
+}
 const LIMITE_LENTO = 1000;
 let DADOS = null;
 let SELECIONADOS = null; // null = todos; Set = escolha explícita do Master
@@ -471,11 +477,11 @@ function renderLinhas(rotulos, porComputador, frota){
   const larg = W-L-R, alt = H-T-B;
   el.setAttribute('viewBox', `0 0 ${W} ${H}`);
   el.style.height = H + 'px';
-  // as 3 piores por latência média do dia; o resto fica fora do overlay (vai
-  // nos small multiples) - nunca gerar cor nova pra uma 4a, 5a série
-  const destaques = porComputador
+  // Todas as máquinas selecionadas entram no gráfico, além da mediana. Isso
+  // permite ver a situação completa de uma unidade com 1, 2 ou 10 PDVs.
+  const destaques = [...porComputador]
     .filter(c => c.resumo && c.resumo.latenciaMedia !== null)
-    .sort((a,b) => b.resumo.latenciaMedia - a.resumo.latenciaMedia).slice(0,3);
+    .sort((a,b) => String(a.nome||'').localeCompare(String(b.nome||''), 'pt-BR'));
 
   const todos = [...frota.filter(v=>v!==null), ...destaques.flatMap(c=>c.pontos.filter(v=>v!==null))];
   const maxY = Math.max(LIMITE_LENTO*1.15, ...(todos.length?todos:[LIMITE_LENTO]))*1.05;
@@ -503,7 +509,7 @@ function renderLinhas(rotulos, porComputador, frota){
     svg += `<text class="tick" x="${x(i).toFixed(1)}" y="${T+alt+16}" text-anchor="middle">${escapeHtml(r)}</text>`; });
 
   destaques.forEach((c,idx)=>{
-    svg += `<path class="linha" d="${caminho(c.pontos)}" stroke="${CORES[idx+1]}"></path>`;
+    svg += `<path class="linha" d="${caminho(c.pontos)}" stroke="${corComputador(idx)}"></path>`;
   });
   svg += `<path class="linha destaque" d="${caminho(frota)}" stroke="${CORES[0]}"></path>`;
 
@@ -517,7 +523,7 @@ function renderLinhas(rotulos, porComputador, frota){
 
   document.getElementById('legenda').innerHTML =
     `<span class="leg-item espesso"><span class="leg-marca" style="background:${CORES[0]}"></span>Mediana da frota</span>` +
-    destaques.map((c,i)=>`<span class="leg-item"><span class="leg-marca" style="background:${CORES[i+1]}"></span>${escapeHtml(c.nome)}</span>`).join('');
+    destaques.map((c,i)=>`<span class="leg-item"><span class="leg-marca" style="background:${corComputador(i)}"></span>${escapeHtml(c.nome)}</span>`).join('');
 
   ligarHover(el, { rotulos, frota, destaques, x, L, larg, W });
 }
@@ -538,7 +544,7 @@ function ligarHover(el, ctx){
     cruz.setAttribute('x2', ctx.x(i).toFixed(1));
     cruz.classList.remove('hidden');
     const linhas = [`<div class="tt-l"><span class="tt-m" style="background:${CORES[0]}"></span>Mediana da frota<span class="tt-v">${ctx.frota[i]===null?'—':ctx.frota[i]+'ms'}</span></div>`]
-      .concat(ctx.destaques.map((c,k)=>`<div class="tt-l"><span class="tt-m" style="background:${CORES[k+1]}"></span>${escapeHtml(c.nome)}<span class="tt-v">${c.pontos[i]===null?'—':c.pontos[i]+'ms'}</span></div>`));
+      .concat(ctx.destaques.map((c,k)=>`<div class="tt-l"><span class="tt-m" style="background:${corComputador(k)}"></span>${escapeHtml(c.nome)}<span class="tt-v">${c.pontos[i]===null?'—':c.pontos[i]+'ms'}</span></div>`));
     tt.innerHTML = `<div class="tt-h">${escapeHtml(ctx.rotulos[i])}</div>` + linhas.join('');
     tt.classList.remove('hidden');
     const larguraTt = tt.offsetWidth;
