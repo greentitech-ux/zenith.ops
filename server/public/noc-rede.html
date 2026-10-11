@@ -57,6 +57,22 @@
   .filtro-btn.sel{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.12);font-weight:600;}
   .filtro-gran{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-left:auto;white-space:nowrap;}
   @media(max-width:640px){ .filtro-gran{margin-left:0;width:100%;} }
+  .filtros-avancados{display:grid;grid-template-columns:minmax(180px,1.2fr) minmax(160px,1fr) minmax(150px,1fr) minmax(220px,1.4fr);gap:8px;margin:-2px 0 14px;}
+  .filtros-avancados input,.filtros-avancados select{width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font:11px var(--mono);}
+  .filtros-avancados input:focus,.filtros-avancados select:focus{outline:1px solid var(--accent);border-color:var(--accent);}
+  .seletor-computadores{position:relative;}
+  .seletor-computadores summary{list-style:none;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:11px var(--mono);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .seletor-computadores summary::-webkit-details-marker{display:none;}
+  .seletor-computadores[open] summary{border-color:var(--accent);}
+  .seletor-lista{position:absolute;right:0;z-index:55;top:calc(100% + 5px);width:min(440px,calc(100vw - 28px));max-height:360px;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px;box-shadow:0 12px 34px rgba(0,0,0,.55);}
+  .seletor-acoes{display:flex;gap:6px;padding:3px 2px 8px;border-bottom:1px solid var(--line);position:sticky;top:-8px;background:var(--panel2);z-index:1;}
+  .seletor-acoes button{background:none;border:0;color:var(--accent);font:10px var(--mono);cursor:pointer;padding:4px 5px;}
+  .grupo-computadores{padding:8px 2px 2px;}.grupo-computadores+ .grupo-computadores{border-top:1px solid var(--line);margin-top:7px;}
+  .grupo-computadores label,.computador-check{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11px;padding:4px 3px;}
+  .grupo-computadores strong{font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:.04em;}
+  .computador-check span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.computador-check small{margin-left:auto;color:var(--muted);font:9px var(--mono);}
+  @media(max-width:800px){.filtros-avancados{grid-template-columns:1fr 1fr;}.seletor-computadores{grid-column:span 2;}}
+  @media(max-width:480px){.filtros-avancados{grid-template-columns:1fr;}.seletor-computadores{grid-column:auto;}}
   /* aviso de cobertura parcial: honestidade sobre até onde o dado existe */
   .aviso-cobertura{border:1px solid var(--warn);background:rgba(242,179,61,.07);border-radius:10px;
     padding:10px 12px;margin-bottom:14px;font-size:11.5px;line-height:1.55;color:var(--text);}
@@ -151,6 +167,12 @@
 
 <div id="raiz" class="hidden">
   <div class="filtros" id="filtros"></div>
+  <div class="filtros-avancados" aria-label="Filtros dos computadores">
+    <input id="filtro-busca" type="search" placeholder="Buscar computador ou unidade" autocomplete="off">
+    <select id="filtro-unidade" aria-label="Filtrar por unidade"><option value="">Todas as unidades</option></select>
+    <select id="filtro-estado" aria-label="Filtrar por situação"><option value="todos">Todos os computadores</option><option value="online">Online agora</option><option value="offline">Offline agora</option><option value="medidos">Com medição</option><option value="sem-medicao">Sem medição</option><option value="lentos">Lentos (&gt; 400ms)</option><option value="criticos">Críticos (&gt; 1000ms)</option></select>
+    <details class="seletor-computadores" id="seletor-computadores"><summary id="resumo-selecao">Todos os computadores</summary><div class="seletor-lista" id="lista-selecao"></div></details>
+  </div>
   <div class="aviso-cobertura hidden" id="aviso-cobertura"></div>
 
   <div class="tiles" id="tiles"></div>
@@ -212,6 +234,76 @@ function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 const CORES = ['var(--serie-1)','var(--serie-2)','var(--serie-3)','var(--serie-4)'];
 const LIMITE_LENTO = 1000;
 let DADOS = null;
+let SELECIONADOS = null; // null = todos; Set = escolha explícita do Master
+let FILTRO_UNIDADE = '';
+let FILTRO_ESTADO = 'todos';
+let FILTRO_BUSCA = '';
+
+function chaveComputador(c){ return String(c.id || `${c.codigo||''}__${c.posto||c.nome||''}`); }
+function todosComputadores(){ return Array.isArray(DADOS && DADOS.computadores) ? DADOS.computadores : []; }
+function nomeUnidade(c){ return String(c.unidadeNome || c.codigo || 'Sem unidade'); }
+function temMedicao(c){ return Number.isFinite(Number(c.resumo && c.resumo.latenciaMedia)); }
+function atendeFiltros(c){
+  const texto = `${c.nome||''} ${nomeUnidade(c)} ${c.codigo||''} ${c.posto||''}`.toLocaleLowerCase('pt-BR');
+  if(FILTRO_BUSCA && !texto.includes(FILTRO_BUSCA)) return false;
+  if(FILTRO_UNIDADE && String(c.codigo||'') !== FILTRO_UNIDADE) return false;
+  if(SELECIONADOS && !SELECIONADOS.has(chaveComputador(c))) return false;
+  const media = Number(c.resumo && c.resumo.latenciaMedia);
+  if(FILTRO_ESTADO === 'online' && c.online !== true) return false;
+  if(FILTRO_ESTADO === 'offline' && c.online !== false) return false;
+  if(FILTRO_ESTADO === 'medidos' && !Number.isFinite(media)) return false;
+  if(FILTRO_ESTADO === 'sem-medicao' && Number.isFinite(media)) return false;
+  if(FILTRO_ESTADO === 'lentos' && !(Number.isFinite(media) && media > 400)) return false;
+  if(FILTRO_ESTADO === 'criticos' && !(Number.isFinite(media) && media > LIMITE_LENTO)) return false;
+  return true;
+}
+function computadoresVisiveis(){ return todosComputadores().filter(atendeFiltros); }
+function salvarSelecao(){ try{ localStorage.setItem('nocRedeSelecao', SELECIONADOS ? JSON.stringify([...SELECIONADOS]) : ''); }catch(e){} }
+function restaurarSelecao(){
+  try { const salvo = localStorage.getItem('nocRedeSelecao'); if(salvo){ const ids = JSON.parse(salvo); if(Array.isArray(ids)) SELECIONADOS = new Set(ids); } } catch(e){}
+}
+function renderControles(){
+  const unidades = [...new Map(todosComputadores().map(c => [String(c.codigo||''), nomeUnidade(c)])).entries()]
+    .filter(([codigo]) => codigo).sort((a,b) => a[1].localeCompare(b[1], 'pt-BR'));
+  const unidade = document.getElementById('filtro-unidade');
+  unidade.innerHTML = '<option value="">Todas as unidades</option>' + unidades.map(([codigo,nome]) => `<option value="${escapeHtml(codigo)}">${escapeHtml(nome)}</option>`).join('');
+  unidade.value = FILTRO_UNIDADE;
+  document.getElementById('filtro-estado').value = FILTRO_ESTADO;
+  document.getElementById('filtro-busca').value = FILTRO_BUSCA;
+  renderSeletorComputadores();
+}
+function renderSeletorComputadores(){
+  const aberto = document.getElementById('seletor-computadores').open;
+  const todos = todosComputadores();
+  // Seleção antiga não pode esconder para sempre máquinas que foram removidas.
+  if(SELECIONADOS){ const existentes = new Set(todos.map(chaveComputador)); SELECIONADOS = new Set([...SELECIONADOS].filter(id => existentes.has(id))); }
+  const selecionados = SELECIONADOS ? SELECIONADOS.size : todos.length;
+  document.getElementById('resumo-selecao').textContent = SELECIONADOS === null || selecionados === todos.length
+    ? `Todos os computadores (${todos.length})` : `${selecionados} computador(es) selecionado(s)`;
+  const grupos = new Map();
+  todos.forEach(c => { const k = `${c.codigo||''}|${nomeUnidade(c)}`; if(!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(c); });
+  const html = [...grupos.entries()].sort((a,b) => nomeUnidade(a[1][0]).localeCompare(nomeUnidade(b[1][0]), 'pt-BR')).map(([k,lista]) => {
+    const ids = lista.map(chaveComputador); const marcados = SELECIONADOS === null || ids.every(id => SELECIONADOS.has(id));
+    return `<div class="grupo-computadores"><label><input type="checkbox" data-unidade="${escapeHtml(k)}" ${marcados?'checked':''}><strong>${escapeHtml(nomeUnidade(lista[0]))}</strong><small>todos da unidade</small></label>`
+      + lista.sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR')).map(c => `<label class="computador-check"><input type="checkbox" data-computador="${escapeHtml(chaveComputador(c))}" ${SELECIONADOS===null || SELECIONADOS.has(chaveComputador(c))?'checked':''}><span>${escapeHtml(c.nome||c.posto||'Sem nome')}</span><small>${temMedicao(c)?`${Number(c.resumo.latenciaMedia)}ms`:'sem medição'}</small></label>`).join('')
+      + `</div>`;
+  }).join('');
+  document.getElementById('lista-selecao').innerHTML = `<div class="seletor-acoes"><button type="button" onclick="selecionarTodos()">Selecionar todos</button><button type="button" onclick="limparSelecao()">Limpar seleção</button></div>${html || '<div class="vazio">Nenhum computador cadastrado.</div>'}`;
+  document.getElementById('seletor-computadores').open = aberto;
+  document.querySelectorAll('[data-computador]').forEach(el => el.addEventListener('change', () => {
+    if(SELECIONADOS === null) SELECIONADOS = new Set(todos.map(chaveComputador));
+    el.checked ? SELECIONADOS.add(el.dataset.computador) : SELECIONADOS.delete(el.dataset.computador);
+    salvarSelecao(); render();
+  }));
+  document.querySelectorAll('[data-unidade]').forEach(el => el.addEventListener('change', () => {
+    if(SELECIONADOS === null) SELECIONADOS = new Set(todos.map(chaveComputador));
+    const lista = grupos.get(el.dataset.unidade) || [];
+    lista.forEach(c => el.checked ? SELECIONADOS.add(chaveComputador(c)) : SELECIONADOS.delete(chaveComputador(c)));
+    salvarSelecao(); render();
+  }));
+}
+function selecionarTodos(){ SELECIONADOS = null; salvarSelecao(); render(); }
+function limparSelecao(){ SELECIONADOS = new Set(); salvarSelecao(); render(); }
 
 // Períodos. Cada um declara de QUAL camada ele lê e quantos pontos pega -
 // é a granularidade que muda com o período, não o contrário (ver
@@ -263,7 +355,7 @@ const CAMADAS = {
 function montarSeries(){
   const per = periodoAtual();
   const cam = CAMADAS[per.camada];
-  const comSerie = (DADOS.computadores||[]).filter(c => Array.isArray(c[cam.campo]) && c[cam.campo].length);
+  const comSerie = computadoresVisiveis().filter(c => Array.isArray(c[cam.campo]) && c[cam.campo].length);
   // ordena pela chave (epoch numérico ou texto ISO, ambos ordenáveis) e pega
   // só a cauda do tamanho do período
   const todas = [...new Set(comSerie.flatMap(c => c[cam.campo].map(cam.chave)))]
@@ -292,9 +384,11 @@ function trocarPeriodo(id){
 
 function render(){
   renderFiltros();
+  renderControles();
+  const computadores = computadoresVisiveis();
   const { chaves, rotulos, porComputador, frota, per, cobertura } = montarSeries();
-  renderTiles(porComputador, frota);
-  renderTabela();
+  renderTiles(computadores, porComputador, frota);
+  renderTabela(computadores);
 
   // Cobertura: dizer quando o período pedido é maior que o histórico que já
   // existe. Sem isso "30 dias" mostrando 2 pontos parece dado, e não é - a
@@ -311,7 +405,9 @@ function render(){
     document.getElementById('legenda').classList.add('hidden');
     const v = document.getElementById('gr-vazio');
     v.classList.remove('hidden');
-    v.textContent = `Ainda não há medição nesta granularidade (${per.gran}). Os computadores começam a reportar sozinhos assim que o NOC-NoPulso se atualizar (até ~1h) ou assim que a tela da loja recarregar — a série vai se formando a partir daí. ${per.retencao}`;
+    v.textContent = computadores.length
+      ? `Ainda não há medição nesta granularidade (${per.gran}) para os computadores selecionados. Os computadores começam a reportar sozinhos assim que o NOC-NoPulso se atualizar (até ~1h) ou assim que a tela da loja recarregar — a série vai se formando a partir daí. ${per.retencao}`
+      : 'Nenhum computador corresponde aos filtros escolhidos.';
     document.getElementById('mini-grid').innerHTML = '';
     return;
   }
@@ -341,11 +437,11 @@ window.addEventListener('resize', () => {
   }, 150);
 });
 
-function renderTiles(porComputador, frota){
+function renderTiles(computadores, porComputador, frota){
   const atual = frota.filter(v=>v!==null).slice(-1)[0] || null;
   const medidos = porComputador.length;
-  const pior = (DADOS.computadores||[]).filter(c=>c.nota!==null).sort((a,b)=>a.nota-b.nota)[0];
-  const quedas = (DADOS.computadores||[]).reduce((s,c)=>s+(c.quedasNoDia||0),0);
+  const pior = computadores.filter(c=>c.nota!==null).sort((a,b)=>a.nota-b.nota)[0];
+  const quedas = computadores.reduce((s,c)=>s+(c.quedasNoDia||0),0);
   const classe = (ms) => ms===null ? '' : (ms>LIMITE_LENTO ? 'critico' : (ms>400 ? 'alerta' : 'bom'));
   document.getElementById('tiles').innerHTML = `
     <div class="tile"><div class="tile-rot">Mediana da frota</div>
@@ -356,9 +452,9 @@ function renderTiles(porComputador, frota){
       <div class="tile-sub">${pior?escapeHtml(pior.nome)+' · '+escapeHtml(pior.unidadeNome||pior.codigo):'sem medição'}</div></div>
     <div class="tile"><div class="tile-rot">Quedas hoje</div>
       <div class="tile-val ${quedas>5?'critico':(quedas>0?'alerta':'bom')}">${quedas}</div>
-      <div class="tile-sub">somando todos os computadores</div></div>
+      <div class="tile-sub">somando os computadores filtrados</div></div>
     <div class="tile"><div class="tile-rot">Sem medição</div>
-      <div class="tile-val">${(DADOS.computadores||[]).filter(c=>c.nota===null).length}</div>
+      <div class="tile-val">${computadores.filter(c=>c.nota===null).length}</div>
       <div class="tile-sub">aguardando o NOC-NoPulso atualizar</div></div>`;
 }
 
@@ -467,11 +563,12 @@ function renderMini(rotulos, porComputador){
     const y=(v)=> H - (v/maxGlobal)*H;
     let d='',abriu=false;
     c.pontos.forEach((v,i)=>{ if(v===null){abriu=false;return;} d+=(abriu?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)+' '; abriu=true; });
-    const m = c.resumo.latenciaMedia;
-    const cls = m>LIMITE_LENTO?'critico':(m>400?'alerta':'bom');
-    const cor = m>LIMITE_LENTO?'var(--st-critico)':(m>400?'var(--st-alerta)':'var(--serie-1)');
+    const m = Number(c.resumo && c.resumo.latenciaMedia);
+    const medido = Number.isFinite(m);
+    const cls = !medido ? '' : (m>LIMITE_LENTO?'critico':(m>400?'alerta':'bom'));
+    const cor = !medido ? 'var(--muted)' : (m>LIMITE_LENTO?'var(--st-critico)':(m>400?'var(--st-alerta)':'var(--serie-1)'));
     return `<div class="mini">
-      <div class="mini-cab"><span class="mini-nome">${escapeHtml(c.nome)}</span><span class="mini-val ${cls}">${m}ms</span></div>
+      <div class="mini-cab"><span class="mini-nome">${escapeHtml(c.nome)}</span><span class="mini-val ${cls}">${medido ? m+'ms' : 'sem medição'}</span></div>
       <div class="mini-uni">${escapeHtml(c.unidadeNome||c.codigo)}</div>
       <svg class="gr" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:54px;">
         <line class="grade" x1="0" y1="${y(LIMITE_LENTO).toFixed(1)}" x2="${W}" y2="${y(LIMITE_LENTO).toFixed(1)}"></line>
@@ -481,9 +578,9 @@ function renderMini(rotulos, porComputador){
   }).join('') || '<div class="vazio">Nenhum computador com série por hora ainda.</div>';
 }
 
-function renderTabela(){
+function renderTabela(computadores){
   const num = (v,suf) => v===null||v===undefined ? '—' : v+(suf||'');
-  document.getElementById('tabela-corpo').innerHTML = (DADOS.computadores||[]).map(c=>{
+  document.getElementById('tabela-corpo').innerHTML = computadores.map(c=>{
     const r = c.resumo||{};
     return `<tr>
       <td>${escapeHtml(c.nome)}</td>
@@ -507,6 +604,19 @@ function renderTabela(){
       return;
     }
     document.getElementById('raiz').classList.remove('hidden');
+    restaurarSelecao();
+    document.getElementById('filtro-busca').addEventListener('input', (ev) => {
+      FILTRO_BUSCA = ev.target.value.trim().toLocaleLowerCase('pt-BR');
+      render();
+    });
+    document.getElementById('filtro-unidade').addEventListener('change', (ev) => {
+      FILTRO_UNIDADE = ev.target.value;
+      render();
+    });
+    document.getElementById('filtro-estado').addEventListener('change', (ev) => {
+      FILTRO_ESTADO = ev.target.value;
+      render();
+    });
     await carregar();
     setInterval(() => { if(!document.hidden) carregar(); }, 120000);
   }catch(e){ document.getElementById('sem-acesso').classList.remove('hidden'); }
