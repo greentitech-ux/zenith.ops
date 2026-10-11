@@ -12666,6 +12666,7 @@ app.post('/api/saltiverso/fechamento/caixa/:id/solicitar-alteracao', requireSect
       declarado: req.body.declarado, motivo: req.body.motivo,
       solicitadoPorId: req.user.id, solicitadoPorEmail: req.user.email,
       podeAlterarOutroCaixa,
+      gerenteDaUnidade: req.user?.cargo === 'gerente' && (req.permissions.unidades || []).includes(caixa.unidade),
     });
     broadcast('saltiverso-caixa-alteracao', pedido, 'parque-loja');
     res.json(pedido);
@@ -12674,7 +12675,7 @@ app.post('/api/saltiverso/fechamento/caixa/:id/solicitar-alteracao', requireSect
   }
 });
 
-app.get('/api/saltiverso/fechamento/alteracoes', auth.requireMasterOrAdmin, async (req, res) => {
+app.get('/api/saltiverso/fechamento/alteracoes', auth.requireMaster, async (req, res) => {
   res.json(await saltiversoFechamento.listAlteracoesPendentes(req.query.unidade));
 });
 
@@ -12691,7 +12692,7 @@ app.put('/api/saltiverso/fechamento/caixa/:id', auth.requireMaster, async (req, 
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.post('/api/saltiverso/fechamento/alteracoes/:id/decidir', auth.requireMasterOrAdmin, async (req, res) => {
+app.post('/api/saltiverso/fechamento/alteracoes/:id/decidir', auth.requireMaster, async (req, res) => {
   try {
     const r = await saltiversoFechamento.decidirAlteracaoCaixa(req.params.id, { aprovado: !!req.body.aprovado, porId: req.user.id, porEmail: req.user.email });
     broadcast('saltiverso-caixa-alteracao-decidida', r, 'parque-loja');
@@ -12719,13 +12720,33 @@ app.post('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req
 
 app.put('/api/saltiverso/fechamento/:id', auth.requireMaster, async (req, res) => {
   try {
-    const { totalDeclarado, observacao } = req.body;
-    const fechamento = await saltiversoFechamento.corrigirFechamento(req.params.id, { totalDeclarado, observacao }, { porId: req.user.id, porEmail: req.user.email });
+    const { totalDeclarado, observacao, motivo, versaoEsperada } = req.body;
+    const fechamento = await saltiversoFechamento.corrigirFechamento(req.params.id, { totalDeclarado, observacao, motivo, versaoEsperada }, { porId: req.user.id, porEmail: req.user.email });
     broadcast('saltiverso-fechamento-corrigido', fechamento, 'parque-loja');
     res.json(fechamento);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+app.get('/api/saltiverso/fechamento/historico/:id', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const f = await saltiversoFechamento.getOne(req.params.id);
+    if (!f) return res.status(404).json({ error: 'Fechamento não encontrado.' });
+    if (!podeUnidadeInventario(req, f.unidade) || !podeVerFaturadoSaltiverso(req, f.unidade)) return res.status(403).json({ error: 'Sem acesso ao detalhamento desta unidade.' });
+    res.json(f);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/saltiverso/fechamento/historico/:id/solicitar-alteracao', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const f = await saltiversoFechamento.getOne(req.params.id);
+    if (!f) return res.status(404).json({ error: 'Fechamento não encontrado.' });
+    if (req.user?.cargo !== 'gerente' || !(req.permissions.unidades || []).includes(f.unidade) || !podeUnidadeInventario(req, f.unidade)) return res.status(403).json({ error: 'Somente o gerente da unidade pode solicitar correção do histórico.' });
+    const pedido = await saltiversoFechamento.solicitarAlteracaoFechamento(f.id, req.body, { porId: req.user.id, porEmail: req.user.email });
+    broadcast('saltiverso-caixa-alteracao', { unidade: f.unidade, data: f.data }, 'parque-loja');
+    res.json(pedido);
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/saltiverso/fechamentos', requireSection('parque-loja'), async (req, res) => {

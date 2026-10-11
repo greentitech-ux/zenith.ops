@@ -195,6 +195,10 @@
   <div class="caixa-dialog-topo"><h2 id="caixa-detalhe-titulo">Detalhamento do caixa</h2><button type="button" class="btn-secundario" onclick="document.getElementById('caixa-detalhe').close()">Fechar</button></div>
   <div id="caixa-detalhe-corpo"></div>
 </dialog>
+<dialog id="historico-detalhe" class="caixa-dialog" aria-labelledby="historico-detalhe-titulo">
+  <div class="caixa-dialog-topo"><h2 id="historico-detalhe-titulo">Detalhamento do fechamento</h2><button type="button" class="btn-secundario" onclick="document.getElementById('historico-detalhe').close()">Fechar</button></div>
+  <div id="historico-detalhe-corpo"></div>
+</dialog>
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -250,6 +254,11 @@ function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
 function diasAtras(n){ const d = agoraBrasilia(); d.setDate(d.getDate()-n); return isoLocalBR(d); }
 
 function unidadeAtual(){ return document.getElementById('fc-unidade').value; }
+function gerenteDaUnidade(unidade=unidadeAtual()){ return ME?.cargo==='gerente' && (ME.permissions?.unidades||[]).includes(unidade); }
+function podePedirCorrecaoCaixa(c){
+  const em=Date.parse(c.lancadoEm);
+  return gerenteDaUnidade() || (Number.isFinite(em) && Date.now()-em<86400000);
+}
 function dataAtual(){ return document.getElementById('fc-data').value; }
 
 // so gerente/ass.gerente da unidade (ou master/admin) enxergam quanto o
@@ -290,7 +299,8 @@ function inputsBucketsHtml(prefixo, valores){
   const campos = FORMAS_CAIXA.campos(valores);
   const input = b=>`<div><label for="${prefixo}-${b}" style="margin-top:10px;">${BUCKET_LABEL[b]}</label><input type="number" min="0" step="0.01" data-forma="${b}" data-prefixo="${prefixo}" id="${prefixo}-${b}" value="${valores?num(valores[b]):''}" inputmode="decimal"></div>`;
   if(FORMAS_CAIXA.modelo(valores)<3) return `<div class="grid4">${campos.map(input).join('')}</div><p style="font-size:12px;color:var(--muted);">Fechamento antigo: mantidas as formas de pagamento originais, sem redistribuir valores.</p>`;
-  return FORMAS_CAIXA.grupos.map(g=>`<fieldset class="formas-grupo"><legend>${g.label}</legend><div class="grid4">${g.campos.map(input).join('')}</div></fieldset>`).join('')
+  return FORMAS_CAIXA.grupos.map(g=>`<fieldset class="formas-grupo"><legend>${g.label}</legend><div class="grid4">${g.campos.filter(b=>campos.includes(b)).map(input).join('')}</div></fieldset>`).join('')
+    + (campos.some(b=>!FORMAS_CAIXA.novos.includes(b))?`<fieldset class="formas-grupo"><legend>Valores históricos preservados</legend><div class="grid4">${campos.filter(b=>!FORMAS_CAIXA.novos.includes(b)).map(input).join('')}</div></fieldset>`:'')
     + `<p style="font-size:12px;color:var(--muted);">Informe cada comprovante uma única vez: na maquininha ou no link online. Os subtotais são calculados automaticamente.</p>`
     + consolidadoHtml([valores||{}], null, prefixo);
 }
@@ -384,7 +394,7 @@ function renderMeuCaixa(origem='balcao'){
       ${FORMAS_CAIXA.modelo(meu.declarado)>=3?consolidadoHtml([meu.declarado]):''}
       ${badge}
       <div class="sub" style="margin-top:8px;">✅ você fechou ${ui.oQue}. os valores estão travados — para mudar, peça uma alteração.</div>
-      <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="abrirAlteracao('${origem}')">✏️ Pedir correção</button>
+      ${podePedirCorrecaoCaixa(meu)?`<button type="button" class="btn-secundario" style="margin-top:10px;" onclick="abrirAlteracao('${origem}')">✏️ Pedir correção</button>`:'<p class="sub">Após 24 horas, solicite ao gerente da unidade que envie o pedido ao Master.</p>'}
       <div id="${ui.form}" class="hidden" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
         ${inputsBucketsHtml(ui.preAlt, meu.declarado)}
         <label>Motivo da alteração</label>
@@ -526,7 +536,7 @@ function renderFecharDia(){
   const el = document.getElementById('fechar-dia-corpo');
   if(diaFechado()){
     const f = ATUAL.fechamento; const okDif = Math.abs(num(f.diferenca)) <= 10;
-    el.innerHTML = `${consolidadoHtml((f.caixas||[]).map(c=>c.declarado),f.somaTotalDeclarado)}<div class="resumo">
+    el.innerHTML = `${consolidadoHtml(f.totalDeclarado?[f.totalDeclarado]:(f.caixas||[]).map(c=>c.declarado),f.somaTotalDeclarado)}<div class="resumo">
       <div class="linha"><span>Soma dos caixas</span><b>${fmtReal(f.somaTotalDeclarado)}</b></div>
       <div class="linha"><span>Faturado do dia</span><b>${fmtReal(f.faturado)}</b></div>
       <div class="linha total"><span>Diferença</span><b class="diferenca ${okDif?'ok':'bad'}">${fmtReal(f.diferenca)}</b></div>
@@ -574,9 +584,11 @@ async function carregarAprovacoes(){
     const antes = resumoValores(p.antes);
     const novo = resumoValores(p.novo);
     return `<div class="card">
-      <div class="linha1"><span>🧑 ${escapeHtml(p.operadorNome||p.operadorEmail||'operador')} · ${fmtData(p.data)}</span></div>
+      <div class="linha1"><span>${p.tipo==='fechamento'?'Fechamento do dia':'🧑 '+escapeHtml(p.operadorNome||p.operadorEmail||'operador')} · ${fmtData(p.data)}</span></div>
+      <div class="sub">Solicitado por ${escapeHtml(p.solicitadoPorEmail||'—')}</div>
       <div class="sub">de: ${antes}</div>
       <div class="sub">para: ${novo}</div>
+      ${p.tipo==='fechamento'?`<div class="sub">Observação proposta: ${escapeHtml(p.observacao||'—')}</div>`:''}
       ${p.motivo?`<div class="sub">motivo: ${escapeHtml(p.motivo)}</div>`:''}
       <div class="acoes" style="margin-top:8px;">
         <button type="button" class="btn-primary" style="padding:6px 12px;" onclick="decidirAlteracao('${p.id}',true)">✅ Aprovar</button>
@@ -607,7 +619,7 @@ async function carregarHistorico(){
     return `
     <div class="card">
       <div class="linha1">
-        <span>${fmtData(f.data)} · faturado ${fmtReal(f.faturado)} · declarado ${fmtReal(f.somaTotalDeclarado)}</span>
+        <button type="button" class="caixa-nome" data-historico-detalhe="${escapeHtml(f.id)}">${fmtData(f.data)} · faturado ${fmtReal(f.faturado)} · declarado ${fmtReal(f.somaTotalDeclarado)}<small>Ver detalhamento →</small></button>
         <span class="badge ${okDiferenca?'ok':'bad'}">dif. ${fmtReal(f.diferenca)}</span>
       </div>
       ${f.observacao?`<div class="sub">${escapeHtml(f.observacao)}</div>`:''}
@@ -616,12 +628,53 @@ async function carregarHistorico(){
   }).join('');
 }
 
+document.getElementById('lista-historico').addEventListener('click',ev=>{
+  const botao=ev.target.closest('[data-historico-detalhe]');
+  if(botao) abrirHistoricoDetalhe(botao.dataset.historicoDetalhe);
+});
+async function abrirHistoricoDetalhe(id){
+  const dialog=document.getElementById('historico-detalhe'),corpo=document.getElementById('historico-detalhe-corpo');
+  corpo.innerHTML='<p role="status">Carregando fechamento…</p>';
+  if(!dialog.open) dialog.showModal();
+  try{
+    const resp=await fetch('/api/saltiverso/fechamento/historico/'+encodeURIComponent(id));
+    const f=await resp.json();if(!resp.ok) throw new Error(f.error||'Não foi possível abrir o fechamento.');
+    document.getElementById('historico-detalhe-titulo').textContent='Fechamento · '+fmtData(f.data);
+    const auditoria=(f.historico||[]).slice().reverse().map(h=>`<div class="auditoria"><p>${escapeHtml(fmtInstante(h.em))} · ${escapeHtml(h.porEmail||h.porId||'—')}</p><p>Motivo: ${escapeHtml(h.motivo||'Não registrado no lançamento antigo.')}</p><p>Antes: ${resumoValores(h.antes?.totalDeclarado||{})}</p>${h.depois?.totalDeclarado?`<p>Depois: ${resumoValores(h.depois.totalDeclarado)}</p>`:''}<p>Observação anterior: ${escapeHtml(h.antes?.observacao||'—')}</p>${h.depois?`<p>Observação posterior: ${escapeHtml(h.depois.observacao||'—')}</p>`:''}</div>`).join('');
+    const podeSolicitar=gerenteDaUnidade(f.unidade);
+    corpo.innerHTML=`<p>${escapeHtml(f.unidadeNome||f.unidade)}<br>Lançado por ${escapeHtml(f.criadoPorEmail||'—')} em ${escapeHtml(fmtInstante(f.criadoEm))}</p>
+      <div class="resumo"><div class="linha"><span>Faturado registrado</span><b>${fmtReal(f.faturado)}</b></div><div class="linha"><span>Declarado</span><b>${fmtReal(f.somaTotalDeclarado)}</b></div><div class="linha total"><span>Diferença</span><b>${fmtReal(f.diferenca)}</b></div></div>
+      <h3>Formas de pagamento declaradas</h3><div class="resumo">${FORMAS_CAIXA.campos(f.totalDeclarado).map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}</span><b>${fmtReal(f.totalDeclarado[b])}</b></div>`).join('')}</div>
+      ${consolidadoHtml([f.totalDeclarado],f.somaTotalDeclarado)}
+      <p>Observação: ${escapeHtml(f.observacao||'—')}</p>
+      <h3>Caixas que compõem o fechamento</h3>${(f.caixas||[]).map(c=>`<details><summary>${rotuloCaixa(c.operadorNome||c.operadorEmail||'Operador',c.origem)} · ${fmtReal(c.somaDeclarado)}</summary><p>${resumoValores(c.declarado)}</p><p>Faturado: ${fmtReal(c.faturadoOperador)} · diferença: ${fmtReal(c.diferencaOperador)}</p></details>`).join('')||'<p>Registro antigo sem detalhamento individual dos caixas.</p>'}
+      ${(f.caixas||[]).length?`<p>Os caixas acima são a composição registrada. Correções no consolidado não redistribuem valores entre operadores. Ajuste em relação à soma dos caixas: ${fmtReal(num(f.somaTotalDeclarado)-FORMAS_CAIXA.somar({outros:(f.caixas||[]).reduce((s,c)=>s+num(c.somaDeclarado),0)}))}.</p>`:''}
+      <details><summary>Histórico de correções (${(f.historico||[]).length})</summary>${auditoria||'<p>Nenhuma correção registrada.</p>'}</details>
+      ${IS_MASTER||podeSolicitar?`<details id="historico-editar"><summary>${IS_MASTER?'Corrigir fechamento · Master':'Solicitar correção ao Master'}</summary><p>O faturamento original e os caixas individuais serão preservados. Toda correção exige motivo e fica auditada. Após 24 horas, somente o gerente da unidade pode solicitar.</p><form id="historico-form">${inputsBucketsHtml('hist',f.totalDeclarado)}<label for="historico-observacao">Observação do fechamento</label><textarea id="historico-observacao" maxlength="500">${escapeHtml(f.observacao||'')}</textarea><label for="historico-motivo">Motivo da correção (obrigatório)</label><textarea id="historico-motivo" required maxlength="500"></textarea><button type="submit" class="btn-primary" style="margin-top:12px">${IS_MASTER?'Salvar correção do fechamento':'Enviar solicitação ao Master'}</button></form></details>`:''}
+      <div id="historico-msg" class="msg hidden" role="status"></div>`;
+    document.getElementById('historico-form')?.addEventListener('submit',async ev=>{
+      ev.preventDefault();const btn=ev.currentTarget.querySelector('button'),msg=document.getElementById('historico-msg');
+      if(btn.disabled)return;btn.disabled=true;
+      try{
+        const body={totalDeclarado:lerBuckets('hist'),observacao:document.getElementById('historico-observacao').value,motivo:document.getElementById('historico-motivo').value.trim(),versaoEsperada:f.atualizadoEm||f.criadoEm||null};
+        if(!body.motivo)throw new Error('Informe o motivo da correção.');
+        const url=IS_MASTER?'/api/saltiverso/fechamento/'+encodeURIComponent(id):'/api/saltiverso/fechamento/historico/'+encodeURIComponent(id)+'/solicitar-alteracao';
+        const r=await fetch(url,{method:IS_MASTER?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const d=await r.json();if(!r.ok)throw new Error(d.error||'Não foi possível salvar.');
+        if(IS_MASTER){await carregarTudo();await abrirHistoricoDetalhe(id);const m=document.getElementById('historico-msg');m.className='msg ok';m.textContent='Correção salva com histórico preservado.';}
+        else{msg.className='msg ok';msg.textContent='Solicitação enviada ao Master. Nenhum valor foi alterado.';document.getElementById('historico-form').remove();}
+      }catch(err){msg.className='msg err';msg.textContent=err.message;}
+      finally{btn.disabled=false;}
+    });
+  }catch(err){corpo.innerHTML=`<p role="alert">${escapeHtml(err.message)}</p><button class="btn-secundario" id="historico-tentar">Tentar novamente</button>`;document.getElementById('historico-tentar').onclick=()=>abrirHistoricoDetalhe(id);}
+}
+
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();
   IS_MASTER = ME.role==='master';
-  PODE_APROVAR = IS_MASTER || !!ME.isAdmin;
+  PODE_APROVAR = IS_MASTER;
   const secoes = IS_MASTER ? ['parque-loja'] : (ME.permissions?.sections||[]);
 
   if(!secoes.includes('parque-loja')){
