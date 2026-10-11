@@ -137,6 +137,7 @@ const agenteAcoes = require('./agenteAcoes');
 const coworkApi = require('./coworkApi');
 const enderecoAntigo = require('./enderecoAntigo');
 const centralSubdominio = require('./centralSubdominio');
+const sessaoApps = require('./sessaoApps');
 const defesaChargeback = require('./defesaChargeback');
 const pagamentosArquivo = require('./pagamentosArquivo');
 const vigiaScript = require('./vigiaScript');
@@ -428,6 +429,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/acesso-unidade/registrar', '/api/acesso-unidade/sessao',
   '/api/meta/unidades-publico',
   '/api/meta/endereco',
+  '/api/auth/sessao-apps', '/api/auth/sair', '/sessao-apps.js',
   '/api/defesa-arquivo',
   '/api/refund-requests/publico',
   '/api/solicitacoes/publico',
@@ -552,6 +554,7 @@ if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
 }
 
 app.use(express.json({ limit: '2mb' }));
+sessaoApps.registrar(app, { auth, sessions });
 
 const PORT = process.env.PORT || 3000;
 
@@ -731,6 +734,7 @@ app.post('/api/auth/passkey/login/fim', async (req, res) => {
     LOGIN_FALHAS.delete(chaveTentativa);
     console.log(`[passkey] entrada por biometria: ${result.user.email} (${credencial.aparelho})`);
     await notificarEntradaUsuario(result.user,req,'biometria');
+    if (!result.user.precisaTrocarSenha) sessaoApps.gravar(req, res, result.token);
     res.json(result);
   } catch (err) {
     if (['COMPUTADOR_NOC_OBRIGATORIO','UNIDADE_NOC_NAO_AUTORIZADA'].includes(err.code)) return res.status(403).json({error:err.message,code:err.code});
@@ -869,6 +873,7 @@ app.post('/api/auth/login', async (req, res) => {
     });
     LOGIN_FALHAS.delete(chave);
     await notificarEntradaUsuario(result.user,req,'senha');
+    if (!result.user.precisaTrocarSenha) sessaoApps.gravar(req, res, result.token);
     res.json(result);
   } catch (err) {
     if (['COMPUTADOR_NOC_OBRIGATORIO','UNIDADE_NOC_NAO_AUTORIZADA'].includes(err.code)) return res.status(403).json({ error: err.message, code: err.code });
@@ -3329,10 +3334,6 @@ app.post('/api/noc-login/registrar', async (req, res) => {
 });
 app.use('/api', auth.requireAuth);
 app.post('/api/auth/atividade',async(req,res)=>res.json({ok:await sessions.atividadeHumana(req.sid)}));
-app.post('/api/auth/sair',async(req,res)=>{
-  if(req.sid) await sessions.encerrar(req.sid);
-  res.json({ok:true});
-});
 
 // ---------- DEFESA DE CHARGEBACK (ver defesaChargeback.js) ----------
 async function gerarDefesaAoConcluir(tarefa, { notificarMasters = true } = {}) {

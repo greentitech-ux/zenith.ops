@@ -20,7 +20,7 @@
     const d=await r.json();
     if(!r.ok) throw new Error(d.error || 'Não foi possível validar seu acesso. Entre novamente.');
     if(typeof d.permitido!=='boolean') throw new Error('Não foi possível validar seu perfil. Tente novamente.');
-    if(salvar) localStorage.setItem('authToken',token);
+    if(salvar) { localStorage.setItem('authToken',token); localStorage.removeItem('nopulso.sessaoAppsV1'); }
     // Destinos locais e fixos; não aceitar returnTo ou URL recebida no login.
     location.href=d.permitido ? '/atendimento/central' : '/atendimento/meu';
   }
@@ -42,4 +42,16 @@
   const marca=document.getElementById('portal-marca');
   if(window.beniboySVG) marca.innerHTML=window.beniboySVG(64);
   if(localStorage.getItem('authToken')) document.getElementById('portal-entrar').textContent='Continuar com meu acesso';
+  (async () => {
+    const botao = document.getElementById('portal-entrar');
+    botao.disabled = true;
+    try {
+      await window.sessaoAppsPronta;
+      if(!window.NoPulsoSessao?.habilitado) return;
+      const token = window.NoPulsoSessao?.restaurar ? await window.NoPulsoSessao.restaurar() : localStorage.getItem('authToken');
+      // Não tira a pessoa de uma conversa pública que ela já abriu.
+      if(token && !document.body.classList.contains('chat-publico-aberto')) await entrarCentral(token);
+    } catch(e) { avisar(e.message); }
+    finally { botao.disabled = false; }
+  })();
 })();

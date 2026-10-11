@@ -22,7 +22,7 @@
       const a=document.createElement('a');
       a.href=proprio.origin+'/';a.textContent=proprio.host;a.target='_blank';a.rel='noopener';a.style.color='var(--accent)';
       el.appendChild(a);
-      el.appendChild(document.createTextNode(' (entre de novo com seu usuário lá).'));
+      el.appendChild(document.createTextNode(' — seu login é compartilhado no mesmo navegador e perfil.'));
     }).catch(()=>{});
   };
   window.fecharAppBeniboy=function(){document.getElementById('overlay-app-beniboy').classList.add('hidden');};

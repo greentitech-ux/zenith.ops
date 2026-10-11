@@ -87,8 +87,10 @@
     return !f || (!f.elements.texto.value.trim() && !f.elements.anexo.files.length) || confirm('Há uma mensagem não enviada. Deseja sair desta conversa?');
   }
   document.querySelector('#voltar').onclick = () => { if (podeSairDaConversa()) listar(); };
-  document.querySelector('#sair').onclick = () => {
+  document.querySelector('#sair').onclick = async () => {
     if (!podeSairDaConversa()) return;
+    await window.sessaoAppsPronta;
+    if(window.NoPulsoSessao?.sair) return window.NoPulsoSessao.sair('/atendimento/entrar');
     localStorage.removeItem('authToken'); location.replace('/atendimento/entrar');
   };
   window.addEventListener('storage', e => {
