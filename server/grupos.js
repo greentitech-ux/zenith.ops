@@ -283,26 +283,41 @@ async function grupoDaUnidade(unidade) {
 }
 
 // bootstrap idempotente (chamado no boot, ver index.js): garante que a
-// unidade 'Saltiverso Patteo' tem um grupo cadastrado com as 4 formas de
-// pagamento do balcao (maquininha/dinheiro/pix/outros, mesmos BUCKETS de
-// saltiversoFechamento.js). Sem isso o fechamento do Saltiverso caia no
+// unidade 'Saltiverso Patteo' tem um grupo com as formas do balcão. Adiciona
+// as novas formas uma única vez, preservando Maquininha e demais campos
+// históricos. Sem isso o fechamento do Saltiverso caia no
 // bloco "Sem grupo definido" da tabela de Fechamentos, com as colunas
 // erradas (Adyen/Ifood/99Food - que nao existem pra ele) e nunca aparecia
-// separado por rede (GBE). So cria se NENHUM grupo ja cobre essa unidade -
+// separado por rede (GBE). Só cria um grupo se NENHUM já cobre essa unidade -
 // o Master continua livre pra editar/renomear depois em /grupos.html, isso
 // so garante que ela nao nasce sem grupo nenhum.
 async function ensureGrupoSaltiverso() {
   const todos = await list();
-  if (todos.some((g) => (g.unidades || []).includes('Saltiverso Patteo'))) return;
+  const existente = todos.find((g) => (g.unidades || []).includes('Saltiverso Patteo'));
+  const formas = require('./public/saltiverso-caixa-formas');
+  if (existente) {
+    // Migração aditiva e única da configuração, nunca dos fechamentos.
+    // Conserva campos, rótulos e demais ajustes personalizados pelo Master.
+    await db.runTransaction(async tx => {
+      const ref = COLLECTION.doc(existente.id), snap = await tx.get(ref);
+      const atual = snap.data();
+      if (!atual || atual.saltiversoFormasVersao >= 3) return;
+      const extras = atual.formasPagamentoExtras || [];
+      const faltantes = formas.novos.filter(campo => !extras.some(c=>c.campo===campo));
+      tx.update(ref, {formasPagamentoExtras:[...extras,...faltantes.map(campo=>({campo,label:formas.labels[campo]}))],saltiversoFormasVersao:3});
+    });
+    gruposCache.invalidar();
+    return;
+  }
   await create({
     nome: 'Saltiverso Patteo',
     unidades: ['Saltiverso Patteo'],
     formasPagamentoExtras: [
-      { label: 'Maquininha' }, { label: 'Dinheiro' }, { label: 'Pix' }, { label: 'Outros' },
+      ...formas.novos.map(campo=>({campo,label:formas.labels[campo]})), {campo:'maquininha',label:'Maquininha (legado)'},
     ],
     // Saltiverso nao conta caixa fisico nem tem maquininha Adyen integrada
     // (ver saltiversoFechamento.js) - as secoes fixas de sempre nao se
-    // aplicam, so os 4 baldes acima
+    // aplicam, só as formas acima
     caixaHabilitado: false,
     maquininhasHabilitado: false,
     saidasHabilitado: false,

@@ -17,6 +17,7 @@ const saltiversoVendas = require('./saltiversoVendas');
 const festas = require('./festas');
 const solicitacoes = require('./solicitacoes');
 const users = require('./users');
+const { randomUUID } = require('node:crypto');
 
 const COLLECTION = db.collection('saltiversoFechamentos');
 // caixas individuais: cada operador (login) fecha O SEU proprio caixa. Depois
@@ -46,12 +47,8 @@ function diaAnteriorISO(data) {
   return anterior.toISOString().slice(0, 10);
 }
 
-// os 4 "baldes" que o usuário descreveu como os comprovantes reais do fim
-// do dia: maquininha (débito+crédito juntos, o que a maquininha imprime),
-// dinheiro, pix (PixOnlineCNPJ) e outros (voucher/demais formas). O Faturado
-// automático é reagrupado nesses MESMOS 4 baldes (ver bucketsDoResumo) pra
-// comparar lado a lado com o que foi digitado manualmente
-const BUCKETS = ['maquininha', 'dinheiro', 'pix', 'outros'];
+const formasCaixa = require('./public/saltiverso-caixa-formas');
+const BUCKETS = formasCaixa.novos;
 
 // o MESMO operador pode ter dois caixas no mesmo dia: o do balcão (entradas
 // do parque + bebida/meia) e o de FESTA (sinal de reserva + recebimentos).
@@ -76,16 +73,16 @@ function docId(unidade, data) {
   return `${unidade}__${data}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
 
-// reagrupa o breakdown fino (dinheiro/pix/debito/credito/voucher, ver
-// parque.resumoDoDia/saltiversoVendas.resumoDoDia) nos 4 baldes do
-// fechamento
+// Vendas antigas registram Pix sem origem. O fechamento separa a declaração,
+// mas a UI compara os dois Pix juntos; nunca atribui uma origem retroativa.
 function bucketsDoResumo(resumo) {
   const pf = (resumo && resumo.porForma) || {};
   return {
-    maquininha: arred(num(pf.debito) + num(pf.credito)),
+    credito: arred(num(pf.credito)), debito: arred(num(pf.debito)), voucher: arred(num(pf.voucher)),
     dinheiro: arred(num(pf.dinheiro)),
     pix: arred(num(pf.pix)),
-    outros: arred(num(pf.voucher)),
+    linkCredito: arred(num(pf.linkCredito)), linkDebito: arred(num(pf.linkDebito)), linkPix: arred(num(pf.linkPix)),
+    outros: arred(num(pf.outros)),
   };
 }
 
@@ -119,9 +116,9 @@ function resultadoCategoria(diferenca) {
   return diferenca > 0 ? 'sobrando' : 'faltando';
 }
 
-function sanitizarTotalDeclarado(obj) {
+function sanitizarTotalDeclarado(obj, campos = formasCaixa.campos(obj)) {
   const out = {};
-  BUCKETS.forEach((b) => { out[b] = arred(Math.max(0, num(obj && obj[b]))); });
+  campos.forEach((b) => { out[b] = arred(Math.max(0, num(obj && obj[b]))); });
   return out;
 }
 
@@ -241,17 +238,23 @@ async function lancarCaixa({ unidade, unidadeNome, data, declarado, observacao, 
   const origemOk = normalizarOrigem(origem);
   const id = caixaDocId(unidade, data, operadorId, origemOk);
   if ((await CAIXAS.doc(id).get()).exists) throw new Error(`Você já fechou o seu caixa de ${ORIGEM_LABEL[origemOk]} hoje. Para mudar valores, peça uma alteração.`);
-  const declaradoOk = sanitizarTotalDeclarado(declarado);
-  const soma = arred(BUCKETS.reduce((s, b) => s + declaradoOk[b], 0));
+  const declaradoOk = validarCorrecaoDeclarado(declarado, formasCaixa.campos(declarado));
+  const soma = arred(formasCaixa.somar(declaradoOk));
   const faturados = await faturadoPorOperador(unidade, data);
   const meu = faturados.find((f) => f.operadorId === operadorId && f.origem === origemOk) || { faturado: 0, faturadoPorForma: sanitizarTotalDeclarado({}) };
+  const faturadoPorForma = Object.hasOwn(declaradoOk, 'maquininha') ? {
+    maquininha: arred(num(meu.faturadoPorForma.credito)+num(meu.faturadoPorForma.debito)),
+    dinheiro: num(meu.faturadoPorForma.dinheiro), pix: arred(num(meu.faturadoPorForma.pix)+num(meu.faturadoPorForma.pixcnpj)),
+    outros: arred(num(meu.faturadoPorForma.voucher)+num(meu.faturadoPorForma.outros)),
+  } : meu.faturadoPorForma;
   const diferenca = arred(soma - meu.faturado);
   const agora = new Date().toISOString();
   const registro = {
     id, unidade, unidadeNome: unidadeNome || unidade, data, origem: origemOk,
+    modeloFormas: formasCaixa.modelo(declaradoOk),
     operadorId, operadorEmail: operadorEmail || null, operadorNome: operadorNome || operadorEmail || null,
-    declarado: declaradoOk, somaDeclarado: soma,
-    faturadoOperador: meu.faturado, faturadoOperadorPorForma: meu.faturadoPorForma,
+    declarado: declaradoOk, somaDeclarado: soma, consolidadoDeclarado: formasCaixa.consolidar([declaradoOk]),
+    faturadoOperador: meu.faturado, faturadoOperadorPorForma: faturadoPorForma,
     diferencaOperador: diferenca,
     // resultado CATEGORICO (ok/sobrando/faltando) - é o único jeito que o
     // operador comum recebe de volta o "deu certo?" sem saber o faturado por
@@ -295,31 +298,34 @@ async function estadoDoDia(unidade, data) {
 }
 
 // trava anti-fraude: caixa lancado so muda por pedido de alteracao aprovado
-// pelo Master. So vale ANTES do dia fechar (depois, o Master corrige o dia).
+// pelo Master. Também vale após consolidar o dia: a aprovação sincroniza
+// o caixa e o consolidado, sem recalcular vendas históricas.
 async function solicitarAlteracaoCaixa(caixaId, { declarado, motivo, solicitadoPorId, solicitadoPorEmail, podeAlterarOutroCaixa = false }) {
-  const caixa = await getCaixa(caixaId);
-  if (!caixa) throw new Error('Caixa não encontrado.');
-  if (String(caixa.operadorId) !== String(solicitadoPorId) && !podeAlterarOutroCaixa) {
-    throw new Error('Você só pode pedir alteração do seu próprio caixa.');
-  }
-  if (await getOne(docId(caixa.unidade, caixa.data))) throw new Error('O dia já foi fechado — a alteração agora é feita pelo Master no fechamento do dia.');
-  const motivoOk = String(motivo || '').trim();
-  if (!motivoOk) throw new Error('Informe o motivo da alteração.');
-  const existentes = await CAIXA_EDICOES.where('caixaId', '==', caixaId).get();
-  if (existentes.docs.some((d) => d.data().status === 'PENDENTE')) throw new Error('Já existe um pedido de alteração pendente para este caixa.');
-  const novo = sanitizarTotalDeclarado(declarado);
-  const id = `${caixaId}__${Date.now()}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
-  const registro = {
-    id, caixaId, unidade: caixa.unidade, unidadeNome: caixa.unidadeNome, data: caixa.data,
-    operadorEmail: caixa.operadorEmail, operadorNome: caixa.operadorNome,
-    antes: caixa.declarado, novo,
-    motivo: motivoOk.slice(0, 500),
-    status: 'PENDENTE',
-    solicitadoPorId: solicitadoPorId || null, solicitadoPorEmail: solicitadoPorEmail || null,
-    criadoEm: new Date().toISOString(), decididoEm: null, decididoPorEmail: null,
-  };
-  await CAIXA_EDICOES.doc(id).set(registro);
-  return registro;
+  return db.runTransaction(async tx => {
+    const caixaSnap = await tx.get(CAIXAS.doc(caixaId));
+    const caixa = caixaSnap.exists ? caixaSnap.data() : null;
+    if (!caixa) throw new Error('Caixa não encontrado.');
+    if (String(caixa.operadorId) !== String(solicitadoPorId) && !podeAlterarOutroCaixa) {
+      throw new Error('Você só pode pedir alteração do seu próprio caixa.');
+    }
+    const motivoOk = String(motivo || '').trim();
+    if (!motivoOk) throw new Error('Informe o motivo da alteração.');
+    const existentes = await tx.get(CAIXA_EDICOES.where('caixaId', '==', caixaId));
+    if (existentes.docs.some((d) => d.data().status === 'PENDENTE')) throw new Error('Já existe um pedido de alteração pendente para este caixa.');
+    const novo = validarCorrecaoDeclarado(declarado, formasCaixa.campos(caixa.declarado));
+    const id = `${caixaId}__${randomUUID()}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const registro = {
+      id, caixaId, unidade: caixa.unidade, unidadeNome: caixa.unidadeNome, data: caixa.data,
+      operadorEmail: caixa.operadorEmail, operadorNome: caixa.operadorNome,
+      antes: caixa.declarado, novo, caixaAtualizadoEm: caixa.atualizadoEm || caixa.lancadoEm || null,
+      motivo: motivoOk.slice(0, 500),
+      status: 'PENDENTE',
+      solicitadoPorId: solicitadoPorId || null, solicitadoPorEmail: solicitadoPorEmail || null,
+      criadoEm: new Date().toISOString(), decididoEm: null, decididoPorEmail: null,
+    };
+    tx.set(CAIXA_EDICOES.doc(id), registro);
+    return registro;
+  });
 }
 
 async function listAlteracoesPendentes(unidade) {
@@ -331,27 +337,82 @@ async function listAlteracoesPendentes(unidade) {
 // Master aprova/rejeita. Ao aprovar, aplica o novo declarado no caixa (guarda
 // o antes no historico) e recalcula a diferenca do operador.
 async function decidirAlteracaoCaixa(edicaoId, { aprovado, porId, porEmail }) {
+  if (aprovado) return corrigirCaixa(null, {}, { porId, porEmail, edicaoId });
   const ref = CAIXA_EDICOES.doc(edicaoId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error('Pedido de alteração não encontrado.');
-  const ped = snap.data();
-  if (ped.status !== 'PENDENTE') throw new Error('Esse pedido já foi decidido.');
-  const agora = new Date().toISOString();
-  if (aprovado) {
-    const caixa = await getCaixa(ped.caixaId);
-    if (!caixa) throw new Error('Caixa não encontrado.');
-    const soma = arred(BUCKETS.reduce((s, b) => s + num(ped.novo[b]), 0));
-    const novaDiferenca = arred(soma - num(caixa.faturadoOperador));
-    await CAIXAS.doc(caixa.id).update({
-      declarado: ped.novo, somaDeclarado: soma,
-      diferencaOperador: novaDiferenca, resultado: resultadoCategoria(novaDiferenca),
-      historico: [...(caixa.historico || []), { antes: caixa.declarado, em: agora, porEmail: porEmail || null, motivo: ped.motivo }],
-      atualizadoEm: agora,
-    });
-    caixasCache.invalidar();
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new Error('Pedido de alteração não encontrado.');
+    const ped = snap.data();
+    if (ped.status !== 'PENDENTE') throw new Error('Esse pedido já foi decidido.');
+    const agora = new Date().toISOString();
+    tx.update(ref, { status: 'REJEITADO', decididoEm: agora, decididoPorId: porId || null, decididoPorEmail: porEmail || null });
+    return { ...ped, status: 'REJEITADO' };
+  });
+}
+
+function validarCorrecaoDeclarado(valores, campos) {
+  if (!valores || campos.some(b => !['number','string'].includes(typeof valores[b]) || String(valores[b]).trim() === '' || !Number.isFinite(Number(valores[b])) || Number(valores[b]) < 0 || Number(valores[b]) > Number.MAX_SAFE_INTEGER / 100)
+    || Object.keys(valores).some(b => !campos.includes(b))) throw new Error('Informe valores válidos nas formas de pagamento originais deste caixa.');
+  return sanitizarTotalDeclarado(valores, campos);
+}
+
+// Master direto ou decisão do pedido existente. A mesma transação guarda
+// auditoria, caixa e fotografia do dia; nenhum caminho altera o faturado.
+async function corrigirCaixa(caixaId, { declarado, motivo, versaoEsperada }, { porId, porEmail, edicaoId } = {}) {
+  if (!porId) throw new Error('Responsável pela correção não identificado.');
+  const resultado = await db.runTransaction(async (tx) => {
+    const pedidoRef = edicaoId ? CAIXA_EDICOES.doc(edicaoId) : null;
+    const pedidoSnap = pedidoRef ? await tx.get(pedidoRef) : null;
+    const pedido = pedidoSnap?.exists ? pedidoSnap.data() : null;
+    if (pedidoRef && (!pedido || pedido.status !== 'PENDENTE')) throw new Error('Pedido não encontrado ou já decidido.');
+    const ref = CAIXAS.doc(pedido ? pedido.caixaId : caixaId);
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new Error('Caixa não encontrado.');
+    const caixa = snap.data();
+    const esperado = pedido ? pedido.caixaAtualizadoEm : versaoEsperada;
+    const campos = formasCaixa.campos(caixa.declarado);
+    if ((esperado && esperado !== (caixa.atualizadoEm || caixa.lancadoEm)) || (pedido && campos.some(b => num(pedido.antes[b]) !== num(caixa.declarado[b])))) throw new Error('O caixa mudou depois deste pedido ou da abertura da tela. Atualize e revise os valores antes de corrigir.');
+    const novo = validarCorrecaoDeclarado(pedido ? pedido.novo : declarado, campos);
+    const motivoOk = String(pedido ? pedido.motivo : motivo || '').trim().slice(0, 500);
+    if (!motivoOk) throw new Error('Informe o motivo da correção.');
+    const diaRef = COLLECTION.doc(docId(caixa.unidade, caixa.data));
+    const diaSnap = await tx.get(diaRef);
+    const soma = arred(formasCaixa.somar(novo));
+    const diferenca = arred(soma - num(caixa.faturadoOperador));
+    const agora = new Date(Math.max(Date.now(), (Date.parse(caixa.atualizadoEm || caixa.lancadoEm) || 0) + 1)).toISOString();
+    const auditoria = { antes: caixa.declarado, depois: novo, em: agora, porId, porEmail: porEmail || null, motivo: motivoOk, pedidoId: edicaoId || null };
+    const patch = { declarado: novo, somaDeclarado: soma, consolidadoDeclarado: formasCaixa.consolidar([novo]), diferencaOperador: diferenca, resultado: resultadoCategoria(diferenca), historico: [...(caixa.historico || []), auditoria], atualizadoEm: agora };
+    let diaAtualizado = null;
+    if (diaSnap.exists) {
+      const dia = diaSnap.data();
+      const corresponde = c => c.operadorId === caixa.operadorId && normalizarOrigem(c.origem) === normalizarOrigem(caixa.origem);
+      if (!(dia.caixas || []).some(corresponde)) throw new Error('Este caixa não consta no consolidado. Revise o fechamento do dia antes de corrigir.');
+      // Aplica apenas o delta deste caixa; preserva correções anteriores
+      // feitas diretamente no consolidado pelo Master.
+      const camposDia = formasCaixa.uniao([dia.totalDeclarado, novo]);
+      const totalDeclarado = Object.fromEntries(camposDia.map(b => [b, arred(num(dia.totalDeclarado?.[b]) + num(novo[b]) - num(caixa.declarado[b]))]));
+      if (camposDia.some(b => totalDeclarado[b] < 0)) throw new Error('A correção conflita com os valores do dia consolidado. Revise o fechamento do dia.');
+      const somaTotalDeclarado = arred(formasCaixa.somar(totalDeclarado));
+      const patchDia = { totalDeclarado, somaTotalDeclarado, diferenca: arred(somaTotalDeclarado - num(dia.faturado)), atualizadoEm: agora,
+        caixas: dia.caixas.map(c => corresponde(c) ? { ...c, declarado: novo, somaDeclarado: soma, diferencaOperador: diferenca } : c),
+        historico: [...(dia.historico || []), { antes: { totalDeclarado: dia.totalDeclarado, diferenca: dia.diferenca }, depois: { totalDeclarado, somaTotalDeclarado }, em: agora, porId, porEmail: porEmail || null, motivo: motivoOk, caixaId: caixa.id, pedidoId: edicaoId || null }] };
+      patchDia.consolidadoDeclarado = formasCaixa.consolidar(patchDia.caixas.map(c=>c.declarado), somaTotalDeclarado);
+      tx.update(diaRef, patchDia);
+      diaAtualizado = { ...dia, ...patchDia };
+    }
+    tx.update(ref, patch);
+    if (pedidoRef) tx.update(pedidoRef, { status: 'APROVADO', decididoEm: agora, decididoPorId: porId, decididoPorEmail: porEmail || null });
+    return { caixa: { ...caixa, ...patch }, dia: diaAtualizado, pedido: pedido ? { ...pedido, status: 'APROVADO' } : null };
+  });
+  caixasCache.invalidar();
+  fechamentosCache.invalidar();
+  if (resultado.dia && Math.abs(resultado.dia.diferenca) > LIMITE_QUEBRA_SALTIVERSO) {
+    try {
+      const existente = (await solicitacoes.listAll()).some(s => s.tipo === 'quebra-caixa' && s.fechamentoId === resultado.dia.id);
+      if (!existente) await criarCardQuebra(resultado.dia);
+    } catch (err) { console.error('[saltiversoFechamento] falha ao atualizar alerta de correção:', err.message); }
   }
-  await ref.update({ status: aprovado ? 'APROVADO' : 'REJEITADO', decididoEm: agora, decididoPorId: porId || null, decididoPorEmail: porEmail || null });
-  return { ...ped, status: aprovado ? 'APROVADO' : 'REJEITADO' };
+  return resultado.pedido || resultado.caixa;
 }
 
 // "fechar o dia": consolida os caixas individuais. Bloqueia se ainda ha
@@ -375,7 +436,7 @@ async function fecharDia({ unidade, unidadeNome, data, observacao, criadoPorId, 
   const faturadoPorForma = estado.faturadoPorForma;
   const detalhe = estado.detalhe;
   const totalDeclaradoOk = {};
-  BUCKETS.forEach((b) => { totalDeclaradoOk[b] = arred(estado.caixas.reduce((s, c) => s + num(c.declarado[b]), 0)); });
+  formasCaixa.uniao(estado.caixas.map(c=>c.declarado)).forEach((b) => { totalDeclaradoOk[b] = arred(estado.caixas.reduce((s, c) => s + num(c.declarado[b]), 0)); });
   const somaTotalDeclarado = estado.somaCaixas;
   const diferenca = arred(somaTotalDeclarado - faturado);
 
@@ -384,13 +445,22 @@ async function fecharDia({ unidade, unidadeNome, data, observacao, criadoPorId, 
     id, unidade, unidadeNome: unidadeNome || unidade, data,
     faturado, faturadoPorForma, detalhe,
     totalDeclarado: totalDeclaradoOk, somaTotalDeclarado, diferenca,
+    consolidadoDeclarado: formasCaixa.consolidar(estado.caixas.map(c=>c.declarado), somaTotalDeclarado),
     // fotografia dos caixas que compuseram o dia (quem declarou o que)
     caixas: estado.caixas.map((c) => ({ operadorId: c.operadorId, operadorNome: c.operadorNome, operadorEmail: c.operadorEmail, origem: normalizarOrigem(c.origem), declarado: c.declarado, somaDeclarado: c.somaDeclarado, faturadoOperador: c.faturadoOperador, diferencaOperador: c.diferencaOperador })),
     observacao: observacao ? String(observacao).trim().slice(0, 500) : null,
     historico: [],
     criadoPorId, criadoPorEmail, criadoEm: agora, atualizadoEm: agora,
   };
-  await ref.set(registro);
+  await db.runTransaction(async tx => {
+    if ((await tx.get(ref)).exists) throw new Error('Esse dia já foi fechado. Atualize a tela.');
+    const atuais = await tx.get(CAIXAS.where('unidade', '==', unidade).where('data', '==', data));
+    if (atuais.docs.length !== estado.caixas.length || atuais.docs.some(d => {
+      const caixa = d.data(), anterior = estado.caixas.find(c=>c.id===caixa.id);
+      return !anterior || caixa.atualizadoEm !== anterior.atualizadoEm;
+    })) throw new Error('Um caixa foi corrigido durante a consolidação. Atualize a tela e confira novamente.');
+    tx.set(ref, registro);
+  });
   fechamentosCache.invalidar();
 
   // ticket automatico de Quebra de caixa quando a diferenca passa do limite
@@ -424,9 +494,10 @@ async function corrigirFechamento(id, { totalDeclarado, observacao }, { porId, p
   if (totalDeclarado !== undefined) {
     antes.totalDeclarado = atual.totalDeclarado;
     antes.diferenca = atual.diferenca;
-    patch.totalDeclarado = sanitizarTotalDeclarado(totalDeclarado);
-    patch.somaTotalDeclarado = arred(BUCKETS.reduce((s, b) => s + patch.totalDeclarado[b], 0));
+    patch.totalDeclarado = validarCorrecaoDeclarado(totalDeclarado, formasCaixa.campos(atual.totalDeclarado));
+    patch.somaTotalDeclarado = arred(formasCaixa.somar(patch.totalDeclarado));
     patch.diferenca = arred(patch.somaTotalDeclarado - atual.faturado);
+    patch.consolidadoDeclarado = formasCaixa.consolidar((atual.caixas||[]).map(c=>c.declarado), patch.somaTotalDeclarado);
   }
   if (observacao !== undefined) {
     antes.observacao = atual.observacao;
@@ -522,8 +593,8 @@ async function listAll() {
 // veio de outra coleção, so trata como mais um fechamento. Faturamento =
 // Faturado (calculado sozinho a partir do que já foi vendido no sistema),
 // Total Declarado = soma do que cada operador conferiu contra os
-// comprovantes físicos - os MESMOS 4 baldes (maquininha/dinheiro/pix/
-// outros) viram "Formas de pagamento" extras do grupo Saltiverso Patteo
+// comprovantes físicos - as formas novas e as históricas viram
+// "Formas de pagamento" extras do grupo Saltiverso Patteo
 // (ver grupos.ensureGrupoSaltiverso), pra tabela mostrar o breakdown certo
 // em vez de tudo somado numa coluna só
 function comoFechamento(f) {
@@ -559,6 +630,6 @@ module.exports = {
   listAll, comoFechamento,
   // caixas individuais por operador
   faturadoPorOperador, lancarCaixa, listCaixasDoDia, getCaixa, estadoDoDia,
-  solicitarAlteracaoCaixa, listAlteracoesPendentes, decidirAlteracaoCaixa,
+  solicitarAlteracaoCaixa, listAlteracoesPendentes, decidirAlteracaoCaixa, corrigirCaixa,
   historicoParaOperador, exigirDiaAnteriorFechado,
 };

@@ -76,8 +76,32 @@
   .fech-sucesso-card h2{font-size:18px;margin:0 0 7px;color:var(--text);}
   .fech-sucesso-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.45;}
   .fech-sucesso-card button{width:100%;margin-top:20px;background:var(--accent);color:#0b0d10;border:0;border-radius:9px;padding:12px;font:700 14px var(--sans);cursor:pointer;}
+  .caixa-nome{background:none;border:0;padding:4px 0;color:var(--accent);font:inherit;text-align:left;cursor:pointer;overflow-wrap:anywhere;}
+  .caixa-nome small{display:block;font-size:11px;color:var(--muted);margin-top:4px;}
+  .caixa-nome:hover{text-decoration:underline;}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;}
+  .caixa-dialog{width:min(720px,calc(100% - 24px));max-height:calc(100dvh - 24px);padding:20px;border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--text);overflow:auto;}
+  .caixa-dialog::backdrop{background:rgba(0,0,0,.65);}
+  .caixa-dialog-topo{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;}
+  .caixa-dialog h2{font-size:18px;overflow-wrap:anywhere;}
+  .caixa-dialog p{font-size:13px;color:var(--muted);overflow-wrap:anywhere;line-height:1.5;}
+  .caixa-dialog table{width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;}
+  .caixa-dialog th,.caixa-dialog td{padding:10px 4px;border-bottom:1px solid var(--line);text-align:right;overflow-wrap:anywhere;}
+  .caixa-dialog th:first-child,.caixa-dialog td:first-child{text-align:left;}
+  .caixa-dialog summary{cursor:pointer;color:var(--accent);padding:12px 0;font-weight:600;}
+  .caixa-dialog .auditoria{border-top:1px solid var(--line);padding:10px 0;}
+  .caixa-dialog button:disabled{opacity:.6;cursor:wait;}
+  .formas-grupo{border:1px solid var(--line);border-radius:10px;margin:12px 0;padding:12px;}
+  .formas-grupo legend{font-size:14px;font-weight:700;padding:0 6px;color:var(--text);}
+  .formas-grupo .grid4{gap:8px;}
+  .consolidado-caixa{margin:14px 0;border:1px solid var(--line);}
+  .consolidado-caixa h3{font-size:13px;margin:0 0 8px;color:var(--text);}
+  .consolidado-caixa .linha{gap:12px;flex-wrap:wrap;}
+  .consolidado-caixa .linha b{font-variant-numeric:tabular-nums;}
+  @media(max-width:440px){.caixa-dialog{padding:14px;}.caixa-dialog table{font-size:11px;}.caixa-dialog th,.caixa-dialog td{padding:10px 2px;}}
 </style>
 <script src="/tema.js"></script>
+<script src="/saltiverso-caixa-formas.js"></script>
 </head>
 <body>
 
@@ -167,6 +191,10 @@
   </div>
 </div>
 
+<dialog id="caixa-detalhe" class="caixa-dialog" aria-labelledby="caixa-detalhe-titulo">
+  <div class="caixa-dialog-topo"><h2 id="caixa-detalhe-titulo">Detalhamento do caixa</h2><button type="button" class="btn-secundario" onclick="document.getElementById('caixa-detalhe').close()">Fechar</button></div>
+  <div id="caixa-detalhe-corpo"></div>
+</dialog>
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -194,8 +222,8 @@ document.addEventListener('keydown', (ev)=>{
 
 
 const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
-const BUCKETS = ['maquininha','dinheiro','pix','outros'];
-const BUCKET_LABEL = { maquininha:'Maquininha', dinheiro:'Dinheiro', pix:'Pix', outros:'Outros' };
+const FORMAS_CAIXA = window.SaltiversoCaixaFormas;
+const BUCKET_LABEL = FORMAS_CAIXA.labels;
 
 let ME = null;
 let IS_MASTER = false;
@@ -243,7 +271,8 @@ const RESULTADO_INFO = {
 
 function renderFaturadoResumo(faturado, faturadoPorForma, detalhe){
   const el = document.getElementById('faturado-resumo');
-  const linhasBucket = BUCKETS.map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}</span><b>${fmtReal((faturadoPorForma||{})[b])}</b></div>`).join('');
+  const pares = {credito:'linkCredito',debito:'linkDebito',pix:'linkPix'};
+  const linhasBucket = FORMAS_CAIXA.campos(faturadoPorForma).filter(b=>!['pixcnpj',...Object.values(pares)].includes(b)).map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}${pares[b]?' (total das vendas)':''}</span><b>${fmtReal(num(faturadoPorForma?.[b])+num(faturadoPorForma?.[pares[b]])+(b==='pix'?num(faturadoPorForma?.pixcnpj):0))}</b></div>`).join('');
   const parqueTotal = detalhe && detalhe.parque ? detalhe.parque.total : 0;
   const vendasTotal = detalhe && detalhe.vendas ? detalhe.vendas.total : 0;
   const festasTotal = detalhe && detalhe.festas ? detalhe.festas.total : 0;
@@ -258,16 +287,34 @@ function renderFaturadoResumo(faturado, faturadoPorForma, detalhe){
 
 // baldes de input reutilizaveis (um form de caixa por vez)
 function inputsBucketsHtml(prefixo, valores){
-  return `<div class="grid4">
-    ${BUCKETS.map(b=>`<div><label style="margin-top:0;">${BUCKET_LABEL[b]}</label><input type="number" min="0" step="0.01" id="${prefixo}-${b}" value="${valores?(num(valores[b])||''):''}"></div>`).join('')}
-  </div>`;
+  const campos = FORMAS_CAIXA.campos(valores);
+  const input = b=>`<div><label for="${prefixo}-${b}" style="margin-top:10px;">${BUCKET_LABEL[b]}</label><input type="number" min="0" step="0.01" data-forma="${b}" data-prefixo="${prefixo}" id="${prefixo}-${b}" value="${valores?num(valores[b]):''}" inputmode="decimal"></div>`;
+  if(FORMAS_CAIXA.modelo(valores)<3) return `<div class="grid4">${campos.map(input).join('')}</div><p style="font-size:12px;color:var(--muted);">Fechamento antigo: mantidas as formas de pagamento originais, sem redistribuir valores.</p>`;
+  return FORMAS_CAIXA.grupos.map(g=>`<fieldset class="formas-grupo"><legend>${g.label}</legend><div class="grid4">${g.campos.map(input).join('')}</div></fieldset>`).join('')
+    + `<p style="font-size:12px;color:var(--muted);">Informe cada comprovante uma única vez: na maquininha ou no link online. Os subtotais são calculados automaticamente.</p>`
+    + consolidadoHtml([valores||{}], null, prefixo);
 }
+function consolidadoHtml(lista, total=null, prefixo=''){
+  const c=FORMAS_CAIXA.consolidar(lista,total);
+  const grupos=[...FORMAS_CAIXA.grupos,{id:'legado',label:'Legado sem classificação'},{id:'ajustes',label:'Ajustes do consolidado'}];
+  return `<div class="resumo consolidado-caixa" ${prefixo?`data-consolidado-prefixo="${prefixo}"`:''}><h3>Consolidado declarado</h3>${grupos.filter(g=>!['legado','ajustes'].includes(g.id)||c[g.id]!==0).map(g=>`<div class="linha"><span>${g.label}</span><b data-consolidado-grupo="${g.id}">${fmtReal(c[g.id])}</b></div>`).join('')}<div class="linha total"><span>Total geral</span><b data-consolidado-grupo="total">${fmtReal(c.total)}</b></div></div>`;
+}
+document.addEventListener('input',ev=>{
+  const prefixo=ev.target.dataset?.prefixo;
+  if(!prefixo) return;
+  const resumo=document.querySelector(`[data-consolidado-prefixo="${prefixo}"]`);
+  if(!resumo) return;
+  const valores={};document.querySelectorAll(`input[data-prefixo="${prefixo}"]`).forEach(el=>valores[el.dataset.forma]=num(el.value));
+  const c=FORMAS_CAIXA.consolidar([valores]);
+  resumo.querySelectorAll('[data-consolidado-grupo]').forEach(el=>el.textContent=fmtReal(c[el.dataset.consolidadoGrupo]));
+});
 function lerBuckets(prefixo){
-  const o = {}; BUCKETS.forEach(b=>{ o[b] = num(document.getElementById(`${prefixo}-${b}`).value); }); return o;
+  const o = {}; document.querySelectorAll(`input[data-prefixo="${prefixo}"]`).forEach(el=>{ if(!el.checkValidity()) throw new Error('Revise os valores: não podem ser negativos ou inválidos.'); o[el.dataset.forma]=num(el.value); }); return o;
 }
-function somaBuckets(o){ return BUCKETS.reduce((s,b)=>s+num(o[b]),0); }
+function somaBuckets(o){ return FORMAS_CAIXA.somar(o); }
 
 async function carregarTudo(){
+  document.getElementById('caixa-detalhe').close();
   const unidade = unidadeAtual();
   const data = dataAtual();
   if(!unidade || !data) return;
@@ -322,21 +369,22 @@ function renderMeuCaixa(origem='balcao'){
   const ui = CAIXA_UI[origem];
   const el = document.getElementById(ui.corpo);
   if(!el) return;
-  if(diaFechado()){ el.innerHTML = '<div class="sub">o dia já foi fechado. correções agora são feitas pelo Master no fechamento do dia.</div>'; return; }
   const meu = meuCaixa(origem);
+  if(diaFechado() && !meu){ el.innerHTML = '<div class="sub">O dia já foi fechado. Você não tem caixa lançado nesta data.</div>'; return; }
   if(meu){
     // ja fechou: mostra travado + solicitar alteracao. o resultado (ok/
     // sobrando/faltando) e sempre categorico aqui - nunca o valor exato da
     // diferenca nem o faturado, pra quem nao e gerente/master (ver
     // resultadoCategoria em saltiversoFechamento.js)
-    const linhas = BUCKETS.map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}</span><b>${fmtReal(meu.declarado[b])}</b></div>`).join('');
+    const linhas = FORMAS_CAIXA.campos(meu.declarado).map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}</span><b>${fmtReal(meu.declarado[b])}</b></div>`).join('');
     const ri = RESULTADO_INFO[meu.resultado];
     const badge = ri ? `<div class="msg ${ri.cls}" style="margin-top:8px;">${ri.texto}</div>` : '';
     el.innerHTML = `
       <div class="resumo">${linhas}<div class="linha total"><span>Total de ${ui.oQue}</span><b>${fmtReal(meu.somaDeclarado)}</b></div></div>
+      ${FORMAS_CAIXA.modelo(meu.declarado)>=3?consolidadoHtml([meu.declarado]):''}
       ${badge}
       <div class="sub" style="margin-top:8px;">✅ você fechou ${ui.oQue}. os valores estão travados — para mudar, peça uma alteração.</div>
-      <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="abrirAlteracao('${origem}')">✏️ Solicitar alteração</button>
+      <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="abrirAlteracao('${origem}')">✏️ Pedir correção</button>
       <div id="${ui.form}" class="hidden" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
         ${inputsBucketsHtml(ui.preAlt, meu.declarado)}
         <label>Motivo da alteração</label>
@@ -404,7 +452,8 @@ function renderCaixasDoDia(){
   const pendentes = ATUAL.pendentes || [];
   let html = caixas.map(c=>{
     const okDif = Math.abs(num(c.diferencaOperador)) <= 10;
-    return `<div class="card"><div class="linha1"><span>${rotuloCaixa(c.operadorNome||c.operadorEmail||'operador', c.origem)}</span><b>${fmtReal(c.somaDeclarado)}</b></div>
+    const nome = rotuloCaixa(c.operadorNome||c.operadorEmail||'operador', c.origem);
+    return `<div class="card"><div class="linha1">${IS_MASTER ? `<button type="button" class="caixa-nome" data-caixa-detalhe="${escapeHtml(c.id)}">${nome}<small>Ver fechamento →</small></button>` : `<span>${nome}</span>`}<b>${fmtReal(c.somaDeclarado)}</b></div>
       <div class="sub">faturado dele ${fmtReal(c.faturadoOperador)} · <span class="${okDif?'':'diferenca bad'}">dif. ${fmtReal(c.diferencaOperador)}</span></div></div>`;
   }).join('');
   if(pendentes.length){
@@ -413,11 +462,71 @@ function renderCaixasDoDia(){
   el.innerHTML = html || '<div class="empty">nenhum caixa fechado ainda hoje.</div>';
 }
 
+document.getElementById('lista-caixas').addEventListener('click', ev => {
+  const botao = ev.target.closest('[data-caixa-detalhe]');
+  if(botao) abrirDetalheCaixa(botao.dataset.caixaDetalhe);
+});
+function fmtInstante(valor){
+  const data = new Date(valor);
+  return valor && Number.isFinite(data.getTime()) ? data.toLocaleString('pt-BR', {timeZone:FUSO_BR}) : '—';
+}
+function resumoValores(valores){
+  return FORMAS_CAIXA.campos(valores).map(b=>`${BUCKET_LABEL[b]}: ${fmtReal((valores||{})[b])}`).join(' · ');
+}
+function abrirDetalheCaixa(id, aviso=''){
+  if(!IS_MASTER) return;
+  const caixa = (ATUAL?.caixas||[]).find(c=>c.id===id);
+  if(!caixa) return;
+  const dialog = document.getElementById('caixa-detalhe');
+  document.getElementById('caixa-detalhe-titulo').textContent = 'Fechamento · ' + (caixa.operadorNome||caixa.operadorEmail||'Operador');
+  const campos = FORMAS_CAIXA.campos(caixa.declarado);
+  const pixSeparado = campos.includes('pixcnpj');
+  const canaisSeparados = FORMAS_CAIXA.modelo(caixa.declarado)>=3;
+  const linhas = campos.map(b=>{
+    const semOrigem = canaisSeparados && ['credito','debito','pix','linkCredito','linkDebito','linkPix'].includes(b);
+    const esperado = semOrigem || (pixSeparado && ['pix','pixcnpj'].includes(b)) ? null : caixa.faturadoOperadorPorForma?.[b];
+    return `<tr><th scope="row">${BUCKET_LABEL[b]}</th><td>${fmtReal(caixa.declarado?.[b])}</td><td>${esperado==null?'—':fmtReal(esperado)}</td><td>${esperado==null?'—':fmtReal(num(caixa.declarado?.[b])-num(esperado))}</td></tr>`;
+  }).join('');
+  const historico = (caixa.historico||[]).slice().reverse().map(h=>`<div class="auditoria"><p>${escapeHtml(fmtInstante(h.em))} · ${escapeHtml(h.porEmail||h.porId||'Responsável não informado')}</p><p>Motivo: ${escapeHtml(h.motivo||'—')}</p><p>Antes: ${resumoValores(h.antes)}</p>${h.depois?`<p>Depois: ${resumoValores(h.depois)}</p>`:''}</div>`).join('');
+  document.getElementById('caixa-detalhe-corpo').innerHTML = `
+    <p>${escapeHtml(caixa.unidadeNome||caixa.unidade||unidadeAtual())} · ${escapeHtml(fmtData(caixa.data||dataAtual()))} · ${caixa.origem==='festa'?'Festa':'Balcão'}<br>${escapeHtml(caixa.operadorEmail||'')}<br>Fechado em ${escapeHtml(fmtInstante(caixa.lancadoEm))}</p>
+    <table><caption class="secao-titulo">Valores do fechamento</caption><thead><tr><th scope="col">Forma</th><th scope="col">Declarado</th><th scope="col">Faturado</th><th scope="col">Diferença</th></tr></thead><tbody>${linhas}<tr><th scope="row">Total</th><td><b>${fmtReal(caixa.somaDeclarado)}</b></td><td>${fmtReal(caixa.faturadoOperador)}</td><td class="diferenca ${Math.abs(num(caixa.diferencaOperador))<=10?'ok':'bad'}">${fmtReal(caixa.diferencaOperador)}</td></tr></tbody></table>
+    ${canaisSeparados?consolidadoHtml([caixa.declarado])+`<p>As vendas atuais não distinguem maquininha de link online. A comparação é conjunta por modalidade:</p>${[['credito','linkCredito'],['debito','linkDebito'],['pix','linkPix']].map(([b,l])=>`<p>${BUCKET_LABEL[b]} + ${BUCKET_LABEL[l]}: declarado ${fmtReal(num(caixa.declarado[b])+num(caixa.declarado[l]))} · faturado ${fmtReal(num(caixa.faturadoOperadorPorForma?.[b])+num(caixa.faturadoOperadorPorForma?.[l]))}.</p>`).join('')}`:pixSeparado?`<p>Pix + PIX CNPJ: declarado ${fmtReal(num(caixa.declarado.pix)+num(caixa.declarado.pixcnpj))} · faturado ${fmtReal(num(caixa.faturadoOperadorPorForma?.pix)+num(caixa.faturadoOperadorPorForma?.pixcnpj))}. As vendas não distinguem a origem do Pix; a comparação é conjunta.</p>`:'<p>Registro antigo preservado com as formas de pagamento originais.</p>'}
+    <p>Observação: ${escapeHtml(caixa.observacao||'Nenhuma observação registrada.')}</p>
+    <div id="caixa-correcao-msg" class="msg ${aviso?'ok':'hidden'}" role="status">${escapeHtml(aviso)}</div>
+    <details><summary>Corrigir este caixa · Master</summary>
+      <p>Altere somente os valores declarados. ${diaFechado()?'O dia já está fechado: o consolidado será atualizado junto com este caixa.':'O caixa será atualizado para a consolidação do dia.'} O faturamento não será alterado.</p>
+      <form id="caixa-correcao-form">${inputsBucketsHtml('correcao',caixa.declarado)}
+        <label for="caixa-correcao-motivo">Motivo da correção (obrigatório)</label><textarea id="caixa-correcao-motivo" required maxlength="500" rows="3"></textarea>
+        <button type="submit" class="btn-primary" style="width:100%;margin-top:12px;">Salvar correção</button>
+      </form>
+    </details>
+    <details><summary>Histórico de correções (${(caixa.historico||[]).length})</summary>${historico||'<p>Nenhuma correção realizada.</p>'}</details>`;
+  document.getElementById('caixa-correcao-form').addEventListener('submit', async ev=>{
+    ev.preventDefault();
+    const botao = ev.currentTarget.querySelector('button');
+    if(botao.disabled) return;
+    const msg = document.getElementById('caixa-correcao-msg');
+    const motivo = document.getElementById('caixa-correcao-motivo').value.trim();
+    if(!motivo){msg.className='msg err';msg.textContent='Informe o motivo da correção.';return;}
+    botao.disabled=true;botao.textContent='Salvando…';
+    try{
+      const resp = await fetch(`/api/saltiverso/fechamento/caixa/${encodeURIComponent(caixa.id)}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({declarado:lerBuckets('correcao'),motivo,versaoEsperada:caixa.atualizadoEm||caixa.lancadoEm})});
+      const data = await resp.json();
+      if(!resp.ok) throw new Error(data.error||'Não foi possível corrigir o caixa.');
+      await carregarTudo();
+      abrirDetalheCaixa(caixa.id,'Correção salva. Valores e histórico atualizados.');
+    }catch(err){msg.className='msg err';msg.textContent=err.message;}
+    finally{botao.disabled=false;botao.textContent='Salvar correção';}
+  });
+  if(!dialog.open) dialog.showModal();
+}
+
 function renderFecharDia(){
   const el = document.getElementById('fechar-dia-corpo');
   if(diaFechado()){
     const f = ATUAL.fechamento; const okDif = Math.abs(num(f.diferenca)) <= 10;
-    el.innerHTML = `<div class="resumo">
+    el.innerHTML = `${consolidadoHtml((f.caixas||[]).map(c=>c.declarado),f.somaTotalDeclarado)}<div class="resumo">
       <div class="linha"><span>Soma dos caixas</span><b>${fmtReal(f.somaTotalDeclarado)}</b></div>
       <div class="linha"><span>Faturado do dia</span><b>${fmtReal(f.faturado)}</b></div>
       <div class="linha total"><span>Diferença</span><b class="diferenca ${okDif?'ok':'bad'}">${fmtReal(f.diferenca)}</b></div>
@@ -426,7 +535,7 @@ function renderFecharDia(){
   }
   const pendentes = ATUAL.pendentes || [];
   const soma = num(ATUAL.somaCaixas), dif = num(ATUAL.diferencaPrevia);
-  el.innerHTML = `<div class="resumo">
+  el.innerHTML = `${consolidadoHtml((ATUAL.caixas||[]).map(c=>c.declarado),soma)}<div class="resumo">
     <div class="linha"><span>Soma dos caixas (${(ATUAL.caixas||[]).length})</span><b>${fmtReal(soma)}</b></div>
     <div class="linha"><span>Faturado do dia</span><b>${fmtReal(ATUAL.faturado)}</b></div>
     <div class="linha total"><span>Diferença prévia</span><b class="diferenca ${Math.abs(dif)<=10?'ok':'bad'}">${fmtReal(dif)}</b></div>
@@ -462,8 +571,8 @@ async function carregarAprovacoes(){
   document.getElementById('painel-aprovacoes').classList.toggle('hidden', !lista.length);
   if(!lista.length){ el.innerHTML=''; return; }
   el.innerHTML = lista.map(p=>{
-    const antes = BUCKETS.map(b=>`${BUCKET_LABEL[b]} ${fmtReal(p.antes[b])}`).join(' · ');
-    const novo = BUCKETS.map(b=>`${BUCKET_LABEL[b]} ${fmtReal(p.novo[b])}`).join(' · ');
+    const antes = resumoValores(p.antes);
+    const novo = resumoValores(p.novo);
     return `<div class="card">
       <div class="linha1"><span>🧑 ${escapeHtml(p.operadorNome||p.operadorEmail||'operador')} · ${fmtData(p.data)}</span></div>
       <div class="sub">de: ${antes}</div>
