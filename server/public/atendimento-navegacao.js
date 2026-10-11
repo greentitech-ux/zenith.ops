@@ -1,7 +1,7 @@
 'use strict';
 (function () {
-  // Links não são autorização: a origem de destino exige a própria sessão.
-  // Nenhum dado do usuário entra no endereço ou é transmitido entre abas.
+  // O destino recupera a mesma sessão pelo cookie HttpOnly. Nenhum token,
+  // senha ou dado pessoal entra no link ou em mensagens entre janelas.
   const seletores = '[data-area-destino]';
   const estilo = document.createElement('style');
   estilo.textContent = `${seletores}[hidden]{display:none!important}`;
@@ -16,6 +16,8 @@
     } catch (_) { return null; }
   }
   async function preparar() {
+    await window.sessaoAppsPronta;
+    if(window.NoPulsoSessao?.restaurar) await window.NoPulsoSessao.restaurar();
     const links = [...document.querySelectorAll(seletores)];
     links.forEach(ocultar);
     const token = localStorage.getItem('authToken');
@@ -31,7 +33,7 @@
         const href = enderecoSeguro(d.enderecos?.[tipo], tipo);
         if (!href) continue;
         a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer';
-        a.title = 'Abre em outra aba. Seu atendimento permanece aberto; o destino valida seu acesso.';
+        a.title = 'Abre em outra aba com o mesmo login, neste navegador. Seu atendimento permanece aberto.';
         a.hidden = false;
       }
     } catch (_) { /* Sem validação, nenhum atalho é liberado. */ }

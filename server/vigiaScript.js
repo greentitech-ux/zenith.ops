@@ -70,7 +70,8 @@
 //      Windows antigo, servidor, HOST e VMs continuam deliberadamente fora.
 // 148: define nome e logo amarela na própria política do app, inclusive para
 //      instalações antigas com ícone genérico. Preserva URL e identidade.
-const VERSAO_VIGIA = 148;
+// 149: instala NoPulso e Atendimento no mesmo navegador, ambos com atalho no Desktop.
+const VERSAO_VIGIA = 149;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 const CENTRAL_BENIBOY_URL = `https://${String(process.env.ATENDIMENTO_HOST || 'atendimento.nopulso.com.br').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')}/atendimento/central`;
@@ -79,6 +80,8 @@ const ICONE_BENIBOY = MANIFESTO_BENIBOY.icons.find(icone => icone.sizes === '192
 // Lido uma vez no processo, sem download nem leitura de banco por máquina.
 const ICONE_BENIBOY_HASH = require('crypto').createHash('sha256').update(require('fs').readFileSync(require('path').join(__dirname, 'public', ICONE_BENIBOY.src))).digest('hex');
 const IDENTIDADE_BENIBOY = JSON.stringify({ custom_name: MANIFESTO_BENIBOY.name, custom_icon: { url: new URL(ICONE_BENIBOY.src, CENTRAL_BENIBOY_URL).href, hash: ICONE_BENIBOY_HASH } }).slice(1, -1);
+const ICONE_NOPULSO_HASH = require('crypto').createHash('sha256').update(require('fs').readFileSync(require('path').join(__dirname, 'public', 'icon-192.png'))).digest('hex');
+const APP_NOPULSO_POLITICA = JSON.stringify({ url: APP_BASE_URL + '/', create_desktop_shortcut: true, default_launch_container: 'window', custom_name: 'NoPulso', custom_icon: { url: APP_BASE_URL + '/icon-192.png', hash: ICONE_NOPULSO_HASH } });
 
 // qual pagina cada tipo de computador abre - mesmo mapeamento client-side
 // de loja-status.html (paginaDoTipo), usado so pra montar a URL que o
@@ -312,8 +315,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '# a tela de atendimento, nao o app operacional principal do NoPulso.',
     '# Aqui e o mesmo resultado sem clique: a politica WebAppInstallForceList do',
     '# Chrome/Edge (HKCU, vale sem dominio) manda o navegador instalar o PWA',
-    '# dessa URL na proxima abertura. O atalho só é solicitado quando não existe outro',
-    '# no Desktop; NUNCA roda na instância de boot (SYSTEM não tem perfil).',
+    '# dos dois apps na proxima abertura, ambos com atalho na Area de Trabalho.',
+    '# NUNCA roda na instancia de boot (SYSTEM nao tem perfil).',
     'function Instalar-SuporteNoPulso {',
     '  if ($Servico -or $NaoInstalarAppNoPulso) { return }',
     '  $urlApp = "' + CENTRAL_BENIBOY_URL + '"',
@@ -342,11 +345,15 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '    foreach ($duplicado in @($atalhosSuporte | Select-Object -Skip 1)) { try { Remove-Item -LiteralPath $duplicado.FullName -Force -ErrorAction Stop; Escrever-Log "Suporte NoPulso: atalho duplicado removido: $($duplicado.Name)" } catch { Escrever-Log "Suporte NoPulso: não consegui remover atalho duplicado $($duplicado.Name): $($_.Exception.Message)" } }',
     '    $atalhosSuporte = @($atalhosSuporte | Select-Object -First 1)',
     '  }',
-    '  $criarAtalho = ($atalhosSuporte.Count -eq 0)',
-    '  # 2) Chrome/Edge só podem criar o ícone se ele ainda não existir.',
+    '  # 2) Os DOIS atalhos fazem parte da politica padrao, inclusive em atualizacoes.',
+    '  # Um atalho legado encontrado nao pode desativar a criacao do app correto.',
     '  # custom_icon também corrige o ícone das instalações já existentes (Chrome/Edge 112+).',
     '  # A URL e o id do manifesto não mudam: não instalar outro app para trocar a marca.',
-    '  $politica = \'[{"url":"\' + $urlApp + \'","create_desktop_shortcut":\' + $(if ($criarAtalho) { "true" } else { "false" }) + \',"default_launch_container":"window",' + IDENTIDADE_BENIBOY + '}]\'',
+    '  $appsNoPulso = \'[{"url":"\' + $urlApp + \'","create_desktop_shortcut":true,"default_launch_container":"window",' + IDENTIDADE_BENIBOY + '},' + APP_NOPULSO_POLITICA + ']\' | ConvertFrom-Json',
+    '  # Os dois apps precisam do MESMO navegador/perfil para compartilhar o login.',
+    '  $navegadorApps = "Google\\Chrome"',
+    '  if (-not ((Test-Path "${env:ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe") -or (Test-Path "${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe") -or (Test-Path "$env:LOCALAPPDATA\\Google\\Chrome\\Application\\chrome.exe"))) { $navegadorApps = "Microsoft\\Edge" }',
+    '  if ($atalhosSuporte.Count -gt 0) { try { $shellApp = New-Object -ComObject WScript.Shell; $alvoApp = $shellApp.CreateShortcut($atalhosSuporte[0].FullName).TargetPath; if ($alvoApp -match "msedge") { $navegadorApps = "Microsoft\\Edge" } elseif ($alvoApp -match "chrome") { $navegadorApps = "Google\\Chrome" } } catch {} }',
     // -ErrorAction Stop NAO e detalhe: sem ele, New-Item e New-ItemProperty
     // falham com erro NAO-TERMINANTE, que try/catch nao pega. O catch abaixo
     // era decoracao - o erro escapava e o Windows despejava um bloco vermelho
@@ -357,17 +364,21 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     // leitura. Nao ha o que consertar na maquina - o app so nao se instala
     // sozinho, e o resto do NOCZenith segue normal.
     '  $okPolitica = 0',
-    '  foreach ($raiz in @("HKCU:\\Software\\Policies\\Google\\Chrome", "HKCU:\\Software\\Policies\\Microsoft\\Edge")) {',
+    '  foreach ($raiz in @("HKCU:\\Software\\Policies\\$navegadorApps")) {',
     '    try {',
     '      if (-not (Test-Path $raiz)) { New-Item -Path $raiz -Force -ErrorAction Stop | Out-Null }',
+    '      # Preserva apps de terceiros. JSON invalido aborta sem sobrescrever a politica.',
+    '      $anteriorApps = (Get-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -ErrorAction SilentlyContinue).WebAppInstallForceList',
+    '      $preservados = @(); if ($anteriorApps) { $preservados = @($anteriorApps | ConvertFrom-Json -ErrorAction Stop | Where-Object { @($appsNoPulso | ForEach-Object { $_.url }) -notcontains $_.url }) }',
+    '      $politica = ConvertTo-Json -InputObject @($preservados + $appsNoPulso) -Depth 8 -Compress',
     '      New-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -Value $politica -PropertyType String -Force -ErrorAction Stop | Out-Null',
     '      $okPolitica++',
     '    } catch { Escrever-Log "Nao consegui gravar a politica do app em ${raiz}: $($_.Exception.Message)" }',
     '  }',
     // dizer "gravada" quando nada foi gravado e' pior que nao dizer nada: o log
     // e' o unico lugar onde se descobre por que o icone nunca apareceu
-    '  if ($okPolitica -gt 0) { Escrever-Log "Suporte NoPulso: política gravada em $okPolitica navegador(es) ($urlApp) - $([string]$(if ($criarAtalho) { "cria o atalho na próxima abertura" } else { "atalho existente preservado" }))."; Set-Content -Path (Join-Path $env:LOCALAPPDATA "NOCZenith\\central-suporte-gerenciada.ativo") -Value $urlApp -Force -ErrorAction SilentlyContinue }',
-    '  else { Escrever-Log "Suporte NoPulso: nenhum navegador aceitou a politica (maquina gerenciada bloqueia HKCU\\Software\\Policies). O icone tem de ser criado na mao, em Chrome > Instalar app." }',
+    '  if ($okPolitica -gt 0) { Escrever-Log "NoPulso (icone preto) e Atendimento NoPulso (icone amarelo): politica gravada no mesmo navegador ($navegadorApps)."; Set-Content -Path (Join-Path $env:LOCALAPPDATA "NOCZenith\\central-suporte-gerenciada.ativo") -Value $urlApp -Force -ErrorAction SilentlyContinue }',
+    '  else { throw "Nao foi possivel configurar os dois apps na Area de Trabalho. Verifique a permissao de HKCU\\Software\\Policies; o agente tentara novamente sem marcar esta versao como instalada." }',
     '}',
     '',
     // Servidor nao precisa de um PWA nem de icone na area de trabalho. So
@@ -387,7 +398,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '      $registroPolitica = Get-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -ErrorAction SilentlyContinue',
     '      $politica = [string]$registroPolitica.WebAppInstallForceList',
     '      if ($politica -like "*$urlApp*") {',
-    '        Remove-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -Force -ErrorAction Stop',
+    '        $outrosApps = @($politica | ConvertFrom-Json -ErrorAction Stop | Where-Object { $_.url -ne $urlApp })',
+    '        if ($outrosApps.Count -gt 0) { New-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -Value (ConvertTo-Json -InputObject $outrosApps -Depth 8 -Compress) -PropertyType String -Force -ErrorAction Stop | Out-Null }',
+    '        else { Remove-ItemProperty -Path $raiz -Name "WebAppInstallForceList" -Force -ErrorAction Stop }',
     '        $eraGerenciado = $true',
     '        Escrever-Log "Infraestrutura: politica de instalacao automatica do Suporte NoPulso removida em $raiz."',
     '      }',

@@ -1,5 +1,5 @@
 // Central Beniboy em origem própria. O host separa a Central do NoPulso
-// instalado no www, sem transportar sessão, token ou permissões entre eles.
+// instalado no www. A sessão é compartilhada por sessaoApps.js, sem token em URL.
 const HOST_PADRAO = 'atendimento.nopulso.com.br';
 
 function hostAtendimento() {

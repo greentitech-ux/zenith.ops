@@ -14,6 +14,14 @@
 (function () {
   if (window.__zenithTema) return;
   window.__zenithTema = true;
+  // Carregado em todas as telas, antes dos wrappers de fetch das páginas.
+  window.NoPulsoSessao = { requisitar: window.fetch.bind(window) };
+  window.sessaoAppsPronta = new Promise(function (resolve) {
+    var script = document.createElement('script');
+    script.src = '/sessao-apps.js';
+    script.onload = script.onerror = function () { resolve(); };
+    document.head.appendChild(script);
+  });
   // Retira só marcadores do portal de unidade descontinuado. O login normal fica intacto.
   try {
     localStorage.removeItem('nopulso.unidade');

@@ -307,6 +307,11 @@ function paginaInicial(me){
 }
 
 async function boot(){
+  const botaoLogin = document.getElementById('auth-btn');
+  botaoLogin.disabled = true;
+  await window.sessaoAppsPronta;
+  if(window.NoPulsoSessao?.restaurar) AUTH_TOKEN = await window.NoPulsoSessao.restaurar();
+  botaoLogin.disabled = false;
   if(!AUTH_TOKEN) return;
   try{
     let res = await fetch('/api/me', { headers: { Authorization: 'Bearer '+AUTH_TOKEN } });
@@ -339,6 +344,7 @@ document.getElementById('auth-form').addEventListener('submit', async (e)=>{
     }
     if(!res.ok) throw new Error(data.error || 'Não foi possível entrar.');
     localStorage.setItem('authToken', data.token);
+    localStorage.removeItem('nopulso.sessaoAppsV1');
     registrarLoginNoTerminal(data);
     if(data.user && data.user.precisaTrocarSenha){
       mostrarTrocarSenha(data.token, senhaDigitada);
@@ -442,6 +448,7 @@ async function entrarComBiometria(){
     const d2 = await r2.json();
     if(!r2.ok) throw new Error(d2.error || 'Não consegui entrar com a biometria.');
     localStorage.setItem('authToken', d2.token);
+    localStorage.removeItem('nopulso.sessaoAppsV1');
     registrarLoginNoTerminal(d2);
     location.href = paginaInicial(d2.user);
   }catch(err){

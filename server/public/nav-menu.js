@@ -436,6 +436,7 @@
     nav.querySelector('#nmz-fechar').addEventListener('click', fechar);
     nav.querySelector('#nmz-busca').addEventListener('input', (ev) => filtrarMenu(ev.target.value));
     nav.querySelector('#nmz-sair').addEventListener('click', () => {
+      if (window.NoPulsoSessao?.sair) return window.NoPulsoSessao.sair('/');
       if (typeof window.logout === 'function') return window.logout();
       localStorage.removeItem('authToken');
       location.href = '/';
