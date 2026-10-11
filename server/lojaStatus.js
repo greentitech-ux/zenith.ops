@@ -1865,13 +1865,22 @@ async function diagnosticoPapelDeParede() {
 // a toa quando ja existe
 async function garantirAgentToken(codigo, posto) {
   const id = docIdFor(codigo, posto);
-  const snap = await COLLECTION.doc(id).get();
-  if (!snap.exists) throw new Error('Computador não encontrado.');
-  const atual = snap.data();
+  // O espelho é a fonte corrente desta instância. Consultar o documento aqui
+  // fazia cada download do agente pagar uma leitura, embora o token já esteja
+  // nele desde o cadastro. A carga inicial continua garantindo existência.
+  let atual = (await garantirEspelho()).get(id);
+  // Compatibilidade para um cadastro feito por fora deste processo entre duas
+  // recargas do espelho: é raro e merece a leitura pontual, não uma coleção.
+  if (!atual) {
+    const snap = await COLLECTION.doc(id).get();
+    if (!snap.exists) throw new Error('Computador não encontrado.');
+    atual = snap.data();
+    aplicarNoEspelho(id, atual);
+  }
   if (atual.agentToken) return atual.agentToken;
   const token = gerarAgentToken();
   await COLLECTION.doc(id).set({ agentToken: token }, { merge: true });
-  cache.invalidar();
+  espelharEscrita(id, { agentToken: token });
   return token;
 }
 
@@ -2530,8 +2539,16 @@ async function atualizarIpLocal(codigo, posto, ip, token) {
   const id = docIdFor(codigo, posto);
   const limpo = String(ip || '').trim().slice(0, 45);
   if (!limpo) throw new Error('IP inválido.');
-  const snap = await COLLECTION.doc(id).get();
-  const atual = snap.exists ? snap.data() : null;
+  // O agente chama esta rota repetidamente. O espelho já contém token, IP e
+  // histórico do mesmo documento; reler o Firestore antes de cada set era
+  // custo puro. A carga inicial continua sendo a barreira de existência.
+  let atual = (await garantirEspelho()).get(id) || null;
+  if (!atual) {
+    const snap = await COLLECTION.doc(id).get();
+    if (!snap.exists) throw new Error('Computador não encontrado.');
+    atual = snap.data();
+    aplicarNoEspelho(id, atual);
+  }
   exigirTokenSeTiver(atual, token);
   const patch = { codigo, posto, ipLocal: limpo, ipLocalEm: Date.now() };
   // IP local mudou: entra no mesmo historico do IP publico (tipo 'local')
