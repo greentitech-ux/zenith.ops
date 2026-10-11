@@ -1445,7 +1445,7 @@ async function editarPerfilVisual(id){
   document.getElementById('acoes-lista').innerHTML = `
     <div class="master-nota">Escolha a aparência deste acesso. Isto não altera permissões, empresa, cargos nem sessões.</div>
     <button type="button" class="perfil-opcao ${!u.perfilVisual?'selecionado':''}" onclick="salvarPerfilVisual('${u.id}',null)"><strong>Visual padrão</strong><small>Usa o design geral do NoPulso em todas as telas.</small></button>
-    <button type="button" class="perfil-opcao ${u.perfilVisual==='saltiverso-rayana'?'selecionado':''}" onclick="salvarPerfilVisual('${u.id}','saltiverso-rayana')"><strong>Saltiverso · Rayana</strong><small>Mostra a arte pessoal somente no balcão Saltiverso, após o login desse acesso.</small></button>
+    <button type="button" class="perfil-opcao ${u.perfilVisual==='saltiverso-rayana'?'selecionado':''}" onclick="salvarPerfilVisual('${u.id}','saltiverso-rayana')"><strong>Visão Personalizada</strong><small>Mostra a arte pessoal somente no balcão Saltiverso, após o login desse acesso.</small></button>
     <button type="button" onclick="abrirAcoes('${u.id}')">← Voltar às ações</button>`;
   document.getElementById('acoes-overlay').classList.add('show');
 }
