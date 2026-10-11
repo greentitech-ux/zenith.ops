@@ -3864,14 +3864,17 @@ const JANELA_REINICIO_MS = 8 * 60 * 1000;
 // internet/computador da loja" mesmo tendo sido o próprio NOC quem pediu o
 // reinício: afirmava como causa justamente o que a gente sabia ser falso.
 async function marcarReinicioComandado(codigo, posto, origem) {
-  await COLLECTION.doc(docIdFor(codigo, posto)).set({
+  const id = docIdFor(codigo, posto);
+  const patch = {
     reinicioComandadoEm: Date.now(), reinicioNaoVoltouAvisado: false,
     // Distingue uma reinicialização manual da rotina agendada. Só a segunda
     // pode desligar o próprio agendamento caso a estação não volte.
     reinicioComandadoOrigem: origem || null,
-  }, { merge: true });
-  invalidarEspelho();
-  cache.invalidar();
+  };
+  await COLLECTION.doc(id).set(patch, { merge: true });
+  // O alvo e o patch são conhecidos. Invalidar aqui provocava uma leitura da
+  // coleção inteira no próximo poll do NOC para refletir três campos.
+  espelharEscrita(id, patch);
 }
 
 async function enfileirarComandoEmAlvos(alvos, comando, opcoes) {
