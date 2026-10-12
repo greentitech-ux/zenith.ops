@@ -106,6 +106,7 @@ const ocrUso = require('./ocrUso');
 const documentoIdentidadeOcr = require('./documentoIdentidadeOcr');
 const rhCamposConfig = require('./rhCamposConfig');
 const parque = require('./parque');
+const parqueVendasFuturas = require('./parqueVendasFuturas');
 const festas = require('./festas');
 const mensalistas = require('./mensalistas');
 const termoResponsabilidade = require('./termoResponsabilidade');
@@ -10474,9 +10475,47 @@ app.get('/api/parque/pulseiras/painel', requireAnySection('parque', 'parque-chec
   });
 });
 
+function gerenteVendasFuturas(req, res, next) {
+  if (!req.isMaster && req.user?.cargo !== 'gerente') return res.status(403).json({ error: 'Vendas futuras são exclusivas da gerente da unidade e do Master.' });
+  next();
+}
+function dadosPublicosVendaFutura(v) { const { impressao, chaveRequisicao, ...publico } = v; return publico; }
+app.get('/api/parque/vendas-futuras', requireSection('parque-checkin'), gerenteVendasFuturas, async (req, res) => {
+  try { res.json((await parqueVendasFuturas.listar(req.isMaster ? null : req.permissions.unidades || [])).map(dadosPublicosVendaFutura)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/parque/vendas-futuras/previa', requireSection('parque-checkin'), gerenteVendasFuturas, async (req, res) => {
+  try {
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(req.body.unidade)) return res.sendStatus(403);
+    if (!(await unidadesExtras.apareceEm(req.body.unidade, 'parque'))) return res.status(400).json({ error: 'Unidade sem Parque habilitado.' });
+    const p = await parqueVendasFuturas.previa(req.body);
+    res.json({ valor: p.valor, valorMeias: p.valorMeias, criancas: p.criancas });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/parque/vendas-futuras', requireSection('parque-checkin'), gerenteVendasFuturas, async (req, res) => {
+  try {
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(req.body.unidade)) return res.status(403).json({ error: 'Sem acesso à unidade.' });
+    if (!req.isMaster && !(req.permissions.sections || []).includes('parque-loja')) return res.status(403).json({ error: 'O Master precisa liberar o fechamento do Saltiverso para seu usuário antes de lançar vendas.' });
+    if (!(await unidadesExtras.apareceEm(req.body.unidade, 'parque'))) return res.status(400).json({ error: 'Unidade sem Parque habilitado.' });
+    await exigirDiaAnteriorFechadoSaltiverso(req.body.unidade);
+    const v = await parqueVendasFuturas.criar(req.body, { porId: req.user.id, porEmail: req.user.email });
+    broadcast('parque-checkin-criado', { id: v.checkinId, unidade: v.unidade }, 'parque-checkin');
+    broadcast('saltiverso-venda-criada', { unidade: v.unidade, data: v.dataVenda }, 'parque-loja');
+    res.json(dadosPublicosVendaFutura(v));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.patch('/api/parque/vendas-futuras/:id', requireSection('parque-checkin'), gerenteVendasFuturas, async (req, res) => {
+  try {
+    const v = await parqueVendasFuturas.alterar(req.params.id, req.body, { porId: req.user.id, porEmail: req.user.email, master: req.isMaster, unidades: req.permissions?.unidades || [] });
+    broadcast('parque-checkin-atualizado', { id: v.checkinId, unidade: v.unidade }, 'parque-checkin');
+    res.json(dadosPublicosVendaFutura(v));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, res) => {
   try {
     const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo } = req.body;
+    if (dataUtilizacao > parqueVendasFuturas.hoje()) return res.status(400).json({ error: 'Para uma data futura, a gerente deve usar Vendas futuras.' });
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -11061,7 +11100,7 @@ app.get('/api/parque/relatorio.:formato(csv|pdf)', requireSection('parque'), asy
 // (tabela por pulseira: 30min=R$40, 60min=R$50, demais combinam os blocos)
 // e a forma de pagamento. Financeiro e assunto de gestao: Master/Admin veem
 // tudo, Gerente ve as unidades dele; os demais nao acessam
-const METODOS_PARQUE_LABEL = { dinheiro: 'Dinheiro', pix: 'Pix', debito: 'Débito', credito: 'Crédito', cortesia: 'Cortesia', misto: 'Múltiplas formas' };
+const METODOS_PARQUE_LABEL = { dinheiro: 'Dinheiro', pix: 'Pix', debito: 'Débito', credito: 'Crédito', linkCredito: 'Link Crédito', linkDebito: 'Link Débito', linkPix: 'Link Pix', cortesia: 'Cortesia', misto: 'Múltiplas formas' };
 app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), async (req, res) => {
   const ehGestor = req.isMaster || req.isAdmin || (req.user && users.ehCargoGerente(req.user.cargo));
   if (!ehGestor) return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin acessam o financeiro.' });
@@ -11069,7 +11108,8 @@ app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), as
     ? auth.filtrarPorEmpresa(req, await parque.listAll())
     : await parque.listByUnidades(req.permissions.unidades || []);
   const { unidade, inicio, fim } = req.query;
-  lista = lista
+  // Só a representação financeira usa a data da venda. A agenda conserva a data de uso.
+  lista = lista.map(c => c.vendaFuturaId ? { ...c, dataUtilizacao: c.dataVenda } : c)
     .filter((c) => (!unidade || c.unidade === unidade) && (!inicio || c.dataUtilizacao >= inicio) && (!fim || c.dataUtilizacao <= fim))
     .sort((a, b) => (b.dataUtilizacao + (b.timeInicial || '')).localeCompare(a.dataUtilizacao + (a.timeInicial || '')));
   const colunas = [

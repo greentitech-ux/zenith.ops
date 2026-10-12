@@ -144,6 +144,7 @@
     <button class="back" onclick="logout()">🚪 Sair</button>
   </div>
 </header>
+<p><a id="vendas-futuras-link" class="btn-secundario hidden" style="display:block;text-decoration:none;" href="/parque-vendas-futuras">📅 Vendas futuras · registrar pagamento online já confirmado</a></p>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
 <nav class="nav-drawer hidden" id="nav-drawer"></nav>
@@ -334,6 +335,8 @@
 
 <div class="panel">
   <h2>Check-ins recentes</h2>
+  <label for="agenda-futura">Reservas antecipadas para a data</label><input id="agenda-futura" type="date" onchange="renderLista()">
+  <p class="sub">Reservas pagas aparecem na data de utilização. A entrada só começa ao confirmar o check-in e o termo; não cobrar novamente.</p>
   <div id="lista-checkins"><div class="empty">carregando...</div></div>
 </div>
 
@@ -1375,7 +1378,8 @@ function coletarCriancas(){
 
 async function carregar(){
   const lista = await fetch('/api/parque/checkins').then(r=>r.json()).catch(()=>[]);
-  CHECKINS = lista.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||'')).slice(0,30);
+  const ordenada = lista.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
+  CHECKINS = [...ordenada.filter(c=>!c.vendaFuturaId).slice(0,30), ...ordenada.filter(c=>c.vendaFuturaId)];
   renderLista();
   verificarTemposEsgotados();
 }
@@ -1530,8 +1534,9 @@ function acoesCheckoutIndividuais(c){
 
 function renderLista(){
   const el = document.getElementById('lista-checkins');
-  if(!CHECKINS.length){ el.innerHTML = '<div class="empty">Nenhum check-in ainda.</div>'; return; }
-  el.innerHTML = CHECKINS.map(c=>{
+  const visiveis=CHECKINS.filter(c=>!c.vendaFuturaId || (!c.vendaFuturaCancelada && c.dataUtilizacao===(document.getElementById('agenda-futura').value||hojeBrasilia())));
+  if(!visiveis.length){ el.innerHTML = '<div class="empty">Nenhum check-in ou reserva nesta data.</div>'; return; }
+  el.innerHTML = visiveis.map(c=>{
     const criancas = (c.criancas||[]).map(cr=>cr.nome).join(', ');
     const status = statusCheckin(c);
     const horario = c.iniciado
@@ -1545,6 +1550,7 @@ function renderLista(){
       </div>
       <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''} · <b>${fmtReal(valorDoCheckin(c))}</b>${c.metodoPagamento?' ('+escapeHtml(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}</div>
       ${fitasPulseiras(c)}
+      ${c.vendaFuturaId?`<p class="sub"><b>Pago antecipadamente — ${c.iniciado?'entrada confirmada':'aguardando chegada'}</b> · valor registrado no caixa de ${fmtData(c.dataVenda)}. Não cobrar novamente.</p>`:''}
       <div class="criancas">${escapeHtml(criancas)}</div>
       ${cortesiaHtml(c)}
       ${acoesCheckoutIndividuais(c)}
@@ -1552,12 +1558,12 @@ function renderLista(){
         <button type="button" class="link-btn" onclick="abrirVer('${c.id}')">👁 Ver</button>
         <a class="link-btn" href="/api/parque/checkins/${c.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">🖨️ Termo</a>
         ${!c.termoAssinado?`<button type="button" class="link-btn" onclick="marcarAssinadoId('${c.id}')">✔ Marcar assinado</button>`:''}
-        ${(!c.iniciado && !(c.metodoPagamento==='cortesia' && ['PENDENTE','NEGADA'].includes(c.cortesiaStatus)))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="fazerCheckin('${c.id}')">▶ Fazer check-in</button>`:''}
+        ${(!c.iniciado && (!c.vendaFuturaId||c.dataUtilizacao===hojeBrasilia()) && !(c.metodoPagamento==='cortesia' && ['PENDENTE','NEGADA'].includes(c.cortesiaStatus)))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="fazerCheckin('${c.id}')">▶ Fazer check-in</button>`:''}
         ${(!c.planosIndividuais && c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="abrirAddTempo('${c.id}')">➕ Adicionar tempo</button>`:''}
         ${(!c.planosIndividuais && c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--warn);" onclick="checkoutEmergencia('${c.id}')">🚪 Check-out</button>`:''}
         ${(!c.planosIndividuais && c.checkoutEm && !c.checkoutAprovado)?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="retomarCheckout('${c.id}')">↩ Voltar (criança retornou)</button>`:''}
         ${(!c.planosIndividuais && c.checkoutEm && !c.checkoutAprovado && podeAprovarCheckout(c.unidade))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="aprovarCheckout('${c.id}')">✓ Aprovar check-out</button>`:''}
-        <button type="button" class="link-btn" onclick="abrirCorrecao('${c.id}')">🛠 Pedir correção</button>
+        ${!c.vendaFuturaId?`<button type="button" class="link-btn" onclick="abrirCorrecao('${c.id}')">🛠 Pedir correção</button>`:'<span class="sub">Reagendamento com a gerente em Vendas futuras.</span>'}
       </div>
     </div>`;
   }).join('');
@@ -1591,7 +1597,7 @@ function fitasPulseiras(c){
 // perceber na hora que trocou o tempo ou esqueceu uma meia. O caminho antigo
 // era abrir o PDF do termo - que não mostra valor nem forma de pagamento,
 // justamente o que precisa de conferência.
-const METODOS_LABEL = { dinheiro:'Dinheiro', pix:'Pix', debito:'Débito', credito:'Crédito', voucher:'Voucher', gratuidade:'Gratuidade', cortesia:'Cortesia' };
+const METODOS_LABEL = { dinheiro:'Dinheiro', pix:'Pix', debito:'Débito', credito:'Crédito', voucher:'Voucher', linkCredito:'Link Crédito', linkDebito:'Link Débito', linkPix:'Link Pix', gratuidade:'Gratuidade', cortesia:'Cortesia' };
 
 function valorDoCheckin(c){
   if(c.valor!=null) return c.valor;
@@ -2288,6 +2294,8 @@ async function boot(){
   setAC(false);
   document.getElementById('f-data').value = hojeBrasilia();
   document.getElementById('f-data').max = hojeBrasilia();
+  document.getElementById('agenda-futura').value = hojeBrasilia();
+  document.getElementById('vendas-futuras-link').classList.toggle('hidden', !(isMaster || ME.cargo==='gerente'));
   preencherSelectSlots('f-horario-previsto', proximoSlot30());
   atualizarPreviewPulseira();
   adicionarCrianca();

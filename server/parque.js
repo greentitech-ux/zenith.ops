@@ -233,7 +233,7 @@ function resumoPulseirasAoVivo(checkins, tabela, { dataUtilizacao = hojeBrasilia
   const config = sanitizarConfigPulseiras(tabela && tabela.pulseiras);
   const agora = String(horaAgora || '').slice(0, 5);
   const hoje = (Array.isArray(checkins) ? checkins : [])
-    .filter((checkin) => checkin && checkin.dataUtilizacao === dataUtilizacao)
+    .filter((checkin) => checkin && !checkin.vendaFuturaCancelada && checkin.dataUtilizacao === dataUtilizacao)
     .map((checkin) => enriquecerPulseirasParaExibicao(checkin, tabela));
   const pessoas = [];
 
@@ -795,7 +795,7 @@ async function criarComPlanosIndividuais(args, tabela) {
   const meiasExtrasOk = Math.max(0, Math.min(30, num(meiasExtras)));
   const valorMeiasCalc = PRECO_MEIA * (criancasOk.filter((c) => c.meia !== false && !c.gratuita).length + (criancasOk.some((c) => !c.gratuita) ? meiasExtrasOk : 0));
   const valorFinal = criancasOk.reduce((s, c) => s + c.valorEntrada, 0) + valorMeiasCalc;
-  const pagamentosOk = valorFinal > 0 ? sanitizarPagamentos(pagamentos) : [];
+  const pagamentosOk = args.prepararVendaFutura ? [{ forma: 'pix', valor: valorFinal }] : (valorFinal > 0 ? sanitizarPagamentos(pagamentos) : []);
   if (valorFinal > 0 && !pagamentosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
   const somaPagamentos = Math.round(pagamentosOk.reduce((s, p) => s + p.valor, 0) * 100) / 100;
   if (valorFinal > 0 && Math.abs(somaPagamentos - valorFinal) > 0.01) throw new Error(`A soma das formas de pagamento (R$${somaPagamentos.toFixed(2)}) precisa bater com o valor total (R$${valorFinal.toFixed(2)}).`);
@@ -827,6 +827,7 @@ async function criarComPlanosIndividuais(args, tabela) {
     minutosAdicionados: 0, acrescimos: [], cortesiaStatus: temCortesia ? 'PENDENTE' : null, motivoCortesia: temCortesia ? String(motivoCortesia).trim().slice(0, 300) : null,
     usou: args.usou !== false, termoAssinado: termoAssinado === true, criadoPorId, criadoPorEmail, criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString(),
   };
+  if (args.prepararVendaFutura) return registro;
   await ref.set(registro);
   parqueCache.invalidar();
   return registro;
@@ -1002,6 +1003,8 @@ async function criar({
 // aciona o relogio de verdade: a pulseira/tempo contratado passa a valer a
 // partir de AGORA, nao do horario em que a compra/cadastro foi feita
 async function checkin(id) {
+  const futuro = await getOne(id);
+  if (futuro?.vendaFuturaId) return require('./parqueVendasFuturas').checkin(id);
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
@@ -1058,6 +1061,7 @@ async function adicionarTempo(id, { minutos, metodoPagamento, porEmail }) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
   const atual = snap.data();
+  if (atual.vendaFuturaId) throw new Error('Para ingresso antecipado, registre uma nova venda de tempo no balcão. O pagamento original não pode ser alterado.');
   const tabela = await getConfigPrecos();
   const min = Number(minutos);
   if (!temposValidos(tabela).includes(min)) throw new Error('Escolha um tempo válido pra adicionar.');
@@ -1186,7 +1190,7 @@ async function listByUnidades(unidades) {
 // contribui em nada, entao nem precisa de tratamento especial. Usado pelo
 // fechamento dedicado do Saltiverso - ver saltiversoFechamento.js
 async function resumoDoDia(unidade, data) {
-  const checkins = (await listAll()).filter((c) => c.unidade === unidade && c.dataUtilizacao === data);
+  const checkins = (await listAll()).filter((c) => !c.vendaFuturaId && c.unidade === unidade && c.dataUtilizacao === data);
   const porForma = {};
   FORMAS_PAGAMENTO_SPLIT.forEach((f) => { porForma[f] = 0; });
   let total = 0;
@@ -1199,6 +1203,10 @@ async function resumoDoDia(unidade, data) {
       if (a.metodoPagamento && porForma[a.metodoPagamento] != null) porForma[a.metodoPagamento] += num(a.valor);
     });
   });
+  for (const v of await require('./parqueVendasFuturas').movimentosDoDia(unidade, data)) {
+    total += v.valor;
+    porForma[v.forma] = (porForma[v.forma] || 0) + v.valor;
+  }
   Object.keys(porForma).forEach((f) => { porForma[f] = Math.round(porForma[f] * 100) / 100; });
   return { total: Math.round(total * 100) / 100, porForma };
 }
@@ -1213,6 +1221,12 @@ async function atualizar(id, patch) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
   const atual = snap.data();
+  if (atual.vendaFuturaId) {
+    if (Object.keys(patch).some(k => k !== 'termoAssinado') || patch.termoAssinado !== true) throw new Error('Venda antecipada: utilize Vendas futuras para reagendar. Valores pagos são preservados.');
+    await ref.update({ termoAssinado: true });
+    parqueCache.invalidar();
+    return getOne(id);
+  }
   const tabela = await getConfigPrecos();
   const merge = {};
 
@@ -1321,6 +1335,7 @@ async function rodarAutoCheckins() {
   const feitos = [];
   for (const doc of snap.docs) {
     const c = doc.data();
+    if (c.vendaFuturaId) continue; // presença física obrigatória, nunca por horário previsto
     if (!c.horarioPrevisto || c.dataUtilizacao !== hoje) continue;
     if (c.horarioPrevisto > agora) continue;
     // cortesia sem aprovacao nao entra sozinha - o relogio so pode iniciar
@@ -1368,6 +1383,7 @@ async function rodarAutoCheckins() {
 async function remover(id) {
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
+  if (snap.data().vendaFuturaId) throw new Error('Venda antecipada não pode ser excluída. Cancele a utilização em Vendas futuras e trate a devolução separadamente.');
   await COLLECTION.doc(id).delete();
   parqueCache.invalidar();
 }
@@ -1448,6 +1464,7 @@ function validarPropostaEdicao(proposta, tabela) {
 async function solicitarEdicao({ checkinId, tipoCorrecao, proposta, motivo, numeroTicket, ticketId, solicitadoPorId, solicitadoPorEmail }) {
   const atual = await getOne(checkinId);
   if (!atual) throw new Error('Check-in não encontrado.');
+  if (atual.vendaFuturaId) throw new Error('Use Vendas futuras para reagendar ou cancelar a utilização. O recebimento não pode ser excluído por correção de check-in.');
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
   const tipo = tipoCorrecao === 'alterar' ? 'alterar' : 'excluir';
   const propostaOk = tipo === 'alterar' ? validarPropostaEdicao(proposta, await getConfigPrecos()) : null;
@@ -1953,6 +1970,7 @@ async function emissoesParaAlertar() {
 }
 
 module.exports = {
+  prepararVendaFutura: async dados => criarComPlanosIndividuais({ ...dados, prepararVendaFutura: true }, await getConfigPrecos()),
   niverElegivelTempo, valorNiverDe, valorEntradaCriancas,
   METODOS_PAGAMENTO, FORMAS_PAGAMENTO_SPLIT, PRECO_MEIA, valorPorTempo, valorDoCheckin,
   // exportado pro teste conferir que a TELA e o SERVIDOR enxergam o mesmo

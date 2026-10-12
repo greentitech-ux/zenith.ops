@@ -48,6 +48,7 @@ function diaAnteriorISO(data) {
 }
 
 const formasCaixa = require('./public/saltiverso-caixa-formas');
+const vendasFuturas = require('./parqueVendasFuturas');
 const BUCKETS = formasCaixa.novos;
 
 // o MESMO operador pode ter dois caixas no mesmo dia: o do balcão (entradas
@@ -181,7 +182,7 @@ async function faturadoPorOperador(unidade, data) {
     festas.movimentosPorOperador(unidade, data),
   ]);
   const movsFesta = await resolverIdsPorEmail(movsFestaCru);
-  const doDia = checkins.filter((c) => c.unidade === unidade && c.dataUtilizacao === data);
+  const doDia = checkins.filter((c) => !c.vendaFuturaId && c.unidade === unidade && c.dataUtilizacao === data);
   const vendasOk = vendas.filter((v) => !v.cancelada);
   const map = new Map();
   const get = (id, email, origem) => {
@@ -200,6 +201,11 @@ async function faturadoPorOperador(unidade, data) {
     o.total += num(v.total);
     (v.pagamentos || []).forEach((p) => { o.porFormaRaw[p.forma] = num(o.porFormaRaw[p.forma]) + num(p.valor); });
   });
+  for (const v of await vendasFuturas.movimentosDoDia(unidade, data)) {
+    const o = get(v.porId, v.porEmail, 'balcao');
+    o.total += v.valor;
+    o.porFormaRaw[v.forma] = num(o.porFormaRaw[v.forma]) + v.valor;
+  }
   // festa: o sinal responsabiliza quem vendeu a reserva; cada recebimento
   // posterior responsabiliza quem registrou aquele recebimento
   movsFesta.forEach((m) => {
@@ -240,6 +246,7 @@ async function lancarCaixa({ unidade, unidadeNome, data, declarado, observacao, 
   if ((await CAIXAS.doc(id).get()).exists) throw new Error(`Você já fechou o seu caixa de ${ORIGEM_LABEL[origemOk]} hoje. Para mudar valores, peça uma alteração.`);
   const declaradoOk = validarCorrecaoDeclarado(declarado, formasCaixa.campos(declarado));
   const soma = arred(formasCaixa.somar(declaradoOk));
+  const revisao = await vendasFuturas.revisaoDia(unidade, data);
   const faturados = await faturadoPorOperador(unidade, data);
   const meu = faturados.find((f) => f.operadorId === operadorId && f.origem === origemOk) || { faturado: 0, faturadoPorForma: sanitizarTotalDeclarado({}) };
   const faturadoPorForma = Object.hasOwn(declaradoOk, 'maquininha') ? {
@@ -265,7 +272,14 @@ async function lancarCaixa({ unidade, unidadeNome, data, declarado, observacao, 
     status: 'lancado', historico: [],
     lancadoEm: agora, atualizadoEm: agora,
   };
-  await CAIXAS.doc(id).set(registro);
+  await db.runTransaction(async tx => {
+    const existente = await tx.get(CAIXAS.doc(id));
+    const dia = await tx.get(COLLECTION.doc(docId(unidade, data)));
+    const rev = await tx.get(db.collection('saltiversoMovimentosDia').doc(vendasFuturas.chaveDia(unidade, data)));
+    if (existente.exists || dia.exists) throw new Error('Caixa ou dia já fechado. Atualize a tela.');
+    if ((rev.exists ? Number(rev.data().versao) || 0 : 0) !== revisao) throw new Error('Uma venda online entrou durante o fechamento. Atualize e confira novamente.');
+    tx.set(CAIXAS.doc(id), registro);
+  });
   caixasCache.invalidar();
   return registro;
 }
@@ -434,6 +448,7 @@ async function fecharDia({ unidade, unidadeNome, data, observacao, criadoPorId, 
   if ((await ref.get()).exists) {
     throw new Error('Esse dia já foi fechado para essa unidade. Peça uma correção em vez de fechar de novo.');
   }
+  const revisao = await vendasFuturas.revisaoDia(unidade, data);
   const estado = await estadoDoDia(unidade, data);
   if (estado.pendentes.length) {
     const nomes = estado.pendentes.map((p) => `${p.operadorEmail || p.operadorId} (${ORIGEM_LABEL[normalizarOrigem(p.origem)]})`).join(', ');
@@ -463,6 +478,8 @@ async function fecharDia({ unidade, unidadeNome, data, observacao, criadoPorId, 
   };
   await db.runTransaction(async tx => {
     if ((await tx.get(ref)).exists) throw new Error('Esse dia já foi fechado. Atualize a tela.');
+    const rev = await tx.get(db.collection('saltiversoMovimentosDia').doc(vendasFuturas.chaveDia(unidade, data)));
+    if ((rev.exists ? Number(rev.data().versao) || 0 : 0) !== revisao) throw new Error('Uma venda online entrou durante a consolidação. Atualize a tela.');
     const atuais = await tx.get(CAIXAS.where('unidade', '==', unidade).where('data', '==', data));
     if (atuais.docs.length !== estado.caixas.length || atuais.docs.some(d => {
       const caixa = d.data(), anterior = estado.caixas.find(c=>c.id===caixa.id);

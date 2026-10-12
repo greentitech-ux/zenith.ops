@@ -180,6 +180,7 @@
 
 <div class="panel hidden" id="painel-financeiro">
   <h2>Financeiro (período filtrado)</h2>
+  <p class="sub">Vendas antecipadas contam pela data da venda. Os check-ins e a utilização acima contam pela data da visita, sem repetir o recebimento.</p>
   <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:8px;">
     tabela por pulseira: 30min R$40 · 60min R$50 · demais combinam (90min R$90, 120min R$100...)
   </div>
@@ -798,14 +799,16 @@ function preencherSelectSlots(id, valor){
   sel.value = (valor && slots30().includes(valor)) ? valor : '';
 }
 
-function checkinsFiltrados(){
+function checkinsFiltrados(financeiro=false){
   const unidade = document.getElementById('f-unidade').value;
   const de = document.getElementById('f-de').value;
   const ate = document.getElementById('f-ate').value;
   return TODOS.filter(c=>{
+    if(!financeiro && c.vendaFuturaCancelada) return false;
+    const data = financeiro && c.vendaFuturaId ? c.dataVenda : c.dataUtilizacao;
     if(unidade && c.unidade !== unidade) return false;
-    if(de && c.dataUtilizacao < de) return false;
-    if(ate && c.dataUtilizacao > ate) return false;
+    if(de && data < de) return false;
+    if(ate && data > ate) return false;
     return true;
   }).sort((a,b)=> (b.dataUtilizacao+(b.timeInicial||'')).localeCompare(a.dataUtilizacao+(a.timeInicial||'')));
 }
@@ -1123,7 +1126,7 @@ function renderFinanceiro(lista){
   lista.forEach(c=>{
     const v = valorDoCheckin(c);
     total += v;
-    const m = METODOS_LABEL[c.metodoPagamento] || 'sem método';
+    const m = METODOS_LABEL[c.metodoPagamento] || ({linkCredito:'Link Crédito',linkDebito:'Link Débito',linkPix:'Link Pix'})[c.metodoPagamento] || 'sem método';
     porMetodo[m] = (porMetodo[m]||0) + v;
     const g = custoGratuidadeCheckin(c);
     if(g){
@@ -1186,7 +1189,7 @@ function atualizarLinksExport(){
 function renderTudo(){
   const lista = checkinsFiltrados();
   renderKpis(lista);
-  renderFinanceiro(lista);
+  renderFinanceiro(checkinsFiltrados(true));
   renderLista(lista);
   renderAgora();
   atualizarLinksExport();
