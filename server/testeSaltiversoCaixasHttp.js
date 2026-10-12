@@ -66,13 +66,13 @@ async function testar({http,DOCS,port,fakeDb}) {
   const reduzido=ok(await pedir('/api/saltiverso/fechamento?unidade='+encodeURIComponent(unidade)+'&data=2026-10-10','GET',undefined,operador));
   assert.equal(reduzido.caixas,undefined);assert.equal(reduzido.faturado,undefined);assert.equal(reduzido.diaFechado,true);
   const urlAntigo='/api/saltiverso/fechamento/caixa/'+antigo.id;
-  const pAntigo=ok(await pedir(urlAntigo+'/solicitar-alteracao','POST',{declarado:{...antigo.declarado,maquininha:560},motivo:'Recontagem após o dia fechado'},operador));
+  const pAntigo=ok(await pedir(urlAntigo+'/solicitar-alteracao','POST',{declarado:{...antigo.declarado,maquininha:560},motivo:'Recontagem após o dia fechado'},gerente));
   ok(await pedir('/api/saltiverso/fechamento/alteracoes/'+pAntigo.id+'/decidir','POST',{aprovado:true}));
   let dia=DOCS.get('saltiversoFechamentos/'+diaId), caixa=await modulo.getCaixa(antigo.id);
   assert.equal(caixa.somaDeclarado,620);assert.equal(dia.somaTotalDeclarado,825,'delta preserva ajuste independente de R$5');
   assert.equal(caixa.faturadoOperador,1160);assert.equal(dia.faturado,1360);assert.deepEqual(dia.caixas[1],festa);
   assert.deepEqual(caixa.historico[0].antes,antigo.declarado);assert.equal(caixa.historico[0].depois.maquininha,560);
-  const pStale=ok(await pedir(urlAntigo+'/solicitar-alteracao','POST',{declarado:{...caixa.declarado,maquininha:570},motivo:'Pedido anterior'},operador));
+  const pStale=ok(await pedir(urlAntigo+'/solicitar-alteracao','POST',{declarado:{...caixa.declarado,maquininha:570},motivo:'Pedido anterior'},gerente));
   const direto={declarado:{...caixa.declarado,maquininha:580},motivo:'Master conferiu recibos',versaoEsperada:caixa.atualizadoEm};
   ok(await pedir(urlAntigo,'PUT',direto));
   const diaCorrigido=JSON.stringify(DOCS.get('saltiversoFechamentos/'+diaId));
@@ -124,11 +124,70 @@ async function testar({http,DOCS,port,fakeDb}) {
   assert.equal(antigoConsolidado.legado,40,'Pix antigo não vira maquininha nem link por suposição');
   assert.equal(formas.consolidar([{...nove,credito:0.1,debito:0.2,voucher:0,pix:0,linkCredito:0,linkDebito:0,linkPix:0,dinheiro:0}]).total,0.3);
   console.log('✓ Maquininha/Online: nove modalidades, quatro subtotais, soma sem duplicar, correção após consolidar e centavos exatos.');
+  // Limite exato, contado desde o lançamento, não desde a última edição.
+  const agora=Date.now();
+  assert.equal(modulo.passou24h({lancadoEm:new Date(agora-86400000+1).toISOString()},agora),false);
+  assert.equal(modulo.passou24h({lancadoEm:new Date(agora-86400000).toISOString()},agora),true);
+  assert.equal(modulo.passou24h({}),true);
+  const antigo24=DOCS.get('saltiversoCaixas/'+antigo.id);antigo24.lancadoEm=new Date(agora-86400001).toISOString();antigo24.atualizadoEm=new Date(agora).toISOString();
+  DOCS.set('saltiversoCaixas/'+antigo.id,antigo24);
+  assert.equal((await pedir(urlAntigo+'/solicitar-alteracao','POST',{declarado:antigo24.declarado,motivo:'Fora do prazo'},operador)).status,400);
+  const assistente=token('assistente-caixa',[unidade],'assistente-gerente');
+  assert.equal((await pedir(urlAntigo+'/solicitar-alteracao','POST',{declarado:antigo24.declarado,motivo:'Não é gerente'},assistente)).status,400);
+  const gerenteExterno=token('gerente-externo',['OUTRA'],'gerente');
+  const detalheUrl='/api/saltiverso/fechamento/historico/'+diaOnline.id;
+  const antesDetalhe=JSON.stringify(DOCS.get('saltiversoFechamentos/'+diaOnline.id));
+  assert.equal((await pedir(detalheUrl,'GET',undefined,operador)).status,403);
+  assert.equal((await pedir(detalheUrl,'GET',undefined,gerenteExterno)).status,403);
+  const detalhe=ok(await pedir(detalheUrl,'GET',undefined,gerente));
+  assert.deepEqual(detalhe.totalDeclarado,finalOnline.totalDeclarado);
+  assert.equal(JSON.stringify(DOCS.get('saltiversoFechamentos/'+diaOnline.id)),antesDetalhe);
+  const ajuste={totalDeclarado:{...detalhe.totalDeclarado,linkPix:75},motivo:'Conferência histórica',observacao:'Observação corrigida',versaoEsperada:detalhe.atualizadoEm};
+  const editarUrl='/api/saltiverso/fechamento/'+diaOnline.id;
+  assert.equal((await pedir(editarUrl,'PUT',ajuste,gerente)).status,403);
+  for(const auth of [operador,assistente,gerenteExterno]) assert.equal((await pedir(detalheUrl+'/solicitar-alteracao','POST',ajuste,auth)).status,403);
+  const pedHist=ok(await pedir(detalheUrl+'/solicitar-alteracao','POST',ajuste,gerente));
+  assert.equal(JSON.stringify(DOCS.get('saltiversoFechamentos/'+diaOnline.id)),antesDetalhe,'solicitar não corrige');
+  assert.equal((await pedir(detalheUrl+'/solicitar-alteracao','POST',ajuste,gerente)).status,400);
+  const decidirUrl='/api/saltiverso/fechamento/alteracoes/'+pedHist.id+'/decidir';
+  assert.equal((await pedir(decidirUrl,'POST',{aprovado:true},gerente)).status,403);
+  token('admin-historico');DOCS.get('users/admin-historico').isAdmin=true;
+  const admin=jwt.sign({sub:'admin-historico',role:'user'},process.env.JWT_SECRET,{expiresIn:'1h'});
+  assert.equal((await pedir(decidirUrl,'POST',{aprovado:true},admin)).status,403);
+  ok(await pedir(decidirUrl,'POST',{aprovado:true}));
+  const corrigido=ok(await pedir(detalheUrl));
+  assert.equal(corrigido.somaTotalDeclarado,320);assert.equal(corrigido.faturado,detalhe.faturado);assert.deepEqual(corrigido.caixas,detalhe.caixas);
+  assert.equal(corrigido.historico.at(-1).motivo,ajuste.motivo);assert.equal(corrigido.historico.at(-1).depois.totalDeclarado.linkPix,75);
+  assert.equal((await pedir(decidirUrl,'POST',{aprovado:true})).status,400);
+  assert.equal((await pedir(editarUrl,'PUT',ajuste)).status,400);
+  assert.equal((await pedir(editarUrl,'PUT',{...ajuste,versaoEsperada:corrigido.atualizadoEm,motivo:''})).status,400);
+  const pConflito=ok(await pedir(detalheUrl+'/solicitar-alteracao','POST',{...ajuste,versaoEsperada:corrigido.atualizadoEm},gerente));
+  ok(await pedir(editarUrl,'PUT',{...ajuste,totalDeclarado:{...corrigido.totalDeclarado,dinheiro:45},versaoEsperada:corrigido.atualizadoEm}));
+  assert.equal((await pedir('/api/saltiverso/fechamento/alteracoes/'+pConflito.id+'/decidir','POST',{aprovado:true})).status,400);
+  const legHist={id:'historico-sem-hora',unidade,data:'2026-09-10',totalDeclarado:{maquininha:100,dinheiro:20,pix:30,outros:0},somaTotalDeclarado:150,faturado:150,diferenca:0,historico:[]};
+  DOCS.set('saltiversoFechamentos/'+legHist.id,structuredClone(legHist));
+  const legBody={totalDeclarado:{...legHist.totalDeclarado,dinheiro:25},motivo:'Recibo antigo',versaoEsperada:null};
+  const legPedido=ok(await pedir('/api/saltiverso/fechamento/historico/'+legHist.id+'/solicitar-alteracao','POST',legBody,gerente));
+  ok(await pedir('/api/saltiverso/fechamento/alteracoes/'+legPedido.id+'/decidir','POST',{aprovado:true}));
+  const legCorrigido=await modulo.getOne(legHist.id);
+  assert.equal(legCorrigido.somaTotalDeclarado,155);assert.deepEqual(Object.keys(legCorrigido.totalDeclarado),Object.keys(legHist.totalDeclarado));
+  assert.deepEqual(legCorrigido.historico[0].antes.totalDeclarado,legHist.totalDeclarado);assert.equal(legCorrigido.consolidadoDeclarado.legado,30);
+  assert.equal((await pedir('/api/saltiverso/fechamento/'+legHist.id,'PUT',{...legBody,versaoEsperada:legCorrigido.atualizadoEm,totalDeclarado:nove})).status,400,'não migrar histórico na correção');
+  console.log('✓ Histórico: consulta isolada, 24h exatas, gerente da unidade solicita, somente Master corrige/aprova, motivo, auditoria e conflitos.');
 }
 module.exports={testar};
 if(require.main===module){
   process.env.JWT_SECRET='teste-caixas-saltiverso-nao-producao';process.env.ENCRYPTION_KEY='11'.repeat(32);
   const fs=require('node:fs'),path=require('node:path'),net=require('node:net'),Module=require('node:module');
+  if(process.argv.includes('--sabotagem-24h')){
+    const alvo=path.join(__dirname,'saltiversoFechamento.js');
+    const original=Module._extensions['.js'];
+    Module._extensions['.js']=(m,file)=>{
+      if(file!==alvo)return original(m,file);
+      const fonte=fs.readFileSync(file,'utf8'),trecho='if (passou24h(caixa) && !gerenteDaUnidade)';
+      assert(fonte.includes(trecho));m._compile(fonte.replace(trecho,'if (false)'),file);
+    };
+  }
   const probe=net.createServer();probe.listen(0,'127.0.0.1',()=>{const port=probe.address().port;probe.close(()=>{
     const arquivo=path.join(__dirname,'testeRotas.js');
     const fonte=fs.readFileSync(arquivo,'utf8').split('setTimeout(async () => {')[0].replace(/\b8899\b/g,String(port));

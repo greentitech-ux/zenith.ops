@@ -300,11 +300,18 @@ async function estadoDoDia(unidade, data) {
 // trava anti-fraude: caixa lancado so muda por pedido de alteracao aprovado
 // pelo Master. Também vale após consolidar o dia: a aprovação sincroniza
 // o caixa e o consolidado, sem recalcular vendas históricas.
-async function solicitarAlteracaoCaixa(caixaId, { declarado, motivo, solicitadoPorId, solicitadoPorEmail, podeAlterarOutroCaixa = false }) {
+function passou24h(registro, agora = Date.now()) {
+  const em = Date.parse(registro.lancadoEm || registro.criadoEm);
+  // Sem hora confiável, nunca liberar a exceção de operador por suposição.
+  return !Number.isFinite(em) || agora - em >= 24 * 60 * 60 * 1000;
+}
+
+async function solicitarAlteracaoCaixa(caixaId, { declarado, motivo, solicitadoPorId, solicitadoPorEmail, podeAlterarOutroCaixa = false, gerenteDaUnidade = false }) {
   return db.runTransaction(async tx => {
     const caixaSnap = await tx.get(CAIXAS.doc(caixaId));
     const caixa = caixaSnap.exists ? caixaSnap.data() : null;
     if (!caixa) throw new Error('Caixa não encontrado.');
+    if (passou24h(caixa) && !gerenteDaUnidade) throw new Error('Após 24 horas do lançamento, somente o gerente da unidade pode solicitar correção.');
     if (String(caixa.operadorId) !== String(solicitadoPorId) && !podeAlterarOutroCaixa) {
       throw new Error('Você só pode pedir alteração do seu próprio caixa.');
     }
@@ -337,6 +344,8 @@ async function listAlteracoesPendentes(unidade) {
 // Master aprova/rejeita. Ao aprovar, aplica o novo declarado no caixa (guarda
 // o antes no historico) e recalcula a diferenca do operador.
 async function decidirAlteracaoCaixa(edicaoId, { aprovado, porId, porEmail }) {
+  const pedido = await CAIXA_EDICOES.doc(edicaoId).get();
+  if (aprovado && pedido.exists && pedido.data().tipo === 'fechamento') return corrigirFechamento(pedido.data().fechamentoId, {}, { porId, porEmail, edicaoId });
   if (aprovado) return corrigirCaixa(null, {}, { porId, porEmail, edicaoId });
   const ref = CAIXA_EDICOES.doc(edicaoId);
   return db.runTransaction(async (tx) => {
@@ -396,7 +405,7 @@ async function corrigirCaixa(caixaId, { declarado, motivo, versaoEsperada }, { p
       const patchDia = { totalDeclarado, somaTotalDeclarado, diferenca: arred(somaTotalDeclarado - num(dia.faturado)), atualizadoEm: agora,
         caixas: dia.caixas.map(c => corresponde(c) ? { ...c, declarado: novo, somaDeclarado: soma, diferencaOperador: diferenca } : c),
         historico: [...(dia.historico || []), { antes: { totalDeclarado: dia.totalDeclarado, diferenca: dia.diferenca }, depois: { totalDeclarado, somaTotalDeclarado }, em: agora, porId, porEmail: porEmail || null, motivo: motivoOk, caixaId: caixa.id, pedidoId: edicaoId || null }] };
-      patchDia.consolidadoDeclarado = formasCaixa.consolidar(patchDia.caixas.map(c=>c.declarado), somaTotalDeclarado);
+      patchDia.consolidadoDeclarado = formasCaixa.consolidar([totalDeclarado], somaTotalDeclarado);
       tx.update(diaRef, patchDia);
       diaAtualizado = { ...dia, ...patchDia };
     }
@@ -483,46 +492,66 @@ async function fecharDia({ unidade, unidadeNome, data, observacao, criadoPorId, 
 // corrigidas/canceladas por outros motivos, sem relacao com ESSA correcao).
 // Guarda o "antes" no historico[], mesmo espirito do historico de
 // fechamentosLive.js
-async function corrigirFechamento(id, { totalDeclarado, observacao }, { porId, porEmail }) {
-  const ref = COLLECTION.doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error('Fechamento não encontrado.');
-  const atual = snap.data();
+async function solicitarAlteracaoFechamento(id, { totalDeclarado, observacao, motivo, versaoEsperada }, { porId, porEmail }) {
+  return db.runTransaction(async tx => {
+    const snap = await tx.get(COLLECTION.doc(id));
+    if (!snap.exists) throw new Error('Fechamento não encontrado.');
+    const atual = snap.data();
+    if (versaoEsperada === undefined || versaoEsperada !== (atual.atualizadoEm || atual.criadoEm || null)) throw new Error('O fechamento mudou. Atualize a tela e revise os valores.');
+    const existentes = await tx.get(CAIXA_EDICOES.where('fechamentoId', '==', id));
+    if (existentes.docs.some(d => d.data().status === 'PENDENTE')) throw new Error('Já existe um pedido pendente para este fechamento.');
+    const motivoOk = String(motivo || '').trim().slice(0, 500);
+    if (!motivoOk) throw new Error('Informe o motivo da correção.');
+    const novo = validarCorrecaoDeclarado(totalDeclarado, formasCaixa.campos(atual.totalDeclarado));
+    const pedidoId = randomUUID();
+    const pedido = { id: pedidoId, tipo: 'fechamento', fechamentoId: id, unidade: atual.unidade, data: atual.data,
+      antes: atual.totalDeclarado, novo, observacao: String(observacao ?? atual.observacao ?? '').trim().slice(0, 500),
+      versaoEsperada, motivo: motivoOk, status: 'PENDENTE', solicitadoPorId: porId, solicitadoPorEmail: porEmail || null, criadoEm: new Date().toISOString() };
+    tx.set(CAIXA_EDICOES.doc(pedidoId), pedido);
+    return pedido;
+  });
+}
 
-  const patch = {};
-  const antes = {};
-  if (totalDeclarado !== undefined) {
-    antes.totalDeclarado = atual.totalDeclarado;
-    antes.diferenca = atual.diferenca;
-    patch.totalDeclarado = validarCorrecaoDeclarado(totalDeclarado, formasCaixa.campos(atual.totalDeclarado));
-    patch.somaTotalDeclarado = arred(formasCaixa.somar(patch.totalDeclarado));
-    patch.diferenca = arred(patch.somaTotalDeclarado - atual.faturado);
-    patch.consolidadoDeclarado = formasCaixa.consolidar((atual.caixas||[]).map(c=>c.declarado), patch.somaTotalDeclarado);
-  }
-  if (observacao !== undefined) {
-    antes.observacao = atual.observacao;
-    patch.observacao = observacao ? String(observacao).trim().slice(0, 500) : null;
-  }
-  if (!Object.keys(patch).length) throw new Error('Nada para corrigir.');
-
-  patch.historico = [...(atual.historico || []), { antes, em: new Date().toISOString(), porId: porId || null, porEmail: porEmail || null }];
-  patch.atualizadoEm = new Date().toISOString();
-  await ref.update(patch);
-  fechamentosCache.invalidar();
-
-  const atualizado = await getOne(id);
-  let cardQuebraCaixa = null;
-  if (patch.diferenca !== undefined && Math.abs(patch.diferenca) > LIMITE_QUEBRA_SALTIVERSO) {
-    // idempotente: so cria se ainda nao existe ticket de quebra-caixa pra
-    // esse fechamentoId (evita duplicar a cada correcao pequena)
-    const jaExiste = (await solicitacoes.listAll()).some((s) => s.tipo === 'quebra-caixa' && s.fechamentoId === id);
-    if (!jaExiste) {
-      try {
-        cardQuebraCaixa = await criarCardQuebra(atualizado);
-      } catch (err) {
-        console.error(`[saltiversoFechamento] falha ao criar ticket de quebra de caixa na correção (${id}):`, err.message);
-      }
+async function corrigirFechamento(id, { totalDeclarado, observacao, motivo, versaoEsperada }, { porId, porEmail, edicaoId }) {
+  const atualizado = await db.runTransaction(async tx => {
+    const ref = COLLECTION.doc(id);
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new Error('Fechamento não encontrado.');
+    const atual = snap.data();
+    let pedido = null;
+    if (edicaoId) {
+      const ped = await tx.get(CAIXA_EDICOES.doc(edicaoId));
+      if (!ped.exists || ped.data().status !== 'PENDENTE' || ped.data().fechamentoId !== id) throw new Error('Pedido não está pendente para este fechamento.');
+      pedido = ped.data();
+      totalDeclarado = pedido.novo; observacao = pedido.observacao; motivo = pedido.motivo; versaoEsperada = pedido.versaoEsperada;
     }
+    // Registros sem timestamp ainda podem ser corrigidos pelo Master usando
+    // a versão explícita null; nunca reclassifica nem regrava ao consultar.
+    if (versaoEsperada === undefined || versaoEsperada !== (atual.atualizadoEm || atual.criadoEm || null)) throw new Error('O fechamento mudou. Atualize a tela e revise os valores.');
+    const motivoOk = String(motivo || '').trim().slice(0, 500);
+    if (!motivoOk) throw new Error('Informe o motivo da correção.');
+    const novo = validarCorrecaoDeclarado(totalDeclarado, formasCaixa.campos(atual.totalDeclarado));
+    const soma = arred(formasCaixa.somar(novo));
+    const agora = new Date(Math.max(Date.now(), (Date.parse(atual.atualizadoEm || atual.criadoEm) || 0) + 1)).toISOString();
+    const patch = { totalDeclarado: novo, somaTotalDeclarado: soma, diferenca: arred(soma - atual.faturado),
+      observacao: String(observacao ?? atual.observacao ?? '').trim().slice(0, 500) || null, atualizadoEm: agora,
+      consolidadoDeclarado: formasCaixa.consolidar([novo], soma) };
+    patch.historico = [...(atual.historico || []), {
+      antes: { totalDeclarado: atual.totalDeclarado, somaTotalDeclarado: atual.somaTotalDeclarado, diferenca: atual.diferenca, observacao: atual.observacao || null },
+      depois: { totalDeclarado: novo, somaTotalDeclarado: soma, diferenca: patch.diferenca, observacao: patch.observacao },
+      em: agora, porId: porId || null, porEmail: porEmail || null, motivo: motivoOk, pedidoId: edicaoId || null,
+    }];
+    tx.update(ref, patch);
+    if (pedido) tx.update(CAIXA_EDICOES.doc(edicaoId), { status: 'APROVADO', decididoEm: agora, decididoPorId: porId, decididoPorEmail: porEmail || null });
+    return { ...atual, ...patch };
+  });
+  fechamentosCache.invalidar();
+  let cardQuebraCaixa = null;
+  if (Math.abs(atualizado.diferenca) > LIMITE_QUEBRA_SALTIVERSO) {
+    try {
+      const jaExiste = (await solicitacoes.listAll()).some(s => s.tipo === 'quebra-caixa' && s.fechamentoId === id);
+      if (!jaExiste) cardQuebraCaixa = await criarCardQuebra(atualizado);
+    } catch (err) { console.error('[saltiversoFechamento] falha no alerta da correção:', err.message); }
   }
   return { ...atualizado, cardQuebraCaixa };
 }
@@ -631,5 +660,5 @@ module.exports = {
   // caixas individuais por operador
   faturadoPorOperador, lancarCaixa, listCaixasDoDia, getCaixa, estadoDoDia,
   solicitarAlteracaoCaixa, listAlteracoesPendentes, decidirAlteracaoCaixa, corrigirCaixa,
-  historicoParaOperador, exigirDiaAnteriorFechado,
+  historicoParaOperador, exigirDiaAnteriorFechado, passou24h, solicitarAlteracaoFechamento,
 };
