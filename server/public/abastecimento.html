@@ -142,6 +142,8 @@
   .filtros-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
   .filtro-chip{font-family:var(--mono);font-size:10.5px;color:var(--muted);padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
   .filtro-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
+  .filtro-chip.correcoes{color:var(--warn);border-color:rgba(242,179,61,.45);background:var(--warn-dim);}
+  .filtro-chip.correcoes.ativo{color:var(--warn);border-color:var(--warn);background:rgba(242,179,61,.18);}
   /* linha separada dos filtros de verdade - esses botoes nao filtram a
      lista, abrem outro painel (cadastro/operadores); o rotulo deixa isso
      visualmente claro em vez de parecerem mais um filtro */
@@ -387,6 +389,7 @@
   <button type="button" class="filtro-chip" data-filtro="ENVIO" onclick="filtrar('ENVIO')">🚚 Envios</button>
   <button type="button" class="filtro-chip" data-filtro="CONTAGEM" onclick="filtrar('CONTAGEM')">📋 Contagens</button>
   <button type="button" class="filtro-chip" data-filtro="REMAKE" onclick="filtrar('REMAKE')">🍕 Remakes</button>
+  <button type="button" class="filtro-chip correcoes hidden" id="btn-correcoes" data-filtro="correcoes" onclick="filtrar('correcoes')" title="Somente o Master vê e decide pedidos pendentes">🛠 Correções</button>
 </div>
 <div class="admin-chips hidden" id="admin-chips" style="margin-bottom:8px;">
   <span class="admin-chips-rotulo">⚙️ Administração</span>
@@ -1197,6 +1200,10 @@ function lembrarOperadorUsado(usuario){
 }
 
 function filtrar(f){
+  // Esta fila só é apresentada ao Master. A decisão também é protegida no
+  // servidor por requireMaster; este corte evita que Admin/Gerente sequer a
+  // encontrem entre os filtros operacionais.
+  if(f==='correcoes' && !IS_MASTER) return;
   FILTRO = f;
   PAGINA_HISTORICO = 1;
   REVELADOS_RECENTES = REVELAR_INICIAL;
@@ -1204,9 +1211,18 @@ function filtrar(f){
   renderLista();
 }
 function passaFiltro(r){
+  if(FILTRO==='correcoes') return IS_MASTER && !!(r.correcao && r.correcao.numeroTicket && (r.correcao.status||'pendente')==='pendente');
   if(FILTRO==='pendentes') return pendente(r);
   if(FILTRO==='PEDIDO' || FILTRO==='ENVIO' || FILTRO==='CONTAGEM' || FILTRO==='REMAKE') return r.tipo===FILTRO;
   return true;
+}
+
+function atualizarBotaoCorrecoes(){
+  const botao = document.getElementById('btn-correcoes');
+  if(!botao) return;
+  const total = REGS.filter(r => r.correcao && r.correcao.numeroTicket && (r.correcao.status||'pendente')==='pendente').length;
+  botao.classList.toggle('hidden', !IS_MASTER);
+  botao.textContent = `🛠 Correções${total ? ` (${total})` : ''}`;
 }
 
 function chipsQtd(r){
@@ -1386,6 +1402,7 @@ function regCardHtml(r){
       ${r.observacao ? (r.tipo==='CONTAGEM'
           ? `<div class="cont-recado"><b>Recado de quem contou</b>${escapeHtml(r.observacao)}</div>`
           : `<div class="reg-obs">${escapeHtml(r.observacao)}</div>`) : ''}
+      ${resumoCorrecaoPendente(r)}
       ${pendente(r) && TEM_ENVIO ? `<button type="button" class="btn-acao envio" style="margin-top:8px;padding:9px 10px;font-size:12.5px;min-width:0;width:100%;" onclick="envioRapido('${r.id}')">⚡ Envio rápido — mandar exatamente o que foi pedido</button>` : ''}
       <div class="reg-quem"><span>por ${escapeHtml(r.operadorNome||r.criadoPorNome||r.criadoPorEmail||'—')}${r.operadorUsuario?` <span style="font-family:var(--mono);color:var(--accent);">@${escapeHtml(r.operadorUsuario)}</span>`:''}</span><span style="display:flex;gap:10px;align-items:center;">${correcaoHtml(r)}${IS_MASTER && r.tipo==='CONTAGEM' && (r.correcao||{}).status!=='pendente' ? `<button type="button" class="link-badge-btn" onclick="abrirPedirCorrecao('${r.id}', true)">✏️ editar</button>` : ''}${IS_MASTER?`<button type="button" class="btn-excluir" onclick="excluir('${r.id}')">🗑 excluir</button>`:''}</span></div>
     </div>`;
@@ -1399,11 +1416,27 @@ function regCardHtml(r){
 function regEhPendente(r){
   return (r.tipo==='PEDIDO' && pendente(r)) || (r.tipo==='ENVIO' && !r.recebidoEm);
 }
+function resumoCorrecaoPendente(r){
+  const c = r.correcao;
+  if(!IS_MASTER || FILTRO!=='correcoes' || !c || (c.status||'pendente')!=='pendente') return '';
+  const acao = c.acao==='remover' ? 'Remover lançamento' : c.acao==='data-hora' ? 'Alterar data e hora' : 'Alterar quantidades';
+  const solicitante = c.porOperadorNome || c.porNome || c.porEmail || '—';
+  return `<div class="reg-obs" style="margin-top:9px;border-left:2px solid var(--warn);padding-left:8px;">
+    <b style="color:var(--warn);">🛠 Pedido de correção · Ticket #${escapeHtml(c.numeroTicket)}</b><br>
+    <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">${escapeHtml(acao)} · pedido por ${escapeHtml(solicitante)}${c.solicitadaEm ? ' · '+escapeHtml(fmtHora(c.solicitadaEm)) : ''}</span><br>
+    <span><b>Justificativa:</b> ${escapeHtml(c.motivo||'não informada')}</span>
+  </div>`;
+}
 function renderLista(){
   const visiveis = REGS.filter(passaFiltro);
   document.getElementById('lista-count').textContent = visiveis.length;
   if(!visiveis.length){
     document.getElementById('lista-regs').innerHTML = '<div class="empty">Nenhuma movimentação nesse filtro.</div>';
+    return;
+  }
+  if(FILTRO==='correcoes'){
+    document.getElementById('lista-regs').innerHTML = `<div class="dia-header pendentes-header">🛠 Pedidos de correção aguardando decisão <span style="font-family:var(--mono);">[${visiveis.length}]</span></div>`
+      + visiveis.map(regCardHtml).join('');
     return;
   }
   const desktop = MQ_DESKTOP.matches;
@@ -1479,6 +1512,7 @@ async function carregar(){
     if(!resp.ok) throw new Error(`Falha ao carregar (${resp.status})`);
     REGS = await resp.json();
     REGS.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
+    atualizarBotaoCorrecoes();
     atualizarSinalAoVivo('vivo');
     renderOperacaoAgora();
     renderResumo();
