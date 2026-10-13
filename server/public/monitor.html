@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NoPulso · ao vivo</title>
@@ -559,7 +559,7 @@ async function tentarEntrar(){
 
 let DATA = [];
 
-function fmtMoney(v){ return 'R$ ' + (v||0).toFixed(2).replace('.',','); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((v||0)); }
 // escapa texto pra ir dentro de innerHTML/atributo com segurança - vários
 // campos (nome do cliente, nome no cartão, motivo/observação da Adyen) vêm
 // de fora e o cliente/fraudador digita o que quiser; sem isso, um "nome"

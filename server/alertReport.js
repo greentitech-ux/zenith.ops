@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // alertReport.js
 // Relatorio do painel "Alertas de falha/fraude" do Monitor (recusas
 // repetidas, tentativa Amex recusada, fraude suspeita nativa da Adyen, fim
@@ -23,7 +24,7 @@ function fmtData(iso) {
 }
 
 function fmtMoney(v) {
-  return 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((v || 0));
 }
 
 function normalizarNome(nome) {

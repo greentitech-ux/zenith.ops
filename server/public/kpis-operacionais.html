@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>KPI's operacionais · NoPulso</title>
@@ -254,7 +254,7 @@ function fmtTempo(seg){
 function fmtValor(v, def, modo){
   if(v == null) return null;
   const tipo = tipoKpi(def);
-  if(tipo === 'moeda') return `R$ ${fmtNumero(v, 2)}`;
+  if(tipo === 'moeda') return NoPulsoMoeda.formatar(v);
   if(tipo === 'kg') return `${fmtNumero(v, modo === 'media' ? 2 : 3)} kg`;
   if(tipo === 'tempo') return `⏱ ${fmtTempo(v)}`;
   if(tipo === 'percentual') return `${fmtNumero(v, 1)}%`;
@@ -270,7 +270,7 @@ function fmtEixo(v, def){
   if(tipo === 'tempo') return `⏱ ${fmtTempo(n)}`;
   if(tipo === 'percentual') return `${fmtNumero(n, 1)}%`;
   const curto = Math.abs(n) >= 1000 ? `${fmtNumero(n / 1000, 1)} mil` : fmtNumero(n, tipo === 'kg' ? 2 : 0);
-  if(tipo === 'moeda') return `R$ ${curto}`;
+  if(tipo === 'moeda') return NoPulsoMoeda.formatar(n);
   if(tipo === 'kg') return `${curto} kg`;
   return `${curto} un.`;
 }

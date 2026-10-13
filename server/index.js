@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // index.js
 require('dotenv').config();
 const express = require('express');
@@ -415,6 +416,7 @@ function senhasIguais(a, b) {
 // recebia texto puro em vez de JSON, quebrando o fetch().json() com um erro
 // cru na tela ("Unexpected token 'A'...")
 const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
+  '/moeda-br.js', // Formatador sem dados; também usado nas telas públicas.
   '/login-avisos.js',
   '/noc-validacao.js', '/api/noc-login/desafio', '/api/noc-login/automatico',
   '/noc-login.html', '/noc-login.js', '/api/noc-login/vinculo', '/api/noc-login/registrar',
@@ -1137,7 +1139,7 @@ app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, 
     });
     broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
     broadcast('refund-request-changed', estorno, 'monitor');
-    push.notifySolicitacao(`Ticket #${tarefa.numeroTicket} · Pedido de estorno`, `${unidadeNome} · R$ ${(Number(valorEstornar) || 0).toFixed(2)}`, tarefa.id);
+    push.notifySolicitacao(`Ticket #${tarefa.numeroTicket} · Pedido de estorno`, `${unidadeNome} · R$ ${NoPulsoMoeda.numero((Number(valorEstornar) || 0))}`, tarefa.id);
     res.json({ ok: true, id: tarefa.id, estornoId: estorno.id, numeroTicket: tarefa.numeroTicket });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -3849,7 +3851,7 @@ app.post('/webhooks/adyen', async (req, res) => {
         // A referência da Adyen é um UUID interno e não ajuda a operação na
         // loja. Ela continua no Monitor/Suporte, mas não vai para a tela dos
         // computadores da unidade.
-        const aviso = `${cliente} · R$ ${Number(tx.valor || pedido.valor || 0).toFixed(2)} foi estornado após aprovação. Não produzir/não entregar; confirme com o Suporte.`;
+        const aviso = `${cliente} · R$ ${NoPulsoMoeda.numero(Number(tx.valor || pedido.valor || 0))} foi estornado após aprovação. Não produzir/não entregar; confirme com o Suporte.`;
         try {
           const novo = await push.notifyCriticoUnico(
             `estorno-operacional-${tx.unidade || 'sem-unidade'}-${pedidoIdAtual}`,
@@ -3879,7 +3881,7 @@ app.post('/webhooks/adyen', async (req, res) => {
       const rajadaAmex = amexVelocity.registrarRecusa(tx);
       if (rajadaAmex) {
         const motivo = rajadaAmex.tipo === 'mesmo-valor'
-          ? `${rajadaAmex.tentativas} recusas AMEX de R$ ${rajadaAmex.valor.toFixed(2)} em ${rajadaAmex.janelaMinutos} min`
+          ? `${rajadaAmex.tentativas} recusas AMEX de R$ ${NoPulsoMoeda.numero(rajadaAmex.valor)} em ${rajadaAmex.janelaMinutos} min`
           : `${rajadaAmex.tentativas} recusas AMEX na unidade em ${rajadaAmex.janelaMinutos} min`;
         push.notifyCritico(
           `🚨 Possível ataque AMEX — ${tx.unidade || ''}`,
@@ -3917,7 +3919,7 @@ app.post('/webhooks/adyen', async (req, res) => {
         if (registro.bloqueioNovo) {
           await push.notifyCritico(
             `🚫 PEDIDO AMEX BLOQUEADO — ${tx.unidade || ''}`,
-            `${clienteNome || 'Cliente'} · R$ ${Number(tx.valor || 0).toFixed(2)} · NÃO produzir/entregar; acione o suporte.`,
+            `${clienteNome || 'Cliente'} · R$ ${NoPulsoMoeda.numero(Number(tx.valor || 0))} · NÃO produzir/entregar; acione o suporte.`,
             `amex-bloqueio-${pedidoIdAtual}`,
             tx.unidade
           );
@@ -4020,7 +4022,7 @@ app.post('/webhooks/adyen', async (req, res) => {
         broadcast('fraude-marcada', registro, 'monitor');
         if (registro.bloqueioNovo) push.notifyRaw(
           `🚫 PEDIDO BLOQUEADO — ${tx.unidade || ''}`,
-          `${clienteNome || 'Cliente'} · R$ ${Number(tx.valor || 0).toFixed(2)} · NÃO produzir/entregar; acione o suporte`,
+          `${clienteNome || 'Cliente'} · R$ ${NoPulsoMoeda.numero(Number(tx.valor || 0))} · NÃO produzir/entregar; acione o suporte`,
           `fraude-bloqueio-${pedidoIdAtual}`, tx.unidade
         );
         await escalarClusterParaFraude(clusterInfo.nomes, 'Bloqueado: mesmo cartão aprovado em pedidos ligados com variação de nomes.', true);
@@ -5451,7 +5453,7 @@ app.post('/api/monitor/alertar-loja', requireSection('monitor'), async (req, res
     // ao banner da loja: codigo longo na tela operacional atrapalha a leitura.
     // Mantemos o mesmo formato objetivo do alerta de estorno: nome, valor e a
     // descricao clara da acao esperada.
-    const texto = `🚨 CONFIRA ESSE PEDIDO: ${cliente} · R$ ${valor.toFixed(2)} · O Monitor pediu para verificar agora.`;
+    const texto = `🚨 CONFIRA ESSE PEDIDO: ${cliente} · R$ ${NoPulsoMoeda.numero(valor)} · O Monitor pediu para verificar agora.`;
     await Promise.all(alvo.map((c) => lojaStatus.enviarMensagem(c.codigo, c.posto, texto, req.user.email)));
     res.json({ ok: true, avisados: alvo.length });
   } catch (err) {
@@ -5786,7 +5788,7 @@ async function alertarBloqueioFraudeNaLoja(tx, pedidoId, motivo) {
       return;
     }
     const cliente = String(tx.nomeCliente || tx.cardHolder || 'Cliente').slice(0, 80);
-    const texto = `🚫 NÃO PRODUZIR/NÃO ENTREGAR: ${cliente} · R$ ${Number(tx.valor || 0).toFixed(2)}. ACIONE O SUPORTE e aguarde a liberação.`;
+    const texto = `🚫 NÃO PRODUZIR/NÃO ENTREGAR: ${cliente} · R$ ${NoPulsoMoeda.numero(Number(tx.valor || 0))}. ACIONE O SUPORTE e aguarde a liberação.`;
     await lojaStatus.enviarMensagemMuitos(computadores.map((c) => ({ codigo: c.codigo, posto: c.posto })), texto, 'deteccao-automatica@sistema');
     console.log(`[fraude] bloqueio do pedido ${pedidoId} avisado em ${computadores.length} computador(es) de ${nomeAlvo}: ${motivo}`);
   } catch (err) {
@@ -5804,7 +5806,7 @@ async function alertarEstornoNaLoja(tx, pedidoId, cliente, valorDoPedido) {
       console.warn(`[estorno] nenhum PDV/ATM/Dispatch/Delivery cadastrado para alertar em ${nomeAlvo} (pedido ${pedidoId}).`);
       return;
     }
-    const valor = Number(tx.valor || valorDoPedido || 0).toFixed(2);
+    const valor = NoPulsoMoeda.numero(tx.valor || valorDoPedido || 0);
     const texto = `🔴 ESTORNO CONFIRMADO: ${cliente} · R$ ${valor}. O pagamento foi aprovado e depois estornado. NÃO PRODUZIR/NÃO ENTREGAR; confirme com o Suporte.`;
     const resultado = await lojaStatus.enviarMensagemMuitos(
       computadores.map((c) => ({ codigo: c.codigo, posto: c.posto })),
@@ -6537,7 +6539,7 @@ app.get('/api/formularios/:id/anexo/:indice', requireSection('formularios'), asy
 // que a pessoa viu; cancelar tira de circulação sem apagar o registro.
 app.put('/api/formularios/:id', auth.requireMaster, async (req, res) => {
   try {
-    const dados = { campos: req.body.campos, linhas: req.body.linhas, porEmail: req.user.email };
+    const dados = { campos: req.body.campos, linhas: req.body.linhas, unidade: req.body.unidade, motivoEmpresa: req.body.motivoEmpresa, porEmail: req.user.email };
     if (await desviarSeQaMaster(req, res, 'formularios.editar', `Editar formulário ${req.params.id}`, { id: req.params.id, ...dados })) return;
     res.json(formularioComLinks(await formularios.editar(req.params.id, dados)));
   } catch (err) {
@@ -6665,7 +6667,7 @@ app.post('/api/formularios/:id/enviar-pagamento', requireSection('formularios'),
     });
     await formularios.marcarEnviadoPagamento(req.params.id, { pagamentoId: ticket.id });
     broadcast('solicitacao-criada', ticket, 'solicitacoes');
-    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · ${modelo.rotulo} (formulário)`, `${modelo.rotulo} · ${registro.unidade} · R$ ${Number(registro.valorTotal || 0).toFixed(2)}`, ticket.id);
+    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · ${modelo.rotulo} (formulário)`, `${modelo.rotulo} · ${registro.unidade} · R$ ${NoPulsoMoeda.numero(Number(registro.valorTotal || 0))}`, ticket.id);
     res.json({ ticket });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -7265,7 +7267,7 @@ const EXECUTORES_QA = {
     async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)),
     { origem: 'manutencao-zebra' },
   ),
-  'formularios.editar': (p) => formularios.editar(p.id, { campos: p.campos, linhas: p.linhas, porEmail: p.porEmail }),
+  'formularios.editar': (p) => formularios.editar(p.id, { campos: p.campos, linhas: p.linhas, unidade: p.unidade, motivoEmpresa: p.motivoEmpresa, porEmail: p.porEmail }),
   'formularios.cancelar': (p) => formularios.cancelar(p.id, { motivo: p.motivo, porEmail: p.porEmail }),
   'formularios.reabrirAnexo': (p) => formularios.reabrirAnexo(p.id, { porEmail: p.porEmail }),
   'formularios.remover': (p) => formularios.remover(p.id),
@@ -8782,6 +8784,21 @@ function combinarFechamentosParaLeitura({ planilha = [], lancados = [], sangrias
     sheetsSync.mesclarLancamentosDoMesmoDia,
   );
 }
+
+// O conector consulta exatamente as fontes/precedência da tela, sem ler a
+// coleção outra vez nem criar uma segunda entidade de fechamento.
+require('./coworkLeituras').configurar({ fechamentos: async () => {
+  const [lancados, saidas, parque] = await Promise.all([
+    fechamentosLive.listAll(), sangrias.listAll(), saltiversoFechamento.listAll(),
+  ]);
+  return {
+    itens: combinarFechamentosParaLeitura({ planilha: fechamentosData, lancados,
+      sangriasLancadas: saidas.map(sangrias.comoFechamento), saltiversoLancado: parque.map(saltiversoFechamento.comoFechamento) }),
+    cobertura: { planilhaSincronizadaEm: statusSincronizacaoPlanilhas.ultimaEm,
+      planilhaComErro: !!statusSincronizacaoPlanilhas.ultimoErro,
+      aviso: 'Planilha pode ser snapshot antigo; lançamentos nativos prevalecem para a mesma unidade/dia.' },
+  };
+} });
 
 // PAUSA DA SINCRONIZACAO (pedido do Master): uma trava pra ele congelar a
 // leitura das planilhas quando quiser mexer nelas sem o NoPulso relendo por
@@ -13871,7 +13888,7 @@ app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('
 function resumoDoTicket(t, tipoVinculo, nomeDoSolicitante) {
   const linhas = [];
   const põe = (rotulo, valor) => { if (valor != null && String(valor).trim() !== '') linhas.push({ rotulo, valor: String(valor) }); };
-  const dinheiro = (v) => (v == null || v === '' ? null : (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+  const dinheiro = (v) => (v == null || v === '' ? null : NoPulsoMoeda.formatar(v));
   const dia = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d).split('-').reverse().join('/') : d || null);
   põe('Solicitante', nomeDoSolicitante);
   if (tipoVinculo === 'estorno') {
@@ -17435,7 +17452,7 @@ async function verificarAlertaPedido(order) {
     push.notifyUsuario(
       vigia.userId,
       `Pedido ${order.pedidoId} mudou de status`,
-      `${order.cliente || 'Cliente'} · R$ ${(order.valor || 0).toFixed(2)} · ${vigia.statusVisto || '—'} → ${order.statusAtual}`,
+      `${order.cliente || 'Cliente'} · R$ ${NoPulsoMoeda.numero((order.valor || 0))} · ${vigia.statusVisto || '—'} → ${order.statusAtual}`,
       'pedido-' + order.pedidoId,
       '/monitor'
     ).catch((err) => console.error('[pedidoWatch] falha no push:', err.message));
@@ -17652,6 +17669,19 @@ app.get('/api/suporte-chats/:id/pdf', auth.requireMaster, async (req, res) => {
 
 // anexo de uma mensagem, lado do atendimento (mesmo gate das outras rotas de
 // /api/suporte-chats)
+app.get('/api/suporte-chats/:id/formularios/:formularioId/pdf', auth.requireAuth, async (req, res) => {
+  try {
+    if (!centralBeniboy.podeAtender(req)) return res.sendStatus(403);
+    const chat = await suporteChat.getOne(req.params.id);
+    if (!chat) return res.sendStatus(404);
+    const f = await formularios.getOne(req.params.formularioId);
+    if (!f || ![f.origem, f.origemAtendimento].some(o => o?.tipo === 'chat' && o.id === chat.id) || f.status !== 'ASSINADO'
+      || !f.origemPdf?.path || f.origemPdf.hash !== require('./formularioOrigem').versaoAssinada(f)) return res.sendStatus(404);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return storage.streamArquivo(f.origemPdf.path, 'application/pdf', res);
+  } catch (err) { res.status(500).json({ error: 'Não foi possível baixar o formulário.' }); }
+});
+
 app.get('/api/suporte-chats/:id/anexo/:indice', auth.requireAuth, async (req, res) => {
   if (!centralBeniboy.podeAtender(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
   const chat = await suporteChat.getOne(req.params.id);
@@ -18091,7 +18121,7 @@ async function enviarCobrancaChamado({ modulo, chamadoId, origem, req }) {
   });
   chamado = await modulo.marcarCobrancaEnviada(chamadoId, { pagamentoId: ticket.id });
   broadcast('solicitacao-criada', ticket, 'solicitacoes');
-  push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Cobrança de ${origem}`, `${chamado.titulo} · R$ ${Number(chamado.cobranca.valor).toFixed(2)}`, ticket.id);
+  push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Cobrança de ${origem}`, `${chamado.titulo} · R$ ${NoPulsoMoeda.numero(Number(chamado.cobranca.valor))}`, ticket.id);
   return { chamado, ticket };
 }
 

@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // botIndicadores.js
 // Monta o resumo de indicadores que a rota GET /api/bot/indicadores devolve
 // pro assistente do gestor de operacoes (Claude, rodando fora do app, sem
@@ -248,7 +249,7 @@ function escaparHtml(s) {
 }
 
 function brl(v) {
-  return 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((Number(v) || 0));
 }
 
 // E-mail diario com o MESMO JSON da rota, pra quem le por caixa de entrada

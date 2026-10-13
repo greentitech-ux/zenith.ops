@@ -1317,7 +1317,7 @@ setTimeout(async () => {
       // o caso dele, com os números dele
       'o 85.353,77 é barrado porque a linha diz R$6.353,77':
         c1.reprovados.length === 1 && c1.reprovados[0].campo === 'moto'
-        && /não é o que está impresso na linha/.test(c1.reprovados[0].motivo) && /R\$ 6353,77/.test(c1.reprovados[0].motivo),
+        && /não é o que está impresso na linha/.test(c1.reprovados[0].motivo) && /R\$ 6\.353,77/.test(c1.reprovados[0].motivo),
       'e os outros três continuam preenchidos': c1.aprovados.length === 3 && !c1.aprovados.some((x) => x.campo === 'moto'),
       // sem depender da linha estar certa: a % pega
       'dígito errado nos dois lugares é barrado pela % (88,7% não fecha com 85 mil)':
@@ -1348,7 +1348,7 @@ setTimeout(async () => {
         c8.reprovados.some((r) => r.campo === 'carryout') && !c8.reprovados.some((r) => r.campo === 'moto'),
       'só duas linhas com % que discordam: as duas vão pra digitação, dizendo os dois totais':
         c9.reprovados.length === 2
-        && c9.reprovados.every((r) => /apontam totais diferentes/.test(r.motivo) && /R\$ 11040,80/.test(r.motivo) && /R\$ 5137,59/.test(r.motivo))
+        && c9.reprovados.every((r) => /apontam totais diferentes/.test(r.motivo) && /R\$ 11\.040,80/.test(r.motivo) && /R\$ 5\.137,59/.test(r.motivo))
         && c9.aprovados.length === 0,
       'só duas linhas que concordam passam': c9ok.reprovados.length === 0 && c9ok.aprovados.length === 2,
       'a folga cresce com o arredondamento da % impressa (2,0%: 4% passa, 8% não)':
@@ -1411,10 +1411,10 @@ setTimeout(async () => {
 
     const conf = {
       'a conta abre os dois lados, com o rótulo de cada parcela':
-        /Faturamento \(canais de venda\) R\$ 2566,93 =/.test(texto)
-        && /Delivery - Moto Especi R\$ 1954,23/.test(texto)
+        /Faturamento \(canais de venda\) R\$ 2\.566,93 =/.test(texto)
+        && /Delivery - Moto Especi R\$ 1\.954,23/.test(texto)
         && /CarryOut R\$ 513,80/.test(texto)
-        && /Total declarado \(formas \+ dinheiro\) R\$ 1746,33 =/.test(texto)
+        && /Total declarado \(formas \+ dinheiro\) R\$ 1\.746,33 =/.test(texto)
         && /AdyenV2 R\$ 289,60/.test(texto) && /99Food R\$ 466,90/.test(texto),
       'diz a conta da diferença, não só o número':
         /Diferença = declarado - faturamento = -R\$ 820,60/.test(texto),
@@ -12892,7 +12892,7 @@ setTimeout(async () => {
       + pega(/const FICHA_SEM_CIFRAO = \[[^\]]*\];/) + pega(/function segundosParaTempo\(seg\)\{[\s\S]*?\n\}/)
       + pega(/function fichaValorFmt\(it\)\{[\s\S]*?\n\}/);
     // eslint-disable-next-line no-new-func
-    const fmtK = new Function('window', `${ktK};${pecas}; return fichaValorFmt;`)({});
+    const fmtK = new Function('window', 'NoPulsoMoeda', `${ktK};${pecas}; return fichaValorFmt;`)({}, require('./public/moeda-br'));
     const v = (tipo, valor) => fmtK({ campo: 'kpi:x', label: 'x', tipo, valor });
     const conf = {
       // os quatro do print, com os segundos que estavam gravados
@@ -15493,7 +15493,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         pctOk.itens[0].status === 'ok' && pctFora.itens[0].status === 'divergente',
       'divergência vira tarefa pro GERENTE DA LOJA, prioridade alta, com o texto do fato':
         cob1.length === 2 && tBessa.responsavelId === 'u-ger-conc' && tBessa.prioridade === 'alta'
-        && /declarou R\$ 10\.000,00, PWR R\$ 12\.100,00 \(R\$ 2\.100,00 a menos\)/.test(tBessa.titulo || ''),
+        && /declarou R\$ 10\.000, PWR R\$ 12\.100 \(R\$ 2\.100 a menos\)/.test(tBessa.titulo || ''),
       'loja sem gerente cadastrado: a tarefa fica com o Master': tTat.responsavelEmail === 'master@teste.local',
       'e vira alerta crítico na Central': alertasConc.length === 2 && alertasConc.every((a) => a.critico === true),
       'a mesma divergência NUNCA é cobrada duas vezes (o registro fica marcado)':
@@ -23691,7 +23691,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
       'balão e leitor de tela dizem a mesma coisa':
         !/data-dica="([^"]*)" aria-label="(?!\1")/.test(ben),
       'não sobrou botão de texto na fileira de ações':
-        !/btn-ghost[^>]*>(🙋|🔀|✅|⛔|↩️|🎫|📄|🖥️)/.test(ben),
+        // Só a fileira de ações, não botões textuais dentro das notas/anexos.
+        (ben.match(/acoes\.push\(`[\s\S]*?`\);/g) || []).length > 0
+        && !(ben.match(/acoes\.push\(`[\s\S]*?`\);/g) || []).some(t => /btn-ghost[^>]*>(🙋|🔀|✅|⛔|↩️|🎫|📄|🖥️)/.test(t)),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okDicas = !falhas.length;
@@ -29957,7 +29959,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         // RELAÇÃO: a aniversariante paga menos que a irmã, e está marcada
         if (r.erro) {
           // a soma dos pagamentos precisa bater - o erro traz o total certo
-          const total = Number((/valor total \(R\$([\d.]+)\)/.exec(r.erro) || [])[1]);
+          const valorExibido = (/valor total \(R\$ ([\d.,]+)\)/.exec(r.erro) || [])[1];
+          const total = valorExibido ? Number(valorExibido.replace(/\./g, '').replace(',', '.')) : NaN;
           if (!Number.isFinite(total)) return false;
           const r2 = await pq.criar({
             unidade: 'Saltiverso Manaira', unidadeNome: 'Saltiverso Manaira',
@@ -30077,6 +30080,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
   } catch(e){console.log('  erro acesso normal: '+e.message);}
   if(!okTerminalUnidade) ruins++;
   console.log(`${okTerminalUnidade?'✓':'✗'} Acesso normal: portal retirado, suporte com nome/contato e login pessoal preservado`);
+  try {require('./testeMoedaBR');}
+  catch(e){ruins++;console.log('✗ Moeda BR: '+e.message);}
   try {await require('./testeEstornoBeniboy').testar();}
   catch(e){ruins++;console.log('✗ Estorno do Beniboy: '+e.message);}
   try {await require('./testeAcoesEntregas').testarHttp({DOCS,enviarJson,postarJson});}

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Decidir solicitação · NoPulso</title>
@@ -119,7 +119,7 @@ const TOKEN = params.get('token');
 let ACAO = params.get('acao') === 'recusar' ? 'recusar' : (params.get('acao') === 'aprovar' ? 'aprovar' : null);
 
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fmtMoney(v){ return v==null ? null : 'R$ ' + Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtMoney(v){ return v==null ? null : NoPulsoMoeda.formatar(Number(v)); }
 function fmtData(iso){ if(!iso) return ''; return new Date(iso).toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo' }); }
 
 const TIPOS_LABEL = { compra:'Compra', manutencao:'Manutenção', 'suporte-ti':'Suporte de TI', pagamento:'Pagamento', nota:'Nota fiscal' };

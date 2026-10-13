@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Parque · NoPulso</title>
@@ -475,7 +475,7 @@ async function carregarTermos(){
         </span>
       </div>
       <div class="sub" style="font-size:12px;color:var(--muted);margin-top:3px;">
-        ${escapeHtml(e.unidadeNome||e.unidade||'')} · ${e.qtdCriancas||0} criança(s)${e.tempoMinutos?` · ${e.tempoMinutos}min`:''}${e.valorPrevisto?` · previsto R$ ${Number(e.valorPrevisto).toFixed(2)}`:''}
+        ${escapeHtml(e.unidadeNome||e.unidade||'')} · ${e.qtdCriancas||0} criança(s)${e.tempoMinutos?` · ${e.tempoMinutos}min`:''}${e.valorPrevisto?` · previsto R$ ${NoPulsoMoeda.numero(Number(e.valorPrevisto))}`:''}
       </div>
       <div class="sub" style="font-size:12px;color:var(--muted);">
         emitido ${fmtQuando(e.emitidoEm)} por ${escapeHtml(e.emitidoPorEmail||'—')}
@@ -1082,7 +1082,7 @@ function valorDoCheckin(c){
   if(c.metodoPagamento==='cortesia') return 0;
   return valorPorTempo(c.tempoMinutos) * ((c.criancas||[]).length || c.pulseiras || 0);
 }
-function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
+function fmtReal(v){ return NoPulsoMoeda.formatar(Number(v||0)); }
 const METODOS_LABEL = { dinheiro:'Dinheiro', pix:'Pix', debito:'Débito', credito:'Crédito', voucher:'Voucher', gratuidade:'Gratuidade', cortesia:'Cortesia' };
 const PRECO_MEIA_FIN = 25;
 

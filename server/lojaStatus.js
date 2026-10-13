@@ -335,7 +335,8 @@ async function papelDeParedeDe(codigo, posto) {
   // nesse caso nao ha marca e a maquina cai no papel de parede do parque
   const perfilUnidade = await unidades.perfil(codigo).catch(() => null);
   const marca = (perfilUnidade && perfilUnidade.marca) || null;
-  const empresa = await empresas.empresaDaUnidade(codigo).catch(() => null);
+  const { empresa } = require('./identidadeNoc').resolverIdentidade(codigo,
+    await empresas.listAtivas().catch(() => []));
   const rede = empresa && empresa.id ? String(empresa.id) : null;
   const porMarca = (cfg && cfg.papelDeParedePorMarca) || {};
   const temArte = (k) => (k && porMarca[k] && porMarca[k].caminho ? porMarca[k] : null);
@@ -399,7 +400,7 @@ const chaveLogoCarimbo = (tipo, id) => `${tipo}:${id}`;
 // a correção da atualização de logos. Não afeta artes enviadas pelo Master.
 // Mudar o desenho sem trocar logos também precisa redesenhar as máquinas já
 // instaladas; esta revisão viaja no heartbeat somente para o modelo básico.
-const REVISAO_MODELO_BASICO = 7;
+const REVISAO_MODELO_BASICO = 8;
 // Uma revisão visual não deve reexecutar USB, atalhos, barra e arquivamento.
 // O heartbeat leva esta chave separada: quando ela mudar, o agente troca só o
 // papel de parede, inclusive se o Windows ainda estiver com uma imagem antiga.
@@ -429,13 +430,25 @@ async function logosDaUnidade(codigo) {
   const logos = (cfg && cfg.logosCarimbo) || {};
   const perfilUnidade = await unidades.perfil(codigo).catch(() => null);
   const marca = (perfilUnidade && perfilUnidade.marca) || null;
-  const empresa = await empresas.empresaDaUnidade(codigo).catch(() => null);
+  const { empresa, prestadora } = require('./identidadeNoc').resolverIdentidade(codigo,
+    await empresas.listAtivas().catch(() => []));
   const rede = empresa && empresa.id ? String(empresa.id) : null;
   const tem = (k) => (logos[k] && logos[k].caminho ? logos[k] : null);
-  const logoMarca = (marca && tem(chaveLogoCarimbo('marca', marca))) || logoPadraoDaMarca(marca);
-  const logoGrupo = (rede && tem(chaveLogoCarimbo('grupo', rede))) || logoPadraoDoGrupo(empresa);
-  const versao = Math.max(Number(logoMarca && logoMarca.versao) || 0, Number(logoGrupo && logoGrupo.versao) || 0);
-  return { marca, rede, logoMarca, logoGrupo, versao };
+  const doCliente = (rede && tem(chaveLogoCarimbo('grupo', rede))) || logoPadraoDoGrupo(empresa);
+  const daPrestadora = prestadora && tem(chaveLogoCarimbo('grupo', prestadora.id));
+  const logoGrupo = doCliente || daPrestadora || null;
+  // Sem vínculo inequívoco/logo do cliente, somente a identidade da prestadora.
+  const marcaSegura = doCliente ? marca : null;
+  const logoMarca = (marcaSegura && tem(chaveLogoCarimbo('marca', marcaSegura))) || logoPadraoDaMarca(marcaSegura);
+  const versionar = logo => !logo ? null : { ...logo, versao: parseInt(crypto.createHash('sha256')
+    .update(JSON.stringify([logo.caminho || logo.arquivoPublico, logo.versao || 0])).digest('hex').slice(0, 12), 16) };
+  // Inclui a identidade dos arquivos: trocar de empresa com versões iguais
+  // também precisa redesenhar e baixar a logo nova, sem reutilizar a anterior.
+  const grupoVersionado = versionar(logoGrupo), marcaVersionada = versionar(logoMarca);
+  const versao = parseInt(crypto.createHash('sha256').update(JSON.stringify([
+    rede, marcaSegura, grupoVersionado && grupoVersionado.versao, marcaVersionada && marcaVersionada.versao,
+  ])).digest('hex').slice(0, 12), 16);
+  return { marca: marcaSegura, rede, logoMarca: marcaVersionada, logoGrupo: grupoVersionado, versao };
 }
 // O heartbeat precisa considerar também os logos oficiais embutidos. Perfil e
 // empresa já usam cache; isso mantém a versão do heartbeat idêntica à que a
@@ -1732,6 +1745,7 @@ async function listar() {
 // 20/08). O painel agora recebe o resumo e busca o detalhe so da maquina
 // cujo modal esta aberto (ver GET .../detalhe em index.js).
 const CAMPOS_SO_DO_DETALHE = [
+  'diagnostico',
   'eventos', 'ipHistorico', 'chatMensagens', 'dispositivos',
   'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
   'ultimoComandoTexto', 'ultimoComandoResultado', 'ultimoComandoErro',
@@ -4573,6 +4587,13 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   const snap = await comandoRef.get();
   if (!snap.exists) throw new Error('Comando não encontrado.');
   const comando = snap.data();
+  // Inclusive respostas tardias precisam vir do agente e computador corretos.
+  if (ctx.codigo != null && (ctx.codigo !== comando.codigo || ctx.posto !== comando.posto)) {
+    throw new Error('Comando não pertence a esse computador.');
+  }
+  const compSnap = await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).get();
+  const agentToken = compSnap.exists ? compSnap.data().agentToken : null;
+  if (agentToken && !tokensBatem(ctx.token, agentToken)) throw new Error('Token do agente inválido.');
   // Mesmo após alerta de timeout, "entregue" permanece aguardando a resposta
   // autenticada que comprova o término e pode liberar a próxima vaga.
   // RESPOSTA QUE CHEGA DEPOIS DA DESISTÊNCIA: a fila já foi liberada, então
@@ -4582,7 +4603,7 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   if (comando.status === 'cancelado' && comando.desistidoSemRetorno) {
     await comandoRef.update({
       respostaTardiaEm: new Date().toISOString(),
-      resultado: d.resultado || null,
+      resultado: comando.origem === 'manutencao-diagnostico-completo' ? 'Retorno tardio descartado; solicite uma nova coleta.' : d.resultado || null,
       erro: d.erro || null,
     });
     cache.invalidar();
@@ -4597,18 +4618,23 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   // com o token dele - senao qualquer um que adivinhasse um comandoId forjava
   // o resultado (marcava 'executado' com saida falsa, escondendo se rodou de
   // verdade). A rota passa codigo/posto da URL + token do cabecalho
-  if (ctx.codigo != null && (ctx.codigo !== comando.codigo || ctx.posto !== comando.posto)) {
-    throw new Error('Comando não pertence a esse computador.');
-  }
-  const compSnap = await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).get();
-  const agentToken = compSnap.exists ? compSnap.data().agentToken : null;
-  if (agentToken && !tokensBatem(ctx.token, agentToken)) throw new Error('Token do agente inválido.');
   const patch = {
     status: d.erro ? 'erro' : 'executado',
     executadoEm: new Date().toISOString(),
     resultado: d.resultado || null,
     erro: d.erro || null,
   };
+  const ehDiagnosticoCompleto = comando.origem === 'manutencao-diagnostico-completo';
+  const diagnosticoCompleto = ehDiagnosticoCompleto && !d.erro
+    ? require('./diagnosticoCompleto').extrair(d.resultado) : null;
+  if (ehDiagnosticoCompleto) {
+    // Só o último resumo na máquina. O histórico de comandos não duplica
+    // relatórios de hardware por execução nem guarda saída não validada.
+    patch.resultado = diagnosticoCompleto ? 'Diagnóstico recebido; consulte a ficha da máquina.' : null;
+    if (!diagnosticoCompleto && !patch.erro) {
+      patch.status = 'erro'; patch.erro = 'Diagnóstico sem resultado estruturado válido.';
+    }
+  }
   const foiComandoZebra = /~JR|Zpl-Enviar|zebra/i.test(String(comando.comando || ''));
   await comandoRef.update(patch);
   // carimba o ultimo resultado no doc do computador (alem de liberar a fila),
@@ -4621,7 +4647,7 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
   const inventarioAtalhos = /inventario-estacao|noc-inventario-atalhos/.test(String(comando.origem || ''))
     ? atalhosDoInventario(patch.resultado) : null;
   const filaRestante = filaDeComandos(compSnap.data() || {}).filter((id) => id !== String(comandoId));
-  await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).set({
+  await gravarEEspelhar(comando.codigo, comando.posto, {
     comandosFilaIds: filaRestante,
     comandoPendenteId: filaRestante[0] || null,
     comandoAguardandoElevacaoDesde: null,
@@ -4633,9 +4659,12 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
     ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 4000) : null,
     ultimoComandoErro: patch.erro ? String(patch.erro).slice(0, 500) : null,
     ...(inventarioAtalhos ? { atalhosDesktop: inventarioAtalhos, atalhosDesktopEm: Date.now() } : {}),
+    ...(diagnosticoCompleto ? { diagnostico: diagnosticoCompleto, diagnosticoResumo: {
+      geradoEm: diagnosticoCompleto.geradoEm, alertasCount: diagnosticoCompleto.alertas.length,
+      alertas: diagnosticoCompleto.alertas.slice(0, 3),
+    } } : {}),
     ...(eventoZebra ? { eventos: [...((compSnap.data() || {}).eventos || []), eventoZebra].slice(-EVENTOS_MAX) } : {}),
-  }, { merge: true });
-  cache.invalidar();
+  });
   return { ...comando, ...patch };
 }
 

@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // saltiversoFechamento.js
 // Fechamento de caixa DEDICADO do Saltiverso Patteo - diferente do
 // fechamentosLive.js usado pelas lojas (que carrega campos de loja de
@@ -128,7 +129,7 @@ async function criarCardQuebra(registro) {
     tipo: 'quebra-caixa',
     unidade: registro.unidade,
     unidadeNome: registro.unidadeNome,
-    titulo: `Quebra de caixa · ${registro.unidadeNome} (${registro.data}) · diferença de R$${registro.diferenca.toFixed(2)}`,
+    titulo: `Quebra de caixa · ${registro.unidadeNome} (${registro.data}) · diferença de R$ ${NoPulsoMoeda.numero(registro.diferenca)}`,
     valorEstimado: registro.diferenca,
     observacao: registro.observacao || 'Diferença detectada automaticamente no fechamento do Saltiverso.',
     fechamentoId: registro.id,

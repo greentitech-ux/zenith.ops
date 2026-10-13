@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Painel · NoPulso</title>
@@ -483,7 +483,7 @@ async function initNotifBtn(){
 }
 initNotifBtn();
 
-function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((Number(v)||0)); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const FUSO_BR = 'America/Sao_Paulo';
 function hojeBrasilia(){
@@ -1282,7 +1282,7 @@ async function cardSaltiversoLoja(){
   return pcardWrap('🥤','Bebidas & Meias (hoje)','/saltiverso-vendas', `
     <div class="pstats">
       ${statRow('Vendas hoje', validas.length)}
-      ${statRow('Total vendido', 'R$ '+totalVendido.toFixed(2).replace('.',','))}
+      ${statRow('Total vendido', NoPulsoMoeda.formatar(totalVendido))}
       ${statRow('Fechamento do dia', fechado ? 'lançado' : 'pendente', fechado ? 'ok' : 'warn')}
     </div>
   `);

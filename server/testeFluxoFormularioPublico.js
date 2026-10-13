@@ -2,7 +2,7 @@
 const assert = require('assert/strict');
 
 async function testar({ DOCS, postarJson }) {
-  const base = 'http://127.0.0.1:8899';
+  const base = 'http://127.0.0.1:' + process.env.PORT;
   const anterior = process.env.APP_BASE_URL;
   const atorAnterior = process.env.NOPULSO_AGENT_MASTER;
   process.env.APP_BASE_URL = base;
@@ -36,12 +36,14 @@ async function testar({ DOCS, postarJson }) {
           if (String(url).includes('/api/')) return new Response('{}', { status: 404 });
           return realFetch(url, opcoes);
         };
-        await assert.rejects(cw.executar({ nome: 'criar_formulario', entrada, idempotencyKey: 'link-falha-' + falha }), /não passou na validação/);
-        await assert.rejects(cw.executar({ nome: 'criar_formulario', entrada, idempotencyKey: 'link-publico-novo' }), /não passou na validação/);
+        const indisponivel = (await cw.executar({ nome: 'criar_formulario', entrada, idempotencyKey: 'link-falha-' + falha })).resultado;
+        assert.equal(indisponivel.linkValidado, false); assert(indisponivel.formularioId); assert.equal(indisponivel.linkPreenchimento, null);
+        const repetida = (await cw.executar({ nome: 'criar_formulario', entrada, idempotencyKey: 'link-publico-novo' })).resultado;
+        assert.equal(repetida.formularioId, r.id); assert.equal(repetida.linkValidado, false);
       }
     } finally { global.fetch = realFetch; }
-    const repetir = (await cw.executar({ nome: 'criar_formulario', entrada, idempotencyKey: 'link-recuperado' })).resultado;
-    assert.equal(repetir.id, r.id, 'Falha de validação não duplica formulário');
+    const repetir = (await cw.executar({ nome: 'gerar_link_formulario', entrada: {formularioId:r.id}, idempotencyKey: 'link-recuperado' })).resultado;
+    assert.equal(repetir.formularioId, r.id, 'Reenviar o link não duplica formulário');
 
     const dados = { unidade: 'LOJA_TESTE', motivoEstorno: 'Cobrança duplicada', valorVenda: 30, formaPagamento: 'Crédito', bandeira: 'Visa', dataVenda: '2026-10-08', valorEstornar: 30, nomeCliente: 'Cliente Teste', cpfCnpjCliente: '529.982.247-25', telefoneCliente: '81999999999', pixChave: 'teste@exemplo.local', pixNomeTitular: 'Cliente Teste', pixBanco: 'Banco teste' };
     const enviar = async (payload) => {

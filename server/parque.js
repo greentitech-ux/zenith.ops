@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // parque.js
 // Controle de entrada do parque de trampolins (Saltiverso Patteo) - um
 // registro por check-in de um responsavel trazendo N criancas pra pular.
@@ -798,7 +799,7 @@ async function criarComPlanosIndividuais(args, tabela) {
   const pagamentosOk = args.prepararVendaFutura ? [{ forma: 'pix', valor: valorFinal }] : (valorFinal > 0 ? sanitizarPagamentos(pagamentos) : []);
   if (valorFinal > 0 && !pagamentosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
   const somaPagamentos = Math.round(pagamentosOk.reduce((s, p) => s + p.valor, 0) * 100) / 100;
-  if (valorFinal > 0 && Math.abs(somaPagamentos - valorFinal) > 0.01) throw new Error(`A soma das formas de pagamento (R$${somaPagamentos.toFixed(2)}) precisa bater com o valor total (R$${valorFinal.toFixed(2)}).`);
+  if (valorFinal > 0 && Math.abs(somaPagamentos - valorFinal) > 0.01) throw new Error(`A soma das formas de pagamento (R$ ${NoPulsoMoeda.numero(somaPagamentos)}) precisa bater com o valor total (R$ ${NoPulsoMoeda.numero(valorFinal)}).`);
   const ref = COLLECTION.doc();
   const maiorTempo = Math.max(...criancasOk.map((c) => c.tempoMinutos));
   const pulseirasInfo = criancasOk.map((crianca, indice) => ({
@@ -880,7 +881,7 @@ async function criar({
     if (!pagamentosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
     const somaPagamentos = Math.round(pagamentosOk.reduce((s, p) => s + p.valor, 0) * 100) / 100;
     if (Math.abs(somaPagamentos - valorFinal) > 0.01) {
-      throw new Error(`A soma das formas de pagamento (R$${somaPagamentos.toFixed(2)}) precisa bater com o valor total (R$${valorFinal.toFixed(2)}).`);
+      throw new Error(`A soma das formas de pagamento (R$ ${NoPulsoMoeda.numero(somaPagamentos)}) precisa bater com o valor total (R$ ${NoPulsoMoeda.numero(valorFinal)}).`);
     }
   }
   // minutosExtras: credito de tempo guardado de um checkout antecipado

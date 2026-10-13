@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // Gateway unico e fechado para Claude/Cowork operar o NoPulso.
 // Nao e uma API administrativa generica: cada ferramenta tem executor,
 // esquema e risco conhecidos. A identidade vem do servidor, nunca do modelo.
@@ -25,6 +26,7 @@ const { validarLinkPreenchimento } = require('./formularioLinkPublico');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const suporteChat = require('./suporteChat');
 const pedidosMonitor = require('./pedidosMonitor');
+const leiturasCowork = require('./coworkLeituras');
 const estornosAdyenCowork = require('./estornosAdyenCowork');
 
 // O index.js liga aqui o broadcast da tela: sem isso, o comentário ou o
@@ -52,6 +54,7 @@ function chaveArquivoXmlProcessados(computador, ano, mes) {
 }
 
 const FERRAMENTAS = Object.freeze({
+  ...leiturasCowork.ferramentas,
   buscar_pedidos_agregador: { descricao: 'Consulta vendas iFood já sincronizadas por unidade/data (padrão hoje), pedido e status. Não lê o PDV e não opera pedidos. Retorna disponivel=false se não houver integração/dados; 99Food ainda não possui fonte de consulta.', risco: 'leitura', obrigatorios: ['canal', 'unidade'] },
   buscar_pedidos_monitor: { descricao: 'Busca pagamentos sem PSP: unidade (inclusive apelido curto único), período ISO (padrão hoje em São Paulo), nome parcial sem acentos, valor ±R$ 0,10, final do cartão, contato exato, pedido, PSP, status e canal. Só dados retidos no Monitor; não infere conclusão no PDV nem canal ausente. Dados sensíveis mascarados.', risco: 'leitura', obrigatorios: [] },
   obter_pedido_monitor: { descricao: 'Detalha pagamento por PSP ou número do pedido e unidade opcional: eventos, motivo, solicitações internas e confirmações Adyen. Solicitação não comprova estorno e pagamento não comprova pedido finalizado. Prazo/carta só quando disponíveis.', risco: 'leitura', obrigatorios: [] },
@@ -87,6 +90,9 @@ const FERRAMENTAS = Object.freeze({
   obter_estorno: { descricao: 'Um estorno pelo número do ticket (ex.: 12029): venda, valor, motivo, cliente e Pix (documento, telefone e chave mascarados - o servidor copia os dados reais pro formulário), status, o formulário já gerado e LINKS TEMPORÁRIOS (2h) dos anexos (comprovante da maquininha).', risco: 'leitura', obrigatorios: [] },
   obter_formulario: { descricao: 'Um formulário: status (RASCUNHO, PENDENTE = aguardando assinatura, ASSINADO, CANCELADO), assinaturas, origem, envio ao Conecta e LINK TEMPORÁRIO (2h) do PDF. Informe formularioId ou numero.', risco: 'leitura', obrigatorios: [] },
   validar_formulario: { descricao: 'Diz o que falta e o que não bate num formulário (campo obrigatório vazio, CPF/CNPJ inválido, data, valor diferente do ticket de origem). Use antes de pedir_assinatura.', risco: 'leitura', obrigatorios: [] },
+  gerar_link_formulario: { descricao: 'Gera/reenvia o preenchimento de um formulário EXISTENTE (RASCUNHO ou AGUARDANDO_PREENCHIMENTO). Não cria outro. regenerar=true revoga o link anterior. Papel deve ser o preenchedor do modelo; nunca assina pelo Master.', risco: 'baixo', obrigatorios: [] },
+  cancelar_formulario: { descricao: 'Cancela rascunho ou preenchimento pendente duplicado, exigindo motivo e preservando histórico. Não cancela documentos assinados ou já enviados.', risco: 'medio', obrigatorios: ['motivo'] },
+  vincular_formulario: { descricao: 'Vincula formulário existente a chat, solicitação ou tarefa da mesma unidade. Não transfere documento de outra origem.', risco: 'medio', obrigatorios: ['origem'] },
   pedir_assinatura: { descricao: 'Manda o formulário pra assinatura do Master: valida (se faltar algo, recusa na hora e diz o quê), tira do rascunho e pede a digital dele no celular com a prévia. Aprovado, o Master assina eletronicamente o papel Responsável/Gerente, o PDF assinado fica pronto e o ticket de origem recebe o registro. Informe formularioId ou numero.', risco: 'medio', obrigatorios: [], autorizar: true },
   registrar_envio_conecta: { descricao: 'Registra no NoPulso que o PDF ASSINADO foi enviado no portal do Conecta, com o número de protocolo que o portal deu. Use só depois de enviar de fato. Comenta no ticket de origem.', risco: 'baixo', obrigatorios: ['protocolo'] },
   preparar_reuniao: { descricao: 'Consulta pendências, reuniões, tickets e alertas do NOC para montar pauta e cobranças atuais.', risco: 'leitura', obrigatorios: [] },
@@ -104,7 +110,7 @@ const FERRAMENTAS = Object.freeze({
   cancelar_tarefa: { descricao: 'Cancela uma tarefa.', risco: 'alto', obrigatorios: ['tarefaId', 'motivo'], autorizar: true },
   criar_solicitacao_ti: { descricao: 'Abre solicitação de Suporte de TI na Central.', risco: 'baixo', obrigatorios: ['unidade', 'titulo'] },
   registrar_execucao_solicitacao: { descricao: 'Marca solicitação de TI aprovada como FINALIZADO e registra a nota de execução na Central.', risco: 'baixo', obrigatorios: ['solicitacaoId', 'observacao'] },
-  criar_formulario: { descricao: 'Cria um formulário em RASCUNHO (nada é assinado nem enviado). numero = ticket de origem (ex.: o estorno 12029): o servidor copia campos e anexos do ticket e acha a unidade sozinho. Sem numero: tipo + unidade (código, nome ou apelido) + campos/linhas. modo=link gera o link pro solicitante preencher. Tipos e campos: listar_modelos_formulario.', risco: 'baixo', obrigatorios: ['tipo'] },
+  criar_formulario: { descricao: 'Cria formulário novo preservando campos/linhas em ambos os modos. Repetição da MESMA intenção usa a mesma idempotencyKey; para reenviar um existente use gerar_link_formulario. origem={tipo:chat|solicitacao|tarefa,numero} vincula qualquer tipo. tipo=avulso + numero copia solicitação de pagamento para Pix; tipo=estorno + numero mantém o fluxo de estorno aprovado.', risco: 'baixo', obrigatorios: ['tipo'] },
   criar_usuario: { descricao: 'Cria acesso copiando permissões de um usuário-modelo.', risco: 'alto', obrigatorios: ['modelo', 'email', 'username'], autorizar: true, devolveSegredo: true },
   desbloquear_usuario: { descricao: 'Desbloqueia um acesso existente sem trocar a senha.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true },
   criar_nova_senha: { descricao: 'Gera e aplica senha temporária aleatória; Master precisa repassá-la com segurança.', risco: 'alto', obrigatorios: ['usuario'], autorizar: true, devolveSegredo: true },
@@ -135,7 +141,7 @@ const PROPRIEDADES_COMUNS = {
   tarefaId: { type: 'string' }, motivo: { type: 'string' }, usuario: { type: 'string', description: 'E-mail ou username.' },
   pedirTrocaSenha: { type: 'boolean' }, modelo: { type: 'string' }, email: { type: 'string' }, username: { type: 'string' },
   tipo: { type: 'string', description: 'Formulário: estorno, reembolso, avulso, deposito, diarias, diariasRh, adiantamento, assBoleto (listar_modelos_formulario). Solicitação: estorno, compra, manutencao, suporte-ti, pagamento, nota...' }, modo: { type: 'string', enum: ['link', 'preenchido'] }, campos: { type: 'object' }, linhas: { type: 'array', items: { type: 'object' } },
-  tarefa: { type: 'string', enum: ['reiniciar', 'abortar', 'anydesk', 'gsurf-rsa', 'diagnostico-tef', 'diagnostico-desempenho', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office', 'rede', 'gcom-wcf', 'zebra', 'reset-senha'], description: 'Função fechada de Manutenção. Todas geram aprovação do Master antes de chegar na máquina.' },
+  tarefa: { type: 'string', enum: ['reiniciar', 'abortar', 'anydesk', 'gsurf-rsa', 'diagnostico-tef', 'diagnostico-desempenho', 'diagnostico-completo', 'inventario-estacao', 'limpeza-segura', 'corrigir-memoria-limitada', 'remover-office', 'rede', 'gcom-wcf', 'zebra', 'reset-senha'], description: 'Função fechada de Manutenção. Todas geram aprovação do Master antes de chegar na máquina.' },
   alvos: { type: 'array', items: { type: 'object', required: ['codigo', 'posto'], properties: { codigo: { type: 'string' }, posto: { type: 'string' } } } },
   nomeConta: { type: 'string', description: 'Obrigatório apenas em reset-senha: conta local do Windows que ficará sem senha.' },
   limite: { type: 'number' },
@@ -158,6 +164,9 @@ const PROPRIEDADES_COMUNS = {
   avisar: { type: 'boolean', description: 'comentar_tarefa: false = só registra, sem push pros participantes.' },
   responsavelEmail: { type: 'string', description: 'E-mail ou username do responsável. Sem ele, a tarefa fica com o Master.' },
   formularioId: { type: 'string', description: 'Id interno do formulário (vem de criar_formulario/obter_formulario).' },
+  papel: { type: 'string', enum: ['favorecido','gerente'], description: 'Papel do preenchimento; omitido usa o preenchedor do modelo (normalmente favorecido).' },
+  regenerar: { type: 'boolean', description: 'Revoga o token anterior. Padrão false.' },
+  origem: { type: 'object', additionalProperties: false, required: ['tipo','numero'], properties: { tipo: {type:'string',enum:['chat','solicitacao','tarefa']}, numero: {anyOf:[{type:'string'},{type:'integer'}]} } },
   gcom: { type: 'boolean', description: 'consultar_noc: true = só as máquinas marcadas "Possui GCOM" no cadastro; false = só as sem.' },
   maquina: { type: 'string', description: 'Nome da máquina no NOC, por exemplo AERO-CAR-PDV.01.' },
   codigo: { type: 'string', description: 'Código da unidade da máquina, alternativa ao nome.' },
@@ -192,7 +201,8 @@ const PROPRIEDADES_COMUNS = {
 // toda tarefa criada pelo Claude caía no Master.
 // Cada nome aqui é o que o executor da ferramenta LÊ de verdade.
 const PARAMETROS = Object.freeze({
-  buscar_pedidos_agregador: ['canal', 'unidade', 'desde', 'ate', 'numeroPedido', 'status', 'limite'],
+  ...leiturasCowork.parametros,
+  buscar_pedidos_agregador: ['canal', 'unidade', 'desde', 'ate', 'numeroPedido', 'status', 'limite', 'pagina'],
   buscar_pedidos_monitor: ['unidade', 'desde', 'ate', 'nomeCliente', 'valor', 'finalCartao', 'emailOuTelefone', 'numeroPedido', 'psp', 'status', 'canal', 'limite'],
   obter_pedido_monitor: ['psp', 'numeroPedido', 'unidade'],
   solicitar_estorno_adyen: ['psp', 'valor', 'motivo', 'protocoloChat'],
@@ -233,7 +243,10 @@ const PARAMETROS = Object.freeze({
   cancelar_tarefa: ['tarefaId', 'motivo'],
   criar_solicitacao_ti: ['unidade', 'unidadeNome', 'titulo', 'observacao', 'prioridade', 'tema'],
   registrar_execucao_solicitacao: ['solicitacaoId', 'observacao'],
-  criar_formulario: ['tipo', 'unidade', 'modo', 'campos', 'linhas', 'numero'],
+  criar_formulario: ['tipo', 'unidade', 'modo', 'campos', 'linhas', 'numero', 'origem'],
+  gerar_link_formulario: ['formularioId', 'numero', 'papel', 'regenerar'],
+  cancelar_formulario: ['formularioId', 'numero', 'motivo'],
+  vincular_formulario: ['formularioId', 'numero', 'origem'],
   listar_unidades: ['termo'],
   listar_modelos_formulario: ['tipo'],
   obter_estorno: ['numero', 'estornoId'],
@@ -250,6 +263,7 @@ const PARAMETROS = Object.freeze({
   executar_noc: ['tarefa', 'alvos', 'nomeConta'],
 });
 function propriedadesDe(nome, f) {
+  if (leiturasCowork.propriedades?.(nome)) return leiturasCowork.propriedades(nome);
   const lista = [...(PARAMETROS[nome] || []), ...(f.risco === 'leitura' ? [] : ['idempotencyKey'])];
   return Object.fromEntries(lista.map((k) => [k, nome === 'buscar_pedidos_monitor' && k === 'status' ? { type: 'string', enum: pedidosMonitor.STATUS } : PROPRIEDADES_COMUNS[k]]));
 }
@@ -415,7 +429,7 @@ async function consultarTicket(numero) {
   // estorno e formulário moram em coleções próprias, mas o número é da MESMA
   // sequência dos tickets: o #12029 do estorno é achado aqui também
   const estornos = todosEstornos.filter((x) => Number(x.numeroTicket) === n);
-  const forms = todosFormularios.filter((f) => Number(f.numeroTicket) === n);
+  const forms = todosFormularios.filter((f) => Number(f.numeroTicket) === n || Number(f.origem?.numero || f.origem?.numeroTicket) === n || Number(f.origemAtendimento?.numero) === n);
   const chats = chatsSuporte.filter((c) => Number(c.numeroTicket) === n).map(chatSuporteCompacto);
   const nada = !listaTarefas.length && !achadas.length && !estornos.length && !forms.length && !chats.length;
   return {
@@ -423,7 +437,7 @@ async function consultarTicket(numero) {
     tarefas: listaTarefas.map(tarefaCompacta),
     solicitacoes: achadas.map(solicitacaoCompacta),
     estornos: estornos.map(estornoCompacto),
-    formularios: forms.map((f) => ({ formularioId: f.id, tipo: f.tipo, status: f.status, unidade: f.unidade, valorTotal: f.valorTotal ?? null })),
+    formularios: forms.map((f) => ({ formularioId: f.id, numero: f.numeroTicket, origem: f.origem || null, tipo: f.tipo, status: f.status, unidade: f.unidade, valorTotal: f.valorTotal ?? null })),
     chatsSuporte: chats,
     aviso: nada ? 'Nenhuma tarefa, solicitação, estorno, formulário ou chat de suporte com esse número.' : null,
   };
@@ -977,12 +991,18 @@ function formularioCompacto(f) {
     unidade: r.unidade, status: r.status, valorTotal: r.valorTotal ?? null,
     campos: camposMascarados(r.campos), linhas: r.linhas, anexos: (r.anexos || []).map((a) => a.nome),
     assinaturas: r.assinaturas.map((a) => ({ papel: a.chave, rotulo: a.rotulo, assinado: a.assinado, eletronica: a.eletronica ? a.eletronica.metodo : null, nome: a.nome, em: a.assinadoEm })),
-    origem: r.origem || null, preparadoPor: r.preparadoPor || null,
+    origem: r.origem || null, origemAtendimento: r.origemAtendimento || null, preparadoPor: r.preparadoPor || null,
     enviadoConecta: r.enviadoConecta || null,
+    sincronizacaoPendente: !!r.origemSincronizacaoPendente,
     pdf: linkTemporario(`formulario-pdf:${r.id}`, `formulario-${r.numeroTicket || r.id}.pdf`),
   };
 }
 async function referenciaDe(f) {
+  if (f?.pagamentoOrigemPix && f.origem?.tipo === 'solicitacao') {
+    const s = await solicitacoes.getOne(f.origem.id);
+    if (!s || s.status !== 'APROVADO' || s.execucaoStatus === 'FINALIZADO') throw new Error('Pagamento de origem indisponível para assinatura.');
+    return { valor: s.valorEstimado };
+  }
   if (f && f.origem && f.origem.tipo === 'estorno' && f.origem.id) {
     const x = await refunds.getOne(f.origem.id);
     if (x) return { valor: x.valorEstornar };
@@ -992,7 +1012,33 @@ async function referenciaDe(f) {
 async function obterFormulario(p) {
   const f = await acharFormulario(p);
   if (!f) throw new Error('Formulário não encontrado.');
-  return formularioCompacto(f);
+  const sincronizacao = await formularios.sincronizarOrigem(f.id);
+  const atual = await formularios.getOne(f.id);
+  return { ...formularioCompacto(atual), sincronizacao, ...(atual.status === 'AGUARDANDO_PREENCHIMENTO' ? await linkDoFormulario(atual) : {}) };
+}
+
+async function linkDoFormulario(f) {
+  const validacao = formularios.validarConteudo(f);
+  const dados = { token: f.tokenPreenchimento || null, validade: f.preenchimentoValidoAte || null,
+    status: f.status, camposFaltantes: validacao.faltando, inconsistencias: validacao.inconsistencias };
+  if (!f.tokenPreenchimento || (f.preenchimentoValidoAte && Date.parse(f.preenchimentoValidoAte) <= Date.now())) return { ...dados, token: null, linkPreenchimento: null, linkValidado: false, aviso: 'Link expirado ou revogado; use gerar_link_formulario.' };
+  try { return { ...dados, linkPreenchimento: await validarLinkPreenchimento(baseUrl(), f), linkValidado: true }; }
+  catch (_) { return { ...dados, token: null, linkPreenchimento: null, linkValidado: false, aviso: 'Formulário salvo. O link público está indisponível; corrija o acesso e use gerar_link_formulario com este formularioId. Não crie outro.' }; }
+}
+async function gerarLinkFormulario(p, ator) {
+  const f = await acharFormulario(p);
+  if (!f) throw new Error('Formulário não encontrado.');
+  const atual = await formularios.gerarLinkPreenchimento(f.id, { papel: p.papel, regenerar: p.regenerar === true, porEmail: ator.email });
+  return { ...formularioCompacto(atual), ...await linkDoFormulario(atual) };
+}
+async function cancelarFormulario(p, ator) {
+  const f = await acharFormulario(p);
+  if (!f) throw new Error('Formulário não encontrado.');
+  if (!String(p.motivo || '').trim()) throw new Error('Informe o motivo do cancelamento.');
+  if (![formularios.STATUS_RASCUNHO,'AGUARDANDO_PREENCHIMENTO'].includes(f.status)
+    || f.enviadoPagamento || f.enviadoConecta || Object.values(f.assinaturas || {}).some(formularios.slotAssinado)) throw new Error('Só rascunhos não assinados e não enviados podem ser cancelados pelo conector.');
+  await formularios.cancelar(f.id, { motivo: p.motivo, porEmail: ator.email, somenteRascunho: true });
+  return formularioCompacto(await formularios.getOne(f.id));
 }
 async function validarFormulario(p) {
   const f = await acharFormulario(p);
@@ -1021,30 +1067,60 @@ async function criarFormulario(p, ator) {
   const tipos = Object.keys(formularios.TIPOS);
   if (!tipos.includes(String(p.tipo || ''))) throw catalogo.erroComLista('Tipo de formulário', p.tipo, tipos);
   const preparadoPor = { nome: 'Claude (Cowork)', via: ator.email, em: new Date().toISOString() };
-  if (p.numero) {
-    // a partir do ticket: hoje só o estorno tem o caminho ticket -> formulário
-    if (p.tipo !== 'estorno') throw new Error(`Formulário a partir de ticket só existe pro tipo estorno. Pra ${p.tipo}, mande unidade + campos/linhas.`);
+  if (p.numero && p.tipo === 'estorno') {
+    // Estorno exige sua aprovação financeira mesmo quando ligado a um chat.
     const x = await estornoPorNumero(numeroDe(p.numero));
     if (!x) throw new Error(`Não há estorno com o ticket ${p.numero}. Confira com obter_estorno.`);
     const dados = {};
     if (p.unidade) dados.unidade = (await catalogo.resolverUnidadeDoFormulario(p.unidade)).unidade;
+    if (p.origem) await require('./formularioOrigem').resolver(p.origem, dados.unidade || x.unidadeNome || x.unidade);
     const f = await refunds.gerarFormulario(x.id, dados, `${ator.email} via Claude/Cowork`, { rascunho: true, preparadoPor });
+    if (p.campos || p.linhas) {
+      const existente = await formularios.getOne(f.id);
+      await formularios.editar(f.id, { campos: { ...existente.campos, ...(p.campos || {}) }, linhas: p.linhas || existente.linhas, porEmail: ator.email });
+    }
+    if (p.origem) await require('./formularioOrigem').vincular(f.id, p.origem, ator.email);
+    else await formularios.sincronizarOrigem(f.id);
+    if (p.modo === 'link') return gerarLinkFormulario({ formularioId: f.id }, ator);
     const cheio = await formularios.getOne(f.id);
     return { mensagem: `Formulário #${f.numeroTicket} (${formularios.TIPOS.estorno.rotulo}) criado em RASCUNHO a partir do estorno #${x.numeroTicket}, com ${(cheio.anexos || []).length} anexo(s) copiado(s).`,
       ...formularioCompacto(cheio), validacao: formularios.validarConteudo(cheio, { referencia: { valor: x.valorEstornar } }) };
   }
   if (formularios.TIPOS[p.tipo].somenteDeTicket) throw new Error(`${formularios.TIPOS[p.tipo].rotulo} só nasce de um ticket: mande numero (o ticket de origem).`);
-  if (!p.unidade) throw new Error('Informe a unidade (código, nome ou apelido) - ou numero, pra criar a partir de um ticket.');
-  const cadastro = await catalogo.resolverUnidadeDoFormulario(p.unidade);
-  const base = { tipo: p.tipo, unidade: cadastro.unidade, criadoPorId: ator.id, criadoPorEmail: `${ator.email} via Claude/Cowork` };
-  if (p.modo === 'link') {
-    const r = await formularios.criarParaPreenchimento(base);
-    const linkPreenchimento = await validarLinkPreenchimento(baseUrl(), r);
-    return { mensagem: `Formulário #${r.numeroTicket} criado pra preenchimento por link.`, id: r.id, linkPreenchimento, linkValidado: true };
+  if (p.numero && p.origem) throw new Error('Informe numero para copiar uma solicitação de pagamento OU origem explícita, não ambos.');
+  if (p.numero && p.tipo !== 'avulso') throw new Error('numero copia pagamento em avulso ou estorno aprovado. Para os demais tipos informe origem={tipo,numero}.');
+  if (p.modo && !['link','preenchido'].includes(p.modo)) throw new Error('Modo inválido.');
+  const origemPedida = p.origem || (p.numero ? { tipo: 'solicitacao', numero: p.numero } : null);
+  const vinculo = origemPedida ? await require('./formularioOrigem').resolver(origemPedida, p.unidade) : null;
+  if (!p.unidade && !vinculo) throw new Error('Informe a unidade ou a origem do formulário.');
+  const cadastro = vinculo?.cadastro || await catalogo.resolverUnidadeDoFormulario(p.unidade);
+  let campos = p.campos || {}, linhas = p.linhas || [], anexos = [];
+  if (p.numero) {
+    const s = vinculo.registro;
+    if (s.tipo !== 'pagamento' || s.status !== 'APROVADO' || s.execucaoStatus === 'FINALIZADO') throw new Error('A origem deve ser pagamento aprovado e ainda não finalizado.');
+    if (!(Number(s.valorEstimado) > 0)) throw new Error('Solicitação sem valor de pagamento.');
+    const autor = s.criadoPorId ? (await users.list()).find(u => u.id === s.criadoPorId) : null;
+    campos = { favorecido: s.criadoPorNome || autor?.nome || autor?.username || s.criadoPorEmail || '', ...campos };
+    linhas = p.linhas || [{ data: new Date(s.criadoEm || Date.now()).toLocaleDateString('pt-BR', {timeZone:'America/Sao_Paulo'}), descricao: s.observacao || s.titulo, valor: s.valorEstimado }];
+    if (Math.abs(linhas.reduce((s,l)=>s+formularios.parseValor(l.valor),0) - Number(s.valorEstimado)) > 0.009) throw new Error('Valor do formulário deve ser igual ao da solicitação.');
+    anexos = s.anexos || [];
   }
-  const r = await formularios.criar({ ...base, campos: p.campos || {}, linhas: p.linhas || [], anexos: [], rascunho: true, preparadoPor });
+  const modelo = formularios.TIPOS[p.tipo];
+  const invalidos = Object.keys(campos).filter(k => !modelo.cabecalho.some(c=>c.key===k));
+  const colunasInvalidas = linhas.flatMap(l => Object.keys(l).filter(k=>!modelo.colunas.some(c=>c.key===k)));
+  if (invalidos.length || colunasInvalidas.length) throw new Error(`Campos/colunas não reconhecidos: ${[...invalidos,...colunasInvalidas].join(', ')}. Consulte listar_modelos_formulario.`);
+  const base = { tipo: p.tipo, unidade: cadastro.unidade, criadoPorId: ator.id, criadoPorEmail: `${ator.email} via Claude/Cowork`,
+    campos, linhas, anexos, origem: vinculo?.origem || null, preparadoPor, pagamentoOrigemPix: !!p.numero };
+  let r;
+  if (p.modo === 'link') {
+    r = await formularios.criarParaPreenchimento({ ...base, sempreNovo: true });
+  } else {
+    r = await formularios.criar({ ...base, rascunho: true });
+  }
+  const sincronizacao = await formularios.sincronizarOrigem(r.id);
   const cheio = await formularios.getOne(r.id);
-  return { mensagem: `Formulário #${r.numeroTicket} criado em RASCUNHO.`, ...formularioCompacto(cheio), validacao: formularios.validarConteudo(cheio) };
+  return { mensagem: `Formulário #${r.numeroTicket} criado (${cheio.status}).`, id: r.id, reaproveitado: false, sincronizacao,
+    ...formularioCompacto(cheio), validacao: formularios.validarConteudo(cheio), ...(p.modo === 'link' ? await linkDoFormulario(cheio) : {}) };
 }
 
 // ANTES do pedido chegar no celular: valida e tira do rascunho. Faltando
@@ -1058,7 +1134,7 @@ async function antesDePedirAssinatura(p) {
   if (formularios.slotAssinado(f.assinaturas[papel])) throw new Error('O Master já assinou esse formulário.');
   await formularios.liberarParaAssinatura(f.id, { referencia: await referenciaDe(f) });
   const modelo = formularios.TIPOS[f.tipo] || {};
-  const reais = (v) => `R$ ${(Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const reais = (v) => `R$ ${NoPulsoMoeda.numero((Number(v) || 0))}`;
   return {
     // o pedido guarda o id: numero pode achar outro formulário amanhã
     entrada: { formularioId: f.id, destino: p.destino || null, observacao: p.observacao || null },
@@ -1430,6 +1506,7 @@ async function registrarResultadoXmlProcessados(comando) {
 
 async function despachar(nome, entrada, ator) {
   const p = { ...(entrada || {}), porId: ator.id };
+  if (leiturasCowork.ferramentas?.[nome]) return leiturasCowork.executar(nome, p);
   if (nome === 'buscar_pedidos_agregador') return require('./pedidosAgregadorCowork').buscar(p);
   if (nome === 'buscar_pedidos_monitor') {
     const consulta = await pedidosMonitor.buscar(p);
@@ -1463,6 +1540,14 @@ async function despachar(nome, entrada, ator) {
   if (nome === 'listar_modelos_formulario') return listarModelosFormulario(p);
   if (nome === 'obter_estorno') return obterEstorno(p);
   if (nome === 'obter_formulario') return obterFormulario(p);
+  if (nome === 'gerar_link_formulario') return gerarLinkFormulario(p, ator);
+  if (nome === 'cancelar_formulario') return cancelarFormulario(p, ator);
+  if (nome === 'vincular_formulario') {
+    const f = await acharFormulario(p);
+    if (!f) throw new Error('Formulário não encontrado.');
+    const sincronizacao = await require('./formularioOrigem').vincular(f.id, p.origem, ator.email);
+    return { ...formularioCompacto(await formularios.getOne(f.id)), sincronizacao };
+  }
   if (nome === 'validar_formulario') return validarFormulario(p);
   if (nome === 'pedir_assinatura') return pedirAssinatura(p);
   if (nome === 'registrar_envio_conecta') return registrarEnvioConectaDoCowork(p);
@@ -1559,6 +1644,7 @@ async function despachar(nome, entrada, ator) {
       // responder "quem ja baixou a versao nova?" sem abrir a tela do NOC -
       // e o resumo ja traz o campo, entao nao custa leitura nenhuma.
       versaoAgente: m.agenteVersao || null,
+      diagnostico: m.diagnosticoResumo || null,
       gcom: !!m.temGcom,
       ...(xml ? { xmlPronto: xml.pronto, xmlMotivo: xml.motivo } : {}),
     }; })));
@@ -1630,6 +1716,18 @@ function conferirRepeticao(salva, nome, fingerprint) {
   if (salva.nome !== nome || (salva.fingerprint && salva.fingerprint !== fingerprint)) throw new Error('idempotencyKey já usada para outra intenção. Não altere os parâmetros ao repetir uma chamada.');
   if (!salva.resposta) throw new Error(salva.status === 'ERRO' ? 'A tentativa anterior falhou. Consulte a auditoria antes de tentar outra intenção.' : 'Esta ação já está em execução. Aguarde.');
 }
+async function respostaRepetida(salva) {
+  const resposta = salva.resposta;
+  // Revalidar também após disputa pela reserva: nunca devolver token revogado.
+  if (['criar_formulario','gerar_link_formulario'].includes(salva.nome) && (resposta?.resultado?.formularioId || resposta?.resultado?.id)) {
+    const formulario = await formularios.getOne(resposta.resultado.formularioId || resposta.resultado.id);
+    if (!formulario) throw new Error('Formulário não encontrado. Confira o histórico antes de criar outro.');
+    const atual = { ...formularioCompacto(formulario), id: formulario.id, linkPreenchimento: null, token: null, linkValidado: false };
+    if (formulario.status === 'AGUARDANDO_PREENCHIMENTO') Object.assign(atual, await linkDoFormulario(formulario));
+    return { ...resposta, resultado: atual, repetida: true };
+  }
+  return { ...resposta, repetida: true };
+}
 async function executar({ nome, entrada, idempotencyKey }) {
   const ferramenta = validar(String(nome || ''), entrada || {});
   const chave = String(idempotencyKey || '').trim().slice(0, 160);
@@ -1638,7 +1736,7 @@ async function executar({ nome, entrada, idempotencyKey }) {
     const ator = await resolverAtor();
     const resultado = await despachar(nome, entrada || {}, ator);
     await AUDITORIA.doc().set({ nome, risco: 'leitura', atorId: ator.id, atorEmail: ator.email, status: 'CONCLUIDO', criadoEm: new Date().toISOString() });
-    return { ok: true, resultado, tempoReal: !['buscar_pedidos_monitor', 'obter_pedido_monitor', 'consultar_estorno_adyen', 'buscar_pedidos_agregador'].includes(nome) };
+    return { ok: true, resultado, tempoReal: !leiturasCowork.ferramentas?.[nome] && !['buscar_pedidos_monitor', 'obter_pedido_monitor', 'consultar_estorno_adyen', 'buscar_pedidos_agregador'].includes(nome) };
   }
   const ator = await resolverAtor();
   const fingerprint = fingerprintIntencao(nome, entrada);
@@ -1647,15 +1745,7 @@ async function executar({ nome, entrada, idempotencyKey }) {
   if (anterior.exists) {
     const salva = anterior.data();
     conferirRepeticao(salva, nome, fingerprint);
-    const resposta = salva.resposta;
-    // Links guardados antes da correção também passam pela checagem pública.
-    if (salva.nome === 'criar_formulario' && resposta?.resultado?.linkPreenchimento) {
-      const formulario = await formularios.getOne(resposta.resultado.id);
-      if (!formulario) throw new Error('Formulário não encontrado; gere um novo link.');
-      const linkPreenchimento = await validarLinkPreenchimento(baseUrl(), formulario);
-      return { ...resposta, resultado: { ...resposta.resultado, linkPreenchimento, linkValidado: true }, repetida: true };
-    }
-    return { ...resposta, repetida: true };
+    return respostaRepetida(salva);
   }
   // Reserva ANTES de alterar qualquer coisa. Duas chamadas simultâneas com a
   // mesma chave não podem criar dois tickets/usuários. `create` é atômico.
@@ -1665,7 +1755,7 @@ async function executar({ nome, entrada, idempotencyKey }) {
     const concorrente = await ref.get();
     if (concorrente.exists) {
       conferirRepeticao(concorrente.data(), nome, fingerprint);
-      return { ...concorrente.data().resposta, repetida: true };
+      return respostaRepetida(concorrente.data());
     }
     const e = new Error('Esta ação com a mesma idempotencyKey já está em execução. Aguarde e consulte novamente.');
     e.code = 'ACAO_EM_EXECUCAO';

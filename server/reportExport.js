@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // reportExport.js
 // Monta o PDF/CSV do relatorio periodico de transacoes (aprovado, recusado,
 // estornado, chargeback, fraude...). Puramente de renderizacao - quem decide
@@ -18,7 +19,7 @@ function fmtData(iso) {
 }
 
 function fmtMoney(v) {
-  return 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((Number(v) || 0));
 }
 
 const COLUNAS = [

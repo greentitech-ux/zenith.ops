@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // formularios.js
 // Formulários financeiros por unidade (Depósito de Caixa, Pagamento de
 // Diárias, Pagamento Avulso, Reembolso) - reprodução dos formulários em
@@ -384,7 +385,7 @@ function parseValor(v) {
 }
 
 function fmtMoney(v) {
-  return (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.numero(v);
 }
 
 async function listAllUncached() {
@@ -541,7 +542,7 @@ function montarAssinaturas(modelo, linhasOk, campos) {
 // numeroTicket: aceita um número pronto de fora pelo MESMO motivo que
 // solicitacoes.js/refunds.js aceitam - quando um registro vira outro, ele
 // carrega o número em vez de tirar outro da fila (ver ticketCounter.js).
-async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail, numeroTicket, rascunho, origem, preparadoPor }) {
+async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail, numeroTicket, rascunho, origem, preparadoPor, pagamentoOrigemPix }) {
   const modelo = TIPOS[tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
   const unidadeOk = limpar(unidade, 80);
@@ -570,7 +571,7 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
     assinaturas, status: rascunho ? STATUS_RASCUNHO : 'PENDENTE',
     // de onde veio (ex.: o estorno #12029) e quem preparou - é o que o
     // selo "preparado pelo Claude" e o comentário no ticket usam
-    origem: origem || null, preparadoPor: preparadoPor || null,
+    origem: origem || null, preparadoPor: preparadoPor || null, pagamentoOrigemPix: !!pagamentoOrigemPix, origemSincronizacaoPendente: !!origem,
     // MESMA sequência dos tickets da Central (#10000+), não um contador
     // próprio: o formulário vira uma solicitação de Pagamento depois de
     // assinado, e tem que chegar lá com o número que já nasceu com ele -
@@ -619,32 +620,87 @@ const STATUS_AGUARDANDO = 'AGUARDANDO_PREENCHIMENTO';
 // pessoas diferentes), cancele o pendente primeiro (cancelarPreenchimento)
 // - assim continua valendo "um link vivo de cada vez", que é o que evita
 // dois destinatários brigando pelo mesmo formulário.
-async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEmail, numeroTicket }) {
+async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEmail, numeroTicket, campos, linhas, anexos, origem, preparadoPor, pagamentoOrigemPix, sempreNovo = false }) {
   const modelo = TIPOS[tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
   const unidadeOk = limpar(unidade, 80);
   const cadastro = await formulariosUnidades.obterPorUnidade(unidadeOk);
   if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
 
-  const jaExiste = (await cache.cached()).find((r) => r.status === STATUS_AGUARDANDO
+  const jaExiste = !sempreNovo && (await cache.cached()).find((r) => r.status === STATUS_AGUARDANDO
     && r.tipo === tipo && r.unidade === unidadeOk
     && (r.criadoPorId || null) === (criadoPorId || null));
   if (jaExiste) return { ...(await detalhar(jaExiste.id)), reaproveitado: true };
+
+  // O conector traz uma intenção própria (protegida por idempotencyKey).
+  // Unidade/tipo iguais NÃO identificam o destinatário nem o atendimento.
+  const conteudo = conteudoInicial(modelo, cadastro, campos, linhas);
 
   const doc = COLLECTION.doc();
   const registro = {
     id: doc.id, tipo, unidade: unidadeOk, unidadeCodigo: cadastro.codigo || null,
     razaoSocial: cadastro.razaoSocial,
-    campos: { cnpj: cadastro.cnpj }, linhas: [], valorTotal: 0, anexos: [],
+    campos: conteudo.camposOk, linhas: conteudo.linhasOk, valorTotal: conteudo.valorTotal,
+    anexos: normalizarAnexos(anexos), origem: origem || null, preparadoPor: preparadoPor || null,
+    complementoSomente: !!sempreNovo, origemSincronizacaoPendente: !!origem, pagamentoOrigemPix: !!pagamentoOrigemPix,
     // sem slot de assinatura ainda - só dá pra montar quando houver linhas
     assinaturas: {}, status: STATUS_AGUARDANDO,
     tokenPreenchimento: crypto.randomBytes(18).toString('hex'),
+    preenchimentoValidoAte: new Date(Date.now() + 7 * 86400000).toISOString(),
     numeroTicket: numeroTicket != null ? numeroTicket : await ticketCounter.proximoTicket(),
     criadoEm: new Date().toISOString(), criadoPorId: criadoPorId || null, criadoPorEmail: criadoPorEmail || null,
   };
   await doc.set(registro);
   cache.invalidar();
   return detalhar(doc.id);
+}
+
+function normalizarAnexos(anexos) {
+  return (Array.isArray(anexos) ? anexos : []).slice(0, MAX_ANEXOS)
+    .map(a => ({ nome: limpar(a.nome, 120) || 'anexo', path: String(a.path || ''), tipo: limpar(a.tipo, 80) }))
+    .filter(a => a.path);
+}
+function conteudoInicial(modelo, cadastro, campos, linhas) {
+  if (modelo.soAnexo || (Array.isArray(linhas) && linhas.length)) return montarConteudo(modelo, cadastro, campos, linhas);
+  const camposOk = Object.fromEntries(modelo.cabecalho.map(c => [c.key, limpar((campos || {})[c.key], 160)]));
+  camposOk.cnpj = cadastro.cnpj;
+  return { camposOk, linhasOk: [], valorTotal: 0 };
+}
+
+// Gera uma capacidade de PREENCHIMENTO, nunca uma assinatura do Master.
+// A transação impede duas chamadas concorrentes de entregar tokens diferentes.
+async function gerarLinkPreenchimento(id, { papel, regenerar = false, porEmail } = {}) {
+  await db.runTransaction(async tx => {
+    const ref = COLLECTION.doc(id), snap = await tx.get(ref), r = snap.exists ? snap.data() : null;
+    if (!r) throw new Error('Formulário não encontrado.');
+    if (![STATUS_RASCUNHO, STATUS_AGUARDANDO].includes(r.status)) throw new Error(`Não é possível gerar preenchimento em ${r.status}.`);
+    if (Object.values(r.assinaturas || {}).some(slotAssinado)) throw new Error('Formulário com assinatura não pode voltar ao preenchimento.');
+    const modelo = TIPOS[r.tipo], solicitado = papel || modelo.preenchedorAssina || 'favorecido';
+    if (!['favorecido', 'gerente', 'responsavel'].includes(solicitado)) throw new Error('Papel inválido.');
+    if (modelo.preenchedorAssina && !(modelo.assinantes || []).some(a => a.papel === solicitado)) throw new Error('Esse papel não existe no formulário.');
+    // Quem só complementa não ganha a assinatura de outro papel pelo link.
+    if (modelo.preenchedorAssina && solicitado !== modelo.preenchedorAssina) throw new Error('O link deve ser do papel que preenche este modelo. A assinatura do Master continua na autorização.');
+    const valido = r.tokenPreenchimento && (!r.preenchimentoValidoAte || Date.parse(r.preenchimentoValidoAte) > Date.now());
+    if (valido && !regenerar && r.status === STATUS_AGUARDANDO) return;
+    tx.update(ref, {
+      status: STATUS_AGUARDANDO, complementoSomente: true, assinaturas: {},
+      tokenPreenchimento: crypto.randomBytes(18).toString('hex'),
+      preenchimentoValidoAte: new Date(Date.now() + 7 * 86400000).toISOString(),
+      linkGeradoPor: porEmail || null, linkGeradoEm: new Date().toISOString(),
+    });
+  });
+  cache.invalidar();
+  return getOne(id);
+}
+
+async function sincronizarOrigem(id) {
+  try { return await require('./formularioOrigem').sincronizar(id); }
+  catch (_) {
+    // A assinatura já existe: não a perde por falha no Storage/nota. O
+    // estado pendente é durável e obter_formulario retoma a sincronização.
+    await COLLECTION.doc(id).update({ origemSincronizacaoPendente: true }).catch(() => {});
+    return { pendente: true, aviso: 'Formulário salvo; sincronização com a origem pendente. Consulte obter_formulario para retomar.' };
+  }
 }
 
 // desiste do link antes de alguém preencher. O formulário é apagado (não
@@ -656,6 +712,11 @@ async function cancelarPreenchimento(id) {
   const r = await getOne(id);
   if (!r) throw new Error('Formulário não encontrado.');
   if (r.status !== STATUS_AGUARDANDO) throw new Error('Esse formulário já foi preenchido - não dá mais pra cancelar o link.');
+  // Os novos links já podem conter um lançamento e uma origem; desistir
+  // pela tela antiga não pode apagar esse histórico.
+  if (r.complementoSomente || r.origem || r.linhas?.length || r.anexos?.length) {
+    return cancelar(id, { motivo: 'Link de preenchimento cancelado pela tela de formulários.', somenteRascunho: true });
+  }
   await COLLECTION.doc(id).delete();
   cache.invalidar();
   return { id };
@@ -664,7 +725,8 @@ async function cancelarPreenchimento(id) {
 async function porTokenPreenchimento(token) {
   if (!token) return null;
   const todos = await cache.cached();
-  return todos.find((r) => r.tokenPreenchimento && r.tokenPreenchimento === token) || null;
+  return todos.find((r) => r.status !== STATUS_CANCELADO && r.tokenPreenchimento && r.tokenPreenchimento === token
+    && (!r.preenchimentoValidoAte || Date.parse(r.preenchimentoValidoAte) > Date.now())) || null;
 }
 
 // o que a página pública de preenchimento enxerga: o modelo (pra montar os
@@ -685,6 +747,8 @@ async function vistaPreenchimento(token) {
     soAnexo: !!modelo.soAnexo, anexoObrigatorio: !!modelo.anexoObrigatorio,
     jaPreenchido: r.status !== STATUS_AGUARDANDO,
     campos: r.campos, linhas: r.linhas,
+    complementoSomente: !!r.complementoSomente,
+    anexosExistentes: (r.anexos || []).map(a => ({ nome: a.nome })),
     // avisa a tela pública se, ao enviar, ela deve seguir direto pra
     // assinatura (ver salvarPreenchimento) em vez de mostrar só "recebemos
     // seus dados" - null quando esse tipo não tem preenchedor=assinante
@@ -704,9 +768,21 @@ async function salvarPreenchimento(token, { campos, linhas, anexos } = {}) {
   const modelo = TIPOS[r.tipo];
   const cadastro = await formulariosUnidades.obterPorUnidade(r.unidade);
 
-  const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
+  const recebidos = Object.fromEntries(Object.entries(campos || {}).filter(([, v]) => String(v ?? '').trim()));
+  if (r.complementoSomente) {
+    for (const [chave, valor] of Object.entries(r.campos || {})) {
+      if (chave !== 'cnpj' && String(valor || '').trim() && recebidos[chave] != null && limpar(recebidos[chave],160) !== valor) {
+        throw new Error('Os dados já lançados devem ser preservados. Peça uma correção ao responsável.');
+      }
+    }
+    if (r.linhas?.length && Array.isArray(linhas) && linhas.length) {
+      const conferido = montarConteudo(modelo, cadastro, { ...r.campos, ...recebidos }, linhas);
+      if (JSON.stringify(conferido.linhasOk) !== JSON.stringify(r.linhas)) throw new Error('Os itens e valores já lançados não podem ser alterados pelo link.');
+    }
+  }
+  const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, { ...r.campos, ...recebidos }, r.linhas?.length && (r.complementoSomente || !linhas?.length) ? r.linhas : linhas);
 
-  const anexosOk = (Array.isArray(anexos) ? anexos : []).slice(0, MAX_ANEXOS)
+  const anexosOk = [...(r.anexos || []), ...(Array.isArray(anexos) ? anexos : [])].slice(0, MAX_ANEXOS)
     .map((a) => ({ nome: limpar(a.nome, 120) || 'anexo', path: String(a.path || ''), tipo: limpar(a.tipo, 80) }))
     .filter((a) => a.path);
   if (modelo.anexoObrigatorio && !anexosOk.length) {
@@ -714,13 +790,19 @@ async function salvarPreenchimento(token, { campos, linhas, anexos } = {}) {
   }
 
   const assinaturas = montarAssinaturas(modelo, linhasOk, camposOk);
-  await COLLECTION.doc(r.id).update({
+  await db.runTransaction(async tx => {
+    const ref = COLLECTION.doc(r.id), atual = await tx.get(ref);
+    const vigente = atual.exists ? atual.data() : null;
+    if (!vigente || vigente.status !== STATUS_AGUARDANDO || vigente.tokenPreenchimento !== token
+      || (vigente.preenchimentoValidoAte && Date.parse(vigente.preenchimentoValidoAte) <= Date.now())) throw new Error('Link revogado ou formulário já preenchido.');
+    tx.update(ref, {
     campos: camposOk, linhas: linhasOk, valorTotal, anexos: anexosOk,
     // as assinaturas só nascem AQUI - é o que garante que o Responsável não
     // tem link nenhum antes do favorecido mandar o anexo (ver comentário
     // acima de STATUS_AGUARDANDO)
     assinaturas,
     status: 'PENDENTE', preenchidoEm: new Date().toISOString(),
+    });
   });
   cache.invalidar();
   await salvarFavorecido(camposOk);
@@ -824,10 +906,11 @@ async function assinar(id, token, { nome, imagem, anexos, userAgent } = {}) {
   const completo = todasAssinadas
     && (!comprovanteObrigatorio(r) || anexosFinais.length > 0);
   await COLLECTION.doc(id).update({
-    assinaturas, anexos: anexosFinais, status: completo ? 'ASSINADO' : 'PENDENTE',
+    assinaturas, anexos: anexosFinais, status: completo ? 'ASSINADO' : 'PENDENTE', origemSincronizacaoPendente: !!r.origem,
   });
   cache.invalidar();
-  return { ok: true, chave, completo, faltaComprovante: todasAssinadas && !completo };
+  const sincronizacao = await sincronizarOrigem(id);
+  return { ok: true, chave, completo, faltaComprovante: todasAssinadas && !completo, sincronizacao };
 }
 
 // ---------------------------------------------------------------------
@@ -848,27 +931,59 @@ const STATUS_CANCELADO = 'CANCELADO';
 // assinaturas e gera links novos; quem já assinou assina de novo.
 // Salvar sem mudar nada não mexe em assinatura nenhuma (senão abrir pra
 // conferir e fechar já custaria as assinaturas coletadas).
-async function editar(id, { campos, linhas, porEmail } = {}) {
+async function editar(id, { campos, linhas, porEmail, unidade, motivoEmpresa } = {}) {
   const r = await getOne(id);
   if (!r) throw new Error('Formulário não encontrado.');
   if (r.status === STATUS_AGUARDANDO) throw new Error('Esse formulário ainda está esperando o solicitante preencher - não há conteúdo pra editar. Cancele o link se precisar refazer.');
   if (r.status === STATUS_CANCELADO) throw new Error('Formulário cancelado não pode ser editado.');
   const modelo = TIPOS[r.tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
-  const cadastro = await formulariosUnidades.obterPorUnidade(r.unidade);
+  const destino = unidade == null ? r.unidade : limpar(unidade, 160);
+  const trocaEmpresa = destino !== r.unidade;
+  if (trocaEmpresa && (r.enviadoPagamento || r.enviadoConecta)) throw new Error('Formulário já enviado ao financeiro ou ao Conecta. Regularize o envio antes de trocar a empresa.');
+  const motivo = limpar(motivoEmpresa, 500);
+  if (trocaEmpresa && motivo.length < 5) throw new Error('Informe o motivo da troca de empresa (mínimo de 5 caracteres).');
+  const cadastro = await formulariosUnidades.obterPorUnidade(destino);
   if (!cadastro) throw new Error('A unidade desse formulário não está mais cadastrada.');
+  if (trocaEmpresa && cadastro.ativo === false) throw new Error('Escolha uma empresa/unidade ativa.');
 
   const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
-  const mudou = JSON.stringify([camposOk, linhasOk]) !== JSON.stringify([r.campos, r.linhas]);
+  const mudou = trocaEmpresa || JSON.stringify([camposOk, linhasOk]) !== JSON.stringify([r.campos, r.linhas]);
   if (!mudou) return { ...(await detalhar(id)), assinaturasDescartadas: 0, semMudanca: true };
 
   const descartadas = Object.values(r.assinaturas || {}).filter(slotAssinado).length;
-  await COLLECTION.doc(id).update({
+  const em = new Date().toISOString();
+  const patch = {
     campos: camposOk, linhas: linhasOk, valorTotal,
     assinaturas: montarAssinaturas(modelo, linhasOk, camposOk),
     // editar um rascunho não o libera pra assinatura: continua rascunho
     status: r.status === STATUS_RASCUNHO ? STATUS_RASCUNHO : 'PENDENTE',
-    editadoEm: new Date().toISOString(), editadoPorEmail: porEmail || null,
+    editadoEm: em, editadoPorEmail: porEmail || null,
+  };
+  if (trocaEmpresa) {
+    Object.assign(patch, { unidade: cadastro.unidade, unidadeCodigo: cadastro.codigo || null, razaoSocial: cadastro.razaoSocial,
+      tokenPreenchimento: null, preenchimentoValidoAte: null, origemPdf: null,
+      historicoEmpresas: [...(r.historicoEmpresas || []), { em, porEmail: porEmail || null, motivo,
+        antes: { unidade: r.unidade, unidadeCodigo: r.unidadeCodigo || null, razaoSocial: r.razaoSocial || null, cnpj: r.campos?.cnpj || null },
+        depois: { unidade: cadastro.unidade, unidadeCodigo: cadastro.codigo || null, razaoSocial: cadastro.razaoSocial, cnpj: cadastro.cnpj },
+        assinaturasDescartadas: descartadas }] });
+  }
+  await db.runTransaction(async tx => {
+    const ref = COLLECTION.doc(id), snap = await tx.get(ref);
+    if (!snap.exists || JSON.stringify(snap.data()) !== JSON.stringify(r)) throw new Error('O formulário foi alterado por outra pessoa. Atualize a tela e confira antes de salvar.');
+    if (trocaEmpresa) {
+      // Não mover uma despesa de outra loja sem corrigir o atendimento de origem.
+      const colecoes = { chat: 'suporteChats', solicitacao: 'solicitacoes', tarefa: 'tarefas', estorno: 'refundRequests' };
+      for (const origem of [r.origem, r.origemAtendimento].filter(Boolean)) {
+        if (!colecoes[origem.tipo] || !origem.id) throw new Error('Confira o vínculo de origem antes de trocar a empresa.');
+        const s = await tx.get(db.collection(colecoes[origem.tipo]).doc(origem.id)), o = s.exists ? s.data() : null;
+        const rotulo = o && (o.unidade || o.unidadeContexto || o.lojaContexto);
+        if (!rotulo) throw new Error('A origem precisa ter a empresa/unidade correta antes desta troca.');
+        const origemCadastro = await formulariosUnidades.obterPorUnidade(rotulo) || await formulariosUnidades.obterPorCodigo(rotulo);
+        if (!origemCadastro || origemCadastro.unidade !== cadastro.unidade) throw new Error('A empresa escolhida difere da origem. Corrija primeiro a unidade do atendimento vinculado.');
+      }
+    }
+    tx.update(ref, patch);
   });
   cache.invalidar();
   await salvarFavorecido(camposOk);
@@ -1045,8 +1160,10 @@ async function adicionarAnexos(id, anexos, { porEmail } = {}) {
   const todasAssinadas = Object.values(r.assinaturas || {}).length > 0
     && Object.values(r.assinaturas || {}).every(slotAssinado);
   if (todasAssinadas && r.status === 'PENDENTE' && comprovanteObrigatorio(r)) patch.status = 'ASSINADO';
+  if (r.origem && patch.status === 'ASSINADO') patch.origemSincronizacaoPendente = true;
   await COLLECTION.doc(id).update(patch);
   cache.invalidar();
+  if (patch.origemSincronizacaoPendente) await sincronizarOrigem(id);
   return detalhar(id);
 }
 
@@ -1055,19 +1172,24 @@ async function adicionarAnexos(id, anexos, { porEmail } = {}) {
 // link que já foi pro WhatsApp de alguém - sem token, chaveDoToken não
 // acha o slot e a página pública devolve "link inválido ou revogado",
 // exatamente como um formulário que nunca existiu.
-async function cancelar(id, { motivo, porEmail } = {}) {
+async function cancelar(id, { motivo, porEmail, somenteRascunho = false } = {}) {
   const r = await getOne(id);
   if (!r) throw new Error('Formulário não encontrado.');
-  if (r.status === STATUS_AGUARDANDO) throw new Error('Esse é um link de preenchimento - use "Cancelar link".');
   if (r.status === STATUS_CANCELADO) throw new Error('Esse formulário já está cancelado.');
   const assinaturas = {};
   Object.entries(r.assinaturas || {}).forEach(([chave, a]) => { assinaturas[chave] = { ...a, token: null }; });
-  await COLLECTION.doc(id).update({
-    assinaturas, status: STATUS_CANCELADO,
+  await db.runTransaction(async tx => {
+    const ref = COLLECTION.doc(id), snap = await tx.get(ref), atual = snap.data();
+    if (somenteRascunho && (![STATUS_RASCUNHO,STATUS_AGUARDANDO].includes(atual.status) || atual.enviadoConecta || atual.enviadoPagamento || Object.values(atual.assinaturas || {}).some(slotAssinado))) throw new Error('O formulário mudou; não é mais um rascunho cancelável.');
+    tx.update(ref, {
+    assinaturas, status: STATUS_CANCELADO, tokenPreenchimento: null,
     canceladoEm: new Date().toISOString(), canceladoPorEmail: porEmail || null,
     motivoCancelamento: limpar(motivo, 200) || null,
+    origemSincronizacaoPendente: !!r.origem,
+    });
   });
   cache.invalidar();
+  await sincronizarOrigem(id);
   return { id, status: STATUS_CANCELADO };
 }
 
@@ -1776,14 +1898,14 @@ function validarConteudo(r, { referencia } = {}) {
 async function liberarParaAssinatura(id, opcoes = {}) {
   const r = await getOne(id);
   if (!r) throw new Error('Formulário não encontrado.');
-  if (r.status === 'PENDENTE') return { jaLiberado: true, validacao: validarConteudo(r, opcoes) };
-  if (r.status !== STATUS_RASCUNHO) throw new Error(`Só rascunho vai pra assinatura - este está ${r.status}.`);
+  if (![STATUS_RASCUNHO,'PENDENTE'].includes(r.status)) throw new Error(`Só rascunho ou pendente vai pra assinatura - este está ${r.status}.`);
   const validacao = validarConteudo(r, opcoes);
   if (!validacao.ok) {
     const e = new Error(`O formulário ainda não pode ir pra assinatura. ${[...validacao.faltando.map((f) => `Falta: ${f}`), ...validacao.inconsistencias].join('; ')}.`);
     e.validacao = validacao;
     throw e;
   }
+  if (r.status === 'PENDENTE') return { jaLiberado: true, validacao };
   await COLLECTION.doc(id).update({ status: 'PENDENTE', liberadoEm: new Date().toISOString() });
   cache.invalidar();
   return { jaLiberado: false, validacao };
@@ -1816,10 +1938,11 @@ async function assinarEletronicamente(id, { papel, nome, metodo, dispositivo, au
   } };
   const todasAssinadas = Object.values(assinaturas).every(slotAssinado);
   const completo = todasAssinadas && (!comprovanteObrigatorio(r) || (r.anexos || []).length > 0);
-  await COLLECTION.doc(id).update({ assinaturas, status: completo ? 'ASSINADO' : 'PENDENTE' });
+  await COLLECTION.doc(id).update({ assinaturas, status: completo ? 'ASSINADO' : 'PENDENTE', origemSincronizacaoPendente: !!r.origem });
   cache.invalidar();
   const faltam = Object.entries(assinaturas).filter(([, s]) => !slotAssinado(s)).map(([k, s]) => rotuloDoSlot(r.tipo, k, s.rotulo));
-  return { completo, faltam, hash: assinaturas[papel].eletronica.hash };
+  const sincronizacao = await sincronizarOrigem(id);
+  return { completo, faltam, hash: assinaturas[papel].eletronica.hash, sincronizacao };
 }
 
 // ENVIO AO CONECTA: o Conecta é um portal - quem sobe o PDF lá é o Claude, no
@@ -1832,8 +1955,9 @@ async function registrarEnvioConecta(id, { protocolo, porNome, observacao } = {}
   if (r.status !== 'ASSINADO') throw new Error(`Só formulário ASSINADO vai pro Conecta - este está ${r.status}.`);
   if (r.enviadoConecta) throw new Error(`Esse formulário já foi registrado como enviado ao Conecta em ${new Date(r.enviadoConecta.em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`);
   const envio = { em: new Date().toISOString(), protocolo: limpar(protocolo, 80) || null, porNome: limpar(porNome, 80) || null, observacao: limpar(observacao, 300) || null };
-  await COLLECTION.doc(id).update({ enviadoConecta: envio });
+  await COLLECTION.doc(id).update({ enviadoConecta: envio, origemSincronizacaoPendente: !!r.origem });
   cache.invalidar();
+  await sincronizarOrigem(id);
   return envio;
 }
 
@@ -1848,6 +1972,7 @@ module.exports = {
   pedirComprovanteDeposito, comprovanteObrigatorio, temDepositanteProprio,
   adicionarAnexos,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
+  gerarLinkPreenchimento, sincronizarOrigem,
   reabrirAnexo, removerAssinatura,
   STATUS_RASCUNHO, EXIGIDOS, slotAssinado, validarConteudo, liberarParaAssinatura, assinarEletronicamente, registrarEnvioConecta, hashDoConteudo, cpfOuCnpjValido, resumo,
   // mesma saida que parque.js expoe: quem escreve o documento por fora do

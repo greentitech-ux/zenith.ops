@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fechamentos de caixa · NoPulso</title>
@@ -805,7 +805,7 @@ function codigosDoGrupoFech(){
   return base.filter(c=>UNIDADES_PERMITIDAS.has(c));
 }
 
-function fmtMoney(v){ return 'R$ ' + (v||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((v||0)); }
 // valor cheio (sem abreviar em K/M) pra eixos de gráfico - sem centavos, so pra
 // caber no espaço do eixo sem virar ilegível
 function fmtMoneyEixo(v){

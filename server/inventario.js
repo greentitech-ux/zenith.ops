@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // inventario.js
 // Inventário físico das lojas (Domino's, por enquanto - ver INVENTARIO_UNIDADES
 // em index.js) - controla o estoque de insumos/bebidas/embalagens por setor
@@ -483,7 +484,7 @@ async function verificarDesvioEstoque(contagem) {
 
   const lista = faltas
     .slice(0, 15)
-    .map((o) => `${o.itemNome}: falta ${Math.abs(o.diferencaQtd)} ${o.unidadeMedida} (R$${Math.abs(o.diferencaValor).toFixed(2)})`)
+    .map((o) => `${o.itemNome}: falta ${Math.abs(o.diferencaQtd)} ${o.unidadeMedida} (R$ ${NoPulsoMoeda.numero(Math.abs(o.diferencaValor))})`)
     .join('\n');
   const registro = {
     id,
@@ -492,7 +493,7 @@ async function verificarDesvioEstoque(contagem) {
     data,
     titulo: `Possível desvio de estoque — ${unidadeNome || unidade} (${data})`,
     valorEstimado: Math.abs(totalFaltaValor),
-    observacao: `Contagem de ${data} apurou falta de R$${Math.abs(totalFaltaValor).toFixed(2)} no total.\n\n${lista}`,
+    observacao: `Contagem de ${data} apurou falta de R$ ${NoPulsoMoeda.numero(Math.abs(totalFaltaValor))} no total.\n\n${lista}`,
     status: 'pendente',
     criadoPorId: criadoPorId || null,
     criadoPorEmail: criadoPorEmail || null,

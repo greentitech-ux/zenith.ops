@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Caixa · Estação da Comida · NoPulso</title>
@@ -167,7 +167,7 @@ function logout(){ localStorage.removeItem('authToken'); location = '/'; }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 // com separador de milhar: o total do dia passa de mil, e "R$ 1888,34" é mais
 // difícil de conferir de bate-pronto que "R$ 1.888,34"
-function fmtReal(v){ return 'R$ ' + Number(v||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtReal(v){ return NoPulsoMoeda.formatar(Number(v||0)); }
 function num(v){ const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0; }
 
 const FORMAS = [['dinheiro','Dinheiro'],['pix','Pix'],['debito','Débito'],['credito','Crédito'],['voucher','Voucher']];

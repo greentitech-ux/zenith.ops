@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // monitorReport.js
 // Relatorios (CSV/PDF) dos paineis do Monitor de transacoes (Transacoes,
 // Pedidos repetidos, Chargeback, Pedidos que mudaram de status, Comparativo
@@ -44,7 +45,7 @@ function fmtDT(iso) {
 }
 
 function fmtMoney(v) {
-  return 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((v || 0));
 }
 
 function agoraBrasiliaFmt() {

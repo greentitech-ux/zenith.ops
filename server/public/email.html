@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>E-mail · NoPulso</title>
@@ -479,7 +479,7 @@ async function salvarBriefing(){
 }
 function descreverEnvioBriefing(e){
   return e.ate
-    ? `até ${escapeHtml(e.ate)} · ontem R$ ${Number(e.faturamentoOntem||0).toLocaleString('pt-BR',{minimumFractionDigits:2})} · ${e.lojasLancaramOntem} de ${e.lojasTotal} lojas lançaram`
+    ? `até ${escapeHtml(e.ate)} · ontem R$ ${NoPulsoMoeda.numero(Number(e.faturamentoOntem||0))} · ${e.lojasLancaramOntem} de ${e.lojasTotal} lojas lançaram`
     : '';
 }
 async function enviarBriefingAgora(){

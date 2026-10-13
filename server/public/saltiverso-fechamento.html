@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Fechamento do Balcão · NoPulso</title>
@@ -237,7 +237,7 @@ let ATUAL = null; // preview ou fechamento ja lancado (GET /api/saltiverso/fecha
 
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
-function fmtReal(v){ const n = Number(v||0); return (n<0?'-':'') + 'R$ ' + Math.abs(n).toFixed(2).replace('.', ','); }
+function fmtReal(v){ const n = Number(v||0); return (n<0?'-':'') + NoPulsoMoeda.formatar(Math.abs(n)); }
 function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
 const FUSO_BR = 'America/Sao_Paulo';
 function agoraBrasilia(){

@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // canaisVendaOcr.js
 // Le a foto do relatorio de vendas do PDV (a tela/impressao que a loja ja
 // olha no fim do dia) e devolve um RASCUNHO com o valor de cada Canal de
@@ -485,7 +486,7 @@ function conferirPelaLinha(itens) {
     if (emReais.length && !emReais.some((n) => Math.abs(n - Number(it.valor)) < TOLERANCIA_SOMA)) {
       reprovados.push({
         ...it,
-        motivo: `o número lido (${it.valor}) não é o que está impresso na linha "${it.textoOrigem}" (${emReais.map((n) => 'R$ ' + n.toFixed(2).replace('.', ',')).join(' / ')}). Confira na foto e digite.`,
+        motivo: `o número lido (${it.valor}) não é o que está impresso na linha "${it.textoOrigem}" (${emReais.map((n) => NoPulsoMoeda.formatar(n)).join(' / ')}). Confira na foto e digite.`,
       });
       return;
     }
@@ -514,7 +515,7 @@ function conferirPelaLinha(itens) {
     porSecao.get(it.secao).push({ it, pct, valor: Number(it.valor) || 0 });
   });
   const foraPelaPct = new Set();
-  const reais = (n) => n.toFixed(2).replace('.', ',');
+  const reais = (n) => NoPulsoMoeda.numero(n);
   for (const linhas of porSecao.values()) {
     // participacao minuscula nao serve de referencia (o arredondamento da %
     // domina) e linha zerada nao diz total nenhum

@@ -18,7 +18,7 @@ async function validarLinkPreenchimento(base, formulario) {
     return link;
   } catch (_) {
     // Não incluir o token (nem o erro de fetch com a URL) nos logs de auditoria.
-    throw new Error(`Formulário #${formulario.numeroTicket} salvo, mas o link público não passou na validação. Verifique o deploy e APP_BASE_URL e tente novamente com outra idempotencyKey; o formulário pendente será reaproveitado.`);
+    throw new Error(`Formulário #${formulario.numeroTicket} salvo, mas o link público não passou na validação. Verifique o deploy e APP_BASE_URL e use gerar_link_formulario com formularioId=${formulario.id}. Não crie outro formulário.`);
   }
 }
 

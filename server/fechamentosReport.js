@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // fechamentosReport.js
 // Relatorio (CSV/PDF) dos Fechamentos de caixa no periodo filtrado - mesma
 // tabela mostrada no painel "Fechamentos" de fechamentos.html, pra levar
@@ -35,7 +36,7 @@ function fmtData(iso) {
 }
 
 function fmtMoney(v) {
-  return 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((v || 0));
 }
 
 const COLUNAS_BASE = [

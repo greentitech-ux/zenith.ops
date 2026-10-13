@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // entregasLive.js
 // Lançamento de entregas pelas próprias lojas (substitui o AppSheet de
 // entregas dos motoboys): cada lançamento é uma corrida/turno de um
@@ -343,7 +344,7 @@ const CAMPOS_MOEDA_ENTREGA = ['ajudaCusto', 'valor', 'valorEntregas', 'garantido
 function fmtValorEntrega(campo, valor) {
   const n = num(valor);
   if (!CAMPOS_MOEDA_ENTREGA.includes(campo)) return String(n);
-  return `${n < 0 ? '-' : ''}R$ ${Math.abs(n).toFixed(2).replace('.', ',')}`;
+  return `${n < 0 ? '-' : ''}R$ ${NoPulsoMoeda.numero(Math.abs(n))}`;
 }
 function montarResumoMudancasEntrega(pedido, atual) {
   return Object.entries(pedido.mudancas || {}).map(([campo, valor]) => {

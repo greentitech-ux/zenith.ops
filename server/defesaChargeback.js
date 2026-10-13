@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // defesaChargeback.js
 // DEFESA DE CHARGEBACK SEM PERDER PRAZO (Master, 24/09/2026).
 //
@@ -101,7 +102,7 @@ function prazoInterno(prazoDefesaIso, criadoEmMs) {
 function dataSP(iso) { return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); }
 function dataBR(iso) { return iso ? new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'; }
 function dataHoraBR(iso) { return iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' }) : '—'; }
-function reais(v) { return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ','); }
+function reais(v) { return NoPulsoMoeda.formatar((Number(v) || 0)); }
 
 // ---------------------------------------------------------------------
 // QUESTIONÁRIO. Uma fonte só: a tela desenha a partir disto e o servidor

@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // Checkout API, separada das credenciais de disputas. Nenhuma escrita pode
 // partir do modelo: preparar -> tarefa/push -> assinatura Master -> executar.
 const crypto = require('crypto');
@@ -57,9 +58,9 @@ function criarServico({ db, store, refunds, suporteChat, env = process.env, fetc
     const v = await plano(p);
     const anterior = await referencia({ merchantAccountCode: v.conta, pspReference: v.psp }).get();
     if (anterior.exists) throw new Error('Já existe um envio financeiro para este PSP. Use consultar_estorno_adyen; não tente outra chave.');
-    return { entrada: { ...v, intencaoId: crypto.randomUUID() }, resumo: `Adyen: ${v.operacao === 'refunds' ? 'estornar parcialmente' : 'cancelar/estornar'} R$ ${v.valor.toFixed(2)} · ${v.unidade} · #${v.protocoloChat}`,
+    return { entrada: { ...v, intencaoId: crypto.randomUUID() }, resumo: `Adyen: ${v.operacao === 'refunds' ? 'estornar parcialmente' : 'cancelar/estornar'} R$ ${NoPulsoMoeda.numero(v.valor)} · ${v.unidade} · #${v.protocoloChat}`,
       detalhes: [{ rotulo: 'Unidade', valor: v.unidade }, { rotulo: 'Conta Adyen', valor: v.conta }, { rotulo: 'PSP original', valor: v.psp },
-        { rotulo: 'Valor autorizado', valor: `BRL ${v.valor.toFixed(2)}` }, { rotulo: 'Protocolo de origem', valor: String(v.protocoloChat) },
+        { rotulo: 'Valor autorizado', valor: NoPulsoMoeda.formatar(v.valor) }, { rotulo: 'Protocolo de origem', valor: String(v.protocoloChat) },
         { rotulo: 'Motivo', valor: monitor.mascarar(v.motivo) }, { rotulo: 'Aviso', valor: 'Recebimento pela API não comprova crédito ao cliente. Acompanhar webhook; não reenviar em caso de timeout.' }] };
   }
   function compacto(r, eventos = []) {
@@ -78,7 +79,7 @@ function criarServico({ db, store, refunds, suporteChat, env = process.env, fetc
   async function anotar(r) {
     const estado = compacto(r);
     await suporteChat.registrarEventoFinanceiro(r.chatId, { eventoId: hash(`${r.intencaoId}:${estado.status}`),
-      resumo: `Estorno Adyen do protocolo #${r.protocoloChat}: ${estado.status}. Valor BRL ${r.valor.toFixed(2)}. Referência ${r.referenciaAdyen || r.psp}. Não há prazo de crédito confirmado.`,
+      resumo: `Estorno Adyen do protocolo #${r.protocoloChat}: ${estado.status}. Valor ${NoPulsoMoeda.formatar(r.valor)}. Referência ${r.referenciaAdyen || r.psp}. Não há prazo de crédito confirmado.`,
       textoPublico: estado.status === 'CONFIRMADO_PELA_ADYEN'
         ? 'A Adyen confirmou o processamento do cancelamento/estorno. Isso ainda não confirma o crédito na sua conta; não recebemos um prazo bancário específico.'
         : estado.status === 'RECEBIDO' ? 'A Adyen recebeu a solicitação de cancelamento/estorno. Ainda aguardamos a confirmação do processamento; o crédito na sua conta não está confirmado.'

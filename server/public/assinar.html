@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Assinar formulário · NoPulso</title>
@@ -98,7 +98,7 @@ const params = new URLSearchParams(location.search);
 const FORM = params.get('f');
 const TOKEN = params.get('t');
 const escapeHtml = (s) => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmtMoney = (v) => 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtMoney = (v) => NoPulsoMoeda.formatar((Number(v)||0));
 
 let DATA = null;
 

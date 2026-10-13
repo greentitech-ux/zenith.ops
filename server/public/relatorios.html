@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Relatórios de disputa · NoPulso</title>
@@ -136,7 +136,7 @@ let DISPUTES = [];
 let ORDERS_BY_ID = {};
 let FILTRO = 'TODOS';
 
-function fmtMoney(v){ return 'R$ ' + (v||0).toFixed(2).replace('.',','); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((v||0)); }
 // escapa dado externo antes de ir pra innerHTML - nome do cliente/cartão vem
 // da Adyen (o cliente digita) e observação/contato vêm de formulário; sem
 // isso, um "nome" com <img onerror=...> executaria script aqui (XSS)

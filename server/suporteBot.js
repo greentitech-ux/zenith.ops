@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // suporteBot.js
 // "Beniboy" - atendente virtual do chat de suporte (widget 💬). Quando
 // NENHUM humano assumiu a conversa, ele responde sozinho usando a API da
@@ -1232,7 +1233,7 @@ async function responderConversa(chatId, { unidades = [], unidadesPorCodigo = {}
     if(/estorno(?:-|%2d)cliente/i.test(texto) && !resultado.linkEstorno) texto='Antes de enviar um link de estorno, precisamos localizar o pedido no Monitor pelo nome do cliente e valor e informar seu status. Se esta conversa não tiver acesso à consulta, um atendente precisa verificar.';
     if(resultado.consultaPedido){
       const p=resultado.consultaPedido;
-      texto=`${p.publico ? 'Pagamento localizado' : `Pedido ${p.pedidoId}`} · ${(unidadesPorCodigo||{})[p.unidade]||p.unidade} · Cliente: ${p.cliente} · ${Number(p.valor).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} · Status do pagamento no Monitor: ${p.status}. A conclusão do pedido na loja e o crédito de eventual estorno não são comprovados por este status.\n\n${texto}`;
+      texto=`${p.publico ? 'Pagamento localizado' : `Pedido ${p.pedidoId}`} · ${(unidadesPorCodigo||{})[p.unidade]||p.unidade} · Cliente: ${p.cliente} · ${NoPulsoMoeda.formatar(p.valor)} · Status do pagamento no Monitor: ${p.status}. A conclusão do pedido na loja e o crédito de eventual estorno não são comprovados por este status.\n\n${texto}`;
     }
     if (!texto) throw new Error('Modelo retornou sem texto de atendimento.');
 

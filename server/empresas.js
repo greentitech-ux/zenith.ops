@@ -56,7 +56,7 @@ const UNIDADES_ARCFOOD = [
 ];
 
 // GBE (Grupo Bravo Empresarial): as Domino's do Nordeste, as Spoleto, a
-// São Braz, a Milky Moo e o Saltiverso, mais a unidade Administrativa.
+// São Braz, a Milky Moo e o Saltiverso. Administrativa é Solutions Ti Tech.
 // Escolhidas uma a uma, de propósito: o Master pediu que loja nova NÃO
 // caia aqui sozinha.
 const UNIDADES_GBE = [
@@ -75,7 +75,6 @@ const UNIDADES_GBE = [
   'São Braz IL',
   'Spo Shop Midway',
   'Saltiverso Patteo',
-  'Administrativa',
   // Adyen/Monitor (mesma loja, merchantAccountCode)
   'DOM_19798', 'Caruaru',
   'DOM19911', 'Garanhuns',

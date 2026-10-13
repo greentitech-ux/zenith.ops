@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>iFood · NoPulso</title>
@@ -183,7 +183,7 @@ let UNIDADES_PERMITIDAS = null; // null = Master (sem restrição)
 const SEL_UNIDADE = new Set();
 let IS_MASTER = false;
 
-function fmtMoney(v){ return 'R$ ' + (v||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((v||0)); }
 function fmtData(iso){ if(!iso) return '—'; const d = new Date(iso); if(isNaN(d)) return '—'; return d.toLocaleDateString('pt-BR',{timeZone:'America/Sao_Paulo'}); }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent = s==null?'':String(s); return d.innerHTML; }
 const FUSO_BR = 'America/Sao_Paulo';

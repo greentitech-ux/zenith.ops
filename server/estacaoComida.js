@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // estacaoComida.js
 // Rodízio com comanda por PESSOA (Estação da Comida). Desenhado com o Master
 // em 14/09/2026, dentro do restaurante, olhando a comanda de papel que ele
@@ -836,7 +837,7 @@ async function receber({ unidade, unidadeNome, numeros, caixa, pagamentos, comSe
   if (!pagosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
   const somaPag = arred(pagosOk.reduce((s, p) => s + p.valor, 0));
   if (Math.abs(somaPag - conta.total) > 0.01) {
-    throw new Error(`A soma das formas de pagamento (R$${somaPag.toFixed(2)}) precisa bater com o total (R$${conta.total.toFixed(2)}).`);
+    throw new Error(`A soma das formas de pagamento (R$ ${NoPulsoMoeda.numero(somaPag)}) precisa bater com o total (R$ ${NoPulsoMoeda.numero(conta.total)}).`);
   }
   const data = hojeBrasiliaISO(agora);
   const ref = PAGAMENTOS.doc();

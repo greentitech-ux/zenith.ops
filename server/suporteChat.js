@@ -852,4 +852,5 @@ module.exports = {
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,
   responderReferencia,
   validarAbertura,
+  invalidar: () => chatsCache.invalidar(),
 };

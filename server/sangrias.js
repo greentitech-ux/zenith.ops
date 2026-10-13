@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // sangrias.js
 // Sangrias (retiradas de caixa) registradas em campo - normalmente por quem
 // visita as lojas ao longo do dia, ANTES do fechamento do dia ser lançado.
@@ -48,7 +49,7 @@ function avaliarDivergencia({ valor, esperado, motivoDivergencia }) {
   const dif = Number((num(valor) - Number(esperado)).toFixed(2));
   const motivo = String(motivoDivergencia || '').trim().slice(0, 300);
   if (Math.abs(dif) > TOLERANCIA_DIVERGENCIA && !motivo) {
-    throw new Error(`Diferença de ${dif < 0 ? 'falta' : 'sobra'} de R$ ${Math.abs(dif).toFixed(2).replace('.', ',')} no caixa. Informe o motivo da divergência para salvar.`);
+    throw new Error(`Diferença de ${dif < 0 ? 'falta' : 'sobra'} de R$ ${NoPulsoMoeda.numero(Math.abs(dif))} no caixa. Informe o motivo da divergência para salvar.`);
   }
   return { esperado: Number(Number(esperado).toFixed(2)), divergencia: dif, motivoDivergencia: motivo || null };
 }

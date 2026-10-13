@@ -357,7 +357,7 @@
     bg.innerHTML = `
       <div class="zn-fraude-banner">
         <div class="zn-f-titulo">🚨 Fraude confirmada</div>
-        <div class="zn-f-corpo">${escapeHtml(registro.unidade || '—')} · ${escapeHtml(registro.clienteNome || 'Cliente não identificado')}${registro.valor != null ? ` · R$ ${Number(registro.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}</div>
+        <div class="zn-f-corpo">${escapeHtml(registro.unidade || '—')} · ${escapeHtml(registro.clienteNome || 'Cliente não identificado')}${registro.valor != null ? ` · R$ ${NoPulsoMoeda.numero(Number(registro.valor))}` : ''}</div>
         ${registro.motivo ? `<div class="zn-f-motivo">${escapeHtml(registro.motivo)}</div>` : ''}
         <button type="button" class="zn-f-ok">✓ OK, entendi</button>
       </div>`;

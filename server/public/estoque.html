@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Estoque / Inventário · NoPulso</title>
@@ -591,7 +591,7 @@ function fecharMenu(){}
 
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
-function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((Number(v)||0)); }
 function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
 
 const FUSO_BR = 'America/Sao_Paulo';
@@ -1368,7 +1368,7 @@ function atualizarResumoNota(i){
   const qtdFinal = usaPeso && item.unidadeMedida==='KG' ? qtdBruta/1000 : qtdBruta;
   const resumo = document.getElementById(`rn-resumo-${i}`);
   resumo.textContent = (qtdFinal>0 && valorTotal>0)
-    ? `= ${Number(qtdFinal.toFixed(3))} ${item?item.unidadeMedida:''} · valor unitário R$ ${(valorTotal/qtdFinal).toFixed(4)}`
+    ? `= ${Number(qtdFinal.toFixed(3))} ${item?item.unidadeMedida:''} · valor unitário ${NoPulsoMoeda.formatar(valorTotal/qtdFinal, 4)}`
     : '';
 }
 function cancelarRevisaoNota(){
@@ -1952,7 +1952,7 @@ function renderOcorrencias(){
     <tr>
       <td>${escapeHtml(o.unidadeNome||o.unidade)}</td>
       <td>${fmtData(o.data)}</td>
-      <td>R$ ${Number(o.valorEstimado||0).toFixed(2)}</td>
+      <td>R$ ${NoPulsoMoeda.numero(Number(o.valorEstimado||0))}</td>
       <td>${o.status==='resolvido' ? '✅ Resolvido' : '🔴 Pendente'}</td>
       <td>
         <button type="button" class="acao-btn" onclick="verObservacaoDesvio('${o.id}')" title="Ver detalhes">🔍</button>

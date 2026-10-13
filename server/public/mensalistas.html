@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Mensalistas · NoPulso</title>
@@ -159,7 +159,7 @@ let UNIDADES_NOMES = { ...PARQUE_UNIDADES_NOMES };
 
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
-function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((Number(v)||0)); }
 const FUSO_BR = 'America/Sao_Paulo';
 function agoraBrasilia(){
   const partes = new Intl.DateTimeFormat('en-US', {

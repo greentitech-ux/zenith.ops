@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Formulários · NoPulso</title>
@@ -266,6 +266,17 @@
   <div class="ov-box">
     <h3 id="ed-titulo">Editar formulário</h3>
     <div class="msg warn hidden" id="ed-aviso"></div>
+    <div id="ed-empresa-area" class="hidden">
+      <label for="ed-unidade">Empresa / unidade emitente</label>
+      <select id="ed-unidade" onchange="edEmpresaInfo()"></select>
+      <p class="fi-sub" id="ed-empresa-info" aria-live="polite"></p>
+      <div id="ed-motivo-area" class="hidden">
+        <label for="ed-motivo-empresa">Motivo da troca de empresa</label>
+        <input id="ed-motivo-empresa" maxlength="500" placeholder="Ex.: lançamento feito na empresa errada">
+        <p class="fi-sub">A troca atualiza razão social e CNPJ. Assinaturas e links anteriores serão invalidados.</p>
+      </div>
+      <details id="ed-historico-empresa" class="hidden"><summary>Histórico de troca de empresa</summary><div id="ed-historico-itens"></div></details>
+    </div>
     <div class="grade-campos" id="ed-campos"></div>
     <div id="ed-bloco-tabela">
       <div id="ed-corpo" class="itens-lista"></div>
@@ -293,7 +304,7 @@ window.fetch = (url, opts = {}) => {
 };
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 const escapeHtml = (s) => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmtMoney = (v) => 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtMoney = (v) => NoPulsoMoeda.formatar((Number(v)||0));
 const fmtData = (iso) => iso ? new Date(iso).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
 
 // <input type="date"> só entende/devolve AAAA-MM-DD (ISO) - o resto do
@@ -820,10 +831,22 @@ function edTotal(){
 }
 
 function abrirEdicao(id){
+  if(!SOU_MASTER) return;
   const f = LISTA.find(x=>x.id===id);
   const m = f && TIPOS.find(t=>t.tipo===f.tipo);
   if(!m){ alert('Não achei o modelo desse formulário.'); return; }
-  ED = { id, tipo: f.tipo };
+  ED = { id, tipo: f.tipo, unidade: f.unidade, razaoSocial: f.razaoSocial, cnpj: f.campos?.cnpj };
+  document.getElementById('ed-empresa-area').classList.remove('hidden');
+  const selEmpresa=document.getElementById('ed-unidade');
+  const opcoes=UNIDADES.filter(u=>u.ativo!==false);
+  if(!opcoes.some(u=>u.unidade===f.unidade)) opcoes.unshift({unidade:f.unidade,razaoSocial:f.razaoSocial,cnpj:f.campos?.cnpj});
+  selEmpresa.innerHTML=opcoes.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidade)}</option>`).join('');
+  selEmpresa.value=f.unidade;
+  selEmpresa.disabled=!!(f.enviadoPagamento || f.enviadoConecta);
+  document.getElementById('ed-motivo-empresa').value='';
+  edEmpresaInfo();
+  document.getElementById('ed-historico-empresa').classList.toggle('hidden',!f.historicoEmpresas?.length);
+  document.getElementById('ed-historico-itens').innerHTML=(f.historicoEmpresas||[]).map(h=>`<p class="fi-sub">${escapeHtml(h.antes.unidade)} → ${escapeHtml(h.depois.unidade)}<br>${escapeHtml(h.motivo)} · ${escapeHtml(h.porEmail||'Master')} · ${escapeHtml(new Date(h.em).toLocaleString('pt-BR'))}</p>`).join('');
   document.getElementById('ed-titulo').textContent = `Editar · ${m.rotulo} · ${f.unidade} · #${f.numeroTicket ?? '—'}`;
   // aviso só quando existe assinatura a perder - avisar sempre vira ruído
   // e a pessoa para de ler
@@ -853,11 +876,23 @@ function abrirEdicao(id){
 
 function fecharEdicao(){ ED = null; document.getElementById('ed-overlay').classList.add('hidden'); }
 
+function edEmpresaInfo(){
+  if(!ED) return;
+  const sel=document.getElementById('ed-unidade'), cad=UNIDADES.find(u=>u.unidade===sel.value) || ED;
+  document.getElementById('ed-empresa-info').textContent=sel.disabled
+    ? 'Já enviado ao financeiro ou Conecta: regularize o envio antes de trocar a empresa.'
+    : `${cad.razaoSocial||sel.value} · CNPJ ${cad.cnpj||'não informado'}`;
+  document.getElementById('ed-motivo-area').classList.toggle('hidden',sel.value===ED.unidade);
+}
+
 async function salvarEdicao(){
   const m = edModelo(); if(!m || !ED) return;
   const btn = document.getElementById('ed-salvar');
   const erro = document.getElementById('ed-erro');
   erro.classList.add('hidden');
+  const unidade=document.getElementById('ed-unidade').value;
+  const motivoEmpresa=document.getElementById('ed-motivo-empresa').value.trim();
+  if(unidade!==ED.unidade && motivoEmpresa.length<5){erro.textContent='Informe o motivo da troca de empresa (mínimo de 5 caracteres).';erro.classList.remove('hidden');return;}
   const campos = {};
   document.querySelectorAll('#ed-campos input[data-ed-campo]').forEach(el=>{ campos[el.dataset.edCampo] = valorCampo(el); });
   const linhas = [...document.querySelectorAll('#ed-corpo .item-card')].map(card=>{
@@ -868,7 +903,7 @@ async function salvarEdicao(){
   btn.disabled = true;
   try{
     const r = await fetch('/api/formularios/'+encodeURIComponent(ED.id), {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ campos, linhas }),
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ campos, linhas, unidade, motivoEmpresa }),
     });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||('erro '+r.status));

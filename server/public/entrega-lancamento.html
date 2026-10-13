@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Lançamento de entregas · NoPulso</title>
@@ -422,7 +422,7 @@ let TURNOS_KM = [];
 let TURNO_KM_SAIDA_ID = null;
 const MOTIVOS_REMOCAO_LABEL = { atraso:'Atraso', saiu_antes:'Saiu antes do fim do turno', prejuizo:'Gerou prejuízo', outro:'Outro' };
 
-function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((Number(v)||0)); }
 function fmtValorCampo(campo,v){ return CAMPOS_MONETARIOS.has(campo) ? fmtMoney(v) : (Number(v)||0).toString(); }
 function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
 const FUSO_BR = 'America/Sao_Paulo';

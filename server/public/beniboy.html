@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Central de Atendimento · NoPulso</title>
@@ -1049,6 +1049,7 @@ function painelHtml(chat){
       <div class="d-alerta-item">
         ${n.situacao ? `<b>${ROTULO_NOTA[n.situacao] || n.situacao}</b> · ` : ''}${fmtDataHora(n.em)}<br>
         ${escapeHtml(n.resumo||'')}
+        ${n.pdf?.formularioId ? `<br><button type="button" class="btn-ghost" data-chat="${escapeHtml(chat.id)}" data-formulario="${escapeHtml(n.pdf.formularioId)}" onclick="baixarPdfFormulario(this.dataset.chat,this.dataset.formulario)">📄 Baixar formulário assinado</button>` : ''}
         ${n.pendencia ? `<br><b>Falta:</b> ${escapeHtml(n.pendencia)}` : ''}
         ${n.tratadaEm ? `<br><span class="sub">tratada por ${escapeHtml(n.tratadaPorNome||n.tratadaPorEmail||'—')} · ${fmtDataHora(n.tratadaEm)}</span>` : ''}
         ${n.situacao==='PENDENTE' ? `<br><button type="button" class="btn-ghost" style="margin-top:6px;font-size:11.5px;padding:5px 9px;" onclick="marcarNotaTratada('${chat.id}',${ix},'${escapeHtml(n.em||'')}')">Marcar tratada</button>` : ''}
@@ -1566,6 +1567,16 @@ async function baixarPdfConversa(id){
     a.remove();
     URL.revokeObjectURL(a.href);
   }catch(e){ alert('Erro ao gerar o PDF.'); }
+}
+
+async function baixarPdfFormulario(chatId, formularioId){
+  try{
+    const resp = await fetch(`/api/suporte-chats/${encodeURIComponent(chatId)}/formularios/${encodeURIComponent(formularioId)}/pdf`);
+    if(!resp.ok) throw new Error('Formulário indisponível ou acesso não autorizado.');
+    const a=document.createElement('a'), url=URL.createObjectURL(await resp.blob());
+    a.href=url; a.download='formulario-assinado.pdf'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){ alert(e.message || 'Não foi possível baixar o formulário.'); }
 }
 
 let CARREGAMENTO_LISTA=null;

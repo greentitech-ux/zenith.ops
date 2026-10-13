@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // chamadoRelatorio.js
 // Relatorio do atendimento em PDF, a partir de um chamado de chamadosTI.js
 // (ou chamadosManutencao.js - o formato do documento e o mesmo).
@@ -45,7 +46,7 @@ function fmtData(iso) {
 
 // com separador de milhar: e um documento sobre dinheiro, "R$ 1250,00" e
 // "R$ 1.250,00" se leem diferente na pressa
-const fmtReal = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtReal = (v) => `R$ ${NoPulsoMoeda.numero(Number(v || 0))}`;
 
 // Duracao do atendimento em texto humano. E o numero que o franqueado
 // pergunta ("quanto tempo o tecnico ficou?") e que ninguem quer calcular na

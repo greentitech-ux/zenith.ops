@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // conciliacao.js
 //
 // FONTE DE VERDADE EXTERNA x O QUE O GERENTE DECLAROU.
@@ -72,7 +73,7 @@ function somarDiasISO(iso, n) {
 }
 function arredondar(v) { return Math.round((Number(v) || 0) * 100) / 100; }
 function brl(v) {
-  return 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((Number(v) || 0));
 }
 function dataBR(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));

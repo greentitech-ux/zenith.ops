@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // reportUtil.js
 // Nucleo generico de CSV/PDF reaproveitado pelos relatorios de tabelas que
 // nao tinham exportacao (Entregas, iFood, Usuarios, Grupos, Central
@@ -18,7 +19,7 @@ function slugify(text, fallback = 'relatorio') {
 }
 
 function fmtMoneyBR(v) {
-  return 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((Number(v) || 0));
 }
 
 function fmtDataBR(iso) {

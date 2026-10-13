@@ -22,6 +22,7 @@ async function testar(){
     return p.statusAtual==='ESTORNADO'?[base,{...base,originalReference:base.pspReference,pspReference:'MOD'+p.pedidoId,eventCode:'REFUND',status:'ESTORNADO'}]:[base];
   });
   const mocks={'./pedidosMonitor':require('./pedidosMonitor'),'./consultaPedidoPublico':require('./consultaPedidoPublico'),'./coworkCatalogo':{mapaDeUnidades:async()=>mapa},'./suporteChat':suporte,'./firestore':{collection:()=>({})},'./store':{allOrders:()=>pedidos,allTransactions:eventos,estaCarregado:()=>true},'./pedidoWatch':{registrar:async()=>{}},'./users':{list:async()=>[],ehCargoGerente:()=>false},'./agenteAcoes':{obterContexto:async()=>({})},'@anthropic-ai/sdk':class {constructor(){this.messages={create:async()=>{assert(respostas.length,'Modelo local sem resposta preparada');return respostas.shift();}};}}};
+  mocks['./public/moeda-br']=require('./public/moeda-br');
   const mod=new Module(path.join(__dirname,'suporteBot.js'),module);mod.filename=path.join(__dirname,'suporteBot.js');mod.paths=module.paths;mod.require=id=>mocks[id]||{};
   mod._compile(fonte+'\nmodule.exports.executarTool=executarTool;',mod.filename);
   const bot=mod.exports;

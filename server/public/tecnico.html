@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Chamados de TI · NoPulso</title>
@@ -443,7 +443,7 @@ let ITENS_ANTES = [];
 let ITENS_DEPOIS = [];
 let SEQ = 0;
 
-function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((Number(v)||0)); }
 const FUSO_BR = 'America/Sao_Paulo';
 function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR',{timeZone:FUSO_BR}); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

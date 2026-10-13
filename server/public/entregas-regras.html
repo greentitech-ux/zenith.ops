@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Regras de Entregas · NoPulso</title>
@@ -212,7 +212,7 @@ function abrirMenu(){}
 function fecharMenu(){}
 
 function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtMoney(v){ return NoPulsoMoeda.formatar((Number(v)||0)); }
 const FUSO_BR = 'America/Sao_Paulo';
 
 const BASES = [ ['entrega','Quantidade de Entregas (multiplica)'], ['retorno','Quantidade de Retornos (multiplica)'], ['extra','Quantidade de Extras (multiplica)'], ['pos00hs','Quantidade Pós 00h (multiplica)'], ['foraDeArea','Quantidade Fora de Área (multiplica)'], ['flat','Uma vez por lançamento (não multiplica)'] ];

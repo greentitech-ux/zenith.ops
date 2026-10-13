@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Salão · Estação da Comida · NoPulso</title>
@@ -134,7 +134,7 @@ function logout(){ localStorage.removeItem('authToken'); location = '/'; }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 // com separador de milhar: o total do dia passa de mil, e "R$ 1888,34" é mais
 // difícil de conferir de bate-pronto que "R$ 1.888,34"
-function fmtReal(v){ return 'R$ ' + Number(v||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtReal(v){ return NoPulsoMoeda.formatar(Number(v||0)); }
 function horaCurta(iso){ const d = new Date(iso); return isNaN(d.getTime()) ? '' : `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 
 // mesmo vocabulário do servidor (estacaoComida.js ROTULO_TIPO/ROTULO_TURNO):

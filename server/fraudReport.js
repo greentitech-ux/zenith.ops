@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // fraudReport.js
 // Relatorio de fraude, pra apresentar pra diretoria/CEO depois de um surto
 // de tentativas: agrupa o historico de marcacoes (fraudMarks.listHistorico,
@@ -22,7 +23,7 @@ function fmtData(iso) {
 }
 
 function fmtMoney(v) {
-  return 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((v || 0));
 }
 
 const AUTOR_DETECCAO_AUTOMATICA = 'deteccao-automatica@sistema';

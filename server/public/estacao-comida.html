@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Estação da Comida · NoPulso</title>
@@ -82,7 +82,7 @@ function atualizarLinks(){
   const unidade = document.getElementById('unidade').value;
   ['salao','caixa','fechamento'].forEach((t)=>document.getElementById('link-'+t).href = `/estacao-${t}?unidade=${encodeURIComponent(unidade)}`);
 }
-  function moeda(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+  function moeda(v){ return NoPulsoMoeda.formatar(v); }
   function texto(id, valor, classe=''){ const el=document.getElementById(id); if(!el) return; el.textContent=valor; el.className=classe; }
   async function atualizarPainel(){
     const unidade=document.getElementById('unidade').value;

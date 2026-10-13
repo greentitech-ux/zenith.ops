@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Bebidas & Meias · NoPulso</title>
@@ -217,7 +217,7 @@ let SETOR_SALTIVERSO_CODIGO = null;
 
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
-function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
+function fmtReal(v){ return NoPulsoMoeda.formatar(Number(v||0)); }
 const FUSO_BR = 'America/Sao_Paulo';
 function agoraBrasilia(){
   const partes = new Intl.DateTimeFormat('en-US', {

@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // push.js
 // Notificacoes push (navegador/celular) para eventos criticos: estorno,
 // estorno agendado, chargeback e fraude suspeita.
@@ -252,7 +253,7 @@ async function sendToAll(data, { unidade, section } = {}) {
 async function notify(tx) {
   if (!isAlertable(tx)) return;
   const title = titleFor(tx);
-  const body = `${tx.nomeCliente || tx.cardHolder || 'Cliente'} · R$ ${(tx.valor || 0).toFixed(2)}${tx.motivo ? ' · ' + tx.motivo : ''}`;
+  const body = `${tx.nomeCliente || tx.cardHolder || 'Cliente'} · R$ ${NoPulsoMoeda.numero((tx.valor || 0))}${tx.motivo ? ' · ' + tx.motivo : ''}`;
   // fraude suspeita toca o alarme cheio (mesmo criterio de urgencia dos
   // outros "critico") - estorno/chargeback comum fica so no push normal,
   // senao toda operação de rotina (varias por dia) viraria sirene
@@ -616,7 +617,7 @@ async function notifyParqueTermoPendente({ unidade, unidadeNome, responsavelNome
   const dados = {
     title: '🧾 Termo emitido sem venda',
     body: `${unidadeNome || unidade} · ${responsavelNome || 'sem nome'} · aberto há ${horas}h`
-      + `${valor ? ` · previsto R$ ${valor.toFixed(2)}` : ''} · emitido por ${emitidoPorEmail || '—'}`,
+      + `${valor ? ` · previsto R$ ${NoPulsoMoeda.numero(valor)}` : ''} · emitido por ${emitidoPorEmail || '—'}`,
     // tag com o id da emissao: cada atendimento avisa uma vez so, e um
     // aviso novo nao substitui o anterior na bandeja
     tag: `parque-termo-pendente-${id}`,
@@ -1356,7 +1357,7 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, rei
 // explica a maior parte das sobras.
 async function notifyDivergenciaCaixa(unidadeNome, sangria) {
   const dif = Number(sangria.divergencia) || 0;
-  const abs = Math.abs(dif).toFixed(2).replace('.', ',');
+  const abs = NoPulsoMoeda.numero(Math.abs(dif));
   const pendentes = Number(sangria.diasSemFechamento) || 0;
   const dados = {
     title: dif < 0 ? '💸 Falta dinheiro no caixa' : '💰 Sobra de dinheiro no caixa',
@@ -1781,7 +1782,7 @@ async function notifyUsbArmazenamentoDetectado(unidadeNome, codigo, computadorNo
 // caixa continua avisando em separado (ver create em fechamentosLive.js) -
 // aquilo pede acao, isto so informa que o dia fechou.
 function fmtMoedaFech(v) {
-  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return NoPulsoMoeda.formatar(v);
 }
 
 async function notifyFechamentoLancado(registro, { exceptUserId } = {}) {

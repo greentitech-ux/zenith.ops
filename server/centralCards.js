@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // centralCards.js
 // Agregacao das 3 filas com aprovacao da Central de Solicitacoes - Estorno
 // (refunds.js), Ajuste de Fechamento (fechamentosLive.js) e Compra/
@@ -11,7 +12,7 @@ const fechamentosLive = require('./fechamentosLive');
 const solicitacoes = require('./solicitacoes');
 
 function fmtMoneyServer(v) {
-  return 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar((Number(v) || 0));
 }
 
 function normalizarCard(tipo, r) {

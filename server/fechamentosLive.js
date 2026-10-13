@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // fechamentosLive.js
 // Fechamentos de caixa lançados direto pela loja (substitui o processo manual
 // via AppSheet + planilha). Um documento por unidade+data (nao deixa lançar
@@ -24,7 +25,7 @@ const LIMITE_QUEBRA_CAIXA = 10;
 const DATA_RE_SIMPLES = /^\d{4}-\d{2}-\d{2}$/;
 function fmtMoneyQuebra(v) {
   const n = Number(v) || 0;
-  return `${n < 0 ? '-' : ''}R$ ${Math.abs(n).toFixed(2).replace('.', ',')}`;
+  return `${n < 0 ? '-' : ''}R$ ${NoPulsoMoeda.numero(Math.abs(n))}`;
 }
 
 // nomes amigaveis pros campos fixos - usados no resumo "de -> para" que vai

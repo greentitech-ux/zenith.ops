@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // saltiversoVendas.js
 // Venda avulsa de bebidas/meias no balcão do Saltiverso Patteo - reaproveita
 // o catálogo genérico de inventario.js (itens tipo BEBIDA/MEIA daquela
@@ -96,7 +97,7 @@ async function criarVenda({ unidade, unidadeNome, itens, pagamentos, criadoPorId
   if (!pagamentosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
   const somaPagamentos = arred(pagamentosOk.reduce((s, p) => s + p.valor, 0));
   if (Math.abs(somaPagamentos - total) > 0.01) {
-    throw new Error(`A soma das formas de pagamento (R$${somaPagamentos.toFixed(2)}) precisa bater com o valor total (R$${total.toFixed(2)}).`);
+    throw new Error(`A soma das formas de pagamento (R$ ${NoPulsoMoeda.numero(somaPagamentos)}) precisa bater com o valor total (R$ ${NoPulsoMoeda.numero(total)}).`);
   }
 
   const data = hojeBrasiliaISO();

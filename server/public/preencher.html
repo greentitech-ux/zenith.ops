@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Preencher formulário · NoPulso</title>
@@ -136,7 +136,7 @@ function parseValor(v){
   const n = Number(norm);
   return Number.isFinite(n) ? n : 0;
 }
-function fmtMoney(n){ return (n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function fmtMoney(n){ return NoPulsoMoeda.formatar(n); }
 
 // <input type="date"> só entende/devolve AAAA-MM-DD (ISO) - o resto do
 // sistema (PDF, tabela, formulário em papel) sempre foi DD/MM/AAAA.
@@ -166,11 +166,11 @@ function renderLinhas(){
       <div class="num">Item ${i+1}</div>
       ${LINHAS.length>1?`<button type="button" class="rm" data-rm="${i}" title="Remover">✕</button>`:''}
       ${MODELO.colunas.map(c=>{
-        if(c.intervalo) return `
+        if(c.intervalo) { const [de,ate] = String(l[c.key]||'').split(' a '); return `
           <label>${esc(c.label)} · de</label>
-          <input data-linha="${i}" data-col="${esc(c.key)}:de" type="date" autocomplete="off">
+          <input data-linha="${i}" data-col="${esc(c.key)}:de" type="date" value="${brParaIso(de)}" autocomplete="off">
           <label>${esc(c.label)} · até</label>
-          <input data-linha="${i}" data-col="${esc(c.key)}:ate" type="date" autocomplete="off">`;
+          <input data-linha="${i}" data-col="${esc(c.key)}:ate" type="date" value="${brParaIso(ate)}" autocomplete="off">`; }
         return `
         <label>${esc(c.label)}</label>
         <input data-linha="${i}" data-col="${esc(c.key)}" type="${c.data?'date':'text'}" value="${c.data ? brParaIso(l[c.key]||'') : esc(l[c.key]||'')}"
@@ -277,6 +277,7 @@ async function carregar(){
     const d = await r.json();
     if(!r.ok){ document.getElementById('titulo').textContent='Link inválido'; avisar(d.error||'Esse link não vale mais.'); return; }
     MODELO = d;
+    LINHAS = d.linhas?.length ? d.linhas.map(l=>({...l})) : [{}];
     document.getElementById('titulo').textContent = d.rotulo;
     document.getElementById('sub').textContent = `${d.unidade} · Ticket #${d.numeroTicket}`;
     if(d.jaPreenchido){
@@ -302,6 +303,19 @@ async function carregar(){
     } else {
       renderLinhas();
     }
+    // O destinatário complementa os dados; a venda/despesa já lançada não
+    // pode ser alterada por quem recebeu o link (a API também confere).
+    if(d.complementoSomente){
+      document.querySelectorAll('.campo-cab').forEach(i=>{if(String((d.campos||{})[i.dataset.key]||'').trim())i.readOnly=true;});
+      if(d.linhas?.length){
+        document.querySelectorAll('#linhas input').forEach(i=>i.readOnly=true);
+        document.querySelectorAll('#linhas .rm').forEach(b=>b.hidden=true);
+        document.getElementById('btn-add').hidden=true;
+      }
+    }
+    document.getElementById('anexo-painel').style.display='block';
+    if(!d.soAnexo) document.getElementById('lbl-anexo').textContent='Comprovantes ou documentos (opcional)';
+    if(d.anexosExistentes?.length) document.getElementById('txt-rodape').textContent='Já anexados: '+d.anexosExistentes.map(a=>a.nome).join(', ')+'. Novos arquivos serão acrescentados.';
     document.getElementById('form-area').style.display='block';
   }catch(e){
     document.getElementById('titulo').textContent='Erro';
@@ -313,8 +327,8 @@ document.getElementById('btn-enviar').addEventListener('click', async ()=>{
   limparAviso();
   const campos = {};
   document.querySelectorAll('.campo-cab').forEach(i=>{ campos[i.dataset.key]=valorCampo(i); });
-  const arquivos = MODELO.soAnexo ? document.getElementById('f-anexo').files : null;
-  if(MODELO.soAnexo && MODELO.anexoObrigatorio && (!arquivos || !arquivos.length)){
+  const arquivos = document.getElementById('f-anexo').files;
+  if(MODELO.soAnexo && MODELO.anexoObrigatorio && !MODELO.anexosExistentes?.length && (!arquivos || !arquivos.length)){
     avisar('Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.');
     return;
   }
@@ -322,12 +336,12 @@ document.getElementById('btn-enviar').addEventListener('click', async ()=>{
   btn.disabled = true; btn.textContent = 'Enviando...';
   try{
     let r;
-    if(MODELO.soAnexo){
+    if(MODELO.soAnexo || arquivos?.length){
       // multipart: payload em JSON + anexo(s), mesma convenção da tela da
       // unidade (formularios.html) - sem Content-Type manual pro navegador
       // colocar o boundary
       const fd = new FormData();
-      fd.append('payload', JSON.stringify({ campos, linhas: [] }));
+      fd.append('payload', JSON.stringify({ campos, linhas: MODELO.soAnexo ? [] : LINHAS }));
       for(const arq of arquivos) fd.append('anexos', arq);
       r = await fetch(`/api/formularios-publico/preencher/${encodeURIComponent(TOKEN)}`, { method:'POST', body: fd });
     } else {

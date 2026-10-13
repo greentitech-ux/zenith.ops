@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Grupos (franquias) · NoPulso</title>
@@ -1177,6 +1177,13 @@ function abrirEdicaoEmpresa(id){
   document.getElementById('emp-nome').value = emp.nome;
   document.getElementById('emp-tipo').value = emp.tipoNegocio;
   document.getElementById('emp-unidades').innerHTML = unidadesChecksHtml('emp-unidades', new Set(emp.unidades||[]));
+  // Códigos históricos/Adyen também delimitam acesso. Não podem desaparecer
+  // só porque o catálogo visual passou a mostrar apenas o código principal.
+  const listaEmpresa = document.getElementById('emp-unidades');
+  const visiveis = new Set(Array.from(listaEmpresa.querySelectorAll('input[type="checkbox"]'), el=>el.value));
+  const adicionais = (emp.unidades||[]).filter(codigo=>!visiveis.has(codigo));
+  if(adicionais.length) listaEmpresa.insertAdjacentHTML('beforeend', '<p>Códigos adicionais vinculados</p>' + adicionais.map(codigo=>
+    `<label><input type="checkbox" value="${escapeHtml(codigo)}" checked> ${escapeHtml(codigo)}</label>`).join(''));
   document.getElementById('emp-nome').scrollIntoView({ behavior:'smooth', block:'center' });
 }
 // Arquivar / desarquivar / excluir empresa. As três passam pelo MESMO modal,
@@ -1329,7 +1336,7 @@ function linhasUsoOcr(titulo, mapa, formatar){
 let OCR_COTACAO = 5.4;
 function fmtBrlOcr(usd){
   const v = (Number(usd)||0) * OCR_COTACAO;
-  return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return NoPulsoMoeda.formatar(v);
 }
 // o fluxo 'fechamento-desempate' e o caro (roda no modelo forte): quando
 // aparecer, tem que saltar aos olhos - foi por causa dele que o desempate
@@ -1373,7 +1380,7 @@ async function carregarUsoOcr(){
     ${linhasUsoOcr('Por fluxo', d.porFluxo, rotuloFluxoOcr)}
     ${linhasUsoOcr('Por loja', d.porUnidade)}
     ${linhasUsoOcr('Por pessoa', d.porUsuario)}
-    <div style="font-size:11px;color:var(--muted);margin-top:10px;">Limite por pessoa por dia: <b>${d.limiteDiaUsuario ?? '—'}</b> leituras. Cotação usada: R$ ${OCR_COTACAO}.</div>`;
+    <div style="font-size:11px;color:var(--muted);margin-top:10px;">Limite por pessoa por dia: <b>${d.limiteDiaUsuario ?? '—'}</b> leituras. Cotação usada: ${NoPulsoMoeda.formatar(OCR_COTACAO)}.</div>`;
 }
 
 // ---------- PEDIDO SEMANAL (ver server/pedidoSemanal.js) ----------

@@ -567,6 +567,7 @@ async function responderChat(params) {
 // mesma lista fechada da rota /api/loja-status/manutencao/reiniciar: o
 // comando em si nunca vem de fora, só o NOME da tarefa
 const TAREFAS_NOC = {
+  'diagnostico-completo': { verbo: 'Coletar diagnóstico completo de', comando: require('./diagnosticoCompleto').comando, origem: 'manutencao-diagnostico-completo', requerAdmin: true },
   reiniciar: { verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
   abortar: { verbo: 'Abortar o reinício de', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
   anydesk: { verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk', requerAdmin: true },

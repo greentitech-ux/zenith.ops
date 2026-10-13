@@ -1,3 +1,4 @@
+const NoPulsoMoeda = require('./public/moeda-br');
 // festas.js
 // Reservas de festa (Saltiverso Patteo) - agenda de eventos com sinal/
 // restante e status de pagamento. Mesmo padrao de sangrias.js/parque.js:
@@ -348,7 +349,7 @@ async function atualizar(id, patch) {
     // entrar - o status vira pago sozinho quando o ultimo recebimento cobre
     // o total (cancelado/pendente continuam manuais)
     if (patch.status === 'pago' && restanteDevido(atual) > 0 && (temRecebimentos || atual.pagamentoAberto)) {
-      throw new Error(`Ainda faltam R$ ${restanteDevido(atual).toFixed(2)} - lance o recebimento do restante pra fechar como pago.`);
+      throw new Error(`Ainda faltam R$ ${NoPulsoMoeda.numero(restanteDevido(atual))} - lance o recebimento do restante pra fechar como pago.`);
     }
     merge.status = patch.status;
   }
@@ -400,7 +401,7 @@ async function registrarRecebimento(id, { valor, forma, data, porId, porEmail })
   const v = num(valor);
   const devido = restanteDevido(atual);
   if (v <= 0) throw new Error('Informe o valor recebido.');
-  if (v > devido + 0.009) throw new Error(`O valor recebido não pode passar do restante devido (R$ ${devido.toFixed(2)}).`);
+  if (v > devido + 0.009) throw new Error(`O valor recebido não pode passar do restante devido (R$ ${NoPulsoMoeda.numero(devido)}).`);
   const recebimento = {
     id: crypto.randomBytes(6).toString('hex'),
     valor: v,

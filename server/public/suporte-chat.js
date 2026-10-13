@@ -1225,7 +1225,7 @@
     const card = el(`<div class="szc-pp-card">
       <button type="button" class="szc-pp-fechar" title="Fechar">✕</button>
       <div class="szc-pp-titulo">📦 Pedido ${esc(d.pedidoId || '')} mudou de status</div>
-      <div class="szc-pp-corpo">${esc(d.cliente || 'Cliente')} · R$ ${Number(d.valor || 0).toFixed(2)}<br>${esc(d.statusAnterior || '—')} → <b>${esc(d.statusAtual || '')}</b></div>
+      <div class="szc-pp-corpo">${esc(d.cliente || 'Cliente')} · R$ ${NoPulsoMoeda.numero(Number(d.valor || 0))}<br>${esc(d.statusAnterior || '—')} → <b>${esc(d.statusAtual || '')}</b></div>
     </div>`);
     pedidoPopupEl.appendChild(card);
     const remover = () => { if (card.parentNode) card.parentNode.removeChild(card); };

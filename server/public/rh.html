@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>RH · NoPulso</title>
@@ -2182,7 +2182,7 @@ async function gerarFormularioDiarias(){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error||'Erro ao gerar o formulário.');
     LINKS_DIARIAS = (data.assinaturas||[]).filter(a=>a.link);
-    const total = (Number(data.valorTotal)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const total = NoPulsoMoeda.numero(data.valorTotal);
     const res = document.getElementById('di-resultado');
     res.innerHTML = `<div class="msg ok">✅ Formulário Ticket #${data.numeroTicket} gerado: ${(data.linhas||[]).length} diária(s) · total R$ ${total}.</div>
       <div class="sub" style="margin:10px 0 6px;">Agora é só mandar cada link pra pessoa certa assinar pelo celular. O PDF (com as assinaturas) sai na página Formulários.</div>

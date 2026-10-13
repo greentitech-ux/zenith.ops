@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Usuários · NoPulso</title>
@@ -967,7 +967,7 @@ async function carregarBackups(){
 
 // ---------- recuperar fechamento excluido a partir de um backup ----------
 function fmtDataYMD(d){ if(!d) return '—'; const [y,m,dd]=String(d).split('-'); return `${dd}/${m}/${y}`; }
-function fmtMoneyBR(v){ return 'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtMoneyBR(v){ return NoPulsoMoeda.formatar(Number(v||0)); }
 
 let RESTAURAR_FECHAMENTOS = [];
 function abrirRestaurarFechamento(){

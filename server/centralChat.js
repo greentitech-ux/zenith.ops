@@ -94,4 +94,4 @@ async function listAllGroupedByCard() {
   return [...porCard.values()];
 }
 
-module.exports = { listByCard, addMessage, getMessage, removeMessage, listAllCached, listAllGroupedByCard, reatribuirCard };
+module.exports = { listByCard, addMessage, getMessage, removeMessage, listAllCached, listAllGroupedByCard, reatribuirCard, invalidar: () => chatCache.invalidar() };

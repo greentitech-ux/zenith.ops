@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
+<head><script src="/moeda-br.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Check-in Parque · NoPulso</title>
@@ -710,7 +710,7 @@ function valorPorTempo(t){
   if(entrada) return entrada.preco;
   return Math.floor(t/60)*50 + (t%60>=30?40:0);
 }
-function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
+function fmtReal(v){ return NoPulsoMoeda.formatar(Number(v||0)); }
 
 // valor por crianca considerando a categoria PCD selecionada (mesma regra
 // do servidor - ver valorUnitarioPcd em parque.js)
@@ -729,13 +729,13 @@ function renderTempos(){
     TEMPO_SELECIONADO = temposVisiveis[0].minutos;
   }
   const normais = temposVisiveis.map(t=>
-    `<button type="button" class="toggle-btn ${!CATEGORIA_SELECIONADA && t.minutos===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t.minutos}" onclick="selecionarTempo(${t.minutos})">${escapeHtml(t.label)} · R$${t.preco}</button>`
+    `<button type="button" class="toggle-btn ${!CATEGORIA_SELECIONADA && t.minutos===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t.minutos}" onclick="selecionarTempo(${t.minutos})">${escapeHtml(t.label)} · ${NoPulsoMoeda.formatar(t.preco)}</button>`
   ).join('');
   const pcd = [
     { cat:'pcd30', item: TABELA_PRECOS.pcd.find(p=>p.chave==='pcd30') },
     { cat:'pcd60', item: TABELA_PRECOS.pcd.find(p=>p.chave==='pcd60') },
   ].filter(p=>p.item && p.item.visivel!==false).map(p=>
-    `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA===p.cat?'ativo':''}" data-categoria="${p.cat}" onclick="selecionarCategoriaPcd('${p.cat}')">${escapeHtml(p.item.label)} · R$${p.item.preco}</button>`
+    `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA===p.cat?'ativo':''}" data-categoria="${p.cat}" onclick="selecionarCategoriaPcd('${p.cat}')">${escapeHtml(p.item.label)} · ${NoPulsoMoeda.formatar(p.item.preco)}</button>`
   ).join('');
   const cortesia = TABELA_PRECOS.pcdCortesiaVisivel===false ? '' :
     `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA==='pcd-cortesia'?'ativo':''}" data-categoria="pcd-cortesia" onclick="selecionarCategoriaPcd('pcd-cortesia')">${escapeHtml(TABELA_PRECOS.pcdCortesiaLabel)}</button>`;
@@ -1106,7 +1106,7 @@ function atualizarPreviewValor(){
   const meias = contarMeiasCobrando(linhas);
   const valorMeias = PRECO_MEIA * meias;
   const total = calcularTotalAtual();
-  const niverLabel = TABELA_PRECOS.niverValorCheio > 0 ? `R$${TABELA_PRECOS.niverValorCheio}` : `${TABELA_PRECOS.niverDesconto}% off`;
+  const niverLabel = TABELA_PRECOS.niverValorCheio > 0 ? NoPulsoMoeda.formatar(TABELA_PRECOS.niverValorCheio) : `${TABELA_PRECOS.niverDesconto}% off`;
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
   if(linhas.some(l=>l.querySelector('.crianca-plano'))){
     // o 🎂 aparece aqui também: sem ele, a atendente não tem como saber se o
