@@ -1538,15 +1538,71 @@
   // Minha imagem (x/y/zoom) é aplicado com as mesmas regras de CSS da prévia
   // (aplicarEnquadro, também usada por minha-aparencia.html): é isso que faz
   // a tela aparecer "do jeito que está na pré-visualização".
-  function aplicarEnquadroPessoal(img, enq) {
+  // POR QUE NÃO object-fit:cover. "Cobrir" com posição em % depende da
+  // PROPORÇÃO da caixa: a faixa tem altura fixa e largura variável, então ao
+  // estreitar a janela a foto encolhia e o corte vertical andava - o Master
+  // viu isso como "distorce quando muda o tamanho" (13/10).
+  //
+  // A REGRA AGORA: o enquadro vira um RECORTE da própria imagem - o que a
+  // prévia mostrava, na proporção da prévia (enq.ref) - e esse recorte é
+  // CONTIDO na faixa, em qualquer largura:
+  //  - faixa da mesma proporção: idêntico à prévia;
+  //  - faixa mais estreita (celular): o recorte inteiro continua visível,
+  //    menor, com mais foto em cima e embaixo;
+  //  - faixa mais larga: mesmo tamanho da prévia (o logo não cresce), e a
+  //    sobra nas laterais mostra mais foto ou se funde no fundo do painel.
+  // x/y = ponto da imagem (0-100%) no centro do recorte; zoom 1-3 = quanto
+  // o recorte é menor que o "cobrir" da prévia.
+  // Função PURA (só números): é a que o testeRotas.js executa e confere.
+  function calcularEnquadroPessoal(iw, ih, W, H, enq) {
     var e = enq || {};
-    var x = Number.isFinite(Number(e.x)) ? Number(e.x) : 50;
-    var y = Number.isFinite(Number(e.y)) ? Number(e.y) : 50;
-    var zoom = Number.isFinite(Number(e.zoom)) ? Math.min(3, Math.max(1, Number(e.zoom))) : 1;
-    img.style.objectFit = 'cover';
-    img.style.objectPosition = x + '% ' + y + '%';
-    img.style.transformOrigin = x + '% ' + y + '%';
-    img.style.transform = 'scale(' + zoom + ')';
+    var num = function (v, padrao, min, max) { var n = Number(v); return (v === null || v === undefined || v === '' || !isFinite(n)) ? padrao : Math.min(max, Math.max(min, n)); };
+    var cx = num(e.x, 50, 0, 100) / 100, cy = num(e.y, 50, 0, 100) / 100;
+    var zoom = num(e.zoom, 1, 1, 3), ref = num(e.ref, 12.6, 1, 40);
+    // recorte na proporção da prévia: o "cobrir" daquela caixa, dividido pelo zoom
+    var rw = Math.min(iw, ih * ref) / zoom, rh = rw / ref;
+    // o centro não deixa o recorte sair da imagem
+    var px = Math.min(iw - rw / 2, Math.max(rw / 2, cx * iw));
+    var py = Math.min(ih - rh / 2, Math.max(rh / 2, cy * ih));
+    // o recorte CONTIDO na faixa
+    var esc = Math.min(W / rw, H / rh);
+    var lw = iw * esc, lh = ih * esc;
+    var left = W / 2 - px * esc, top = H / 2 - py * esc;
+    // onde a imagem é maior que a faixa, nunca deixa buraco; onde é menor,
+    // centraliza (a sobra é o fundo do painel, com borda esfumada)
+    left = lw >= W ? Math.min(0, Math.max(W - lw, left)) : (W - lw) / 2;
+    top = lh >= H ? Math.min(0, Math.max(H - lh, top)) : (H - lh) / 2;
+    return { width: lw, height: lh, left: left, top: top, sobraLateral: lw < W - 1, sobraVertical: lh < H - 1 };
+  }
+  window.calcularEnquadroPessoal = calcularEnquadroPessoal;
+  function aplicarEnquadroPessoal(img, enq) {
+    img.__enquadro = enq || {};
+    var desenhar = function () {
+      var caixa = img.parentElement;
+      if (!caixa || !img.naturalWidth) return;
+      var W = caixa.clientWidth, H = caixa.clientHeight;
+      if (!W || !H) return;
+      var r = calcularEnquadroPessoal(img.naturalWidth, img.naturalHeight, W, H, img.__enquadro);
+      img.style.objectFit = 'fill';
+      img.style.transform = 'none';
+      img.style.inset = 'auto';
+      img.style.maxWidth = 'none';
+      img.style.width = r.width + 'px'; img.style.height = r.height + 'px';
+      img.style.left = r.left + 'px'; img.style.top = r.top + 'px';
+      // borda esfumada só onde sobra espaço: a foto se funde no painel em vez
+      // de terminar num corte reto
+      var m = r.sobraLateral ? 'linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)'
+        : (r.sobraVertical ? 'linear-gradient(180deg,transparent,#000 12%,#000 88%,transparent)' : 'none');
+      img.style.webkitMaskImage = m; img.style.maskImage = m;
+    };
+    img.__desenharEnquadro = desenhar;
+    if (img.complete && img.naturalWidth) desenhar(); else img.addEventListener('load', desenhar, { once: true });
+    // acompanha a largura da faixa (janela redimensionada, celular girado,
+    // menu aberto): recalcula o recorte em vez de deixar o navegador esticar
+    if (!img.__observando && typeof ResizeObserver === 'function' && img.parentElement) {
+      img.__observando = true;
+      new ResizeObserver(function () { if (img.__desenharEnquadro) img.__desenharEnquadro(); }).observe(img.parentElement);
+    }
   }
   window.aplicarEnquadroPessoal = aplicarEnquadroPessoal;
   async function montarImagemPessoal() {
@@ -1567,7 +1623,7 @@
       var url = URL.createObjectURL(await foto.blob());
       var estilo = document.createElement('style');
       estilo.textContent =
-        '.zenith-imagem-pessoal-img{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;will-change:transform}' +
+        '.zenith-imagem-pessoal-img{position:absolute;display:block;pointer-events:none;max-width:none}' +
         // Painel: fundo da própria faixa de saudação. O véu por cima
         // (::before) mantém o texto legível em qualquer foto, mais fechado
         // à esquerda (onde está a saudação) e à direita (relógio); vem do

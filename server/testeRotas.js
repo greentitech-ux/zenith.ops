@@ -6457,13 +6457,15 @@ setTimeout(async () => {
     const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
     const painelHtml = fs.readFileSync(__dirname + '/public/painel.html', 'utf8');
     const minhaHtml = fs.readFileSync(__dirname + '/public/minha-aparencia.html', 'utf8');
+    const iniCalc = tema.indexOf('function calcularEnquadroPessoal(');
+    const calcEnq = new Function('return ' + tema.slice(iniCalc, tema.indexOf('\n  }\n', iniCalc) + 4))();
     const cab = { Authorization: 'Bearer ' + token };
     const png = { nome: 'capa.png', tipo: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
 
     const semFoto = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 10, y: 20, zoom: 2 }, cab);
-    const enviou = await postarMultipart('/api/me/personalizacao/imagem', { x: '30', y: '80', zoom: '1.5' }, png, 'imagem', cab, 'POST');
+    const enviou = await postarMultipart('/api/me/personalizacao/imagem', { x: '30', y: '80', zoom: '1.5', ref: '15.3' }, png, 'imagem', cab, 'POST');
     const estado1 = await pedir('/api/me/personalizacao', cab);
-    const ajuste = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 150, y: -5, zoom: 9 }, cab);
+    const ajuste = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 150, y: -5, zoom: 9, ref: 100 }, cab);
     const estado2 = await pedir('/api/me/personalizacao', cab);
     const lixo = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 'a', y: null, zoom: 'muito' }, cab);
     await enviarJson('DELETE', '/api/me/personalizacao/imagem', {}, cab);
@@ -6472,17 +6474,38 @@ setTimeout(async () => {
 
     const conferencias = {
       'enquadrar sem foto é recusado (400)': semFoto.status === 400 && /Escolha uma imagem/.test(semFoto.corpo),
-      'o enquadro viaja junto com a foto e volta sanitizado': enviou.status === 201 && j(enviou).enquadro && j(enviou).enquadro.x === 30 && j(enviou).enquadro.y === 80 && j(enviou).enquadro.zoom === 1.5,
+      'o enquadro viaja junto com a foto (com a proporção da prévia) e volta sanitizado': enviou.status === 201 && j(enviou).enquadro && j(enviou).enquadro.x === 30 && j(enviou).enquadro.y === 80 && j(enviou).enquadro.zoom === 1.5 && j(enviou).enquadro.ref === 15.3,
       'GET /api/me/personalizacao devolve o enquadro guardado': estado1.status === 200 && j(estado1).temImagem === true && j(estado1).enquadro && j(estado1).enquadro.y === 80,
       'ajustar depois, sem reenviar a foto, com faixa fechada (x 150→100, y -5→0, zoom 9→3)':
-        ajuste.status === 200 && j(ajuste).enquadro.x === 100 && j(ajuste).enquadro.y === 0 && j(ajuste).enquadro.zoom === 3
+        ajuste.status === 200 && j(ajuste).enquadro.x === 100 && j(ajuste).enquadro.y === 0 && j(ajuste).enquadro.zoom === 3 && j(ajuste).enquadro.ref === 40
         && j(estado2).enquadro.x === 100 && j(estado2).enquadro.zoom === 3,
-      'lixo cai no padrão (50/50/1), nunca num valor que some com a imagem': lixo.status === 200 && j(lixo).enquadro.x === 50 && j(lixo).enquadro.y === 50 && j(lixo).enquadro.zoom === 1,
+      'lixo cai no padrão (50/50/1, proporção da faixa de 1280px), nunca num valor que some com a imagem': lixo.status === 200 && j(lixo).enquadro.x === 50 && j(lixo).enquadro.y === 50 && j(lixo).enquadro.zoom === 1 && j(lixo).enquadro.ref === 12.6,
       'sanitizarEnquadro: zoom abaixo de 1 vira 1, decimais ficam em 2 casas': usersMod.sanitizarEnquadro({ zoom: 0.2 }).zoom === 1 && usersMod.sanitizarEnquadro({ zoom: 1.234 }).zoom === 1.23,
       'remover a foto apaga o enquadro': estado3.status === 200 && j(estado3).temImagem === false && j(estado3).enquadro === null,
-      'tema.js aplica o enquadro (object-position + scale) e expõe a função pra prévia usar a MESMA':
+      // A REGRA que o Master pediu ("acompanhe conforme mude o tamanho"),
+      // executada com números: banner 1130x290 enquadrado numa prévia de
+      // proporção 15,3 (1438x94). A função pura é recortada do tema.js e rodada.
+      'mesma proporção da prévia: o recorte preenche a faixa como na prévia': (() => {
+        const r = calcEnq(1130, 290, 1438, 94, { x: 50, y: 50, zoom: 1, ref: 15.3 });
+        return Math.abs(r.width - 1438) < 2 && !r.sobraLateral && r.left <= 0 && r.top <= 0 && r.top >= 94 - r.height;
+      })(),
+      'faixa mais estreita (celular): o recorte INTEIRO continua visível, sem cortar dos lados': (() => {
+        const r = calcEnq(1130, 290, 360, 94, { x: 50, y: 50, zoom: 1, ref: 15.3 });
+        return Math.abs(r.width - 360) < 1 && r.left === 0;
+      })(),
+      'faixa mais larga: a imagem NÃO cresce além da prévia (mesma escala), e a sobra é lateral': (() => {
+        const ref = calcEnq(1130, 290, 1438, 94, { x: 50, y: 50, zoom: 1, ref: 15.3 });
+        const larga = calcEnq(1130, 290, 1834, 94, { x: 50, y: 50, zoom: 1, ref: 15.3 });
+        return Math.abs(larga.width - ref.width) < 1 && larga.sobraLateral === true;
+      })(),
+      'zoom e ponto de foco: o recorte é menor e nunca sai da imagem (sem buraco na faixa)': (() => {
+        const r = calcEnq(1600, 900, 1210, 96, { x: 0, y: 100, zoom: 2.5, ref: 12.6 });
+        return r.left <= 0 && r.left >= 1210 - r.width && r.top <= 0 && r.top >= 96 - r.height && r.width > 1210;
+      })(),
+      'tema.js desenha pela função pura, recalcula quando a faixa muda de tamanho, e a prévia usa a MESMA':
         /function aplicarEnquadroPessoal\(img, enq\)/.test(tema) && /window\.aplicarEnquadroPessoal = aplicarEnquadroPessoal/.test(tema)
-        && /img\.style\.objectPosition = x \+ '% ' \+ y \+ '%'/.test(tema) && /img\.style\.transform = 'scale\(' \+ zoom \+ '\)'/.test(tema)
+        && /calcularEnquadroPessoal\(img\.naturalWidth, img\.naturalHeight, W, H, img\.__enquadro\)/.test(tema)
+        && /new ResizeObserver\(/.test(tema) && !/objectFit = 'cover'/.test(tema)
         && /aplicarEnquadroPessoal\(img, est\.enquadro\)/.test(tema),
       'no Painel a imagem é o FUNDO da faixa de saudação (não uma faixa abaixo), com véu pra o texto continuar legível':
         /if \(noPainel\) \{\s*img\.id = 'zenith-imagem-pessoal';\s*alvo\.classList\.add\('zenith-com-imagem'\);\s*alvo\.insertBefore\(img, alvo\.firstChild\);/.test(tema)
@@ -6494,6 +6517,7 @@ setTimeout(async () => {
       'Minha imagem: prévia com a mesma função de enquadro, arrastar e zoom, e manda x/y/zoom ao salvar':
         /window\.aplicarEnquadroPessoal\(img,enq\)/.test(minhaHtml) && /addEventListener\('pointerdown'/.test(minhaHtml) && /addEventListener\('wheel'/.test(minhaHtml)
         && /d\.append\('x',enq\.x\);d\.append\('y',enq\.y\);d\.append\('zoom',enq\.zoom\)/.test(minhaHtml)
+        && /d\.append\('ref',enq\.ref\|\|refDaPrevia\(\)\)/.test(minhaHtml)
         && /\/api\/me\/personalizacao\/enquadro'/.test(minhaHtml) && /id="zoom" type="range" min="100" max="300"/.test(minhaHtml)
         && !/#b8ff3c(?![^{]*\})/.test(minhaHtml.replace(/:root\{[^}]*\}/, '')),
     };
