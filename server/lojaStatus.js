@@ -1363,8 +1363,12 @@ async function heartbeat(codigo, posto, info, token) {
       });
       // só vira ALERTA quando piora: cair a Ethernet, ou trocar de cabo pra
       // Wi-Fi. Voltar pro cabo é boa notícia e entra no registro sem push.
-      const piorou = (linkNovo.ethernetCaida && !(linkAntes && linkAntes.ethernetCaida))
-        || (linkNovo.tipo === 'wifi' && linkAntes && linkAntes.tipo === 'ethernet');
+      // primeira leitura (linkAntes nulo) só registra o estado, sem push:
+      // até 13/10 a rota descartava o link, então no deploy que a consertou
+      // TODA máquina "estreou" ao mesmo tempo - e notebook no Wi-Fi com a
+      // porta de cabo vazia viraria uma rajada de "Ethernet caída" falsa
+      const piorou = !!linkAntes && ((linkNovo.ethernetCaida && !linkAntes.ethernetCaida)
+        || (linkNovo.tipo === 'wifi' && linkAntes.tipo === 'ethernet'));
       if (piorou) patch.linkAvisoPendente = { tipo: linkNovo.tipo, ethernetCaida: linkNovo.ethernetCaida, mbps: linkNovo.mbps };
     }
   }
@@ -2716,8 +2720,9 @@ async function registrarTelemetria(codigo, posto, dados, token) {
         ethernetCaida: linkTelemetria.ethernetCaida, mbps: linkTelemetria.mbps,
       }];
       patch.eventos = eventos.slice(-EVENTOS_MAX);
-      const piorou = (linkTelemetria.ethernetCaida && !(atual.link && atual.link.ethernetCaida))
-        || (linkTelemetria.tipo === 'wifi' && atual.link && atual.link.tipo === 'ethernet');
+      // mesma regra do heartbeat: a primeira leitura só registra
+      const piorou = !!atual.link && ((linkTelemetria.ethernetCaida && !atual.link.ethernetCaida)
+        || (linkTelemetria.tipo === 'wifi' && atual.link.tipo === 'ethernet'));
       if (piorou) patch.linkAvisoPendente = { tipo: linkTelemetria.tipo, ethernetCaida: linkTelemetria.ethernetCaida, mbps: linkTelemetria.mbps };
     }
   }

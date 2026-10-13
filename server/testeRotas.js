@@ -6529,6 +6529,85 @@ setTimeout(async () => {
   console.log(`${okEnquadro ? '✓' : '✗'} Minha imagem: enquadro (x/y/zoom) guardado com faixa fechada, prévia = Painel, e a foto como fundo da saudação com relógio à direita`);
 
   // ------------------------------------------------------------------
+  // Link, sistema e boot do agente chegam PELA ROTA HTTP. Achado em 13/10:
+  // o agente mandava e lojaStatus sabia tratar, mas as rotas de heartbeat e
+  // de telemetria do index.js repassavam uma lista fechada SEM esses campos
+  // - a ficha de todo computador Windows ficava sem "Conexão" e "Sistema".
+  // Os testes antigos chamavam ls.heartbeat() direto e nunca viam a rota.
+  // Aqui: (1) bate nas duas rotas de verdade e confere a ficha; (2) compara
+  // a lista de cada rota com TODO campo que a função do lojaStatus lê
+  // (dados.X), pra que um campo novo do agente não volte a se perder.
+  let okRotasAgente = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const fs = require('fs');
+    const idx = fs.readFileSync(__dirname + '/index.js', 'utf8');
+    const lsSrc = fs.readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+    const UNI = 'NOCROTA';
+    await ls.cadastrarComputador(UNI, 'PC-ROTA', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PC-ROTA').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    const cabAg = { 'x-noc-token': tk };
+    const boot = Date.now() - 3600 * 1000;
+    const hb = await postarJson('/api/loja-status/heartbeat', {
+      unidade: UNI, posto, userAgent: 'NOCZenith/1.0 (Windows NT; PowerShell)', abertoDesde: 1, instancia: 'login',
+      bootEm: boot, desligamentoInesperado: false,
+      link: { tipo: 'wifi', nome: 'LOJA-5G', mbps: 300, sinalWifi: 66, banda: '5 GHz', vazaoMbps: 41.2, vazaoEm: Date.now() },
+      sistema: { nome: 'Microsoft Windows 10 Pro', versao: '10.0.19045', arquitetura: '64 bits' },
+      anydeskServico: { instalado: true, rodando: true },
+    }, cabAg);
+    const d1 = await ls.detalhar(UNI, posto);
+    const tel = await postarJson(`/api/loja-status/${UNI}/computadores/${posto}/telemetria`, {
+      ram: { totalGb: 16, livreGb: 8 },
+      link: { tipo: 'ethernet', nome: 'Ethernet', mbps: 1000, ethernetPresente: true, ethernetAtiva: true },
+      sistema: { nome: 'Microsoft Windows 11 Pro', versao: '10.0.22631', arquitetura: '64 bits' },
+    }, cabAg);
+    const d2 = await ls.detalhar(UNI, posto);
+    // primeira leitura com a Ethernet caída (notebook no Wi-Fi, porta vazia):
+    // registra, mas NÃO vira alerta - senão o deploy que consertou a rota
+    // dispararia "Ethernet caída" em todo notebook do parque de uma vez
+    await ls.cadastrarComputador(UNI, 'NOTE-ROTA', 'interno');
+    const postoNote = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'NOTE-ROTA').posto;
+    const tkNote = await ls.garantirAgentToken(UNI, postoNote);
+    await postarJson('/api/loja-status/heartbeat', { unidade: UNI, posto: postoNote, userAgent: 'NOCZenith/1.0', abertoDesde: 1,
+      link: { tipo: 'wifi', nome: 'LOJA', ethernetPresente: true, ethernetAtiva: false, ethernetCaida: true } }, { 'x-noc-token': tkNote });
+    const dNote = await ls.detalhar(UNI, postoNote);
+
+    // campos que cada função lê, e campos que cada rota repassa
+    const corpoFuncao = (nome) => {
+      const i = lsSrc.indexOf('async function ' + nome + '(');
+      const j = lsSrc.slice(i + 10).search(/\n(async )?function /);
+      return lsSrc.slice(i, i + 10 + j);
+    };
+    const lidos = (src) => [...new Set((src.match(/dados\s*(?:&&\s*dados)?\s*\.\s*([a-zA-Z]+)/g) || []).map((m) => m.replace(/.*\.\s*/, '')))];
+    const blocoRota = (inicio) => {
+      const i = idx.indexOf(inicio);
+      const a = idx.indexOf('{', idx.indexOf('(', idx.indexOf(inicio === "app.post('/api/loja-status/heartbeat'" ? 'lojaStatus.heartbeat(' : 'lojaStatus.registrarTelemetria(', i)));
+      return idx.slice(a, idx.indexOf('}, token)', a));
+    };
+    const repassados = (bloco) => new Set((bloco.match(/\b([a-zA-Z]+)\s*:\s*req\.body\.\1\b/g) || []).map((m) => m.split(':')[0].trim())
+      .concat((bloco.match(/\b([a-zA-Z]+)\s*:\s*req\.body\.[a-zA-Z]+\s*===/g) || []).map((m) => m.split(':')[0].trim()))
+      .concat(/\bip\b/.test(bloco) ? ['ip'] : []));
+    const faltaHb = lidos(corpoFuncao('heartbeat')).filter((c) => !repassados(blocoRota("app.post('/api/loja-status/heartbeat'")).has(c));
+    const faltaTel = lidos(corpoFuncao('registrarTelemetria')).filter((c) => !repassados(blocoRota("app.post('/api/loja-status/:codigo/computadores/:posto/telemetria'")).has(c));
+
+    const conferencias = {
+      'a batida HTTP do agente grava o link (com Wi-Fi e vazão) na ficha': hb.status === 200 && d1 && d1.link && d1.link.tipo === 'wifi' && d1.link.nome === 'LOJA-5G' && d1.link.sinalWifi === 66 && d1.link.vazaoMbps === 41.2,
+      'a batida HTTP grava o sistema do Windows e o boot': d1 && d1.sistema && d1.sistema.nome === 'Microsoft Windows 10 Pro' && d1.sistema.arquitetura === '64 bits' && d1.bootEm === boot,
+      'a telemetria HTTP também atualiza link e sistema (computador de atendimento depende dela)': tel.status === 200 && d2 && d2.link && d2.link.tipo === 'ethernet' && d2.link.mbps === 1000 && d2.sistema && d2.sistema.nome === 'Microsoft Windows 11 Pro',
+      'primeira leitura com Ethernet caída registra o link mas não gera alerta (sem rajada no deploy)':
+        dNote && dNote.link && dNote.link.ethernetCaida === true && !dNote.linkAvisoPendente,
+      'a rota de heartbeat repassa TODO campo que lojaStatus.heartbeat() lê': faltaHb.length === 0,
+      'a rota de telemetria repassa TODO campo que registrarTelemetria() lê (inclui as VMs do Hyper-V)': faltaTel.length === 0,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okRotasAgente = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (hb=${hb.status} tel=${tel.status} faltaHb=${faltaHb} faltaTel=${faltaTel} link=${JSON.stringify(d1 && d1.link)})`);
+  } catch (e) { okRotasAgente = false; console.log('  erro: ' + e.message); }
+  if (!okRotasAgente) ruins += 1;
+  console.log(`${okRotasAgente ? '✓' : '✗'} NOC: link, sistema e boot do agente chegam pelas rotas HTTP de heartbeat e telemetria (e nenhuma rota descarta campo que o servidor lê)`);
+
+  // ------------------------------------------------------------------
   // Logos das empresas do grupo no rodapé do login. Antes era UMA imagem
   // fixa no código: empresa entrava ou saía do grupo e só dava pra
   // refletir isso com deploy. O que precisa ficar provado: o Master
@@ -18565,7 +18644,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && noPainel.motivoDivergencia === 'erro de troco no turno da tarde',
       'o esperado é calculado no SERVIDOR, nunca aceito do corpo da requisição':
         /const caixa = await saidasPainel\.calcularSaldoCaixa\(\{ unidade, ate: periodoFim \|\| data \}/.test(srcIdxCaixa)
-        && !/esperado: req\.body/.test(srcIdxCaixa),
+        // \b: palavra inteira - "desligamentoInesperado: req.body" (rota de
+        // heartbeat) contém o mesmo texto e não tem nada a ver com o caixa
+        && !/\besperado: req\.body/.test(srcIdxCaixa),
       // sem entrada em dinheiro lancada, nao ha com o que comparar: falta de
       // dado nao pode virar divergencia e travar a sangria da loja
       'unidade sem entrada em dinheiro nenhuma: conferência fica indisponível, não vira divergência':

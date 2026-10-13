@@ -2386,6 +2386,19 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // quando o token bate (a validação fica em lojaStatus.heartbeat).
       anydeskId: req.body.anydeskId,
       tailscale: req.body.tailscale,
+      // LINK, SISTEMA, BOOT e ESTADO DO ANYDESK: o agente manda em toda
+      // batida e lojaStatus.heartbeat sempre soube tratar, mas esta lista
+      // nunca os repassava - a ficha do NOC ficava sem "Conexão" e sem
+      // "Sistema" em todo computador Windows (achado em 13/10, pedido do
+      // Master: "continuo sem conseguir ver a rede nos computadores"). Cada
+      // campo é sanitizado lá dentro (sanitizarLink, sanitizarSistemaWindows,
+      // sanitizarEstadoAnydesk); o testeRotas.js reprova se a lista daqui
+      // voltar a ter menos campos do que o heartbeat() lê.
+      link: req.body.link,
+      sistema: req.body.sistema,
+      bootEm: req.body.bootEm,
+      desligamentoInesperado: req.body.desligamentoInesperado,
+      anydeskServico: req.body.anydeskServico,
       // A instancia _Boot do NOCZenith roda como SYSTEM e usa estes dois
       // marcadores para receber SOMENTE comandos que exigem elevacao. Eles
       // ja eram enviados pelo agente, mas a rota os descartava aqui; como
@@ -2465,6 +2478,14 @@ app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, 
       disco: req.body.disco, ram: req.body.ram, hardware: req.body.hardware, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
       statusImpressoras: req.body.statusImpressoras,
       anydeskServico: req.body.anydeskServico, anydeskId: req.body.anydeskId,
+      // mesmo defeito da rota de heartbeat: o agente manda e
+      // registrarTelemetria trata, mas a lista não repassava. Sem link/
+      // sistema/boot aqui, computador de ATENDIMENTO (onde quem bate é o
+      // navegador) nunca contava reinício nem queda de cabo; sem vms, o host
+      // Hyper-V nunca listava as VMs. Sanitizados em registrarTelemetria.
+      link: req.body.link, sistema: req.body.sistema,
+      bootEm: req.body.bootEm, desligamentoInesperado: req.body.desligamentoInesperado,
+      vms: req.body.vms,
     }, token);
     // a RESPOSTA leva quais impressoras aquele agente deve sondar no proximo
     // ciclo. Sem rota nova e sem requisicao extra: a telemetria ja acontece,
