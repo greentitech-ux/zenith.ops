@@ -1999,6 +1999,8 @@ function atualizarConteudoDetalhe(codigo, c){
       : '';
     infoBits.push(`🤖 NOCZenith${c.agenteVersao ? ` v${escapeHtml(String(c.agenteVersao))}` : ''}${seloElevado}${print ? ` · 📸 NoPulsoPrint: <b style="color:${corPrint};">${escapeHtml(print)}</b>` : ''}${c.agenteEstadoEm ? ` <span style="color:var(--muted);font-size:11px;">(${escapeHtml(tempoRelativo(c.agenteEstadoEm))})</span>` : ''}`);
   }
+  // agente Linux (agenteLinux.js): versão vinda da batida autenticada
+  if(c.agenteLinuxVersao) infoBits.push(`🐧 Agente Linux <b>v${escapeHtml(String(c.agenteLinuxVersao))}</b>`);
   if(c.tailscale){
     const t = c.tailscale;
     const estado = t.instalado ? (t.estado === 'Running' ? '<b style="color:var(--ok);">conectado</b>' : `<b style="color:var(--warn,#e0a800);">${escapeHtml(t.estado||'desconhecido')}</b>`) : '<span style="color:var(--muted);">não instalado</span>';
@@ -2681,6 +2683,11 @@ function pintarManutencaoProgramas(corpo){
         <h4>🛡️ Baixar o agente</h4>
         <p>Baixa o script individualizado para uso sem área de transferência ou por suporte local.</p>
         <button type="button" class="btn-ghost" onclick="baixarVigia('${codigo}','${posto}','${tipo}')">Baixar script</button>
+      </article>
+      <article class="prog-manut-card">
+        <h4>🐧 Instalar no Linux</h4>
+        <p>Zorin, Ubuntu e derivados. Copia o comando para colar no Terminal: instala o agente como serviço e ele passa a reportar rede, disco e sistema, sem depender do navegador.</p>
+        <button type="button" class="btn-ghost" onclick="copiarComandoLinux('${codigo}','${posto}','${tipo}')">Copiar comando Linux</button>
       </article>
       ${PODE_BAIXAR_ANDROID ? `<article class="prog-manut-card prog-manut-android">
         <h4>📱 Inscrever tablet ou celular</h4>
@@ -4535,6 +4542,31 @@ async function copiarComandoVigia(codigo, posto, tipo, prefixo){
     } else {
       prompt(`${prefixo ? prefixo + ' ' : ''}Copie este comando (Ctrl+C) e cole no PowerShell da loja:\n\n${passos}`, comando);
     }
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+// COMPUTADOR LINUX (Zorin, Ubuntu): a mesma máquina, com o agente Linux (ver
+// agenteLinux.js no servidor). Sai da MESMA rota e do MESMO agentToken do
+// comando do Windows e do link do Android - três formas de instalar que nunca
+// discordam de cadastro.
+async function copiarComandoLinux(codigo, posto, tipo){
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
+    if(!resp.ok) throw new Error('Erro ao gerar o comando Linux.');
+    const { comandoLinux } = await resp.json();
+    if(!comandoLinux) throw new Error('Este servidor ainda não gera o comando do agente Linux.');
+    const passos = 'No computador Linux:\n'
+      + '1) Abra o Terminal (Ctrl+Alt+T)\n'
+      + '2) Cole com Ctrl+Shift+V e aperte Enter\n'
+      + '3) Digite a senha do usuário quando o sudo pedir (ela não aparece enquanto digita)\n\n'
+      + 'Pronto - o agente fica instalado como serviço, liga junto com o computador e '
+      + 'aparece no NOC em até 1 minuto, sem precisar de navegador aberto.';
+    let copiou = false;
+    try { await navigator.clipboard.writeText(comandoLinux); copiou = true; } catch(e){ /* clipboard bloqueado */ }
+    if(copiou) alert(`Comando Linux copiado! ✅\n\n${passos}`);
+    else prompt(`Copie este comando (Ctrl+C) e cole no Terminal do Linux:\n\n${passos}`, comandoLinux);
   }catch(e){
     alert(e.message);
   }

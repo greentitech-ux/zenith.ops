@@ -34,6 +34,7 @@ Rótulo na tela pode mudar; **o identificador não**.
 | `br.com.nopulso.agente` | `android/app/build.gradle.kts` | é o `applicationId` do agente Android. Trocar não atualiza — instala um app **separado**, e cada tablet precisa de desinstalação na mão |
 | a chave de assinatura do APK | secret `ANDROID_KEYSTORE_BASE64` | o Android só aceita atualizar um app por outro assinado com a **mesma** chave. Chave perdida = reinstalar em cada tablet |
 | esquema `nopulso://inscrever` | `agenteAndroid.js`, `AndroidManifest.xml` | é o link que inscreve tablet. Esquema próprio de propósito: troca de domínio não pode quebrar a inscrição |
+| `nopulso-agente.service`, `/opt/nopulso-agente` | `agenteLinuxScript.py` | nome do serviço systemd e da pasta do agente Linux instalado — renomear deixa o agente velho rodando ao lado do novo, e cada máquina Linux precisa de limpeza na mão. Subir `VERSAO_AGENTE_LINUX` (`agenteLinux.js`) é o que faz os instalados se atualizarem |
 | `VERSAO_AGENTE_ANDROID` ↔ `versionCode` | `agenteAndroid.js` ↔ `build.gradle.kts` | são o mesmo número em dois arquivos. Divergir = tablet que nunca atualiza. O `testeRotas.js` reprova |
 | `normalizarCodigoUnidade()`, `UNIDADES_APELIDOS`, `merchantAccountCode` | `migracaoUnidades.js`, Adyen | espaços de código de unidade. Rebranding é visual; o dado continua igual — inclui os 3 testes de fold do `testeRotas.js`, que são a prova de que o histórico antigo ainda é encontrado |
 

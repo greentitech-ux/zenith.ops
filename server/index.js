@@ -144,6 +144,7 @@ const defesaChargeback = require('./defesaChargeback');
 const pagamentosArquivo = require('./pagamentosArquivo');
 const vigiaScript = require('./vigiaScript');
 const agenteAndroid = require('./agenteAndroid');
+const agenteLinux = require('./agenteLinux');
 const qualidade = require('./qualidade');
 const qualidadeDocumentos = require('./qualidadeDocumentos');
 const qualidadeReport = require('./qualidadeReport');
@@ -519,6 +520,9 @@ const ROTA_LOJA_USB_ARMAZENAMENTO_RE = /^\/api\/loja-status\/[^/]+\/computadores
 // (Verificar-Atualizacao), por isso publica igual as outras: a maquina
 // (ou o navegador sem precisar mandar cookie/token) e quem chama
 const ROTA_LOJA_VIGIA_SCRIPT_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/vigia\.ps1$/;
+// o script do agente Linux: mesma regra de acesso do vigia.ps1 (token da
+// máquina, ou sessão de Master/Suporte), validada dentro da rota
+const ROTA_LOJA_AGENTE_LINUX_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/agente-linux\.py$/;
 // NOCZenith reporta o que a pessoa digitou na janela de chat flutuante
 // (ver vigiaScript.js) - mesmo motivo publico das outras: quem chama e a
 // maquina, sem sessao de usuario
@@ -532,7 +536,7 @@ function rotaPublicaSemDashboard(path) {
     || path.startsWith('/api/pedido-evidencias/publico/')
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
-    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_USB_ARMAZENAMENTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
+    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_USB_ARMAZENAMENTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_AGENTE_LINUX_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
     || ROTA_LOJA_TELEMETRIA_RE.test(path) || ROTA_LOJA_CONFIG_AGENTE_RE.test(path)
     || ROTA_LOJA_PAPEL_PAREDE_RE.test(path)
     || ROTA_LOJA_PROGRAMAS_RE.test(path)
@@ -2375,6 +2379,10 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, noPulsoPrintAtalho, capturarAgora, versaoAplicacao, versaoModeloBasico, versaoForcarPapelDeParede, inventarioAtalhosPendenteEm, avisoBateria } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
       agenteAndroidVersao: req.body.agenteAndroidVersao,
+      // agente Linux (agenteLinux.js): versão e a marca de "sem tela", que
+      // impede a batida dele de consumir mensagem/comando da aba do navegador
+      agenteLinuxVersao: req.body.agenteLinuxVersao,
+      semInterface: req.body.semInterface === true,
       // o que o navegador sabe do aparelho (bateria, armazenamento, rede, SO
       // - ver public/aparelho.js). Entra na MESMA escrita do heartbeat, que
       // já acontece a cada 25s: telemetria de tablet não custa operação nova.
@@ -2824,6 +2832,35 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
   }
 });
 
+// QUEM PODE BAIXAR O SCRIPT DE UM AGENTE (vigia.ps1 e agente-linux.py): o
+// próprio agente (prova o token da máquina), sessão de Master/Admin/Suporte
+// (download manual pela tela NOC) ou máquina legada ainda sem token.
+async function podeBaixarAgente(req, codigo, posto) {
+  const tokenAtual = await lojaStatus.tokenDoComputador(codigo, posto);
+  if (!tokenAtual) return true;
+  if (lojaStatus.tokensBatem(req.headers['x-noc-token'] || null, tokenAtual)) return true;
+  const [scheme, bearer] = String(req.headers.authorization || '').split(' ');
+  const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(bearer, req) : null;
+  const secoes = (user && user.permissions && user.permissions.sections) || [];
+  return !!user && (user.role === 'master' || user.isAdmin || secoes.includes('suporte'));
+}
+
+// AGENTE LINUX (ver agenteLinux.js): o script Python desta máquina, com o
+// token dela dentro. Serve a instalação (comando do NOC) e a autoatualização
+// do próprio agente, que baixa daqui a cada 6 h.
+app.get('/api/loja-status/:codigo/computadores/:posto/agente-linux.py', async (req, res) => {
+  try {
+    const { codigo, posto } = req.params;
+    if (!(await podeBaixarAgente(req, codigo, posto))) {
+      return res.status(403).type('text/plain').send('# Acesso negado. Gere o comando pela tela NOC-NoPulso (logado como Master/Suporte).');
+    }
+    const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
+    res.type('text/plain').send(agenteLinux.montarScriptAgenteLinux({ codigo, posto, agentToken, base: APP_BASE_URL }));
+  } catch (err) {
+    res.status(400).type('text/plain').send('# Erro ao gerar o agente Linux: ' + err.message);
+  }
+});
+
 // comando de UMA LINHA pra colar no PowerShell da loja (botao "Copiar comando"
 // na tela NOC Zenith) - baixa e instala o NOCZenith contornando o Controle de
 // Aplicativo Inteligente do Windows 11 (ver montarComandoInstalacao). O comando
@@ -2857,6 +2894,8 @@ app.get('/api/loja-status/:codigo/computadores/:posto/comando-instalacao', auth.
       // instalar que pegassem o token de lugares diferentes acabariam
       // discordando, e a maquina ficaria com dois cadastros.
       linkAndroid: agenteAndroid.montarLinkInscricao({ codigo, posto, agentToken, base: APP_BASE_URL }),
+      // e o MESMO token também instala o agente Linux (ver agenteLinux.js)
+      comandoLinux: agenteLinux.montarComandoInstalacaoLinux({ codigo, posto, agentToken, base: APP_BASE_URL }),
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

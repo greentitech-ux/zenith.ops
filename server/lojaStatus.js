@@ -999,7 +999,7 @@ let geracaoEspelho = 0;
 // o ultimoHeartbeatEm rebobinava ate 5min e a varredura anunciava queda de
 // uma maquina que nunca parou.
 const CAMPOS_DO_HEARTBEAT = [
-  'agenteAndroidVersao',
+  'agenteAndroidVersao', 'agenteLinuxVersao',
   'ultimoHeartbeatEm', 'ip', 'userAgent', 'abertoDesde',
   'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
   // boot e link: só o heartbeat escreve. Preservar importa mais aqui que
@@ -1259,7 +1259,15 @@ async function heartbeat(codigo, posto, info, token) {
   // quem os trataria e justamente o laco preso, e o que fosse entregue aqui
   // se perderia.
   const soPresenca = dados.soPresenca === true;
-  const mensagemPendente = soPresenca ? null : ((atual && atual.mensagemPendente) || null);
+  // AGENTE SEM TELA (agente Linux, ver agenteLinux.js): roda como serviço do
+  // sistema, sem janela. Bate presença e conta rede/sistema, mas não pode
+  // CONSUMIR o que é de quem tem tela - a mensagem do NOC iria pra ele e a aba
+  // do navegador nunca mostraria. Também não troca userAgent/abertoDesde: a
+  // aba e o agente batendo no mesmo posto alternariam esses campos a cada
+  // 25 s, e cada troca força gravação no Firestore (CLAUDE.md §3).
+  const semTela = dados.semInterface === true;
+  const naoEntrega = soPresenca || semTela;
+  const mensagemPendente = naoEntrega ? null : ((atual && atual.mensagemPendente) || null);
   // BATERIA: decidido com o estado ANTERIOR a esta batida (`atual`), e o
   // resultado entra no MESMO patch la embaixo. Ja foi um `ref.set` separado,
   // depois do patch - e ai a marca ia pro banco mas nao pro espelho em
@@ -1279,6 +1287,9 @@ async function heartbeat(codigo, posto, info, token) {
     // Só a batida autenticada do APK pode habilitar o validador Android.
     ...(atual?.agentToken && tokensBatem(token, atual.agentToken) && Number.isSafeInteger(dados.agenteAndroidVersao) && dados.agenteAndroidVersao >= 3 && dados.agenteAndroidVersao <= 100000
       ? { agenteAndroidVersao: dados.agenteAndroidVersao } : {}),
+    // idem pro agente Linux: a versão só vale vinda da batida com o token
+    ...(atual?.agentToken && tokensBatem(token, atual.agentToken) && Number.isSafeInteger(dados.agenteLinuxVersao) && dados.agenteLinuxVersao >= 1 && dados.agenteLinuxVersao <= 100000
+      ? { agenteLinuxVersao: dados.agenteLinuxVersao } : {}),
     codigo,
     posto: posto || 'principal',
     nome: (atual && atual.nome) || null,
@@ -1297,8 +1308,8 @@ async function heartbeat(codigo, posto, info, token) {
     // marcava "Caiu" de novo, inventando queda que nao houve. Com
     // { merge: true }, nao citar o campo preserva o que estiver la.
     ip: dados.ip || (atual && atual.ip) || null,
-    userAgent: (!soPresenca && dados.userAgent) || (atual && atual.userAgent) || dados.userAgent || null,
-    abertoDesde: (!soPresenca && dados.abertoDesde) || (atual && atual.abertoDesde) || null,
+    userAgent: (!naoEntrega && dados.userAgent) || (atual && atual.userAgent) || dados.userAgent || null,
+    abertoDesde: (!naoEntrega && dados.abertoDesde) || (atual && atual.abertoDesde) || null,
     // diagnostico de link (ver redeDiagnostico.js). Entra nesta MESMA escrita
     // de proposito: o heartbeat ja grava a cada 25s, entao medir a rede nao
     // custa nenhuma operacao a mais no Firestore. redeDia/redeHistorico sao
@@ -1421,8 +1432,8 @@ async function heartbeat(codigo, posto, info, token) {
   if (mensagemPendente) patch.mensagemPendente = null;
   // "Capturar agora" (ver pedirCaptura) - one-shot igual a mensagem: entregue
   // nesta batida e apagado junto, forcando a gravacao
-  const capturarAgora = capturaPendente(atual);
-  if (atual && atual.noPulsoPrintCapturarEm) patch.noPulsoPrintCapturarEm = null;
+  const capturarAgora = semTela ? null : capturaPendente(atual);
+  if (!semTela && atual && atual.noPulsoPrintCapturarEm) patch.noPulsoPrintCapturarEm = null;
 
   // IP publico mudou (ou apareceu pela primeira vez): entra no historico. A
   // mudanca de ip ja forca gravacao imediata (ver mudouAlgoQueImporta), entao
@@ -1522,7 +1533,7 @@ async function heartbeat(codigo, posto, info, token) {
   // o comando PowerShell do Master e ainda o consumia, deixando a maquina de
   // verdade sem receber)
   let comandoPendente = null;
-  if (!soPresenca && tokenOk && atual.tipo === 'interno' && atual.comandoPendenteId) {
+  if (!naoEntrega && tokenOk && atual.tipo === 'interno' && atual.comandoPendenteId) {
     // souAdmin: o agente diz se esta rodando elevado (a instancia SYSTEM diz
     // true; a de login, usuario comum, false). soComandoAdmin: a sondagem da
     // instancia SYSTEM enquanto cede a vez - "so me de comando que exige admin,

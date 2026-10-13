@@ -6678,6 +6678,86 @@ setTimeout(async () => {
   console.log(`${okWifiNormal ? '✓' : '✗'} NOC: Wi-Fi é normal como no tablet - só acusa cabo quem usa cabo (visto nos últimos 30 dias) e nunca notebook`);
 
   // ------------------------------------------------------------------
+  // AGENTE LINUX (pedido do Master, 13/10: "faça um agente que rode em
+  // Linux"). Ponta a ponta: o script gerado pela rota roda DE VERDADE (python3)
+  // contra este servidor de teste e a ficha tem de mostrar o que ele mandou.
+  // Também prova as travas: script só sai com o token da máquina ou sessão de
+  // suporte; a batida "sem tela" não consome a mensagem do NOC nem troca a
+  // identificação da aba do navegador (que gravaria a cada 25 s no Firestore);
+  // e o agente não executa nada vindo do servidor.
+  let okAgenteLinux = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const al = require(__dirname + '/agenteLinux.js');
+    const fs = require('fs'); const os = require('os'); const path = require('path'); const cp = require('child_process');
+    const UNI = 'NOCLINUX';
+    await ls.cadastrarComputador(UNI, 'ZORIN-TESTE', 'atendimento');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'ZORIN-TESTE').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    const cab = { Authorization: 'Bearer ' + token };
+    const rotaScript = `/api/loja-status/${UNI}/computadores/${posto}/agente-linux.py`;
+    const semToken = await pedir(rotaScript, {});
+    const tokenErrado = await pedir(rotaScript, { 'x-noc-token': 'nao-e-esse' });
+    const comToken = await pedir(rotaScript, { 'x-noc-token': tk });
+    const comSessao = await pedir(rotaScript, cab);
+    const script = comToken.corpo;
+    const comando = await pedir(`/api/loja-status/${UNI}/computadores/${posto}/comando-instalacao?tipo=atendimento`, cab);
+    const comandoLinux = comando.status === 200 ? (JSON.parse(comando.corpo).comandoLinux || '') : '';
+
+    // a aba do navegador bate antes, com mensagem pendente do NOC esperando por ela
+    await postarJson('/api/loja-status/heartbeat', { unidade: UNI, posto, userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130', abertoDesde: 4242 }, {});
+    await ls.enviarMensagem(UNI, posto, 'Mensagem do NOC para a aba', 'master@teste.local');
+
+    // roda o agente gerado, uma batida + uma telemetria, contra ESTE servidor
+    const py = ['python3', 'python'].find((b) => { try { return cp.spawnSync(b, ['--version']).status === 0; } catch (e) { return false; } });
+    let execucao = { pulou: !py, codigo: null, saida: '' };
+    if (py) {
+      const arq = path.join(os.tmpdir(), `nopulso-agente-teste-${process.pid}.py`);
+      fs.writeFileSync(arq, script);
+      const env = { ...process.env, NOPULSO_AGENTE_BASE: 'http://127.0.0.1:8899', NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' };
+      for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']) delete env[k];
+      // ASSÍNCRONO de propósito: o servidor que o agente chama roda neste
+      // mesmo processo - execFileSync travaria o laço e o agente nunca teria resposta
+      execucao = await new Promise((resolve) => cp.execFile(py, [arq, '--uma-vez'], { env, timeout: 90000 }, (err, stdout, stderr) => resolve({ pulou: false, codigo: err ? (err.code || 1) : 0, saida: String(stdout) + String(stderr) })));
+      try { fs.unlinkSync(arq); } catch (e) { /* ok */ }
+      if (!py) console.log('  (python3 indisponível: a execução ponta a ponta foi pulada)');
+    }
+    const ficha = await ls.detalhar(UNI, posto);
+    // o espelho em memória é o que a próxima batida lê: é ali que a mensagem tem de continuar
+    const docMsg = ficha || {};
+
+    const conferencias = {
+      'o script só sai com o token da máquina ou sessão de suporte (sem token e token errado = 403)':
+        semToken.status === 403 && tokenErrado.status === 403 && comToken.status === 200 && comSessao.status === 200,
+      'o script gerado tem o cabeçalho que a autoatualização exige, a versão e o token desta máquina':
+        script.startsWith('#!/usr/bin/env python3\n# NoPulso Agente Linux') && new RegExp(`^VERSAO = ${al.VERSAO_AGENTE_LINUX}$`, 'm').test(script)
+        && script.includes(JSON.stringify(tk)) && !/__(VERSAO|BASE|CODIGO|POSTO|TOKEN|CAMINHO_SCRIPT)__/.test(script),
+      'o agente não executa nada vindo do servidor (sem exec/eval/shell e sem tratar comando)':
+        !/\bexec\(|\beval\(|shell=True|os\.system|comandoPendente/.test(script),
+      'o comando Linux leva o token no cabeçalho (nunca na URL) e instala com sudo':
+        /^curl -fsSL -H 'X-NOC-Token: [^']+' 'https?:\/\/[^']+\/agente-linux\.py' -o \/tmp\/nopulso-agente\.py && sudo python3 \/tmp\/nopulso-agente\.py --instalar$/.test(comandoLinux)
+        && !new RegExp(`agente-linux\\.py\\?[^']*${tk}`).test(comandoLinux),
+      'o agente rodou de verdade contra o servidor e terminou bem': execucao.pulou || execucao.codigo === 0,
+      'a ficha mostra a versão do agente Linux, o sistema e o boot': execucao.pulou
+        || (ficha && ficha.agenteLinuxVersao === al.VERSAO_AGENTE_LINUX && ficha.sistema && !!ficha.sistema.nome && Number(ficha.bootEm) > 0),
+      'a ficha recebe a conexão e a telemetria (RAM e uptime) do Linux': execucao.pulou
+        || (ficha && ficha.link && ['ethernet', 'wifi', 'outro', 'nenhum'].includes(ficha.link.tipo) && ficha.ram && ficha.ram.totalGb > 0 && ficha.uptimeHoras != null),
+      'a batida sem tela NÃO consome a mensagem do NOC (ela é da aba do navegador)': execucao.pulou
+        || (docMsg.mensagemPendente && docMsg.mensagemPendente.texto === 'Mensagem do NOC para a aba'),
+      'a batida sem tela NÃO troca a identificação da aba (evita gravar a cada 25 s)': execucao.pulou
+        || (ficha && /Mozilla/.test(ficha.userAgent || '') && ficha.abertoDesde === 4242),
+      'a ficha tem o cartão "Instalar no Linux" e a linha da versão do agente':
+        /onclick="copiarComandoLinux\('\$\{codigo\}'/.test(require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8'))
+        && /🐧 Agente Linux <b>v/.test(require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8')),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okAgenteLinux = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (exec=${JSON.stringify({ c: execucao.codigo, s: execucao.saida.slice(-400) })} ficha=${JSON.stringify(ficha && { v: ficha.agenteLinuxVersao, s: ficha.sistema, l: ficha.link, r: ficha.ram, u: ficha.uptimeHoras, ua: ficha.userAgent, ab: ficha.abertoDesde })} msg=${JSON.stringify(docMsg.mensagemPendente)})`);
+  } catch (e) { okAgenteLinux = false; console.log('  erro: ' + e.message); }
+  if (!okAgenteLinux) ruins += 1;
+  console.log(`${okAgenteLinux ? '✓' : '✗'} Agente Linux: o script da máquina roda de verdade contra o servidor, preenche a ficha e não consome a mensagem nem a identificação da aba`);
+
+  // ------------------------------------------------------------------
   // Logos das empresas do grupo no rodapé do login. Antes era UMA imagem
   // fixa no código: empresa entrava ou saía do grupo e só dava pra
   // refletir isso com deploy. O que precisa ficar provado: o Master
