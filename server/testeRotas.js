@@ -5217,6 +5217,79 @@ setTimeout(async () => {
   console.log(`${okEmpresaArquivar ? '✓' : '✗'} Empresa: arquivar/excluir só com Master + senha, e arquivada deixa de ser dona das unidades`);
 
   // ------------------------------------------------------------------
+  // Tipos de negócio cadastráveis (pedido do Master pra cadastrar a
+  // Solutions Ti Tech como "Tecnologia"). O que precisa ficar provado: o
+  // catálogo aceita tipo novo e a empresa fica GRAVADA com ele (antes
+  // qualquer valor desconhecido virava 'alimentacao' em silêncio); tipo
+  // não cadastrado é recusado com erro, não convertido; não dá pra
+  // remover tipo em uso nem o fixo; e só o Master mexe no catálogo.
+  let okTiposNegocio = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const SENHA = process.env.MASTER_PASSWORD;
+    const empresasMod = require(__dirname + '/empresas.js');
+    const authTn = require(__dirname + '/auth.js');
+    DOCS.set('users/u-tipos-loja', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'tipos-loja@teste.local', username: 'tiposloja',
+      permissions: { sections: ['suporte'], unidades: ['19855'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabLoja = { Authorization: 'Bearer ' + (await authTn.login('tipos-loja@teste.local', 'SenhaDeTeste!2026')).token };
+
+    const listaInicial = await pedir('/api/empresas/tipos-negocio', cab);
+    const tiposIniciais = listaInicial.status === 200 ? JSON.parse(listaInicial.corpo) : [];
+    const criou = await postarJson('/api/empresas/tipos-negocio', { nome: '  Tecnologia  ' }, cab);
+    const criado = criou.status === 200 ? JSON.parse(criou.corpo) : {};
+    const repetiu = await postarJson('/api/empresas/tipos-negocio', { nome: 'tecnologia' }, cab);
+    const vazio = await postarJson('/api/empresas/tipos-negocio', { nome: '' }, cab);
+    const acentuado = await postarJson('/api/empresas/tipos-negocio', { nome: 'Clínica Odontológica' }, cab);
+    const listaDepois = JSON.parse((await pedir('/api/empresas/tipos-negocio', cab)).corpo);
+
+    const empresaTec = await postarJson('/api/empresas', { nome: 'Solutions Ti Tech', tipoNegocio: 'tecnologia', unidades: [] }, cab);
+    const idTec = empresaTec.status === 200 ? JSON.parse(empresaTec.corpo).id : null;
+    empresasMod.invalidarCache();
+    const gravada = (await empresasMod.list()).find((e) => e.id === idTec);
+    const desconhecido = await postarJson('/api/empresas', { nome: 'Empresa Fantasma', tipoNegocio: 'saude', unidades: [] }, cab);
+    const editarDesconhecido = idTec ? await enviarJson('PUT', `/api/empresas/${idTec}`, { tipoNegocio: 'saude' }, cab) : { status: 0, corpo: '' };
+
+    const removerEmUso = await enviarJson('DELETE', '/api/empresas/tipos-negocio/tecnologia', {}, cab);
+    const removerFixo = await enviarJson('DELETE', '/api/empresas/tipos-negocio/alimentacao', {}, cab);
+    const removerInexistente = await enviarJson('DELETE', '/api/empresas/tipos-negocio/nao-existe', {}, cab);
+    const lojaLista = await pedir('/api/empresas/tipos-negocio', cabLoja);
+    const lojaCria = await postarJson('/api/empresas/tipos-negocio', { nome: 'Invasor' }, cabLoja);
+
+    if (idTec) await enviarJson('DELETE', `/api/empresas/${idTec}`, { password: SENHA }, cab);
+    empresasMod.invalidarCache();
+    const removerLivre = await enviarJson('DELETE', '/api/empresas/tipos-negocio/tecnologia', {}, cab);
+    const removerOdonto = await enviarJson('DELETE', '/api/empresas/tipos-negocio/clinica-odontologica', {}, cab);
+    const listaFinal = JSON.parse((await pedir('/api/empresas/tipos-negocio', cab)).corpo);
+
+    const conferencias = {
+      'catálogo começa com Alimentação fixa': tiposIniciais.some((t) => t.codigo === 'alimentacao' && t.nome === 'Alimentação' && t.fixo === true),
+      'criar "Tecnologia" devolve código tecnologia e nome sem espaços sobrando': criou.status === 200 && criado.codigo === 'tecnologia' && criado.nome === 'Tecnologia' && criado.fixo === false,
+      'repetir o mesmo tipo (mesmo em minúsculas) é recusado': repetiu.status === 400 && /já existe/.test(repetiu.corpo),
+      'nome vazio é recusado': vazio.status === 400,
+      'acento e espaço viram código limpo (clinica-odontologica)': acentuado.status === 200 && JSON.parse(acentuado.corpo).codigo === 'clinica-odontologica',
+      'a lista traz o tipo novo depois da Alimentação': listaDepois.length >= 3 && listaDepois[0].codigo === 'alimentacao' && listaDepois.some((t) => t.codigo === 'tecnologia'),
+      'empresa cadastrada com o tipo novo fica GRAVADA com ele (não vira alimentacao)': empresaTec.status === 200 && gravada && gravada.tipoNegocio === 'tecnologia',
+      'tipo não cadastrado é recusado com erro, não convertido em silêncio': desconhecido.status === 400 && /não cadastrado/.test(desconhecido.corpo),
+      'editar empresa pra tipo não cadastrado também é recusado': editarDesconhecido.status === 400 && /não cadastrado/.test(editarDesconhecido.corpo),
+      'tipo em uso não pode ser removido, e o erro diz qual empresa usa': removerEmUso.status === 400 && /Solutions Ti Tech/.test(removerEmUso.corpo),
+      'o tipo fixo (Alimentação) não pode ser removido': removerFixo.status === 400 && /fixo/.test(removerFixo.corpo),
+      'remover tipo inexistente responde 400 em vez de estourar': removerInexistente.status === 400,
+      'usuário comum não lê o catálogo (403)': lojaLista.status === 403,
+      'usuário comum não cria tipo (403)': lojaCria.status === 403,
+      'sem empresa usando, o tipo sai do catálogo': removerLivre.status === 200 && removerOdonto.status === 200 && !listaFinal.some((t) => t.codigo === 'tecnologia' || t.codigo === 'clinica-odontologica'),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okTiposNegocio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTiposNegocio = false; console.log('  erro: ' + e.message); }
+  if (!okTiposNegocio) ruins += 1;
+  console.log(`${okTiposNegocio ? '✓' : '✗'} Empresa: tipo de negócio cadastrável (Alimentação fixa + catálogo do Master), gravado de verdade e só removível sem uso`);
+
+  // ------------------------------------------------------------------
   // Mensagem direta: o Master disse que aviso que some da tela não serve -
   // tem que ser caixa de diálogo que a pessoa ABRE, e ela responde por
   // dentro. Prova aqui: a mensagem FICA GRAVADA (não depende de a pessoa

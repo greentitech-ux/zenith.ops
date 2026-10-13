@@ -7339,6 +7339,8 @@ const EXECUTORES_QA = {
   'empresas.excluir': async (p) => { await users.desvincularEmpresa(p.id); return empresas.remove(p.id); },
   'empresas.arquivar': (p) => empresas.arquivar(p.id, { porEmail: p.porEmail }),
   'empresas.desarquivar': (p) => empresas.desarquivar(p.id),
+  'empresas.tipoNegocio.criar': (p) => empresas.criarTipoNegocio(p),
+  'empresas.tipoNegocio.excluir': (p) => empresas.removerTipoNegocio(p.codigo),
   'unidadesExtras.criar': (p) => invalidandoUnidadesMapa(unidadesExtras.criar(p.dados, codigosUnidadesFixas())),
   'unidadesExtras.editar': (p) => invalidandoUnidadesMapa(unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao })),
   'unidadesExtras.excluir': (p) => invalidandoUnidadesMapa(unidadesExtras.remover(p.id)),
@@ -9890,6 +9892,38 @@ async function exigirSenhaDoMaster(req, res) {
   }
   return true;
 }
+
+// TIPOS DE NEGÓCIO (ver TIPOS_DOC em empresas.js): 'alimentacao' é fixo; o
+// resto é catálogo que o Master cadastra na tela de Grupos. Ficam ANTES das
+// rotas com :id pra não haver dúvida de que "tipos-negocio" não é id de
+// empresa. Remover não pede senha: só sai o que nenhuma empresa usa, e
+// recriar devolve o mesmo código.
+app.get('/api/empresas/tipos-negocio', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await empresas.listarTiposNegocio());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/empresas/tipos-negocio', auth.requireMaster, async (req, res) => {
+  try {
+    const dados = { nome: req.body?.nome, porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'empresas.tipoNegocio.criar', `Criar tipo de negócio: ${dados.nome || ''}`, dados)) return;
+    res.json(await empresas.criarTipoNegocio(dados));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/empresas/tipos-negocio/:codigo', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'empresas.tipoNegocio.excluir', `Remover tipo de negócio ${req.params.codigo}`, { codigo: req.params.codigo })) return;
+    res.json(await empresas.removerTipoNegocio(req.params.codigo));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // quantos acessos e unidades a decisão atinge - a tela mostra isso ANTES de
 // pedir a senha, pra a escolha entre arquivar e excluir ser informada em vez
