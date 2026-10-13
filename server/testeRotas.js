@@ -13161,6 +13161,10 @@ setTimeout(async () => {
     const emp = require('/home/user/adyen-monitor/server/empresas.js');
     DOCS.set('empresas/empArcTeste', { id: 'empArcTeste', nome: 'ARCFOOD', ativa: true, tipoNegocio: 'alimentacao', unidades: ['19855'] });
     DOCS.set('empresas/empBravoTeste', { id: 'empBravoTeste', nome: 'Grupo Bravo', ativa: true, tipoNegocio: 'alimentacao', unidades: ['PPDOM'] });
+    // empresa de OUTRO tipo de negocio, sem unidade com marca (caso real: a
+    // Solutions Ti Tech aparecia com todas as marcas de comida no combo)
+    DOCS.set('empresas/empTecTeste', { id: 'empTecTeste', nome: 'Solutions Ti Tech', ativa: true, tipoNegocio: 'tecnologia', unidades: ['Administrativa'] });
+    DOCS.set('empresas/empNovaComida', { id: 'empNovaComida', nome: 'Comida Nova', ativa: true, tipoNegocio: 'alimentacao', unidades: [] });
     emp.invalidarCache();
     const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'empArcTeste', password: SENHA }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arcComGrupo = await ls.papelDeParedeDe('19855');
@@ -13573,6 +13577,17 @@ setTimeout(async () => {
           const arc = combos.filter((c) => c.rede === 'empArcTeste');
           return arc.length === 1 && arc[0].marca === 'dominos'
             && !combos.some((c) => c.rede === 'empArcTeste' && ['spoleto', 'milkymoo', 'saobraz', 'saltiverso'].includes(c.marca));
+        })(),
+      // empresa de outro tipo de negocio NAO ganha as marcas de comida por
+      // fallback (nenhuma linha dela no combo); a de alimentacao sem unidade
+      // marcada continua caindo em todas, como antes
+      'empresa que não é de alimentação (Solutions Ti Tech) não aparece com Domino\'s/Spoleto/Milky Moo no combo':
+        (() => {
+          const combos = JSON.parse(marcas.corpo).combinacoes || [];
+          const todasMarcas = require(__dirname + '/unidades.js').MARCAS_VALIDAS.length;
+          return !combos.some((c) => c.rede === 'empTecTeste')
+            && combos.filter((c) => c.rede === 'empNovaComida').length === todasMarcas
+            && JSON.parse(marcas.corpo).logosCarimbo.grupos.some((g) => g.id === 'empTecTeste');
         })(),
       // ---- agente ----
       'o agente baixa da URL da PRÓPRIA máquina (quem escolhe a marca é o servidor)':

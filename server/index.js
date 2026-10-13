@@ -8198,9 +8198,13 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
     })),
     // uma linha por GRUPO x marca que a empresa REALMENTE tem (Arcfood so opera
     // Domino's - nao faz sentido oferecer Spoleto/Milky Moo/Sao Braz pra ela).
-    // As marcas saem das unidades da empresa (perfil.marca). Empresa sem
-    // nenhuma unidade marcada cai em TODAS, pra empresa nova nao ficar sem
-    // opcao ate o Master marcar as unidades.
+    // As marcas saem das unidades da empresa (perfil.marca). Empresa de
+    // ALIMENTACAO sem nenhuma unidade marcada cai em TODAS, pra empresa nova
+    // nao ficar sem opcao ate o Master marcar as unidades. Empresa de outro
+    // tipo de negocio (ex: Solutions Ti Tech, 'tecnologia') nao entra nesse
+    // fallback: as marcas do catalogo sao todas de comida, e ela aparecia
+    // com Domino's/Spoleto/Milky Moo/Sao Braz/Saltiverso sem operar nenhuma.
+    // Ela continua na lista de GRUPO (logo propria), que e o que faz sentido.
     combinacoes: await (async () => {
       const linhas = [];
       for (const e of (await empresas.listAtivas().catch(() => []))) {
@@ -8209,7 +8213,8 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
           const perf = await unidadesExtras.perfil(u).catch(() => null);
           if (perf && perf.marca && unidadesExtras.MARCAS_VALIDAS.includes(perf.marca)) set.add(perf.marca);
         }
-        const marcas = set.size ? [...set] : unidadesExtras.MARCAS_VALIDAS;
+        const ehAlimentacao = (e.tipoNegocio || 'alimentacao') === 'alimentacao';
+        const marcas = set.size ? [...set] : (ehAlimentacao ? unidadesExtras.MARCAS_VALIDAS : []);
         for (const m of marcas) {
           linhas.push({
             rede: e.id, marca: m,
