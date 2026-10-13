@@ -6364,9 +6364,9 @@ setTimeout(async () => {
         d3.link && d3.link.sinalWifi === null && d3.link.canal === null && d3.link.banda === 'x'.repeat(10) && d3.link.radio === 'y'.repeat(20)
         && d3.link.vazaoMbps === null && d3.link.vazaoEm === null,
       'sinal e vazão variando NÃO viram evento de link (só a mudança estrutural de C virou, uma)': eventosDepois === eventosAntes + 1 && d2.link.nome === 'LOJA-5G' && d2.link.sinalWifi === 55 && d2.link.vazaoMbps === 12.1,
-      'a ficha separa "placa" (negociada) de "internet" (medida) e mostra sinal/banda/canal do Wi-Fi':
-        /· placa \$\{velocidade/.test(html) && /internet <b>~\$\{vazao/.test(html) && /Mbps<\/b> medidos/.test(html)
-        && /sinal agora <b/.test(html) && /banda <b>/.test(html) && /canal \$\{escapeHtml\(String\(link\.canal\)\)\}/.test(html),
+      'a ficha separa "placa" (negociada) de "internet" (medida) e mostra rede/sinal/banda do Wi-Fi':
+        /partes\.push\(`placa \$\{velocidade/.test(html) && /Mbps<\/b> de internet \(medido/.test(html)
+        && /partes\.push\(`Rede: <b>/.test(html) && /partes\.push\(`sinal <b/.test(html) && /if\(link\.banda\) partes\.push/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okVazao = !falhas.length;
@@ -6606,6 +6606,70 @@ setTimeout(async () => {
   } catch (e) { okRotasAgente = false; console.log('  erro: ' + e.message); }
   if (!okRotasAgente) ruins += 1;
   console.log(`${okRotasAgente ? '✓' : '✗'} NOC: link, sistema e boot do agente chegam pelas rotas HTTP de heartbeat e telemetria (e nenhuma rota descarta campo que o servidor lê)`);
+
+  // ------------------------------------------------------------------
+  // Wi-Fi como no tablet (pedido do Master, 13/10: "o notebook no Wi-Fi tem
+  // que mostrar igual ao Mobiel: no Wi-Fi mostra Wi-Fi, na Ethernet mostra
+  // Ethernet"). Antes QUALQUER máquina no Wi-Fi ficava Degradado ("Ethernet
+  // caída" ou "só no Wi-Fi"). Regra nova (caboEsperado): só acusa cabo quem
+  // USA cabo - visto na Ethernet nos últimos 30 dias - e nunca notebook
+  // (agente v151 manda portatil).
+  let okWifiNormal = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const vg = require(__dirname + '/vigiaScript.js');
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const UNI = 'NOCWIFI';
+    const maquina = async (nome) => {
+      await ls.cadastrarComputador(UNI, nome, 'interno');
+      const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === nome).posto;
+      const tk = await ls.garantirAgentToken(UNI, posto);
+      return { posto, bater: (link) => postarJson('/api/loja-status/heartbeat', { unidade: UNI, posto, userAgent: 'NOCZenith/1.0', abertoDesde: Math.random(), link }, { 'x-noc-token': tk }) };
+    };
+    const ficha = async (m) => ls.detalhar(UNI, m.posto);
+    const wifiPortaVazia = { tipo: 'wifi', nome: 'LOJA-5G', mbps: 300, ethernetPresente: true, ethernetAtiva: false, ethernetCaida: true };
+
+    // 1) desktop que SEMPRE usou Wi-Fi (agente antigo, sem portatil): normal
+    const sempreWifi = await maquina('DESK-WIFI');
+    await sempreWifi.bater(wifiPortaVazia);
+    const f1 = await ficha(sempreWifi);
+    // 2) desktop que estava no CABO e caiu pro Wi-Fi: defeito + alerta
+    const caiu = await maquina('DESK-CABO');
+    await caiu.bater({ tipo: 'ethernet', nome: 'Ethernet', mbps: 1000, ethernetPresente: true, ethernetAtiva: true });
+    await caiu.bater(wifiPortaVazia);
+    const f2 = await ficha(caiu);
+    // 3) notebook (v151) que estava na doca com cabo e saiu: normal, sem alerta
+    const note = await maquina('NOTE-DOCA');
+    await note.bater({ tipo: 'ethernet', nome: 'Ethernet', mbps: 1000, ethernetPresente: true, ethernetAtiva: true, portatil: true });
+    await note.bater({ ...wifiPortaVazia, portatil: true });
+    const f3 = await ficha(note);
+    // 4) cabo visto há mais de 30 dias: o Wi-Fi já virou o normal dela
+    const velho = { caboVistoEm: Date.now() - ls.CABO_ESPERADO_JANELA_MS - 1000, link: wifiPortaVazia };
+    const recente = { caboVistoEm: Date.now() - 60 * 1000, link: wifiPortaVazia };
+
+    const ps = vg.montarScriptVigia({ codigo: 'W', posto: 'P', tipo: 'interno', agentToken: 't' });
+    const psAntigo = vg.montarScriptVigia({ codigo: 'W', posto: 'P', tipo: 'interno', agentToken: 't', windowsAntigo: true });
+
+    const conferencias = {
+      'desktop que sempre usou Wi-Fi fica Operacional, como o tablet': f1 && f1.estado === 'operacional' && !f1.degradacao.length && f1.link.tipo === 'wifi',
+      'desktop que estava no cabo e caiu pro Wi-Fi continua Degradado ("Ethernet caída") e gera alerta':
+        f2 && f2.estado === 'degradado' && f2.degradacao.includes('Ethernet caída') && !!f2.linkAvisoPendente,
+      'notebook (v151) saindo da doca fica Operacional e sem alerta': f3 && f3.estado === 'operacional' && !f3.degradacao.length && !f3.linkAvisoPendente && f3.link.portatil === true,
+      'cabo visto há mais de 30 dias não acusa; visto há pouco acusa': ls.caboEsperado(velho) === false && ls.caboEsperado(recente) === true,
+      'a ficha desenha Wi-Fi + rede como o tablet e só fala de cabo quando o servidor acusa defeito':
+        /const defeito=\(c\.degradacao\|\|\[\]\)\.find\(m=>m==='Ethernet caída'\|\|m==='só no Wi-Fi'\)/.test(html)
+        && !/Ethernet: não disponível/.test(html) && !/Ethernet: desconectada/.test(html)
+        && /\(c\.degradacao\|\|\[\]\)\.includes\('Ethernet caída'\) \? '📶 Wi-Fi \(Ethernet caiu\)'/.test(html),
+      'agente v151 detecta notebook por bateria ou chassi, lido uma vez, nos dois Windows':
+        vg.VERSAO_VIGIA >= 151 && /function Ler-Portatil/.test(ps) && /Win32_Battery/.test(ps) && /Win32_SystemEnclosure/.test(ps)
+        && /\$r\.portatil = \[bool\]\(Ler-Portatil\)/.test(ps) && /function Ler-Portatil/.test(psAntigo),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okWifiNormal = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (f1=${f1 && f1.estado}/${f1 && f1.degradacao} f2=${f2 && f2.estado}/${f2 && f2.degradacao} f3=${f3 && f3.estado}/${f3 && f3.degradacao})`);
+  } catch (e) { okWifiNormal = false; console.log('  erro: ' + e.message); }
+  if (!okWifiNormal) ruins += 1;
+  console.log(`${okWifiNormal ? '✓' : '✗'} NOC: Wi-Fi é normal como no tablet - só acusa cabo quem usa cabo (visto nos últimos 30 dias) e nunca notebook`);
 
   // ------------------------------------------------------------------
   // Logos das empresas do grupo no rodapé do login. Antes era UMA imagem

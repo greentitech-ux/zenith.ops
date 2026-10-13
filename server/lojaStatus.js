@@ -856,7 +856,27 @@ function sanitizarLink(bruto) {
     // real da internet (download cronometrado, 1x por hora) e quando foi.
     // Campo que nao vier fica null - nunca um numero inventado.
     ...extrasDoLink(bruto),
+    // v151: notebook/portátil (bateria ou chassi). null = agente antigo, não sabe
+    portatil: bruto.portatil === true ? true : (bruto.portatil === false ? false : null),
   };
+}
+
+// CABO ESPERADO. "Ethernet caída" só é defeito em máquina que USA cabo: o
+// agente não tem como saber se a porta vazia é escolha (notebook no Wi-Fi)
+// ou problema (desktop que perdeu o cabo). Duas provas, nesta ordem:
+//  - o agente v151 diz que é portátil -> nunca acusa cabo (é o normal dele);
+//  - senão, só acusa se a máquina foi VISTA no cabo nos últimos 30 dias
+//    (caboVistoEm). Desktop que sempre usou Wi-Fi aparece normal, igual ao
+//    tablet; desktop que estava no cabo e caiu pro Wi-Fi acusa. Depois de 30
+//    dias só no Wi-Fi, o Wi-Fi vira o normal dela.
+// Pedido do Master (13/10): "notebook no Wi-Fi tem que mostrar igual ao
+// Mobiel: no Wi-Fi mostra Wi-Fi, na Ethernet mostra Ethernet".
+const CABO_ESPERADO_JANELA_MS = 30 * 24 * 60 * 60 * 1000;
+function caboEsperado(doc, link, agora = Date.now()) {
+  const l = link || (doc && doc.link) || null;
+  if (l && l.portatil === true) return false;
+  const visto = Number(doc && doc.caboVistoEm) || 0;
+  return visto > 0 && (agora - visto) < CABO_ESPERADO_JANELA_MS;
 }
 function extrasDoLink(bruto) {
   const inteiro = (v, min, max) => {
@@ -974,7 +994,7 @@ const CAMPOS_DO_HEARTBEAT = [
   // heartbeat seguinte veria "mudou" e inventaria um reinício que não houve.
   // ('eventos' de propósito FORA desta lista: a varredura também escreve
   // nele, e preservar a cópia da memória apagaria o que ela gravou.)
-  'bootEm', 'link', 'linkEm', 'sistema', 'sistemaEm', 'desligamentoInesperado', 'anydeskServico',
+  'bootEm', 'link', 'linkEm', 'caboVistoEm', 'sistema', 'sistemaEm', 'desligamentoInesperado', 'anydeskServico',
   // contador de falhas do proprio agente (ver registrarHeartbeat): so o
   // heartbeat escreve, e e' o que separa "a loja caiu" de "so o caminho ate
   // o servidor falhou" na hora que ela volta
@@ -1355,6 +1375,7 @@ async function heartbeat(codigo, posto, info, token) {
   if (linkNovo) {
     patch.link = linkNovo;
     patch.linkEm = Date.now();
+    if (linkNovo.tipo === 'ethernet') patch.caboVistoEm = Date.now();
     if (!mesmoLink(linkAntes, linkNovo)) {
       eventosNovos.push({
         tipo: 'link', em: Date.now(),
@@ -1367,7 +1388,8 @@ async function heartbeat(codigo, posto, info, token) {
       // até 13/10 a rota descartava o link, então no deploy que a consertou
       // TODA máquina "estreou" ao mesmo tempo - e notebook no Wi-Fi com a
       // porta de cabo vazia viraria uma rajada de "Ethernet caída" falsa
-      const piorou = !!linkAntes && ((linkNovo.ethernetCaida && !linkAntes.ethernetCaida)
+      // e só em quem usa cabo: notebook saindo da doca não é queda
+      const piorou = !!linkAntes && caboEsperado({ ...atual, ...patch }, linkNovo) && ((linkNovo.ethernetCaida && !linkAntes.ethernetCaida)
         || (linkNovo.tipo === 'wifi' && linkAntes.tipo === 'ethernet'));
       if (piorou) patch.linkAvisoPendente = { tipo: linkNovo.tipo, ethernetCaida: linkNovo.ethernetCaida, mbps: linkNovo.mbps };
     }
@@ -1700,8 +1722,10 @@ function motivosDeDegradacao(doc, agora = Date.now()) {
     motivos.push(`agente ocupado há ${min}min em: ${oc.etapa}${oc.instancia === 'sistema' ? ' (instância de sistema)' : ''}`);
   }
   const link = doc.link || null;
-  if (link && link.ethernetCaida) motivos.push('Ethernet caída');
-  if (link && link.tipo === 'wifi' && !link.ethernetCaida) motivos.push('só no Wi-Fi');
+  // Wi-Fi sozinho não é defeito (ver caboEsperado): só acusa quem usa cabo
+  if (link && link.tipo !== 'ethernet' && caboEsperado(doc, link, agora)) {
+    motivos.push(link.ethernetCaida ? 'Ethernet caída' : 'só no Wi-Fi');
+  }
   if (doc.discoNivel === 'critico') motivos.push('disco crítico');
   else if (doc.discoNivel === 'atencao') motivos.push('disco em atenção');
   // MAQUINA VIVA COM ACESSO REMOTO MORTO. O NOC sabia dizer que ela esta no
@@ -2710,6 +2734,7 @@ async function registrarTelemetria(codigo, posto, dados, token) {
     patch.anydeskIdFonte = 'maquina';
   }
   const linkTelemetria = sanitizarLink(dados && dados.link);
+  if (linkTelemetria && linkTelemetria.tipo === 'ethernet') patch.caboVistoEm = agora;
   if (linkTelemetria) {
     if (!mesmoLink(atual.link, linkTelemetria)) {
       patch.link = linkTelemetria;
@@ -2721,7 +2746,7 @@ async function registrarTelemetria(codigo, posto, dados, token) {
       }];
       patch.eventos = eventos.slice(-EVENTOS_MAX);
       // mesma regra do heartbeat: a primeira leitura só registra
-      const piorou = !!atual.link && ((linkTelemetria.ethernetCaida && !atual.link.ethernetCaida)
+      const piorou = !!atual.link && caboEsperado({ ...atual, ...patch }, linkTelemetria) && ((linkTelemetria.ethernetCaida && !atual.link.ethernetCaida)
         || (linkTelemetria.tipo === 'wifi' && atual.link.tipo === 'ethernet'));
       if (piorou) patch.linkAvisoPendente = { tipo: linkTelemetria.tipo, ethernetCaida: linkTelemetria.ethernetCaida, mbps: linkTelemetria.mbps };
     }
@@ -5632,6 +5657,7 @@ async function impressorasPraSondar(codigo) {
 }
 
 module.exports = {
+  caboEsperado, CABO_ESPERADO_JANELA_MS,
   acessoChatDoComputador,
   avaliarRolloutVigia, versaoVigiaPara, resumoRolloutVigia, decidirRolloutVigia,
   substituirSegredos, SEGREDOS_PERMITIDOS,

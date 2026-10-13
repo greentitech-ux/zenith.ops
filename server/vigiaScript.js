@@ -74,7 +74,9 @@
 // 150: mede a vazão real da internet (download de 512 KB, 1x por hora) e, no
 //      Wi-Fi, lê sinal, banda, canal e tipo de rádio junto com o SSID. Pedido
 //      do Master: os mesmos dados que o tablet mostra, nas máquinas Windows.
-const VERSAO_VIGIA = 150;
+// 151: conta se a máquina é PORTÁTIL (bateria ou chassi de notebook). Notebook
+//      no Wi-Fi com a porta de cabo vazia é uso normal, não "Ethernet caída".
+const VERSAO_VIGIA = 151;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://www.nopulso.com.br').replace(/\/+$/, '');
 const CENTRAL_BENIBOY_URL = `https://${String(process.env.ATENDIMENTO_HOST || 'atendimento.nopulso.com.br').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '')}/atendimento/central`;
@@ -1197,11 +1199,33 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, noPu
     '  } catch { Escrever-Log "Vazao: nao mediu ($($_.Exception.Message))" }',
     '  return $script:VazaoUltima',
     '}',
+    '# NOTEBOOK OU DESKTOP: notebook no Wi-Fi com a porta de cabo vazia e uso',
+    '# normal; desktop que perde o cabo e defeito. Bateria (Win32_Battery) ou',
+    '# chassi portatil (Win32_SystemEnclosure: 8-14 notebook/laptop, 18',
+    '# expansao, 21 periferico, 30-32 tablet/conversivel/destacavel). Lido uma',
+    '# vez: nao muda com a maquina ligada.',
+    '$script:EhPortatilCache = $null',
+    'function Ler-Portatil {',
+    '  if ($script:EhPortatilCache -ne $null) { return $script:EhPortatilCache }',
+    '  $portatil = $false',
+    '  try { if (@(Get-CimInstance Win32_Battery -ErrorAction Stop).Count -gt 0) { $portatil = $true } } catch {',
+    '    try { if (@(Get-WmiObject Win32_Battery -ErrorAction Stop).Count -gt 0) { $portatil = $true } } catch {}',
+    '  }',
+    '  if (-not $portatil) {',
+    '    try {',
+    '      try { $gab = @(Get-CimInstance Win32_SystemEnclosure -ErrorAction Stop) } catch { $gab = @(Get-WmiObject Win32_SystemEnclosure -ErrorAction Stop) }',
+    '      foreach ($g in $gab) { foreach ($t in @($g.ChassisTypes)) { if (@(8,9,10,11,12,14,18,21,30,31,32) -contains [int]$t) { $portatil = $true } } }',
+    '    } catch {}',
+    '  }',
+    '  $script:EhPortatilCache = $portatil',
+    '  return $portatil',
+    '}',
     'function Medir-Link {',
     '  # O objeto sempre descreve tambem a situacao da placa de cabo, mesmo',
     '  # quando a rota ativa e Wi-Fi. Assim o NOC deixa claro se a Ethernet',
     '  # esta operacional, desconectada ou simplesmente nao existe.',
     '  $r = @{ tipo = "nenhum"; ethernetCaida = $false; ethernetPresente = $false; ethernetAtiva = $false }',
+    '  try { $r.portatil = [bool](Ler-Portatil) } catch {}',
     '  try {',
     '    # -Physical falha em alguns drivers/Windows antigos mesmo quando',
     '    # Get-NetAdapter funciona. Filtrar as placas fisicas aqui e mais',

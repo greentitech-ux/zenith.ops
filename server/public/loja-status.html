@@ -630,7 +630,7 @@
       <div class="kpi-num" id="kpi-num-online">0</div>
       <div class="kpi-label">🟢 Operacional</div>
     </button>
-    <button type="button" class="kpi-card kpi-degradado" id="kpi-degradado" onclick="setFiltroStatus('degradado')" title="No ar, mas com defeito: Ethernet caída, só no Wi-Fi ou disco em risco">
+    <button type="button" class="kpi-card kpi-degradado" id="kpi-degradado" onclick="setFiltroStatus('degradado')" title="No ar, mas com defeito: computador que usa cabo e caiu pro Wi-Fi, ou disco em risco">
       <div class="kpi-num" id="kpi-num-degradado">0</div>
       <div class="kpi-label">🟡 Degradado</div>
     </button>
@@ -1541,32 +1541,29 @@ function statusDe(c){
 function conexaoComputadorHtml(c){
   const link=c && c.link;
   if(!link || !link.tipo) return '';
+  // MESMO FORMATO DO TABLET (pedido do Master, 13/10): no Wi-Fi diz Wi-Fi e
+  // a rede; no cabo diz Ethernet. Cabo desconectado só aparece quando é
+  // DEFEITO - o servidor decide (caboEsperado em lojaStatus.js) e manda o
+  // motivo em c.degradacao. Notebook no Wi-Fi não acusa nada.
   const tipos={ethernet:'Ethernet (cabo)',wifi:'Wi-Fi',nenhum:'sem placa de rede ativa',outro:'outro meio'};
+  const partes=[];
+  if(link.tipo==='wifi'){
+    // Windows 11 24H2 só mostra o nome da rede com a localização ligada
+    partes.push(`Rede: <b>${escapeHtml(String(link.nome && link.nome!==link.adaptador ? link.nome : 'não informada pelo Windows (localização desligada?)'))}</b>`);
+    const sinal=Number(link.sinalWifi);
+    if(link.sinalWifi!==null && link.sinalWifi!==undefined && Number.isFinite(sinal)) partes.push(`sinal <b style="color:${sinal < REDE_SINAL_WIFI_BAIXO ? 'var(--warn,#e0a800)' : 'var(--text)'};">${sinal}%</b>`);
+    if(link.banda) partes.push(escapeHtml(String(link.banda)));
+  }
   const velocidade=Number(link.mbps);
-  // "placa" = velocidade negociada da placa (1 Gbps no cabo nao diz nada da
-  // internet); "internet" = vazao MEDIDA pelo agente v150 (download de 512 KB,
-  // 1x por hora). Sao dois numeros diferentes e a ficha diz qual e qual.
-  const mbps=Number.isFinite(velocidade)&&velocidade>0 ? ` · placa ${velocidade.toLocaleString('pt-BR')} Mbps` : '';
+  if(link.tipo!=='nenhum' && Number.isFinite(velocidade) && velocidade>0) partes.push(`placa ${velocidade.toLocaleString('pt-BR')} Mbps`);
+  // internet MEDIDA pelo agente v150 (download de 512 KB, 1x por hora) - o
+  // tablet mostra a estimativa do navegador; aqui é medição de verdade
   const vazao=Number(link.vazaoMbps);
-  const internet=Number.isFinite(vazao)&&vazao>0 ? ` · internet <b>~${vazao.toLocaleString('pt-BR',{maximumFractionDigits:1})} Mbps</b> medidos${link.vazaoEm ? ` ${escapeHtml(tempoRelativo(link.vazaoEm))}` : ''}` : '';
-  // Wi-Fi: o que o netsh conta da associacao atual (agente v150)
-  const wifiDetalhes=link.tipo==='wifi' ? [
-    Number.isFinite(Number(link.sinalWifi)) && link.sinalWifi!==null ? `sinal agora <b style="color:${Number(link.sinalWifi) < REDE_SINAL_WIFI_BAIXO ? 'var(--warn,#e0a800)' : 'var(--text)'};">${Number(link.sinalWifi)}%</b>` : null,
-    link.banda ? `banda <b>${escapeHtml(String(link.banda))}</b>` : null,
-    link.canal ? `canal ${escapeHtml(String(link.canal))}` : null,
-    link.radio ? escapeHtml(String(link.radio)) : null,
-  ].filter(Boolean).map(x=>' · '+x).join('') : '';
-  // A ficha precisa dizer explicitamente o estado da Ethernet tambem quando
-  // o caminho ativo e Wi-Fi; isso separa "sem cabo" de "placa sem defeito".
-  const ethernetEstado=link.ethernetCaida
-    ? ' · Ethernet caída/desconectada'
-    : link.ethernetPresente
-    ? (link.ethernetAtiva ? ' · Ethernet: operacional' : ' · Ethernet: desconectada')
-    : ' · Ethernet: não disponível';
-  const interfaceNome=link.nome ? ` · ${link.tipo==='wifi'?'Rede':'interface'}: ${escapeHtml(String(link.nome))}` : '';
-  const adaptador=link.adaptador && link.adaptador!==link.nome ? ` · adaptador: ${escapeHtml(String(link.adaptador))}` : '';
-  const leitura=c.linkEm ? ` · leitura ${escapeHtml(tempoRelativo(c.linkEm))}` : '';
-  return `📡 Conexão: <b>${escapeHtml(tipos[link.tipo]||String(link.tipo))}</b>${link.tipo==='nenhum'?'':mbps}${interfaceNome}${wifiDetalhes}${internet}${adaptador}${ethernetEstado}${leitura}${qualidadeRedeHtml(c)}`;
+  if(Number.isFinite(vazao) && vazao>0) partes.push(`<b>~${vazao.toLocaleString('pt-BR',{maximumFractionDigits:2})} Mbps</b> de internet (medido${link.vazaoEm ? ` ${escapeHtml(tempoRelativo(link.vazaoEm))}` : ''})`);
+  const defeito=(c.degradacao||[]).find(m=>m==='Ethernet caída'||m==='só no Wi-Fi');
+  if(defeito) partes.push(`<b style="color:var(--warn,#e0a800);">${defeito==='Ethernet caída' ? 'cabo desconectado' : 'saiu do cabo'}</b>`);
+  if(link.portatil===true) partes.push('<span class="sub">notebook</span>');
+  return `📡 Conexão: <b>${escapeHtml(tipos[link.tipo]||String(link.tipo))}</b>${partes.map(p=>' · '+p).join('')}${qualidadeRedeHtml(c)}`;
 }
 // O que o agente MEDE da rede (e nao so o que o Windows diz da placa): sinal
 // Wi-Fi em %, ping do roteador e da internet com perda. Sao as medias de
@@ -1610,7 +1607,8 @@ function linkTexto(c){
   const l = c && c.link;
   if(!l) return '';
   if(l.tipo === 'ethernet') return `🔌 cabo${l.mbps ? ` ${l.mbps >= 1000 ? (l.mbps/1000)+' Gbps' : l.mbps+' Mbps'}` : ''}`;
-  if(l.tipo === 'wifi') return l.ethernetCaida ? '📶 Wi-Fi (Ethernet caiu)' : '📶 Wi-Fi';
+  // "(Ethernet caiu)" só quando o servidor acusou defeito (ver caboEsperado)
+  if(l.tipo === 'wifi') return (c.degradacao||[]).includes('Ethernet caída') ? '📶 Wi-Fi (Ethernet caiu)' : '📶 Wi-Fi';
   if(l.tipo === 'nenhum') return '⛔ sem placa de rede ativa';
   return '🔗 outro meio';
 }
