@@ -6442,6 +6442,69 @@ setTimeout(async () => {
   console.log(`${okAppWifi ? '✓' : '✗'} Agente Android v5: nome, sinal, frequência e link do Wi-Fi do tablet (com permissão de localização), aceitos com faixa fechada e desenhados na ficha`);
 
   // ------------------------------------------------------------------
+  // Imagem pessoal: ENQUADRAMENTO (pedido do Master: "enquadrar mais pra
+  // cima/baixo ou dar zoom, como a foto do WhatsApp" e "que apareça do jeito
+  // que está na pré-visualização") e o lugar dela no Painel (fundo da faixa
+  // de saudação, relógio e "ao vivo" no canto direito). O que fica provado:
+  // o enquadro é guardado com faixa fechada (x/y 0-100, zoom 1-3) tanto no
+  // envio da foto quanto no ajuste depois; sem foto não há enquadro; a prévia
+  // e o Painel usam a MESMA função de CSS (aplicarEnquadroPessoal); e a
+  // faixa do Painel tem o relógio e o "ao vivo" à direita.
+  let okEnquadro = false;
+  try {
+    const usersMod = require(__dirname + '/users.js');
+    const fs = require('fs');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const painelHtml = fs.readFileSync(__dirname + '/public/painel.html', 'utf8');
+    const minhaHtml = fs.readFileSync(__dirname + '/public/minha-aparencia.html', 'utf8');
+    const cab = { Authorization: 'Bearer ' + token };
+    const png = { nome: 'capa.png', tipo: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
+
+    const semFoto = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 10, y: 20, zoom: 2 }, cab);
+    const enviou = await postarMultipart('/api/me/personalizacao/imagem', { x: '30', y: '80', zoom: '1.5' }, png, 'imagem', cab, 'POST');
+    const estado1 = await pedir('/api/me/personalizacao', cab);
+    const ajuste = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 150, y: -5, zoom: 9 }, cab);
+    const estado2 = await pedir('/api/me/personalizacao', cab);
+    const lixo = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 'a', y: null, zoom: 'muito' }, cab);
+    await enviarJson('DELETE', '/api/me/personalizacao/imagem', {}, cab);
+    const estado3 = await pedir('/api/me/personalizacao', cab);
+    const j = (r) => { try { return JSON.parse(r.corpo); } catch (_) { return {}; } };
+
+    const conferencias = {
+      'enquadrar sem foto é recusado (400)': semFoto.status === 400 && /Escolha uma imagem/.test(semFoto.corpo),
+      'o enquadro viaja junto com a foto e volta sanitizado': enviou.status === 201 && j(enviou).enquadro && j(enviou).enquadro.x === 30 && j(enviou).enquadro.y === 80 && j(enviou).enquadro.zoom === 1.5,
+      'GET /api/me/personalizacao devolve o enquadro guardado': estado1.status === 200 && j(estado1).temImagem === true && j(estado1).enquadro && j(estado1).enquadro.y === 80,
+      'ajustar depois, sem reenviar a foto, com faixa fechada (x 150→100, y -5→0, zoom 9→3)':
+        ajuste.status === 200 && j(ajuste).enquadro.x === 100 && j(ajuste).enquadro.y === 0 && j(ajuste).enquadro.zoom === 3
+        && j(estado2).enquadro.x === 100 && j(estado2).enquadro.zoom === 3,
+      'lixo cai no padrão (50/50/1), nunca num valor que some com a imagem': lixo.status === 200 && j(lixo).enquadro.x === 50 && j(lixo).enquadro.y === 50 && j(lixo).enquadro.zoom === 1,
+      'sanitizarEnquadro: zoom abaixo de 1 vira 1, decimais ficam em 2 casas': usersMod.sanitizarEnquadro({ zoom: 0.2 }).zoom === 1 && usersMod.sanitizarEnquadro({ zoom: 1.234 }).zoom === 1.23,
+      'remover a foto apaga o enquadro': estado3.status === 200 && j(estado3).temImagem === false && j(estado3).enquadro === null,
+      'tema.js aplica o enquadro (object-position + scale) e expõe a função pra prévia usar a MESMA':
+        /function aplicarEnquadroPessoal\(img, enq\)/.test(tema) && /window\.aplicarEnquadroPessoal = aplicarEnquadroPessoal/.test(tema)
+        && /img\.style\.objectPosition = x \+ '% ' \+ y \+ '%'/.test(tema) && /img\.style\.transform = 'scale\(' \+ zoom \+ '\)'/.test(tema)
+        && /aplicarEnquadroPessoal\(img, est\.enquadro\)/.test(tema),
+      'no Painel a imagem é o FUNDO da faixa de saudação (não uma faixa abaixo), com véu pra o texto continuar legível':
+        /if \(noPainel\) \{\s*img\.id = 'zenith-imagem-pessoal';\s*alvo\.classList\.add\('zenith-com-imagem'\);\s*alvo\.insertBefore\(img, alvo\.firstChild\);/.test(tema)
+        && /\.painel-saudacao\.zenith-com-imagem::before\{content:""/.test(tema) && /color-mix\(in srgb,var\(--panel\)/.test(tema),
+      'a faixa do Painel tem relógio e "ao vivo" à direita (ps-dir), e a saudação com Bom dia/Boa tarde/Boa noite':
+        /<div class="ps-dir">\s*<div class="ps-relogio" id="ps-relogio">[\s\S]*?<div class="ps-vivo" id="ps-vivo"/.test(painelHtml)
+        && /grid-template-columns:minmax\(0,1fr\) auto;/.test(painelHtml) && !/grid-template-columns:1fr auto 1fr/.test(painelHtml)
+        && /'Bom dia' : \(hora < 18 \? 'Boa tarde' : 'Boa noite'\)/.test(painelHtml),
+      'Minha imagem: prévia com a mesma função de enquadro, arrastar e zoom, e manda x/y/zoom ao salvar':
+        /window\.aplicarEnquadroPessoal\(img,enq\)/.test(minhaHtml) && /addEventListener\('pointerdown'/.test(minhaHtml) && /addEventListener\('wheel'/.test(minhaHtml)
+        && /d\.append\('x',enq\.x\);d\.append\('y',enq\.y\);d\.append\('zoom',enq\.zoom\)/.test(minhaHtml)
+        && /\/api\/me\/personalizacao\/enquadro'/.test(minhaHtml) && /id="zoom" type="range" min="100" max="300"/.test(minhaHtml)
+        && !/#b8ff3c(?![^{]*\})/.test(minhaHtml.replace(/:root\{[^}]*\}/, '')),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okEnquadro = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (envio=${enviou.status} ${enviou.corpo.slice(0, 120)} ajuste=${ajuste.corpo.slice(0, 120)})`);
+  } catch (e) { okEnquadro = false; console.log('  erro: ' + e.message); }
+  if (!okEnquadro) ruins += 1;
+  console.log(`${okEnquadro ? '✓' : '✗'} Minha imagem: enquadro (x/y/zoom) guardado com faixa fechada, prévia = Painel, e a foto como fundo da saudação com relógio à direita`);
+
+  // ------------------------------------------------------------------
   // Logos das empresas do grupo no rodapé do login. Antes era UMA imagem
   // fixa no código: empresa entrava ou saía do grupo e só dava pra
   // refletir isso com deploy. O que precisa ficar provado: o Master

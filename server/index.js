@@ -3473,7 +3473,22 @@ app.get('/api/me', async (req, res) => {
 // perfil devolvido para o navegador.
 app.get('/api/me/personalizacao', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ temImagem: !!req.user.imagemPersonalizacao });
+  res.json({
+    temImagem: !!req.user.imagemPersonalizacao,
+    // enquadramento (x/y/zoom, ver sanitizarEnquadro em users.js): a tela
+    // desenha a faixa com ele; imagem antiga sem enquadro cai no padrao
+    enquadro: req.user.imagemPersonalizacao ? users.sanitizarEnquadro(req.user.imagemPersonalizacaoEnquadro) : null,
+  });
+});
+// so o enquadramento, sem reenviar a foto (o ajuste depois de salvar e o
+// caso comum: olhou o Painel, quis subir um pouco)
+app.put('/api/me/personalizacao/enquadro', async (req, res) => {
+  try {
+    const enquadro = await users.updateEnquadroPersonalizacao(req.user.id, req.body || {});
+    res.json({ temImagem: true, enquadro });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Não foi possível enquadrar a imagem.' });
+  }
 });
 app.get('/api/me/personalizacao/imagem', async (req, res) => {
   if (!req.user.imagemPersonalizacao) return res.sendStatus(404);
@@ -3489,14 +3504,16 @@ app.post('/api/me/personalizacao/imagem', uploadImagemPersonalizacao.single('ima
     if (!req.file) return res.status(400).json({ error: 'Escolha uma imagem JPG, PNG ou WebP.' });
     const anterior = req.user.imagemPersonalizacao || null;
     const caminho = await storage.salvarArquivo(`personalizacao-${req.user.id}`, req.file, 'personalizacao-usuarios');
+    // o enquadramento viaja nos campos do mesmo multipart (x, y, zoom)
+    const enquadro = users.sanitizarEnquadro(req.body || {});
     try {
-      await users.updateImagemPersonalizacao(req.user.id, caminho, req.file.mimetype);
+      await users.updateImagemPersonalizacao(req.user.id, caminho, req.file.mimetype, enquadro);
     } catch (err) {
       await storage.apagarArquivo(caminho).catch(() => {});
       throw err;
     }
     if (anterior && anterior !== caminho) await storage.apagarArquivo(anterior).catch(() => {});
-    res.status(201).json({ temImagem: true });
+    res.status(201).json({ temImagem: true, enquadro });
   } catch (err) {
     res.status(400).json({ error: err.message || 'Não foi possível salvar a imagem.' });
   }

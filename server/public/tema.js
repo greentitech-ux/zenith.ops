@@ -1527,9 +1527,28 @@
     document.head.appendChild(tag);
   }
 
-  // Faixa pessoal limitada às duas telas combinadas. A foto é buscada como
-  // Blob autenticado (nunca por URL pública) e só entra no DOM depois de o
-  // servidor confirmar que pertence ao usuário logado.
+  // Imagem pessoal nas duas telas combinadas (Painel e Meu Dia). A foto é
+  // buscada como Blob autenticado (nunca por URL pública) e só entra no DOM
+  // depois de o servidor confirmar que pertence ao usuário logado.
+  //
+  // ONDE ELA ENTRA (pedido do Master, 13/10): no Painel vai ATRÁS da faixa de
+  // saudação - "Bom dia, fulano" com a imagem de fundo, relógio e "ao vivo"
+  // no canto direito - e não numa faixa separada abaixo. No Meu Dia continua
+  // a faixa logo abaixo do cabeçalho. Nas duas, o ENQUADRAMENTO escolhido em
+  // Minha imagem (x/y/zoom) é aplicado com as mesmas regras de CSS da prévia
+  // (aplicarEnquadro, também usada por minha-aparencia.html): é isso que faz
+  // a tela aparecer "do jeito que está na pré-visualização".
+  function aplicarEnquadroPessoal(img, enq) {
+    var e = enq || {};
+    var x = Number.isFinite(Number(e.x)) ? Number(e.x) : 50;
+    var y = Number.isFinite(Number(e.y)) ? Number(e.y) : 50;
+    var zoom = Number.isFinite(Number(e.zoom)) ? Math.min(3, Math.max(1, Number(e.zoom))) : 1;
+    img.style.objectFit = 'cover';
+    img.style.objectPosition = x + '% ' + y + '%';
+    img.style.transformOrigin = x + '% ' + y + '%';
+    img.style.transform = 'scale(' + zoom + ')';
+  }
+  window.aplicarEnquadroPessoal = aplicarEnquadroPessoal;
   async function montarImagemPessoal() {
     if (!['/painel', '/painel.html', '/tarefas', '/tarefas.html'].includes(location.pathname)) return;
     var token = localStorage.getItem('authToken');
@@ -1537,20 +1556,48 @@
     try {
       var cab = { Authorization: 'Bearer ' + token };
       var estado = await fetch('/api/me/personalizacao', { headers: cab });
-      if (!estado.ok || !(await estado.json()).temImagem) return;
+      if (!estado.ok) return;
+      var est = await estado.json();
+      if (!est.temImagem) return;
       var foto = await fetch('/api/me/personalizacao/imagem', { headers: cab });
       if (!foto.ok) return;
-      var alvo = location.pathname.indexOf('tarefas') >= 0
-        ? document.querySelector('main > .top') : document.getElementById('painel-saudacao');
+      var noPainel = location.pathname.indexOf('painel') >= 0;
+      var alvo = noPainel ? document.getElementById('painel-saudacao') : document.querySelector('main > .top');
       if (!alvo || document.getElementById('zenith-imagem-pessoal')) return;
       var url = URL.createObjectURL(await foto.blob());
       var estilo = document.createElement('style');
-      estilo.textContent = '.zenith-imagem-pessoal{height:104px;margin:12px 0 18px;border-radius:12px;overflow:hidden;border:1px solid var(--line,#27313b);background:var(--panel2,#181d24)}.zenith-imagem-pessoal img{width:100%;height:100%;object-fit:cover;display:block}@media(max-width:640px){.zenith-imagem-pessoal{height:82px;margin:10px 0 14px}}';
+      estilo.textContent =
+        '.zenith-imagem-pessoal-img{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;will-change:transform}' +
+        // Painel: fundo da própria faixa de saudação. O véu por cima
+        // (::before) mantém o texto legível em qualquer foto, mais fechado
+        // à esquerda (onde está a saudação) e à direita (relógio); vem do
+        // token do tema, então no Claro o véu é claro e o texto continua
+        // escuro. A linha sólida de rgba é só o fallback de navegador sem
+        // color-mix.
+        '.painel-saudacao.zenith-com-imagem{position:relative;overflow:hidden;isolation:isolate;min-height:96px}' +
+        '.painel-saudacao.zenith-com-imagem>*{position:relative;z-index:2}' +
+        // position aqui de novo, de proposito: a regra >* acima (mais especifica que
+        // .zenith-imagem-pessoal-img) deixava a foto como item da grade e a faixa
+        // crescia ate a altura da foto
+        '.painel-saudacao.zenith-com-imagem>img.zenith-imagem-pessoal-img{position:absolute;z-index:0}' +
+        '.painel-saudacao.zenith-com-imagem::before{content:"";position:absolute;inset:0;z-index:1;background:rgba(11,13,16,.55);' +
+          'background:linear-gradient(90deg,color-mix(in srgb,var(--panel) 86%,transparent) 0%,color-mix(in srgb,var(--panel) 42%,transparent) 50%,color-mix(in srgb,var(--panel) 74%,transparent) 100%)}' +
+        // Meu Dia: faixa própria abaixo do cabeçalho, como antes
+        '.zenith-imagem-pessoal{position:relative;height:104px;margin:12px 0 18px;border-radius:12px;overflow:hidden;border:1px solid var(--line,#27313b);background:var(--panel2,#181d24)}' +
+        '@media(max-width:640px){.zenith-imagem-pessoal{height:82px;margin:10px 0 14px}}';
       document.head.appendChild(estilo);
-      var faixa = document.createElement('section');
-      faixa.id = 'zenith-imagem-pessoal'; faixa.className = 'zenith-imagem-pessoal';
-      var img = document.createElement('img'); img.src = url; img.alt = 'Sua imagem de personalização';
-      faixa.appendChild(img); alvo.insertAdjacentElement('afterend', faixa);
+      var img = document.createElement('img');
+      img.className = 'zenith-imagem-pessoal-img'; img.src = url; img.alt = '';
+      aplicarEnquadroPessoal(img, est.enquadro);
+      if (noPainel) {
+        img.id = 'zenith-imagem-pessoal';
+        alvo.classList.add('zenith-com-imagem');
+        alvo.insertBefore(img, alvo.firstChild);
+      } else {
+        var faixa = document.createElement('section');
+        faixa.id = 'zenith-imagem-pessoal'; faixa.className = 'zenith-imagem-pessoal';
+        faixa.appendChild(img); alvo.insertAdjacentElement('afterend', faixa);
+      }
     } catch (_) { /* aparência nunca pode impedir o trabalho da tela */ }
   }
   function iniciar() { montarControles(); vigiarDrawer(); montarImagemPessoal(); avisarSinoNoEnderecoNovo(); avisarFechamentoPendente(); montarBeniboy(); }
