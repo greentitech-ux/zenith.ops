@@ -1527,9 +1527,84 @@
     document.head.appendChild(tag);
   }
 
-  // Faixa pessoal limitada às duas telas combinadas. A foto é buscada como
-  // Blob autenticado (nunca por URL pública) e só entra no DOM depois de o
-  // servidor confirmar que pertence ao usuário logado.
+  // Imagem pessoal nas duas telas combinadas (Painel e Meu Dia). A foto é
+  // buscada como Blob autenticado (nunca por URL pública) e só entra no DOM
+  // depois de o servidor confirmar que pertence ao usuário logado.
+  //
+  // ONDE ELA ENTRA (pedido do Master, 13/10): no Painel vai ATRÁS da faixa de
+  // saudação - "Bom dia, fulano" com a imagem de fundo, relógio e "ao vivo"
+  // no canto direito - e não numa faixa separada abaixo. No Meu Dia continua
+  // a faixa logo abaixo do cabeçalho. Nas duas, o ENQUADRAMENTO escolhido em
+  // Minha imagem (x/y/zoom) é aplicado com as mesmas regras de CSS da prévia
+  // (aplicarEnquadro, também usada por minha-aparencia.html): é isso que faz
+  // a tela aparecer "do jeito que está na pré-visualização".
+  // POR QUE NÃO object-fit:cover. "Cobrir" com posição em % depende da
+  // PROPORÇÃO da caixa: a faixa tem altura fixa e largura variável, então ao
+  // estreitar a janela a foto encolhia e o corte vertical andava - o Master
+  // viu isso como "distorce quando muda o tamanho" (13/10).
+  //
+  // A REGRA AGORA: o enquadro vira um RECORTE da própria imagem - o que a
+  // prévia mostrava, na proporção da prévia (enq.ref) - e esse recorte é
+  // CONTIDO na faixa, em qualquer largura:
+  //  - faixa da mesma proporção: idêntico à prévia;
+  //  - faixa mais estreita (celular): o recorte inteiro continua visível,
+  //    menor, com mais foto em cima e embaixo;
+  //  - faixa mais larga: mesmo tamanho da prévia (o logo não cresce), e a
+  //    sobra nas laterais mostra mais foto ou se funde no fundo do painel.
+  // x/y = ponto da imagem (0-100%) no centro do recorte; zoom 1-3 = quanto
+  // o recorte é menor que o "cobrir" da prévia.
+  // Função PURA (só números): é a que o testeRotas.js executa e confere.
+  function calcularEnquadroPessoal(iw, ih, W, H, enq) {
+    var e = enq || {};
+    var num = function (v, padrao, min, max) { var n = Number(v); return (v === null || v === undefined || v === '' || !isFinite(n)) ? padrao : Math.min(max, Math.max(min, n)); };
+    var cx = num(e.x, 50, 0, 100) / 100, cy = num(e.y, 50, 0, 100) / 100;
+    var zoom = num(e.zoom, 1, 1, 3), ref = num(e.ref, 12.6, 1, 40);
+    // recorte na proporção da prévia: o "cobrir" daquela caixa, dividido pelo zoom
+    var rw = Math.min(iw, ih * ref) / zoom, rh = rw / ref;
+    // o centro não deixa o recorte sair da imagem
+    var px = Math.min(iw - rw / 2, Math.max(rw / 2, cx * iw));
+    var py = Math.min(ih - rh / 2, Math.max(rh / 2, cy * ih));
+    // o recorte CONTIDO na faixa
+    var esc = Math.min(W / rw, H / rh);
+    var lw = iw * esc, lh = ih * esc;
+    var left = W / 2 - px * esc, top = H / 2 - py * esc;
+    // onde a imagem é maior que a faixa, nunca deixa buraco; onde é menor,
+    // centraliza (a sobra é o fundo do painel, com borda esfumada)
+    left = lw >= W ? Math.min(0, Math.max(W - lw, left)) : (W - lw) / 2;
+    top = lh >= H ? Math.min(0, Math.max(H - lh, top)) : (H - lh) / 2;
+    return { width: lw, height: lh, left: left, top: top, sobraLateral: lw < W - 1, sobraVertical: lh < H - 1 };
+  }
+  window.calcularEnquadroPessoal = calcularEnquadroPessoal;
+  function aplicarEnquadroPessoal(img, enq) {
+    img.__enquadro = enq || {};
+    var desenhar = function () {
+      var caixa = img.parentElement;
+      if (!caixa || !img.naturalWidth) return;
+      var W = caixa.clientWidth, H = caixa.clientHeight;
+      if (!W || !H) return;
+      var r = calcularEnquadroPessoal(img.naturalWidth, img.naturalHeight, W, H, img.__enquadro);
+      img.style.objectFit = 'fill';
+      img.style.transform = 'none';
+      img.style.inset = 'auto';
+      img.style.maxWidth = 'none';
+      img.style.width = r.width + 'px'; img.style.height = r.height + 'px';
+      img.style.left = r.left + 'px'; img.style.top = r.top + 'px';
+      // borda esfumada só onde sobra espaço: a foto se funde no painel em vez
+      // de terminar num corte reto
+      var m = r.sobraLateral ? 'linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)'
+        : (r.sobraVertical ? 'linear-gradient(180deg,transparent,#000 12%,#000 88%,transparent)' : 'none');
+      img.style.webkitMaskImage = m; img.style.maskImage = m;
+    };
+    img.__desenharEnquadro = desenhar;
+    if (img.complete && img.naturalWidth) desenhar(); else img.addEventListener('load', desenhar, { once: true });
+    // acompanha a largura da faixa (janela redimensionada, celular girado,
+    // menu aberto): recalcula o recorte em vez de deixar o navegador esticar
+    if (!img.__observando && typeof ResizeObserver === 'function' && img.parentElement) {
+      img.__observando = true;
+      new ResizeObserver(function () { if (img.__desenharEnquadro) img.__desenharEnquadro(); }).observe(img.parentElement);
+    }
+  }
+  window.aplicarEnquadroPessoal = aplicarEnquadroPessoal;
   async function montarImagemPessoal() {
     if (!['/painel', '/painel.html', '/tarefas', '/tarefas.html'].includes(location.pathname)) return;
     var token = localStorage.getItem('authToken');
@@ -1537,20 +1612,48 @@
     try {
       var cab = { Authorization: 'Bearer ' + token };
       var estado = await fetch('/api/me/personalizacao', { headers: cab });
-      if (!estado.ok || !(await estado.json()).temImagem) return;
+      if (!estado.ok) return;
+      var est = await estado.json();
+      if (!est.temImagem) return;
       var foto = await fetch('/api/me/personalizacao/imagem', { headers: cab });
       if (!foto.ok) return;
-      var alvo = location.pathname.indexOf('tarefas') >= 0
-        ? document.querySelector('main > .top') : document.getElementById('painel-saudacao');
+      var noPainel = location.pathname.indexOf('painel') >= 0;
+      var alvo = noPainel ? document.getElementById('painel-saudacao') : document.querySelector('main > .top');
       if (!alvo || document.getElementById('zenith-imagem-pessoal')) return;
       var url = URL.createObjectURL(await foto.blob());
       var estilo = document.createElement('style');
-      estilo.textContent = '.zenith-imagem-pessoal{height:104px;margin:12px 0 18px;border-radius:12px;overflow:hidden;border:1px solid var(--line,#27313b);background:var(--panel2,#181d24)}.zenith-imagem-pessoal img{width:100%;height:100%;object-fit:cover;display:block}@media(max-width:640px){.zenith-imagem-pessoal{height:82px;margin:10px 0 14px}}';
+      estilo.textContent =
+        '.zenith-imagem-pessoal-img{position:absolute;display:block;pointer-events:none;max-width:none}' +
+        // Painel: fundo da própria faixa de saudação. O véu por cima
+        // (::before) mantém o texto legível em qualquer foto, mais fechado
+        // à esquerda (onde está a saudação) e à direita (relógio); vem do
+        // token do tema, então no Claro o véu é claro e o texto continua
+        // escuro. A linha sólida de rgba é só o fallback de navegador sem
+        // color-mix.
+        '.painel-saudacao.zenith-com-imagem{position:relative;overflow:hidden;isolation:isolate;min-height:96px}' +
+        '.painel-saudacao.zenith-com-imagem>*{position:relative;z-index:2}' +
+        // position aqui de novo, de proposito: a regra >* acima (mais especifica que
+        // .zenith-imagem-pessoal-img) deixava a foto como item da grade e a faixa
+        // crescia ate a altura da foto
+        '.painel-saudacao.zenith-com-imagem>img.zenith-imagem-pessoal-img{position:absolute;z-index:0}' +
+        '.painel-saudacao.zenith-com-imagem::before{content:"";position:absolute;inset:0;z-index:1;background:rgba(11,13,16,.55);' +
+          'background:linear-gradient(90deg,color-mix(in srgb,var(--panel) 86%,transparent) 0%,color-mix(in srgb,var(--panel) 42%,transparent) 50%,color-mix(in srgb,var(--panel) 74%,transparent) 100%)}' +
+        // Meu Dia: faixa própria abaixo do cabeçalho, como antes
+        '.zenith-imagem-pessoal{position:relative;height:104px;margin:12px 0 18px;border-radius:12px;overflow:hidden;border:1px solid var(--line,#27313b);background:var(--panel2,#181d24)}' +
+        '@media(max-width:640px){.zenith-imagem-pessoal{height:82px;margin:10px 0 14px}}';
       document.head.appendChild(estilo);
-      var faixa = document.createElement('section');
-      faixa.id = 'zenith-imagem-pessoal'; faixa.className = 'zenith-imagem-pessoal';
-      var img = document.createElement('img'); img.src = url; img.alt = 'Sua imagem de personalização';
-      faixa.appendChild(img); alvo.insertAdjacentElement('afterend', faixa);
+      var img = document.createElement('img');
+      img.className = 'zenith-imagem-pessoal-img'; img.src = url; img.alt = '';
+      aplicarEnquadroPessoal(img, est.enquadro);
+      if (noPainel) {
+        img.id = 'zenith-imagem-pessoal';
+        alvo.classList.add('zenith-com-imagem');
+        alvo.insertBefore(img, alvo.firstChild);
+      } else {
+        var faixa = document.createElement('section');
+        faixa.id = 'zenith-imagem-pessoal'; faixa.className = 'zenith-imagem-pessoal';
+        faixa.appendChild(img); alvo.insertAdjacentElement('afterend', faixa);
+      }
     } catch (_) { /* aparência nunca pode impedir o trabalho da tela */ }
   }
   function iniciar() { montarControles(); vigiarDrawer(); montarImagemPessoal(); avisarSinoNoEnderecoNovo(); avisarFechamentoPendente(); montarBeniboy(); }

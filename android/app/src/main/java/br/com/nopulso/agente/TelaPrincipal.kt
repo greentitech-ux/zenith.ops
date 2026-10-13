@@ -61,7 +61,7 @@ class TelaPrincipal : android.app.Activity() {
     caixa.addView(texto)
     setContentView(caixa)
 
-    pedirPermissaoDeNotificacao()
+    pedirPermissoes()
     tratarLink(intent)
     if (Identidade.inscrito(this)) ServicoAgente.ligar(this)
     mostrarEstado()
@@ -95,7 +95,9 @@ class TelaPrincipal : android.app.Activity() {
       val posto = Identidade.posto(this)
       "Monitorando a unidade ${Identidade.unidade(this)}" +
         (if (posto.isNotBlank()) "\ncomputador $posto" else "") +
-        "\n\nPode fechar esta tela: o agente continua batendo presenca sozinho."
+        "\n\nPode fechar esta tela: o agente continua batendo presenca sozinho." +
+        (if (RedeWifi.temPermissaoDeLocalizacao(this)) "" else
+          "\n\nSem a permissao de localizacao, o NOC nao ve o nome nem o sinal da rede Wi-Fi deste aparelho.")
     } else {
       "Este aparelho ainda nao foi inscrito.\n\n" +
         "Abra no tablet o link de inscricao que o NOC gera em\n" +
@@ -104,14 +106,31 @@ class TelaPrincipal : android.app.Activity() {
   }
 
   /**
-   * Android 13+ exige permissao pra notificacao - e sem notificacao o servico
-   * em primeiro plano nao existe. Negar aqui nao trava nada: o servico ainda
-   * sobe, so fica mais exposto a ser morto pelo sistema.
+   * Duas permissoes, UM pedido (dois requestPermissions seguidos cancelam o
+   * primeiro dialogo):
+   *  - notificacao (Android 13+): sem ela o servico em primeiro plano nao
+   *    existe. Negar nao trava nada: o servico sobe, so fica mais exposto a
+   *    ser morto pelo sistema;
+   *  - localizacao: e' o que o Android exige pra contar o NOME e o sinal da
+   *    rede Wi-Fi (ver RedeWifi). Negar tambem nao trava nada: a ficha do
+   *    NOC fica sem esses dois dados, e so.
    */
-  private fun pedirPermissaoDeNotificacao() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-    val jaTem = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-    if (jaTem == PackageManager.PERMISSION_GRANTED) return
-    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+  private fun pedirPermissoes() {
+    val faltam = ArrayList<String>()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+      ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+    ) faltam.add(Manifest.permission.POST_NOTIFICATIONS)
+    if (!RedeWifi.temPermissaoDeLocalizacao(this)) {
+      faltam.add(Manifest.permission.ACCESS_FINE_LOCATION)
+      faltam.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+    }
+    if (faltam.isEmpty()) return
+    requestPermissions(faltam.toTypedArray(), 1)
+  }
+
+  override fun onRequestPermissionsResult(codigo: Int, permissoes: Array<out String>, resultados: IntArray) {
+    super.onRequestPermissionsResult(codigo, permissoes, resultados)
+    // o servico ja rodando se promove sozinho a "location" na proxima batida
+    mostrarEstado()
   }
 }

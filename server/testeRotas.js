@@ -5217,6 +5217,79 @@ setTimeout(async () => {
   console.log(`${okEmpresaArquivar ? '✓' : '✗'} Empresa: arquivar/excluir só com Master + senha, e arquivada deixa de ser dona das unidades`);
 
   // ------------------------------------------------------------------
+  // Tipos de negócio cadastráveis (pedido do Master pra cadastrar a
+  // Solutions Ti Tech como "Tecnologia"). O que precisa ficar provado: o
+  // catálogo aceita tipo novo e a empresa fica GRAVADA com ele (antes
+  // qualquer valor desconhecido virava 'alimentacao' em silêncio); tipo
+  // não cadastrado é recusado com erro, não convertido; não dá pra
+  // remover tipo em uso nem o fixo; e só o Master mexe no catálogo.
+  let okTiposNegocio = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const SENHA = process.env.MASTER_PASSWORD;
+    const empresasMod = require(__dirname + '/empresas.js');
+    const authTn = require(__dirname + '/auth.js');
+    DOCS.set('users/u-tipos-loja', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'tipos-loja@teste.local', username: 'tiposloja',
+      permissions: { sections: ['suporte'], unidades: ['19855'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabLoja = { Authorization: 'Bearer ' + (await authTn.login('tipos-loja@teste.local', 'SenhaDeTeste!2026')).token };
+
+    const listaInicial = await pedir('/api/empresas/tipos-negocio', cab);
+    const tiposIniciais = listaInicial.status === 200 ? JSON.parse(listaInicial.corpo) : [];
+    const criou = await postarJson('/api/empresas/tipos-negocio', { nome: '  Tecnologia  ' }, cab);
+    const criado = criou.status === 200 ? JSON.parse(criou.corpo) : {};
+    const repetiu = await postarJson('/api/empresas/tipos-negocio', { nome: 'tecnologia' }, cab);
+    const vazio = await postarJson('/api/empresas/tipos-negocio', { nome: '' }, cab);
+    const acentuado = await postarJson('/api/empresas/tipos-negocio', { nome: 'Clínica Odontológica' }, cab);
+    const listaDepois = JSON.parse((await pedir('/api/empresas/tipos-negocio', cab)).corpo);
+
+    const empresaTec = await postarJson('/api/empresas', { nome: 'Solutions Ti Tech', tipoNegocio: 'tecnologia', unidades: [] }, cab);
+    const idTec = empresaTec.status === 200 ? JSON.parse(empresaTec.corpo).id : null;
+    empresasMod.invalidarCache();
+    const gravada = (await empresasMod.list()).find((e) => e.id === idTec);
+    const desconhecido = await postarJson('/api/empresas', { nome: 'Empresa Fantasma', tipoNegocio: 'saude', unidades: [] }, cab);
+    const editarDesconhecido = idTec ? await enviarJson('PUT', `/api/empresas/${idTec}`, { tipoNegocio: 'saude' }, cab) : { status: 0, corpo: '' };
+
+    const removerEmUso = await enviarJson('DELETE', '/api/empresas/tipos-negocio/tecnologia', {}, cab);
+    const removerFixo = await enviarJson('DELETE', '/api/empresas/tipos-negocio/alimentacao', {}, cab);
+    const removerInexistente = await enviarJson('DELETE', '/api/empresas/tipos-negocio/nao-existe', {}, cab);
+    const lojaLista = await pedir('/api/empresas/tipos-negocio', cabLoja);
+    const lojaCria = await postarJson('/api/empresas/tipos-negocio', { nome: 'Invasor' }, cabLoja);
+
+    if (idTec) await enviarJson('DELETE', `/api/empresas/${idTec}`, { password: SENHA }, cab);
+    empresasMod.invalidarCache();
+    const removerLivre = await enviarJson('DELETE', '/api/empresas/tipos-negocio/tecnologia', {}, cab);
+    const removerOdonto = await enviarJson('DELETE', '/api/empresas/tipos-negocio/clinica-odontologica', {}, cab);
+    const listaFinal = JSON.parse((await pedir('/api/empresas/tipos-negocio', cab)).corpo);
+
+    const conferencias = {
+      'catálogo começa com Alimentação fixa': tiposIniciais.some((t) => t.codigo === 'alimentacao' && t.nome === 'Alimentação' && t.fixo === true),
+      'criar "Tecnologia" devolve código tecnologia e nome sem espaços sobrando': criou.status === 200 && criado.codigo === 'tecnologia' && criado.nome === 'Tecnologia' && criado.fixo === false,
+      'repetir o mesmo tipo (mesmo em minúsculas) é recusado': repetiu.status === 400 && /já existe/.test(repetiu.corpo),
+      'nome vazio é recusado': vazio.status === 400,
+      'acento e espaço viram código limpo (clinica-odontologica)': acentuado.status === 200 && JSON.parse(acentuado.corpo).codigo === 'clinica-odontologica',
+      'a lista traz o tipo novo depois da Alimentação': listaDepois.length >= 3 && listaDepois[0].codigo === 'alimentacao' && listaDepois.some((t) => t.codigo === 'tecnologia'),
+      'empresa cadastrada com o tipo novo fica GRAVADA com ele (não vira alimentacao)': empresaTec.status === 200 && gravada && gravada.tipoNegocio === 'tecnologia',
+      'tipo não cadastrado é recusado com erro, não convertido em silêncio': desconhecido.status === 400 && /não cadastrado/.test(desconhecido.corpo),
+      'editar empresa pra tipo não cadastrado também é recusado': editarDesconhecido.status === 400 && /não cadastrado/.test(editarDesconhecido.corpo),
+      'tipo em uso não pode ser removido, e o erro diz qual empresa usa': removerEmUso.status === 400 && /Solutions Ti Tech/.test(removerEmUso.corpo),
+      'o tipo fixo (Alimentação) não pode ser removido': removerFixo.status === 400 && /fixo/.test(removerFixo.corpo),
+      'remover tipo inexistente responde 400 em vez de estourar': removerInexistente.status === 400,
+      'usuário comum não lê o catálogo (403)': lojaLista.status === 403,
+      'usuário comum não cria tipo (403)': lojaCria.status === 403,
+      'sem empresa usando, o tipo sai do catálogo': removerLivre.status === 200 && removerOdonto.status === 200 && !listaFinal.some((t) => t.codigo === 'tecnologia' || t.codigo === 'clinica-odontologica'),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okTiposNegocio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTiposNegocio = false; console.log('  erro: ' + e.message); }
+  if (!okTiposNegocio) ruins += 1;
+  console.log(`${okTiposNegocio ? '✓' : '✗'} Empresa: tipo de negócio cadastrável (Alimentação fixa + catálogo do Master), gravado de verdade e só removível sem uso`);
+
+  // ------------------------------------------------------------------
   // Mensagem direta: o Master disse que aviso que some da tela não serve -
   // tem que ser caixa de diálogo que a pessoa ABRE, e ela responde por
   // dentro. Prova aqui: a mensagem FICA GRAVADA (não depende de a pessoa
@@ -6188,6 +6261,421 @@ setTimeout(async () => {
   } catch (e) { okNoc = false; console.log('  erro: ' + e.message); }
   if (!okNoc) ruins += 1;
   console.log(`${okNoc ? '✓' : '✗'} NOC: Ethernet caída vira DEGRADADO, reinício é detectado pelo boot, e o Master reinicia o parque com senha`);
+
+  // ------------------------------------------------------------------
+  // Visão geral mostra o que o agente MEDE da rede (pedido do Master: "quero
+  // esses dados"): sinal Wi-Fi %, roteador e internet do dia, na linha
+  // Conexão. Antes só existia na aba Rede, como nota. O que fica provado: o
+  // detalhe traz o resumo do dia calculado pelo servidor (redeResumo), a
+  // tela desenha os três números a partir dele, e máquina sem medição não
+  // ganha linha nenhuma (número inventado é pior que linha vazia).
+  let okRedeNaFicha = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const UNI = 'NOCTESTE';
+    const postoNoc = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-NOC').posto;
+    const tk = await ls.garantirAgentToken(UNI, postoNoc);
+    const bater = (extra) => ls.heartbeat(UNI, postoNoc, { userAgent: 'NOCZenith/1.0', ...extra }, tk);
+    await bater({ link: { tipo: 'wifi', nome: 'LOJA-5G', mbps: 300 }, rede: { conexao: 'wifi', sinalWifi: 48, gatewayMs: 12, wanMs: 140, wanPerdaPct: 3 } });
+    await bater({ rede: { conexao: 'wifi', sinalWifi: 72, gatewayMs: 8, wanMs: 100, wanPerdaPct: 1 } });
+    const ficha = await ls.detalhar(UNI, postoNoc);
+    const r = (ficha && ficha.redeResumo) || {};
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    // máquina cadastrada que nunca mediu rede: sem resumo
+    await ls.cadastrarComputador(UNI, 'SEM-MEDICAO', 'interno');
+    const semMed = await ls.detalhar(UNI, (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'SEM-MEDICAO').posto);
+
+    const conferencias = {
+      'o detalhe traz redeResumo do dia, calculado no servidor': r.semDados === false && r.conexao === 'wifi',
+      'sinal Wi-Fi: média e mínimo do dia': r.sinalWifiMedio === 60 && r.sinalWifiMin === 48,
+      'roteador e internet: média do dia, com perda': r.gatewayMedia === 10 && r.wanMedia === 120 && r.wanPerda === 2,
+      'máquina sem medição não ganha resumo (semDados), e a tela não desenha nada': !!(semMed && semMed.redeResumo && semMed.redeResumo.semDados === true)
+        && /if\(!r \|\| r\.semDados\) return '';/.test(html),
+      'a linha Conexão da Visão geral desenha sinal Wi-Fi, roteador e internet a partir do redeResumo':
+        // desde 13/10 dentro do bloco "Conexão": linhas Sinal (média/mín.) e Latência
+        /const r = \(c\.redeResumo && !c\.redeResumo\.semDados\) \? c\.redeResumo : null;/.test(html)
+        && /sinalPartes\.push\(`média <b/.test(html) && /function latenciaDoDiaHtml\(r\)/.test(html)
+        && /roteador <b/.test(html) && /internet <b/.test(html) && /\['Latência', latenciaDoDiaHtml\(r\)\]/.test(html),
+      'limiares da ficha são os mesmos da aba Rede (30 ms roteador, 120 ms internet, 2% perda, 60% sinal)':
+        /REDE_ROTEADOR_LENTO_MS = 30;/.test(html) && /REDE_INTERNET_LENTA_MS = 120;/.test(html)
+        && /REDE_PERDA_RUIM_PCT = 2;/.test(html) && /REDE_SINAL_WIFI_BAIXO = 60;/.test(html)
+        && /gatewayMedia > 30 \? 'alerta'/.test(html) && /wanMedia > 120 \|\| r\.wanPerda > 2/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okRedeNaFicha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (resumo=${JSON.stringify(r)})`);
+  } catch (e) { okRedeNaFicha = false; console.log('  erro: ' + e.message); }
+  if (!okRedeNaFicha) ruins += 1;
+  console.log(`${okRedeNaFicha ? '✓' : '✗'} NOC: a Visão geral mostra sinal Wi-Fi, roteador e internet medidos hoje (redeResumo do detalhe)`);
+
+  // ------------------------------------------------------------------
+  // Agente v150: vazão REAL da internet (download cronometrado, 1x por hora)
+  // e, no Wi-Fi, sinal/banda/canal/rádio junto com o SSID. O que fica
+  // provado: o script tem a medição com trava de 1 hora e timeout curto (o
+  // heartbeat não pode atrasar); o servidor guarda os campos novos com
+  // faixa fechada e descarta lixo; vazão/sinal variando NÃO vira evento de
+  // link (só mudança estrutural vira); a ficha separa "placa" de "internet";
+  // e a versão subiu (senão nenhuma máquina recebe).
+  let okVazao = false;
+  try {
+    const vg = require(__dirname + '/vigiaScript.js');
+    const ps = vg.montarScriptVigia({ codigo: 'VZ', posto: 'PC1', tipo: 'interno', agentToken: 'tokvz' });
+    const psAntigo = vg.montarScriptVigia({ codigo: 'VZ', posto: 'PC1', tipo: 'interno', agentToken: 'tokvz', windowsAntigo: true });
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const ls = require(__dirname + '/lojaStatus.js');
+    const UNI = 'NOCTESTE';
+    const postoNoc = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-NOC').posto;
+    const tk = await ls.garantirAgentToken(UNI, postoNoc);
+    const bater = (extra) => ls.heartbeat(UNI, postoNoc, { userAgent: 'NOCZenith/1.0', ...extra }, tk);
+    const doc = async () => ls.detalhar(UNI, postoNoc);
+    // o painel só relê quando há EVENTO de link (mudança estrutural). Então:
+    // A (estrutural) grava e vira evento; B (só sinal/vazão) NÃO pode virar
+    // evento; C (estrutural de novo, com os valores de B) força a releitura
+    // e prova que B foi guardado; D manda lixo.
+    const base = { tipo: 'wifi', nome: 'LOJA-5G-V150', mbps: 300, ethernetPresente: false };
+    await bater({ link: { ...base, sinalWifi: 71, canal: 36, banda: '5 GHz', radio: '802.11ax', vazaoMbps: 38.678, vazaoEm: 1791870000000 } });
+    const d1 = await doc();
+    const eventosAntes = (d1.eventos || []).filter((e) => e.tipo === 'link').length;
+    await bater({ link: { ...base, sinalWifi: 55, canal: 36, banda: '5 GHz', radio: '802.11ax', vazaoMbps: 12.1, vazaoEm: 1791873600000 } });
+    await bater({ link: { ...base, nome: 'LOJA-5G', sinalWifi: 55, canal: 36, banda: '5 GHz', radio: '802.11ax', vazaoMbps: 12.1, vazaoEm: 1791873600000 } });
+    const d2 = await doc();
+    const eventosDepois = (d2.eventos || []).filter((e) => e.tipo === 'link').length;
+    // lixo: sinal 250%, canal 0, banda enorme, vazão negativa
+    await bater({ link: { ...base, nome: 'LIXO', sinalWifi: 250, canal: 0, banda: 'x'.repeat(50), radio: 'y'.repeat(60), vazaoMbps: -5, vazaoEm: 'ontem' } });
+    const d3 = await doc();
+
+    const conferencias = {
+      'VERSAO_VIGIA subiu pra 150+ (senão nenhuma das 52 máquinas mede)': vg.VERSAO_VIGIA >= 150,
+      'o agente mede a vazão baixando 512 KB de endpoint público, não do NoPulso (banda do Render)':
+        /function Medir-Vazao/.test(ps) && /speed\.cloudflare\.com\/__down\?bytes=524288/.test(ps)
+        && !/Medir-Vazao[\s\S]*\$UrlHeartbeat/.test(ps.slice(ps.indexOf('function Medir-Vazao'), ps.indexOf('function Medir-Vazao') + 1500)),
+      'a medição tem trava de 1 hora e timeout de 8 s (o heartbeat não pode atrasar)':
+        /TotalMinutes -lt 60\) \{ return \$script:VazaoUltima \}/.test(ps) && /Invoke-WebRequest -Uri \$UrlTesteVazao -UseBasicParsing -TimeoutSec 8/.test(ps),
+      'resposta curta demais (bloqueio/portal cativo) não vira número': /\$bytes -ge 65536 -and \$seg -gt 0/.test(ps),
+      'a vazão viaja dentro do link, na cadência do link': /\$Link\.vazaoMbps = \$vz\.vazaoMbps; \$Link\.vazaoEm = \$vz\.vazaoEm/.test(ps),
+      'no Wi-Fi o agente lê sinal, canal, banda e rádio do netsh (rótulo pt/en), nos dois ramos do Medir-Link':
+        /function Ler-WifiDetalhes/.test(ps) && /\(Canal\|Channel\)/.test(ps) && /Band\[a\]\?/.test(ps) && /Radio type\|Tipo de r\.dio/.test(ps)
+        && (ps.match(/if \(\$r\.tipo -eq "wifi"\) \{ try \{ Aplicar-WifiDetalhes \$r \} catch \{\} \}/g) || []).length === 2,
+      'banda sai do canal quando o Windows não imprime a linha Band': /\$w\.canal -ge 1 -and \$w\.canal -le 14\) \{ \$w\.banda = "2,4 GHz" \}/.test(ps) && /\$w\.canal -ge 32 -and \$w\.canal -le 177\) \{ \$w\.banda = "5 GHz" \}/.test(ps),
+      'a versão de Windows antigo gera sem API de PowerShell 5 (o relógio da vazão foi trocado)': !/ToUnixTimeMilliseconds/.test(psAntigo) && /function Medir-Vazao/.test(psAntigo),
+      'o servidor guarda sinal, canal, banda, rádio e vazão com faixa fechada':
+        d1.link && d1.link.sinalWifi === 71 && d1.link.canal === 36 && d1.link.banda === '5 GHz' && d1.link.radio === '802.11ax'
+        && d1.link.vazaoMbps === 38.68 && d1.link.vazaoEm === 1791870000000,
+      'lixo nos campos novos vira null, nunca número inventado':
+        d3.link && d3.link.sinalWifi === null && d3.link.canal === null && d3.link.banda === 'x'.repeat(10) && d3.link.radio === 'y'.repeat(20)
+        && d3.link.vazaoMbps === null && d3.link.vazaoEm === null,
+      'sinal e vazão variando NÃO viram evento de link (só a mudança estrutural de C virou, uma)': eventosDepois === eventosAntes + 1 && d2.link.nome === 'LOJA-5G' && d2.link.sinalWifi === 55 && d2.link.vazaoMbps === 12.1,
+      'a ficha separa "placa" (negociada) de "internet" (medida) e mostra rede/sinal/banda do Wi-Fi':
+        /const placa = link\.tipo!=='nenhum'/.test(html) && /\['Placa', placa\]/.test(html)
+        && /const internet = Number\.isFinite\(vazao\)/.test(html) && /<span class="sub">medido/.test(html) && /\['Internet', internet\]/.test(html)
+        && /link\.banda \? `<b>\$\{escapeHtml\(String\(link\.banda\)\)\}<\/b>`/.test(html) && /\['Frequência', freq\]/.test(html)
+        && /sinalPartes\.push\(`<b style="color:\$\{corSinal\(link\.sinalWifi\)\};">/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okVazao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (link=${JSON.stringify(d3 && d3.link)} eventos=${eventosAntes}/${eventosDepois})`);
+  } catch (e) { okVazao = false; console.log('  erro: ' + e.message); }
+  if (!okVazao) ruins += 1;
+  console.log(`${okVazao ? '✓' : '✗'} NOCZenith v150: vazão real da internet (1x/hora, 8 s) e sinal/banda/canal do Wi-Fi no link, sem virar evento a cada medição`);
+
+  // ------------------------------------------------------------------
+  // App Android v5 (RedeWifi.kt): nome da rede, sinal, frequência e link do
+  // Wi-Fi do tablet - o que o navegador nunca conta. O que fica provado do
+  // lado de cá: o servidor aceita os três campos novos com faixa fechada
+  // (sinal 0-100, frequência 2000-7200 MHz, link 1-10000 Mbps) e o nome sem
+  // aspas/quebras; a ficha desenha sinal, banda derivada da frequência e
+  // "placa"; o app pede a permissão de localização e só se declara
+  // "location" quando a tem; e versionCode/VERSAO_AGENTE_ANDROID subiram
+  // juntos pra 5 (o teste de versão lá embaixo confere a igualdade).
+  let okAppWifi = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const fs = require('fs');
+    const raiz = require('path').join(__dirname, '..');
+    const html = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const redeKt = fs.readFileSync(raiz + '/android/app/src/main/java/br/com/nopulso/agente/RedeWifi.kt', 'utf8');
+    const telemetriaKt = fs.readFileSync(raiz + '/android/app/src/main/java/br/com/nopulso/agente/Telemetria.kt', 'utf8');
+    const servicoKt = fs.readFileSync(raiz + '/android/app/src/main/java/br/com/nopulso/agente/ServicoAgente.kt', 'utf8');
+    const telaKt = fs.readFileSync(raiz + '/android/app/src/main/java/br/com/nopulso/agente/TelaPrincipal.kt', 'utf8');
+    const manifesto = fs.readFileSync(raiz + '/android/app/src/main/AndroidManifest.xml', 'utf8');
+    const testeKt = fs.readFileSync(raiz + '/android/app/src/test/java/br/com/nopulso/agente/RedeWifiTest.kt', 'utf8');
+    const agente = require(__dirname + '/agenteAndroid.js');
+
+    const bom = ls.sanitizarAparelho({ rede: { tipo: 'wifi', nome: ' LOJA-5G\n', sinal: 71, frequenciaMhz: 5180, linkMbps: 433, downlinkMbps: 38.7 }, so: { nome: 'Android', versao: '14' } });
+    const lixo = ls.sanitizarAparelho({ rede: { tipo: 'wifi', sinal: 250, frequenciaMhz: 99, linkMbps: -1 } });
+    const semNada = ls.sanitizarAparelho({ rede: { tipo: 'wifi' } });
+
+    const conferencias = {
+      'servidor guarda nome (limpo), sinal, frequência e link do Wi-Fi do app':
+        bom && bom.rede && bom.rede.nome === 'LOJA-5G' && bom.rede.sinal === 71 && bom.rede.frequenciaMhz === 5180 && bom.rede.linkMbps === 433 && bom.rede.downlinkMbps === 38.7,
+      'fora da faixa vira nada, nunca número inventado':
+        lixo && lixo.rede && lixo.rede.sinal === undefined && lixo.rede.frequenciaMhz === undefined && lixo.rede.linkMbps === undefined,
+      'só o tipo, sem os campos novos, continua válido (app antigo / navegador)': semNada && semNada.rede && semNada.rede.tipo === 'wifi' && Object.keys(semNada.rede).length === 1,
+      'a ficha desenha sinal, banda (da frequência) e placa do tablet, e explica o nome ausente pela permissão':
+        /function bandaDaFrequencia\(mhz\)/.test(html) && /bandaDaFrequencia\(ap\.rede\.frequenciaMhz\)/.test(html)
+        && /2400 && f <= 2500\) return '2,4 GHz'/.test(html) && /4900 && f <= 5900\) return '5 GHz'/.test(html)
+        && /\$\{Number\(ap\.rede\.sinal\)\}%<\/b>/.test(html) && /const placaAp = ap\.rede\.linkMbps/.test(html)
+        && /rede não informada pelo aparelho \(permissão de localização\?\)/.test(html) && /NoPulsoAgente\\\//.test(html)
+        // o MESMO bloco organizado do computador (rótulo/valor), não uma frase corrida
+        && /infoBits\.push\(blocoConexaoHtml\(\{/.test(html) && /return blocoConexaoHtml\(\{/.test(html)
+        && /\.cx-bloco\{display:inline-grid/.test(html),
+      'o app lê SSID/sinal/frequência/link só com permissão de localização, e manda no mesmo campo rede':
+        /fun temPermissaoDeLocalizacao/.test(redeKt) && /if \(!temPermissaoDeLocalizacao\(ctx\)\) return null/.test(redeKt)
+        && /wm\.connectionInfo/.test(redeKt) && /put\("nome"/.test(redeKt) && /put\("sinal", sinalPorcento/.test(redeKt)
+        && /put\("frequenciaMhz", info\.frequency\)/.test(redeKt) && /put\("linkMbps", info\.linkSpeed\)/.test(redeKt)
+        && /RedeWifi\.ler\(ctx\)/.test(telemetriaKt) && /TRANSPORT_WIFI\)\) \{\s*RedeWifi\.ler/.test(telemetriaKt),
+      'SSID escondido pelo Android ("<unknown ssid>") nunca vira nome': /SSID_DESCONHECIDO = "<unknown ssid>"/.test(redeKt) && /s == SSID_DESCONHECIDO/.test(redeKt) && /startsWith\("0x"\)/.test(redeKt),
+      'sinal na mesma régua do Windows (-100 dBm = 0%, -55 dBm = 100%), com teste unitário no app':
+        /\(rssi \+ 100\) \* 100\.0 \/ 45\.0/.test(redeKt) && /coerceIn\(0, 100\)/.test(redeKt)
+        && /sinalPorcento\(-100\)\)/.test(testeKt) && /sinalPorcento\(-55\)\)/.test(testeKt) && /limparSsid\("<unknown ssid>"\)/.test(testeKt),
+      'manifesto declara localização e o tipo "location" do serviço; o serviço só o usa COM a permissão (Android 14 recusa sem)':
+        /android\.permission\.ACCESS_FINE_LOCATION/.test(manifesto) && /android\.permission\.FOREGROUND_SERVICE_LOCATION/.test(manifesto)
+        && /foregroundServiceType="specialUse\|location"/.test(manifesto)
+        && /RedeWifi\.temPermissaoDeLocalizacao\(this\)\) \{\s*tipos = tipos or ServiceInfo\.FOREGROUND_SERVICE_TYPE_LOCATION/.test(servicoKt)
+        && /startForeground\(ID_NOTIFICACAO, notificacao, ServiceInfo\.FOREGROUND_SERVICE_TYPE_SPECIAL_USE\)/.test(servicoKt)
+        && /promoverSeGanhouLocalizacao/.test(servicoKt),
+      'a tela pede notificação e localização num pedido só, e avisa o que falta sem travar o agente':
+        /faltam\.add\(Manifest\.permission\.ACCESS_FINE_LOCATION\)/.test(telaKt) && /requestPermissions\(faltam\.toTypedArray\(\), 1\)/.test(telaKt)
+        && !/requestPermissions\(arrayOf\(Manifest\.permission\.POST_NOTIFICATIONS\), 1\)/.test(telaKt)
+        && /Sem a permissao de localizacao, o NOC nao ve o nome nem o sinal/.test(telaKt),
+      'versão do app subiu pra 5 (senão nenhum tablet recebe)': agente.VERSAO_AGENTE_ANDROID >= 5,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okAppWifi = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (bom=${JSON.stringify(bom && bom.rede)} lixo=${JSON.stringify(lixo && lixo.rede)})`);
+  } catch (e) { okAppWifi = false; console.log('  erro: ' + e.message); }
+  if (!okAppWifi) ruins += 1;
+  console.log(`${okAppWifi ? '✓' : '✗'} Agente Android v5: nome, sinal, frequência e link do Wi-Fi do tablet (com permissão de localização), aceitos com faixa fechada e desenhados na ficha`);
+
+  // ------------------------------------------------------------------
+  // Imagem pessoal: ENQUADRAMENTO (pedido do Master: "enquadrar mais pra
+  // cima/baixo ou dar zoom, como a foto do WhatsApp" e "que apareça do jeito
+  // que está na pré-visualização") e o lugar dela no Painel (fundo da faixa
+  // de saudação, relógio e "ao vivo" no canto direito). O que fica provado:
+  // o enquadro é guardado com faixa fechada (x/y 0-100, zoom 1-3) tanto no
+  // envio da foto quanto no ajuste depois; sem foto não há enquadro; a prévia
+  // e o Painel usam a MESMA função de CSS (aplicarEnquadroPessoal); e a
+  // faixa do Painel tem o relógio e o "ao vivo" à direita.
+  let okEnquadro = false;
+  try {
+    const usersMod = require(__dirname + '/users.js');
+    const fs = require('fs');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const painelHtml = fs.readFileSync(__dirname + '/public/painel.html', 'utf8');
+    const minhaHtml = fs.readFileSync(__dirname + '/public/minha-aparencia.html', 'utf8');
+    const iniCalc = tema.indexOf('function calcularEnquadroPessoal(');
+    const calcEnq = new Function('return ' + tema.slice(iniCalc, tema.indexOf('\n  }\n', iniCalc) + 4))();
+    const cab = { Authorization: 'Bearer ' + token };
+    const png = { nome: 'capa.png', tipo: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
+
+    const semFoto = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 10, y: 20, zoom: 2 }, cab);
+    const enviou = await postarMultipart('/api/me/personalizacao/imagem', { x: '30', y: '80', zoom: '1.5', ref: '15.3' }, png, 'imagem', cab, 'POST');
+    const estado1 = await pedir('/api/me/personalizacao', cab);
+    const ajuste = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 150, y: -5, zoom: 9, ref: 100 }, cab);
+    const estado2 = await pedir('/api/me/personalizacao', cab);
+    const lixo = await enviarJson('PUT', '/api/me/personalizacao/enquadro', { x: 'a', y: null, zoom: 'muito' }, cab);
+    await enviarJson('DELETE', '/api/me/personalizacao/imagem', {}, cab);
+    const estado3 = await pedir('/api/me/personalizacao', cab);
+    const j = (r) => { try { return JSON.parse(r.corpo); } catch (_) { return {}; } };
+
+    const conferencias = {
+      'enquadrar sem foto é recusado (400)': semFoto.status === 400 && /Escolha uma imagem/.test(semFoto.corpo),
+      'o enquadro viaja junto com a foto (com a proporção da prévia) e volta sanitizado': enviou.status === 201 && j(enviou).enquadro && j(enviou).enquadro.x === 30 && j(enviou).enquadro.y === 80 && j(enviou).enquadro.zoom === 1.5 && j(enviou).enquadro.ref === 15.3,
+      'GET /api/me/personalizacao devolve o enquadro guardado': estado1.status === 200 && j(estado1).temImagem === true && j(estado1).enquadro && j(estado1).enquadro.y === 80,
+      'ajustar depois, sem reenviar a foto, com faixa fechada (x 150→100, y -5→0, zoom 9→3)':
+        ajuste.status === 200 && j(ajuste).enquadro.x === 100 && j(ajuste).enquadro.y === 0 && j(ajuste).enquadro.zoom === 3 && j(ajuste).enquadro.ref === 40
+        && j(estado2).enquadro.x === 100 && j(estado2).enquadro.zoom === 3,
+      'lixo cai no padrão (50/50/1, proporção da faixa de 1280px), nunca num valor que some com a imagem': lixo.status === 200 && j(lixo).enquadro.x === 50 && j(lixo).enquadro.y === 50 && j(lixo).enquadro.zoom === 1 && j(lixo).enquadro.ref === 12.6,
+      'sanitizarEnquadro: zoom abaixo de 1 vira 1, decimais ficam em 2 casas': usersMod.sanitizarEnquadro({ zoom: 0.2 }).zoom === 1 && usersMod.sanitizarEnquadro({ zoom: 1.234 }).zoom === 1.23,
+      'remover a foto apaga o enquadro': estado3.status === 200 && j(estado3).temImagem === false && j(estado3).enquadro === null,
+      // A REGRA que o Master pediu ("acompanhe conforme mude o tamanho"),
+      // executada com números: banner 1130x290 enquadrado numa prévia de
+      // proporção 15,3 (1438x94). A função pura é recortada do tema.js e rodada.
+      'mesma proporção da prévia: o recorte preenche a faixa como na prévia': (() => {
+        const r = calcEnq(1130, 290, 1438, 94, { x: 50, y: 50, zoom: 1, ref: 15.3 });
+        return Math.abs(r.width - 1438) < 2 && !r.sobraLateral && r.left <= 0 && r.top <= 0 && r.top >= 94 - r.height;
+      })(),
+      'faixa mais estreita (celular): o recorte INTEIRO continua visível, sem cortar dos lados': (() => {
+        const r = calcEnq(1130, 290, 360, 94, { x: 50, y: 50, zoom: 1, ref: 15.3 });
+        return Math.abs(r.width - 360) < 1 && r.left === 0;
+      })(),
+      'faixa mais larga: a imagem NÃO cresce além da prévia (mesma escala), e a sobra é lateral': (() => {
+        const ref = calcEnq(1130, 290, 1438, 94, { x: 50, y: 50, zoom: 1, ref: 15.3 });
+        const larga = calcEnq(1130, 290, 1834, 94, { x: 50, y: 50, zoom: 1, ref: 15.3 });
+        return Math.abs(larga.width - ref.width) < 1 && larga.sobraLateral === true;
+      })(),
+      'zoom e ponto de foco: o recorte é menor e nunca sai da imagem (sem buraco na faixa)': (() => {
+        const r = calcEnq(1600, 900, 1210, 96, { x: 0, y: 100, zoom: 2.5, ref: 12.6 });
+        return r.left <= 0 && r.left >= 1210 - r.width && r.top <= 0 && r.top >= 96 - r.height && r.width > 1210;
+      })(),
+      'tema.js desenha pela função pura, recalcula quando a faixa muda de tamanho, e a prévia usa a MESMA':
+        /function aplicarEnquadroPessoal\(img, enq\)/.test(tema) && /window\.aplicarEnquadroPessoal = aplicarEnquadroPessoal/.test(tema)
+        && /calcularEnquadroPessoal\(img\.naturalWidth, img\.naturalHeight, W, H, img\.__enquadro\)/.test(tema)
+        && /new ResizeObserver\(/.test(tema) && !/objectFit = 'cover'/.test(tema)
+        && /aplicarEnquadroPessoal\(img, est\.enquadro\)/.test(tema),
+      'no Painel a imagem é o FUNDO da faixa de saudação (não uma faixa abaixo), com véu pra o texto continuar legível':
+        /if \(noPainel\) \{\s*img\.id = 'zenith-imagem-pessoal';\s*alvo\.classList\.add\('zenith-com-imagem'\);\s*alvo\.insertBefore\(img, alvo\.firstChild\);/.test(tema)
+        && /\.painel-saudacao\.zenith-com-imagem::before\{content:""/.test(tema) && /color-mix\(in srgb,var\(--panel\)/.test(tema),
+      'a faixa do Painel tem relógio e "ao vivo" à direita (ps-dir), e a saudação com Bom dia/Boa tarde/Boa noite':
+        /<div class="ps-dir">\s*<div class="ps-relogio" id="ps-relogio">[\s\S]*?<div class="ps-vivo" id="ps-vivo"/.test(painelHtml)
+        && /grid-template-columns:minmax\(0,1fr\) auto;/.test(painelHtml) && !/grid-template-columns:1fr auto 1fr/.test(painelHtml)
+        && /'Bom dia' : \(hora < 18 \? 'Boa tarde' : 'Boa noite'\)/.test(painelHtml),
+      'Minha imagem: prévia com a mesma função de enquadro, arrastar e zoom, e manda x/y/zoom ao salvar':
+        /window\.aplicarEnquadroPessoal\(img,enq\)/.test(minhaHtml) && /addEventListener\('pointerdown'/.test(minhaHtml) && /addEventListener\('wheel'/.test(minhaHtml)
+        && /d\.append\('x',enq\.x\);d\.append\('y',enq\.y\);d\.append\('zoom',enq\.zoom\)/.test(minhaHtml)
+        && /d\.append\('ref',enq\.ref\|\|refDaPrevia\(\)\)/.test(minhaHtml)
+        && /\/api\/me\/personalizacao\/enquadro'/.test(minhaHtml) && /id="zoom" type="range" min="100" max="300"/.test(minhaHtml)
+        && !/#b8ff3c(?![^{]*\})/.test(minhaHtml.replace(/:root\{[^}]*\}/, '')),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okEnquadro = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (envio=${enviou.status} ${enviou.corpo.slice(0, 120)} ajuste=${ajuste.corpo.slice(0, 120)})`);
+  } catch (e) { okEnquadro = false; console.log('  erro: ' + e.message); }
+  if (!okEnquadro) ruins += 1;
+  console.log(`${okEnquadro ? '✓' : '✗'} Minha imagem: enquadro (x/y/zoom) guardado com faixa fechada, prévia = Painel, e a foto como fundo da saudação com relógio à direita`);
+
+  // ------------------------------------------------------------------
+  // Link, sistema e boot do agente chegam PELA ROTA HTTP. Achado em 13/10:
+  // o agente mandava e lojaStatus sabia tratar, mas as rotas de heartbeat e
+  // de telemetria do index.js repassavam uma lista fechada SEM esses campos
+  // - a ficha de todo computador Windows ficava sem "Conexão" e "Sistema".
+  // Os testes antigos chamavam ls.heartbeat() direto e nunca viam a rota.
+  // Aqui: (1) bate nas duas rotas de verdade e confere a ficha; (2) compara
+  // a lista de cada rota com TODO campo que a função do lojaStatus lê
+  // (dados.X), pra que um campo novo do agente não volte a se perder.
+  let okRotasAgente = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const fs = require('fs');
+    const idx = fs.readFileSync(__dirname + '/index.js', 'utf8');
+    const lsSrc = fs.readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+    const UNI = 'NOCROTA';
+    await ls.cadastrarComputador(UNI, 'PC-ROTA', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PC-ROTA').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    const cabAg = { 'x-noc-token': tk };
+    const boot = Date.now() - 3600 * 1000;
+    const hb = await postarJson('/api/loja-status/heartbeat', {
+      unidade: UNI, posto, userAgent: 'NOCZenith/1.0 (Windows NT; PowerShell)', abertoDesde: 1, instancia: 'login',
+      bootEm: boot, desligamentoInesperado: false,
+      link: { tipo: 'wifi', nome: 'LOJA-5G', mbps: 300, sinalWifi: 66, banda: '5 GHz', vazaoMbps: 41.2, vazaoEm: Date.now() },
+      sistema: { nome: 'Microsoft Windows 10 Pro', versao: '10.0.19045', arquitetura: '64 bits' },
+      anydeskServico: { instalado: true, rodando: true },
+    }, cabAg);
+    const d1 = await ls.detalhar(UNI, posto);
+    const tel = await postarJson(`/api/loja-status/${UNI}/computadores/${posto}/telemetria`, {
+      ram: { totalGb: 16, livreGb: 8 },
+      link: { tipo: 'ethernet', nome: 'Ethernet', mbps: 1000, ethernetPresente: true, ethernetAtiva: true },
+      sistema: { nome: 'Microsoft Windows 11 Pro', versao: '10.0.22631', arquitetura: '64 bits' },
+    }, cabAg);
+    const d2 = await ls.detalhar(UNI, posto);
+    // primeira leitura com a Ethernet caída (notebook no Wi-Fi, porta vazia):
+    // registra, mas NÃO vira alerta - senão o deploy que consertou a rota
+    // dispararia "Ethernet caída" em todo notebook do parque de uma vez
+    await ls.cadastrarComputador(UNI, 'NOTE-ROTA', 'interno');
+    const postoNote = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'NOTE-ROTA').posto;
+    const tkNote = await ls.garantirAgentToken(UNI, postoNote);
+    await postarJson('/api/loja-status/heartbeat', { unidade: UNI, posto: postoNote, userAgent: 'NOCZenith/1.0', abertoDesde: 1,
+      link: { tipo: 'wifi', nome: 'LOJA', ethernetPresente: true, ethernetAtiva: false, ethernetCaida: true } }, { 'x-noc-token': tkNote });
+    const dNote = await ls.detalhar(UNI, postoNote);
+
+    // campos que cada função lê, e campos que cada rota repassa
+    const corpoFuncao = (nome) => {
+      const i = lsSrc.indexOf('async function ' + nome + '(');
+      const j = lsSrc.slice(i + 10).search(/\n(async )?function /);
+      return lsSrc.slice(i, i + 10 + j);
+    };
+    const lidos = (src) => [...new Set((src.match(/dados\s*(?:&&\s*dados)?\s*\.\s*([a-zA-Z]+)/g) || []).map((m) => m.replace(/.*\.\s*/, '')))];
+    const blocoRota = (inicio) => {
+      const i = idx.indexOf(inicio);
+      const a = idx.indexOf('{', idx.indexOf('(', idx.indexOf(inicio === "app.post('/api/loja-status/heartbeat'" ? 'lojaStatus.heartbeat(' : 'lojaStatus.registrarTelemetria(', i)));
+      return idx.slice(a, idx.indexOf('}, token)', a));
+    };
+    const repassados = (bloco) => new Set((bloco.match(/\b([a-zA-Z]+)\s*:\s*req\.body\.\1\b/g) || []).map((m) => m.split(':')[0].trim())
+      .concat((bloco.match(/\b([a-zA-Z]+)\s*:\s*req\.body\.[a-zA-Z]+\s*===/g) || []).map((m) => m.split(':')[0].trim()))
+      .concat(/\bip\b/.test(bloco) ? ['ip'] : []));
+    const faltaHb = lidos(corpoFuncao('heartbeat')).filter((c) => !repassados(blocoRota("app.post('/api/loja-status/heartbeat'")).has(c));
+    const faltaTel = lidos(corpoFuncao('registrarTelemetria')).filter((c) => !repassados(blocoRota("app.post('/api/loja-status/:codigo/computadores/:posto/telemetria'")).has(c));
+
+    const conferencias = {
+      'a batida HTTP do agente grava o link (com Wi-Fi e vazão) na ficha': hb.status === 200 && d1 && d1.link && d1.link.tipo === 'wifi' && d1.link.nome === 'LOJA-5G' && d1.link.sinalWifi === 66 && d1.link.vazaoMbps === 41.2,
+      'a batida HTTP grava o sistema do Windows e o boot': d1 && d1.sistema && d1.sistema.nome === 'Microsoft Windows 10 Pro' && d1.sistema.arquitetura === '64 bits' && d1.bootEm === boot,
+      'a telemetria HTTP também atualiza link e sistema (computador de atendimento depende dela)': tel.status === 200 && d2 && d2.link && d2.link.tipo === 'ethernet' && d2.link.mbps === 1000 && d2.sistema && d2.sistema.nome === 'Microsoft Windows 11 Pro',
+      'primeira leitura com Ethernet caída registra o link mas não gera alerta (sem rajada no deploy)':
+        dNote && dNote.link && dNote.link.ethernetCaida === true && !dNote.linkAvisoPendente,
+      'a rota de heartbeat repassa TODO campo que lojaStatus.heartbeat() lê': faltaHb.length === 0,
+      'a rota de telemetria repassa TODO campo que registrarTelemetria() lê (inclui as VMs do Hyper-V)': faltaTel.length === 0,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okRotasAgente = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (hb=${hb.status} tel=${tel.status} faltaHb=${faltaHb} faltaTel=${faltaTel} link=${JSON.stringify(d1 && d1.link)})`);
+  } catch (e) { okRotasAgente = false; console.log('  erro: ' + e.message); }
+  if (!okRotasAgente) ruins += 1;
+  console.log(`${okRotasAgente ? '✓' : '✗'} NOC: link, sistema e boot do agente chegam pelas rotas HTTP de heartbeat e telemetria (e nenhuma rota descarta campo que o servidor lê)`);
+
+  // ------------------------------------------------------------------
+  // Wi-Fi como no tablet (pedido do Master, 13/10: "o notebook no Wi-Fi tem
+  // que mostrar igual ao Mobiel: no Wi-Fi mostra Wi-Fi, na Ethernet mostra
+  // Ethernet"). Antes QUALQUER máquina no Wi-Fi ficava Degradado ("Ethernet
+  // caída" ou "só no Wi-Fi"). Regra nova (caboEsperado): só acusa cabo quem
+  // USA cabo - visto na Ethernet nos últimos 30 dias - e nunca notebook
+  // (agente v151 manda portatil).
+  let okWifiNormal = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const vg = require(__dirname + '/vigiaScript.js');
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const UNI = 'NOCWIFI';
+    const maquina = async (nome) => {
+      await ls.cadastrarComputador(UNI, nome, 'interno');
+      const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === nome).posto;
+      const tk = await ls.garantirAgentToken(UNI, posto);
+      return { posto, bater: (link) => postarJson('/api/loja-status/heartbeat', { unidade: UNI, posto, userAgent: 'NOCZenith/1.0', abertoDesde: Math.random(), link }, { 'x-noc-token': tk }) };
+    };
+    const ficha = async (m) => ls.detalhar(UNI, m.posto);
+    const wifiPortaVazia = { tipo: 'wifi', nome: 'LOJA-5G', mbps: 300, ethernetPresente: true, ethernetAtiva: false, ethernetCaida: true };
+
+    // 1) desktop que SEMPRE usou Wi-Fi (agente antigo, sem portatil): normal
+    const sempreWifi = await maquina('DESK-WIFI');
+    await sempreWifi.bater(wifiPortaVazia);
+    const f1 = await ficha(sempreWifi);
+    // 2) desktop que estava no CABO e caiu pro Wi-Fi: defeito + alerta
+    const caiu = await maquina('DESK-CABO');
+    await caiu.bater({ tipo: 'ethernet', nome: 'Ethernet', mbps: 1000, ethernetPresente: true, ethernetAtiva: true });
+    await caiu.bater(wifiPortaVazia);
+    const f2 = await ficha(caiu);
+    // 3) notebook (v151) que estava na doca com cabo e saiu: normal, sem alerta
+    const note = await maquina('NOTE-DOCA');
+    await note.bater({ tipo: 'ethernet', nome: 'Ethernet', mbps: 1000, ethernetPresente: true, ethernetAtiva: true, portatil: true });
+    await note.bater({ ...wifiPortaVazia, portatil: true });
+    const f3 = await ficha(note);
+    // 4) cabo visto há mais de 30 dias: o Wi-Fi já virou o normal dela
+    const velho = { caboVistoEm: Date.now() - ls.CABO_ESPERADO_JANELA_MS - 1000, link: wifiPortaVazia };
+    const recente = { caboVistoEm: Date.now() - 60 * 1000, link: wifiPortaVazia };
+
+    const ps = vg.montarScriptVigia({ codigo: 'W', posto: 'P', tipo: 'interno', agentToken: 't' });
+    const psAntigo = vg.montarScriptVigia({ codigo: 'W', posto: 'P', tipo: 'interno', agentToken: 't', windowsAntigo: true });
+
+    const conferencias = {
+      'desktop que sempre usou Wi-Fi fica Operacional, como o tablet': f1 && f1.estado === 'operacional' && !f1.degradacao.length && f1.link.tipo === 'wifi',
+      'desktop que estava no cabo e caiu pro Wi-Fi continua Degradado ("Ethernet caída") e gera alerta':
+        f2 && f2.estado === 'degradado' && f2.degradacao.includes('Ethernet caída') && !!f2.linkAvisoPendente,
+      'notebook (v151) saindo da doca fica Operacional e sem alerta': f3 && f3.estado === 'operacional' && !f3.degradacao.length && !f3.linkAvisoPendente && f3.link.portatil === true,
+      'cabo visto há mais de 30 dias não acusa; visto há pouco acusa': ls.caboEsperado(velho) === false && ls.caboEsperado(recente) === true,
+      'a ficha desenha Wi-Fi + rede como o tablet e só fala de cabo quando o servidor acusa defeito':
+        /const defeito=\(c\.degradacao\|\|\[\]\)\.find\(m=>m==='Ethernet caída'\|\|m==='só no Wi-Fi'\)/.test(html)
+        && !/Ethernet: não disponível/.test(html) && !/Ethernet: desconectada/.test(html)
+        && /\(c\.degradacao\|\|\[\]\)\.includes\('Ethernet caída'\) \? '📶 Wi-Fi \(Ethernet caiu\)'/.test(html),
+      'agente v151 detecta notebook por bateria ou chassi, lido uma vez, nos dois Windows':
+        vg.VERSAO_VIGIA >= 151 && /function Ler-Portatil/.test(ps) && /Win32_Battery/.test(ps) && /Win32_SystemEnclosure/.test(ps)
+        && /\$r\.portatil = \[bool\]\(Ler-Portatil\)/.test(ps) && /function Ler-Portatil/.test(psAntigo),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okWifiNormal = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (f1=${f1 && f1.estado}/${f1 && f1.degradacao} f2=${f2 && f2.estado}/${f2 && f2.degradacao} f3=${f3 && f3.estado}/${f3 && f3.degradacao})`);
+  } catch (e) { okWifiNormal = false; console.log('  erro: ' + e.message); }
+  if (!okWifiNormal) ruins += 1;
+  console.log(`${okWifiNormal ? '✓' : '✗'} NOC: Wi-Fi é normal como no tablet - só acusa cabo quem usa cabo (visto nos últimos 30 dias) e nunca notebook`);
 
   // ------------------------------------------------------------------
   // Logos das empresas do grupo no rodapé do login. Antes era UMA imagem
@@ -13088,6 +13576,10 @@ setTimeout(async () => {
     const emp = require('/home/user/adyen-monitor/server/empresas.js');
     DOCS.set('empresas/empArcTeste', { id: 'empArcTeste', nome: 'ARCFOOD', ativa: true, tipoNegocio: 'alimentacao', unidades: ['19855'] });
     DOCS.set('empresas/empBravoTeste', { id: 'empBravoTeste', nome: 'Grupo Bravo', ativa: true, tipoNegocio: 'alimentacao', unidades: ['PPDOM'] });
+    // empresa de OUTRO tipo de negocio, sem unidade com marca (caso real: a
+    // Solutions Ti Tech aparecia com todas as marcas de comida no combo)
+    DOCS.set('empresas/empTecTeste', { id: 'empTecTeste', nome: 'Solutions Ti Tech', ativa: true, tipoNegocio: 'tecnologia', unidades: ['Administrativa'] });
+    DOCS.set('empresas/empNovaComida', { id: 'empNovaComida', nome: 'Comida Nova', ativa: true, tipoNegocio: 'alimentacao', unidades: [] });
     emp.invalidarCache();
     const envArc = await postarMultipart('/api/loja-status/papel-de-parede', { marca: 'dominos', rede: 'empArcTeste', password: SENHA }, { nome: 'a.png', tipo: 'image/png', buffer: png }, 'imagem', cabPP, 'PUT');
     const arcComGrupo = await ls.papelDeParedeDe('19855');
@@ -13500,6 +13992,17 @@ setTimeout(async () => {
           const arc = combos.filter((c) => c.rede === 'empArcTeste');
           return arc.length === 1 && arc[0].marca === 'dominos'
             && !combos.some((c) => c.rede === 'empArcTeste' && ['spoleto', 'milkymoo', 'saobraz', 'saltiverso'].includes(c.marca));
+        })(),
+      // empresa de outro tipo de negocio NAO ganha as marcas de comida por
+      // fallback (nenhuma linha dela no combo); a de alimentacao sem unidade
+      // marcada continua caindo em todas, como antes
+      'empresa que não é de alimentação (Solutions Ti Tech) não aparece com Domino\'s/Spoleto/Milky Moo no combo':
+        (() => {
+          const combos = JSON.parse(marcas.corpo).combinacoes || [];
+          const todasMarcas = require(__dirname + '/unidades.js').MARCAS_VALIDAS.length;
+          return !combos.some((c) => c.rede === 'empTecTeste')
+            && combos.filter((c) => c.rede === 'empNovaComida').length === todasMarcas
+            && JSON.parse(marcas.corpo).logosCarimbo.grupos.some((g) => g.id === 'empTecTeste');
         })(),
       // ---- agente ----
       'o agente baixa da URL da PRÓPRIA máquina (quem escolhe a marca é o servidor)':
@@ -18211,7 +18714,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && noPainel.motivoDivergencia === 'erro de troco no turno da tarde',
       'o esperado é calculado no SERVIDOR, nunca aceito do corpo da requisição':
         /const caixa = await saidasPainel\.calcularSaldoCaixa\(\{ unidade, ate: periodoFim \|\| data \}/.test(srcIdxCaixa)
-        && !/esperado: req\.body/.test(srcIdxCaixa),
+        // \b: palavra inteira - "desligamentoInesperado: req.body" (rota de
+        // heartbeat) contém o mesmo texto e não tem nada a ver com o caixa
+        && !/\besperado: req\.body/.test(srcIdxCaixa),
       // sem entrada em dinheiro lancada, nao ha com o que comparar: falta de
       // dado nao pode virar divergencia e travar a sangria da loja
       'unidade sem entrada em dinheiro nenhuma: conferência fica indisponível, não vira divergência':
@@ -28569,7 +29074,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && /START_STICKY/.test(servico),
       // servico comum/alarme entram em Doze e param de bater
       'roda em primeiro plano, que e o unico que o Android nao mata':
-        /foregroundServiceType="specialUse"/.test(manifesto)
+        // v5 somou "location" ao tipo (SSID e dado de localizacao, ver RedeWifi.kt);
+        // o que importa aqui e continuar em primeiro plano
+        /foregroundServiceType="specialUse(\|location)?"/.test(manifesto)
         && /startForeground\(/.test(servico),
       // rota nova de telemetria seria um segundo jeito de ser maquina
       // o endereco antigo foi aposentado (CLAUDE.md §4): o agente nao pode

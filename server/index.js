@@ -2388,6 +2388,19 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // quando o token bate (a validação fica em lojaStatus.heartbeat).
       anydeskId: req.body.anydeskId,
       tailscale: req.body.tailscale,
+      // LINK, SISTEMA, BOOT e ESTADO DO ANYDESK: o agente manda em toda
+      // batida e lojaStatus.heartbeat sempre soube tratar, mas esta lista
+      // nunca os repassava - a ficha do NOC ficava sem "Conexão" e sem
+      // "Sistema" em todo computador Windows (achado em 13/10, pedido do
+      // Master: "continuo sem conseguir ver a rede nos computadores"). Cada
+      // campo é sanitizado lá dentro (sanitizarLink, sanitizarSistemaWindows,
+      // sanitizarEstadoAnydesk); o testeRotas.js reprova se a lista daqui
+      // voltar a ter menos campos do que o heartbeat() lê.
+      link: req.body.link,
+      sistema: req.body.sistema,
+      bootEm: req.body.bootEm,
+      desligamentoInesperado: req.body.desligamentoInesperado,
+      anydeskServico: req.body.anydeskServico,
       // A instancia _Boot do NOCZenith roda como SYSTEM e usa estes dois
       // marcadores para receber SOMENTE comandos que exigem elevacao. Eles
       // ja eram enviados pelo agente, mas a rota os descartava aqui; como
@@ -2467,6 +2480,14 @@ app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, 
       disco: req.body.disco, ram: req.body.ram, hardware: req.body.hardware, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
       statusImpressoras: req.body.statusImpressoras,
       anydeskServico: req.body.anydeskServico, anydeskId: req.body.anydeskId,
+      // mesmo defeito da rota de heartbeat: o agente manda e
+      // registrarTelemetria trata, mas a lista não repassava. Sem link/
+      // sistema/boot aqui, computador de ATENDIMENTO (onde quem bate é o
+      // navegador) nunca contava reinício nem queda de cabo; sem vms, o host
+      // Hyper-V nunca listava as VMs. Sanitizados em registrarTelemetria.
+      link: req.body.link, sistema: req.body.sistema,
+      bootEm: req.body.bootEm, desligamentoInesperado: req.body.desligamentoInesperado,
+      vms: req.body.vms,
     }, token);
     // a RESPOSTA leva quais impressoras aquele agente deve sondar no proximo
     // ciclo. Sem rota nova e sem requisicao extra: a telemetria ja acontece,
@@ -3475,7 +3496,22 @@ app.get('/api/me', async (req, res) => {
 // perfil devolvido para o navegador.
 app.get('/api/me/personalizacao', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ temImagem: !!req.user.imagemPersonalizacao });
+  res.json({
+    temImagem: !!req.user.imagemPersonalizacao,
+    // enquadramento (x/y/zoom, ver sanitizarEnquadro em users.js): a tela
+    // desenha a faixa com ele; imagem antiga sem enquadro cai no padrao
+    enquadro: req.user.imagemPersonalizacao ? users.sanitizarEnquadro(req.user.imagemPersonalizacaoEnquadro) : null,
+  });
+});
+// so o enquadramento, sem reenviar a foto (o ajuste depois de salvar e o
+// caso comum: olhou o Painel, quis subir um pouco)
+app.put('/api/me/personalizacao/enquadro', async (req, res) => {
+  try {
+    const enquadro = await users.updateEnquadroPersonalizacao(req.user.id, req.body || {});
+    res.json({ temImagem: true, enquadro });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Não foi possível enquadrar a imagem.' });
+  }
 });
 app.get('/api/me/personalizacao/imagem', async (req, res) => {
   if (!req.user.imagemPersonalizacao) return res.sendStatus(404);
@@ -3491,14 +3527,16 @@ app.post('/api/me/personalizacao/imagem', uploadImagemPersonalizacao.single('ima
     if (!req.file) return res.status(400).json({ error: 'Escolha uma imagem JPG, PNG ou WebP.' });
     const anterior = req.user.imagemPersonalizacao || null;
     const caminho = await storage.salvarArquivo(`personalizacao-${req.user.id}`, req.file, 'personalizacao-usuarios');
+    // o enquadramento viaja nos campos do mesmo multipart (x, y, zoom)
+    const enquadro = users.sanitizarEnquadro(req.body || {});
     try {
-      await users.updateImagemPersonalizacao(req.user.id, caminho, req.file.mimetype);
+      await users.updateImagemPersonalizacao(req.user.id, caminho, req.file.mimetype, enquadro);
     } catch (err) {
       await storage.apagarArquivo(caminho).catch(() => {});
       throw err;
     }
     if (anterior && anterior !== caminho) await storage.apagarArquivo(anterior).catch(() => {});
-    res.status(201).json({ temImagem: true });
+    res.status(201).json({ temImagem: true, enquadro });
   } catch (err) {
     res.status(400).json({ error: err.message || 'Não foi possível salvar a imagem.' });
   }
@@ -7341,6 +7379,8 @@ const EXECUTORES_QA = {
   'empresas.excluir': async (p) => { await users.desvincularEmpresa(p.id); return empresas.remove(p.id); },
   'empresas.arquivar': (p) => empresas.arquivar(p.id, { porEmail: p.porEmail }),
   'empresas.desarquivar': (p) => empresas.desarquivar(p.id),
+  'empresas.tipoNegocio.criar': (p) => empresas.criarTipoNegocio(p),
+  'empresas.tipoNegocio.excluir': (p) => empresas.removerTipoNegocio(p.codigo),
   'unidadesExtras.criar': (p) => invalidandoUnidadesMapa(unidadesExtras.criar(p.dados, codigosUnidadesFixas())),
   'unidadesExtras.editar': (p) => invalidandoUnidadesMapa(unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao })),
   'unidadesExtras.excluir': (p) => invalidandoUnidadesMapa(unidadesExtras.remover(p.id)),
@@ -8198,9 +8238,13 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
     })),
     // uma linha por GRUPO x marca que a empresa REALMENTE tem (Arcfood so opera
     // Domino's - nao faz sentido oferecer Spoleto/Milky Moo/Sao Braz pra ela).
-    // As marcas saem das unidades da empresa (perfil.marca). Empresa sem
-    // nenhuma unidade marcada cai em TODAS, pra empresa nova nao ficar sem
-    // opcao ate o Master marcar as unidades.
+    // As marcas saem das unidades da empresa (perfil.marca). Empresa de
+    // ALIMENTACAO sem nenhuma unidade marcada cai em TODAS, pra empresa nova
+    // nao ficar sem opcao ate o Master marcar as unidades. Empresa de outro
+    // tipo de negocio (ex: Solutions Ti Tech, 'tecnologia') nao entra nesse
+    // fallback: as marcas do catalogo sao todas de comida, e ela aparecia
+    // com Domino's/Spoleto/Milky Moo/Sao Braz/Saltiverso sem operar nenhuma.
+    // Ela continua na lista de GRUPO (logo propria), que e o que faz sentido.
     combinacoes: await (async () => {
       const linhas = [];
       for (const e of (await empresas.listAtivas().catch(() => []))) {
@@ -8209,7 +8253,8 @@ app.get('/api/loja-status/papel-de-parede-marcas', auth.requireMaster, async (re
           const perf = await unidadesExtras.perfil(u).catch(() => null);
           if (perf && perf.marca && unidadesExtras.MARCAS_VALIDAS.includes(perf.marca)) set.add(perf.marca);
         }
-        const marcas = set.size ? [...set] : unidadesExtras.MARCAS_VALIDAS;
+        const ehAlimentacao = (e.tipoNegocio || 'alimentacao') === 'alimentacao';
+        const marcas = set.size ? [...set] : (ehAlimentacao ? unidadesExtras.MARCAS_VALIDAS : []);
         for (const m of marcas) {
           linhas.push({
             rede: e.id, marca: m,
@@ -9907,6 +9952,38 @@ async function exigirSenhaDoMaster(req, res) {
   }
   return true;
 }
+
+// TIPOS DE NEGÓCIO (ver TIPOS_DOC em empresas.js): 'alimentacao' é fixo; o
+// resto é catálogo que o Master cadastra na tela de Grupos. Ficam ANTES das
+// rotas com :id pra não haver dúvida de que "tipos-negocio" não é id de
+// empresa. Remover não pede senha: só sai o que nenhuma empresa usa, e
+// recriar devolve o mesmo código.
+app.get('/api/empresas/tipos-negocio', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await empresas.listarTiposNegocio());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/empresas/tipos-negocio', auth.requireMaster, async (req, res) => {
+  try {
+    const dados = { nome: req.body?.nome, porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'empresas.tipoNegocio.criar', `Criar tipo de negócio: ${dados.nome || ''}`, dados)) return;
+    res.json(await empresas.criarTipoNegocio(dados));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/empresas/tipos-negocio/:codigo', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'empresas.tipoNegocio.excluir', `Remover tipo de negócio ${req.params.codigo}`, { codigo: req.params.codigo })) return;
+    res.json(await empresas.removerTipoNegocio(req.params.codigo));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // quantos acessos e unidades a decisão atinge - a tela mostra isso ANTES de
 // pedir a senha, pra a escolha entre arquivar e excluir ser informada em vez

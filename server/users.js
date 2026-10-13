@@ -419,14 +419,57 @@ async function updatePerfilVisual(id, perfilVisual) {
 // sai no /api/me: a entrega do arquivo e feita por rota autenticada que so
 // aceita o dono da conta, evitando que uma foto enviada por alguem vire URL
 // publica ou possa ser enumerada por outro usuario.
-async function updateImagemPersonalizacao(id, caminho, tipo = null) {
+async function updateImagemPersonalizacao(id, caminho, tipo = null, enquadro = null) {
   const ref = usersRef.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Acesso não encontrado.');
-  await ref.update({ imagemPersonalizacao: caminho || null, imagemPersonalizacaoTipo: caminho ? String(tipo || 'image/jpeg') : null });
+  await ref.update({
+    imagemPersonalizacao: caminho || null,
+    imagemPersonalizacaoTipo: caminho ? String(tipo || 'image/jpeg') : null,
+    imagemPersonalizacaoEnquadro: caminho ? sanitizarEnquadro(enquadro) : null,
+  });
   invalidarUsuario(id);
   usersCache.invalidar();
   return { anterior: snap.data().imagemPersonalizacao || null, imagem: !!caminho };
+}
+
+// ENQUADRAMENTO da imagem pessoal (pedido do Master: "enquadrar mais pra
+// cima, mais pra baixo ou dar zoom, como a foto do WhatsApp"). x/y em % sao
+// o ponto da imagem que fica no centro da faixa (object-position), zoom e a
+// ampliacao em cima do "cobrir" (1 = so cobrir). Faixa fechada: fora dela
+// cai no padrao, nunca num valor que esconda a imagem inteira.
+// ref = proporção (largura/altura) da prévia no momento em que a pessoa
+// salvou. É o que permite desenhar O MESMO recorte em qualquer largura de
+// tela (ver calcularEnquadroPessoal no tema.js). Imagem salva antes disto,
+// sem ref, usa a proporção da faixa do Painel numa tela de 1280px.
+const ENQUADRO_PADRAO = Object.freeze({ x: 50, y: 50, zoom: 1, ref: 12.6 });
+function sanitizarEnquadro(bruto) {
+  const b = bruto && typeof bruto === 'object' ? bruto : {};
+  // null/undefined/'' = "nao informado" -> padrao (Number(null) seria 0, e
+  // 0 e um valor valido de borda, nao ausencia)
+  const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+  const pct = (v, padrao) => {
+    const n = num(v);
+    return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : padrao;
+  };
+  const z = num(b.zoom);
+  return {
+    x: pct(b.x, ENQUADRO_PADRAO.x),
+    y: pct(b.y, ENQUADRO_PADRAO.y),
+    zoom: Number.isFinite(z) ? Math.min(3, Math.max(1, Math.round(z * 100) / 100)) : ENQUADRO_PADRAO.zoom,
+    ref: Number.isFinite(num(b.ref)) ? Math.min(40, Math.max(1, Math.round(num(b.ref) * 100) / 100)) : ENQUADRO_PADRAO.ref,
+  };
+}
+async function updateEnquadroPersonalizacao(id, enquadro) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (!snap.data().imagemPersonalizacao) throw new Error('Escolha uma imagem antes de enquadrar.');
+  const limpo = sanitizarEnquadro(enquadro);
+  await ref.update({ imagemPersonalizacaoEnquadro: limpo });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return limpo;
 }
 
 // atualizacao em massa: recebe uma lista [{email, username}] (ex: colada
@@ -1203,6 +1246,9 @@ module.exports = {
   updateCargo,
   updateUsername,
   updateImagemPersonalizacao,
+  updateEnquadroPersonalizacao,
+  sanitizarEnquadro,
+  ENQUADRO_PADRAO,
   updatePerfil,
   preencherContatoAusenteDoChat,
   updatePerfilVisual,

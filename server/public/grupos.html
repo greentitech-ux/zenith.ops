@@ -229,7 +229,24 @@
           <option value="alimentacao">Alimentação</option>
         </select>
       </label>
+      <button type="button" class="btn-add" id="emp-tipo-abrir" style="padding:8px 10px;" onclick="abrirNovoTipoNegocio()" title="Cadastrar uma categoria nova (ex: Tecnologia, Saúde)">+ Tipo de negócio</button>
       <button type="button" class="primary" style="padding:8px 14px;" onclick="salvarEmpresa()">+ Cadastrar empresa</button>
+    </div>
+    <!-- TIPOS DE NEGÓCIO (ver TIPOS_DOC em empresas.js): "Alimentação" é fixo
+         do sistema; o resto é catálogo cadastrado aqui. O tipo só identifica a
+         empresa - não liga módulo nenhum sozinho (os módulos da operação de
+         comida continuam só da Alimentação, ver SECTION_VERTICAIS em users.js). -->
+    <div id="emp-tipo-box" class="hidden" style="margin-top:8px;padding:10px;border:1px dashed var(--line);border-radius:8px;background:var(--panel2);">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;">
+        <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Novo tipo de negócio
+          <input type="text" id="emp-tipo-nome" maxlength="40" placeholder="ex: Tecnologia" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();criarTipoNegocio();}">
+        </label>
+        <button type="button" class="primary" style="padding:8px 14px;" onclick="criarTipoNegocio()">Criar tipo</button>
+        <button type="button" class="back" style="padding:8px 10px;cursor:pointer;" onclick="fecharNovoTipoNegocio()">cancelar</button>
+      </div>
+      <p style="font-size:11px;color:var(--muted);margin:6px 0 0;">O tipo identifica a empresa e aparece no cadastro dela. Os módulos da operação de comida (Monitor, Fechamentos, Entregas...) continuam só da Alimentação; os de infraestrutura (Suporte, Chamados, Cofre, Formulários, Tarefas...) valem pra qualquer tipo.</p>
+      <div id="emp-tipo-lista" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
+      <p class="err hidden" id="emp-tipo-err" style="margin:6px 0 0;"></p>
     </div>
     <fieldset style="margin-top:10px;">
       <legend>Unidades desta empresa <span style="font-weight:400;color:var(--muted);">(marque todas que pertencem a ela)</span></legend>
@@ -1142,7 +1159,79 @@ let EMPRESAS = [];
 let EDITANDO_EMPRESA_ID = null;
 async function carregarEmpresas(){
   EMPRESAS = await fetch('/api/empresas').then(r=>r.json()).catch(()=>[]);
+  await carregarTiposNegocio();
   renderEmpresasLista();
+}
+
+// ---------- Tipos de negócio (ver TIPOS_DOC em empresas.js). "Alimentação"
+// é fixo; o resto o Master cadastra aqui. O select e a lista de empresas
+// mostram o NOME; o que vai pro servidor é o código ----------
+let TIPOS_NEGOCIO = [{ codigo:'alimentacao', nome:'Alimentação', fixo:true }];
+function nomeTipoNegocio(codigo){
+  const t = TIPOS_NEGOCIO.find(x=>x.codigo===codigo);
+  return t ? t.nome : (codigo || '');
+}
+async function carregarTiposNegocio(){
+  const lista = await fetch('/api/empresas/tipos-negocio').then(r=>r.ok?r.json():null).catch(()=>null);
+  if(Array.isArray(lista) && lista.length) TIPOS_NEGOCIO = lista;
+  const sel = document.getElementById('emp-tipo');
+  const atual = sel.value || 'alimentacao';
+  sel.innerHTML = TIPOS_NEGOCIO.map(t=>`<option value="${escapeHtml(t.codigo)}">${escapeHtml(t.nome)}</option>`).join('');
+  sel.value = TIPOS_NEGOCIO.some(t=>t.codigo===atual) ? atual : 'alimentacao';
+  renderTiposNegocioLista();
+}
+function renderTiposNegocioLista(){
+  const el = document.getElementById('emp-tipo-lista');
+  el.innerHTML = TIPOS_NEGOCIO.map(t=>{
+    const emUso = EMPRESAS.filter(e=>e.tipoNegocio===t.codigo).length;
+    const info = t.fixo ? 'fixo do sistema' : (emUso ? `${emUso} empresa(s)` : 'sem empresa');
+    const remover = (t.fixo || emUso) ? '' : ` <button type="button" class="btn-remover-tipo" data-codigo="${escapeHtml(t.codigo)}" title="Remover este tipo (nenhuma empresa usa)" style="border:0;background:none;color:var(--bad);cursor:pointer;font-size:11px;padding:0 2px;">✕</button>`;
+    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid var(--line);border-radius:999px;font-size:11.5px;"><b>${escapeHtml(t.nome)}</b> <span style="color:var(--muted);">· ${info}</span>${remover}</span>`;
+  }).join('');
+}
+document.getElementById('emp-tipo-lista').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.btn-remover-tipo');
+  if(btn) removerTipoNegocio(btn.dataset.codigo);
+});
+function abrirNovoTipoNegocio(){
+  document.getElementById('emp-tipo-box').classList.remove('hidden');
+  document.getElementById('emp-tipo-err').classList.add('hidden');
+  renderTiposNegocioLista();
+  document.getElementById('emp-tipo-nome').focus();
+}
+function fecharNovoTipoNegocio(){
+  document.getElementById('emp-tipo-box').classList.add('hidden');
+  document.getElementById('emp-tipo-nome').value = '';
+}
+async function criarTipoNegocio(){
+  const err = document.getElementById('emp-tipo-err');
+  err.classList.add('hidden');
+  const nome = document.getElementById('emp-tipo-nome').value.trim();
+  if(!nome){ err.textContent = 'Digite o nome do tipo de negócio (ex: Tecnologia).'; err.classList.remove('hidden'); return; }
+  try{
+    const resp = await fetch('/api/empresas/tipos-negocio', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nome }) });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(data.error || 'Erro ao criar o tipo.');
+    if(resp.status===202){ alert('Enviado pra aprovação de um Master de verdade (acesso QA).'); fecharNovoTipoNegocio(); return; }
+    document.getElementById('emp-tipo-nome').value = '';
+    await carregarTiposNegocio();
+    // já deixa o tipo novo escolhido: o próximo passo natural é cadastrar a empresa dele
+    document.getElementById('emp-tipo').value = data.codigo;
+    document.getElementById('emp-nome').focus();
+  }catch(e){ err.textContent = e.message; err.classList.remove('hidden'); }
+}
+async function removerTipoNegocio(codigo){
+  const err = document.getElementById('emp-tipo-err');
+  err.classList.add('hidden');
+  const t = TIPOS_NEGOCIO.find(x=>x.codigo===codigo);
+  if(!t || !confirm(`Remover o tipo de negócio "${t.nome}"?`)) return;
+  try{
+    const resp = await fetch(`/api/empresas/tipos-negocio/${encodeURIComponent(codigo)}`, { method:'DELETE' });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(data.error || 'Erro ao remover o tipo.');
+    if(resp.status===202){ alert('Enviado pra aprovação de um Master de verdade (acesso QA).'); return; }
+    await carregarTiposNegocio();
+  }catch(e){ err.textContent = e.message; err.classList.remove('hidden'); }
 }
 function renderEmpresasLista(){
   const el = document.getElementById('empresas-lista');
@@ -1155,7 +1244,7 @@ function renderEmpresasLista(){
     const arq = !!e.arquivada;
     const selo = arq ? ' <span style="color:var(--warn);font-size:10.5px;border:1px solid var(--warn);border-radius:4px;padding:1px 5px;">ARQUIVADA</span>' : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;${arq?'opacity:.6;':''}">
-      <span style="flex:1;"><b>${escapeHtml(e.nome)}</b>${selo} <span style="color:var(--muted);font-size:11px;">· ${escapeHtml(e.tipoNegocio)} · ${escapeHtml(escopo)}</span></span>
+      <span style="flex:1;"><b>${escapeHtml(e.nome)}</b>${selo} <span style="color:var(--muted);font-size:11px;">· ${escapeHtml(nomeTipoNegocio(e.tipoNegocio))} · ${escapeHtml(escopo)}</span></span>
       <button type="button" class="back btn-editar-empresa" style="cursor:pointer;" data-id="${escapeHtml(e.id)}">✏️ editar</button>
       <button type="button" class="back btn-arquivar-empresa" style="cursor:pointer;" data-id="${escapeHtml(e.id)}" data-nome="${escapeHtml(e.nome)}" data-acao="${arq?'desarquivar':'arquivar'}">${arq?'♻️ desarquivar':'📦 arquivar'}</button>
       <button type="button" class="back btn-excluir-empresa" style="cursor:pointer;color:var(--bad);" data-id="${escapeHtml(e.id)}" data-nome="${escapeHtml(e.nome)}">🗑️ excluir</button>

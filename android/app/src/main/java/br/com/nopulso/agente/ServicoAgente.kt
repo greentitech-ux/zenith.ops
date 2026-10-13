@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -65,7 +66,7 @@ class ServicoAgente : Service() {
   override fun onCreate() {
     super.onCreate()
     criarCanal()
-    startForeground(ID_NOTIFICACAO, montarNotificacao("iniciando..."))
+    entrarEmPrimeiroPlano("iniciando...")
     validador.iniciar()
     val t = HandlerThread("batida-nopulso").also { it.start() }
     thread = t
@@ -92,6 +93,10 @@ class ServicoAgente : Service() {
         Batida.Resposta(false, null)
       }
       atualizarNotificacao(resposta.ok)
+      // a permissao de localizacao pode ter sido dada DEPOIS de o servico
+      // subir: promove de novo, agora como "location", pra o Android deixar
+      // ler o SSID com a tela apagada (ver RedeWifi)
+      try { promoverSeGanhouLocalizacao() } catch (_: Exception) { }
       try {
         val atualizacao = resposta.corpo?.optJSONObject("atualizacaoAndroid")
         if (atualizacao != null) Atualizacao.receber(applicationContext, atualizacao)
@@ -110,6 +115,57 @@ class ServicoAgente : Service() {
     } catch (e: Exception) {
       // versao nova pode esperar a proxima janela - nunca derruba a batida
     }
+  }
+
+  /**
+   * Tipo do servico em primeiro plano. "specialUse" (Android 14+) e' o de
+   * sempre; "location" entra SO quando a permissao de localizacao existe -
+   * declarar o tipo sem ter a permissao e' SecurityException no Android 14,
+   * e o servico nao subiria. Se o sistema recusar a combinacao, cai no tipo
+   * de sempre: monitorar vem antes de saber o nome da rede.
+   */
+  private var tiposEmUso = 0
+
+  private fun tiposDePrimeiroPlano(): Int {
+    var tipos = 0
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      tipos = tipos or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && RedeWifi.temPermissaoDeLocalizacao(this)) {
+      tipos = tipos or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+    }
+    return tipos
+  }
+
+  private fun entrarEmPrimeiroPlano(texto: String) {
+    val notificacao = montarNotificacao(texto)
+    val tipos = tiposDePrimeiroPlano()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && tipos != 0) {
+      try {
+        startForeground(ID_NOTIFICACAO, notificacao, tipos)
+        tiposEmUso = tipos
+        return
+      } catch (e: Exception) {
+        // combinacao recusada (ex: "location" sem elegibilidade): tenta so
+        // o tipo de sempre no Android 14+, ou o padrao do manifesto abaixo
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+          try {
+            startForeground(ID_NOTIFICACAO, notificacao, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            tiposEmUso = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            return
+          } catch (_: Exception) { }
+        }
+      }
+    }
+    startForeground(ID_NOTIFICACAO, notificacao)
+    tiposEmUso = 0
+  }
+
+  private fun promoverSeGanhouLocalizacao() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+    if (!RedeWifi.temPermissaoDeLocalizacao(this)) return
+    if ((tiposEmUso and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) != 0) return
+    entrarEmPrimeiroPlano("Monitorando ${Identidade.unidade(applicationContext)}")
   }
 
   private fun atualizarNotificacao(ok: Boolean) {
