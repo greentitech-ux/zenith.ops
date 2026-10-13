@@ -6460,7 +6460,7 @@ setTimeout(async () => {
   try {
     const usersMod = require(__dirname + '/users.js');
     const fs = require('fs');
-    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8').replace(/\r\n/g, '\n');
     const painelHtml = fs.readFileSync(__dirname + '/public/painel.html', 'utf8');
     const minhaHtml = fs.readFileSync(__dirname + '/public/minha-aparencia.html', 'utf8');
     const iniCalc = tema.indexOf('function calcularEnquadroPessoal(');

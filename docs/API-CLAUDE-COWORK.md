@@ -193,3 +193,32 @@ usar credenciais reais.
 Para Gmail, habilite a **Gmail API** no projeto Google Cloud. Na delegação em todo o domínio, o ID numérico da conta de serviço deve ter `gmail.readonly` e `gmail.send` (a tela atual já mostra esses escopos). A leitura trata o corpo das mensagens como conteúdo externo não confiável; enviar exige confirmação explícita do Master.
 
 O catálogo retornado por `/api/agent/tools` é a fonte de verdade. Não existe ferramenta para executar código livre, consultar senha existente ou elevar alguém a Master.
+
+## Cobertura nativa ampliada (13/10/2026)
+
+As consultas abaixo são somente leitura, exigem o Master ativo do conector e
+usam os caches das telas. Não acionam coleta externa nem comandos nas máquinas.
+
+- `obter_fechamento(unidade, data?)` e `listar_fechamentos(unidade?, desde?, ate?, limite?, pagina?)`: mesma consolidação da tela, com precedência dos lançamentos nativos. Campo não fornecido pela origem retorna `null`; ausência de registro não significa caixa aberto ou receita zero. O mapeamento histórico permanece: `pix` é Adyen online, `adyen` é Maquininhas.
+- `consultar_acessos_parque(unidade, desde?, ate?, limite?, pagina?)`: acessos iniciados, crianças identificáveis, recorrência na base retida, horários, planos, eventos e semana anterior. O financeiro usa o total nativo; valores sem detalhamento aparecem na diferença de discriminação. Vendas antecipadas entram pela data da venda, sem repetição na visita.
+- `obter_cliente_parque(unidade, documento|telefone|nome, limite?, pagina?)`: exatamente um filtro, com identificação mascarada. Sem período, consulta todo o histórico retido. Não devolve CPF, telefone, endereço ou informações de saúde. Nome pode incluir homônimos.
+- `obter_diagnostico(codigo, posto)`: telemetria recebida e último diagnóstico estruturado/mascarado. Não executa nada. Para coletar, `executar_noc` aceita `tarefa: "diagnostico-completo"` e mantém a aprovação do Master, fila autenticada e execução elevada. Script fixo, amostra de CPU de 5 segundos e timeout de 120 segundos, sem alterar configurações nem abrir Notepad. O último resumo substitui o anterior na máquina; relatório local em `C:\Diagnostico`. Fontes indisponíveis são sinalizadas e eventos ficam limitados à amostra de 200.
+- `resumo_unidade(unidade, data?)`: reúne as fontes disponíveis sem somar recebimentos entre sistemas. Fonte indisponível tem motivo explícito, não total zero.
+
+Unidade aceita código, nome ou apelido. Datas usam ISO e padrão hoje em São
+Paulo (exceto histórico de cliente sem período). Consultas por período aceitam
+até 366 dias; listas usam `limite` de 1 a 100 e `pagina` a partir de 1.
+"Primeira na base" não comprova primeira visita ao parque: a identidade usa
+nome, nascimento e responsável, e a base externa antiga pode estar incompleta.
+
+`buscar_pedidos_agregador` acrescenta paginação, resumo e merchants vinculados
+à mesma unidade sobre os dados iFood **já retidos**. Em decisão de 13/10/2026,
+o Master adiou a nova API iFood e as fontes/exportações AnyFood e Pulse. Este
+deploy não ativa essas integrações, não cadastra merchants desconhecidos e não
+usa o navegador do usuário como fonte. O histórico externo WOWPark/planilha
+também não foi importado por esta alteração.
+
+Validação local: `node testeCoworkLeituras.js`; com `--sabotagem`, o teste deve
+reprovar o mapeamento financeiro propositalmente adulterado. A execução real
+do diagnóstico em uma máquina da loja continua dependendo de aprovação e
+validação operacional; os testes usam retorno de agente simulado.
