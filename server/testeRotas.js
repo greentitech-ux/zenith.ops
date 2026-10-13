@@ -6263,6 +6263,185 @@ setTimeout(async () => {
   console.log(`${okNoc ? '✓' : '✗'} NOC: Ethernet caída vira DEGRADADO, reinício é detectado pelo boot, e o Master reinicia o parque com senha`);
 
   // ------------------------------------------------------------------
+  // Visão geral mostra o que o agente MEDE da rede (pedido do Master: "quero
+  // esses dados"): sinal Wi-Fi %, roteador e internet do dia, na linha
+  // Conexão. Antes só existia na aba Rede, como nota. O que fica provado: o
+  // detalhe traz o resumo do dia calculado pelo servidor (redeResumo), a
+  // tela desenha os três números a partir dele, e máquina sem medição não
+  // ganha linha nenhuma (número inventado é pior que linha vazia).
+  let okRedeNaFicha = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const UNI = 'NOCTESTE';
+    const postoNoc = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-NOC').posto;
+    const tk = await ls.garantirAgentToken(UNI, postoNoc);
+    const bater = (extra) => ls.heartbeat(UNI, postoNoc, { userAgent: 'NOCZenith/1.0', ...extra }, tk);
+    await bater({ link: { tipo: 'wifi', nome: 'LOJA-5G', mbps: 300 }, rede: { conexao: 'wifi', sinalWifi: 48, gatewayMs: 12, wanMs: 140, wanPerdaPct: 3 } });
+    await bater({ rede: { conexao: 'wifi', sinalWifi: 72, gatewayMs: 8, wanMs: 100, wanPerdaPct: 1 } });
+    const ficha = await ls.detalhar(UNI, postoNoc);
+    const r = (ficha && ficha.redeResumo) || {};
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    // máquina cadastrada que nunca mediu rede: sem resumo
+    await ls.cadastrarComputador(UNI, 'SEM-MEDICAO', 'interno');
+    const semMed = await ls.detalhar(UNI, (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'SEM-MEDICAO').posto);
+
+    const conferencias = {
+      'o detalhe traz redeResumo do dia, calculado no servidor': r.semDados === false && r.conexao === 'wifi',
+      'sinal Wi-Fi: média e mínimo do dia': r.sinalWifiMedio === 60 && r.sinalWifiMin === 48,
+      'roteador e internet: média do dia, com perda': r.gatewayMedia === 10 && r.wanMedia === 120 && r.wanPerda === 2,
+      'máquina sem medição não ganha resumo (semDados), e a tela não desenha nada': !!(semMed && semMed.redeResumo && semMed.redeResumo.semDados === true)
+        && /if\(!r \|\| r\.semDados\) return '';/.test(html),
+      'a linha Conexão da Visão geral desenha sinal Wi-Fi, roteador e internet a partir do redeResumo':
+        /function qualidadeRedeHtml\(c\)/.test(html) && /c\.redeResumo/.test(html)
+        && /sinal Wi-Fi <b/.test(html) && /roteador <b/.test(html) && /internet <b/.test(html)
+        && /\$\{qualidadeRedeHtml\(c\)\}/.test(html),
+      'limiares da ficha são os mesmos da aba Rede (30 ms roteador, 120 ms internet, 2% perda, 60% sinal)':
+        /REDE_ROTEADOR_LENTO_MS = 30;/.test(html) && /REDE_INTERNET_LENTA_MS = 120;/.test(html)
+        && /REDE_PERDA_RUIM_PCT = 2;/.test(html) && /REDE_SINAL_WIFI_BAIXO = 60;/.test(html)
+        && /gatewayMedia > 30 \? 'alerta'/.test(html) && /wanMedia > 120 \|\| r\.wanPerda > 2/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okRedeNaFicha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (resumo=${JSON.stringify(r)})`);
+  } catch (e) { okRedeNaFicha = false; console.log('  erro: ' + e.message); }
+  if (!okRedeNaFicha) ruins += 1;
+  console.log(`${okRedeNaFicha ? '✓' : '✗'} NOC: a Visão geral mostra sinal Wi-Fi, roteador e internet medidos hoje (redeResumo do detalhe)`);
+
+  // ------------------------------------------------------------------
+  // Agente v150: vazão REAL da internet (download cronometrado, 1x por hora)
+  // e, no Wi-Fi, sinal/banda/canal/rádio junto com o SSID. O que fica
+  // provado: o script tem a medição com trava de 1 hora e timeout curto (o
+  // heartbeat não pode atrasar); o servidor guarda os campos novos com
+  // faixa fechada e descarta lixo; vazão/sinal variando NÃO vira evento de
+  // link (só mudança estrutural vira); a ficha separa "placa" de "internet";
+  // e a versão subiu (senão nenhuma máquina recebe).
+  let okVazao = false;
+  try {
+    const vg = require(__dirname + '/vigiaScript.js');
+    const ps = vg.montarScriptVigia({ codigo: 'VZ', posto: 'PC1', tipo: 'interno', agentToken: 'tokvz' });
+    const psAntigo = vg.montarScriptVigia({ codigo: 'VZ', posto: 'PC1', tipo: 'interno', agentToken: 'tokvz', windowsAntigo: true });
+    const html = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const ls = require(__dirname + '/lojaStatus.js');
+    const UNI = 'NOCTESTE';
+    const postoNoc = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-NOC').posto;
+    const tk = await ls.garantirAgentToken(UNI, postoNoc);
+    const bater = (extra) => ls.heartbeat(UNI, postoNoc, { userAgent: 'NOCZenith/1.0', ...extra }, tk);
+    const doc = async () => ls.detalhar(UNI, postoNoc);
+    // o painel só relê quando há EVENTO de link (mudança estrutural). Então:
+    // A (estrutural) grava e vira evento; B (só sinal/vazão) NÃO pode virar
+    // evento; C (estrutural de novo, com os valores de B) força a releitura
+    // e prova que B foi guardado; D manda lixo.
+    const base = { tipo: 'wifi', nome: 'LOJA-5G-V150', mbps: 300, ethernetPresente: false };
+    await bater({ link: { ...base, sinalWifi: 71, canal: 36, banda: '5 GHz', radio: '802.11ax', vazaoMbps: 38.678, vazaoEm: 1791870000000 } });
+    const d1 = await doc();
+    const eventosAntes = (d1.eventos || []).filter((e) => e.tipo === 'link').length;
+    await bater({ link: { ...base, sinalWifi: 55, canal: 36, banda: '5 GHz', radio: '802.11ax', vazaoMbps: 12.1, vazaoEm: 1791873600000 } });
+    await bater({ link: { ...base, nome: 'LOJA-5G', sinalWifi: 55, canal: 36, banda: '5 GHz', radio: '802.11ax', vazaoMbps: 12.1, vazaoEm: 1791873600000 } });
+    const d2 = await doc();
+    const eventosDepois = (d2.eventos || []).filter((e) => e.tipo === 'link').length;
+    // lixo: sinal 250%, canal 0, banda enorme, vazão negativa
+    await bater({ link: { ...base, nome: 'LIXO', sinalWifi: 250, canal: 0, banda: 'x'.repeat(50), radio: 'y'.repeat(60), vazaoMbps: -5, vazaoEm: 'ontem' } });
+    const d3 = await doc();
+
+    const conferencias = {
+      'VERSAO_VIGIA subiu pra 150+ (senão nenhuma das 52 máquinas mede)': vg.VERSAO_VIGIA >= 150,
+      'o agente mede a vazão baixando 512 KB de endpoint público, não do NoPulso (banda do Render)':
+        /function Medir-Vazao/.test(ps) && /speed\.cloudflare\.com\/__down\?bytes=524288/.test(ps)
+        && !/Medir-Vazao[\s\S]*\$UrlHeartbeat/.test(ps.slice(ps.indexOf('function Medir-Vazao'), ps.indexOf('function Medir-Vazao') + 1500)),
+      'a medição tem trava de 1 hora e timeout de 8 s (o heartbeat não pode atrasar)':
+        /TotalMinutes -lt 60\) \{ return \$script:VazaoUltima \}/.test(ps) && /Invoke-WebRequest -Uri \$UrlTesteVazao -UseBasicParsing -TimeoutSec 8/.test(ps),
+      'resposta curta demais (bloqueio/portal cativo) não vira número': /\$bytes -ge 65536 -and \$seg -gt 0/.test(ps),
+      'a vazão viaja dentro do link, na cadência do link': /\$Link\.vazaoMbps = \$vz\.vazaoMbps; \$Link\.vazaoEm = \$vz\.vazaoEm/.test(ps),
+      'no Wi-Fi o agente lê sinal, canal, banda e rádio do netsh (rótulo pt/en), nos dois ramos do Medir-Link':
+        /function Ler-WifiDetalhes/.test(ps) && /\(Canal\|Channel\)/.test(ps) && /Band\[a\]\?/.test(ps) && /Radio type\|Tipo de r\.dio/.test(ps)
+        && (ps.match(/if \(\$r\.tipo -eq "wifi"\) \{ try \{ Aplicar-WifiDetalhes \$r \} catch \{\} \}/g) || []).length === 2,
+      'banda sai do canal quando o Windows não imprime a linha Band': /\$w\.canal -ge 1 -and \$w\.canal -le 14\) \{ \$w\.banda = "2,4 GHz" \}/.test(ps) && /\$w\.canal -ge 32 -and \$w\.canal -le 177\) \{ \$w\.banda = "5 GHz" \}/.test(ps),
+      'a versão de Windows antigo gera sem API de PowerShell 5 (o relógio da vazão foi trocado)': !/ToUnixTimeMilliseconds/.test(psAntigo) && /function Medir-Vazao/.test(psAntigo),
+      'o servidor guarda sinal, canal, banda, rádio e vazão com faixa fechada':
+        d1.link && d1.link.sinalWifi === 71 && d1.link.canal === 36 && d1.link.banda === '5 GHz' && d1.link.radio === '802.11ax'
+        && d1.link.vazaoMbps === 38.68 && d1.link.vazaoEm === 1791870000000,
+      'lixo nos campos novos vira null, nunca número inventado':
+        d3.link && d3.link.sinalWifi === null && d3.link.canal === null && d3.link.banda === 'x'.repeat(10) && d3.link.radio === 'y'.repeat(20)
+        && d3.link.vazaoMbps === null && d3.link.vazaoEm === null,
+      'sinal e vazão variando NÃO viram evento de link (só a mudança estrutural de C virou, uma)': eventosDepois === eventosAntes + 1 && d2.link.nome === 'LOJA-5G' && d2.link.sinalWifi === 55 && d2.link.vazaoMbps === 12.1,
+      'a ficha separa "placa" (negociada) de "internet" (medida) e mostra sinal/banda/canal do Wi-Fi':
+        /· placa \$\{velocidade/.test(html) && /internet <b>~\$\{vazao/.test(html) && /Mbps<\/b> medidos/.test(html)
+        && /sinal agora <b/.test(html) && /banda <b>/.test(html) && /canal \$\{escapeHtml\(String\(link\.canal\)\)\}/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okVazao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (link=${JSON.stringify(d3 && d3.link)} eventos=${eventosAntes}/${eventosDepois})`);
+  } catch (e) { okVazao = false; console.log('  erro: ' + e.message); }
+  if (!okVazao) ruins += 1;
+  console.log(`${okVazao ? '✓' : '✗'} NOCZenith v150: vazão real da internet (1x/hora, 8 s) e sinal/banda/canal do Wi-Fi no link, sem virar evento a cada medição`);
+
+  // ------------------------------------------------------------------
+  // App Android v5 (RedeWifi.kt): nome da rede, sinal, frequência e link do
+  // Wi-Fi do tablet - o que o navegador nunca conta. O que fica provado do
+  // lado de cá: o servidor aceita os três campos novos com faixa fechada
+  // (sinal 0-100, frequência 2000-7200 MHz, link 1-10000 Mbps) e o nome sem
+  // aspas/quebras; a ficha desenha sinal, banda derivada da frequência e
+  // "placa"; o app pede a permissão de localização e só se declara
+  // "location" quando a tem; e versionCode/VERSAO_AGENTE_ANDROID subiram
+  // juntos pra 5 (o teste de versão lá embaixo confere a igualdade).
+  let okAppWifi = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const fs = require('fs');
+    const raiz = require('path').join(__dirname, '..');
+    const html = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const redeKt = fs.readFileSync(raiz + '/android/app/src/main/java/br/com/nopulso/agente/RedeWifi.kt', 'utf8');
+    const telemetriaKt = fs.readFileSync(raiz + '/android/app/src/main/java/br/com/nopulso/agente/Telemetria.kt', 'utf8');
+    const servicoKt = fs.readFileSync(raiz + '/android/app/src/main/java/br/com/nopulso/agente/ServicoAgente.kt', 'utf8');
+    const telaKt = fs.readFileSync(raiz + '/android/app/src/main/java/br/com/nopulso/agente/TelaPrincipal.kt', 'utf8');
+    const manifesto = fs.readFileSync(raiz + '/android/app/src/main/AndroidManifest.xml', 'utf8');
+    const testeKt = fs.readFileSync(raiz + '/android/app/src/test/java/br/com/nopulso/agente/RedeWifiTest.kt', 'utf8');
+    const agente = require(__dirname + '/agenteAndroid.js');
+
+    const bom = ls.sanitizarAparelho({ rede: { tipo: 'wifi', nome: ' LOJA-5G\n', sinal: 71, frequenciaMhz: 5180, linkMbps: 433, downlinkMbps: 38.7 }, so: { nome: 'Android', versao: '14' } });
+    const lixo = ls.sanitizarAparelho({ rede: { tipo: 'wifi', sinal: 250, frequenciaMhz: 99, linkMbps: -1 } });
+    const semNada = ls.sanitizarAparelho({ rede: { tipo: 'wifi' } });
+
+    const conferencias = {
+      'servidor guarda nome (limpo), sinal, frequência e link do Wi-Fi do app':
+        bom && bom.rede && bom.rede.nome === 'LOJA-5G' && bom.rede.sinal === 71 && bom.rede.frequenciaMhz === 5180 && bom.rede.linkMbps === 433 && bom.rede.downlinkMbps === 38.7,
+      'fora da faixa vira nada, nunca número inventado':
+        lixo && lixo.rede && lixo.rede.sinal === undefined && lixo.rede.frequenciaMhz === undefined && lixo.rede.linkMbps === undefined,
+      'só o tipo, sem os campos novos, continua válido (app antigo / navegador)': semNada && semNada.rede && semNada.rede.tipo === 'wifi' && Object.keys(semNada.rede).length === 1,
+      'a ficha desenha sinal, banda (da frequência) e placa do tablet, e explica o nome ausente pela permissão':
+        /function bandaDaFrequencia\(mhz\)/.test(html) && /bandaDaFrequencia\(ap\.rede\.frequenciaMhz\)/.test(html)
+        && /2400 && f <= 2500\) return '2,4 GHz'/.test(html) && /4900 && f <= 5900\) return '5 GHz'/.test(html)
+        && /ap\.rede\.sinal\)\}%<\/b>/.test(html) && /placa \$\{Number\(ap\.rede\.linkMbps\)/.test(html)
+        && /não informada pelo aparelho \(permissão de localização\?\)/.test(html) && /NoPulsoAgente\\\//.test(html),
+      'o app lê SSID/sinal/frequência/link só com permissão de localização, e manda no mesmo campo rede':
+        /fun temPermissaoDeLocalizacao/.test(redeKt) && /if \(!temPermissaoDeLocalizacao\(ctx\)\) return null/.test(redeKt)
+        && /wm\.connectionInfo/.test(redeKt) && /put\("nome"/.test(redeKt) && /put\("sinal", sinalPorcento/.test(redeKt)
+        && /put\("frequenciaMhz", info\.frequency\)/.test(redeKt) && /put\("linkMbps", info\.linkSpeed\)/.test(redeKt)
+        && /RedeWifi\.ler\(ctx\)/.test(telemetriaKt) && /TRANSPORT_WIFI\)\) \{\s*RedeWifi\.ler/.test(telemetriaKt),
+      'SSID escondido pelo Android ("<unknown ssid>") nunca vira nome': /SSID_DESCONHECIDO = "<unknown ssid>"/.test(redeKt) && /s == SSID_DESCONHECIDO/.test(redeKt) && /startsWith\("0x"\)/.test(redeKt),
+      'sinal na mesma régua do Windows (-100 dBm = 0%, -55 dBm = 100%), com teste unitário no app':
+        /\(rssi \+ 100\) \* 100\.0 \/ 45\.0/.test(redeKt) && /coerceIn\(0, 100\)/.test(redeKt)
+        && /sinalPorcento\(-100\)\)/.test(testeKt) && /sinalPorcento\(-55\)\)/.test(testeKt) && /limparSsid\("<unknown ssid>"\)/.test(testeKt),
+      'manifesto declara localização e o tipo "location" do serviço; o serviço só o usa COM a permissão (Android 14 recusa sem)':
+        /android\.permission\.ACCESS_FINE_LOCATION/.test(manifesto) && /android\.permission\.FOREGROUND_SERVICE_LOCATION/.test(manifesto)
+        && /foregroundServiceType="specialUse\|location"/.test(manifesto)
+        && /RedeWifi\.temPermissaoDeLocalizacao\(this\)\) \{\s*tipos = tipos or ServiceInfo\.FOREGROUND_SERVICE_TYPE_LOCATION/.test(servicoKt)
+        && /startForeground\(ID_NOTIFICACAO, notificacao, ServiceInfo\.FOREGROUND_SERVICE_TYPE_SPECIAL_USE\)/.test(servicoKt)
+        && /promoverSeGanhouLocalizacao/.test(servicoKt),
+      'a tela pede notificação e localização num pedido só, e avisa o que falta sem travar o agente':
+        /faltam\.add\(Manifest\.permission\.ACCESS_FINE_LOCATION\)/.test(telaKt) && /requestPermissions\(faltam\.toTypedArray\(\), 1\)/.test(telaKt)
+        && !/requestPermissions\(arrayOf\(Manifest\.permission\.POST_NOTIFICATIONS\), 1\)/.test(telaKt)
+        && /Sem a permissao de localizacao, o NOC nao ve o nome nem o sinal/.test(telaKt),
+      'versão do app subiu pra 5 (senão nenhum tablet recebe)': agente.VERSAO_AGENTE_ANDROID >= 5,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okAppWifi = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (bom=${JSON.stringify(bom && bom.rede)} lixo=${JSON.stringify(lixo && lixo.rede)})`);
+  } catch (e) { okAppWifi = false; console.log('  erro: ' + e.message); }
+  if (!okAppWifi) ruins += 1;
+  console.log(`${okAppWifi ? '✓' : '✗'} Agente Android v5: nome, sinal, frequência e link do Wi-Fi do tablet (com permissão de localização), aceitos com faixa fechada e desenhados na ficha`);
+
+  // ------------------------------------------------------------------
   // Logos das empresas do grupo no rodapé do login. Antes era UMA imagem
   // fixa no código: empresa entrava ou saía do grupo e só dava pra
   // refletir isso com deploy. O que precisa ficar provado: o Master
@@ -28655,7 +28834,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         && /START_STICKY/.test(servico),
       // servico comum/alarme entram em Doze e param de bater
       'roda em primeiro plano, que e o unico que o Android nao mata':
-        /foregroundServiceType="specialUse"/.test(manifesto)
+        // v5 somou "location" ao tipo (SSID e dado de localizacao, ver RedeWifi.kt);
+        // o que importa aqui e continuar em primeiro plano
+        /foregroundServiceType="specialUse(\|location)?"/.test(manifesto)
         && /startForeground\(/.test(servico),
       // rota nova de telemetria seria um segundo jeito de ser maquina
       // o endereco antigo foi aposentado (CLAUDE.md §4): o agente nao pode

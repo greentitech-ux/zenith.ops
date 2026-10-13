@@ -9,6 +9,15 @@
   <!-- Android 13+: sem isso o servico em primeiro plano nao mostra a barra, e
        o sistema mata o servico por nao ter notificacao visivel -->
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <!-- v5: o Android trata o NOME da rede Wi-Fi (SSID) como localizacao. Sem
+       estas duas, o sistema devolve "<unknown ssid>" e sinal nenhum (ver
+       RedeWifi.kt). Pedidas na TelaPrincipal; negar nao trava o agente. -->
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  <!-- Android 14+: servico em primeiro plano que le localizacao (o SSID) tem
+       de declarar o tipo "location" - e o ServicoAgente so o usa quando a
+       permissao acima foi concedida -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
   <application
       android:allowBackup="false"
@@ -40,7 +49,7 @@
     <service
         android:name=".ServicoAgente"
         android:exported="false"
-        android:foregroundServiceType="specialUse">
+        android:foregroundServiceType="specialUse|location">
       <property
           android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
           android:value="Monitoramento continuo de presenca e bateria de tablet de loja (NOC interno)" />

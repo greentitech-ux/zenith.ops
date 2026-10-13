@@ -22,7 +22,9 @@ import org.json.JSONObject
  *
  * O que o agente sabe e o navegador nao sabia:
  *  - bateria em aparelho Android sem Chrome, e mesmo com a tela apagada;
- *  - o armazenamento do APARELHO inteiro, nao a cota do navegador.
+ *  - o armazenamento do APARELHO inteiro, nao a cota do navegador;
+ *  - o nome (SSID), o sinal, a frequencia e a velocidade do link Wi-Fi,
+ *    quando a permissao de localizacao foi concedida (ver RedeWifi).
  *
  * Campo que o Android nao responder simplesmente nao vai - nunca um numero
  * inventado (mesma regra do coletor do navegador, e do CLAUDE.md §6).
@@ -86,6 +88,14 @@ object Telemetria {
       }
       val kbps = caps.linkDownstreamBandwidthKbps
       if (kbps > 0) saida.put("downlinkMbps", arredondar(kbps / 1000.0))
+      // nome, sinal, frequencia e velocidade do link Wi-Fi (ver RedeWifi):
+      // so com a permissao de localizacao; sem ela, a rede vai como antes
+      if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+        RedeWifi.ler(ctx)?.let { w ->
+          val chaves = w.keys()
+          while (chaves.hasNext()) { val k = chaves.next(); saida.put(k, w.get(k)) }
+        }
+      }
       saida
     } catch (e: Exception) {
       null

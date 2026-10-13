@@ -1543,7 +1543,19 @@ function conexaoComputadorHtml(c){
   if(!link || !link.tipo) return '';
   const tipos={ethernet:'Ethernet (cabo)',wifi:'Wi-Fi',nenhum:'sem placa de rede ativa',outro:'outro meio'};
   const velocidade=Number(link.mbps);
-  const mbps=Number.isFinite(velocidade)&&velocidade>0 ? ` · ${velocidade.toLocaleString('pt-BR')} Mbps` : '';
+  // "placa" = velocidade negociada da placa (1 Gbps no cabo nao diz nada da
+  // internet); "internet" = vazao MEDIDA pelo agente v150 (download de 512 KB,
+  // 1x por hora). Sao dois numeros diferentes e a ficha diz qual e qual.
+  const mbps=Number.isFinite(velocidade)&&velocidade>0 ? ` · placa ${velocidade.toLocaleString('pt-BR')} Mbps` : '';
+  const vazao=Number(link.vazaoMbps);
+  const internet=Number.isFinite(vazao)&&vazao>0 ? ` · internet <b>~${vazao.toLocaleString('pt-BR',{maximumFractionDigits:1})} Mbps</b> medidos${link.vazaoEm ? ` ${escapeHtml(tempoRelativo(link.vazaoEm))}` : ''}` : '';
+  // Wi-Fi: o que o netsh conta da associacao atual (agente v150)
+  const wifiDetalhes=link.tipo==='wifi' ? [
+    Number.isFinite(Number(link.sinalWifi)) && link.sinalWifi!==null ? `sinal agora <b style="color:${Number(link.sinalWifi) < REDE_SINAL_WIFI_BAIXO ? 'var(--warn,#e0a800)' : 'var(--text)'};">${Number(link.sinalWifi)}%</b>` : null,
+    link.banda ? `banda <b>${escapeHtml(String(link.banda))}</b>` : null,
+    link.canal ? `canal ${escapeHtml(String(link.canal))}` : null,
+    link.radio ? escapeHtml(String(link.radio)) : null,
+  ].filter(Boolean).map(x=>' · '+x).join('') : '';
   // A ficha precisa dizer explicitamente o estado da Ethernet tambem quando
   // o caminho ativo e Wi-Fi; isso separa "sem cabo" de "placa sem defeito".
   const ethernetEstado=link.ethernetCaida
@@ -1554,7 +1566,45 @@ function conexaoComputadorHtml(c){
   const interfaceNome=link.nome ? ` · ${link.tipo==='wifi'?'Rede':'interface'}: ${escapeHtml(String(link.nome))}` : '';
   const adaptador=link.adaptador && link.adaptador!==link.nome ? ` · adaptador: ${escapeHtml(String(link.adaptador))}` : '';
   const leitura=c.linkEm ? ` · leitura ${escapeHtml(tempoRelativo(c.linkEm))}` : '';
-  return `📡 Conexão: <b>${escapeHtml(tipos[link.tipo]||String(link.tipo))}</b>${link.tipo==='nenhum'?'':mbps}${interfaceNome}${adaptador}${ethernetEstado}${leitura}`;
+  return `📡 Conexão: <b>${escapeHtml(tipos[link.tipo]||String(link.tipo))}</b>${link.tipo==='nenhum'?'':mbps}${interfaceNome}${wifiDetalhes}${internet}${adaptador}${ethernetEstado}${leitura}${qualidadeRedeHtml(c)}`;
+}
+// O que o agente MEDE da rede (e nao so o que o Windows diz da placa): sinal
+// Wi-Fi em %, ping do roteador e da internet com perda. Sao as medias de
+// HOJE, as mesmas da aba Rede (redeResumo vem do detalhar() do servidor, que
+// usa o mesmo resumir()). Antes isso so existia na aba Rede, como nota; o
+// Master pediu os numeros na ficha. Limiares iguais aos da aba Rede.
+const REDE_ROTEADOR_LENTO_MS = 30;
+const REDE_INTERNET_LENTA_MS = 120;
+const REDE_PERDA_RUIM_PCT = 2;
+const REDE_SINAL_WIFI_BAIXO = 60;
+// banda Wi-Fi a partir da frequencia do canal (MHz), como o Android informa
+function bandaDaFrequencia(mhz){
+  const f = Number(mhz);
+  if(!Number.isFinite(f) || f <= 0) return null;
+  if(f >= 2400 && f <= 2500) return '2,4 GHz';
+  if(f >= 4900 && f <= 5900) return '5 GHz';
+  if(f >= 5925 && f <= 7125) return '6 GHz';
+  return null;
+}
+function qualidadeRedeHtml(c){
+  const r = c && c.redeResumo;
+  if(!r || r.semDados) return '';
+  const partes = [];
+  const num = (v) => (v !== null && v !== undefined && Number.isFinite(Number(v)));
+  if(r.conexao === 'wifi' && num(r.sinalWifiMedio)){
+    const fraco = num(r.sinalWifiMin) && r.sinalWifiMin < REDE_SINAL_WIFI_BAIXO;
+    partes.push(`sinal Wi-Fi <b style="color:${fraco ? 'var(--warn,#e0a800)' : 'var(--text)'};">${Math.round(r.sinalWifiMedio)}%</b>${num(r.sinalWifiMin) ? ` (mín. ${Math.round(r.sinalWifiMin)}%)` : ''}`);
+  }
+  if(num(r.gatewayMedia)){
+    partes.push(`roteador <b style="color:${r.gatewayMedia > REDE_ROTEADOR_LENTO_MS ? 'var(--warn,#e0a800)' : 'var(--text)'};">${Math.round(r.gatewayMedia)} ms</b>`);
+  }
+  if(num(r.wanMedia)){
+    const perda = num(r.wanPerda) ? Math.round(r.wanPerda) : 0;
+    const ruim = r.wanMedia > REDE_INTERNET_LENTA_MS || perda > REDE_PERDA_RUIM_PCT;
+    partes.push(`internet <b style="color:${ruim ? 'var(--bad)' : 'var(--text)'};">${Math.round(r.wanMedia)} ms</b>${perda > 0 ? ` (${perda}% perda)` : ''}`);
+  }
+  if(!partes.length) return '';
+  return `<br><span style="padding-left:1.6em;">📶 ${partes.join(' · ')} <span class="sub">· médias de hoje${r.amostras ? `, ${r.amostras} amostra(s)` : ''}</span></span>`;
 }
 function linkTexto(c){
   const l = c && c.link;
@@ -1952,8 +2002,19 @@ function atualizarConteudoDetalhe(codigo, c){
   // fonte mais fiel. A telemetria do navegador fica para tablet/celular.
   if(ap && !c.link && ap.rede && (ap.rede.tipo || ap.rede.geracao || ap.rede.nome)){
     const via = ap.rede.tipo === 'wifi' ? 'Wi-Fi' : (ap.rede.tipo === 'cellular' ? 'dados móveis' : (ap.rede.tipo || ap.rede.geracao));
-    const redeWifi = ap.rede.tipo === 'wifi' ? ` · Rede: <b>${escapeHtml(ap.rede.nome || 'não informada pelo navegador')}</b>` : '';
-    infoBits.push(`📡 Conexão: <b>${escapeHtml(String(via))}</b>${redeWifi}${ap.rede.geracao && ap.rede.tipo ? ` · ${escapeHtml(ap.rede.geracao)}` : ''}${ap.rede.downlinkMbps ? ` · ~${ap.rede.downlinkMbps} Mbps (estimativa)` : ''}${ap.rede.rttMs !== undefined ? ` · latência estimada: ${ap.rede.rttMs} ms` : ''}${ap.rede.economiaDados === true ? ' · economia de dados ligada' : ''}`);
+    // o app Android v5 conta o nome; o navegador nunca conta (privacidade)
+    const pelaApp = /NoPulsoAgente\//.test(String(c.userAgent || ''));
+    const semNome = pelaApp ? 'não informada pelo aparelho (permissão de localização?)' : 'não informada pelo navegador';
+    const redeWifi = ap.rede.tipo === 'wifi' ? ` · Rede: <b>${escapeHtml(ap.rede.nome || semNome)}</b>` : '';
+    // sinal, banda (da frequencia) e velocidade do link: so o app Android v5
+    // (RedeWifi.kt) entrega; campo ausente nao desenha nada
+    const bandaApp = bandaDaFrequencia(ap.rede.frequenciaMhz);
+    const wifiApp = ap.rede.tipo === 'wifi' ? [
+      Number.isFinite(Number(ap.rede.sinal)) && ap.rede.sinal !== undefined && ap.rede.sinal !== null ? `sinal <b style="color:${Number(ap.rede.sinal) < REDE_SINAL_WIFI_BAIXO ? 'var(--warn,#e0a800)' : 'var(--text)'};">${Number(ap.rede.sinal)}%</b>` : null,
+      bandaApp ? `banda <b>${escapeHtml(bandaApp)}</b> (${Number(ap.rede.frequenciaMhz)} MHz)` : null,
+      ap.rede.linkMbps ? `placa ${Number(ap.rede.linkMbps).toLocaleString('pt-BR')} Mbps` : null,
+    ].filter(Boolean).map(x => ' · ' + x).join('') : '';
+    infoBits.push(`📡 Conexão: <b>${escapeHtml(String(via))}</b>${redeWifi}${wifiApp}${ap.rede.geracao && ap.rede.tipo ? ` · ${escapeHtml(ap.rede.geracao)}` : ''}${ap.rede.downlinkMbps ? ` · ~${ap.rede.downlinkMbps} Mbps (estimativa)` : ''}${ap.rede.rttMs !== undefined ? ` · latência estimada: ${ap.rede.rttMs} ms` : ''}${ap.rede.economiaDados === true ? ' · economia de dados ligada' : ''}`);
   }
   if(ap && ap.so && ap.so.nome){
     infoBits.push(`📱 Sistema: <b>${escapeHtml(ap.so.nome)}${ap.so.versao ? ' ' + escapeHtml(ap.so.versao) : ''}</b>`);

@@ -851,8 +851,35 @@ function sanitizarLink(bruto) {
     ethernetCaida: !!bruto.ethernetCaida,
     ethernetPresente: !!bruto.ethernetPresente,
     ethernetAtiva: !!bruto.ethernetAtiva,
+    // v150: o que o agente MEDE, alem do que o Windows diz da placa. Wi-Fi:
+    // sinal %, canal, banda e tipo de radio (do netsh). Qualquer tipo: vazao
+    // real da internet (download cronometrado, 1x por hora) e quando foi.
+    // Campo que nao vier fica null - nunca um numero inventado.
+    ...extrasDoLink(bruto),
   };
 }
+function extrasDoLink(bruto) {
+  const inteiro = (v, min, max) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= min && n <= max ? Math.round(n) : null;
+  };
+  const texto = (v, max) => {
+    const t = String(v == null ? '' : v).trim().replace(/[\r\n\t]+/g, ' ').slice(0, max);
+    return t || null;
+  };
+  const vazao = Number(bruto.vazaoMbps);
+  return {
+    sinalWifi: inteiro(bruto.sinalWifi, 0, 100),
+    canal: inteiro(bruto.canal, 1, 233),
+    banda: texto(bruto.banda, 10),
+    radio: texto(bruto.radio, 20),
+    vazaoMbps: Number.isFinite(vazao) && vazao > 0 && vazao <= 10000 ? Math.round(vazao * 100) / 100 : null,
+    vazaoEm: inteiro(bruto.vazaoEm, 0, 4102444800000),
+  };
+}
+// so o que e ESTRUTURAL conta como "mudou o link" (vira evento e, se piorou,
+// alerta). Sinal, canal e vazao variam a cada medicao e nao sao mudanca de
+// caminho - comparar esses encheria o registro de eventos de hora em hora.
 function mesmoLink(a, b) {
   if (!a || !b) return a === b;
   return a.tipo === b.tipo && a.nome === b.nome && a.adaptador === b.adaptador
@@ -1593,6 +1620,15 @@ function sanitizarAparelho(bruto) {
     const rttMs = typeof rede.rttMs === 'number' ? numeroEntre(rede.rttMs, 0, 60000, 0) : null;
     if (rttMs !== null) r.rttMs = rttMs;
     if (typeof rede.economiaDados === 'boolean') r.economiaDados = rede.economiaDados;
+    // app Android v5 (RedeWifi.kt): sinal em %, frequencia do canal em MHz
+    // (a tela deriva a banda) e velocidade do link. Faixas fechadas; o que
+    // vier fora vira nada, nunca um numero inventado.
+    const sinal = numeroEntre(rede.sinal, 0, 100, 0);
+    const frequenciaMhz = numeroEntre(rede.frequenciaMhz, 2000, 7200, 0);
+    const linkMbps = numeroEntre(rede.linkMbps, 1, 10000, 0);
+    if (sinal !== null) r.sinal = sinal;
+    if (frequenciaMhz !== null) r.frequenciaMhz = frequenciaMhz;
+    if (linkMbps !== null) r.linkMbps = linkMbps;
     if (Object.keys(r).length) saida.rede = r;
   }
 
@@ -1791,7 +1827,13 @@ async function listarResumo() {
 // apelidos, fabricante) da listar() - sai do mesmo cache, sem leitura extra
 async function detalhar(codigo, posto) {
   const alvo = docIdFor(codigo, posto);
-  return (await listar()).find((d) => docIdFor(d.codigo, d.posto) === alvo) || null;
+  const d = (await listar()).find((d) => docIdFor(d.codigo, d.posto) === alvo) || null;
+  if (!d) return null;
+  // resumo do diagnostico de rede DE HOJE (sinal Wi-Fi, roteador, internet),
+  // o mesmo calculo da aba Rede, pra Visao geral mostrar na linha "Conexao"
+  // sem a tela ter que refazer a conta. Sai do redeDia que ja esta no doc:
+  // custo zero de leitura.
+  return { ...d, redeResumo: redeDiagnostico.resumir(d.redeDia || null) };
 }
 
 // `listar()` e `detalhar()` deliberadamente removem o agentToken antes de
