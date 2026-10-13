@@ -6292,9 +6292,10 @@ setTimeout(async () => {
       'máquina sem medição não ganha resumo (semDados), e a tela não desenha nada': !!(semMed && semMed.redeResumo && semMed.redeResumo.semDados === true)
         && /if\(!r \|\| r\.semDados\) return '';/.test(html),
       'a linha Conexão da Visão geral desenha sinal Wi-Fi, roteador e internet a partir do redeResumo':
-        /function qualidadeRedeHtml\(c\)/.test(html) && /c\.redeResumo/.test(html)
-        && /sinal Wi-Fi <b/.test(html) && /roteador <b/.test(html) && /internet <b/.test(html)
-        && /\$\{qualidadeRedeHtml\(c\)\}/.test(html),
+        // desde 13/10 dentro do bloco "Conexão": linhas Sinal (média/mín.) e Latência
+        /const r = \(c\.redeResumo && !c\.redeResumo\.semDados\) \? c\.redeResumo : null;/.test(html)
+        && /sinalPartes\.push\(`média <b/.test(html) && /function latenciaDoDiaHtml\(r\)/.test(html)
+        && /roteador <b/.test(html) && /internet <b/.test(html) && /\['Latência', latenciaDoDiaHtml\(r\)\]/.test(html),
       'limiares da ficha são os mesmos da aba Rede (30 ms roteador, 120 ms internet, 2% perda, 60% sinal)':
         /REDE_ROTEADOR_LENTO_MS = 30;/.test(html) && /REDE_INTERNET_LENTA_MS = 120;/.test(html)
         && /REDE_PERDA_RUIM_PCT = 2;/.test(html) && /REDE_SINAL_WIFI_BAIXO = 60;/.test(html)
@@ -6365,8 +6366,10 @@ setTimeout(async () => {
         && d3.link.vazaoMbps === null && d3.link.vazaoEm === null,
       'sinal e vazão variando NÃO viram evento de link (só a mudança estrutural de C virou, uma)': eventosDepois === eventosAntes + 1 && d2.link.nome === 'LOJA-5G' && d2.link.sinalWifi === 55 && d2.link.vazaoMbps === 12.1,
       'a ficha separa "placa" (negociada) de "internet" (medida) e mostra rede/sinal/banda do Wi-Fi':
-        /partes\.push\(`placa \$\{velocidade/.test(html) && /Mbps<\/b> de internet \(medido/.test(html)
-        && /partes\.push\(`Rede: <b>/.test(html) && /partes\.push\(`sinal <b/.test(html) && /if\(link\.banda\) partes\.push/.test(html),
+        /const placa = link\.tipo!=='nenhum'/.test(html) && /\['Placa', placa\]/.test(html)
+        && /const internet = Number\.isFinite\(vazao\)/.test(html) && /<span class="sub">medido/.test(html) && /\['Internet', internet\]/.test(html)
+        && /link\.banda \? `<b>\$\{escapeHtml\(String\(link\.banda\)\)\}<\/b>`/.test(html) && /\['Frequência', freq\]/.test(html)
+        && /sinalPartes\.push\(`<b style="color:\$\{corSinal\(link\.sinalWifi\)\};">/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okVazao = !falhas.length;
@@ -6411,8 +6414,11 @@ setTimeout(async () => {
       'a ficha desenha sinal, banda (da frequência) e placa do tablet, e explica o nome ausente pela permissão':
         /function bandaDaFrequencia\(mhz\)/.test(html) && /bandaDaFrequencia\(ap\.rede\.frequenciaMhz\)/.test(html)
         && /2400 && f <= 2500\) return '2,4 GHz'/.test(html) && /4900 && f <= 5900\) return '5 GHz'/.test(html)
-        && /ap\.rede\.sinal\)\}%<\/b>/.test(html) && /placa \$\{Number\(ap\.rede\.linkMbps\)/.test(html)
-        && /não informada pelo aparelho \(permissão de localização\?\)/.test(html) && /NoPulsoAgente\\\//.test(html),
+        && /\$\{Number\(ap\.rede\.sinal\)\}%<\/b>/.test(html) && /const placaAp = ap\.rede\.linkMbps/.test(html)
+        && /rede não informada pelo aparelho \(permissão de localização\?\)/.test(html) && /NoPulsoAgente\\\//.test(html)
+        // o MESMO bloco organizado do computador (rótulo/valor), não uma frase corrida
+        && /infoBits\.push\(blocoConexaoHtml\(\{/.test(html) && /return blocoConexaoHtml\(\{/.test(html)
+        && /\.cx-bloco\{display:inline-grid/.test(html),
       'o app lê SSID/sinal/frequência/link só com permissão de localização, e manda no mesmo campo rede':
         /fun temPermissaoDeLocalizacao/.test(redeKt) && /if \(!temPermissaoDeLocalizacao\(ctx\)\) return null/.test(redeKt)
         && /wm\.connectionInfo/.test(redeKt) && /put\("nome"/.test(redeKt) && /put\("sinal", sinalPorcento/.test(redeKt)
