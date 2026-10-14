@@ -16,8 +16,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO_AGENTE_LINUX = 1;
+const VERSAO_AGENTE_LINUX = 2;
 const MODELO = fs.readFileSync(path.join(__dirname, 'agenteLinuxScript.py'), 'utf8');
+const PRINT_X11 = fs.readFileSync(path.join(__dirname, 'noPulsoPrintLinux.py'), 'utf8');
 
 function caminhoDoScript(codigo, posto) {
   return `/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/agente-linux.py`;
@@ -29,6 +30,7 @@ const lit = (v) => JSON.stringify(String(v == null ? '' : v));
 
 function montarScriptAgenteLinux({ codigo, posto, agentToken, base }) {
   const trocas = {
+    __PRINT_X11__: lit(PRINT_X11),
     __VERSAO__: String(VERSAO_AGENTE_LINUX),
     __BASE__: lit(String(base || '').replace(/\/+$/, '')),
     __CODIGO__: lit(codigo),

@@ -9,6 +9,8 @@
 #   - conta sistema, reinício, disco, RAM, processador, placa-mãe e uptime;
 #   - mede roteador e internet (ping) para a aba Rede do NOC.
 #
+# NoPulsoPrint X11 roda separado, sem token, como o usuário da sessão gráfica.
+# O agente recebe apenas habilitado/atalho; as imagens ficam na máquina.
 # O QUE ELE NÃO FAZ, DE PROPÓSITO: não recebe nem executa comando nenhum vindo
 # do servidor. A batida vai marcada "semInterface": o servidor não entrega a
 # ela mensagem, comando nem captura - quem mostra mensagem é a tela do
@@ -25,6 +27,8 @@
 # Compatível com Python 3.6+ (Ubuntu 18.04 em diante).
 import json
 import os
+import glob
+import pwd
 import re
 import shutil
 import socket
@@ -41,11 +45,13 @@ CODIGO = __CODIGO__
 POSTO = __POSTO__
 TOKEN = __TOKEN__
 CAMINHO_SCRIPT = __CAMINHO_SCRIPT__
+PRINT_X11 = __PRINT_X11__
 
 PASTA = '/opt/nopulso-agente'
 DESTINO = PASTA + '/agente.py'
 UNIDADE_SYSTEMD = '/etc/systemd/system/nopulso-agente.service'
 CABECALHO = '#!/usr/bin/env python3\n# NoPulso Agente Linux'
+DESTINO_PRINT = PASTA + '/print-x11.py'
 
 INTERVALO_S = 25                 # igual ao NOCZenith e ao app Android (limiar de 90 s no NOC)
 TICKS_TELEMETRIA = 24            # ~10 min
@@ -402,6 +408,114 @@ class Estado:
         self.link = None
 
 
+def sessao_print():
+    """Seleciona a sessão local ativa; nunca acessa a tela de outro usuário
+    pelo processo root. Extrai apenas as variáveis necessárias para X11."""
+    for linha in rodar(['loginctl', 'list-sessions', '--no-legend']).splitlines():
+        partes = linha.split()
+        if not partes:
+            continue
+        sid = partes[0]
+        texto = rodar(['loginctl', 'show-session', sid, '--property=Active,Remote,Type,User,Name,Display'])
+        campos = dict(l.split('=', 1) for l in texto.splitlines() if '=' in l)
+        if campos.get('Active') != 'yes' or campos.get('Remote') != 'no' or campos.get('Type') != 'x11':
+            continue
+        try:
+            usuario = pwd.getpwuid(int(campos['User']))
+        except (KeyError, ValueError):
+            continue
+        if usuario.pw_uid == 0:
+            continue
+        for proc in glob.glob('/proc/[0-9]*'):
+            try:
+                if os.stat(proc).st_uid != usuario.pw_uid:
+                    continue
+                with open(proc + '/environ', 'rb') as f:
+                    pares = f.read(131072).split(b'\0')
+                env = dict(p.decode('utf-8').split('=', 1) for p in pares if b'=' in p)
+                if env.get('XDG_SESSION_TYPE') != 'x11':
+                    continue
+                if env.get('XDG_SESSION_ID') and env['XDG_SESSION_ID'] != sid:
+                    continue
+                if env.get('XDG_SESSION_ID') != sid and ler(proc + '/comm') != 'gnome-shell':
+                    continue
+                if not env.get('DISPLAY') or not env.get('XAUTHORITY'):
+                    continue
+                if campos.get('Display') and env['DISPLAY'] != campos['Display']:
+                    continue
+                if not os.path.isfile(env['XAUTHORITY']) or os.stat(env['XAUTHORITY']).st_uid != usuario.pw_uid:
+                    continue
+                return usuario, {k: env[k] for k in ('DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS') if k in env}
+            except (OSError, UnicodeError, ValueError):
+                continue
+    return None
+
+
+class PrintLinux:
+    def __init__(self):
+        self.processo = None
+        self.sessao = None
+        self.config = None
+        self.ultimo_aviso = None
+
+    def parar(self):
+        if self.processo:
+            try:
+                self.processo.stdin.close()
+                self.processo.wait(timeout=4)
+            except (OSError, subprocess.TimeoutExpired):
+                self.processo.kill()
+                self.processo.wait()
+        self.processo = self.sessao = self.config = None
+
+    def aviso(self, texto):
+        if texto != self.ultimo_aviso:
+            log('NoPulsoPrint: ' + texto)
+            self.ultimo_aviso = texto
+
+    def aplicar(self, resposta):
+        if resposta.get('noPulsoPrint') is not True:
+            self.parar()
+            self.aviso('desligado no cadastro')
+            return
+        if os.geteuid() != 0 or not shutil.which('runuser') or not shutil.which('gnome-screenshot'):
+            self.parar()
+            self.aviso('reinstale o agente com sudo; requer runuser e gnome-screenshot')
+            return
+        sessao = sessao_print()
+        if not sessao:
+            self.parar()
+            self.aviso('aguardando sessão local X11 ativa')
+            return
+        usuario, grafico = sessao
+        identidade = (usuario.pw_uid, grafico.get('DISPLAY'), grafico.get('XAUTHORITY'))
+        if self.processo and (self.processo.poll() is not None or self.sessao != identidade):
+            self.parar()
+        if not self.processo:
+            # A pasta passa a ser atravessável; agente.py continua 0700 com
+            # o token protegido. O auxiliar público não contém credenciais.
+            os.chmod(PASTA, 0o755)
+            with open(DESTINO_PRINT, 'w', encoding='utf-8') as f:
+                f.write(PRINT_X11)
+            os.chmod(DESTINO_PRINT, 0o644)
+            env = dict(grafico, HOME=usuario.pw_dir, USER=usuario.pw_name,
+                       PATH='/usr/local/bin:/usr/bin:/bin', XDG_SESSION_TYPE='x11',
+                       XDG_RUNTIME_DIR='/run/user/%d' % usuario.pw_uid)
+            comando = ['runuser', '-u', usuario.pw_name, '--', '/usr/bin/env', '-i']
+            comando += ['%s=%s' % (k, v) for k, v in env.items()]
+            comando += ['/usr/bin/python3', DESTINO_PRINT]
+            self.processo = subprocess.Popen(comando, stdin=subprocess.PIPE)
+            self.sessao = identidade
+        atalho = resposta.get('noPulsoPrintAtalho', 'ctrl_q')
+        atalho = atalho if atalho in ('ctrl_q', 'ctrl_alt_p', 'ctrl_alt_q', 'ctrl_shift_p') else 'ctrl_q'
+        cfg = {'habilitado': True, 'atalho': atalho}
+        if cfg != self.config:
+            self.processo.stdin.write((json.dumps(cfg) + '\n').encode('utf-8'))
+            self.processo.stdin.flush()
+            self.config = cfg
+        self.aviso('sessão X11 de %s; atalho %s' % (usuario.pw_name, atalho))
+
+
 def bater(est):
     link = dict(est.link or {})
     vz = _vazao['valor']
@@ -423,8 +537,9 @@ def bater(est):
     if est.boot_em:
         corpo['bootEm'] = est.boot_em
     inicio = time.time()
-    postar(BASE + '/api/loja-status/heartbeat', corpo)
+    resposta = postar(BASE + '/api/loja-status/heartbeat', corpo)
     est.ultima_latencia = int((time.time() - inicio) * 1000)
+    return resposta
 
 
 def enviar_telemetria(est):
@@ -472,6 +587,7 @@ def laco(uma_vez=False):
     est = Estado()
     tick = 0
     ultima_checagem = time.time()
+    impressao = PrintLinux()
     log('iniciado - versão %d - %s/%s' % (VERSAO, CODIGO, POSTO))
     while True:
         try:
@@ -481,11 +597,18 @@ def laco(uma_vez=False):
                     medir_vazao()
             if not uma_vez and tick > 0 and tick % TICKS_DIAGNOSTICO_REDE == 0:
                 est.diag = diagnostico_rede(est.link)
-            bater(est)
+            resposta = bater(est)
+            if not uma_vez:
+                try:
+                    impressao.aplicar(resposta)
+                except Exception as e:
+                    impressao.parar()
+                    impressao.aviso('falhou: %s' % e)
             est.falhas = 0
             if tick % TICKS_TELEMETRIA == 0:
                 enviar_telemetria(est)
         except Exception as e:
+            impressao.parar()
             est.falhas += 1
             log('falha na batida: %s' % e)
         if uma_vez:
@@ -493,6 +616,7 @@ def laco(uma_vez=False):
         if time.time() - ultima_checagem >= INTERVALO_ATUALIZACAO_S:
             ultima_checagem = time.time()
             if talvez_atualizar():
+                impressao.parar()
                 sys.exit(0)  # o systemd sobe de novo, já com a versão nova
         tick += 1
         time.sleep(INTERVALO_S)
@@ -521,6 +645,15 @@ def instalar():
     if not shutil.which('systemctl'):
         print('Este Linux não usa systemd; o agente não sabe se instalar como serviço aqui.')
         return 1
+    if not shutil.which('gnome-screenshot'):
+        if not shutil.which('apt-get'):
+            log('Instale gnome-screenshot e tente novamente.')
+            return 1
+        r = subprocess.run(['apt-get', 'install', '-y', 'gnome-screenshot'],
+                           env=dict(os.environ, DEBIAN_FRONTEND='noninteractive'))
+        if r.returncode != 0 or not shutil.which('gnome-screenshot'):
+            log('Não foi possível instalar gnome-screenshot; instalação interrompida.')
+            return 1
     os.makedirs(PASTA, exist_ok=True)
     os.chmod(PASTA, 0o700)
     origem = os.path.abspath(sys.argv[0])
@@ -538,6 +671,7 @@ def instalar():
         except Exception:
             pass
     print('Agente NoPulso instalado e ligado. Em até 1 minuto esta máquina aparece no NOC.')
+    print('NoPulsoPrint: habilite no cadastro NOC. Na sessão X11, o atalho salva a seleção em Imagens/NoPulsoPrint.')
     return 0
 
 
@@ -546,7 +680,7 @@ def desinstalar():
         print('Rode com sudo: sudo python3 %s --desinstalar' % sys.argv[0])
         return 1
     subprocess.run(['systemctl', 'disable', '--now', 'nopulso-agente.service'])
-    for caminho in (UNIDADE_SYSTEMD, DESTINO):
+    for caminho in (UNIDADE_SYSTEMD, DESTINO, DESTINO_PRINT):
         try:
             os.remove(caminho)
         except Exception:
