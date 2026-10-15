@@ -16,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO_AGENTE_LINUX = 2;
+const VERSAO_AGENTE_LINUX = 3;
 const MODELO = fs.readFileSync(path.join(__dirname, 'agenteLinuxScript.py'), 'utf8');
 const PRINT_X11 = fs.readFileSync(path.join(__dirname, 'noPulsoPrintLinux.py'), 'utf8');
 
@@ -52,7 +52,12 @@ function montarScriptAgenteLinux({ codigo, posto, agentToken, base }) {
 function montarComandoInstalacaoLinux({ codigo, posto, agentToken, base }) {
   const url = String(base || '').replace(/\/+$/, '') + caminhoDoScript(codigo, posto);
   const aspas = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
-  return `curl -fsSL -H ${aspas('X-NOC-Token: ' + agentToken)} ${aspas(url)} -o /tmp/nopulso-agente.py && sudo python3 /tmp/nopulso-agente.py --instalar`;
+  // arquivo temporário NOVO a cada vez (mktemp): com nome fixo, uma 2ª tentativa
+  // com "sudo curl" batia no arquivo deixado pela 1ª (dono: o usuário) e o
+  // Linux recusa o root gravando por cima em /tmp - "curl: (23) Failure
+  // writing output to destination", caso real da 1ª instalação. O curl roda
+  // como o usuário; só a instalação usa sudo.
+  return `f=$(mktemp /tmp/nopulso-agente.XXXXXX) && curl -fsSL -H ${aspas('X-NOC-Token: ' + agentToken)} ${aspas(url)} -o "$f" && sudo python3 "$f" --instalar`;
 }
 
 module.exports = { VERSAO_AGENTE_LINUX, montarScriptAgenteLinux, montarComandoInstalacaoLinux, caminhoDoScript };

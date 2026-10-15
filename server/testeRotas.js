@@ -6732,10 +6732,18 @@ setTimeout(async () => {
       'o script gerado tem o cabeçalho que a autoatualização exige, a versão e o token desta máquina':
         script.startsWith('#!/usr/bin/env python3\n# NoPulso Agente Linux') && new RegExp(`^VERSAO = ${al.VERSAO_AGENTE_LINUX}$`, 'm').test(script)
         && script.includes(JSON.stringify(tk)) && !/__(VERSAO|BASE|CODIGO|POSTO|TOKEN|CAMINHO_SCRIPT)__/.test(script),
+      // "--instalar~" (lixo de colagem do terminal) tem de instalar, e opção
+      // desconhecida mostra o uso - nunca roda o agente em primeiro plano
+      'colar com lixo no fim ("--instalar~") ainda instala, e opção desconhecida não roda o agente':
+        /arg = re\.sub\(r'\[\^a-z-\]\+\$', '', sys\.argv\[1\]/.test(script) && /if arg:\n\s+print\(USO/.test(script),
+      'a medição de internet manda identificador próprio (a Cloudflare recusa o do Python com 403)':
+        /urllib\.request\.Request\(URL_TESTE_VAZAO, headers=\{'User-Agent': 'NoPulsoAgenteLinux/.test(script),
       'o agente não executa nada vindo do servidor (sem exec/eval/shell e sem tratar comando)':
         !/\bexec\(|\beval\(|shell=True|os\.system|comandoPendente/.test(script),
       'o comando Linux leva o token no cabeçalho (nunca na URL) e instala com sudo':
-        /^curl -fsSL -H 'X-NOC-Token: [^']+' 'https?:\/\/[^']+\/agente-linux\.py' -o \/tmp\/nopulso-agente\.py && sudo python3 \/tmp\/nopulso-agente\.py --instalar$/.test(comandoLinux)
+        // arquivo temporário novo a cada vez (mktemp) e curl SEM sudo: com nome
+        // fixo a 2ª tentativa dava "curl: (23)" (arquivo do usuário em /tmp)
+        /^f=\$\(mktemp \/tmp\/nopulso-agente\.XXXXXX\) && curl -fsSL -H 'X-NOC-Token: [^']+' 'https?:\/\/[^']+\/agente-linux\.py' -o "\$f" && sudo python3 "\$f" --instalar$/.test(comandoLinux)
         && !new RegExp(`agente-linux\\.py\\?[^']*${tk}`).test(comandoLinux),
       'o agente rodou de verdade contra o servidor e terminou bem': execucao.pulou || execucao.codigo === 0,
       'a ficha mostra a versão do agente Linux, o sistema e o boot': execucao.pulou

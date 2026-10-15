@@ -271,7 +271,10 @@ def medir_vazao():
     _vazao['valor'] = None
     try:
         inicio = time.time()
-        with urllib.request.urlopen(URL_TESTE_VAZAO, timeout=8) as resp:
+        # identificador próprio: a Cloudflare recusa (403) o "Python-urllib"
+        # padrão - foi o "vazão não medida: HTTP Error 403" da 1ª instalação
+        req = urllib.request.Request(URL_TESTE_VAZAO, headers={'User-Agent': 'NoPulsoAgenteLinux/%d (+https://www.nopulso.com.br)' % VERSAO})
+        with urllib.request.urlopen(req, timeout=8) as resp:
             total = len(resp.read())
         seg = time.time() - inicio
         if total >= 65536 and seg > 0:
@@ -690,12 +693,26 @@ def desinstalar():
     return 0
 
 
+USO = ('Uso:\n'
+       '  sudo python3 %s --instalar      instala e liga o serviço\n'
+       '  sudo python3 %s --desinstalar   desliga e apaga\n'
+       '  python3 %s --uma-vez            uma batida e uma telemetria (teste)')
+
+
 if __name__ == '__main__':
-    arg = sys.argv[1] if len(sys.argv) > 1 else ''
+    # Colar no terminal às vezes traz um "~" ou "^[[201~" grudado no fim (marca
+    # de colagem do terminal): "--instalar~" rodava o agente em primeiro plano
+    # em vez de instalar - caso real da 1ª instalação no Pop!_OS. Limpa o lixo
+    # do fim; e opção desconhecida mostra o uso em vez de rodar o laço.
+    arg = re.sub(r'[^a-z-]+$', '', sys.argv[1].strip().lower()) if len(sys.argv) > 1 else ''
     if arg == '--instalar':
         sys.exit(instalar())
     if arg == '--desinstalar':
         sys.exit(desinstalar())
     if arg == '--uma-vez':
         sys.exit(0 if laco(uma_vez=True) else 1)
+    if arg:
+        print(USO % ((sys.argv[0],) * 3))
+        sys.exit(2)
+    # sem opção: é o systemd chamando (ExecStart do serviço)
     laco()
