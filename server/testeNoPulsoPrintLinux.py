@@ -78,6 +78,53 @@ class PrintLinuxTeste(unittest.TestCase):
             popen.assert_not_called()
             self.assertIn('gnome-screenshot', p.ultimo_aviso)
 
+    def test_acha_sessao_x11_com_loginctl_que_recusa_lista_com_virgula(self):
+        # Caso real (Pop!_OS 24.04, KDE/SDDM): "show-session 1
+        # --property=A,B" volta vazio; só "-p A -p B" responde.
+        dados = {'1': {'Active': 'yes', 'Remote': 'no', 'Type': 'x11', 'User': '1000',
+                       'Name': 'solutions', 'Display': ':0'},
+                 '3': {'Active': 'yes', 'Remote': 'yes', 'Type': 'tty', 'User': '1000',
+                       'Name': 'solutions', 'Display': ''}}
+
+        def loginctl(cmd, timeout=6):
+            if cmd[:2] == ['loginctl', 'list-sessions']:
+                return '      1 1000 solutions seat0 1234 user tty7 no -\n      3 1000 solutions -     999 user pts/1 no -\n'
+            if cmd[:2] == ['loginctl', 'show-session']:
+                props = [cmd[i + 1] for i, a in enumerate(cmd) if a == '-p']
+                if any(a.startswith('--property=') and ',' in a for a in cmd):
+                    return ''
+                return ''.join('%s=%s\n' % (p, dados[cmd[2]][p]) for p in props)
+            return ''
+
+        with tempfile.TemporaryDirectory() as raiz:
+            xauth = os.path.join(raiz, 'xauth_QvdRZt')
+            Path(xauth).write_text('cookie')
+            proc = os.path.join(raiz, '4242')
+            os.makedirs(proc)
+            env = {'XDG_SESSION_TYPE': 'x11', 'XDG_SESSION_ID': '1', 'DISPLAY': ':0',
+                   'XAUTHORITY': xauth, 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus',
+                   'SEGREDO': 'nao-deve-sair'}
+            Path(proc, 'environ').write_bytes(b'\0'.join(('%s=%s' % kv).encode() for kv in env.items()))
+            Path(proc, 'comm').write_text('dolphin\n')
+            stat_real = os.stat
+            def stat_falso(c, *a, **k):
+                r = stat_real(c, *a, **k)
+                if not str(c).startswith(raiz):
+                    return r
+                # os arquivos de mentira "pertencem" ao uid 1000 da sessão
+                return os.stat_result((r.st_mode, r.st_ino, r.st_dev, r.st_nlink, 1000, r.st_gid,
+                                       r.st_size, r.st_atime, r.st_mtime, r.st_ctime))
+            usuario = types.SimpleNamespace(pw_uid=1000, pw_name='solutions', pw_dir='/home/solutions')
+            with patch.object(agente, 'rodar', side_effect=loginctl), \
+                 patch.object(agente.glob, 'glob', return_value=[proc]), \
+                 patch.object(agente.os, 'stat', side_effect=stat_falso), \
+                 patch.object(agente.pwd, 'getpwuid', return_value=usuario):
+                achou = agente.sessao_print()
+        self.assertIsNotNone(achou, 'a sessão X11 local ativa deveria ser achada')
+        self.assertEqual(achou[0].pw_name, 'solutions')
+        self.assertEqual(achou[1], {'DISPLAY': ':0', 'XAUTHORITY': xauth,
+                                    'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus'})
+
 
 if __name__ == '__main__':
     unittest.main()

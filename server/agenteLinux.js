@@ -16,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO_AGENTE_LINUX = 3;
+const VERSAO_AGENTE_LINUX = 4;
 const MODELO = fs.readFileSync(path.join(__dirname, 'agenteLinuxScript.py'), 'utf8');
 const PRINT_X11 = fs.readFileSync(path.join(__dirname, 'noPulsoPrintLinux.py'), 'utf8');
 

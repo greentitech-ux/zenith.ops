@@ -419,7 +419,13 @@ def sessao_print():
         if not partes:
             continue
         sid = partes[0]
-        texto = rodar(['loginctl', 'show-session', sid, '--property=Active,Remote,Type,User,Name,Display'])
+        # Um -p por propriedade: o loginctl do Ubuntu 24.04 / Pop!_OS devolve
+        # vazio para a lista com vírgula (--property=A,B), e aí nenhuma sessão
+        # era achada ("aguardando sessão local X11 ativa" pra sempre).
+        cmd = ['loginctl', 'show-session', sid]
+        for prop in ('Active', 'Remote', 'Type', 'User', 'Name', 'Display'):
+            cmd += ['-p', prop]
+        texto = rodar(cmd)
         campos = dict(l.split('=', 1) for l in texto.splitlines() if '=' in l)
         if campos.get('Active') != 'yes' or campos.get('Remote') != 'no' or campos.get('Type') != 'x11':
             continue
