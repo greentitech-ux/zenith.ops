@@ -6725,6 +6725,14 @@ setTimeout(async () => {
     const ficha = await ls.detalhar(UNI, posto);
     // o espelho em memória é o que a próxima batida lê: é ali que a mensagem tem de continuar
     const docMsg = ficha || {};
+    // "📸 Capturar agora" do NOC: uma batida sem tela comum NÃO o consome; a
+    // do agente Linux (capturaPorAgente, tem o auxiliar X11) recebe uma vez
+    await ls.pedirCaptura(UNI, posto);
+    const batidaLinux = (extra) => postarJson('/api/loja-status/heartbeat', { unidade: UNI, posto, userAgent: 'NoPulsoAgenteLinux/5 (x; python)', semInterface: true, ...extra }, { 'x-noc-token': tk });
+    const capSemAgente = await batidaLinux({});
+    const capComAgente = await batidaLinux({ capturaPorAgente: true });
+    const capDepois = await batidaLinux({ capturaPorAgente: true });
+    const jcap = (r) => { try { return JSON.parse(r.corpo).capturarAgora; } catch (e) { return 'erro'; } };
 
     const conferencias = {
       'o script só sai com o token da máquina ou sessão de suporte (sem token e token errado = 403)':
@@ -6757,6 +6765,18 @@ setTimeout(async () => {
       'a ficha tem o cartão "Instalar no Linux" e a linha da versão do agente':
         /onclick="copiarComandoLinux\('\$\{codigo\}'/.test(require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8'))
         && /🐧 Agente Linux <b>v/.test(require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8')),
+      // NoPulsoPrint Linux COMPLETO (Master, 15/10: "seta, seleção, embaçar,
+      // tudo que o do Windows entrega", e "Ctrl+C / Ctrl+V no chat"): o
+      // auxiliar embutido tem o mesmo desenhista do Windows e a área de
+      // transferência de verdade (xclip, image/png - é o que o Ctrl+V cola)
+      'o auxiliar X11 embutido tem o editor do Windows (seta/linha/caixa/desfoque, 1400 px, pasta do mês, Salvar onde?) e copia com xclip':
+        /def desenhar_marcas\(/.test(script) && /'desfoque'/.test(script) && /farpas_da_seta/.test(script) && /LADO_MINIMO = 1400/.test(script)
+        && /askyesnocancel/.test(script) && /'xclip', '-selection', 'clipboard', '-t', 'image\/png'/.test(script) && /strftime\('%Y-%m'\)/.test(script),
+      'o agente manda capturaPorAgente, a unidade curta igual à do Windows, e instala os pacotes do editor sozinho (tk, Pillow, xclip)':
+        /'capturaPorAgente': True/.test(script) && new RegExp(`^UNIDADE_CURTA = ${JSON.stringify(require('./vigiaScript').unidadeCurtaParaArquivo(UNI))}$`, 'm').test(script)
+        && /def instalar_dependencias_print/.test(script) && /'python3-tk', 'python3-pil', 'python3-pil\.imagetk', 'xclip'/.test(script) && !/gnome-screenshot/.test(script.split('PRINT_X11 = ')[0]),
+      'o "📸 Capturar agora" chega à batida do agente Linux (capturaPorAgente) uma vez, e não a uma batida sem tela comum':
+        jcap(capSemAgente) !== true && jcap(capComAgente) === true && jcap(capDepois) !== true,
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okAgenteLinux = !falhas.length;

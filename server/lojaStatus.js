@@ -1432,8 +1432,11 @@ async function heartbeat(codigo, posto, info, token) {
   if (mensagemPendente) patch.mensagemPendente = null;
   // "Capturar agora" (ver pedirCaptura) - one-shot igual a mensagem: entregue
   // nesta batida e apagado junto, forcando a gravacao
-  const capturarAgora = semTela ? null : capturaPendente(atual);
-  if (!semTela && atual && atual.noPulsoPrintCapturarEm) patch.noPulsoPrintCapturarEm = null;
+  // AGENTE LINUX (capturaPorAgente): é "sem tela" pra mensagem e comando, mas
+  // o auxiliar X11 dele abre a seleção do NoPulsoPrint - então o 📸 chega a ele
+  const entregaCaptura = !semTela || dados.capturaPorAgente === true;
+  const capturarAgora = entregaCaptura ? capturaPendente(atual) : null;
+  if (entregaCaptura && atual && atual.noPulsoPrintCapturarEm) patch.noPulsoPrintCapturarEm = null;
 
   // IP publico mudou (ou apareceu pela primeira vez): entra no historico. A
   // mudanca de ip ja forca gravacao imediata (ver mudouAlgoQueImporta), entao

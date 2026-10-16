@@ -16,7 +16,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO_AGENTE_LINUX = 4;
+const { unidadeCurtaParaArquivo } = require('./vigiaScript');
+
+const VERSAO_AGENTE_LINUX = 5;
 const MODELO = fs.readFileSync(path.join(__dirname, 'agenteLinuxScript.py'), 'utf8');
 const PRINT_X11 = fs.readFileSync(path.join(__dirname, 'noPulsoPrintLinux.py'), 'utf8');
 
@@ -37,6 +39,8 @@ function montarScriptAgenteLinux({ codigo, posto, agentToken, base }) {
     __POSTO__: lit(posto),
     __TOKEN__: lit(agentToken),
     __CAMINHO_SCRIPT__: lit(caminhoDoScript(codigo, posto)),
+    // o mesmo nome curto do print do Windows ("10-09 18h42 Tirol.png")
+    __UNIDADE_CURTA__: lit(unidadeCurtaParaArquivo(codigo)),
   };
   let saida = MODELO;
   for (const [marca, valor] of Object.entries(trocas)) {

@@ -4492,4 +4492,6 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntig
   return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64Elevador}`;
 }
 
-module.exports = { montarScriptVigia, montarComandoInstalacao, adaptarParaWindowsAntigo, VERSAO_VIGIA };
+// unidadeCurtaParaArquivo: o agente Linux (agenteLinux.js) usa o MESMO nome
+// curto no arquivo do NoPulsoPrint, pra print de Windows e de Linux se chamarem igual
+module.exports = { montarScriptVigia, montarComandoInstalacao, adaptarParaWindowsAntigo, VERSAO_VIGIA, unidadeCurtaParaArquivo };

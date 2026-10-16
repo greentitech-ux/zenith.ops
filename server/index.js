@@ -2383,6 +2383,9 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // impede a batida dele de consumir mensagem/comando da aba do navegador
       agenteLinuxVersao: req.body.agenteLinuxVersao,
       semInterface: req.body.semInterface === true,
+      // o agente Linux tem auxiliar X11 pro NoPulsoPrint: mesmo sem tela pra
+      // mensagem/comando, o "📸 Capturar agora" do NOC chega a ele
+      capturaPorAgente: req.body.capturaPorAgente === true,
       // o que o navegador sabe do aparelho (bateria, armazenamento, rede, SO
       // - ver public/aparelho.js). Entra na MESMA escrita do heartbeat, que
       // já acontece a cada 25s: telemetria de tablet não custa operação nova.

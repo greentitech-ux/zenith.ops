@@ -45,7 +45,13 @@ CODIGO = __CODIGO__
 POSTO = __POSTO__
 TOKEN = __TOKEN__
 CAMINHO_SCRIPT = __CAMINHO_SCRIPT__
+# nome curto da unidade pro arquivo do print ("10-09 18h42 Tirol.png"), o
+# mesmo que o NOCZenith usa (unidadeCurtaParaArquivo); só letras e números
+UNIDADE_CURTA = __UNIDADE_CURTA__
 PRINT_X11 = __PRINT_X11__
+# o que o editor do NoPulsoPrint (print-x11.py) precisa: Tk pra janela, Pillow
+# pra foto da tela/marcas/mosaico, xclip pra área de transferência (Ctrl+V)
+DEPENDENCIAS_PRINT = ('python3-tk', 'python3-pil', 'python3-pil.imagetk', 'xclip')
 
 PASTA = '/opt/nopulso-agente'
 DESTINO = PASTA + '/agente.py'
@@ -460,12 +466,46 @@ def sessao_print():
     return None
 
 
+def print_faltando():
+    """Pacotes que o editor do NoPulsoPrint precisa e esta máquina não tem.
+    Testa o /usr/bin/python3 (o que roda o auxiliar), não este processo."""
+    faltam = []
+    try:
+        r = subprocess.run(['/usr/bin/python3', '-c', 'import tkinter, PIL.Image, PIL.ImageTk, PIL.ImageDraw'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        if r.returncode != 0:
+            faltam += ['python3-tk', 'python3-pil', 'python3-pil.imagetk']
+    except Exception:
+        faltam += ['python3-tk', 'python3-pil', 'python3-pil.imagetk']
+    if not shutil.which('xclip'):
+        faltam.append('xclip')
+    return faltam
+
+
+def instalar_dependencias_print(mostrar=False):
+    """apt-get dos pacotes do editor. Roda no --instalar e também quando o
+    agente se atualiza sozinho (a máquina instalada antes não tem os pacotes
+    novos e ninguém vai lá reinstalar na mão)."""
+    if not shutil.which('apt-get'):
+        return False
+    try:
+        saida = None if mostrar else subprocess.DEVNULL
+        r = subprocess.run(['apt-get', 'install', '-y', '--no-install-recommends'] + list(DEPENDENCIAS_PRINT),
+                           env=dict(os.environ, DEBIAN_FRONTEND='noninteractive'),
+                           stdout=saida, stderr=saida, timeout=600)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 class PrintLinux:
     def __init__(self):
         self.processo = None
         self.sessao = None
         self.config = None
         self.ultimo_aviso = None
+        self.dependencias_ok = False
+        self.tentou_instalar = False
 
     def parar(self):
         if self.processo:
@@ -487,10 +527,24 @@ class PrintLinux:
             self.parar()
             self.aviso('desligado no cadastro')
             return
-        if os.geteuid() != 0 or not shutil.which('runuser') or not shutil.which('gnome-screenshot'):
+        if os.geteuid() != 0 or not shutil.which('runuser'):
             self.parar()
-            self.aviso('reinstale o agente com sudo; requer runuser e gnome-screenshot')
+            self.aviso('reinstale o agente com sudo; requer runuser')
             return
+        if not self.dependencias_ok:
+            faltam = print_faltando()
+            if faltam and not self.tentou_instalar:
+                # uma tentativa por processo: apt preso (outra instalação) ou
+                # sem rede não pode travar toda batida; o próximo reinício tenta de novo
+                self.tentou_instalar = True
+                self.aviso('instalando %s' % ', '.join(faltam))
+                instalar_dependencias_print()
+                faltam = print_faltando()
+            if faltam:
+                self.parar()
+                self.aviso('faltam %s - rode: sudo apt-get install -y %s' % (', '.join(faltam), ' '.join(DEPENDENCIAS_PRINT)))
+                return
+            self.dependencias_ok = True
         sessao = sessao_print()
         if not sessao:
             self.parar()
@@ -507,9 +561,11 @@ class PrintLinux:
             with open(DESTINO_PRINT, 'w', encoding='utf-8') as f:
                 f.write(PRINT_X11)
             os.chmod(DESTINO_PRINT, 0o644)
+            # LANG: os botões Sim/Não/Cancelar do Tk saem em português (o Tk
+            # traz a tradução; não depende de locale instalado)
             env = dict(grafico, HOME=usuario.pw_dir, USER=usuario.pw_name,
                        PATH='/usr/local/bin:/usr/bin:/bin', XDG_SESSION_TYPE='x11',
-                       XDG_RUNTIME_DIR='/run/user/%d' % usuario.pw_uid)
+                       XDG_RUNTIME_DIR='/run/user/%d' % usuario.pw_uid, LANG='pt_BR.UTF-8')
             comando = ['runuser', '-u', usuario.pw_name, '--', '/usr/bin/env', '-i']
             comando += ['%s=%s' % (k, v) for k, v in env.items()]
             comando += ['/usr/bin/python3', DESTINO_PRINT]
@@ -517,11 +573,16 @@ class PrintLinux:
             self.sessao = identidade
         atalho = resposta.get('noPulsoPrintAtalho', 'ctrl_q')
         atalho = atalho if atalho in ('ctrl_q', 'ctrl_alt_p', 'ctrl_alt_q', 'ctrl_shift_p') else 'ctrl_q'
-        cfg = {'habilitado': True, 'atalho': atalho}
+        cfg = {'habilitado': True, 'atalho': atalho, 'unidade': UNIDADE_CURTA}
         if cfg != self.config:
             self.processo.stdin.write((json.dumps(cfg) + '\n').encode('utf-8'))
             self.processo.stdin.flush()
             self.config = cfg
+        # "📸 Capturar agora" do NOC: uso único, entregue nesta batida (o
+        # servidor só manda porque a batida vai com capturaPorAgente)
+        if resposta.get('capturarAgora') is True:
+            self.processo.stdin.write(b'{"capturar": true}\n')
+            self.processo.stdin.flush()
         self.aviso('sessão X11 de %s; atalho %s' % (usuario.pw_name, atalho))
 
 
@@ -538,8 +599,10 @@ def bater(est):
     corpo = {
         'unidade': CODIGO, 'posto': POSTO,
         'userAgent': 'NoPulsoAgenteLinux/%d (%s; python)' % (VERSAO, est.sistema.get('nome')),
-        # sem tela: o servidor não entrega mensagem/comando/captura a esta batida
+        # sem tela: o servidor não entrega mensagem/comando a esta batida...
         'semInterface': True,
+        # ...mas a captura do NoPulsoPrint sim: o auxiliar X11 abre a seleção
+        'capturaPorAgente': True,
         'agenteLinuxVersao': VERSAO,
         'link': link, 'sistema': est.sistema, 'rede': rede,
     }
@@ -654,14 +717,15 @@ def instalar():
     if not shutil.which('systemctl'):
         print('Este Linux não usa systemd; o agente não sabe se instalar como serviço aqui.')
         return 1
-    if not shutil.which('gnome-screenshot'):
+    faltam = print_faltando()
+    if faltam:
         if not shutil.which('apt-get'):
-            log('Instale gnome-screenshot e tente novamente.')
+            log('Instale %s e tente novamente.' % ', '.join(faltam))
             return 1
-        r = subprocess.run(['apt-get', 'install', '-y', 'gnome-screenshot'],
-                           env=dict(os.environ, DEBIAN_FRONTEND='noninteractive'))
-        if r.returncode != 0 or not shutil.which('gnome-screenshot'):
-            log('Não foi possível instalar gnome-screenshot; instalação interrompida.')
+        instalar_dependencias_print(mostrar=True)
+        faltam = print_faltando()
+        if faltam:
+            log('Não foi possível instalar %s; instalação interrompida.' % ', '.join(faltam))
             return 1
     os.makedirs(PASTA, exist_ok=True)
     os.chmod(PASTA, 0o700)
@@ -680,7 +744,8 @@ def instalar():
         except Exception:
             pass
     print('Agente NoPulso instalado e ligado. Em até 1 minuto esta máquina aparece no NOC.')
-    print('NoPulsoPrint: habilite no cadastro NOC. Na sessão X11, o atalho salva a seleção em Imagens/NoPulsoPrint.')
+    print('NoPulsoPrint: habilite no cadastro NOC. Na sessão X11, o atalho abre a seleção (seta, linha, caixa, desfocar); '
+          'Enter salva em Imagens/NoPulsoPrint e copia, Ctrl+C só copia - cola com Ctrl+V no chat do NoPulso.')
     return 0
 
 
