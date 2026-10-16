@@ -8,3 +8,6 @@ server/data/*.json
 docs/varredura/
 
 docs/exemplo-laudo-qa.pdf
+
+# cache do Python (testes do agente Linux)
+__pycache__/
