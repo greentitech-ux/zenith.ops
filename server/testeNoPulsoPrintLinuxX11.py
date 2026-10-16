@@ -75,8 +75,10 @@ def testar():
     p = subprocess.Popen(comando, env=env, stdin=subprocess.PIPE, stdout=log, stderr=log)
 
     def xdo(*args, **kw):
+        # timeout: "windowfocus --sync" espera o foco pra sempre se a janela
+        # fechar antes - o teste ficava mudo até o timeout de fora matá-lo
         return subprocess.run(['xdotool', *args], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              check=kw.get('check', True))
+                              check=kw.get('check', True), timeout=20)
 
     def configurar(cfg):
         p.stdin.write((cfg + '\n').encode())

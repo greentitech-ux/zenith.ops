@@ -658,7 +658,11 @@ def talvez_atualizar():
 def laco(uma_vez=False):
     est = Estado()
     tick = 0
-    ultima_checagem = time.time()
+    # 0 = procura atualização logo na PRIMEIRA volta (depois da primeira
+    # batida), não dali a 6 h. Com time.time() aqui, reiniciar o serviço
+    # ADIAVA a atualização em 6 h - caso real: deploy do editor novo no ar e
+    # a STT-HOME seguiu com o auxiliar velho mesmo depois de um restart.
+    ultima_checagem = 0
     impressao = PrintLinux()
     log('iniciado - versão %d - %s/%s' % (VERSAO, CODIGO, POSTO))
     while True:

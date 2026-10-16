@@ -18,7 +18,7 @@ const path = require('path');
 
 const { unidadeCurtaParaArquivo } = require('./vigiaScript');
 
-const VERSAO_AGENTE_LINUX = 5;
+const VERSAO_AGENTE_LINUX = 6;
 const MODELO = fs.readFileSync(path.join(__dirname, 'agenteLinuxScript.py'), 'utf8');
 const PRINT_X11 = fs.readFileSync(path.join(__dirname, 'noPulsoPrintLinux.py'), 'utf8');
 

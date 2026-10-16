@@ -130,6 +130,23 @@ class AgenteTeste(unittest.TestCase):
             popen.assert_called_once()
             self.assertTrue(p.dependencias_ok)
 
+    def test_reiniciar_o_agente_procura_atualizacao_na_primeira_volta(self):
+        # caso real: deploy no ar, "systemctl restart", e a máquina seguiu 6 h
+        # com a versão velha - a checagem contava a partir do reinício
+        with patch.object(agente, 'medir_link', return_value={}), patch.object(agente, 'medir_vazao'), \
+             patch.object(agente, 'bater', side_effect=[{}, {}, KeyboardInterrupt()]), \
+             patch.object(agente, 'enviar_telemetria'), patch.object(agente.PrintLinux, 'aplicar'), \
+             patch.object(agente, 'talvez_atualizar', return_value=True) as atualizar, \
+             patch.object(agente.time, 'sleep'):
+            try:
+                agente.laco()
+                self.fail('o laço devia ter saído pra reiniciar com a versão nova')
+            except SystemExit:
+                pass
+            except KeyboardInterrupt:
+                self.fail('3 batidas e nenhuma atualização aplicada: a checagem ficou pra dali a 6 h')
+            atualizar.assert_called_once()
+
     def test_acha_sessao_x11_com_loginctl_que_recusa_lista_com_virgula(self):
         # Caso real (Pop!_OS 24.04, KDE/SDDM): "show-session 1
         # --property=A,B" volta vazio; só "-p A -p B" responde.
